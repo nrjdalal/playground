@@ -3,7 +3,12 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { FALLBACK_PORT, proxyDown } from "../../../../api/hono/src/lib/dev/proxy"
+import {
+  FALLBACK_PORT,
+  portlessDir,
+  proxyDown,
+  serviceDir,
+} from "../../../../api/hono/src/lib/dev/proxy"
 import { readPolicyFile } from "../../../settings/src/rendered"
 import { assetOf, herdrPath, PIN_SOURCE, pinnedSum } from "../ops-herdr/pin"
 import { checkHerdr } from "./herdr-pin"
@@ -201,7 +206,7 @@ export const doctor = async (repo: string, home: string, data: string): Promise<
   ),
   ...(process.platform === "darwin"
     ? [
-        proxyCheck(repo, await proxyDown(process.env)),
+        proxyCheck(repo, await proxyDown(process.env, serviceDir(portlessDir()))),
         ...(await launchdChecks(data, (label) =>
           exitsZero(["launchctl", "print", `gui/${process.getuid!()}/${label}`]),
         )),

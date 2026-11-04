@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -264,17 +264,21 @@ describe("the rows the app cannot fix itself", () => {
 
   test("portless's proxy is looked for on the port its state folder saved, by the dev launcher's own rule", async () => {
     const dir = mkdtempSync(join(tmpdir(), "portless-state-"))
-    const ca = join(dir, "ca.pem")
-    const at = async (ports: number[], extra = {}) =>
+    const fallback = join(dir, "fallback")
+    mkdirSync(fallback)
+    const at = async (ports: number[], extra = {}, state = dir) =>
       byName(
         await onboardChecks({
           ...signedUp,
           database: "ok",
-          env: { HOME, PORTLESS_STATE_DIR: dir, ...extra },
+          env: { HOME, PORTLESS_STATE_DIR: state, ...extra },
           reader: machine(
             TOOLS,
-            { ...ANSWERS, [`security verify-cert -c ${ca} -L -p ssl`]: {} },
-            [ca],
+            {
+              ...ANSWERS,
+              [`security verify-cert -c ${join(state, "ca.pem")} -L -p ssl`]: {},
+            },
+            [join(state, "ca.pem")],
             { ports },
           ).reader,
         }),
@@ -285,10 +289,13 @@ describe("the rows the app cannot fix itself", () => {
       writeFileSync(join(dir, "proxy.port"), "444\n")
       expect(await at([443])).toBe("not running")
       expect(await at([444])).toBe("ready")
+      writeFileSync(join(fallback, "proxy.port"), "1355\n")
+      expect(await at([], {}, fallback)).toBe("not running")
+      expect(await at([1355], {}, fallback)).toBe("not on 443")
+      expect(await at([1355, 443], {}, fallback)).toBe("set up")
+      // #810 review: a 1355 proxy in a folder of the owner's own is no fallback, so no button offers the install that would stop it
       writeFileSync(join(dir, "proxy.port"), "1355\n")
-      expect(await at([])).toBe("not running")
-      expect(await at([1355])).toBe("not on 443")
-      expect(await at([1355, 443])).toBe("set up")
+      expect(await at([1355])).toBe("ready")
       writeFileSync(join(dir, "proxy.port"), "8443\n")
       expect(await at([8443])).toBe("ready")
     } finally {
@@ -298,7 +305,9 @@ describe("the rows the app cannot fix itself", () => {
 
   // #810: a stack whose proxy was down runs it on 1355, and Settings offers to set up 443, whose service install trusts the CA too, so it comes before the trust fix
   test("a proxy on 1355 offers the proxy fix, before the trust fix, naming its port", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "portless-state-"))
+    const root = mkdtempSync(join(tmpdir(), "portless-state-"))
+    const dir = join(root, "fallback")
+    mkdirSync(dir)
     writeFileSync(join(dir, "proxy.port"), "1355\n")
     const ca = join(dir, "ca.pem")
     try {
@@ -322,7 +331,7 @@ describe("the rows the app cannot fix itself", () => {
       })
       expect(row!.note).toContain("runs on port 1355 for now")
     } finally {
-      rmSync(dir, { force: true, recursive: true })
+      rmSync(root, { force: true, recursive: true })
     }
   })
 

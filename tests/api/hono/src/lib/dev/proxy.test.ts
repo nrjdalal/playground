@@ -7,6 +7,7 @@ import {
   FALLBACK_PORT,
   fallbackDir,
   listening,
+  portlessDir,
   proxyDown,
   proxySetup,
   serviceDir,
@@ -54,6 +55,24 @@ describe("proxyDown", () => {
     expect(fallbackDir("/h/.portless")).toBe("/h/.portless/fallback")
     expect(serviceDir("/h/.portless/fallback")).toBe("/h/.portless")
     expect(serviceDir("/h/.portless")).toBe("/h/.portless")
+  })
+
+  // #810 review: a process outside the stack (the supervisor's web route, health-beat) has no PORTLESS_STATE_DIR, so it finds the 1355 proxy's folder by whose proxy serves
+  test("portlessDir names the fallback folder while only its proxy serves", () => {
+    const home = join(dir, "home")
+    const own = join(home, ".portless")
+    mkdirSync(fallbackDir(own), { recursive: true })
+    const dead = String(Bun.spawnSync(["true"]).pid)
+    const live = String(process.pid)
+    const pids = (main: string, fallback: string) => {
+      writeFileSync(join(own, "proxy.pid"), main)
+      writeFileSync(join(fallbackDir(own), "proxy.pid"), fallback)
+      return portlessDir({ HOME: home })
+    }
+    expect(pids(dead, live)).toBe(fallbackDir(own))
+    expect(pids(live, live)).toBe(own)
+    expect(pids(dead, dead)).toBe(own)
+    expect(portlessDir({ HOME: home, PORTLESS_STATE_DIR: "/set" })).toBe("/set")
   })
 
   test("passes a stack that skips portless", async () => {

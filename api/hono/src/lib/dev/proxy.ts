@@ -1,9 +1,25 @@
+import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
-// portless's state folder: PORTLESS_STATE_DIR, else ~/.portless, as portless's own.
-export const portlessDir = (): string =>
-  process.env.PORTLESS_STATE_DIR || join(homedir(), ".portless")
+// Whether a folder's proxy.pid names a live process; a root proxy's answers EPERM, which is live too.
+const serving = (dir: string): boolean => {
+  try {
+    const pid = Number(readFileSync(join(dir, "proxy.pid"), "utf8").trim())
+    if (!(pid > 0)) return false
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+// portless's state folder: PORTLESS_STATE_DIR, else ~/.portless, or its fallback folder while the 1355 proxy there serves and portless's own does not, so a process outside the stack (the supervisor's web route, health-beat) reads the routes the stack wrote.
+export const portlessDir = (env: Record<string, string | undefined> = process.env): string => {
+  if (env.PORTLESS_STATE_DIR) return env.PORTLESS_STATE_DIR
+  const dir = join(env.HOME || homedir(), ".portless")
+  return !serving(dir) && serving(fallbackDir(dir)) ? fallbackDir(dir) : dir
+}
 
 // Whether anything takes a connection on a loopback port.
 export const listening = (port: number, timeout = 500): Promise<boolean> =>
@@ -32,9 +48,11 @@ export const FALLBACK_PORT = 1355
 // The folder the 1355 proxy keeps its state in, inside portless's own: a service install reads portless's own folder alone, so it leaves this proxy, and every stack on it, running until each next start lands on 443.
 export const fallbackDir = (dir: string): string => join(dir, "fallback")
 
+// Whether a stack's state folder is the 1355 proxy's fallback folder.
+export const isFallback = (dir: string): boolean => basename(dir) === "fallback"
+
 // portless's own folder for a stack's state folder, the one a fallback folder sits in.
-export const serviceDir = (dir: string): string =>
-  basename(dir) === "fallback" ? dirname(dir) : dir
+export const serviceDir = (dir: string): string => (isFallback(dir) ? dirname(dir) : dir)
 
 // The port portless serves on here: the one it saved, else PORTLESS_PORT, else 443.
 export const proxyPort = async (

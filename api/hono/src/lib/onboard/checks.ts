@@ -5,7 +5,7 @@ import { site } from "@packages/config/site"
 import { dataDirOf } from "@packages/env/data-dir"
 
 import { type DashboardSource, currentSource, readFixtureMachine } from "@/lib/dashboard/fixture"
-import { FALLBACK_PORT, proxyDown, proxyPort } from "@/lib/dev/proxy"
+import { FALLBACK_PORT, isFallback, portlessDir, proxyDown, proxyPort } from "@/lib/dev/proxy"
 import { type FixId, fixtureFixed } from "@/lib/onboard/fix-ids"
 import { machine, type Reader } from "@/lib/onboard/machine"
 import type { SetupState } from "@/lib/setup/app"
@@ -206,10 +206,10 @@ const portlessCheck = async (reader: Reader, env: Env): Promise<Check> => {
     status: "optional",
   })
   if (env.PORTLESS === "0") return okRow("portless", need, "not needed")
-  const dir = env.PORTLESS_STATE_DIR || join(env.HOME || homedir(), ".portless")
+  const dir = portlessDir(env)
   if (await proxyDown(env, dir, reader.listens))
     return row("not running", `The local web proxy is not running. ${INSTALLER_NOTE}`)
-  if ((await proxyPort(env, dir)) === FALLBACK_PORT)
+  if (isFallback(dir) && (await proxyPort(env, dir)) === FALLBACK_PORT)
     return (await reader.listens(443))
       ? row(
           "set up",

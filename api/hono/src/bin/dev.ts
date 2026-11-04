@@ -146,7 +146,8 @@ if (!dry) {
       leave(1)
     }
     env.PORTLESS_PORT = String(FALLBACK_PORT)
-    env.PORTLESS_STATE_DIR = state
+    // process.env too, so this launcher's own route and alias writes reach the 1355 proxy's folder
+    env.PORTLESS_STATE_DIR = process.env.PORTLESS_STATE_DIR = state
     console.error(
       `dev: portless's proxy is not running on port ${down}, which needs your Mac's password, so it runs on ${FALLBACK_PORT}, which needs none; Settings' Things to fix sets up the web address on ${down}`,
     )
