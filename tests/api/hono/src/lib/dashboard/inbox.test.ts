@@ -2532,21 +2532,19 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       { code: "QUEUED", ok: false as const, reason: "ops holds the message" },
       { code: "LOST", ok: false as const, reason: "Retry sends it again." },
     ]
-    let settle = () => {}
-    const settled = new Promise<void>((resolve) => (settle = resolve))
-    const deliver = async () => {
-      const answer = answers.shift()!
-      if (!answers.length) setTimeout(settle, 50)
-      return answer
-    }
+    const deliver = async () => answers.shift()!
     await store.answerItem(
       db,
       posted.id,
       { action: "approve" },
       { actor, deliver, wait: async () => {} },
     )
-    await settled
-    const item = await store.getItem(db, posted.id)
+    // follow() records LOST in its own write after deliver returns, so the item is read again until that write lands, for 2s at most
+    let item = await store.getItem(db, posted.id)
+    for (let i = 0; i < 200 && item?.delivery?.status === "queued"; i++) {
+      await Bun.sleep(10)
+      item = await store.getItem(db, posted.id)
+    }
     expect(item?.delivery).toMatchObject({ code: "LOST", status: "failed" })
     expect(item && store.retryable(item)).toBe(true)
   })
