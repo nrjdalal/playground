@@ -1922,7 +1922,7 @@ function inspect(raw, environment, main) {
     if (cmd.stdin && stdinShell(cmd))
       fed.set(cmd.stdin, cmd);
   const visit = async (cmd, parsed, env) => {
-    if (parsed.name === "" || EXPORTS2.has(parsed.name)) {
+    if (parsed.name === "" && !cmd.feedsShell || EXPORTS2.has(parsed.name)) {
       for (const here of places(env, directory)) {
         const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure;
         const verdict = await fedScript(cmd, here, sure, inMain, visit);
