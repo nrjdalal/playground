@@ -1753,17 +1753,83 @@ var EVALUATES = [
   /\(\([^)]*[A-Za-z_]/,
   /\$\[[^\]]*[A-Za-z_]/,
   /\[\[.*\s-(?:eq|ge|gt|le|lt|ne)\s/s,
-  /\$\{[#!]?\w+\[[^\]]*[A-Za-z_]/,
-  /(?:^|[\s;&|(])\w+\[[^\]]*[A-Za-z_][^\]]*\]\+?=/,
+  /\w\[(?!(?:[@*]|[-\d:,\s]*)\]|\^)/,
   /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
-  /@P\}/,
-  /[^\s(|&;<>$=]\((?:#q)?(?:[^()\s=|"']*?e([:'"])[^]*?\1|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>])/
+  /@P\}/
 ];
+var QUALIFIER = /[^\s(|&;<>$=]\((?:#q)?[^()\s|]*?(?:e(?:\[[^]*?\]|\{[^]*?\}|<[^]*?>|([^\s[{<])[^]*?\1)|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>`}])/;
+function singleQuotesOut(command) {
+  if (command.includes("$'"))
+    return command;
+  let out = "";
+  let double = false;
+  const docs = [];
+  for (let i = 0;i < command.length; i++) {
+    const c = command[i];
+    if (c === "\\") {
+      out += command.slice(i, i + 2);
+      i++;
+    } else if (double) {
+      if (c === '"')
+        double = false;
+      out += c;
+    } else if (c === '"') {
+      double = true;
+      out += c;
+    } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
+      const end = command.indexOf(`
+`, i);
+      const stop = end === -1 ? command.length : end;
+      out += command.slice(i, stop);
+      i = stop - 1;
+    } else if (c === "'") {
+      const end = command.indexOf("'", i + 1);
+      if (end === -1)
+        return command;
+      out += "x";
+      i = end;
+    } else if (command.startsWith("<<<", i)) {
+      out += "<<<";
+      i += 2;
+    } else if (command.startsWith("<<", i)) {
+      const doc = command.slice(i).match(/^<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([\w.-]+))/);
+      if (!doc)
+        return command;
+      docs.push({ delim: doc[2] ?? doc[3] ?? doc[4], strip: doc[1] === "-" });
+      out += doc[0];
+      i += doc[0].length - 1;
+    } else if (c === `
+` && docs.length) {
+      out += c;
+      let at = i + 1;
+      for (const { delim, strip } of docs) {
+        for (;; ) {
+          if (at > command.length)
+            return command;
+          const end = command.indexOf(`
+`, at);
+          const stop = end === -1 ? command.length : end;
+          const line = command.slice(at, stop);
+          out += command.slice(at, Math.min(stop + 1, command.length));
+          at = stop + 1;
+          if ((strip ? line.replace(/^\t+/, "") : line) === delim)
+            break;
+          if (end === -1)
+            return command;
+        }
+      }
+      docs.length = 0;
+      i = at - 1;
+    } else
+      out += c;
+  }
+  return double || docs.length ? command : out;
+}
 function namings(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
-  let blind = EVALUATES.some((evaluates) => evaluates.test(command));
+  let blind = EVALUATES.some((evaluates) => evaluates.test(command)) || QUALIFIER.test(singleQuotesOut(command));
   for (const m of command.matchAll(/\$\{\(([^)]*)(\)?)/g)) {
     const [whole, flags, closed] = m;
     const rest = command.slice(m.index + whole.length);
