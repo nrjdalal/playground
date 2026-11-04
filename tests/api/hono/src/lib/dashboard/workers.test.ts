@@ -48,7 +48,7 @@ setSessionNames(SEEDED_NAMES)
 
 const b64 = (s: string) => Buffer.from(s).toString("base64")
 
-// cmux's raw list with every record taken at its word, as listLive hands it on when it has no registry to read.
+// A raw session list with every record taken at its word, as listLive hands it on when it has no registry to read.
 const fromCmux = (
   sessions: unknown,
   ...rest: Parameters<typeof composeWorkers> extends [unknown, ...infer R] ? R : never
@@ -1376,7 +1376,7 @@ describe("isLiveRecord", () => {
     expect(isLiveRecord({ ...running, session_id: "" }, proof({ registry }))).toBe(false)
   })
 
-  test("with no registry to read, cmux's stored pid is trusted as before", () => {
+  test("with no registry to read, the record's own pid is trusted as before", () => {
     expect(isLiveRecord(reused, proof({ registry: null }))).toBe(true)
     expect(isLiveRecord(reused, null)).toBe(true)
   })

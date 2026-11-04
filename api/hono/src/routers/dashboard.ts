@@ -842,7 +842,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ),
         502: errorResponse(
           "CMUX_FAILED",
-          "cmux could not read the session, or refused the send before anything was typed and again on a second try (CMUX_FAILED, which the outbox retries), or typing began and did not finish (INTERRUPTED), which reads Delivered once its transcript shows it",
+          "the sessions could not be read, or the send was refused before anything was typed and again on a second try (CMUX_FAILED, which the outbox retries), or typing began and did not finish (INTERRUPTED), which reads Delivered once its transcript shows it",
         ),
       },
     }),

@@ -327,7 +327,7 @@ const UNATTACHED: Record<Exclude<Attachment["state"], "attached">, (detail: stri
   detached: () =>
     "this process does not descend from a cmux terminal, so cmux would refuse the stack's API every read (turbo passes it no capability token); start `bun run dev` in a cmux terminal, or as a background task of an agent session running in one, never detached with `( … &)` or `nohup`",
   missing: () =>
-    "cmux is not installed or not on PATH, and the dashboard reads every session through it; install cmux, then start `bun run dev` in one of its terminals",
+    "cmux is not installed or not on PATH, and a stack that opts in to every session still needs it; install cmux, then start `bun run dev` in one of its terminals",
   unreachable: (detail) =>
     `cmux did not answer a read (${detail}); make sure cmux is running and answering, then start \`bun run dev\` in one of its terminals`,
 }
@@ -448,7 +448,7 @@ export async function preflight(
       const sessions = await held()
       if (sessions === null) {
         return refuse(
-          `${fix}; whether a factory session is live in cmux could not be read from ps and Claude's registry, so the dashboard cannot read herdr alone`,
+          `${fix}; whether a factory session is live in cmux could not be read from ps and Claude's registry, so the stack cannot start without cmux`,
         )
       }
       if (sessions.length > 0) {

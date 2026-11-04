@@ -20,7 +20,7 @@ import { thread } from "@/schema/thread"
 
 const tsvector = customType<{ data: string }>({ dataType: () => "tsvector" })
 
-// One row per session id, or per agent id for a subagent. Whether a session is live is not stored: the dashboard reads that from ~/.claude/sessions and cmux at request time.
+// One row per session id, or per agent id for a subagent. Whether a session is live is not stored: the dashboard reads that from ~/.claude/sessions and herdr at request time.
 export const claudeSession = pgTable(
   "claude_session",
   {

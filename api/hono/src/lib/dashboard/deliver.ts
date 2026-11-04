@@ -575,7 +575,7 @@ export async function deliver(
   if (!("worker" in first)) return first
   const { sessionId } = first.worker
   const herdr = isHerdrSurface(first.surface)
-  // Only the session found is read again: the board may be a moment old, so the sessions read's word on that one session decides.
+  // The board is read again, and only the session found decides, since the board it was found on may be a moment old.
   const own = () => deps.readSession(first.worker)
   return oneAtATime(sessionId, async () => {
     // Behind the session's line, so a retry that arrives while its first try is still typing reads the row that try commits.
