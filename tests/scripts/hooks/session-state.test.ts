@@ -555,16 +555,16 @@ describe("the shell-pane launcher checks its environment against the claude proc
     writeFileSync(join(config, "sessions", `${pid}.json`), JSON.stringify(entry))
     return config
   }
-  // A launcher, 100, two shells below its claude process, 300, as a Bash call puts it; claude was started with `role` and the config folder named.
+  // A launcher, 100, two shells below its claude process, 300, as a Bash call puts it; claude was started with `role` and the config folder named, or with `env` alone when given.
   const procsOf =
-    (config: string, role?: string, claude = "/opt/claude/bin/claude") =>
+    (config: string, role?: string, claude = "/opt/claude/bin/claude", env?: Proc["env"]) =>
     (pid: number): Proc | undefined =>
       ({
         100: { comm: "/bin/zsh", env: {}, ppid: 200 },
         200: { comm: "bash", env: {}, ppid: 300 },
         300: {
           comm: claude,
-          env: {
+          env: env ?? {
             CLAUDE_CONFIG_DIR: config,
             ...(role === undefined ? {} : { PLAYGROUND_ROLE: role }),
           },
@@ -617,6 +617,34 @@ describe("the shell-pane launcher checks its environment against the claude proc
     )
   })
 
+  test("a claude process started with HOME alone reads its registry from its own HOME's .claude, not the launcher's", async () => {
+    registry(join("claude-home", ".claude"), 300)
+    const procs = procsOf("", "worker", undefined, {
+      HOME: join(scratch, "claude-home"),
+      PLAYGROUND_ROLE: "worker",
+    })
+    expect((await sessionAbove(100, procs))?.sessionId).toBe(ID)
+    expect(
+      await callerRefusal(
+        { CLAUDE_CODE_SESSION_ID: ID, HOME: "/nowhere", PLAYGROUND_ROLE: "worker" },
+        100,
+        procs,
+      ),
+    ).toBeUndefined()
+  })
+
+  test("a claude process whose environment reads back empty names no session, and one naming no config or home folder names no session id", async () => {
+    const empty = procsOf("", undefined, undefined, {})
+    expect(await sessionAbove(100, empty)).toBeUndefined()
+    expect(await callerRefusal({ CLAUDE_CODE_SESSION_ID: ID }, 100, empty)).toContain(
+      "no Claude Code session runs above it",
+    )
+    const homeless = procsOf("", "worker", undefined, { PLAYGROUND_ROLE: "worker" })
+    expect(
+      await callerRefusal({ CLAUDE_CODE_SESSION_ID: ID, PLAYGROUND_ROLE: "worker" }, 100, homeless),
+    ).toContain("registry names no session for the claude process above it (300)")
+  })
+
   test("a caller that names another session id, or none, is refused", async () => {
     const config = registry("caller-id", 300)
     expect(
@@ -657,16 +685,19 @@ describe("the shell-pane launcher checks its environment against the claude proc
     expect(procOf(2 ** 22 + 1)).toBeUndefined()
   })
 
-  // The launcher as a session runs it: under a stand-in claude process (this test's bun, linked as claude) started with `role` and a scratch config folder whose registry it writes for itself; its herdr, a stand-in that logs each call and fails, is the first thing a passed check reaches.
+  // The launcher as a session runs it: under a stand-in claude process (this test's bun, linked as claude) started with `role` and a scratch config folder, or with a HOME of its own alone when `homeOnly`, whose registry it writes for itself; its herdr, a stand-in that logs each call and fails, is the first thing a passed check reaches.
   async function launch(
     name: string,
     role: string,
     launcherEnv: Record<string, string | undefined>,
+    homeOnly = false,
   ) {
     const root = join(scratch, name)
     const config = join(root, "config")
     const home = join(root, "home")
-    mkdirSync(join(config, "sessions"), { recursive: true })
+    const claudeHome = join(root, "claude-home")
+    const sessions = homeOnly ? join(claudeHome, ".claude", "sessions") : join(config, "sessions")
+    mkdirSync(sessions, { recursive: true })
     mkdirSync(join(home, ".playground", "bin"), { recursive: true })
     const claude = join(root, "bin", "claude")
     mkdirSync(join(root, "bin"))
@@ -676,7 +707,7 @@ describe("the shell-pane launcher checks its environment against the claude proc
       wrapper,
       [
         `import { writeFileSync } from "node:fs"`,
-        `writeFileSync(${JSON.stringify(join(config, "sessions"))} + "/" + process.pid + ".json", JSON.stringify({ pid: process.pid, sessionId: ${JSON.stringify(ID)} }))`,
+        `writeFileSync(${JSON.stringify(sessions)} + "/" + process.pid + ".json", JSON.stringify({ pid: process.pid, sessionId: ${JSON.stringify(ID)} }))`,
         `const [env, ...cmd] = process.argv.slice(2)`,
         `const child = Bun.spawn(cmd, { env: JSON.parse(env!), stderr: "inherit", stdout: "inherit" })`,
         `process.exit(await child.exited)`,
@@ -713,8 +744,7 @@ describe("the shell-pane launcher checks its environment against the claude proc
       ],
       {
         env: {
-          CLAUDE_CONFIG_DIR: config,
-          HOME: home,
+          ...(homeOnly ? { HOME: claudeHome } : { CLAUDE_CONFIG_DIR: config, HOME: home }),
           PATH: process.env.PATH,
           PLAYGROUND_ROLE: role,
         },
@@ -784,6 +814,17 @@ describe("the shell-pane launcher checks its environment against the claude proc
       PLAYGROUND_ROLE: "worker",
     })
     expect(code).toBe(1)
+    expect(err).toContain("herdr pane get: stand-in herdr")
+    expect(calls).toBe("pane get w1:p1\n")
+  })
+
+  test("a launcher under a claude process started with HOME alone reads the registry from claude's HOME, not its own, and goes on to herdr", async () => {
+    const { calls, err } = await launch(
+      "launch-home-only",
+      "worker",
+      { PLAYGROUND_ROLE: "worker" },
+      true,
+    )
     expect(err).toContain("herdr pane get: stand-in herdr")
     expect(calls).toBe("pane get w1:p1\n")
   })

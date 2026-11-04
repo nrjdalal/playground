@@ -4,7 +4,7 @@ import { open } from "node:fs/promises"
 import { basename, join } from "node:path"
 
 import type { SessionState } from "../../packages/config/src/session-state"
-import { configDirOf, dataDir } from "../../packages/env/src/data-dir"
+import { dataDir } from "../../packages/env/src/data-dir"
 import { alertFor } from "../../packages/scripts/src/stuck-alert"
 import { writeAtomic } from "../../packages/scripts/src/write-atomic"
 import { loadNames } from "./role"
@@ -267,13 +267,14 @@ export function procOf(pid: number): Proc | undefined {
       .replace(/\n$/, "")
   const comm = ps("comm").trim()
   if (!comm) return undefined
-  const args = isClaude(comm) ? ps("command") : ""
-  const full = isClaude(comm) ? ps("command", "-E") : ""
+  const claude = isClaude(comm)
+  const args = claude ? ps("command") : ""
+  const full = claude ? ps("command", "-E") : ""
   const env = full.startsWith(args) ? entriesOf(full.slice(args.length).trim()) : {}
   return { comm, env, ppid: Number(ps("ppid").trim()) || 0 }
 }
 
-// The claude process a Bash call runs under, the nearest at or above `pid` whose executable is claude: the role it was started with, and the session id Claude Code's registry in its own config folder holds for it (<config>/sessions/<pid>.json, whose pid is that process's), so a prefix that drops PLAYGROUND_ROLE or moves CLAUDE_CONFIG_DIR or HOME changes nothing it reads.
+// The claude process a Bash call runs under, the nearest at or above `pid` whose executable is claude: the role it was started with, and the session id Claude Code's registry holds for it (<config>/sessions/<pid>.json, whose pid is that process's), the config folder named by that process's own CLAUDE_CONFIG_DIR, else its own HOME's .claude, so a prefix that drops PLAYGROUND_ROLE or moves CLAUDE_CONFIG_DIR or HOME changes nothing it reads. A claude process whose environment reads back empty names no session, so a failed read refuses.
 export async function sessionAbove(
   pid: number = process.ppid,
   procs: (pid: number) => Proc | undefined = procOf,
@@ -282,9 +283,16 @@ export async function sessionAbove(
     const proc = procs(at)
     if (!proc) return undefined
     if (isClaude(proc.comm)) {
-      const entry = (await Bun.file(join(configDirOf(proc.env), "sessions", `${at}.json`))
-        .json()
-        .catch(() => null)) as { pid?: unknown; sessionId?: unknown } | null
+      if (!Object.keys(proc.env).length) return undefined
+      const config =
+        proc.env.CLAUDE_CONFIG_DIR || (proc.env.HOME ? join(proc.env.HOME, ".claude") : "")
+      const entry = (
+        config
+          ? await Bun.file(join(config, "sessions", `${at}.json`))
+              .json()
+              .catch(() => null)
+          : null
+      ) as { pid?: unknown; sessionId?: unknown } | null
       const sessionId =
         entry?.pid === at && typeof entry.sessionId === "string" ? entry.sessionId : undefined
       return { pid: at, role: proc.env.PLAYGROUND_ROLE ?? "", sessionId }
