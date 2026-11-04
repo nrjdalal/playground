@@ -1,4 +1,4 @@
-import type { InboxAction, InboxItem } from "@api/hono"
+import type { InboxAction, InboxAnswer, InboxItem } from "@api/hono"
 import { useQuery } from "@tanstack/react-query"
 
 import { agentLabel } from "@/lib/agent-label"
@@ -182,8 +182,7 @@ const chosen = (item: InboxItem) =>
   item.kind !== "update" && item.answer && "choice" in item.answer ? item.answer : null
 
 // What the dashboard's own run on an accept's, an apps change's or a grant's Approve gave, read off any answer, none for the rest.
-type StepResult = { exitCode: number; line: string }
-type Steps = { accepted?: StepResult; listed?: StepResult; opened?: StepResult }
+type Steps = Pick<InboxAnswer, "accepted" | "listed" | "opened">
 const stepsOf = (answer: object | null): Steps => (answer ?? {}) as Steps
 
 // Pure: whether a card a chat reply collapsed opens again to its full self, its answers and Schedule back: an open decision or draft whose answer is that reply, its poster not done with it, which an answer or a Schedule from the card replaces.

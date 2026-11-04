@@ -3568,7 +3568,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const first = store.answerItem(db, notes.id, { action: "approve" }, { actor, apps })
       await started
       const second = store.answerItem(db, mail.id, { action: "approve" }, { actor, apps })
-      await Bun.sleep(50)
+      while ((await store.getItem(db, mail.id))?.status === "open") await Bun.sleep(5)
+      await Bun.sleep(10)
       releaseFirst()
       await Promise.all([first, second])
       expect(list).toEqual(["Slack", "Notes", "Mail"])
