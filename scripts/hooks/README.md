@@ -610,6 +610,7 @@ Only the first reading moves the folder, sets variables and records files for th
   and the shell-pane launcher's `run` refuses a call whose `CLAUDE_CODE_SESSION_ID` is not the session Claude Code's registry (`<config>/sessions/<pid>.json`) names for the claude process above it,
   or whose `PLAYGROUND_ROLE` is not that session's recorded role (`callerRefusal`).
   When it writes `stuck` or `failed` for a factory session, it also queues one line in the ops outbox (`ops-stuck-alert.jsonl`, which the relay sends by SendMessage) for the session's manager alone, by `managerFor()` in `packages/scripts/src/stuck-alert.ts`: the session, its roster task, the reason, the command or question, and its last message (playbook's **unstick**);
+  An orchestrator's manager, the Assistant's for one, is the session its roster row reports to.
   The dispatcher's own and a session outside the factory queue nothing.
   It acts for every session, fails open, and its tests are in `bun run test:file tests/scripts/hooks`.
   `bun run ops:session-resume` (`packages/scripts/src/ops-session-resume/`) reads those files every 60s and queues one resume line through the ops relay to each live factory session (a name `scripts/hooks/role.ts` gives a role, never a probe, whose spawner answers it, nor a session of the owner's own) a minute past its usage limit's reset,

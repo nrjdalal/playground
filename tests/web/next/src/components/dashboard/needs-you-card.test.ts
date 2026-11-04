@@ -121,7 +121,24 @@ describe("NeedsYouCard", () => {
   test("without onAnswer the card is read-only and says where to answer it", () => {
     const html = render({})
     expect(html).not.toContain(">Submit<")
-    expect(html).toContain("This can only be answered in Alpha&#x27;s terminal.")
+    expect(html).toContain(
+      "This cannot be answered here: ask Playground in the chat, and Alpha&#x27;s manager answers it.",
+    )
+  })
+
+  // A dispatcher has no manager to answer through the chat, so its own read-only card names its terminal, as every other card names the chat.
+  test("a dispatcher's own read-only card names its terminal, every other card the chat", () => {
+    const own = { ...item, dispatcher: true as const }
+    expect(render({ item: own })).toContain("This can only be answered in Alpha&#x27;s terminal.")
+    expect(render({ item: { ...own, kind: "permission" } })).toContain(
+      "Answer it in Alpha&#x27;s terminal: approving a permission here is off for now.",
+    )
+    expect(render({ item: { ...own, herdr: true } })).toContain(
+      "Answer it in Alpha&#x27;s terminal, in herdr: the Dashboard answers only a herdr session&#x27;s pickers.",
+    )
+    expect(render({ item: { ...item, herdr: true } })).toContain(
+      "The Dashboard answers only a herdr session&#x27;s pickers: ask Playground in the chat, and Alpha&#x27;s manager answers it.",
+    )
   })
 
   // Questionnaire hides a disabled question whole, which left a read-only card showing nothing but its title (P2c), so each option is disabled instead.
@@ -210,7 +227,9 @@ describe("a Feed card's body", () => {
     expect(html).toContain('role="region"')
     expect(html).toContain('aria-label="Bash asks to run"')
     expect(html).toContain("rm -rf build")
-    expect(html).toContain("approving a permission here is off for now")
+    expect(html).toContain(
+      "Approving a permission here is off for now: ask Playground in the chat, and Greed&#x27;s manager answers it.",
+    )
   })
 
   // Markdown would drop an HTML comment or a link definition from sight, so a plan is shown as the text it is.

@@ -1270,9 +1270,7 @@ export function WorkerStream({
       ) : lost ? (
         <Alert variant={lost.onYou ? "destructive" : "default"} className="mt-3 mb-4">
           <AlertTitle>{lost.title}</AlertTitle>
-          <AlertDescription>
-            Its prompt is not in the Feed any more. Its terminal shows what it is asking.
-          </AlertDescription>
+          <AlertDescription>{lost.text}</AlertDescription>
         </Alert>
       ) : null}
       <MessageScrollerProvider defaultScrollPosition="end" {...STREAM_SCROLL}>

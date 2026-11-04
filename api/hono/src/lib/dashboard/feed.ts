@@ -44,7 +44,7 @@ export type FeedAnswering = {
   sessionId: string
 }
 
-// Why an answer did not go, or did and could not be confirmed: BUSY (that prompt is being answered already), CMUX_FAILED (cmux or herdr could not be read, or the reply may not have gone), DISABLED (permission and plan answers are off), FORBIDDEN (this sign-in may not answer), INTERRUPTED (keys went into a herdr session's pane, yet its prompt still shows or changed partway), INVALID (the answer does not fit the prompt), NOT_FOUND (the session is not live), NOT_PENDING (no such prompt waits on that session, or a herdr session's pane no longer shows it, so nothing was typed), NOT_TAKEN (cmux took the reply, yet the prompt still waits), TERMINAL_ONLY (a herdr session's permission or plan, answered in its terminal alone), UNCONFIRMED (the reply went, but the Feed or the pane could not be read to see it land).
+// Why an answer did not go, or did and could not be confirmed: BUSY (that prompt is being answered already), CMUX_FAILED (cmux or herdr could not be read, or the reply may not have gone), DISABLED (permission and plan answers are off), FORBIDDEN (this sign-in may not answer), INTERRUPTED (keys went into a herdr session's pane, yet its prompt still shows or changed partway), INVALID (the answer does not fit the prompt), NOT_FOUND (the session is not live), NOT_PENDING (no such prompt waits on that session, or a herdr session's pane no longer shows it, so nothing was typed), NOT_TAKEN (cmux took the reply, yet the prompt still waits), TERMINAL_ONLY (a herdr session's permission or plan, which its manager answers, not the Dashboard), UNCONFIRMED (the reply went, but the Feed or the pane could not be read to see it land).
 export const FEED_FAILURES = [
   "BUSY",
   "CMUX_FAILED",
@@ -164,7 +164,7 @@ export function replyFor(item: FeedItem, answer: FeedAnswer): FeedReply | Refusa
     if (answer.mode === "once" && !item.whole) {
       return refused(
         "INVALID",
-        "Not all of what that tool would do can be shown here, so allow it from the session's terminal.",
+        "Not all of what that tool would do can be shown here, so it cannot be allowed here: ask Playground in the chat, and the session's manager answers it.",
       )
     }
     return { kind: "permission", mode: answer.mode, requestId: item.requestId }
@@ -180,13 +180,13 @@ export function replyFor(item: FeedItem, answer: FeedAnswer): FeedReply | Refusa
     if (answer.mode === "manual" && !item.plan.trim()) {
       return refused(
         "INVALID",
-        "That plan came with no text to show, so start it from the session's terminal.",
+        "That plan came with no text to show, so it cannot be started here: ask Playground in the chat, and the session's manager answers it.",
       )
     }
     if (answer.mode === "manual" && !item.whole) {
       return refused(
         "INVALID",
-        "Only part of that plan can be shown here, so start it from the session's terminal.",
+        "Only part of that plan can be shown here, so it cannot be started here: ask Playground in the chat, and the session's manager answers it.",
       )
     }
     return {
@@ -243,7 +243,7 @@ export async function answerFeed(
   if (!canApprove(approver)) return refused("FORBIDDEN", "Only the owner answers prompts.")
   const off = refused(
     "DISABLED",
-    "Answering permission and plan prompts here is off for now: answer it in the session's terminal.",
+    "Answering permission and plan prompts here is off for now: ask Playground in the chat, and the session's manager answers it.",
   )
   if (answer.kind !== "question" && !deps.approvals) return off
   if (answering.has(requestId)) return refused("BUSY", "That prompt is being answered already.")
@@ -267,7 +267,9 @@ export async function answerFeed(
     if (worker.herdr && item.kind !== "question") {
       return refused(
         "TERMINAL_ONLY",
-        `The Dashboard answers only a herdr session's pickers: answer this ${item.kind} in ${worker.name}'s terminal.`,
+        worker.role === "dispatcher"
+          ? `The Dashboard answers only a herdr session's pickers: answer this ${item.kind} in ${worker.name}'s terminal.`
+          : `The Dashboard answers only a herdr session's pickers: for this ${item.kind}, ask Playground in the chat, and ${worker.name}'s manager answers it.`,
       )
     }
     if (item.kind !== "question" && !deps.approvals) return off
