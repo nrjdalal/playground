@@ -254,7 +254,7 @@ export const appsArgs = (login: string, ref: number): string[] => [
   `the owner approved it in the Inbox (${itemTag(ref)})`,
 ]
 
-// Pure: an app's name as the hook's appName matches it (no-desktop-owner-app.ts): its last path part, without .app, spaces or case.
+// Pure: an app's name as the hook's appName matches it (no-desktop-owner-app.ts): its last path part, without .app, edge spaces or case.
 const appKey = (name: string): string =>
   (name.split("/").filter(Boolean).pop() ?? "")
     .replace(/\.app$/i, "")
