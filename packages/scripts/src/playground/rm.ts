@@ -18,40 +18,46 @@ import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
 
 export const RM_USAGE =
-  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--reason "<why>"] | --list | --restore <id>'
+  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--discard] [--reason "<why>"] | --list | --restore <id>'
 
 export type RmArgs =
   | { list: true }
   | { restore: string }
-  | { path: string; reason: string; worktree: boolean }
+  | { discard: boolean; path: string; reason: string; worktree: boolean }
 
-// playground rm's words: one path, or --worktree's, with an optional --reason; --list or --restore <id> alone.
+// playground rm's words: one path, or --worktree's with an optional --discard, with an optional --reason; --list or --restore <id> alone.
 export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   if (words.length === 1 && words[0] === "--list") return { list: true }
   if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
   let path: string | undefined
   let reason = "playground rm"
   let worktree = false
+  let discard = false
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!
     if (word === "--reason" && words[i + 1] !== undefined) reason = words[++i]!
+    else if (word === "--discard" && !discard) discard = true
     else if (word === "--worktree" && words[i + 1] !== undefined && path === undefined) {
       worktree = true
       path = words[++i]!
     } else if (!word.startsWith("--") && path === undefined) path = word
     else return { error: RM_USAGE }
   }
-  return path === undefined ? { error: RM_USAGE } : { path, reason, worktree }
+  return path === undefined || (discard && !worktree)
+    ? { error: RM_USAGE }
+    : { discard, path, reason, worktree }
 }
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, every process with a working folder, the ops notify line to the dispatcher, and the session's name.
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the caller's PLAYGROUND_ROLE, which a factory session sets and the owner's own terminal does not, and the session's name.
 export type RmDeps = {
   clones: () => Clone[]
   data: string
   home: string
   main: string
+  merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
   procs: () => Proc[] | null
+  role: string | undefined
   session: () => Promise<string>
 }
 
@@ -130,12 +136,29 @@ const processes = (): Proc[] | null => {
   return procs.length ? procs : null
 }
 
-// This machine's: run-slot's running clone, HOME, the data folder, the main checkout, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
+// Whether a merged PR holds the commit, from GitHub's REST list of the commit's PRs in the worktree's own repository, or null when gh cannot answer.
+const merged = (sha: string, at: string): boolean | null => {
+  const run = Bun.spawnSync(
+    [
+      "gh",
+      "api",
+      `repos/{owner}/{repo}/commits/${sha}/pulls`,
+      "--jq",
+      "any(.[]; .merged_at != null)",
+    ],
+    { cwd: at, stderr: "ignore", stdout: "pipe" },
+  )
+  const out = run.stdout.toString().trim()
+  return run.exitCode === 0 && (out === "true" || out === "false") ? out === "true" : null
+}
+
+// This machine's: run-slot's running clone, HOME, the data folder, the main checkout, gh for a merged PR, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
 export const rmDeps = (repo: string): RmDeps => ({
   clones: clones(dataDir()),
   data: dataDir(),
   home: homedir(),
   main: mainCheckout(repo),
+  merged,
   notify: (text) =>
     void Bun.spawnSync(["bash", join(repo, "scripts", "ops", "notify.sh"), "safe-delete", text], {
       env: { ...process.env, NOTIFY_TO: "dispatcher" },
@@ -143,6 +166,7 @@ export const rmDeps = (repo: string): RmDeps => ({
       stdout: "ignore",
     }),
   procs: processes,
+  role: process.env.PLAYGROUND_ROLE || undefined,
   session: sessionName,
 })
 
@@ -152,6 +176,12 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   if ("error" in args) {
     console.error(`playground: ${args.error}`)
     return 2
+  }
+  if ("discard" in args && args.discard && deps.role) {
+    console.error(
+      `playground: --discard is the owner's own call, so a session with a role (${deps.role}) posts an Inbox delete decision with bun run ask new, naming ${args.path} and why, and the owner runs playground rm --worktree ${args.path} --discard in their own terminal`,
+    )
+    return 1
   }
   const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
   if ("list" in args) {
@@ -173,7 +203,9 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
             worktree: args.worktree
               ? {
                   clones: deps.clones(),
+                  discard: args.discard,
                   live: STATUSES.live,
+                  merged: deps.merged,
                   procs: deps.procs(),
                   roster: join(deps.data, "roster.json"),
                 }

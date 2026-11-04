@@ -23,11 +23,23 @@ import {
   runRm,
 } from "../../../../../packages/scripts/src/playground/rm"
 
-test("rm takes one path, or --worktree's, with an optional reason", () => {
-  expect(rmArgs(["old"])).toEqual({ path: "old", reason: "playground rm", worktree: false })
+test("rm takes one path, or --worktree's with an optional --discard, with an optional reason", () => {
+  expect(rmArgs(["old"])).toEqual({
+    discard: false,
+    path: "old",
+    reason: "playground rm",
+    worktree: false,
+  })
   expect(rmArgs(["--worktree", "wt", "--reason", "merged"])).toEqual({
+    discard: false,
     path: "wt",
     reason: "merged",
+    worktree: true,
+  })
+  expect(rmArgs(["--worktree", "wt", "--discard"])).toEqual({
+    discard: true,
+    path: "wt",
+    reason: "playground rm",
     worktree: true,
   })
 })
@@ -44,6 +56,8 @@ test.each([
   [["--force", "a"]],
   [["--list", "a"]],
   [["a", "--worktree", "b"]],
+  [["a", "--discard"]],
+  [["--worktree", "wt", "--discard", "--discard"]],
 ])("rm refuses %j with its usage", (words) => {
   expect(rmArgs(words)).toEqual({ error: RM_USAGE })
 })
@@ -76,7 +90,9 @@ const machine = () => {
     data,
     home,
     main,
+    merged: () => false,
     notify: (text) => void told.push(text),
+    role: undefined,
     session: async () => "j6rjgy-worker",
   }
   return { deps, home, main, root, told }
@@ -135,6 +151,45 @@ test("runRm --worktree checks the holders, moves the worktree and prunes it from
   expect(await runRm(["--worktree", wt], deps)).toBe(0)
   expect(existsSync(wt)).toBe(false)
   expect(git(main, "worktree", "list")).not.toContain("pg-1")
+})
+
+test("runRm --worktree refuses a worktree with uncommitted work, naming --discard, which a session with a role may not pass and the owner's own terminal moves it with", async () => {
+  const { deps, main, root } = machine()
+  git(root, "init", "--bare", "-q", join(root, "remote.git"))
+  git(main, "init", "-q", "-b", "canary")
+  writeFileSync(join(main, "README.md"), "x")
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  git(main, "remote", "add", "origin", join(root, "remote.git"))
+  git(main, "push", "-q", "origin", "canary")
+  const wt = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+  writeFileSync(join(wt, "wip.txt"), "x")
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--worktree", wt], deps)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toEqual([
+    `playground: ${wt} holds 1 uncommitted change (wip.txt): the owner's own playground rm --worktree ${wt} --discard removes it anyway, which a factory session asks for as an Inbox delete decision`,
+  ])
+  expect(existsSync(wt)).toBe(true)
+  said.length = 0
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--worktree", wt, "--discard"], { ...deps, role: "worker" })).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toEqual([
+    `playground: --discard is the owner's own call, so a session with a role (worker) posts an Inbox delete decision with bun run ask new, naming ${wt} and why, and the owner runs playground rm --worktree ${wt} --discard in their own terminal`,
+  ])
+  expect(existsSync(wt)).toBe(true)
+  expect(await runRm(["--worktree", wt, "--discard"], deps)).toBe(0)
+  expect(existsSync(wt)).toBe(false)
 })
 
 // run-slot's clone lane copies <source>/node_modules from its caller's folder, so only its holder record names the source (PG-699)
