@@ -197,6 +197,17 @@ describe("a run through run-slot, a light run, or one outside the worktrees runs
   test("a cd the hook cannot follow leaves the command alone", async () => {
     expect(await bash("cd $DIR && bun run build", OUTSIDE)).toBeUndefined()
   })
+
+  // #573: a cd an && joins to what follows names the folder those commands run from, so the worktree line the Workflow rule types reaches the new worktree, where its install needs the slot that rule names
+  test("the Workflow rule's worktree line runs with its install slotted", async () => {
+    const command = `git fetch origin canary && git worktree add ${MAIN}/.claude/worktrees/new -b PG-1-x origin/canary && cd ${MAIN}/.claude/worktrees/new && ${SLOT} bun install`
+    expect(await bash(command, MAIN)).toBeUndefined()
+  })
+
+  test("the same line with a bare install is refused, since its cd names a worktree", async () => {
+    const command = `git fetch origin canary && git worktree add ${MAIN}/.claude/worktrees/new -b PG-1-x origin/canary && cd ${MAIN}/.claude/worktrees/new && bun install`
+    expect(await bash(command, MAIN)).toContain("no-unslotted-run hook refuses")
+  })
 })
 
 describe("it fails open, and acts for a factory session alone", () => {

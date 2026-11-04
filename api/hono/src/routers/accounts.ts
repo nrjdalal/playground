@@ -11,7 +11,7 @@ import {
   notFoundErrorResponses,
   validationErrorResponses,
 } from "@/lib/error"
-import { addAccount, listAccounts, removeAccount } from "@/lib/store/accounts"
+import { accountsScope, addAccount, listAccounts, removeAccount } from "@/lib/store/accounts"
 import { hasLogin } from "@/lib/store/extensions"
 import { authMiddleware, guardWrites, requireConsoleRole, type StoreVariables } from "@/middlewares"
 import { done, invalid, responses } from "@/routers/store"
@@ -41,18 +41,21 @@ export const listResponse = z.object({
         email: z.string().nullable(),
         key: z.string(),
         label: z.string().nullable(),
+        own: z.boolean(),
         provider: z.enum(["claude", "glm"]),
         stored: z.boolean(),
       }),
     ),
     login: z.boolean(),
+    scope: z.string().nullable(),
   }),
 })
 
-// The list, and whether the extensions login exists, which Settings asks before it offers Add account.
+// The list, whether the extensions login exists, which Settings asks before it offers Add account, and the scope its Own account switch writes to.
 export const accountsList = (data?: string) => ({
   accounts: listAccounts(data),
   login: hasLogin(data),
+  scope: accountsScope(data),
 })
 
 const who = (c: { get: (key: "user") => unknown }, reason: string) => ({
@@ -72,7 +75,7 @@ export const accountsRouter = new Hono<{ Variables: StoreVariables }>()
     describeRoute({
       tags: ["Settings"],
       description:
-        "Every account in usage.accounts, with whether its token is kept, and whether ext init has named the login every account write needs",
+        "Every account in usage.accounts, with whether its token is kept and whether it is marked own, whether ext init has named the login every account write needs, and the scope a Settings write goes to",
       responses: {
         200: {
           content: { "application/json": { schema: resolver(listResponse) } },

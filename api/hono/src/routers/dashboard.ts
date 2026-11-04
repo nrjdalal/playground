@@ -1,5 +1,6 @@
 import { sValidator } from "@hono/standard-validator"
 import type { Session } from "@packages/auth"
+import { SESSION_EFFORTS, SESSION_MODELS } from "@packages/config/console"
 import {
   threadIdSchema,
   threadPatchSchema,
@@ -70,13 +71,16 @@ import { readRoster } from "@/lib/dashboard/roster"
 import {
   answerHosted,
   changeHostedMode,
+  changeHostedSetting,
   HOSTED_MODES,
   hosts,
   SDK_PROBE,
   sendToHosted,
   type ModeChanging,
   type ModeResult,
+  type SettingChanging,
 } from "@/lib/dashboard/sdk"
+import { settingRequestSchema, type SessionSetting } from "@/lib/dashboard/setting"
 import { readStacks } from "@/lib/dashboard/stacks"
 import {
   createThread,
@@ -88,7 +92,7 @@ import {
 } from "@/lib/dashboard/threads"
 import { AGENT_ID_PATTERN, readTail, subagentPath } from "@/lib/dashboard/transcript"
 import { startVibe, stopVibe, VibeError } from "@/lib/dashboard/vibe"
-import { DISPATCHER, DISPATCHERS, listLive } from "@/lib/dashboard/workers"
+import { DISPATCHER, DISPATCHERS, listLive, type Live } from "@/lib/dashboard/workers"
 import { searchYouTube } from "@/lib/dashboard/youtube-search"
 import {
   ApiError,
@@ -126,6 +130,13 @@ export const answerLimiter = createRateLimiter({
 
 // A person flips a session's mode a few times at most; each one changes what the session may do unasked.
 export const modeLimiter = createRateLimiter({
+  getUserId: (c) => c.get("session")?.userId,
+  limit: 10,
+  windowMs: 60_000,
+})
+
+// A person sets a model or an effort a few times at most; each one changes a running session.
+export const settingLimiter = createRateLimiter({
   getUserId: (c) => c.get("session")?.userId,
   limit: 10,
   windowMs: 60_000,
@@ -190,6 +201,7 @@ const messageSchema = z.object({
   attachments: z.array(z.string().regex(ID_PATTERN)).max(MAX_ATTACHMENTS).default([]),
   id: z.uuid().optional(),
   newThread: z.boolean().optional(),
+  queuedAt: z.iso.datetime().optional(),
   text: z.string().max(MAX_CHARS * 2),
   threadId: threadIdSchema.optional(),
   to: z.string().min(1).max(200),
@@ -214,6 +226,7 @@ export async function sendMessage(
     attachments: ids = [],
     id: messageId,
     newThread,
+    queuedAt,
     text,
     threadId: named,
     to,
@@ -269,15 +282,17 @@ export async function sendMessage(
     to,
     ...(attachments.length && { attachments }),
     ...(messageId && { id: messageId }),
+    ...(messageId && queuedAt && { queuedAt }),
   })
   if (!result.ok) {
-    // a message cut off while typing may have gone, marker and all, and one left pasted and unsent waits for its retry's Enter, so its thread stays and is named, for a retry to send to it
+    // a message cut off while typing may have gone, marker and all, and one left pasted and unsent waits for its retry's Enter, as one Claude Code holds (QUEUED, marked pasted) waits to be read again, so its thread stays and is named, for a retry to send to it
     const held = result.code === "INTERRUPTED" || result.pasted
     const kept = opened && held ? opened : undefined
     if (opened && !kept) await threads.drop(opened)
     const [status, code] = FAILURE_STATUS[result.code]
     throw new ApiError(status, code, result.reason, {
       delivery: result.code,
+      ...(result.queuedAt && { queuedAt: result.queuedAt }),
       ...(kept && { threadId: kept }),
     })
   }
@@ -448,6 +463,34 @@ export async function changeMode(
   return { at: result.at, mode: result.mode }
 }
 
+// The setting route's work once the request is through its guards: a model or an effort for a dispatcher, typed as its one slash command through deliver() under the composer's id, or for the session the dashboard hosts, set through the SDK by changeHostedSetting(); any other session is refused as FORBIDDEN before anything is sent, and a delivery's refusal is turned into the API's error envelope with its code under `delivery`.
+export async function changeSetting(
+  { id, sessionId, setting }: { id?: string; sessionId: string; setting: SessionSetting },
+  actor: Delivery["actor"],
+  live: () => Promise<Live> = listLive,
+  send: (delivery: Delivery) => Promise<DeliveryResult> = deliver,
+  setHosted: (changing: SettingChanging) => Promise<DeliveryResult> = changeHostedSetting,
+): Promise<{ at: string; sessionId: string }> {
+  const worker = (await live()).workers.find((w) => w.sessionId === sessionId)
+  if (!worker) throw new ApiError(404, "NOT_FOUND", "No live session with that id")
+  const typed = DISPATCHERS.includes(worker.name)
+  if (!typed && !worker.hosted) {
+    throw new ApiError(
+      403,
+      "FORBIDDEN",
+      `A model or effort is set on ${[...DISPATCHERS, SDK_PROBE].join(", ")} only`,
+    )
+  }
+  const result = typed
+    ? await send({ actor, setting, text: "", to: worker.name, ...(id && { id }) })
+    : await setHosted({ actor, sessionId, setting })
+  if (!result.ok) {
+    const [status, code] = FAILURE_STATUS[result.code]
+    throw new ApiError(status, code, result.reason, { delivery: result.code })
+  }
+  return { at: result.at, sessionId: result.sessionId }
+}
+
 const transcriptQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(200),
 })
@@ -592,7 +635,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "This machine's room for more workers, read every 30s while anyone reads it: RAM used and free with macOS's memory pressure, swap, the load average against the cores, disk free, Docker's VM and containers, each live session's footprint (its claude process, everything under it, and the dev stack it serves with that stack's Postgres container) and processes left running in a checkout with no session, an hour of totals, the usage windows the usage job writes, `account`, the Claude account the usage windows reflect (its email and display name alone), `pulls`, the pull requests page of the checkout's GitHub origin, and `update`, how many commits this build is behind the branch its checkout follows (main on origin/main, canary and the live dashboard's branch on origin/canary, fetched at most every 10 minutes in the background) with the newest one's title and time, and `live` when that branch is the live dashboard's. `capacity.line` says how many more workers fit and what limits them; `capacity.idle.line` how much stopping a worker's dev stack idle for 15 minutes would free. Read-only but for the update check's fetch, which moves only origin/<upstream>: every other command it runs only reports.",
+        "This machine's room for more workers, read every 30s while anyone reads it: RAM used and free with macOS's memory pressure, swap, the load average against the cores, disk free, Docker's VM and containers, each live session's footprint (its claude process, everything under it, and the dev stack it serves with that stack's Postgres container) and processes left running in a checkout with no session, an hour of totals, the usage windows the usage job writes, `account`, the Claude account the usage windows reflect (its email and display name alone), `pulls`, the pull requests page of the checkout's GitHub origin, and `update`, how many commits this build is behind the branch its checkout follows (main on origin/main, canary and the live dashboard's branch on origin/canary, fetched at most every 10 minutes in the background) with the newest one's title and time, and `live` when that branch is the live dashboard's. `capacity.line` says how many more workers fit and what limits them, `capacity.orchestrators` how many more orchestrators (a claude with no dev stack, `capacity.perOrchestrator`); `capacity.idle.line` how much stopping a worker's dev stack idle for 15 minutes would free. Read-only but for the update check's fetch, which moves only origin/<upstream>: every other command it runs only reports.",
       responses: { 200: { description: "OK" }, ...authErrorResponses },
     }),
     async (c) => c.json({ data: await systemReport() }),
@@ -771,7 +814,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     "/messages",
     describeRoute({
       tags: ["Dashboard"],
-      description: `Send a message to a live session as the owner, and record it in the console's activity. Phase 2a sends to each dispatcher (${DISPATCHERS.join(" and ")}), typed into its terminal as if the owner typed it, and to ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, whose message goes on its input rather than into a terminal; a message to any other session is refused as FORBIDDEN before anything is sent. \`attachments\` names up to ${MAX_ATTACHMENTS} uploaded files by id; each one's absolute path follows the words on an "Attached:" line, for the session to Read. \`id\`, the composer's own for the message, makes a retry safe: a message already recorded under it is answered as delivered, not typed again. A refusal names its reason in \`delivery\`: CMUX_FAILED, COMMAND, EMPTY, INPUT_NOT_EMPTY (nothing typed, or, for a message with an \`id\` to a herdr session, its paste left unsent in the box, which its retry presses Enter on and, for a new thread, names under \`threadId\`), INTERRUPTED (typing began and did not finish, so look at the session before sending again), NOT_FOUND, ON_PICKER or TOO_LONG; an attachment that is gone is a 404 naming it under \`attachment\` (GONE) and \`id\`. A message naming an inbox item (\`re #iN\`) records the reply on it once sent, which takes it off his count and list until its poster closes it. \`threadId\`, for the primary dispatcher alone, puts that thread's marker (\`[thread:<id>] \`) before the words, which routes the message to the thread once ingest brings it; a thread that does not exist is a 404 before anything is sent. \`newThread: true\`, in place of \`threadId\`, opens a thread titled from the message's first line and sends the message as its first, naming it under \`threadId\`.`,
+      description: `Send a message to a live session as the owner, and record it in the console's activity. Phase 2a sends to each dispatcher (${DISPATCHERS.join(" and ")}), typed into its terminal as if the owner typed it, and to ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, whose message goes on its input rather than into a terminal; a message to any other session is refused as FORBIDDEN before anything is sent. \`attachments\` names up to ${MAX_ATTACHMENTS} uploaded files by id; each one's absolute path follows the words on an "Attached:" line, for the session to Read. \`id\`, the composer's own for the message, makes a retry safe: a message already recorded under it is answered as delivered, not typed again. \`queuedAt\`, with an \`id\`, is the time an earlier try's QUEUED refusal gave under \`queuedAt\` (when the message was pasted), so an API that restarted since reads the message again rather than typing it twice. A refusal names its reason in \`delivery\`: CMUX_FAILED, COMMAND, EMPTY, INPUT_NOT_EMPTY (nothing typed, or, for a message with an \`id\` to a herdr session, its paste left unsent in the box, which its retry presses Enter on and, for a new thread, names under \`threadId\`), INTERRUPTED (typing began and did not finish, or a QUEUED message left the screen with a transcript that cannot be read back to when it was queued, so whether it went is not known and it is never retried unseen), LOST (a QUEUED message that neither the session's screen nor its transcript, read back to when it was queued, shows 10 minutes after it was queued, which a retry sends again), NOT_FOUND, ON_PICKER, QUEUED (Claude Code holds the message, in its box while it compacts or in its queue while it works, and takes it once free: a retry under the same \`id\` types nothing and reads it again, answering it delivered once its transcript shows it) or TOO_LONG; an attachment that is gone is a 404 naming it under \`attachment\` (GONE) and \`id\`. A message naming an inbox item (\`re #iN\`) records the reply on it once sent, which takes it off his count and list until its poster closes it. \`threadId\`, for the primary dispatcher alone, puts that thread's marker (\`[thread:<id>] \`) before the words, which routes the message to the thread once ingest brings it; a thread that does not exist is a 404 before anything is sent. \`newThread: true\`, in place of \`threadId\`, opens a thread titled from the message's first line and sends the message as its first, naming it under \`threadId\`.`,
       responses: {
         200: {
           description: "Sent and recorded",
@@ -795,11 +838,11 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ...notFoundErrorResponses,
         409: errorResponse(
           "CONFLICT",
-          "The session cannot take it now: it waits on a picker (ON_PICKER) or its input holds something (INPUT_NOT_EMPTY)",
+          "The session cannot take it now: it waits on a picker (ON_PICKER), its input holds something (INPUT_NOT_EMPTY), Claude Code holds the message to take once free (QUEUED), or a held message was lost (LOST)",
         ),
         502: errorResponse(
           "CMUX_FAILED",
-          "cmux could not read the session, or refused the send before anything was typed and again on a second try (CMUX_FAILED, which the outbox retries), or typing began and did not finish (INTERRUPTED): look at the session before sending again",
+          "cmux could not read the session, or refused the send before anything was typed and again on a second try (CMUX_FAILED, which the outbox retries), or typing began and did not finish (INTERRUPTED), which reads Delivered once its transcript shows it",
         ),
       },
     }),
@@ -841,7 +884,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ),
         502: errorResponse(
           "CMUX_FAILED",
-          "The reply may not have gone (CMUX_FAILED), cmux took it and the prompt still waits (NOT_TAKEN), or it went and could not be seen to land (UNCONFIRMED): look at the session",
+          "The reply may not have gone (CMUX_FAILED), cmux took it and the prompt still waits (NOT_TAKEN), or it went and could not be seen to land (UNCONFIRMED): its card stays while the prompt waits, and leaves once it is answered",
         ),
       },
     }),
@@ -914,6 +957,42 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         mode: c.req.valid("json").mode,
         sessionId: c.req.valid("param").sessionId,
       })
+      return c.json({ data })
+    },
+  )
+  .post(
+    "/workers/:sessionId/setting",
+    describeRoute({
+      tags: ["Dashboard"],
+      description: `Set the model or the effort of a dispatcher (${DISPATCHERS.join(" or ")}) or of ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, as the owner's own pick in the composer: \`model\` one of ${SESSION_MODELS.join(", ")}, or \`effort\` one of ${SESSION_EFFORTS.join(", ")}, never both. For a dispatcher the API builds the one slash command (\`/model <alias>\` or \`/effort <level>\`) from those lists and types it as a message is typed; the hosted session takes it through the SDK's own calls. Either way it records a dashboard.setting row naming the session and the value. Any other session is refused as FORBIDDEN before anything is sent. \`id\`, the composer's own for the pick, lets a dispatcher that holds the command while it compacts read QUEUED rather than INTERRUPTED, and makes a retry under it safe, as the message route's does. A delivery's refusal names its reason in \`delivery\`, as the message route's does.`,
+      responses: {
+        200: {
+          description:
+            "Set: a dispatcher runs the typed command, or the hosted session has taken the value",
+          content: {
+            "application/json": {
+              schema: resolver(
+                z.object({ data: z.object({ at: z.string(), sessionId: z.string() }) }),
+              ),
+            },
+          },
+        },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+      },
+    }),
+    settingLimiter,
+    sValidator("param", z.object({ sessionId: z.string().min(1).max(200) }), invalidInput),
+    sValidator("json", settingRequestSchema, invalidInput),
+    async (c) => {
+      const user = c.get("user")
+      const { id, ...setting } = c.req.valid("json")
+      const data = await changeSetting(
+        { id, sessionId: c.req.valid("param").sessionId, setting },
+        { email: user.email, id: user.id },
+      )
       return c.json({ data })
     },
   )

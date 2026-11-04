@@ -4,7 +4,7 @@ Each Claude Code hook in this folder, in full: what it refuses or writes, for wh
 AGENTS.md names each hook and points here, and this file holds each one's text.
 Read a hook's section before you change the hook, its tests or its registration, or when it refuses a call you did not expect.
 Widen what a hook allows only by one literal form it reads whole, tracking no shell state (variables, functions, loops, traps), and have it refuse every other form with a reason that names the literal one.
-Every bypass form a review has found stays refused through a widening: each is a row of `tests/scripts/hooks/fixtures/refused-forms.ts`, which `tests/scripts/hooks/refused-forms.test.ts` runs through each guard it names, and a bypass a new review finds that canary refuses joins it as a row in the same PR.
+Every bypass form a review has found stays refused through a widening: each is a row of `tests/scripts/hooks/fixtures/refused-forms/`, one file a source (`<n>.ts` holds #<n>'s rows), which `tests/scripts/hooks/refused-forms.test.ts` runs through each guard it names, and a bypass a new review finds that canary refuses joins it as a row in the same PR.
 `no-raw-spawn` guards `scripts/spawn.sh`, so its text sits in [the spawn.sh section of scripts/README.md](../README.md#spawnsh).
 Their tests are `bun run test:file tests/scripts/hooks`.
 Every hook reads a wrapper (`doas`, `env`, `nice`, `nohup`, `stdbuf`, `sudo`, `time`, `timeout`, `xargs` and the rest of `WRAPPERS` in `scripts/hooks/shell.ts`) by that wrapper's own list of options, a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, so the program it finds is the one the wrapper runs.
@@ -28,17 +28,20 @@ Only the first reading moves the folder, sets variables and records files for th
 - A PreToolUse guard's wrapper runs its bundle, `scripts/hooks/bundled/<hook>.js`, which `bun run hooks:bundle` (`packages/scripts/src/hooks-bundle.ts`) builds from `scripts/hooks/<hook>.ts` with everything it imports, so the guard starts with a missing or damaged `node_modules`; every other hook runs its source.
   While the checkout holds no bundle, as the main checkout holds none until a ship brings them, the wrapper runs `scripts/hooks/<hook>.ts`, which keeps every guard running across that gap; with neither file it refuses under `PLAYGROUND_ROLE`, as above.
   The source stays the one place a guard's logic is edited: after an edit to a guard or to anything it imports, run `bun run hooks:bundle` and commit `scripts/hooks/bundled/` (`bun run hooks:bundle --check` names each stale bundle and writes nothing), since `tests/packages/scripts/src/hooks-bundle.test.ts` fails on a bundle a fresh build would write otherwise.
+  Write mode also removes a bundle no build writes, a removed guard's: each `.js` file directly in `scripts/hooks/bundled/` that no build writes, one file at a time, and nothing else there.
   The bundles are committed, so a git restore of a deleted checkout brings them back with no install (so a guard that cannot start needs its bundle back, by `git checkout` or `bun run hooks:bundle`, where the wrapper's refusal still reads `bun install`).
-  Two branches that both change a shared hook file conflict there: take `canary`'s side, commit the merge, then run `bun run hooks:bundle` and commit the rebuild on its own.
+  Two branches that both change a shared hook file conflict there, so merge `canary` into a hook PR with `bun run hooks:merge-canary` (`packages/scripts/src/hooks-merge-canary.ts`), from a clean tree.
+  It takes `canary`'s side of each conflicted bundle, commits the merge, rebuilds the bundles with the merged checkout's own `hooks-bundle.ts` and commits the rebuild on its own, then runs `--check`.
+  A conflict outside `scripts/hooks/bundled/` aborts the merge and names its paths, and a merge that changes `bun.lock` stops after the merge commit for a `bun install` before you run `bun run hooks:bundle`.
   `bun run hooks:bundle` refuses to write while a merge is in progress (`MERGE_HEAD` set), naming that order, since bundles rebuilt inside the merge commit read to pr:merge's keeps-canary gate as lines lost from `canary`; `--check` runs during a merge as before.
+  pr:merge's `types` gate runs `--check` on the tree the squash makes when the PR touches `scripts/hooks/` or `packages/`, and refuses a bundle stale there ([packages/scripts/src/pr-merge/README.md](../../packages/scripts/src/pr-merge/README.md)).
   Each guard is its own build, since a build that also takes a guard it imports keeps that guard's `import.meta.main` block live, and the bundle would then judge by both guards' rules.
   Each bundled module reads `import.meta.dir` as its own source's folder, which the build writes against the checkout the bundle sits in (two folders up from `bundled/`), and `packages/settings/src/rendered.ts`'s `../../../extensions/core` URL lands on the repo root while `bundled/` sits three folders deep, as `packages/settings/src/` does.
   `role.ts`'s read of the session names still runs `setting.ts` in a process of its own, and keeps a fresh install's names when that read fails.
   `tests/scripts/hooks/refused-forms.test.ts` runs each bundle from a scratch checkout no `node_modules` reaches and holds it to its source's verdict on every row.
   A headless scan run from outside the checkout exports `PLAYGROUND_REPO` as the factory's checkout and passes `--settings` naming that checkout's `scripts/factory-settings.json`, so its guards run rather than exit 0: the board scan's loop takes the checkout from `beat.py`'s `checkout()`, the end-of-day scan's `scan.sh` from its own path.
-  Three factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label,
-  and no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them.
-  no-raw-delete will guard every session's deletes, since a delete is final whoever runs it, once it is registered ([its section](#no-raw-delete)).
+  Four factory hooks act for every session: session-state writes every session's state, since the Dashboard is to show them all, no-off-palette-label guards every session's labels, since the label rule covers any label, no-desktop-owner-app guards every session's agent-desktop calls, since the owner's pointer and apps are the same whichever session drives them,
+  and no-raw-delete guards every session's deletes, since a delete is final whoever runs it.
   Every other factory hook acts for a factory session alone, `PLAYGROUND_ROLE` or else its name in Claude Code's registry, placed by the roster's `kind` for that name and then by the factory's names (`scripts/hooks/role.ts`), so a session the owner opens in the factory's checkout passes them untouched.
   Claude Code loads project settings from the session's own folder alone, so a factory session restored where they lack the hooks (another checkout, an older one, a subfolder) is respawned with its settings (playbook's SESSIONS.md), and `scripts/ops/up.py --sessions`, which reads each session's command line and its own folder's `.claude/settings.json`, names each one.
 
@@ -48,15 +51,56 @@ Only the first reading moves the folder, sets variables and records files for th
   which only the extensions hold) loads it through `guardList` in `scripts/hooks/lists.ts` inside its check, at every call,
   and fails closed on it:
   on a machine with extensions (its data folder holds `extensions/`) the list comes from `extensions/hooks/<list>.json`, which every list write derives as the union of every scope's `lists/<list>.json` (the login's, each org's, then core's), read by `packages/settings/src/rendered.ts`, and never from this folder.
-  A root that lacks the list refuses the guarded call, naming the file and `playground ext import --from-tree extensions/core/lists`, which seeds it: the session tells its lead, and the dispatcher hands the owner the command to type as a `!` command in the dispatcher's terminal window, since the Dashboard's composer types no `!` command.
+  A root that lacks the list refuses the guarded call, naming the file and the owner's command that writes it: `playground ext import --from-tree extensions/core/lists` for a list core ships, and `playground ext put <login> list <list> <file> --reason <why>` for one it ships none of (no-public-leak's, whose refusal also names its five keys), since that import never seeds it.
+  The session tells its lead, and the dispatcher hands the owner the command to type as a `!` command in the dispatcher's terminal window, since the Dashboard's composer types no `!` command.
   A factory session writes nothing in the root itself and changes no list or guard setting through the CLI: [no-extensions-write](#no-extensions-write) refuses both, so a list changes only on the owner's own command.
   With no extensions, the list is core's file; with no file either, the guard takes its empty default.
   A list file that is there but empty, malformed or missing a key refuses the guarded call, extensions or not; an explicit empty list (`[]`, or every key empty) is the owner's choice and loads.
   A broken list refuses only the calls its guard checks, so every other call runs.
+  Each refusal above, for a missing list and a broken one alike, follows one read rule.
+  The leak guards and no-extension-repo-write give a list's or `policy.json`'s refusal to a call that names `curl`, `gh`, `git`, GitHub, Linear or Slack, unless it only reads, as `scripts/hooks/read-only.ts` judges it: a Bash line of exact read shapes from a closed set, each with its own option list, which takes a read over a `.git` path; an MCP call keeps the refusal.
   `GUARD_LISTS` in `packages/settings/src/rendered.ts` names every guard's list, and a root that lacks one refuses its guard, so a new guard list goes there and into core's `lists/`.
   A shell or Python script reads the set through `bun packages/scripts/src/playground/rendered.ts <file>`: exit 0 prints the path, 2 is extensions that lack the file, 3 is no extensions.
   A shell script that judges by a list of words reads it whole through `bun packages/scripts/src/playground/guard-list.ts <guard> <list>`, which takes `guardList`'s fallbacks and prints the words as JSON, or exits 2 with its refusal, as spawn.sh does for `glm-refused-sources`.
-  Its tests are `bun run test:file tests/scripts/hooks/guard-lists.test.ts tests/packages/settings/src/rendered.test.ts tests/packages/scripts/src/playground/guard-list.test.ts`.
+  Its tests are `bun run test:file tests/scripts/hooks/guard-lists.test.ts tests/scripts/hooks/read-only.test.ts tests/packages/settings/src/rendered.test.ts tests/packages/scripts/src/playground/guard-list.test.ts`.
+
+## The folder a hook reads
+
+- The shared reader (`scripts/hooks/shell.ts`) follows the folder a command runs in from the Bash tool's cwd through the line's `cd` steps, and holds two readings of it.
+  `Env.cwd` takes a `cd`'s own target wherever the reader reads it: the reading every hook had before the proven folder arrived, kept so a hook that reads that field alone keeps the verdicts it had.
+  `Env.cwdSure` names a folder only where the shell is sure to run that `cd` once, and `places` gives every folder the shell may be in otherwise.
+  The three hooks below read the folder through `places`, and moving another hook onto it is a change of its own: a guard written as "refuse where the path is inside the folder I guard" reads a folder it cannot place as outside that folder, so it fails open until it judges each of `places`'s folders.
+  Sure means, for `Env.cwdSure`: `cd` is the command's own first word, or `builtin` or `command` runs it, since every other wrapper runs no builtin (`env cd`, `xargs cd`); it stands outside a pipeline, a background and an `||`'s right side (`cmd || cd x`); it stands outside every body the shell may run no time or many (`if`, `while`, `until`, `for`, `case`, a function, a brace group, `coproc`);
+  and no count or loop runs it again.
+  A reserved word counts in command position alone, so an argument that spells one (`echo if`, `grep -q done`) opens and closes no body.
+  The folder a sure `cd` names has to be there for the reader to name it, but for a `cd` an `&&` joins to what follows: such a `cd` has certainly run and succeeded for each command that chain joins after it, since a `cd` that does not run, or that fails, stops the chain before them.
+  So the reader names its folder whether or not the folder is there as it reads the line, which is how the worktree line of [AGENTS.md](../../AGENTS.md)'s Workflow rule reaches its new worktree (`git worktree add <path> && cd <path> && git merge origin/canary`, `mkdir -p <path> && cd <path> && git commit -m x`).
+  That reading holds for the commands of that `cd`'s own run and no others: a run ends at each operator that runs the next command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and there the folders from before the `cd` are the shell's again beside the one it named (`Env.cwdChain`, held under that run's own token in `Env.cwdChainToken`),
+  since such a command runs whether or not the `cd` did (`false && cd <path>; git commit -m x`, refused in both folders).
+  A command keeps the named folder by proof alone, its own run matching the `cd`'s, and every other command reads the folders from before it: an `&&` carries the run on, a pipeline's stages run with the command the run reached (`cd <path> && echo x | tee f`), and a group, a body or a substitution carries the run it was entered through,
+  so `cd <path> && (git commit -m x)` keeps the folder while `cd <path>; (git commit -m x)` and `cd <path> || (git commit -m x)` read both.
+  A `!` in front of the `cd` keeps the folders from before it from the start, since it turns the `cd`'s own failure into success and the run carries on with the shell where it was (`! cd <path> && git commit -m x`); an even count of them reads as none.
+  A script a command reads (`sh -c`, `eval`, `source`) reads with no run of the line's, since every command in it runs because that command ran; what the script's own trailing run leaves joins the line's on the way out, under the reading command's run,
+  since a `cd` an `&&` made sure at the end of an `eval` or a `source` may not have run either (`eval 'true && cd <path>'; git commit -m x`, refused in both folders).
+- Every other `cd` leaves `Env.cwdSure` unnamed and keeps each folder the shell may be in: the folder before it, and each folder its target names, read against every folder the shell may already be in (`Env.cwdMaybe`).
+  A relative target a count or a loop may run again adds every folder above it.
+  A `cd` that opens a function's, a brace group's or a coprocess's body adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point, and a relative `cd` after it resolves from those folders too, since the body may already have run.
+  A `cd` later in the body is read where it stands, as one the shell may not run, so a sure `cd` after the body clears it, as `Env.cwd`'s own reading does too.
+  `popd`, `cd -` and a bare `pushd` take every folder the line has named (`Env.cwdBack`).
+  In a hook that follows zsh's `~-` (`Env.old` set), a `pushd ~-` takes those folders too, the start folder among them, and a `pushd ~+` each folder the shell may be in, each beside the folder literally named `~-` or `~+` and the one `Env.cwd`'s own reading lands in.
+  `Env.cwdUnread` marks a `cd` whose landing folder nothing names (`cd "$X"`, zsh's two-operand `cd`, a `popd` whose stack the reader cannot see).
+  At most 32 folders are carried for one line, since each hook judges every command in all of them; past that `Env.cwdAnywhere` is set for the rest of the line, and each of the three hooks below refuses the command it guards outright, since a folder the reader dropped stays one the shell may be in;
+  `no-extensions-write` refuses a writing redirect by a relative path there too, before a reader or an echo lets it run.
+  A command that names its own folder keeps running on such a line, as everywhere else.
+- `places(env, fallback)` gives each folder the shell may be in as an `Env` of its own, each carrying its own folder as both `cwd` and `cwdSure`, so a hook judges a command in every folder it cannot rule out and refuses where any is the folder it guards:
+  [no-main-checkout](#no-main-checkout) the main checkout, [no-unslotted-run](#no-unslotted-run) a worktree, [no-extensions-write](#no-extensions-write) the extensions root.
+  Each hook reads an unread folder by its own fail-closed rule: no-main-checkout passes the folder the line started in as `places`'s fallback, and the hooks that place a repository, a socket or a file by the folder refuse the call they cannot place, as they already refuse one after a `cd` they cannot read.
+  A line on which the reader can name no folder keeps canary's reading, since nothing on it says where the shell goes (a bare `cd -` with no earlier `cd` to return to).
+  A command that names its own folder (`git -C <path>`, `bun --cwd <path>`, turbo's `--cwd`, `env -C <path>`) is judged by that path, whatever the shell's folder.
+  Its tests are in `bun run test:file tests/scripts/hooks`.
+- Repetition is the open class, which canary shares and a follow-up holds: where a line may run one `cd` more times than the reader counts it, the reader keeps the folders of a single run, so a target that climbs reaches a folder it kept none of.
+  The follow-up is filed as the reader treating a `cd` that may run more than once as reaching every folder above its base, which is the wording to search the tracker for.
+  Name the folder in the command itself (`git -C <path>`, `bun --cwd <path>`), which holds whatever the line's `cd` steps do, when a `cd` of the line sits in a body the line calls, in a loop's own test, or in text the shell reads again as a command.
 
 ## after-compact
 
@@ -88,7 +132,7 @@ Only the first reading moves the folder, sets variables and records files for th
 ## no-chat-question
 
 - The dispatcher and the leads run the inbox gate, the Stop hook `scripts/hooks/no-chat-question.ts`, since a question asked in chat with nothing in the Inbox is one the owner can miss; it is registered with one command in `.claude/settings.json` and `scripts/factory-settings.json`, so a session loading both runs it once (the same command string in both, as the cmux restore line says).
-  It acts for `PLAYGROUND_ROLE` `dispatcher`, `lead` or `manager`, else for a session with no role whose name in Claude Code's registry (`$CLAUDE_CONFIG_DIR/sessions/<pid>.json`, matched by the hook input's `session_id`) has a manager's kind in the roster (builder, ops, planner, optimizer or dispatcher, through `rosterRole`)
+  It acts for `PLAYGROUND_ROLE` `dispatcher`, `lead` or `manager`, else for a session with no role whose name in Claude Code's registry (`$CLAUDE_CONFIG_DIR/sessions/<pid>.json`, matched by the hook input's `session_id`) has a manager's kind in the roster (assistant, builder, ops, planner, optimizer or dispatcher, through `rosterRole`)
   or else is a manager's name in the `sessions.names` setting or an old name `sessions.aliases` maps to a manager's kind,
   read through `roleOfName` in `scripts/hooks/role.ts`; workers, checkers, runners and probes report to a lead, so it passes them.
   When the final reply asks the owner for a decision, it refuses the stop with `name the open #iN on the same thing if one exists (bun run ask open lists them), else post it with bun run ask new, then say in chat that it's in the inbox as #iN`, so a session reuses the item already posted (a lead once posted a duplicate of the dispatcher's),
@@ -196,13 +240,34 @@ Only the first reading moves the folder, sets variables and records files for th
   A command of reserved words alone (`fi`, `done`) runs nothing; one with no program read otherwise (`sudo -s`, a group, a redirect or an assignment alone) has its whole line judged.
   A line holding a shell that reads its script from stdin (`stdinShell` in `scripts/hooks/shell.ts`) runs whatever is printed into it, so from every folder no reader on it is spared: a shell given no script (`sh`, `sudo bash`), or a root shell with no command of its own.
   A root shell is sudo's `-s`, `-i`, `--shell` or `--login`, or doas's `-s`, alone or in a cluster of the wrapper's flags ahead of its first value-taking letter (`-Es`, `-su root`, `-su#0`; in `-us` the `-u` takes the `s`), behind any wrapper; an option or a program in a variable counts as one.
+  The root shell is looked for under each reading of the wrapper's options (above); once the parse runs out of readings, any sudo or doas among the command's words counts as a root shell and any shell's name as a shell.
   Every spaced text of every program on such a line, each `\n`-separated part of it and an awk program's strings are read as command lines.
   A root shell's stdin is read as its script, and one the hook cannot read (a download, a file it cannot see, a bare `sudo -s`) is refused: run its commands as calls of their own.
   For any program but a reader, each text that holds a space (a word, the value after its `=`, an option's attached value, a variable the call sets or exports) is judged as a command line of its own, a leading `!` dropped, since a program may run it (`watch`, `tmux`, `ssh -o ProxyCommand`, `rsync -e`, a git alias, a pager).
+  A value it cannot read (a variable, a substitution) is lexed again with the steady variables the call has set by then, an assignment naming an earlier one included (`S=/tmp/a; T="$S/b"`), and judged as written;
+  under a remover (`find`, `mv`, `rm`, `rmdir`, `rsync`, `unlink`) one still unread is refused, so hold it in the same call or write it literally, and git's `-c` takes a literal value alone, refusing any variable or substitution, held or not.
+  The steady variable is the one way a value is held, an allow-list: a variable the line names once, by a plain assignment that is its command's first word with its name unquoted (`"X=a"` is a command), at the line's top level (outside any function, `if`, loop, `case` arm, `{ }` group or subshell), and not piped or sent to the background.
+  It holds for every later command when the shell always runs it (first, or after `;` or `&`), and only along its own `&&` chain when it follows `&&`, since the shell skips the rest of the chain with it.
+  Every other naming counts, so one set again, appended to, set by `read`, `printf -v`, arithmetic or a `for` loop, set by any `${K…}` but a read (`${K}`, `${K:-…}`, `${K-…}`, `${K:+…}`, `${K+…}`, `${K:?…}`, `${K?…}`, `${K#…}`, `${K%…}`, `${K/…}`), zsh's `${K::=…}` included, or assigned after `||` stays unread, and a lone flag (`git -C $C`) is no naming of it.
+  A name spelled across a quote or a backslash counts as the shell reads it (`read X\Y` names `XY`).
+  A parameter the shell sets itself is never held (`_`, `RANDOM` and the rest of bash(1)'s Shell Variables the shell sets and zshparam(1)'s PARAMETERS SET BY THE SHELL), nor is the `REPLY` or `MATCH` a builtin or a match writes.
+  A line that runs `eval`, `source` or `.`, names `IFS` other than by expanding it, or sets a variable through a name the hook cannot read whole, holds no variable steady.
+  A line that names `HOME`, `TMPDIR` or `PWD` other than by expanding it (`for TMPDIR in …`) is read a second time with that variable unread, and refused when either reading refuses.
+  A remover under `xargs` whose input the hook cannot read is refused too.
+  The shell's pid `$$` reads as digits, so a path built on it is judged where it lands, and a plain `$(mktemp)` (only `-d` or `-q`, no `-p`, `--tmpdir` or `-t`, and no `TMPDIR=` on the line) reads as its held template, judged where it lands from the call's folder, or with none as a path under `TMPDIR`; any other `mktemp` stays unread.
+  A dry run (`-u`) is one of those, since it makes no file, so its name can be one that exists.
   A line is read call by call instead when every command on it, a substitution's included, is on a closed list of readers or a quiet git commit, and no redirect on it writes a file (`2>&1` and `>/dev/null` write none): then only a variable's text is read that way, so `awk '$3 ~ /runner/' f` runs from `~`.
   The closed list is an `awk`, `gawk`, `mawk` or `nawk` whose program runs nothing, a `cat`, `grep`, `head`, `tail` or `wc` that is a reader by the list above, `cut`, a `sort` with no `-o` and no long option (macOS sort takes an abbreviation, `--out=`), and a `uniq` with at most one file, since its second is its output.
-  Each is its command's own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
-  An awk program runs something when it holds `system`, `getline`, `|`, `>` or `@`, or comes from `-f` or an option the hook does not know; each string literal of such a program is judged as a command line wherever it stands (`awk 'BEGIN{system("…")}'`).
+  The closed list also holds a read-only gh call with a `-q` or `--jq` filter or a `-t` or `--template` template: `gh api` with no option that sends, or `issue list`, `issue view`, `pr list`, `pr view`, `run list`, `run view` or `search`.
+  A call with an option that sends (`-F`, `-X`, `-f`, `--cache`, `--field`, `--input`, `--method` or `--raw-field`) or opens the browser (`--web` or `-w`) is no read, a short one counted alone or in a cluster ahead of the filter's letter (`-iX POST`).
+  Such a call holds no other word with a space, and no pager or editor variable (`EDITOR`, `GH_EDITOR`, `GH_PAGER`, `PAGER`, `VISUAL`) is set on its line, since an assignment or an export keeps a line from being read call by call.
+  Its filter or template is text, never a path, so `gh pr view 1 --json a,b -q '.a+" \(.b)/x"'` runs from every folder, and is judged only when it names the root.
+  An unquoted glob in it is the shell's, so `gh api x --jq .[]` is judged as any glob and refused from the home.
+  Each command on the closed list is its own first word as a reader is, named bare or by a system folder's path (`/usr/bin/awk`), so a script the session wrote (`./awk`), a `PATH` set in the call and a reader behind a wrapper (`time cut …`) keep canary's reading.
+  An awk program runs something when it holds `system`, `getline`, `>` or `@`, or comes from `-f` or an option the hook does not know.
+  It runs something too when it holds a `|` anywhere but two places: a regex that is the whole leading pattern (`/a|b/`, `/a|b/ {print $2}`) and a regex or a string right after `~` (`$1 ~ /a|b/`, `$1 ~ "a|b"`), each holding no quote, `[` or newline.
+  Once those are cut out, any `|`, quote, `/`, `#` or backslash left counts as a pipe, as canary counted every `|`, so `awk '!/a|b/' f` and `awk '/[ab]|c/' f` keep canary's reading.
+  Each string literal of such a program is judged as a command line wherever it stands (`awk 'BEGIN{system("…")}'`).
   A quiet commit is a `git commit` whose `git` is its command's own first word as a reader is, named bare or by a system folder's path, so `sudo git`, `env git` and `./git` keep canary's reading.
   It sets no shell variable and no git option ahead of `commit` that changes what git runs or where (`-c`, `-C`, `--config-env`, `--exec-path`, `--git-dir`, `--work-tree`), and its every spaced word is a quoted message it holds (after `-m`, a flag cluster ending in `m`, `--message`, or `--message=`).
   Its message is text the hook never reads as a command line, so `git commit -m "fix(x): y"` runs from `~`, though a message that holds the root's path as text or names a gated call (`playground ext sync`) is still refused.
@@ -220,33 +285,33 @@ Only the first reading moves the folder, sets variables and records files for th
   A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
   `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
   Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note in a session's own call frees it.
-  The owner runs an accept there as `! env -u PLAYGROUND_ROLE playground ext accept …`, since that window carries `PLAYGROUND_ROLE=dispatcher`.
-  The CLI refuses an accept with a role set too, for a caller no hook reads (a script run by its path, an ops job).
+  An accept's refusal names its own route: the session posts an `accept` decision with `bun run ask new` (`.agents/dashboard/asks.md`), and the owner's Approve has the Dashboard run the accept with no role.
+  The CLI refuses an accept with a role set too, for a caller no hook reads (a script run by its path, an ops job), naming the same decision.
   It reads every command `scripts/hooks/shell.ts` finds: one inside a `$(…)`, a `${…}`, a `$((…))` or an array assignment's `(…)`, and the script a shell, `source` or `.` reads from a process substitution, a group's output or `/dev/stdin`, every command that prints part of it included, and the parts it can read of a script it reads only in part (a group holding a `curl`).
   It judges each command line and each word once per call, and each variable once per scope and folder, so a deep nest or a long list of variables ends well inside the hook's timeout, and it refuses, each time naming the fix (split it into shorter calls), a call whose lexing or walk runs past 10 s
   (a deadline checked at every lex, expansion and walk step, its clock read once every 1024 steps, so any slow route is refused), a command over 128 KB, whose lexing could outlast the timeout, one nested too deep for its stack, and a chain of scripts a shell,
   `eval` or `source` reads 256 or more deep, and such a script over 128 KB, or over 1 MB as text a command printed or wrote in the call, which it holds as unknown elsewhere, and an `xargs -I` line over 128 KB once its stdin is filled in.
   It runs its check in a Worker (`scripts/hooks/no-extensions-write-worker.ts`) and refuses from the main thread when the Worker has not answered in 12 s, so a single step the deadline cannot interrupt (a regex, a copy) cannot hold it past its 15 s timeout; this costs about 10 ms a call.
   It reads `env -C<dir>` and `env --chdir=<dir>` as the folder the command runs in, as it reads `env -C <dir>`.
-  It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary), a file the same line writes that git then runs (a hook in `.git/hooks`, a filter or diff driver in `.git/config`) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it.
+  It reads a command's text, so a program whose own code writes the root (a script file run by its path, a binary), a file the same line writes that git then runs (a hook in `.git/hooks`, a filter or diff driver in `.git/config`) and a path it cannot read (built at run time, in a `$(…)` or a variable) pass it, but for the remover and `git -c` cases above.
   It follows no payload of `fish -c`, `trap`, `alias`, a function the same call defines (`cat() { sh -c "$1"; } && cat '<cmd>'`), `hash -p` (`hash -p /bin/sh cat && cat -c '<cmd>'`), `env -S` before a reader (`env -S 'sh -c "<cmd>"' cut`),
   `su -c`, `man -P`, `less -P`, GNU `parallel`, `osascript`, `open --args` or `make` as a runner's, so a same-user session can still get past it through any of them.
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; [no-extension-repo-write](#no-extension-repo-write) refuses one.
   An awk program that builds the line it runs (`system("rm " x)`) without naming the root literally gets past.
   A line holding `sed` keeps canary's reading, so `sed -n '/sh -c/p' f` is refused from `~` as on canary.
-  It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs.
+  It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs, an awk program file run with `-f` included.
   An `ext score` after an `unset` or an `export -n` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset or un-exported.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
-  A `cd` or `pushd` it cannot follow (`cd -`, `cd ~-`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one passes.
-  A `pushd ~-` or `pushd ~+` lands where zsh takes it, `~-` reading the folder before the last `cd` or `pushd`, the start folder before any.
+  A `cd` or `pushd` whose landing folder nothing on the line names (`cd "$X"`, `cd -`, `cd ~-`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so a relative write after one is judged against the folders the line does name, the one before that `cd` included, and passes when none of them is this root.
+  A `cd` whose target the reader names is judged in every folder it may reach, this root included ([The folder a hook reads](#the-folder-a-hook-reads)).
+  A `pushd ~-` is judged in every folder a `cd -` would go back to, the start folder among them, and a `pushd ~+` in each folder the shell may be in, so a write after either is refused wherever zsh may land.
   An assignment to `OLDPWD` leaves `~-` where it was, since zsh's `~-` reads the folder it last left rather than the variable.
-  Beside a folder named `~-` or `~+` it keeps the typed reading, though zsh still lands in the folder it last left or the current one, so a relative write after one is judged in a folder zsh does not enter.
   A glob in a `cd` or `pushd` folder is judged as any word holding one, so `cd ~/.playground/e*` is refused as `ls ~/.playground/e*` is.
   From a cwd at or above the root (`~`, `~/.playground`), a quoted `(`, `[`, `*`, `?` or `{` reads as a glob there, so a call holding one is refused; run it from a worktree.
   A closed-list reader on a line read call by call is the exception: its quoted glob is text, so `awk '{print $1}' f` runs, since the lexer marks each word whose glob the shell sees outside quotes (`Word.glob` in `scripts/hooks/shell.ts`).
   A quiet commit's message is the other exception (above).
-  A quoted regex that starts at `/` reads its glob characters as a glob in `/`, which holds the root, so `sed -n '/^a*b/p' f` and `awk '$1 ~ /^(a|b)/' f` (whose `|` takes awk off the closed list) are refused from any folder, while `awk '/^a*b/' f` runs; run such a script from a file (`awk -f <file>`, `sed -f <file>`).
-  A gh `-q` filter that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(` (`-q '.a+" +\(.a)/-\(.b)"'`); pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
+  A quoted regex that starts at `/` reads its glob characters as a glob in `/`, which holds the root, so `sed -n '/^a*b/p' f` is refused from any folder, while `awk '/^a*b/' f` runs; run such a script from a file (`awk -f <file>`, `sed -f <file>`).
+  A gh `-q` filter on a line read whole (one beside a program off the closed list, such as `date; gh …` or `gh … | sh`) keeps canary's reading: one that holds a jq interpolation is refused from the home (`-q '"\(.a)"'`), and from any folder once it holds a space and a `/` after the `(`; pipe the JSON to jq, a reader, instead (`gh … --json <fields> | jq -r '<filter>'`).
   It fails open on any other error, and its tests are in `bun run test:file tests/scripts/hooks/no-extensions-write.test.ts`.
 
 ## no-false-green
@@ -299,7 +364,7 @@ Only the first reading moves the folder, sets variables and records files for th
   It reads the whole call for a search before it judges a kill, since a loop's `done < <(pgrep …)` comes after the kill it feeds, and it reads the `-I` string xargs hands a shell it starts as such a pid.
   Its reason gives the way out: `TaskStop` for a background task, `bun run dev:stop` for a dev stack, `kill <pid>` for a pid the session spawned and holds, in a Bash call of its own when the call also searches.
   `kill <pid>`, `kill -<sig> <pid>`, `kill $!`, `kill %1`, `kill $(cat <pid file>)` and a liveness check before it (`ps -p $PID && kill $PID`) run in a call that searches nothing else, and so do each search alone (`pgrep -f x`, `lsof -i :3000`), `command -v pkill` and `pkill --help`. <!-- kill-check: names only -->
-  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too; `tests/test_kill_by_name.py` skips the hook, its bundle, its test and `tests/scripts/hooks/fixtures/refused-forms.ts`, which hold the refused commands as data.
+  It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks` too; `tests/test_kill_by_name.py` skips the hook, its bundle, its test and `tests/scripts/hooks/fixtures/refused-forms/`, which hold the refused commands as data.
 
 ## no-playground-leak
 
@@ -349,11 +414,16 @@ Only the first reading moves the folder, sets variables and records files for th
 ## The trace ratchet
 
 - ALWAYS: Write a new comment, doc or test in plain words, with no issue number (`#NNN`, or a ticket key from the list) or old session name: the number belongs in the commit scope and the pull request body.
-  `bun run trace-count` counts each kind in `kinds.ts` over the tree (git's files, or every file but installs and build output where no `.git` is), past the live names `LIVE_NAMES` keeps for the switch's migration.
+  `bun run trace-count` counts each kind in `kinds.ts` over the tree (the files git's index holds, tracked or staged, so a harness's untracked output never counts; or every file but installs and build output where no `.git` is), past the live names `LIVE_NAMES` keeps for the switch's migration.
   Its `ownerName` kind counts the owner's names (`owner.names`, then the owner part of `factory.archiveRepo`, read from the settings at run time), a quote set against the owner and anyone's dated quote; `companyName` counts the company's name, and `lightWords` a factory or old skill word glued into a longer one.
   It reads past the lockfiles too (`bun.lock`, `package-lock.json`), whose integrity hashes can spell a list value by chance.
-  It fails when a count is over `packages/scripts/src/trace-count/counts.json`, and so does `tests/packages/scripts/src/trace-count/count.test.ts`, which `bun run test` runs and pre-commit's `trace-count` step runs on every commit but one of images and fonts alone, over every tracked and untracked file as it stands on disk, staged or not; `--write` lowers each count a trace-out brought down.
-  It exits 2, naming the fix, when no-public-leak's list (`extensions/hooks/no-public-leak.json` in the data folder) is missing or a key of it is empty, or when `owner.names` or `factory.archiveRepo` is unset, since those kinds would count nothing; the test counts the kinds that read neither alone.
+  It fails when a count is over `packages/scripts/src/trace-count/counts.json`, and so does `tests/packages/scripts/src/trace-count/count.test.ts`, which `bun run test` runs and pre-commit's `trace-count` step runs on every commit but one of images and fonts alone, over every file the index holds as it stands on disk; `--write` lowers each count a trace-out brought down.
+  A refusal names each `path:line: kind` holding a hit of a risen kind (`located()`), for each kind the files changed against `HEAD` alone when they hold one, past the lines `kept.json` keeps while they hold no more than its hits.
+  It exits 2, naming the fix, when no-public-leak's list (`extensions/hooks/no-public-leak.json` in the data folder) is missing or a key of it is empty, or when `owner.names` or `factory.archiveRepo` is unset, since those kinds would count nothing.
+  The test counts the kinds that read neither, and `ownerName`'s quote patterns under a made-up owner name built at run time, so a new quote fails the commit while the owner's names count only in `bun run trace-count`.
+  To watch a refusal end to end on a machine where it exits 2, point `PLAYGROUND_DATA_DIR` at a scratch folder whose `extensions/policy.json` holds made-up settings, `{ "values": { "owner.names": ["<made-up name>"], "factory.archiveRepo": "<made-up owner>/<repo>" } }`, and whose `extensions/hooks/no-public-leak.json` holds a made-up entry under each key the exit-2 message names.
+  Append a line holding one of those list values to an ordinary tracked file in your own worktree, such as `GLOSSARY.md`, `git add` it, and run `PLAYGROUND_DATA_DIR=<scratch> bun run trace-count`; done when its refusal names `<file>:<line>: names` (or the list kind you used).
+  Probe with a list value, since each list kind's floor in `counts.json` is 0, so its one hit refuses; then restore the file with `git reset -q HEAD <file>` and `git checkout HEAD -- <file>`.
 
 ## no-linear-ticket
 
@@ -388,7 +458,7 @@ Only the first reading moves the folder, sets variables and records files for th
 ## no-main-checkout
 
 - A factory session keeps the main checkout clean: `scripts/hooks/no-main-checkout.ts`, registered beside no-stash on Bash and the file tools (Edit, MultiEdit, NotebookEdit and Write), refuses lefthook, turbo (but for its packages build, below), `git commit` (it runs pre-commit), `bun run build`, `bun run check-types`,
-  `bun run test`, `bun run test:file` and `bun test` while the command's directory (the Bash tool's cwd, after any `cd`, `pushd` (its `~-` and `~+` read as zsh reads them), `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says) is the main checkout and not a worktree under `.claude/worktrees/`,
+  `bun run test`, `bun run test:file` and `bun test` while the command's directory ([The folder a hook reads](#the-folder-a-hook-reads), a `pushd`'s `~-` and `~+` among it, and a `git -C` or `bun --cwd` in it, but for `bun x` and `bunx`, which run in the shell's folder whatever bun's own `--cwd` says) is the main checkout and not a worktree under `.claude/worktrees/`,
   and a write into the main checkout from anywhere (a redirect, `cp`, `mv`, `touch`, `tee`, curl's `-c` or `-o`, the files `sed -i`, BSD's `sed -I`, `sed --in-place` or `perl -i` edits in place, or a file tool's path), naming the fix: run it in your own worktree.
   A command run through `run-slot.sh`, typed bare or as a shell's script (`bash <path>/run-slot.sh <who> -- <command>`, `shellSlot`), is read as the words after its `--` (`slotWords` in `scripts/hooks/shell.ts`, which no-glm-heavy-path and no-false-green read it by too), so a commit, a build or a write through run-slot is refused as the same command typed bare.
   It refuses a git move there too: `add` (but `-n` or `--dry-run`), `am`, `apply` (but `--check`, `--numstat`, `--stat` or `--summary` without `--apply`), `bisect`, `branch -f`, `checkout`, `cherry-pick`, `clean` (but `-n`), `merge`, `mv`, `pull`, `rebase`, `reset` (but the one below), `restore`, `revert`, `rm`, `stash` (but `list` and `show`), `switch` and `update-ref`,
@@ -402,6 +472,12 @@ Only the first reading moves the folder, sets variables and records files for th
   Reads, `git fetch`, step 5's `git merge --ff-only origin/main` (with `-q` or `--quiet` before or after `--ff-only`), `scripts/link-skills.sh`, `bun install` and `env NODE_ENV=production SKIP_ENV_VALIDATION=true turbo run build --filter='./packages/*'` alone run, as the release skill's step 5 needs:
   the install a pull that changes `bun.lock` or a `package.json` needs, and the build a pull that changes `packages/` needs, since the `playground` command imports their `dist`.
   That build needs `NODE_ENV` set and `SKIP_ENV_VALIDATION=true`, on its line, exported or in the session, since the main checkout has no `.env` and the packages' env checks fail without them, so a bare one is refused with the line `playground update`'s build step runs.
+  Where the reader names no one folder ([The folder a hook reads](#the-folder-a-hook-reads)), it judges the command in every folder the shell may be in, and in the folder the line started in when a `cd`'s landing folder is unread: a build, a test run, a commit, a git move, a tool and a write by a path that lands in the main checkout in any of those folders is refused,
+  and the refusal names the fix, naming the folder (`git -C <your worktree>`, `bun --cwd <your worktree>`) or a `cd` to a literal path that is there.
+  So a line that starts in a worktree is refused too where a `cd` of its own may reach the main checkout, and one that starts in the main checkout runs where every folder its `cd` steps may reach is a worktree.
+  It reads the shell a pipeline feeds (`<reader> | sh`, `<reader> | sudo -s`) as the shell's own command line: a script it cannot read is refused where that shell may run in the main checkout.
+  A script it reads is judged command by command wherever the shell's stdin comes from, since the shared reader runs a shell's script itself.
+  Two forms keep canary's reading: a privilege wrapper's shell fed by a here-string or a heredoc (`sudo -s <<< '<command>'`), whose script this hook does not read, and a heredoc holding a value it cannot read (`sh <<EOF` around a substitution).
   It fails open on a call it cannot read.
   Its tests are in `bun run test:file tests/scripts/hooks`.
   The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).
@@ -448,8 +524,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 - A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>`, so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
   The trash takes up to 5,000 files or 2 GB, so the refusal also names the lead's cleanup for a bigger tree and `bun install` for a `node_modules`.
-  It is registered in neither settings file until a ship puts `scripts/hooks/no-raw-delete.ts` on `main`, since the registration runs the main checkout's copy and refuses every factory session's Bash call while that copy is missing; it then goes back after no-kill-by-name in both files.
-  `scripts/hooks/no-raw-delete.ts` acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
+  `scripts/hooks/no-raw-delete.ts`, registered after no-kill-by-name, acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
   an `rm` or GNU rm's `grm` with `-r`, `-R` or `--recursive` (any prefix GNU rm takes, anywhere among its words), `find -delete`, `rm` under xargs, `gxargs` or `parallel`,
   `find -exec`, `-execdir`, `-ok` or `-okdir` and `fd -x`, `-X`, `--exec` or `--exec-batch` running `rm` behind any wrapper, fd's option last in a cluster of its flags that take no value too (`-HX rm`) and its value attached too (`--exec=rm`, `-xrm`),
   `git clean` with `-d`, `-x` or `-X` and no dry run, with or without force, since `clean.requireForce` can be off,
@@ -488,7 +563,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 ## no-stash
 
-- Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry, lint-staged's commit backup included: take a before-shot from a separate worktree on `origin/canary`, or commit first.
+- Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry (the pre-commit's lint-staged runs with `--no-stash`, so a commit adds none): take a before-shot from a separate worktree on `origin/canary`, or commit first.
   The factory's `scripts/hooks/no-stash.ts` (registered in `scripts/factory-settings.json`, and in `.claude/settings.json` for a session cmux restores without it) refuses a stash that could take another worktree's work, and `agent-browser close --all`, which closes every session's browser on the machine.
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD stash pop` reads as a stash.
 
@@ -496,10 +571,15 @@ Only the first reading moves the folder, sets variables and records files for th
 
 - A factory session runs every heavy run in a worktree through run-slot: `scripts/hooks/no-unslotted-run.ts`, registered beside no-stash, refuses `bun install`, a recursive `cp` of a `node_modules` folder, `bun run build`, `bun run check-types`, `bun run test`, a `bun test` or `bun run test:file` that names no file, `next build`,
   and turbo running `build`, `check-types`, `lint` or `test` (`turbo run <task>` or `turbo <task>`), by name, path or versioned package (`turbo@latest`), through `bunx`, `npx` (past their own options, `-y` or `-p turbo`) or `bun x`, but for `--help`, `--version` and `--dry-run`,
-  whose directory (the Bash tool's cwd after any `cd`, or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
+  whose directory (every folder the shell may be in, [The folder a hook reads](#the-folder-a-hook-reads), or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
-  A commit's pre-commit build takes a slot through `packages/scripts/src/commit-slot.ts` when turbo's dry run finds a build task with work to do, and playbook's **slots** rule says which slot each way of committing takes.
+  A commit's pre-commit steps take `run-slot-commit` through `packages/scripts/src/commit-slot.ts`, which hands each to run-slot as `commit-<worktree>` marked `RUN_SLOT_COMMIT_STEP=1`, as `run-slot.sh <who> -- git commit` takes it, and playbook's **slots** rule says which slot each way of committing takes.
+  The build runs bare when turbo's dry run finds every build task cached, while a type check takes the slot whenever it would, since the build's cache says nothing of its cost.
+  Before the dry run or any slot, `commit-slot.ts` runs `unlinked()` (`packages/scripts/src/playground/unlinked.ts`, link-skills.sh's check) on the checkout and, when a workspace package's dependency is unlinked, as a canary merge that adds a package leaves it, exits 1 at once, naming each `<package>: <dependency>` and the run-slot `bun install --ignore-scripts --cwd <checkout>` that links it.
+  The pre-commit steps `check-types-scripts` and `check-types-tests` run CI's two type checks the build leaves out, `packages/scripts`' `check-types` when a staged file is under `packages/scripts/` and `check-types:tests` when one is under `tests/`, after the build (priority 7 to its 6) and through the same `commit-slot.ts`, so a type error there stops the commit in place of a CI round.
+  `check-types-tests` first writes `web/next`'s data-table metrics, outside the slot, as CI does.
+  Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts tests/lefthook.test.ts tests/scripts/ops/run-slot-quick.test.ts`.
 
 ## rules
 

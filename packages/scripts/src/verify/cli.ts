@@ -71,9 +71,9 @@ Checks (default: all)
                 the route's own error
   signin        the agent sign-in works and /api/v1/user is LocalAgent
   ws            the dashboard's WebSocket sends a well-formed workers frame
-  system        the machine's room for more workers, idle dev stacks, the usage windows and
-                what did not read, as the Dashboard's System panel shows them: what a lead
-                reads before it spawns
+  system        the machine's room for more workers and orchestrators, idle dev stacks,
+                the usage windows and what did not read, as the Dashboard's System panel
+                shows them: what a lead reads before it spawns
   ended <name>  the session reads Ended as the Dashboard shows it: the roster's ended and no
                 live session of its name (a herdr session's included), failing while live
                 sessions or a herdr server could not be read; what a lead outside herdr
@@ -105,7 +105,8 @@ Checks (default: all)
                 the footer is 32px, every row's and member row's words fit its box and none
                 runs past its padded edge, no first-line label ends in an ellipsis at the
                 stock width, and no row covers another, so a row never grows or draws over
-                its neighbours
+                its neighbours, and the sidebar body is never wider than it shows, so it
+                scrolls only up and down
   screenshots   each route, full page, at 1280x800, 1782x972 and 390x844, light then dark
                 (named -dark), named before-* or after-* by --label; only on a stack whose
                 /api/health reports dashboard: fixture, since any other shows live sessions

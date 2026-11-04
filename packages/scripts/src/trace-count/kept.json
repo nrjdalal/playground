@@ -21,6 +21,13 @@
     "reason": "switch step 8: a link to an issue the issue re-file moves; that commit puts the new number in and drops this entry"
   },
   {
+    "hits": 2,
+    "kind": "ownerName",
+    "line": "The starter's own history of retired overrides lives in [nrjdalal/zerostarter's record](https://github.com/nrjdalal/zerostarter/blob/main/.github/notes/dependencies.md); a returning advisory is checked there before `package.json` changes.",
+    "path": "docs/dependencies.md",
+    "reason": "the public upstream starter's own record of retired overrides, which a fork keeps"
+  },
+  {
     "hits": 1,
     "kind": "ownerName",
     "line": "source: https://github.com/nrjdalal/zerostarter",

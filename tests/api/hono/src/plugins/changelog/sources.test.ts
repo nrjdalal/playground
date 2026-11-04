@@ -673,14 +673,14 @@ describe("detailOf", () => {
     ).toBe("- **Fix**: the roster's note no longer shifts.")
   })
 
-  // a real PR's squash message as merged: its Outcome line hard-wrapped, then a source quote and the issues it closes.
+  // a real PR's squash message as merged, its quote made up: its Outcome line hard-wrapped, then a source quote and the issues it closes.
   const WRAPPED = [
     "fix(pg-240): a sent message takes the very top (#253)",
     "",
     "Closes #240. Research: #242.",
     "",
-    'The owner, verbatim: "why my message is not at top and I see last agent',
-    'text cutoff on my send".',
+    'The ask, verbatim: "a sent message should take the very top, with no',
+    'text cut off".',
     "",
     "Outcome: your sent message now takes the very top; the reply fills",
     "below, as in langsdk.",

@@ -18,6 +18,7 @@ import {
   secretInputSchema,
 } from "@/lib/dashboard/inbox"
 import { runSink } from "@/lib/dashboard/secret-sink"
+import { slackUpload } from "@/lib/dashboard/slack-upload"
 import { DISPATCHER } from "@/lib/dashboard/workers"
 import {
   ApiError,
@@ -27,6 +28,7 @@ import {
   notFoundErrorResponses,
   validationErrorResponses,
 } from "@/lib/error"
+import { runCli } from "@/lib/store/extensions"
 import {
   authMiddleware,
   guardWrites,
@@ -123,7 +125,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Answer an open decision (approve, deny, clear to set it aside as Archive, or edit with words) or draft (send, or for a Slack draft save it as a draft in Slack, each as written or changed, or discard), with his optional note. With seen, the updatedAt of the card he answered, it is refused when the item has changed since. The answer is kept, then typed into the posting session through the delivery adapter, and that session carries it out; the Dashboard itself sends nothing",
+        "Answer an open decision (approve, deny, clear to set it aside as Archive, or edit with words) or draft (send, or for a Slack draft save it as a draft in Slack, each as written or changed, discard, or clear to archive it), with his optional note, or move an archived item back to the Inbox open and unanswered (unarchive), which tells its poster nothing. With seen, the updatedAt of the card he answered, it is refused when the item has changed since. The answer is kept, then typed into the posting session through the delivery adapter, and that session carries it out; the Dashboard itself sends no message, and only shares a Slack send's files into its channel and thread first (dm upload), a failed share failing the send before anything is typed. An accept decision's Approve is the one the Dashboard carries out itself: once the answer is kept, it runs the extensions store's accept of <scope> <kind> <key> <rev> from the preview's words, with no role, records its exit code and line under accepted, and tells the poster",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
@@ -137,9 +139,11 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     async (c) => {
       const user = c.get("user")
       const result = await answerItem(db, c.req.param("id"), c.req.valid("json"), {
+        accept: runCli(),
         actor: { email: user.email, id: user.id },
         deliver,
         dispatcher: DISPATCHER,
+        upload: slackUpload(),
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
       return c.json({ data: result.item })
@@ -150,7 +154,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Type an answer whose delivery failed into the posting session again, through the delivery adapter, and record how that went",
+        "Type an answer whose delivery failed into the posting session again, through the delivery adapter, sharing a Slack send's files first when none were shared, and record how that went",
       responses: {
         200: { description: "OK" },
         ...authErrorResponses,
@@ -165,6 +169,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         actor: { email: user.email, id: user.id },
         deliver,
         dispatcher: DISPATCHER,
+        upload: slackUpload(),
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
       return c.json({ data: result.item })

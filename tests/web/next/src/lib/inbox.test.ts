@@ -4,19 +4,26 @@ import { join } from "node:path"
 import type { InboxItem } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import {
   ACKS_STAMPED_FROM as API_ACKS_STAMPED_FROM,
+  filesToUpload as API_filesToUpload,
   GO_CHOICES as API_GO_CHOICES,
   PLACED_TYPES as API_PLACED_TYPES,
+  QUEUED_POLL_MS as API_QUEUED_POLL_MS,
   RETRY_CODES as API_RETRY_CODES,
+  retryable as API_retryable,
   savesDraft as API_savesDraft,
+  slackPlace as API_slackPlace,
+  STUCK_QUEUED_MS as API_STUCK_QUEUED_MS,
 } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import {
   ACKS_STAMPED_FROM,
   canDraft,
+  checkAnswerNote,
   cardKey,
   changedAt,
   dismissable,
   DONE_AFTER_MS,
   focusAfterTake,
+  foldsByDefault,
   GO_CHOICES,
   inboxLight,
   inboxPosters,
@@ -27,6 +34,7 @@ import {
   inboxWaiting,
   itemState,
   kindWord,
+  lifecycle,
   MOVED_PAUSE_MS,
   movedRows,
   movedStep,
@@ -36,6 +44,7 @@ import {
   pickedAt,
   pinnedView,
   PLACED_TYPES,
+  PROGRESS_AFTER_MS,
   resultLink,
   RETRY_CODES,
   retryable,
@@ -44,11 +53,17 @@ import {
   schedulable,
   scheduleChoices,
   sendFailed,
+  sendUnconfirmed,
   sendWhy,
+  STUCK_QUEUED_MS,
   updatedSince,
   upfrontLink,
+  slackPlaced,
+  uploadsOn,
 } from "../../../../../web/next/src/lib/inbox"
+import { QUEUED_POLL_MS } from "../../../../../web/next/src/lib/outbox"
 import { statusIcon } from "../../../../../web/next/src/lib/status-icons"
+import { fullTime } from "../../../../../web/next/src/lib/time"
 
 // Remix's icons resolve from the web app's own packages, which this directory cannot see.
 const web = join(import.meta.dir, "../../../../../web/next")
@@ -126,6 +141,53 @@ describe("a secret ask (PG-59)", () => {
   })
 })
 
+describe("an accept decision (PG-658)", () => {
+  const preview = {
+    key: "end-of-day",
+    kind: "skill",
+    rev: "3f9a2c1d",
+    scope: "acme",
+    type: "accept",
+    why: "Scored 4 by two reviewers",
+  }
+  const asked = item({ kind: "decision", preview } as never)
+  const approved = (accepted?: { exitCode: number; line: string }) =>
+    item({
+      answer: { accepted, at: "2026-11-03T20:00:00.000Z", choice: "approve" },
+      delivery: { at: "x", status: "delivered", via: "session" },
+      kind: "decision",
+      preview,
+      status: "approved",
+    } as never)
+
+  test("needs you while open, and reads as an accept", () => {
+    expect(kindWord(asked)).toBe("Accept")
+    expect(needsYou(asked)).toBe(true)
+  })
+
+  test("once approved, reads what the dashboard's accept gave, done or failed by its exit code", () => {
+    const ran = approved({ exitCode: 0, line: "rev 9b8c7d6 is accepted" })
+    expect(outcomeLine(ran)).toBe("You approved it · Accepted: rev 9b8c7d6 is accepted")
+    expect(itemState(ran)).toBe("done")
+    const refused = approved({ exitCode: 1, line: "409 the proposal is at 0a1b2c3d4e5f" })
+    expect(outcomeLine(refused)).toBe(
+      "You approved it · Accept failed (exit 1): 409 the proposal is at 0a1b2c3d4e5f",
+    )
+    expect(itemState(refused)).toBe("failed")
+  })
+
+  test("an accept its poster was not told of says why beside the result", () => {
+    const unsent = item({
+      ...approved({ exitCode: 0, line: "rev 9b8c7d6 is accepted" }),
+      delivery: { code: "CMUX_FAILED", reason: "cmux is not running", status: "failed" },
+    } as never)
+    expect(outcomeLine(unsent)).toBe(
+      "You approved it · Accepted: rev 9b8c7d6 is accepted · Send failed: cmux is not running",
+    )
+    expect(itemState(unsent)).toBe("failed")
+  })
+})
+
 describe("the inbox's counts", () => {
   test("what needs you: open decisions and drafts, and unread updates", () => {
     expect(items.filter(needsYou).map((i) => i.ref)).toEqual([41, 40, 44])
@@ -198,15 +260,16 @@ describe("the inbox's counts", () => {
         status: "denied",
       } as InboxItem),
     ).toBe("You denied it · Read by Ops")
-    // a clear sets it aside for later, read by its poster as a deny is, and is never carried out
+    // a clear archives it, read by its poster as a deny is, and is never carried out (PG-654: Archived and when)
+    const archivedAt = "2026-10-07T11:00:00.000Z"
     expect(
       outcomeLine({
         ...items[4]!,
-        answer: { at: "x", choice: "clear" },
+        answer: { at: archivedAt, choice: "clear" },
         delivery: { at: "x", status: "delivered", via: "cli" },
         status: "cleared",
       } as InboxItem),
-    ).toBe("You set it aside for later · Read by Ops")
+    ).toBe(`Archived ${fullTime(archivedAt)} · Read by Ops`)
     expect(
       outcomeLine({
         ...items[4]!,
@@ -695,7 +758,9 @@ describe("an answer that failed to send", () => {
       }
       expect(sendFailed(cut), code).toBe(true)
       expect(retryable(cut), code).toBe(false)
-      expect(outcomeLine(cut), code).toBe("You sent it · Send unconfirmed: cut off")
+      expect(outcomeLine(cut), code).toMatch(
+        /^You sent it · Send unconfirmed: whether \S+ has it is not known$/,
+      )
     }
     expect(retryable(failed(78, ago(1_000)))).toBe(false)
   })
@@ -1393,5 +1458,252 @@ describe("a card a chat reply collapsed opens again", () => {
       expect(reopenKey({ ...e, [modifier]: true })).toBe(false)
     expect(reopenKey({ ...e, key: "E", shiftKey: true })).toBe(false)
     expect(reopenKey({ ...e, key: "Enter" })).toBe(false)
+  })
+})
+
+describe("a card folds by priority, the ones needing an answer staying open", () => {
+  const NOW = Date.parse("2026-11-03T10:00:00.000Z")
+  const ago = (ms: number) => new Date(NOW - ms).toISOString()
+  const decision = item({ kind: "decision", ref: 1 })
+  const draft = item({ kind: "draft", ref: 2 })
+  const unread = item({ kind: "update", ref: 3 })
+  const read = item({ kind: "update", readAt: ago(60_000), ref: 4 })
+  const answered = item({
+    answer: { at: ago(60_000), choice: "approve" },
+    kind: "decision",
+    ref: 5,
+    status: "approved",
+  })
+  const replied = item({ answer: { at: ago(60_000), choice: "replied" }, kind: "draft", ref: 6 })
+
+  test("an open decision or draft and an unread update show open", () => {
+    for (const card of [decision, draft, unread]) expect(foldsByDefault(card, NOW)).toBe(false)
+  })
+
+  test("a read update, an answered decision and a chat reply waiting on its poster fold in the list", () => {
+    expect(inboxView([read, answered, replied], NOW).shown).toEqual([read, answered, replied])
+    for (const card of [read, answered, replied]) expect(foldsByDefault(card, NOW)).toBe(true)
+  })
+
+  test("every card on the In progress, Archived and Done shelves folds", () => {
+    const working = item({
+      answer: { at: ago(PROGRESS_AFTER_MS), choice: "replied" },
+      kind: "decision",
+      ref: 7,
+    })
+    const archived = item({
+      answer: { at: ago(60_000), choice: "clear" },
+      kind: "decision",
+      ref: 8,
+      status: "cleared",
+    })
+    const settled = item({ kind: "update", readAt: ago(DONE_AFTER_MS), ref: 9 })
+    const view = inboxView([working, archived, settled], NOW)
+    expect([view.progress, view.archived, view.done]).toEqual([[working], [archived], [settled]])
+    for (const card of [working, archived, settled]) expect(foldsByDefault(card, NOW)).toBe(true)
+  })
+
+  test("a snoozed ask folds until its time, then shows open", () => {
+    const snoozed = item({
+      answer: { snoozedUntil: new Date(NOW + 60_000).toISOString() },
+      kind: "decision",
+      ref: 10,
+    })
+    expect(foldsByDefault(snoozed, NOW)).toBe(true)
+    expect(foldsByDefault(snoozed, NOW + 60_000)).toBe(false)
+  })
+
+  test("a card that rises to an open tier shows open: an answer that failed to send, an update made unread", () => {
+    const failed = {
+      ...answered,
+      delivery: { code: "CMUX_FAILED", reason: "no answer from cmux", status: "failed" },
+    } as InboxItem
+    expect(foldsByDefault(failed, NOW)).toBe(false)
+    expect(foldsByDefault({ ...read, readAt: null }, NOW)).toBe(false)
+  })
+})
+
+describe("a card's lifecycle buttons on each shelf (PG-654)", () => {
+  const decision = item({ kind: "decision", ref: 1 })
+  const draft = item({ kind: "draft", ref: 2 })
+  const update = item({ kind: "update", ref: 3 })
+  const answered = item({
+    answer: { at: "x", choice: "approve" },
+    kind: "decision",
+    ref: 4,
+    status: "approved",
+  })
+  const snoozed = item({
+    answer: { snoozedUntil: "2026-11-04T10:00:00.000Z" },
+    kind: "draft",
+    ref: 5,
+  })
+  const archived = (kind: "decision" | "draft") =>
+    item({ answer: { at: "x", choice: "clear" }, kind, ref: 6, status: "cleared" })
+  const secret = item({
+    kind: "decision",
+    preview: {
+      key: "API_KEY",
+      sink: { environments: ["production"], project: "p", scope: "s", type: "vercel" },
+      type: "secret",
+    },
+    ref: 7,
+  } as never)
+
+  test("an open decision or draft in the Inbox offers Archive and Snooze", () => {
+    expect(lifecycle(decision, "inbox")).toEqual(["archive", "snooze"])
+    expect(lifecycle(draft, "inbox")).toEqual(["archive", "snooze"])
+  })
+
+  test("a snoozed one offers Snooze again, for a new time, and Archive", () => {
+    expect(lifecycle(snoozed, "snoozed")).toEqual(["archive", "snooze"])
+  })
+
+  test("an archived decision or draft offers Move to Inbox and Done", () => {
+    expect(lifecycle(archived("decision"), "archived")).toEqual(["unarchive", "done"])
+    expect(lifecycle(archived("draft"), "archived")).toEqual(["unarchive", "done"])
+  })
+
+  test("an update and an answered item keep Dismiss straight to Done, with nothing to set aside", () => {
+    expect(lifecycle(update, "inbox")).toEqual(["dismiss"])
+    expect(lifecycle(answered, "inbox")).toEqual(["dismiss"])
+  })
+
+  test("a card on Done offers none, since it reads as history", () => {
+    for (const card of [decision, draft, update, answered, archived("draft")])
+      expect(lifecycle(card, "done")).toEqual([])
+  })
+
+  test("a secret ask is snoozed, never archived, since its value comes through Submit alone", () => {
+    expect(lifecycle(secret, "inbox")).toEqual(["snooze"])
+  })
+})
+
+// PG-649: a Slack send shares its files into the same thread, and its card says so until the go
+describe("uploadsOn", () => {
+  const THREAD =
+    "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100"
+  const FILES = [
+    { id: "3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png", kind: "image" as const, name: "before.png" },
+  ]
+  const words = { text: "hi", to: "@Merritt" }
+  const cases: [InboxItem, InboxItem["answer"]][] = [
+    [item({ kind: "draft", preview: { ...words, attachments: FILES, link: THREAD } }), null],
+    [
+      item({
+        kind: "draft",
+        preview: { ...words, attachments: FILES, link: "https://linear.app/acme/issue/DUNE-1/x" },
+      }),
+      null,
+    ],
+    [item({ kind: "draft", preview: { ...words, attachments: FILES, noLink: "a new DM" } }), null],
+    [item({ kind: "draft", preview: { ...words, link: THREAD } }), null],
+    [
+      item({
+        kind: "decision",
+        preview: { ...words, attachments: FILES, link: THREAD, type: "slack" },
+      }),
+      null,
+    ],
+    [item({ kind: "decision", preview: { attachments: FILES, text: "look", type: "ask" } }), null],
+  ]
+
+  test("names Send on a Slack draft and Approve on a slack decision with files, and nothing else", () => {
+    expect(cases.map(([open]) => uploadsOn(open))).toEqual([
+      "Send",
+      null,
+      null,
+      null,
+      "Approve",
+      null,
+    ])
+  })
+
+  test("marks the same items whose go the API shares into Slack", () => {
+    for (const [open] of cases) {
+      const choice = open.kind === "draft" ? "send" : "approve"
+      const answered = { ...open, answer: { at: "x", choice } } as InboxItem
+      expect(uploadsOn(open) !== null).toBe(API_filesToUpload(answered) !== null)
+    }
+  })
+
+  test("reads a Slack link as the API's slackPlace does, a query, a hash and a thread that does not parse included", () => {
+    const team = "https://app.slack.com/client/T0000000000"
+    for (const link of [
+      THREAD,
+      `${team}/C0MADEUP01`,
+      `${team}/C0MADEUP01/`,
+      `${team}/D0MADEUP11?cdn_fallback=1#top`,
+      `${THREAD}?x=1`,
+      `${team}/C0MADEUP01/thread/C0MADEUP01-notats`,
+      `${team}/C0MADEUP01/thread/C0OTHER001-1700000000.000100`,
+      `${team}/C0MADEUP01/thread`,
+      `${THREAD}/more`,
+      `${team}/C0MADEUP01/files/F0MADEUP01`,
+      team,
+      "https://evil.example/client/T0000000000/C0MADEUP01",
+      "http://app.slack.com/client/T0000000000/C0MADEUP01",
+      "not a link",
+    ])
+      expect([link, slackPlaced(link)]).toEqual([link, API_slackPlace(link) !== null])
+  })
+
+  test("leaves an answered card unmarked, its result line counting the files shared", () => {
+    const [open] = cases[0]!
+    const sent = {
+      ...open,
+      answer: { at: "x", choice: "send", uploaded: 2 },
+      delivery: { at: "x", status: "delivered", to: "ops", via: "session" },
+      status: "sent",
+    } as InboxItem
+    expect(uploadsOn(sent)).toBeNull()
+    expect(outcomeLine(sent)).toBe("You sent it · 2 files shared · Sending in Slack…")
+  })
+})
+
+// An answer's line reads what the session has: queued while Claude Code holds it, delivered once it went, lost when neither its screen nor its transcript shows it, which offers Retry
+describe("an answer queued, delivered or lost", () => {
+  const base = items[4]!
+  test("each state reads in the answer line", () => {
+    const queued = {
+      ...base,
+      delivery: { at: "x", id: "d1", status: "queued", to: "ops" },
+    } as InboxItem
+    expect(outcomeLine(queued)).toBe("You approved it · Queued: Ops holds it, to take once free")
+    expect(itemState(queued)).toBe("sending")
+    const lost = {
+      ...base,
+      delivery: { code: "LOST", reason: "Retry sends it again.", status: "failed" },
+    } as InboxItem
+    expect(outcomeLine(lost)).toBe("You approved it · Lost: Retry sends it again.")
+    expect(retryable(lost)).toBe(true)
+  })
+
+  test("an unconfirmed send names no terminal and offers Check it for me, a note naming the item", () => {
+    const cut = {
+      ...base,
+      delivery: { code: "INTERRUPTED", reason: "whatever deliver said", status: "failed" },
+    } as InboxItem
+    expect(outcomeLine(cut)).toBe(
+      "You approved it · Send unconfirmed: whether Ops has it is not known",
+    )
+    expect(sendUnconfirmed(cut)).toBe(true)
+    expect(retryable(cut)).toBe(false)
+    expect(checkAnswerNote(cut)).toContain(`#i${cut.ref}`)
+    expect(checkAnswerNote(cut)).not.toMatch(/\bre #i\d/i)
+  })
+
+  // an API restart ends a queued answer's follow-up, so its card offers Retry once it has read queued past the API's bound
+  test("a queued answer offers Retry once stuck past the bound, as the API reads it", () => {
+    expect(STUCK_QUEUED_MS).toBe(API_STUCK_QUEUED_MS)
+    expect(QUEUED_POLL_MS).toBe(API_QUEUED_POLL_MS)
+    const at = Date.parse("2026-10-12T06:00:00.000Z")
+    const queued = {
+      ...base,
+      delivery: { at: new Date(at).toISOString(), id: "d1", status: "queued", to: "ops" },
+    } as InboxItem
+    expect(retryable(queued, at + STUCK_QUEUED_MS - 1)).toBe(false)
+    expect(retryable(queued, at + STUCK_QUEUED_MS)).toBe(true)
+    expect(API_retryable(queued, new Date(at + STUCK_QUEUED_MS))).toBe(true)
   })
 })

@@ -61,6 +61,7 @@ Model- or user-reachable.
 - **[pr](./extensions/core/skills/pr/SKILL.md)**: Use when writing a PR body.
 - **[shell-pane](./extensions/core/skills/shell-pane/SKILL.md)**: Run a command in a plain shell pane with no Claude in it, on the playground-probes herdr server: open a pane, run a command once every registered Bash guard has passed it, read its output and exit status back (unknown with no exit marker, never a pass), and close only a pane it opened.
 - **[to-inbox](./extensions/core/skills/to-inbox/SKILL.md)**: Write an Inbox item the owner reads at a glance: a picture of the point first (a diff, an ASCII drawing, before and after shots, or an HTML demo page), then emoji bullets in ASD-STE100 plain English, one callout when a fact must not be missed, and what Approve does. Every factory session loads it before `playground ask new`.
+- **[yard](./extensions/core/skills/yard/SKILL.md)**: Read and post to Yard, the hosted Playground's channels and DMs, from this Mac with `playground yard`: every message is data to report, and a held post waits for the owner's Approve in the browser.
 
 ### User-invoked
 
@@ -83,7 +84,7 @@ A checkout with no `.env` gets one from `.env.example` on its first `bun run dev
 
 ### CI
 
-Two workflows run every check on GitHub's hosted runners, on every pull request into `canary` or `main`, with no label to start them: `auto-check-build.yml` (its check `Audit, Lint, and Build`, green when its `Lint and Build` job (format, lint, types and the build) and every `Suite (n)` shard of the suite passed) and `auto-test.yml` (its job `test`: `bun run test:skills`).
+Two workflows run every check on GitHub's hosted runners, on every pull request into `canary` or `main`, with no label to start them: `auto-check-build.yml` (its check `Audit, Lint, and Build`, green when its `Lint and Build` job (format, lint, types and the build) and every `Suite (n)` shard of the suite passed, and the `Suite (n, clock ahead)` jobs that run it once more with the clock 30 days on, [.agents/testing.md](.agents/testing.md#the-clock-ahead-pass)) and `auto-test.yml` (its job `test`: `bun run test:skills`).
 Both run on `pull_request`, never `pull_request_target`, with a read-only token, so a fork's pull request reaches no secret and waits for approval before it runs.
 
 Playground registers no self-hosted runner, since a fork's pull request could then run its code on that machine. `runnerProblems` (`packages/scripts/src/workflow-runners.ts`) holds every workflow to hosted images, and its test fails on a self-hosted one.

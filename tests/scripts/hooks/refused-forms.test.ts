@@ -20,12 +20,15 @@ import { check as extensionsWrite } from "../../../scripts/hooks/no-extensions-w
 import { check as glmHeavyPath } from "../../../scripts/hooks/no-glm-heavy-path"
 import { check as headlessLogin } from "../../../scripts/hooks/no-headless-login"
 import { check as killByName } from "../../../scripts/hooks/no-kill-by-name"
+import { check as linearTicket } from "../../../scripts/hooks/no-linear-ticket"
 import { check as mainCheckout } from "../../../scripts/hooks/no-main-checkout"
 import { check as playgroundLeak } from "../../../scripts/hooks/no-playground-leak"
+import { check as publicLeak } from "../../../scripts/hooks/no-public-leak"
 import { check as rawDelete } from "../../../scripts/hooks/no-raw-delete"
 import { check as rawSpawn } from "../../../scripts/hooks/no-raw-spawn"
 import { check as releaseComment } from "../../../scripts/hooks/no-release-comment"
 import { check as stash } from "../../../scripts/hooks/no-stash"
+import { check as unslottedRun } from "../../../scripts/hooks/no-unslotted-run"
 import {
   ALLOWED,
   type Call,
@@ -92,6 +95,8 @@ git(GLM_REPO, "add", ".")
 // The leak guard's lists as core holds them, with ext.links guarding a made-up org's repositories, as its own test sets them.
 const LISTS = join(CHECKOUT, "extensions", "core", "lists")
 const LEAK = join(SCRATCH, "leak")
+// no-linear-ticket reads its approvals folder under PLAYGROUND_DATA_DIR, so its rows cd into the data folder the fixture makes
+const TICKETS = join(SCRATCH, "tickets")
 storeWith(
   join(LEAK, "playground"),
   {
@@ -100,6 +105,8 @@ storeWith(
   },
   { "ext.links": { "made-up-org": ["acme-blue"] } },
 )
+// A data folder whose extensions root lacks no-public-leak's list, which core never ships, so its rows pin the writes that refusal still refuses.
+const LISTLESS = storeWith(join(SCRATCH, "listless"), {})
 const OWNED = storeWith(join(SCRATCH, "owned"), { "release-owners.json": '["qmarsh"]' })
 const DESKTOP = storeWith(join(SCRATCH, "desktop"), { "desktop-owner-apps.json": '["Slack"]' })
 // A data folder whose scope acme syncs with the made-up extension repo quillco/acme-skills.
@@ -152,11 +159,15 @@ const CHECK_NAMES = [
   "glmHeavyPath",
   "headlessLogin",
   "killByName",
+  "linearTicket",
   "mainCheckout",
   "playgroundLeak",
+  "publicLeak",
+  "rawDelete",
   "rawSpawn",
   "releaseComment",
   "stash",
+  "unslottedRun",
 ] as const
 const SOURCE: Checks = {
   desktopOwnerApp,
@@ -166,11 +177,15 @@ const SOURCE: Checks = {
   glmHeavyPath,
   headlessLogin,
   killByName,
+  linearTicket,
   mainCheckout,
   playgroundLeak,
+  publicLeak,
+  rawDelete,
   rawSpawn,
   releaseComment,
   stash,
+  unslottedRun,
 }
 const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
   desktopOwnerApp: "no-desktop-owner-app",
@@ -180,11 +195,15 @@ const GUARD_OF: Record<(typeof CHECK_NAMES)[number], Guard> = {
   glmHeavyPath: "no-glm-heavy-path",
   headlessLogin: "no-headless-login",
   killByName: "no-kill-by-name",
+  linearTicket: "no-linear-ticket",
   mainCheckout: "no-main-checkout",
   playgroundLeak: "no-playground-leak",
+  publicLeak: "no-public-leak",
+  rawDelete: "no-raw-delete",
   rawSpawn: "no-raw-spawn",
   releaseComment: "no-release-comment",
   stash: "no-stash",
+  unslottedRun: "no-unslotted-run",
 }
 
 // Each guard's bundle, copied into a scratch checkout with no node_modules above it, as a damaged install leaves one; the folders the bundles read beside them (extensions' lists, the settings reader role.ts runs in its own process) link to this checkout's.
@@ -262,6 +281,16 @@ const guardsOf = (
       }),
   },
   "no-kill-by-name": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => c.killByName(raw) },
+  "no-linear-ticket": {
+    folders: { checkout: [CHECKOUT, HOME], "data folder": [DATA, HOME] },
+    run: (raw, home) =>
+      c.linearTicket(raw, {
+        CLAUDE_CONFIG_DIR: TICKETS,
+        HOME: home,
+        PLAYGROUND_DATA_DIR: DATA,
+        PLAYGROUND_ROLE: "worker",
+      }),
+  },
   "no-main-checkout": {
     folders: {
       checkout: [join(PATHS.MAIN, ".claude", "worktrees", "a"), HOME],
@@ -279,13 +308,16 @@ const guardsOf = (
         LISTS,
       ),
   },
-  // No bundle while no settings file registers it, so only its source runs, and the bundled pass below leaves it out, since GUARD_OF names no check of it.
+  "no-public-leak": {
+    folders: { checkout: [CHECKOUT, HOME], home: [HOME, HOME] },
+    run: (raw) => c.publicLeak(raw, { CLAUDE_CONFIG_DIR: SCRATCH, PLAYGROUND_DATA_DIR: LISTLESS }),
+  },
   "no-raw-delete": {
     folders: {
       checkout: [CHECKOUT, HOME],
       "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
     },
-    run: (raw) => rawDelete(raw),
+    run: (raw) => c.rawDelete(raw),
   },
   "no-raw-spawn": { folders: { checkout: [CHECKOUT, HOME] }, run: (raw) => c.rawSpawn(raw) },
   "no-release-comment": {
@@ -295,6 +327,13 @@ const guardsOf = (
   "no-stash": {
     folders: { checkout: [CHECKOUT, HOME], "data folder": [DATA, HOME], home: [HOME, HOME] },
     run: (raw) => c.stash(raw, {}),
+  },
+  "no-unslotted-run": {
+    folders: {
+      checkout: [join(PATHS.MAIN, ".claude", "worktrees", "a"), HOME],
+      "main checkout": [PATHS.MAIN, HOME],
+    },
+    run: (raw, home) => c.unslottedRun(raw, { HOME: home, PLAYGROUND_ROLE: "worker" }, PATHS.MAIN),
   },
 })
 
@@ -365,9 +404,11 @@ describe("every refused form stays refused unless the allow list names it", () =
 
   // A recursive rm (-r, -R or --recursive, alone or in a cluster) and the folder it names, read from a row's text, where a backslash starts an escape (printf's \n) rather than the folder's name.
   const RECURSIVE = /\brm\s+((?:-\S+\s+)*)([^\s'"`;)&|\\]+)/g
-  // A folder named from HOME, and a cd or pushd to HOME, after which a relative folder is in HOME too
+  // A folder named from HOME, and a cd or pushd to HOME, after which a relative folder is in HOME too; a bare cd or pushd goes there as well, as the shared reader reads one
   const HOME_PATH = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/
   const CD_HOME = /\b(?:cd|pushd)\s+(?:~|\$HOME|\$\{HOME\})\/?(?=[\s;&|)]|$)/
+  // A bare cd or pushd, with no folder word and a redirect of its own aside, which the shared reader reads as the home too
+  const BARE_HOME = /\b(?:cd|pushd)(?:\s+\d?>{1,2}\s*\S+)*\s*(?=[;&|)]|$)/
   // A folder written from ~ is NEVER_MADE itself, or a glob of it that keeps its last name
   const never = (path: string) =>
     path.endsWith(NEVER_MADE.slice(NEVER_MADE.lastIndexOf("/"))) &&
@@ -378,7 +419,8 @@ describe("every refused form stays refused unless the allow list names it", () =
       if (!/(?:^|\s)(?:-[a-zA-Z]*[rR]|--recursive)/.test(flags)) return []
       const path = HOME_PATH.test(target)
         ? target.replace(HOME_PATH, "~")
-        : !/^[/~$]/.test(target) && CD_HOME.test(text.slice(0, index))
+        : !/^[/~$]/.test(target) &&
+            (CD_HOME.test(text.slice(0, index)) || BARE_HOME.test(text.slice(0, index)))
           ? `~/${target}`
           : undefined
       return path !== undefined && !never(path) ? [rm] : []
@@ -412,6 +454,63 @@ describe("every refused form stays refused unless the allow list names it", () =
   test("every allow-list entry names a case", () => {
     for (const entry of ALLOWED)
       expect(CASES.some(({ id, key }) => entry === id || entry === key)).toBe(true)
+  })
+})
+
+// Each guard PR puts its rows in its own source's file, so two of them merge in either order.
+describe("two branches that each add a source's file merge with no conflict, in either order", () => {
+  // A new source's file with one row, as a guard PR writes it.
+  const sourceFile = (what: string) =>
+    [
+      `import { type Group } from "./_shared"`,
+      ``,
+      `export const groups: Group[] = [`,
+      `  { folders: ["checkout"], guards: ["no-stash"], rows: () => [[${JSON.stringify(what)}, "git stash"]] },`,
+      `]`,
+      ``,
+      `export const allowed: string[] = [${JSON.stringify(what)}]`,
+      ``,
+    ].join("\n")
+
+  // A scratch repo holding a copy of the fixture, its reader and its folder, with two branches from one base each adding its own source's file.
+  const repo = () => {
+    const dir = mkdtempSync(join(SCRATCH, "merge-"))
+    const from = join(import.meta.dir, "fixtures")
+    mkdirSync(join(dir, "refused-forms"))
+    copyFileSync(join(from, "refused-forms.ts"), join(dir, "refused-forms.ts"))
+    for (const name of readdirSync(join(from, "refused-forms")))
+      copyFileSync(join(from, "refused-forms", name), join(dir, "refused-forms", name))
+    git(dir, "init", "-q", "-b", "base")
+    git(dir, "add", "-A")
+    git(dir, "commit", "-q", "-m", "base")
+    for (const [branch, n] of [
+      ["a", 9001],
+      ["b", 9002],
+    ] as const) {
+      git(dir, "checkout", "-q", "-b", branch, "base")
+      writeFileSync(join(dir, "refused-forms", `${n}.ts`), sourceFile(`branch ${branch}'s row`))
+      git(dir, "add", "-A")
+      git(dir, "commit", "-q", "-m", branch)
+    }
+    return dir
+  }
+
+  test.each([
+    ["a", "b"],
+    ["b", "a"],
+  ])("%s, then %s merged into it", async (first, second) => {
+    const dir = repo()
+    git(dir, "checkout", "-q", first)
+    const merge = git(dir, "merge", "-q", "--no-edit", second)
+    expect(merge.exitCode).toBe(0)
+    expect(git(dir, "diff", "--name-only", "--diff-filter=U").stdout.toString()).toBe("")
+    const merged = await import(join(dir, "refused-forms.ts"))
+    const sources = merged.REFUSED_FORMS.map((group: { source: string }) => group.source)
+    expect(sources).toContain("#9001")
+    expect(sources).toContain("#9002")
+    expect(merged.ALLOWED).toEqual(
+      expect.arrayContaining(["#9001 branch a's row", "#9002 branch b's row"]),
+    )
   })
 })
 

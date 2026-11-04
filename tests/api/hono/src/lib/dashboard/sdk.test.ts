@@ -14,6 +14,7 @@ import {
   answerHosted,
   askOf,
   changeHostedMode,
+  changeHostedSetting,
   hostedEnv,
   hostedSettings,
   hosts,
@@ -28,6 +29,7 @@ import {
   type HostDeps,
   type HostedMode,
 } from "../../../../../../api/hono/src/lib/dashboard/sdk"
+import type { SessionSetting } from "../../../../../../api/hono/src/lib/dashboard/setting"
 import {
   hostedNow,
   hostSessions,
@@ -52,9 +54,9 @@ const question = {
   ],
 }
 
-// A stand-in for the SDK's query(): it records the options it was given, every message put on the input and every mode set, and ends a turn for each message. A message `report:<mode>` has the session report that mode itself, as its status message does when it leaves plan mode.
-function fakeQuery({ refuseMode = false } = {}) {
-  const calls: { modes: string[]; options: Options; sent: string[] }[] = []
+// A stand-in for the SDK's query(): it records the options it was given, every message put on the input and every mode, model and effort set, and ends a turn for each message. A message `report:<mode>` has the session report that mode itself, as its status message does when it leaves plan mode, and `init:<model>` has it report its model as its init message does.
+function fakeQuery({ refuseMode = false, refuseSetting = false } = {}) {
+  const calls: { modes: string[]; options: Options; sent: string[]; settings: string[] }[] = []
   const run = ({
     options,
     prompt,
@@ -62,7 +64,7 @@ function fakeQuery({ refuseMode = false } = {}) {
     options: Options
     prompt: AsyncIterable<SDKUserMessage>
   }) => {
-    const call = { modes: [] as string[], options, sent: [] as string[] }
+    const call = { modes: [] as string[], options, sent: [] as string[], settings: [] as string[] }
     calls.push(call)
     const stream = (async function* () {
       for await (const message of prompt) {
@@ -72,6 +74,9 @@ function fakeQuery({ refuseMode = false } = {}) {
           const permissionMode = text.slice("report:".length)
           yield { permissionMode, status: null, subtype: "status", type: "system" } as SDKMessage
         }
+        if (text.startsWith("init:")) {
+          yield { model: text.slice("init:".length), subtype: "init", type: "system" } as SDKMessage
+        }
         yield { type: "assistant" } as SDKMessage
         yield { type: "result" } as SDKMessage
       }
@@ -80,6 +85,14 @@ function fakeQuery({ refuseMode = false } = {}) {
       setPermissionMode: async (mode: string) => {
         if (refuseMode) throw new Error("the session refused the mode")
         call.modes.push(mode)
+      },
+      applyFlagSettings: async ({ effortLevel }: { effortLevel: string }) => {
+        if (refuseSetting) throw new Error("the session refused the effort")
+        call.settings.push(`effort ${effortLevel}`)
+      },
+      setModel: async (model: string) => {
+        if (refuseSetting) throw new Error("the session refused the model")
+        call.settings.push(`model ${model}`)
       },
     })
   }
@@ -511,6 +524,83 @@ describe("the hosted session's prompts", () => {
   })
 })
 
+describe("changeHostedSetting", () => {
+  const started = (options = {}) => {
+    const dir = scratch()
+    const fake = fakeQuery(options)
+    const host = new SdkHost(deps(fake.query))
+    host.start(dir, CLAUDE, "default")
+    const recorded: string[] = []
+    const on = {
+      host,
+      now: () => new Date(AT),
+      record: async (event: { action: string; summary: string }, run: () => Promise<void>) => {
+        await run()
+        recorded.push(`${event.action}: ${event.summary}`)
+      },
+    }
+    const changing = (setting: SessionSetting, sessionId = host.sessionId!) => ({
+      actor,
+      sessionId,
+      setting,
+    })
+    return { changing, dir, fake, host, on, recorded }
+  }
+
+  test("a pick reaches the session through setModel or applyFlagSettings, never its input, and the row shows what it took", async () => {
+    const { changing, dir, fake, host, on, recorded } = started()
+    try {
+      host.send("init:claude-opus-5-5")
+      await Bun.sleep(0)
+      expect(host.worker()).toMatchObject({ effort: null, model: "claude-opus-5-5" })
+      expect(await changeHostedSetting(changing({ model: "sonnet" }), on)).toEqual({
+        at: AT,
+        ok: true,
+        sessionId: host.sessionId!,
+      })
+      await changeHostedSetting(changing({ effort: "max" }), on)
+      expect(fake.calls[0]!.settings).toEqual(["model sonnet", "effort max"])
+      expect(fake.calls[0]!.sent).toEqual(["init:claude-opus-5-5"])
+      expect(host.worker()).toMatchObject({ effort: "max", model: "sonnet" })
+      expect(recorded).toEqual([
+        `dashboard.setting: Set ${SDK_PROBE}'s model to sonnet`,
+        `dashboard.setting: Set ${SDK_PROBE}'s effort to max`,
+      ])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("a session started again on the same host shows no model or effort from before", async () => {
+    const { changing, dir, host, on } = started()
+    try {
+      await changeHostedSetting(changing({ model: "haiku" }), on)
+      await changeHostedSetting(changing({ effort: "low" }), on)
+      expect(host.worker()).toMatchObject({ effort: "low", model: "haiku" })
+      host.start(dir, CLAUDE, "default")
+      expect(host.worker()).toMatchObject({ effort: null, model: null })
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("a session not hosted gets NOT_FOUND, and a value the session refuses is not recorded and leaves the row as it was", async () => {
+    const { changing, dir, fake, host, on, recorded } = started({ refuseSetting: true })
+    try {
+      expect(await changeHostedSetting(changing({ model: "haiku" }, "s-1"), on)).toMatchObject({
+        code: "NOT_FOUND",
+        ok: false,
+      })
+      await expect(changeHostedSetting(changing({ effort: "low" }), on)).rejects.toThrow("refused")
+      expect(fake.calls[0]!.settings).toEqual([])
+      expect(recorded).toEqual([])
+      expect(host.worker()).toMatchObject({ effort: null, model: null })
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+})
+
 describe("changeHostedMode", () => {
   const started = (options = {}) => {
     const dir = scratch()
@@ -634,6 +724,34 @@ describe("sendToHosted", () => {
     }
   })
 
+  test("a setting passed with a message is never typed: the hosted session sets those through the SDK alone", async () => {
+    const dir = scratch()
+    try {
+      const { calls, query } = fakeQuery()
+      const host = new SdkHost(deps(query))
+      host.start(dir, CLAUDE, "default")
+      const recorded: string[] = []
+      const result = await sendToHosted(
+        delivery({ setting: { effort: "max" }, text: "/effort max" }),
+        {
+          delivered: async () => null,
+          host,
+          now: () => new Date(AT),
+          record: async (event, sending) => {
+            recorded.push(event.summary)
+            await sending()
+          },
+        },
+      )
+      expect(result).toMatchObject({ code: "COMMAND", ok: false })
+      expect(recorded).toEqual([])
+      await Bun.sleep(0)
+      expect(calls[0]!.sent).toEqual([])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
   test("while a card waits, a message is refused as on a picker and nothing is recorded", async () => {
     const dir = scratch()
     try {
@@ -736,7 +854,9 @@ describe("who reaches the hosted session", () => {
       const file = Bun.file(join(root, path))
       if (!(await file.exists())) continue
       if (
-        /\b(?:sendToHosted|answerHosted|changeHostedMode|sdkHost|SdkHost)\b/.test(await file.text())
+        /\b(?:sendToHosted|answerHosted|changeHostedMode|changeHostedSetting|sdkHost|SdkHost)\b/.test(
+          await file.text(),
+        )
       )
         callers.push(path)
     }

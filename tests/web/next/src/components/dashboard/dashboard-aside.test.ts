@@ -44,7 +44,7 @@ describe("the aside window on every dashboard page", () => {
     }
   })
 
-  // the owner: "just keep inbox, changelog, documents": the bar as DashboardAside builds it, from the default app squares
+  // the Inbox, Changelog and Documents alone: the bar as DashboardAside builds it, from the default app squares
   test("holds the Inbox, Playground's chat, Changelog, Pages and Apps, and no parked app or Pull requests", () => {
     const bar = (selected: typeof dispatcher | typeof worker) =>
       asideTabs(
@@ -101,7 +101,7 @@ describe("the aside window on every dashboard page", () => {
     expect(aside).toContain("{ count: unread }")
   })
 
-  // the owner: "I clicked just to clear the notification in toolbar"
+  // a click made only to clear the bar's dot
   test("counts on the Inbox square what needs you and came since your last look, so a look clears it", async () => {
     const aside = await source("components/dashboard/dashboard-aside.tsx")
     expect(aside).toContain('const inboxSeenAt = useMark("inbox")')
@@ -151,7 +151,7 @@ describe("the aside's tabs", () => {
     expect(SIDE_TOP).toBe(`pt-${STREAM_SCROLL.scrollMargin / 4}`)
   })
 
-  test('name their top padding as --pane-top, so a stuck Changelog header covers it and no text shows above it (the owner: "please no text can go above the entry")', async () => {
+  test("name their top padding as --pane-top, so a stuck Changelog header covers it and no text shows above it", async () => {
     const aside = await source("components/dashboard/dashboard-aside.tsx")
     expect(aside).toContain(
       `[--pane-top:--spacing(${SIDE_TOP.slice(3)})] [--pane-x:--spacing(5)] has-[[data-preview-frame]]:pb-0 sm:[--pane-x:--spacing(7)] \${SIDE_TOP}`,
@@ -217,7 +217,7 @@ describe("the aside's tabs", () => {
     expect(TAB_BAR.split(" ")).toContain("group-data-horizontal/tabs:h-auto")
   })
 
-  // the owner: "on mobile menu can join the toolbar"
+  // on a phone the Menu joins the bar
   test("on a phone end with the sidebar's Menu as a square of their own, and the shell's floating Menu leaves the dashboard", async () => {
     expect(await source("components/dashboard/dashboard-aside.tsx")).toContain(
       '<SidebarTrigger aria-label="Menu" className={MENU_TAB} />',
@@ -244,7 +244,7 @@ describe("the aside's tabs", () => {
     expect(TAB_BAR.split(" ")).not.toContain("flex-wrap")
   })
 
-  // the owner: "autohide aside toolbar", "something like this for hover around hint", "black should be transparent" and "why this black at bottom"
+  // a bar that hides itself, shows on a hover near it, and is see-through rather than black, down to its bottom
   test("hide as a dock does: shut at first, shown while the pointer is within 96px of the bottom or a key has focus in it", async () => {
     const aside = await source("components/dashboard/dashboard-aside.tsx")
     expect(aside).toContain("const [barHidden, setBarHidden] = useState(true)")
@@ -304,7 +304,7 @@ describe("the aside's tabs", () => {
     expect(aside).toContain('"pt-(--pane-top) [--pane-top:--spacing(1)]"} ${paneBottom}`')
   })
 
-  // the owner: "why this padding bottom? at bottom"
+  // no padding at the bottom
   test("show the pane under it through a see-through bar, each pane ending 12px under its last line and the chat keeping its 12px and its room", async () => {
     const aside = await source("components/dashboard/dashboard-aside.tsx")
     expect(TAB_BAR).toContain(GLASS)
@@ -347,7 +347,7 @@ describe("the aside's tabs", () => {
 })
 
 describe("the split between the page and the aside", () => {
-  test(`snaps to the middle when a drag is let go within 5% of it (the owner: "in chat view the slider should be snapable in middle")`, () => {
+  test(`snaps to the middle when a drag is let go within 5% of it`, () => {
     expect([45.1, 47, 52, 54.9].every(snapsToMiddle)).toBe(true)
     expect([30, 45, 50, 55, 70].some(snapsToMiddle)).toBe(false)
   })

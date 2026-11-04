@@ -5,6 +5,7 @@ import { join, relative } from "node:path"
 
 import { removeScratch } from "@packages/safe-delete"
 
+import { CLOCK_EXEMPT, clockExempt } from "./clock-exempt"
 import { sandbox } from "./sandbox"
 
 const TIMINGS = "tests/timings.json"
@@ -24,6 +25,8 @@ const unbuilt = existsSync("packages")
   : []
 
 const { env, scratch } = sandbox()
+// a git hook (pre-commit runs tests) exports GIT_DIR and GIT_INDEX_FILE, which turn a test's scratch git init or commit onto the real repository: one set its core.bare (3 Nov); a test that needs a GIT_ variable sets it on its own git call
+for (const name of Object.keys(env)) if (name.startsWith("GIT_")) delete env[name]
 const dropScratch = () => {
   const refused = removeScratch(scratch)
   if (refused) console.error(`test-sandbox: ${refused}`)
@@ -31,9 +34,14 @@ const dropScratch = () => {
 // a worktree with none of the env files bun test loads (a skill-only chore; it skips .env.local) has no values for the apps' env schemas, so a test that imports one would fail its validation, unless the caller set the flag
 if (![".env", ".env.test", ".env.test.local"].some((file) => existsSync(file)))
   Object.assign(env, { SKIP_ENV_VALIDATION: process.env.SKIP_ENV_VALIDATION ?? "true" })
+// CI's clock-ahead pass: with CLOCK_AHEAD_DAYS set, every test file reads a clock that many days on, so a test that mixes a fixed clock with the real one fails on its own PR rather than on the day the real clock reaches it
+const ahead = Boolean(process.env.CLOCK_AHEAD_DAYS)
+const clock = ahead ? [`--preload=${join(import.meta.dir, "../../../tests/clock-ahead.ts")}`] : []
 const run = (argv: string[]) =>
-  Bun.spawnSync(["bun", "test", ...argv], { env, stdio: ["inherit", "inherit", "inherit"] })
-    .exitCode ?? 1
+  Bun.spawnSync(["bun", "test", ...clock, ...argv], {
+    env,
+    stdio: ["inherit", "inherit", "inherit"],
+  }).exitCode ?? 1
 
 // bun's own test timeout cannot stop a test blocked in sync code (a spawnSync that never returns held a worker 29 minutes once), so the parallel pass has a deadline: each worker marks the file it holds through a preload that runs once per test file, and a pass past the deadline is killed as a group and fails naming the files still marked
 const DEADLINE_MS = Number(process.env.TEST_PARALLEL_DEADLINE_MS) || 20 * 60_000
@@ -54,7 +62,7 @@ const held = () =>
   })
 let interrupted: NodeJS.Signals | undefined
 const runParallel = async (argv: string[]) => {
-  const child = Bun.spawn(["bun", "test", `--preload=${preload}`, ...argv], {
+  const child = Bun.spawn(["bun", "test", `--preload=${preload}`, ...clock, ...argv], {
     detached: true,
     env,
     stdio: ["inherit", "inherit", "inherit"],
@@ -105,10 +113,21 @@ const args = process.argv.slice(2)
 const paths = args.length > 0 ? args : ["tests"]
 // compared without a leading ./ or a trailing /, and passed to bun as given, since bun reads ./name as a path and name as a filter
 const bare = (path: string) => path.replace(/^(\.\/)+/, "").replace(/\/+$/, "") || "."
+// bun reads a path it cannot find as a name filter that matches nothing, so the run would pass on the other files: a test path names a file or the run stops
+const missing = args.filter((arg) => /\.test\.tsx?$/.test(arg) && !existsSync(bare(arg)))
+if (missing.length > 0) {
+  console.error(`test-sandbox: no test file at ${missing.join(", ")}; check the path and run again`)
+  dropScratch()
+  process.exit(1)
+}
 const serial = SERIAL.filter((file) =>
   paths.map(bare).some((path) => path === "." || file === path || file.startsWith(`${path}/`)),
 )
-const rest = paths.filter((path) => !SERIAL.includes(bare(path)))
+// a shard names its files, which no ignore pattern drops, so the clock-ahead pass drops its exempt ones here
+const left = ahead ? paths.filter((path) => clockExempt(bare(path))) : []
+const rest = paths.filter((path) => !SERIAL.includes(bare(path)) && !left.includes(path))
+if (left.length > 0)
+  console.error(`test-sandbox: the clock-ahead pass leaves out ${left.join(", ")}`)
 
 console.error(
   `test-sandbox: ${workers} workers with a ${Math.round(DEADLINE_MS / 1000)}s deadline, then ${serial.length} serial files`,
@@ -121,6 +140,7 @@ const parallel =
         ...timings,
         ...(update ? ["--update-timings"] : []),
         ...SERIAL.map((file) => `--path-ignore-patterns=${file}`),
+        ...(ahead ? CLOCK_EXEMPT.map(([pattern]) => `--path-ignore-patterns=${pattern}`) : []),
         ...rest,
       ])
     : 0

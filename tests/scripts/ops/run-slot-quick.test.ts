@@ -144,9 +144,16 @@ describe("a quick run takes its own slot past a full queue", () => {
   // ran: the seconds each earlier run of the same command took, oldest first, as run-slot.runs.log records them
   // the slot the last quick() run took, from its runs log's start line
   let took = ""
-  const quick = async (argv: string[], ran: number[] = []) => {
+  // as: the run's session name and env words, and whether a CPU-queue waiter's ticket stands ahead of it
+  const quick = async (
+    argv: string[],
+    ran: number[] = [],
+    as: { env?: Record<string, string>; waiter?: boolean; who?: string } = {},
+  ) => {
+    const who = as.who ?? "worker-q"
     const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
     m.hold("run-slot", 3, "big")
+    if (as.waiter) m.ticket(1, "worker-w", "s2 23 3 big")
     for (const bin of ["bun", "git"]) {
       writeFileSync(join(m.bin, bin), '#!/bin/bash\ntouch "${@: -1}"\n')
       chmodSync(join(m.bin, bin), 0o755)
@@ -161,9 +168,9 @@ describe("a quick run takes its own slot past a full queue", () => {
         )
         .join(""),
     )
-    const p = Bun.spawn(["bash", SCRIPT, "worker-q", "--", ...argv, marker], {
+    const p = Bun.spawn(["bash", SCRIPT, who, "--", ...argv, marker], {
       cwd: m.root,
-      env: m.env({ RUN_SLOT_SIZE: "medium" }),
+      env: m.env({ RUN_SLOT_SIZE: "medium", ...as.env }),
       stderr: "pipe",
     })
     let err = ""
@@ -178,7 +185,7 @@ describe("a quick run takes its own slot past a full queue", () => {
     took =
       readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
         .split("\n")
-        .find((l) => l.split(" ")[1] === "start" && l.split(" ")[2] === "worker-q")
+        .find((l) => l.split(" ")[1] === "start" && l.split(" ")[2] === who)
         ?.split(" ")[4] ?? ""
     return existsSync(marker)
   }
@@ -272,6 +279,26 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(took).toBe("run-slot-commit")
   })
 
+  // 3 Nov: a plain commit's build, which commit-slot.ts hands run-slot as commit-<worktree>, waited about an hour in the queue, since only git's own words took the commit slot
+  const STEP = { env: { RUN_SLOT_COMMIT_STEP: "1" }, waiter: true, who: "commit-wt-one" }
+  test("a pre-commit build commit-slot.ts marks takes run-slot-commit past a queue waiter", async () => {
+    expect(await quick(["bun", "run", "build"], [], STEP)).toBe(true)
+    expect(took).toBe("run-slot-commit")
+  })
+
+  test("and so does a type check it marks", async () => {
+    expect(await quick(["bun", "run", "check-types:tests"], [], STEP)).toBe(true)
+    expect(took).toBe("run-slot-commit")
+  })
+
+  test("but a commit- name with no mark goes through the queue", async () => {
+    expect(await quick(["bun", "run", "build"], [], { ...STEP, env: {} })).toBe(false)
+  })
+
+  test("nor does the mark under a session's own name", async () => {
+    expect(await quick(["bun", "run", "build"], [], { ...STEP, who: "worker-q" })).toBe(false)
+  })
+
   // ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites
   test("bun test naming one test file", async () => {
     expect(await quick(["env", "X=1", "bun", "test"])).toBe(true)
@@ -335,6 +362,39 @@ describe("a quick run takes its own slot past a full queue", () => {
 
   test("nor a bun test --cwd <dir> end-to-end test", async () => {
     expect(await quick(["bun", "test", "--cwd", "x", "b.e2e.test.ts"])).toBe(false)
+  })
+})
+
+// PG-796, 3 Nov: pr:merge's types gate, holding the merge lock, waited 263 s for the quick slot on a 1 s step, and ran past its 600 s twice on a cached build
+describe("the merge train's quick run skips the quick slot's race", () => {
+  // A machine whose fake bun touches its last argument, its one quick slot held by a live session's run
+  const busy = () => {
+    const m = machine()
+    writeFileSync(join(m.bin, "bun"), '#!/bin/bash\ntouch "${@: -1}"\n')
+    chmodSync(join(m.bin, "bun"), 0o755)
+    writeFileSync(
+      join(m.ops, "run-slot-quick.holder"),
+      `worker-q ${process.pid} 2026-11-03T21:29:51Z\n`,
+    )
+    mkdirSync(join(m.ops, "run-slot-quick"))
+    return m
+  }
+
+  test("ops-merge-train's starts at once while the quick slot is held, logged bare", async () => {
+    const m = busy()
+    expect(await m.start("ops-merge-train", {}, undefined, ["bun", "run", "docs:wrap"]).ran()).toBe(
+      true,
+    )
+    expect(readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")).toMatch(
+      / start ops-merge-train \d+ bare waited=\d+s/,
+    )
+  })
+
+  test("while another session's waits for it", async () => {
+    const run = busy().start("worker-x", {}, undefined, ["bun", "run", "docs:wrap"])
+    expect(await run.saw(/waiting for the quick slot/g)).toBe(true)
+    expect(existsSync(run.marker)).toBe(false)
+    await stop(run.p)
   })
 })
 

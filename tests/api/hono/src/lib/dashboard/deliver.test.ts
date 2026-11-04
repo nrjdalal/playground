@@ -24,6 +24,7 @@ import {
   MAX_LINES,
   normalize,
   pieces,
+  QUEUED_MS,
   readSkills,
   refusal,
   SETTLE_GAP_MS,
@@ -1514,6 +1515,21 @@ describe("deliver to a herdr session", () => {
     expect(recorded).toHaveLength(1)
   })
 
+  test("a setting types its one slash command, recorded whole, while the same words typed by hand stay refused", async () => {
+    const { deps, recorded, sent } = herdr()
+    deps.readScreen = async () => EMPTY
+    const set = await deliver(
+      { actor, setting: { model: "opus" }, text: "", to: "dispatcher" },
+      deps,
+    )
+    expect(set).toMatchObject({ ok: true, sessionId: "s-dispatcher" })
+    expect(sent).toEqual([{ surface: HERDR, text: "/model opus" }])
+    expect(recorded).toEqual(["Set dispatcher's model to opus"])
+    const typed = await deliver({ actor, text: "/model opus", to: "dispatcher" }, deps)
+    expect(typed).toMatchObject({ code: "COMMAND", ok: false })
+    expect(sent).toHaveLength(1)
+  })
+
   // herdr pastes the message and then presses Enter, and the Enter can land while Claude Code is still taking a pasted image's path in, so the message sat unsent in dispatcher's box and every later delivery read it as a draft
   describe("the box read after the send", () => {
     const MESSAGE = "Is send on the right? why"
@@ -1654,6 +1670,233 @@ describe("deliver to a herdr session", () => {
       expect(run.sent).toHaveLength(1)
       expect(run.enters).toEqual([HERDR])
       expect(run.recorded).toHaveLength(1)
+    })
+
+    // Claude Code holds a message typed while it compacts in its box, and one sent while it works in its queue above the box, and takes each on its own once free, so either reads queued, never failed; a retry under the same id reads it again and types nothing
+    describe("a message Claude Code holds", () => {
+      // deliver() keeps a queued id across calls, as the API process does, so each test queues its own
+      let n = 0
+      const nextId = () => `11111111-2222-4333-8444-659${String(++n).padStart(9, "0")}`
+      // the spinner line Claude Code draws while it compacts (its "Compacting conversation" status, 2.1.3xx)
+      const compacting = (...box: string[]) =>
+        screen(...box).replace(
+          "✻ Crystallizing…",
+          "✻ Compacting conversation… (38s · esc to interrupt)",
+        )
+      // a busy session's queue, as the probe's screen above draws it: the message above the box, the box showing the queue hint
+      const QUEUED_ABOVE = screen(`❯${NBSP}Press up to edit queued messages`).replace(
+        "✻ Crystallizing…",
+        `❯ ${MESSAGE}\n  ctrl+enter to send now\n✻ Crystallizing… (2m 4s · ↓ 328 tokens)`,
+      )
+      const NOW = Date.parse("2026-10-06T12:00:00.000Z")
+      const arrived: Entry = {
+        at: "2026-10-06T12:00:40.000Z",
+        from: null,
+        id: "e1",
+        kind: "human",
+        text: MESSAGE,
+        tool: null,
+      }
+      const queuedRun = (held: string) => {
+        const run = after([held], [held])
+        let now = NOW
+        run.deps.now = () => new Date(now)
+        const id = nextId()
+        return { ...run, at: (ms: number) => (now = NOW + ms), send: () => run.send(id) }
+      }
+
+      test("compacting with the message in the box gives queued, with no Enter pressed into it", async () => {
+        const { enters, recorded, send } = queuedRun(compacting(`❯ ${MESSAGE}`))
+        const result = await send()
+        expect(result).toMatchObject({ code: "QUEUED", ok: false })
+        expect(result.ok ? "" : result.reason).not.toMatch(/terminal/i)
+        expect(enters).toEqual([])
+        expect(recorded).toEqual([])
+      })
+
+      test("the queue hint with the message queued above the box gives queued", async () => {
+        const { enters, recorded, send } = queuedRun(QUEUED_ABOVE)
+        expect(await send()).toMatchObject({ code: "QUEUED", ok: false })
+        expect(enters).toEqual([])
+        expect(recorded).toEqual([])
+      })
+
+      test("its retry while the screen still holds it reads queued again and types nothing", async () => {
+        const run = queuedRun(compacting(`❯ ${MESSAGE}`))
+        await run.send()
+        run.at(QUEUED_MS + 60_000)
+        expect(await run.send()).toMatchObject({ code: "QUEUED", ok: false })
+        expect(run.sent).toHaveLength(1)
+        expect(run.enters).toEqual([])
+      })
+
+      test("the box emptied with a transcript line gives delivered, typing nothing more", async () => {
+        const run = queuedRun(compacting(`❯ ${MESSAGE}`))
+        await run.send()
+        run.deps.readScreen = async () => EMPTY
+        run.deps.said = async () => [OLDER, arrived]
+        run.at(60_000)
+        expect(await run.send()).toMatchObject({ ok: true, sessionId: "s-dispatcher" })
+        expect(run.sent).toHaveLength(1)
+        expect(run.recorded).toHaveLength(1)
+      })
+
+      test("the box emptied with no transcript line yet, inside the bound, still reads queued", async () => {
+        const run = queuedRun(QUEUED_ABOVE)
+        await run.send()
+        run.deps.readScreen = async () => EMPTY
+        run.at(QUEUED_MS - 1)
+        expect(await run.send()).toMatchObject({ code: "QUEUED", ok: false })
+        expect(run.sent).toHaveLength(1)
+        expect(run.recorded).toEqual([])
+      })
+
+      test("no transcript line past the bound gives lost, and its Retry sends it again", async () => {
+        const run = queuedRun(compacting(`❯ ${MESSAGE}`))
+        await run.send()
+        run.deps.readScreen = async () => EMPTY
+        run.at(QUEUED_MS)
+        const lost = await run.send()
+        expect(lost).toMatchObject({ code: "LOST", ok: false })
+        expect(lost.ok ? "" : lost.reason).toContain("Retry")
+        expect(lost.ok ? "" : lost.reason).not.toMatch(/terminal/i)
+        expect(run.recorded).toEqual([])
+        expect(await run.send()).toMatchObject({ ok: true })
+        expect(run.sent).toHaveLength(2)
+        expect(run.recorded).toHaveLength(1)
+      })
+
+      // a busy session can write more than the tail read in the wait, so a transcript that starts after the message was held cannot say it never went
+      test("past the bound, a transcript that does not reach back to the hold reads unconfirmed, and no Retry pastes it", async () => {
+        const run = queuedRun(compacting(`❯ ${MESSAGE}`))
+        await run.send()
+        run.deps.readScreen = async () => EMPTY
+        run.deps.said = async () => [{ ...OLDER, at: "2026-10-06T12:05:00.000Z", text: "later" }]
+        run.at(QUEUED_MS)
+        const unknown = await run.send()
+        expect(unknown).toMatchObject({ code: "INTERRUPTED", ok: false })
+        expect(unknown.ok ? "" : unknown.reason).toContain("may have gone")
+        expect(run.sent).toHaveLength(1)
+        expect(run.recorded).toEqual([])
+      })
+
+      test("past the bound, a transcript that cannot be read reads unconfirmed", async () => {
+        const run = queuedRun(compacting(`❯ ${MESSAGE}`))
+        await run.send()
+        run.deps.readScreen = async () => EMPTY
+        run.deps.said = async () => {
+          throw new Error("no transcript")
+        }
+        run.at(QUEUED_MS)
+        expect(await run.send()).toMatchObject({ code: "INTERRUPTED", ok: false })
+        expect(run.sent).toHaveLength(1)
+      })
+
+      // Claude Code stamps a queued_command at its Enter, and a loaded machine can take more than the transcript's 5s slack from the paste to the read that sees it held
+      test("a hold is timed from the paste, so after a restart a line stamped at its Enter reads delivered", async () => {
+        const run = queuedRun(compacting(`❯ ${MESSAGE}`))
+        const prompt = run.deps.prompt
+        run.deps.prompt = async (surface, text) => {
+          await prompt(surface, text)
+          run.at(8000)
+        }
+        const held = await run.send()
+        expect(held).toMatchObject({
+          code: "QUEUED",
+          ok: false,
+          queuedAt: new Date(NOW).toISOString(),
+        })
+        run.deps.readScreen = async () => EMPTY
+        run.deps.said = async () => [OLDER, { ...arrived, at: new Date(NOW + 1000).toISOString() }]
+        run.at(QUEUED_MS)
+        const queuedAt = held.ok ? undefined : held.queuedAt
+        const id = nextId()
+        expect(
+          await deliver({ actor, id, queuedAt, text: MESSAGE, to: "dispatcher" }, run.deps),
+        ).toMatchObject({ ok: true })
+        expect(run.sent).toHaveLength(1)
+      })
+
+      // a model or effort setting types its slash command the way a message types its words, so Claude Code holds it as it holds a message
+      describe("a setting", () => {
+        const COMMAND = "/model opus"
+        const settingRun = (held: string) => {
+          const run = after([held], [held])
+          run.deps.now = () => new Date(NOW)
+          const id = nextId()
+          const send = () =>
+            deliver({ actor, id, setting: { model: "opus" }, text: "", to: "dispatcher" }, run.deps)
+          return { ...run, send }
+        }
+
+        test("sent while the session compacts reads queued, not interrupted, with no Enter pressed into it", async () => {
+          const { enters, recorded, send } = settingRun(compacting(`❯ ${COMMAND}`))
+          expect(await send()).toMatchObject({ code: "QUEUED", ok: false })
+          expect(enters).toEqual([])
+          expect(recorded).toEqual([])
+        })
+
+        test("its retry under the same id while still held types nothing new", async () => {
+          const run = settingRun(compacting(`❯ ${COMMAND}`))
+          await run.send()
+          expect(await run.send()).toMatchObject({ code: "QUEUED", ok: false })
+          expect(run.sent).toEqual([{ surface: HERDR, text: COMMAND }])
+          expect(run.enters).toEqual([])
+        })
+
+        test("sent to an idle session reads delivered", async () => {
+          const run = settingRun(EMPTY)
+          expect(await run.send()).toMatchObject({ ok: true, sessionId: "s-dispatcher" })
+          expect(run.sent).toEqual([{ surface: HERDR, text: COMMAND }])
+          expect(run.recorded).toEqual(["Set dispatcher's model to opus"])
+        })
+      })
+
+      // an API restart forgets the ids it queued, and the outbox's queuedAt stands in for them, so the message is read again and never pasted twice
+      describe("after an API restart", () => {
+        const restarted = (shown: string, ms: number) => {
+          const run = herdr()
+          const enters: string[] = []
+          run.deps.readScreen = async () => (enters.length ? EMPTY : shown)
+          run.deps.pressEnter = async (surface) => {
+            enters.push(surface)
+          }
+          run.deps.wait = async () => {}
+          run.deps.now = () => new Date(NOW + ms)
+          const queuedAt = new Date(NOW).toISOString()
+          const send = () =>
+            deliver({ actor, id: nextId(), queuedAt, text: MESSAGE, to: "dispatcher" }, run.deps)
+          return { ...run, enters, send }
+        }
+
+        test("a message its transcript shows reads delivered, typing nothing", async () => {
+          const run = restarted(EMPTY, 60_000)
+          run.deps.said = async () => [OLDER, arrived]
+          expect(await run.send()).toMatchObject({ ok: true, sessionId: "s-dispatcher" })
+          expect(run.sent).toEqual([])
+          expect(run.recorded).toHaveLength(1)
+        })
+
+        test("a message still queued above the box reads queued, typing nothing", async () => {
+          const run = restarted(QUEUED_ABOVE, 60_000)
+          expect(await run.send()).toMatchObject({ code: "QUEUED", ok: false })
+          expect(run.sent).toEqual([])
+          expect(run.enters).toEqual([])
+        })
+
+        test("a message gone with no transcript line past the bound reads lost, typing nothing", async () => {
+          const run = restarted(EMPTY, QUEUED_MS)
+          expect(await run.send()).toMatchObject({ code: "LOST", ok: false })
+          expect(run.sent).toEqual([])
+        })
+
+        test("a message back in the box once the compaction ends gets its Enter, pasted once", async () => {
+          const run = restarted(screen(`❯ ${MESSAGE}`), 60_000)
+          expect(await run.send()).toMatchObject({ ok: true })
+          expect(run.sent).toEqual([])
+          expect(run.enters).toEqual([HERDR])
+        })
+      })
     })
 
     // 24 Oct 02:58Z: dispatcher's box held the owner's image message, pasted and never submitted, which every later try refused as a draft until the owner pressed Enter in the terminal; the box's shape is the one dispatcher's transcript recorded at 03:13Z
@@ -2079,4 +2322,23 @@ describe("deliver to a herdr session", () => {
     })
     expect(sent).toEqual([])
   })
+})
+
+// The owner works in the dashboard alone, so no delivery, Feed or outbox copy sends them to a session's terminal; each offers Retry, or Check it for me, in its place
+test("no delivery or answer copy sends the owner to a terminal", async () => {
+  const root = join(import.meta.dir, "../../../../../..")
+  const files = [
+    "api/hono/src/lib/dashboard/deliver.ts",
+    "api/hono/src/lib/dashboard/feed.ts",
+    "web/next/src/lib/inbox.ts",
+    "web/next/src/lib/outbox.ts",
+  ]
+  for (const file of files) {
+    const source = await Bun.file(join(root, file)).text()
+    const strings = source.match(/`[^`]*`|"[^"\n]*"/g) ?? []
+    const sent = strings.filter((s) =>
+      /(?:look at|check) [^`"]*terminal|in its terminal first/i.test(s),
+    )
+    expect({ file, sent }).toEqual({ file, sent: [] })
+  }
 })

@@ -108,6 +108,7 @@ describe("an account's row", () => {
           email: "made-up@example.test",
           key: "made-up@example.test",
           label: "work",
+          own: false,
           provider: "claude",
           stored: true,
         },
@@ -118,13 +119,27 @@ describe("an account's row", () => {
       title: "work",
     })
     expect(
-      accountWords({ email: null, key: "zai", label: "zai", provider: "glm", stored: false }),
+      accountWords({
+        email: null,
+        key: "zai",
+        label: "zai",
+        own: false,
+        provider: "glm",
+        stored: false,
+      }),
     ).toEqual({ description: "GLM · No token kept", title: "zai" })
   })
 })
 
 describe("an Add's answer", () => {
-  const account = { email: null, key: "zai", label: "zai", provider: "glm" as const, stored: true }
+  const account = {
+    email: null,
+    key: "zai",
+    label: "zai",
+    own: false,
+    provider: "glm" as const,
+    stored: true,
+  }
 
   test("is the account added, or the API's own words for a refusal, the 409 for no login included", async () => {
     expect(await addOutcome(async () => ({ data: { account }, error: null }))).toEqual({ account })

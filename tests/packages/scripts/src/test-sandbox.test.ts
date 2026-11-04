@@ -17,6 +17,40 @@ const DIR = mkdtempSync(join(tmpdir(), "test-sandbox-test-"))
 // removing DIR also ends the looping child's loop, even when bun drops a timed-out test's body before its finally
 afterAll(() => rmSync(DIR, { force: true, recursive: true }))
 
+test("CLOCK_AHEAD_DAYS moves a running clock that many days ahead, and leaves out a named exempt file", async () => {
+  const dir = join(DIR, "clock")
+  mkdirSync(join(dir, "tests/scripts"), { recursive: true })
+  // the OS stamps a new file's mtime on the real clock, which the preload never moves
+  writeFileSync(
+    join(dir, "ahead.test.ts"),
+    `import { expect, test } from "bun:test"\nimport { statSync, writeFileSync } from "node:fs"\ntest("ahead", async () => { writeFileSync("stamp", ""); const days = (Date.now() - statSync("stamp").mtimeMs) / 86_400_000; expect(statSync("stamp").mtime instanceof Date).toBe(true); expect(structuredClone(new Date()) instanceof Date).toBe(true); expect(days).toBeGreaterThan(29.9); expect(days).toBeLessThan(30.1); const a = Date.now(); await Bun.sleep(50); expect(Date.now() - a).toBeGreaterThanOrEqual(40) })\n`,
+  )
+  writeFileSync(
+    join(dir, "tests/scripts/roster.test.ts"),
+    'import { expect, test } from "bun:test"\ntest("exempt", () => expect(1).toBe(2))\n',
+  )
+  const files = ["./ahead.test.ts", "tests/scripts/roster.test.ts"]
+  const { CLOCK_AHEAD_DAYS: _, ...real } = process.env
+  const runs = await Promise.all(
+    [{ ...real, CLOCK_AHEAD_DAYS: "30" }, real].map(async (env) => {
+      const run = Bun.spawn(["bun", SCRIPT, ...files], {
+        cwd: dir,
+        env,
+        stderr: "pipe",
+        stdout: "ignore",
+      })
+      return { code: await run.exited, stderr: await new Response(run.stderr).text() }
+    }),
+  )
+  expect(runs[0]!.code).toBe(0)
+  expect(runs[0]!.stderr).toMatch(/\b1 pass\b/)
+  expect(runs[0]!.stderr).toContain("the clock-ahead pass leaves out tests/scripts/roster.test.ts")
+  expect(runs[0]!.stderr).not.toContain("exempt")
+  expect(runs[1]!.code).not.toBe(0)
+  expect(runs[1]!.stderr).toContain("(fail) ahead")
+  expect(runs[1]!.stderr).toContain("(fail) exempt")
+}, 60_000)
+
 test("a parallel pass past its deadline fails, naming the file still running", async () => {
   writeFileSync(
     join(DIR, "quick.test.ts"),
@@ -221,3 +255,65 @@ test("a failed run in a folder with an unbuilt package ends naming it and the bu
     rmSync(folder, { force: true, recursive: true })
   }
 }, 30_000)
+
+// A git hook exports GIT_DIR and GIT_INDEX_FILE, and a test's scratch git init once took them and set the real repository's core.bare (3 Nov), so the sandbox hands its tests none
+test("a test's scratch git init, run under a hook's GIT_DIR and GIT_INDEX_FILE, leaves them untouched", () => {
+  const decoy = join(DIR, "decoy-git")
+  const repo = join(DIR, "scratch-repo")
+  writeFileSync(
+    join(DIR, "git-init.test.ts"),
+    `import { expect, test } from "bun:test"\ntest("git init", () => { expect(Bun.spawnSync(["git", "init", "-q", ${JSON.stringify(repo)}]).exitCode).toBe(0) })\n`,
+  )
+  const run = Bun.spawnSync(["bun", SCRIPT, "./git-init.test.ts"], {
+    cwd: DIR,
+    env: { ...process.env, GIT_DIR: decoy, GIT_INDEX_FILE: join(decoy, "index") },
+    stderr: "pipe",
+    stdout: "ignore",
+  })
+  expect(existsSync(decoy)).toBe(false)
+  expect(existsSync(join(repo, ".git"))).toBe(true)
+  expect(run.exitCode).toBe(0)
+}, 30_000)
+
+// bun reads a path it cannot find as a name filter that matches nothing, so a mistyped path once let a run pass on its other files (2 Nov)
+test("a test path that names no file fails the run, naming it, and runs nothing (#627)", async () => {
+  const ran = join(DIR, "real-ran")
+  writeFileSync(
+    join(DIR, "real.test.ts"),
+    `import { test } from "bun:test"\nimport { writeFileSync } from "node:fs"\ntest("real", () => writeFileSync(${JSON.stringify(ran)}, ""))\n`,
+  )
+  const run = Bun.spawn(["bun", SCRIPT, "./real.test.ts", "fixtures/missing.test.ts"], {
+    cwd: DIR,
+    stderr: "pipe",
+    stdout: "ignore",
+    timeout: 15_000,
+  })
+  const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+  expect(code).not.toBe(0)
+  expect(stderr).toContain("fixtures/missing.test.ts")
+  expect(existsSync(ran)).toBe(false)
+}, 20_000)
+
+test.each([
+  ["a path with a leading ./", "./filtered.test.ts"],
+  ["a path with none", "filtered.test.ts"],
+  ["a filter with no test suffix", "filtered"],
+])(
+  "%s runs as before (#627)",
+  async (_, arg) => {
+    writeFileSync(
+      join(DIR, "filtered.test.ts"),
+      'import { test } from "bun:test"\ntest("filtered", () => {})\n',
+    )
+    const run = Bun.spawn(["bun", SCRIPT, arg], {
+      cwd: DIR,
+      stderr: "pipe",
+      stdout: "ignore",
+      timeout: 15_000,
+    })
+    const [stderr, code] = await Promise.all([new Response(run.stderr).text(), run.exited])
+    expect(code).toBe(0)
+    expect(stderr).toContain("1 pass")
+  },
+  20_000,
+)

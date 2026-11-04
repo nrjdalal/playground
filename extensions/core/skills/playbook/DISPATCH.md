@@ -3,22 +3,16 @@
 How the dispatcher, the Planner and the two leads route a new ask, bundle the work and fill the worker slots.
 The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), and the roster writes in [ROSTER.md](ROSTER.md).
 
-- Every new ask runs down one chain, each manager doing its own part (the owner: "I always see planner idle.
-  Planner never works.
-  Why are you not separating that task based on the managers?"
-  and "Why don't we use planner?
-  Planner should do this T3 code and other things.
-  Maybe not do, but align things."; the chain is his Inbox decision #i48): the dispatcher routes it; the Planner researches it, orders it and writes the plan; the Builder's workers build, review and merge it; Ops ships it, rolls the dashboard and watches the machine.
+- Every new ask runs down one chain, each manager doing its own part (so no manager sits idle while another does its part, the Planner aligning the work; the chain is his Inbox decision #i48): the dispatcher routes it; the Planner researches it, orders it and writes the plan; the Builder's workers build, review and merge it;
+  Ops ships it, rolls the dashboard and watches the machine.
   Research, a deep dive, a comparison, a plan or a plan page ends with the Planner.
   Four routes skip the Planner, and the manager that takes one tells the Planner after, so it records the task in `plan.json`: the two fast lanes, a live break or a tiny fix the owner points at (a stuck bubble, a wrong colour) straight to the Builder and a machine or ops incident (load, Docker, a stuck session) straight to Ops; a backlog `Fix: ` entry a free slot takes;
   and a task the owner calls priority (both below).
   The work org's work (one of its tickets) skips the Planner too, and stays outside the lanes.
   The dispatcher keeps the owner's conversation, the routing and the Inbox.
   A message reading `update the dashboard now: ...` is his click on the Dashboard's Update now: route it to Ops, who rolls the live dashboard at once with `playground update` (`.agents/dashboard/live.md`).
-- The dispatcher routes every ask of the owner's to a thread, as it routes the ask, in the live dashboard's checkout (the owner, 22 Oct: "there is this the concept of threads?
-  I just want to introduce it at Playground ASAP."; 23 Oct: "a thread will have an ID.
-  If the agent replies, it replies with the same ID, so it keeps being associated with the thread."):
-  - A message that opens with a marker, `[thread:<id>]`, is already routed: he sent it with New thread or from the thread's view, and ingest routes it as it reads it.
+- The dispatcher routes every ask of the owner's to a thread, as it routes the ask, in the live dashboard's checkout (each thread has an ID that a reply carries, so the reply stays with its thread):
+  - A message that opens with a marker, `[thread:<id>]`, is already routed: he sent it from the thread's view (the main chat's New thread is off for now), and ingest routes it as it reads it.
   - A new ask with no marker opens a thread titled with what he asked (`bun run thread new "<title>"` prints its id), and the ask is routed to it (`bun run thread route <id> --quote "<its opening words>"`), quoting enough of them that no other untagged message of the session starts the same way.
   - Every reply about a thread's ask opens with its marker, `[thread:<id>] `, and so does every later update on that topic, a peer's report relayed included: ingest routes the reply to the thread.
   - An ask to a peer about a thread opens with its marker, and asks the peer to open its report with it, so the report routes there too.
@@ -33,12 +27,9 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   Before it files one, it searches that repo's open issues for the same file or symptom, and folds the finding into a match as a comment, filing a new issue only when none matches (one issue once duplicated another).
   When a Done when it writes asks a doc to cite a past case, it asks for the case by its date and what happened, and for the issue number in the PR body, since a doc holds no issue number ([the trace ratchet](../../../../scripts/hooks/README.md#the-trace-ratchet); one worker, 1 Nov, had to depart from its issue's Done when for that).
   Before it records an ETA in `plan.json` or reports one to the dispatcher, it reads that worker's `eta` field in `~/.playground/roster.json`, where the Builder writes each move at once (**eta**), rather than the message that carried it (one such went stale three times).
-- The Planner stays free to take a new ask within a minute or two (the owner, 9 Oct: "Planner is using worker, right?
-  Planner should always be using worker.
-  He should not be busy, because if I get to do three production PRs, how would we manage that?").
+- The Planner stays free to take a new ask within a minute or two, since it works through workers alone and so is never busy when several urgent asks land.
   When several urgent asks land together, each goes to the Builder as its own lane within minutes, its order first and its details after, so no plan waits on another plan's research.
-- Building calls stay in the factory (the owner, 9 Oct: "At the end of the day, everything is autonomous, but if you are making a breaking change or you are talking to somebody, it goes through me, mostly Slack.
-  Besides Slack, most of the things we can do and manage, you can do and manage yourself."): scope, order, design, a build, a fix, an additive schema change (AGENTS.md's schema rule) and a merge under the **gate** are made by the Planner, the dispatcher and the Builder,
+- Building calls stay in the factory (everything runs on its own, and only a breaking change or talking to someone goes through the owner, mostly on Slack): scope, order, design, a build, a fix, an additive schema change (AGENTS.md's schema rule) and a merge under the **gate** are made by the Planner, the dispatcher and the Builder,
   on Playground's work and the work org's alike (the work org's through its ticket skill's loop, less the go-points that skill keeps for him),
   never put to him.
   The work org's scope is its ticket and the Product team's decisions, and a plan or lane adds nothing beyond them; a gap or a disagreement goes to your lead as a question (`.agents/decisions.md`).
@@ -51,18 +42,14 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   A skill with no `hooks:` is Read as a document and followed: a Read arms no `allowed-tools` grant either, and the skill's own asks and prohibitions bind as written.
   `${CLAUDE_SKILL_DIR}` is not expanded on a Read, so the worker resolves the path itself.
   Of the steps a brief names, only the ones **terminal** names go to the dashboard's owner, and a decision still goes as **ask** says.
-- Work goes out in bundles (the owner, 7 Oct: "There are now so many pending PRs.
-  We need to group issues together, and we can ship so much at once instead of chunking up everything.
-  Running a test-review loop on anything, we can make it more precise.").
+- Work goes out in bundles, since too many PRs stood open one by one, and one test and review loop over a group is more precise.
   The Planner groups the open issues and backlog entries that touch one surface into a bundle: sidebar and status, chat and composer, inbox and aside, ops scripts and the merge path, tests and docs, or apps.
   The work org's work stays outside the bundles, one ticket to a worker, as its ticket skill works it.
   A bundle is one worker, one branch, one PR, one review loop and one tester pass per head.
   A lane's item aims at about 1,000 changed lines or fewer, and a worker whose diff passes that splits the rest into a new PR off `canary` rather than stacking a third level, since each round of a diff too big to read whole finds new blocking issues (measured, 31 Oct: one of 9,089 lines opened with 3 blocking and 10 should-fix findings, and one of 1,241 stayed at 3/5 after 5 rounds).
   The Planner keeps the bundles as `plan.json`'s lanes: one worker a lane, each lane owning its files and naming its test area (`testArea`, the pages and files it touches), the lanes in parallel, each lane's items top to bottom.
   A lane's file set, a stack's, and every overlap check between open PRs read each PR's whole list with `gh api --paginate repos/<owner>/<repo>/pulls/<n>/files --jq '.[].filename'` ([GITHUB-BULK-READS.md](GITHUB-BULK-READS.md)), since `gh pr view <n> --json files` stops at 100 with no sign it cut the list (one PR read 100 of its 143 files, measured).
-  Every estimate a lane or a plan carries names three numbers at the agent's pace, each labelled measured or estimated (**verify**): the build time in hours, the people waits (reviews, the owner's answers) and the gate waits (Checks, review rounds, counted as **eta** counts them), and never human dev-days or weeks (the owner: "The estimates are always not nice...
-  Nothing takes 2 to 3 weeks.
-  You should be aware of this fact").
+  Every estimate a lane or a plan carries names three numbers at the agent's pace, each labelled measured or estimated (**verify**): the build time in hours, the people waits (reviews, the owner's answers) and the gate waits (Checks, review rounds, counted as **eta** counts them), and never human dev-days or weeks, since nothing at the agent's pace takes weeks.
   The tester drives that area alone, and the suite runs once per head.
   The Planner marks an item or a part merged once GitHub shows that item's own PR merged, read by its number and branch, with its merge commit and time; a ticket ID or commit title two PRs share is no evidence.
   The Builder dispatches from `plan.json`'s `lanes` alone, a backlog fix or work-org entry aside (below); a lane marked `listedOnly` is shown on the plan, never dispatched.
@@ -88,17 +75,15 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
 - Stay free, since the dispatcher is always free: it runs nothing long, waits on no picker or tool, and does no worker's job, and a manager summarises before it sends the dispatcher anything.
   Route the ask (spawn or `SendMessage`), record it in the roster, end the turn.
   Reports arrive by `SendMessage`, and you build nothing yourself, and run no background watcher: a threshold worth watching goes to Ops as an ops-report finding.
-  The dispatcher runs no check or research itself either: research goes to the Planner and a check to a lead, so nothing queues behind it (the owner, 7 Oct: "you shouldn't be doing anything directly.
-  Always go for a worker or something.
-  You should not be blocked.").
+  The dispatcher runs no check or research itself either: research goes to the Planner and a check to a lead, so nothing queues behind it, so the dispatcher hands every piece of work on and is never blocked.
   Between turns the dispatcher waits; a lead's one look at its sessions is its [sweep](SWEEP.md).
 - A bundle, or a task that goes out alone, goes to a new worker.
   Steer a busy worker only with a correction to the very thing it is building.
   A separable change to an open PR goes to a new worker on a branch off that PR's head, the two coordinating through the Builder.
 - Before a lead spawns a worker, it reads the machine's room from the live dashboard: `bun run --cwd <dashboard checkout> verify system`, which finds the dashboard's stack through portless.
-  Room is held in code: `scripts/spawn.sh`, the one way a session starts another ([SESSIONS.md](SESSIONS.md#spawn)), runs a capacity gate on load, memory, for a new worker a run-slot lane free with the load units for a run, or an empty queue, and the backend's usage, and refuses with the gate and its reading (the owner: "It's not about the slot at all.
-  It's about how many cores we are using."), and refuses a name a live session already holds.
-  It has no bypass: past the gate only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate, and a priority task takes the room its lead frees by closing its lowest-priority worker (below).
+  Room is held in code: `scripts/spawn.sh`, the one way a session starts another ([SESSIONS.md](SESSIONS.md#spawn)), runs a capacity gate on load, memory, for a new worker a run-slot lane free with the load units for a run, or an empty queue, and the backend's usage, and refuses with the gate and its reading (the room is the cores in use, not a count of slots),
+  and refuses a name a live session already holds.
+  Its one bypass is the first dispatcher's ([SESSIONS.md](SESSIONS.md#spawn)); past the gate otherwise only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate, and a priority task takes the room its lead frees by closing its lowest-priority worker (below).
   Spawn a new session only for a chore that needs its own context; a short job (a probe-sized check, a one-off script) runs as a background task in the session that wants it.
   Within them, spawn as many as its `system` line's room allows, and at "No room" spawn none and queue the task with that line as the reason.
   Room is the machine's, not usage's: count every membership, and trim no work for usage while any account has room.
@@ -110,8 +95,8 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   Ready means its brief exists: a worker's order and a backlog entry each carry the brief's path, written when the item is queued.
   The owner's own asks go ahead of the chores the factory proposed, and a fix for live breakage or security goes ahead of both: the Planner folds his asks and the other entries into the lanes, his asks first, and a slot that opens takes what ROSTER.md's step 1 names ([ROSTER.md](ROSTER.md)).
 - A task the owner calls priority starts now: in the same turn, when the slots are full or `verify system` reads No room, close the lowest-priority worker at a safe point (a WIP commit, a handoff ([SESSIONS.md](SESSIONS.md#write-a-handoff)), closed as [SESSIONS.md](SESSIONS.md#end) End says),
-  which frees its room so spawn.sh passes (at the load cap, wait for the load to fall), and spawn the task's worker; past the gate only the owner starts a session, from his own terminal, whose sessions load no factory hook, or a PR changes the gate.
-  Then send the dispatcher the worker's name and ETA.
+  which frees its room so spawn.sh passes (at the load cap, wait for the load to fall), and spawn the task's worker, whose start takes the gate as any other (above).
+  Then send the Planner the worker's name and ETA, and the dispatcher too, since a priority task is the owner's own ask.
   It never waits in the backlog.
 - A small task going out alone (one concern, a small diff, under about 30 minutes) runs as an A/B pair: two workers on the same brief and base, differing in one variable (such as brief style; model and effort stay Opus at high, [SESSIONS.md](SESSIONS.md#spawn)), one reviewer scoring both PRs blind as X and Y. The winner merges,
   the loser closes with a link to it, the pair holds two slots, and one pair runs at a time.
@@ -124,10 +109,11 @@ Dispatch is done when the session holds its brief, the roster shows its task (an
 ## Slack mode
 
 While the `slack.mode` setting is on, the owner is away and reads only the owner's own Slack DM, so the DM is the owner's chat with the factory.
-ops-dm-watch reads the DM each minute and sends each new owner message to the dispatcher in full; one with no reply in 3 minutes, or any while the dispatcher has read stuck or failed for 3 minutes, goes to the second dispatcher too, and Ops hears of the stuck dispatcher.
+ops-dm-watch reads the DM each minute and sends each new owner message to the dispatcher in full; one with no reply in 3 minutes, or any while the dispatcher has read stuck or failed for 3 minutes, goes to the session in the assistant seat too (`roster.ts who assistant`), else stays with the dispatcher alone and the job's log says so, and Ops hears of the stuck dispatcher.
+A dispatcher mid-turn, its session state `working` and written in the last 3 minutes, holds the no-reply hand-on until it stops, since its reply waits behind that turn.
 
 1. Answer every owner message the job hands you, even a one-word one: write the reply to a file and run `playground dm send <absolute path>`.
-   The second dispatcher answers only what the job hands it, the same way, and routes nothing.
+   The Assistant answers only what the job hands it, the same way, and routes nothing.
    Done when the command prints `dm send: posted`.
 2. At each 15-minute line from the job, post the owner an update on the factory's work the same way.
    Done when the update is posted, or nothing has changed since the last one and the reply says so.

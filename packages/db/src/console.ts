@@ -41,6 +41,10 @@ export const dashboardMessageSummary = (to: string, text: string, attachments: n
   return text ? `Sent ${to} ${words} with ${files}` : `Sent ${to} ${files}`
 }
 
+// A model or effort the composer set, told whole, since it is one word from a fixed list and quotes nothing.
+export const dashboardSettingSummary = (to: string, setting: "effort" | "model", value: string) =>
+  `Set ${to}'s ${setting} to ${value}`
+
 // Takes the caller's transaction, not a database handle, so the record shares the fate of the change it describes: an event always means the change happened, and a change cannot happen unrecorded. Passing the connection instead would make that a convention; this makes it the only thing that compiles.
 export type ActivityEvent = {
   action: ActivityAction

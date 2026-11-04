@@ -15,6 +15,7 @@ import {
   read,
   Refusal,
   run,
+  UNTYPED,
 } from "../../scripts/shell-pane"
 import { ALLOWED, type Paths, REFUSED_FORMS } from "./hooks/fixtures/refused-forms"
 import { storeWith } from "./hooks/render-set"
@@ -215,8 +216,12 @@ const rowsFor = (guard: string): string[] => [
   ...REFUSED_FORMS.filter((group) => group.guards.includes(guard as never)).flatMap((group) =>
     group
       .rows(PATHS)
+      // a row holding a character run will not type (a newline) never reaches a guard through the pane, so it is left to refused-forms.test.ts
       .filter(
-        ([what, call]) => typeof call === "string" && !ALLOWED.includes(`${group.source} ${what}`),
+        ([what, call]) =>
+          typeof call === "string" &&
+          !UNTYPED.test(call) &&
+          !ALLOWED.includes(`${group.source} ${what}`),
       )
       .map(([, call]) => call as string),
   ),

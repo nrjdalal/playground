@@ -32,6 +32,7 @@ import {
   livePair,
   moveRoute,
   othersLiveDashboard,
+  pendingMigrations,
   PORTLESS,
   preflight,
   prefixOf,
@@ -687,7 +688,7 @@ const read =
 const OWN_ROOT = "/home/me/dispatcher"
 const FACTORY_ROOT = "/home/me/dispatcher/.claude/worktrees/pg-1"
 // A live-reads stack that opts in to cmux's sessions, as the attachment tests below need.
-const OPT_IN = { PLAYGROUND_CMUX_SESSIONS: "true" }
+const OPT_IN = { PLAYGROUND_ALL_SESSIONS: "true" }
 const LIVE_READS = { ...OPT_IN, PLAYGROUND_LIVE_READS: "1" }
 
 // Stand-ins for the guard: the container that publishes the port, or the guard's own refusal, and a proof that records each call.
@@ -708,6 +709,8 @@ const proving = () => {
 }
 // A database the migration has filled; the empty-database tests below name the refusal instead.
 const seeded = async (): Promise<number> => 2
+// A database that holds every migration in the journal.
+const current = async (): Promise<number> => 0
 
 describe("preflight", () => {
   // The branch comes first, so a CI runner's detached HEAD refuses before anything asks cmux.
@@ -746,6 +749,7 @@ describe("preflight", () => {
       attach,
       bare: () => [],
       locate: () => located("playground-a-db"),
+      pending: current,
       prove,
       tables: seeded,
     })
@@ -784,6 +788,7 @@ describe("preflight", () => {
         return ["playground.localhost"]
       },
       locate: () => located("playground-a-db"),
+      pending: current,
       prove,
       tables: seeded,
     })
@@ -803,6 +808,7 @@ describe("preflight", () => {
           return ["playground.localhost"]
         },
         locate: () => located("playground-a-db"),
+        pending: current,
         prove,
         tables: seeded,
       })
@@ -870,6 +876,7 @@ describe("preflight", () => {
         attach: async () => reach,
         held: async () => [],
         locate: () => located("playground-a-db"),
+        pending: current,
         prove,
         tables: seeded,
       })
@@ -900,6 +907,7 @@ describe("preflight", () => {
         return []
       },
       locate: () => located("playground-a-db"),
+      pending: current,
       prove,
       tables: seeded,
     })
@@ -917,6 +925,7 @@ describe("preflight", () => {
         return { state: "attached" }
       },
       locate: () => located("playground-a-db"),
+      pending: current,
       prove,
       tables: seeded,
     })
@@ -925,7 +934,7 @@ describe("preflight", () => {
     if (checked.ok) {
       expect(checked.dashboard.kind).toBe("fixture")
       if (checked.dashboard.kind === "fixture") {
-        expect(checked.dashboard.fixture.cmux.sessions.length).toBeGreaterThan(0)
+        expect(checked.dashboard.fixture.herdr.panes.length).toBeGreaterThan(0)
       }
     }
   })
@@ -997,6 +1006,7 @@ describe("preflight", () => {
           return { state: "attached" }
         },
         locate: () => located("playground-a-db"),
+        pending: current,
         prove,
         tables: seeded,
       })
@@ -1010,7 +1020,7 @@ describe("preflight", () => {
     for (const [checkout, settings, root] of [
       [{ branch: LIVE_DASHBOARD.branch, linked: true }, {}, undefined],
       [BRANCH, { PLAYGROUND_LIVE_READS: "1" }, undefined],
-      [{ branch: "main", linked: false }, { PLAYGROUND_CMUX_SESSIONS: "false" }, OWN_ROOT],
+      [{ branch: "main", linked: false }, { PLAYGROUND_ALL_SESSIONS: "false" }, OWN_ROOT],
     ] as const) {
       const { prove } = proving()
       const checked = await preflight(checkout, read(URL, settings), {
@@ -1022,6 +1032,7 @@ describe("preflight", () => {
           throw new Error("a stack that has not opted in read ps and the registry")
         },
         locate: () => located("playground-a-db"),
+        pending: current,
         prove,
         root,
         tables: seeded,
@@ -1043,6 +1054,7 @@ describe("preflight", () => {
       },
       bare: () => [],
       locate: () => located("playground-a-db"),
+      pending: current,
       prove,
       root: OWN_ROOT,
       tables: seeded,
@@ -1060,6 +1072,7 @@ describe("preflight", () => {
         return { state: "attached" }
       },
       locate: () => located("playground-a-db"),
+      pending: current,
       prove,
       root: FACTORY_ROOT,
       tables: seeded,
@@ -1106,6 +1119,7 @@ describe("preflight", () => {
           throw new Error("a test run's launcher asked cmux")
         },
         locate: () => located("playground-a-db"),
+        pending: current,
         prove: proving().prove,
         bare: () => [],
         root: OWN_ROOT,
@@ -1232,6 +1246,7 @@ describe("preflight", () => {
     const passed = await preflight({ branch: LIVE_DASHBOARD.branch, linked: true }, read(URL), {
       attach,
       locate: () => located(LIVE_DASHBOARD.database),
+      pending: current,
       prove: dashboard.prove,
       tables: seeded,
     })
@@ -1247,6 +1262,7 @@ describe("preflight", () => {
       await preflight(BRANCH, read(URL), {
         attach,
         locate: () => located("playground-a-db"),
+        pending: current,
         prove,
         tables: seeded,
       }),
@@ -1266,10 +1282,49 @@ describe("preflight", () => {
     const filled = await preflight(BRANCH, read(URL), {
       attach,
       locate: () => located("playground-a-db"),
+      pending: current,
       prove: proving().prove,
       tables: async () => 2,
     })
     expect(filled).toMatchObject({ ok: true, proof: `${URL} is playground-a-db` })
+  })
+
+  // A worktree that merged canary keeps its container's old schema, and a stack booted on it fails its sign-in, which verify reports only as a timeout.
+  test("refuses a database that lacks a migration in the journal, naming the migrate command", async () => {
+    const lacking = (count: number) =>
+      preflight(BRANCH, read(URL), {
+        attach,
+        locate: () => located("playground-a-db"),
+        pending: async () => count,
+        prove: proving().prove,
+        tables: seeded,
+      })
+    expect(await lacking(1)).toEqual({
+      ok: false,
+      refusal: "database lacks 1 migration: run bun run db:migrate",
+    })
+    expect(await lacking(3)).toEqual({
+      ok: false,
+      refusal: "database lacks 3 migrations: run bun run db:migrate",
+    })
+    expect(await lacking(0)).toMatchObject({ ok: true, proof: `${URL} is playground-a-db` })
+  })
+
+  // The live dashboard's roll migrates its database itself, or holds an index migration for a quiet moment, so its restart starts on the database as it is.
+  test("starts the live dashboard's own checkout on a database that lacks a migration", async () => {
+    let asked = 0
+    const checked = await preflight({ branch: LIVE_DASHBOARD.branch, linked: true }, read(URL), {
+      attach,
+      locate: () => located(LIVE_DASHBOARD.database),
+      pending: async () => {
+        asked++
+        return 1
+      },
+      prove: proving().prove,
+      tables: seeded,
+    })
+    expect(checked).toMatchObject({ ok: true })
+    expect(asked).toBe(0)
   })
 })
 
@@ -1358,6 +1413,40 @@ describe.skipIf(!dockerUp())("preflight against a real container", () => {
     expect(proofs).toEqual([])
     expect(checked.ok).toBe(false)
     if (!checked.ok) expect(checked.refusal).toContain(`points at ${name}`)
+  }, 30_000)
+
+  // drizzle's migrator applies each journal entry newer than the last one it recorded, so the count of missing ones reads the same rows; with no journal named, it reads the shipped one, all of whose migrations a fresh database lacks.
+  test("counts the journal's migrations newer than the last one drizzle recorded", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dev-journal-"))
+    const journal = join(dir, "_journal.json")
+    writeFileSync(
+      journal,
+      JSON.stringify({
+        entries: [
+          { tag: "0000_a", when: 1000 },
+          { tag: "0001_b", when: 2000 },
+          { tag: "0002_c", when: 3000 },
+        ],
+      }),
+    )
+    const shipped = await Bun.file(
+      join(import.meta.dir, "../../../../../../packages/db/drizzle/meta/_journal.json"),
+    ).json()
+    const sql = new SQL(url, { max: 1 })
+    try {
+      expect(await pendingMigrations(url)).toBe(shipped.entries.length)
+      expect(await pendingMigrations(url, journal)).toBe(3)
+      await sql`create schema if not exists drizzle`
+      await sql`create table drizzle.__drizzle_migrations (id serial primary key, hash text not null, created_at bigint)`
+      expect(await pendingMigrations(url, journal)).toBe(3)
+      await sql`insert into drizzle.__drizzle_migrations (hash, created_at) values ('a', 1000)`
+      expect(await pendingMigrations(url, journal)).toBe(2)
+      await sql`insert into drizzle.__drizzle_migrations (hash, created_at) values ('b', 2000), ('c', 3000)`
+      expect(await pendingMigrations(url, journal)).toBe(0)
+    } finally {
+      await sql.close()
+      rmSync(dir, { force: true, recursive: true })
+    }
   }, 30_000)
 })
 
