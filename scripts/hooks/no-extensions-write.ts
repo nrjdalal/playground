@@ -9,6 +9,7 @@ import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
   ASSIGN,
+  codeFed,
   type Command,
   type Env,
   examine,
@@ -573,8 +574,9 @@ function narrow(cmd: Command, env: Env): boolean {
   return false
 }
 
-// Whether a line holds a shell reading its script from stdin (`sudo -s`, `sh`) anywhere, its groups' and substitutions' included, which runs whatever a reader prints into it
+// Whether a line holds a shell reading its script from stdin (`sudo -s`, `sh`) or a command its pipe feeds as code (codeFed) anywhere, its groups' and substitutions' included, which runs whatever a reader prints into it
 function rooted(commands: Command[]): boolean {
+  if (codeFed(commands).size > 0) return true
   return commands.some(
     (cmd) =>
       !!stdinShell(cmd) ||

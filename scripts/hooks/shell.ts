@@ -25,6 +25,8 @@ export type Command = {
   redirects: Redirect[]
   // Set when a count or a loop may run the command more than once, so a relative cd of its own may climb or descend any number of folders
   repeated?: boolean
+  // Set when the command's piped input may run as code (codeFed), so the walk judges that input as a script the command runs
+  runsStdin?: boolean
   scope: number
   stdin?: Command
   unsure?: boolean
@@ -247,7 +249,7 @@ const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
-// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
+// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): "root" | "shell" | undefined {
   const parsed = parse(cmd)
   const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading))
@@ -263,20 +265,15 @@ function stdinShellOf(
   cmd: Command,
   { args, first, name, xargs }: Parsed,
 ): "root" | "shell" | undefined {
+  // piped input, or input xargs hands on as words, reaches whatever the command runs, so a command that can run code takes it as code whatever its arguments say
+  const fed = !!cmd.stdin || !!xargs
   if (first && !marked(first.value)) {
-    if (name === "." || name === "source")
-      return args[0]?.value === "/dev/stdin" ? "shell" : undefined
+    if (name === "." || name === "source" || name === "eval")
+      return fed || (name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "")) ? "shell" : undefined
     if (!SHELLS.has(name)) return undefined
+    if (fed) return "shell"
     const { inline, operand } = shellOperand(args, name)
-    // xargs hands its input to the shell as words, so with no script of its own, or a placeholder in it, that input is the script
-    if (
-      xargs &&
-      (!operand || (xargs.replace !== undefined && operand.value.includes(xargs.replace)))
-    )
-      return "shell"
-    // a script the shell fills in at run time may be the piped input itself (`sh -c "$(cat)"`)
-    if (inline && operand && cmd.stdin && marked(operand.value)) return "shell"
-    return inline || operand ? undefined : "shell"
+    return inline || (operand && !STDIN_PATHS.has(operand.value)) ? undefined : "shell"
   }
   let at = 0
   for (let w = cmd.words[at]; w && !w.quoted; w = cmd.words[at]) {
@@ -287,7 +284,8 @@ function stdinShellOf(
   const end = first ? cmd.words.indexOf(first) : -1
   const before = cmd.words.slice(at, end === -1 ? undefined : end)
   const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
-  if (k === -1) return undefined
+  // a program the hook cannot read (`$SHELL`, `"$X"`) may be a shell
+  if (k === -1) return fed && first ? "shell" : undefined
   const wrapper = program(before[k].value)
   const shells = ROOT_SHELLS.get(wrapper) as Set<string>
   const { flags, values } = WRAPPERS.get(wrapper) as Options
@@ -308,9 +306,28 @@ function stdinShellOf(
   return !!first || before.slice(k + 1).some(starts) ? "root" : undefined
 }
 
+// Every command whose piped input may run as code, by the command whose output it reads: one stdinShell names, or one that opens a loop, a conditional or a brace group whose body up to its closing word holds a command that would be one under the same pipe, since every command of the body reads that stdin
+export function codeFed(commands: Command[]): Map<Command, Command> {
+  const fed = new Map<Command, Command>()
+  for (const [k, cmd] of commands.entries()) {
+    if (!cmd.stdin) continue
+    if (stdinShell(cmd)) fed.set(cmd.stdin, cmd)
+    let depth = 0
+    for (let j = k; j < commands.length; j++) {
+      const body = commands[j]
+      for (const m of markers(body.words)) depth += OPENS.has(m) ? 1 : CLOSES.has(m) ? -1 : 0
+      if (j > k && stdinShell({ ...body, stdin: cmd.stdin })) fed.set(cmd.stdin, cmd)
+      if (depth <= 0) break
+    }
+  }
+  return fed
+}
+
 // Wrappers that take one positional argument (a count or a duration) before the command.
 const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"])
+// The script names a shell or a source reads stdin through
+const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])
 // Every git-reading hook's one list of the words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
@@ -1095,7 +1112,10 @@ async function runAll(
     envs.set(scope, child)
     return child
   }
-  for (const cmd of lexed.commands) if (cmd.stdin && stdinShell(cmd)) cmd.stdin.feedsShell = true
+  for (const [producer, consumer] of codeFed(lexed.commands)) {
+    producer.feedsShell = true
+    consumer.runsStdin = true
+  }
   for (const cmd of lexed.commands) {
     const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins)
     if (verdict) return verdict
@@ -1104,7 +1124,7 @@ async function runAll(
 
 const subshell = (env: Env): Env => ({ ...env, vars: new Map(env.vars) })
 
-// One command as run() reads it, cd, the shells it starts, eval, and source or . of a process substitution or /dev/stdin followed, for a hook that finds a command inside another (a wrapper's words).
+// One command as run() reads it, cd, the shells it starts, eval, source or . of a process substitution or stdin's name, and piped input a command may run as code followed, for a hook that finds a command inside another (a wrapper's words).
 export async function examine(
   cmd: Command,
   env: Env,
@@ -1122,6 +1142,18 @@ export async function examine(
     const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins)
     if (verdict) return verdict
   }
+  // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already
+  if (!cmd.runsStdin || stdinScript(primary)) return
+  const script = await stdinOf(cmd, env)
+  return nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins))
+}
+
+// Whether a shell or a source reads its script from stdin, as shell() and examineReading read it
+function stdinScript({ args, name }: Parsed): boolean {
+  if (name === "." || name === "source") return STDIN_PATHS.has(args[0]?.value ?? "")
+  if (!SHELLS.has(name)) return false
+  const { inline, operand } = shellOperand(args, name)
+  return !operand || (!inline && STDIN_PATHS.has(operand.value))
 }
 
 const apart = (env: Env): Env => ({
@@ -1179,7 +1211,7 @@ async function examineReading(
     )
   else if (
     (name === "source" || name === ".") &&
-    (args[0]?.procs || args[0]?.value === "/dev/stdin")
+    (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))
   ) {
     const script = await scriptOf(args[0], cmd, here)
     verdict =
@@ -1475,10 +1507,7 @@ async function shell(
       const fed = await stdinOf(cmd, env)
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
     }
-    const verdict = await run(lexScript(script, env), subshell(env), visit, builtins)
-    // a script filled in at run time may be the piped input itself (`sh -c "$(cat)"`), so that input is judged as the script too
-    if (verdict || !cmd.stdin || !marked(operand.value)) return verdict
-    return run(lexScript(known(await stdinOf(cmd, env)), env), subshell(env), visit, builtins)
+    return run(lexScript(script, env), subshell(env), visit, builtins)
   }
   const script = await scriptOf(operand, cmd, env)
   return run(lexScript(known(script), env), subshell(env), visit, builtins)
@@ -1487,10 +1516,10 @@ async function shell(
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
 const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
 
-// A shell's or source's script: stdin with no operand or `/dev/stdin`, a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
+// A shell's or source's script: stdin with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text> {
   const script =
-    !operand || operand.value === "/dev/stdin"
+    !operand || STDIN_PATHS.has(operand.value)
       ? await stdinOf(cmd, env)
       : operand.procs
         ? await outputs(operand.procs, env)

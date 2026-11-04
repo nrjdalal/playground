@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from "no
 
 import { fromFactory } from "./role"
 import {
+  codeFed,
   type Command,
   type Env,
   examine,
@@ -16,7 +17,6 @@ import {
   run,
   slotWords,
   stdinOf,
-  stdinShell,
   type Text,
   type Visit,
   type Word,
@@ -448,8 +448,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   const known = knownVariables(command, environment, directory)
   const lexed = lex(command, known)
   // the shell each pipeline feeds, by the command whose output it reads, since the walk judges that command in the folder the pipeline runs in and never visits a shell of its own
-  const fed = new Map<Command, Command>()
-  for (const cmd of lexed.commands) if (cmd.stdin && stdinShell(cmd)) fed.set(cmd.stdin, cmd)
+  const fed = codeFed(lexed.commands)
   const visit: Visit = async (cmd, parsed, env) => {
     const slot = slotWords(parsed)
     if (slot)
