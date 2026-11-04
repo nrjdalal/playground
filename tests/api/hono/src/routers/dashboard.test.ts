@@ -243,7 +243,7 @@ describe("answerPrompt", () => {
     }
   })
 
-  // The route's own schema turns away a mode that would approve more than the one action, before anything reads cmux.
+  // The route's own schema turns away a mode that would approve more than the one action, before anything reads a session.
   test("the route's body takes only once or deny for a permission, manual or deny for a plan, and named choices", () => {
     for (const mode of ["always", "all", "bypass"]) {
       expect(feedAnswerSchema.safeParse({ kind: "permission", mode }).success).toBe(false)
@@ -262,7 +262,7 @@ describe("answerPrompt", () => {
   })
 
   // a herdr card's id is its tool call's, so the route takes one, and answerFeed answers it by keys into its pane
-  test("the route's params take a cmux Feed id and a herdr card's tool call id, and nothing a path could carry", () => {
+  test("the route's params take a herdr card's tool call id, and nothing a path could carry", () => {
     const params = (requestId: string) =>
       feedParamsSchema.safeParse({ requestId, sessionId: "s" }).success
     expect(params("3F2504E0-4F89-11D3-9A0C-0305E82C3301")).toBe(true)

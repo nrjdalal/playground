@@ -12,12 +12,9 @@ import {
   deliver,
   holdsMessage,
   inputState,
-  keystrokes,
   MAX_CHARS,
-  MAX_KEYSTROKES,
   MAX_LINES,
   normalize,
-  pieces,
   QUEUED_MS,
   readSkills,
   refusal,
@@ -35,9 +32,7 @@ import {
 import type { Entry } from "../../../../../../api/hono/src/lib/dashboard/transcript"
 import type { Live, Worker } from "../../../../../../api/hono/src/lib/dashboard/workers"
 import {
-  keystrokeCount,
   MESSAGE_MAX_CHARS,
-  MESSAGE_MAX_KEYSTROKES,
   MESSAGE_MAX_LINES,
   pastedFile,
 } from "../../../../../../web/next/src/lib/paste"
@@ -179,39 +174,15 @@ describe("refusal", () => {
     expect(refusal("", 1)).toBeNull()
   })
 
-  test("the paste rule counts keystrokes as deliver() types them, and keeps room for a reply's tag and five files", () => {
-    expect(MESSAGE_MAX_KEYSTROKES).toBe(MAX_KEYSTROKES)
-    for (const text of ["", "a", "a\nb", "a\\n\\t\\rb\n\\", "\\\\n", "x\n\ny"]) {
-      expect(keystrokeCount(text)).toBe(keystrokes(text).length)
-    }
-    // a short log line dense with escaped new lines
-    const log = `{"log":"${"a\\n".repeat(450)}"}`
-    expect(log.length).toBeLessThan(2000)
-    expect(pastedFile(log, "")).not.toBeNull()
-    const files = Array.from({ length: MAX_ATTACHMENTS }, (_, i) => ({
-      path: `/Users/someone/.playground/attachments/0000000${i}-0000-4000-8000-000000000000.txt`,
-    }))
-    // what deliver() would be asked to type: the words tagged with a picked reply, as withReply puts it, and five files
-    const fits = (pasted: string, before: string, after: string) => {
-      const sent = normalize(`re #i99999: ${before}${pasted}${after}`)
-      return (
-        !refusal(sent, MAX_ATTACHMENTS) &&
-        keystrokes(withAttachments(sent, files)).length <= MAX_KEYSTROKES
-      )
-    }
+  test("the paste rule keeps room for a reply's tag, with five files beside the words", () => {
+    // what deliver() would be asked to send: the words tagged with a picked reply, as withReply puts it, and five files, whose Attached lines no cap counts
+    const fits = (pasted: string, before: string, after: string) =>
+      !refusal(normalize(`re #i99999: ${before}${pasted}${after}`), MAX_ATTACHMENTS)
     const typed = "Made-up meeting notes. ".repeat(400).slice(0, 7000)
     for (const [pasted, words, asFile, after = ""] of [
       ["x".repeat(995), typed, true],
       ["x".repeat(1000), typed.slice(0, 6984), false],
       ["x".repeat(1000), typed.slice(0, 6985), true],
-      // at the keystroke cap from both sides: one line, then a piece per escape
-      [`x${"a\\n".repeat(386)}`, "", false],
-      [`x${"a\\n".repeat(387)}`, "", true],
-      // an empty first line, where the reply's tag costs a keystroke of its own
-      [`\n${"a\\n".repeat(385)}`, "", false],
-      [`\n${"a\\n".repeat(386)}`, "", true],
-      // a control character between the backslash and the n is dropped before deliver() counts
-      ["\\\u0001n".repeat(450), "", true],
       // lone carriage returns are line ends
       [Array(MAX_LINES).fill("z").join("\r"), "", false],
       [
@@ -230,9 +201,6 @@ describe("refusal", () => {
         true,
         "\nz",
       ],
-      // pasted mid-box: its closing backslash meets the n after the cursor and makes a piece of its own
-      [`${"a\\n".repeat(385)}\\`, "x", false, "n"],
-      [`${"a\\n".repeat(386)}\\`, "x", true, "n"],
     ] as const) {
       expect(pastedFile(pasted, words, after) !== null).toBe(asFile)
       if (!asFile) expect(fits(pasted, words, after)).toBe(true)
@@ -315,55 +283,6 @@ describe("skillDirs", () => {
 
   test("a stack that does not read this machine never reads a session's cwd, which a fixture made up", () => {
     expect(skillDirs("/work/app", "/fixture/claude", false)).toEqual(["/fixture/claude/skills"])
-  })
-})
-
-describe("pieces", () => {
-  test("a line is cut after every backslash that precedes n, r or t, and nowhere else", () => {
-    expect(pieces("C:\\temp\\new")).toEqual(["C:\\", "temp\\", "new"])
-    expect(pieces("a\\\\nb")).toEqual(["a\\\\", "nb"])
-    expect(pieces("keep \\N \\e \\x41 \\u0041 and a trailing \\")).toEqual([
-      "keep \\N \\e \\x41 \\u0041 and a trailing \\",
-    ])
-    expect(pieces("plain")).toEqual(["plain"])
-    expect(pieces("")).toEqual([])
-  })
-})
-
-describe("keystrokes", () => {
-  test("one line is its text, then Enter", () => {
-    expect(keystrokes("hello")).toEqual([{ text: "hello" }, { key: "enter" }])
-  })
-
-  test("lines are joined by Shift+Enter, a blank line included, and only the end submits", () => {
-    expect(keystrokes("one\n\nthree")).toEqual([
-      { text: "one" },
-      { key: "shift+enter" },
-      { key: "shift+enter" },
-      { text: "three" },
-      { key: "enter" },
-    ])
-  })
-
-  test("every piece is safe for cmux send, and the pieces put back together are the message", () => {
-    const samples = [
-      "C:\\temp\\new\\red\\tab",
-      "\\n\\r\\t at the start",
-      "ends with \\",
-      "double \\\\n and \\\\\\t",
-      "unicode café → ✓ 🙂 and `code` with $HOME",
-      "line one\nline \\two\n\n  indented \\n line",
-      "a C1 \u0085 control and \u009b",
-    ]
-    for (const sample of samples) {
-      const text = normalize(sample)
-      const steps = keystrokes(text)
-      const rebuilt = steps
-        .map((step) => ("text" in step ? step.text : step.key === "shift+enter" ? "\n" : ""))
-        .join("")
-      expect(rebuilt).toBe(text)
-      for (const step of steps) if ("text" in step) expect(step.text).not.toMatch(/\\[nrt]|\p{Cc}/u)
-    }
   })
 })
 
@@ -618,7 +537,6 @@ describe("deliver", () => {
       ["   ", "EMPTY"],
       ["!ls", "COMMAND"],
       ["\u200B/end-of-day", "COMMAND"],
-      [Array(MAX_KEYSTROKES).fill("\\n").join(""), "TOO_LONG"],
     ]) {
       expect(await deliver({ actor, text: text!, to: "dispatcher" }, deps)).toMatchObject({ code })
     }
@@ -1096,7 +1014,7 @@ describe("who calls deliver()", () => {
   })
 })
 
-// The one route beside deliver()'s that types into a pane: a herdr prompt's answer, the owner's own Submit on its card, which answerFeed() hands to answerHerdr() past its guards: the same contract as deliver() for the composer and answerFeed() for cmux. cmux.test.ts holds typeKeys() to feed.ts.
+// The one route beside deliver()'s that types into a pane: a herdr prompt's answer, the owner's own Submit on its card, which answerFeed() hands to answerHerdr() past its guards: the same contract as deliver() for the composer. cmux.test.ts holds typeKeys() to feed.ts.
 const HERDR_ANSWER_ROUTE = {
   file: "api/hono/src/routers/dashboard.ts",
   path: "/workers/:sessionId/feed/:requestId",

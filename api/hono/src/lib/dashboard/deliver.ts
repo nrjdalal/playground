@@ -122,11 +122,6 @@ export type DeliveryResult =
 
 export const MAX_CHARS = 8000
 export const MAX_LINES = 100
-// The keystrokes cmux's send once typed a message in, a text dense with \n, \r or \t splitting into many: herdr sends a message whole, and the cap stays only as the one the composer's paste rule mirrors (web/next/src/lib/paste.ts), until both go.
-export const MAX_KEYSTROKES = 400
-
-type Step = { key: "enter" | "shift+enter" } | { text: string }
-
 // A tab would autocomplete and a control character is a keystroke, so the text arrives with tabs as four spaces, line ends as \n and no other control character (C0, DEL or C1), trimmed.
 export const normalize = (text: string): string =>
   [...text.replace(/\r\n?/g, "\n").replaceAll("\t", "    ")]
@@ -214,34 +209,9 @@ export const skillDirs = (cwd: string, config: string, live: boolean): string[] 
 export const sessionSkills = (cwd: string): Promise<Set<string>> =>
   readSkills(skillDirs(cwd, configDir(), readsLive()))
 
-// `cmux send` reads \n, \r and \t inside its text as keystrokes, so a line is cut after every backslash that precedes one of those letters: sent apart, each half arrives literally.
-export const pieces = (line: string): string[] => {
-  const out: string[] = []
-  let start = 0
-  for (let i = 0; i < line.length - 1; i++) {
-    if (line[i] === "\\" && /[nrt]/.test(line[i + 1] ?? "")) {
-      out.push(line.slice(start, i + 1))
-      start = i + 1
-    }
-  }
-  if (start < line.length) out.push(line.slice(start))
-  return out
-}
-
-// Typed the way Claude Code's input takes a message: each line's text, Shift+Enter between lines for a newline that does not submit, then Enter. cmux 0.64's send has no paste, so a newline in its text would submit.
-export const keystrokes = (text: string): Step[] => [
-  ...text
-    .split("\n")
-    .flatMap((line, i): Step[] => [
-      ...(i > 0 ? [{ key: "shift+enter" as const }] : []),
-      ...pieces(line).map((piece) => ({ text: piece })),
-    ]),
-  { key: "enter" },
-]
-
 const RULE = /^─+$/
 const NAMED_RULE = /^─.*─$/
-// While messages wait in its queue, Claude Code fills its empty box with one of these dim hints (its prompt input's placeholder, 2.1.309) and draws the messages themselves above the box; read-screen drops the dimming, so a hint is matched whole.
+// While messages wait in its queue, Claude Code fills its empty box with one of these dim hints (its prompt input's placeholder, 2.1.309) and draws the messages themselves above the box; the screen read drops the dimming, so a hint is matched whole.
 const QUEUED_HINTS = new Set([
   "Press up to edit queued messages",
   "Press up to edit queued messages, Enter to send them immediately",
@@ -263,7 +233,7 @@ const cutHint = (box: string[], words: string): boolean =>
   words.endsWith("…") &&
   [...QUEUED_HINTS].some((hint) => hint.startsWith(words.slice(0, -1).trimEnd()))
 
-// What a session's input box holds, as read-screen shows it between the last two rules on the screen: only its ❯ prompt or a queue hint (empty), anything more (a draft, which would be sent with the message, a ! or an open / menu, which would run it, or a picker framed by rules, which ON_PICKER normally catches first), or no rules to frame a box at all (missing: a Claude Code whose layout has changed).
+// What a session's input box holds, as the screen read shows it between the last two rules on the screen: only its ❯ prompt or a queue hint (empty), anything more (a draft, which would be sent with the message, a ! or an open / menu, which would run it, or a picker framed by rules, which ON_PICKER normally catches first), or no rules to frame a box at all (missing: a Claude Code whose layout has changed).
 export const inputState = (screen: string): "empty" | "holds" | "missing" => {
   const box = inputBox(screen)
   if (!box) return "missing"
@@ -533,7 +503,7 @@ export async function deliver(
   deps: DeliverDeps = deliverDeps,
 ): Promise<DeliveryResult> {
   const attachments = delivery.attachments ?? []
-  // The person's own words are judged, so a leading / or ! is a command whether or not files come with it, and the caps count only what they wrote; the files' Attached lines come on top, at most MAX_ATTACHMENTS of them, and the keystroke cap below still bounds the whole. A skill's command waits for the session's own skills, read once it is found.
+  // The person's own words are judged, so a leading / or ! is a command whether or not files come with it, and the caps count only what they wrote; the files' Attached lines come on top, at most MAX_ATTACHMENTS of them. A skill's command waits for the session's own skills, read once it is found.
   const { refused: refusedText, skill, words } = deliveryWords(delivery, true)
   if (refusedText) return refusedText
   const text = withAttachments(words, attachments)
@@ -541,13 +511,6 @@ export async function deliver(
   // A paste is this message's when it carries this id, or, for a message with none, these words.
   const isThis = (paste: Paste): boolean =>
     paste.id === delivery.id && (paste.id !== undefined || paste.text === text)
-  const steps = keystrokes(text)
-  if (steps.length > MAX_KEYSTROKES) {
-    return refused(
-      "TOO_LONG",
-      "The message has too many lines and backslashes before n, r or t to type in one go.",
-    )
-  }
   const answered = await recorded(delivery, deps)
   if (answered) return answered
   const first = await target(delivery.to, deps.board)

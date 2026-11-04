@@ -155,7 +155,7 @@ if (!dry) {
   } else {
     console.error(`dev: dashboard source matched ${DASHBOARD_RULES[checked.dashboard.rule]}`)
     console.error(
-      "dev: dashboard reads this machine's own sessions, every real one included: take no screenshots of this stack",
+      "dev: dashboard reads this machine's own sessions from herdr, every real one included: take no screenshots of this stack",
     )
     // The live dashboard and a person's own clone bring the herdr servers up when they are down, so restarting the app alone brings the factory back; a test stack with PLAYGROUND_LIVE_READS never does. It runs the main checkout's job, never this checkout's: the live dashboard runs the latest head of the branch its main checkout sits on, so there the pin and config change only once they reach that checkout; a person's own clone is its own main checkout, on whatever branch it holds. A failure is named and the stack starts anyway.
     const main = mainCheckoutOf(ROOT)
