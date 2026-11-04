@@ -849,21 +849,20 @@ const spies = (dir: string): { bin: string; log: string } => {
 }
 
 describe.skipIf(onLiveDashboard())("a fixture stack", () => {
-  // The control: the same spies catch a process that reads the live machine, opted in to cmux's sessions, so a quiet log below means the fixture held, not a blind spy.
-  test("the spies catch a live-reads process asking cmux", async () => {
+  // The control: the same spies catch a process that reads the live machine, so a quiet log below means the fixture held, not a blind spy.
+  test("the spies catch a live-reads process probing the machine", async () => {
     const dir = scratch("fixture-control")
     const { bin, log } = spies(dir)
     const { code } = await inFixture(
-      `const { listLive } = await import(\`\${API}/lib/dashboard/workers\`)\nawait listLive().catch(() => null)\nconsole.log("{}")\nprocess.exit(0)\n`,
+      `const { read } = await import(\`\${API}/lib/system/sampler\`)\nawait read().catch(() => null)\nconsole.log("{}")\nprocess.exit(0)\n`,
       dir,
       {
-        PLAYGROUND_CMUX_SESSIONS: "true",
         PLAYGROUND_LIVE_READS: "1",
         PATH: `${bin}:${process.env.PATH}`,
       },
     )
     expect(code).toBe(0)
-    expect(readFileSync(log, "utf8")).toContain("cmux sessions list")
+    expect(readFileSync(log, "utf8")).toContain("ps -axo")
   }, 60_000)
 
   test("never runs cmux or the machine's probes, never connects to cmux's socket, and keeps its writes in its own scratch copy", async () => {

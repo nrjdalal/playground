@@ -31,7 +31,7 @@ import {
   locate as locateOwner,
   prove as proveOwner,
 } from "@/lib/sessions/guard"
-import { cmuxSessions } from "@/lib/sessions/own"
+import { allSessions } from "@/lib/sessions/own"
 
 // What `bun run dev` hands turbo: the shell's environment, less what would boot the wrong stage, plus the settings and the sha the stack runs with.
 
@@ -150,7 +150,7 @@ export const devEnv = (shell: Record<string, string | undefined>, gitSha: string
   return { env, notes }
 }
 
-// The stack of a live dashboard that reads herdr alone: the API's cmux reads go quiet (herdrAlone in lib/dashboard/cmux.ts).
+// The stack of a live dashboard that cmux would not answer, started anyway since cmux held no live factory session (herdrAlone in lib/dashboard/cmux.ts, which no read heeds now).
 export const herdrAloneEnv = (env: Record<string, string>): Record<string, string> => ({
   ...env,
   PLAYGROUND_HERDR_ALONE: "1",
@@ -203,7 +203,7 @@ export const mainCheckoutOf = (root: string): string | null => {
 // The settings the API reads that decide what its stack is: where the dashboard's data comes from (fixture.ts's dashboardSource, which also reads who runs the stack: Claude Code, a factory role, a test run), the folder a fixture stack's scratch copy sits in, and the database it writes.
 export const API_SETTINGS = [
   "CLAUDECODE",
-  "PLAYGROUND_CMUX_SESSIONS",
+  "PLAYGROUND_ALL_SESSIONS",
   "PLAYGROUND_FIXTURE",
   "PLAYGROUND_FIXTURE_DIR",
   "PLAYGROUND_HOSTED",
@@ -301,7 +301,7 @@ const FIX: Record<GuardFailure, string> = {
   vanished: "Docker is up, so run `bun run dev` again",
 }
 
-// What the stack's dashboard reads, and the rule of dashboardSource's that chose it: the live machine, the fixture the launcher writes for it, or, on a stack of the hosted build, nothing. A live dashboard reads herdr alone (`cmux: false`) unless it opts in to cmux's sessions (`reason` null), or when cmux would not answer it while cmux held no live factory session (`reason` says why).
+// What the stack's dashboard reads, and the rule of dashboardSource's that chose it: the live machine, the fixture the launcher writes for it, or, on a stack of the hosted build, nothing. A live dashboard reads herdr alone; `cmux` says whether cmux answers the stack, asked only of one that opts in to every session, for cmux's write path, and `reason` says why it does not (null when the stack did not opt in).
 export type Dashboard =
   | { fixture: Fixture; kind: "fixture"; rule: DashboardRule }
   | { kind: "hosted" }
@@ -327,7 +327,7 @@ const UNATTACHED: Record<Exclude<Attachment["state"], "attached">, (detail: stri
   detached: () =>
     "this process does not descend from a cmux terminal, so cmux would refuse the stack's API every read (turbo passes it no capability token); start `bun run dev` in a cmux terminal, or as a background task of an agent session running in one, never detached with `( … &)` or `nohup`",
   missing: () =>
-    "cmux is not installed or not on PATH, and the dashboard reads every session through it; install cmux, then start `bun run dev` in one of its terminals",
+    "cmux is not installed or not on PATH, and a stack that opts in to every session still needs it; install cmux, then start `bun run dev` in one of its terminals",
   unreachable: (detail) =>
     `cmux did not answer a read (${detail}); make sure cmux is running and answering, then start \`bun run dev\` in one of its terminals`,
 }
@@ -390,7 +390,7 @@ export type Guard = {
 const SETUP_MODE =
   "none yet: POSTGRES_URL is unset, so the dashboard opens on its first run, whose database check starts a local container"
 
-// Whether the stack may start here, checked before turbo runs and cheapest first: the branch, and for a checkout portless gives the bare names, whether a running stack or a live alias holds them, then the API's settings (read only once the branch passes), then where its dashboard reads from: nothing on a hosted build, a fixture that must load, or the live machine, read through herdr alone unless the stack opts in to cmux's sessions (PLAYGROUND_CMUX_SESSIONS), when it needs cmux to answer this process as it would the stack's API, or else no session live in cmux, read from ps and Claude's registry, when the dashboard reads herdr alone (a fixture stack never asks cmux, so it never opens the live socket); then POSTGRES_URL's container, refused by name before anything runs inside it or connects, then the proof that it is that container's own Postgres, then that its database has the schema the migration makes and, but on the live dashboard's own checkout, whose roll migrates or holds a migration itself, every migration in the journal. The first refusal names its fix.
+// Whether the stack may start here, checked before turbo runs and cheapest first: the branch, and for a checkout portless gives the bare names, whether a running stack or a live alias holds them, then the API's settings (read only once the branch passes), then where its dashboard reads from: nothing on a hosted build, a fixture that must load, or the live machine, read through herdr alone unless the stack opts in to every session (PLAYGROUND_ALL_SESSIONS), when it needs cmux to answer this process as it would the stack's API, or else no session live in cmux, read from ps and Claude's registry, when the dashboard reads herdr alone (a fixture stack never asks cmux, so it never opens the live socket); then POSTGRES_URL's container, refused by name before anything runs inside it or connects, then the proof that it is that container's own Postgres, then that its database has the schema the migration makes and, but on the live dashboard's own checkout, whose roll migrates or holds a migration itself, every migration in the journal. The first refusal names its fix.
 export async function preflight(
   { branch, linked }: Checkout,
   readSettings: () => SettingsRead,
@@ -439,7 +439,7 @@ export async function preflight(
     const loaded = loadFixture(source.file)
     if (!loaded.ok) return refuse(`${loaded.error}; ${FIXTURE_FIX}`)
     dashboard = { fixture: loaded.fixture, kind: "fixture", rule: source.rule }
-  } else if (source.kind === "live" && !cmuxSessions(read.settings.PLAYGROUND_CMUX_SESSIONS)) {
+  } else if (source.kind === "live" && !allSessions(read.settings.PLAYGROUND_ALL_SESSIONS)) {
     dashboard = { cmux: false, kind: "live", reason: null, rule: source.rule }
   } else if (source.kind === "live") {
     const reach = await attach()
@@ -448,7 +448,7 @@ export async function preflight(
       const sessions = await held()
       if (sessions === null) {
         return refuse(
-          `${fix}; whether a factory session is live in cmux could not be read from ps and Claude's registry, so the dashboard cannot read herdr alone`,
+          `${fix}; whether a factory session is live in cmux could not be read from ps and Claude's registry, so the stack cannot start without cmux`,
         )
       }
       if (sessions.length > 0) {
