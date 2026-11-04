@@ -317,6 +317,7 @@ var ROOT_SHELLS = new Map([
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
 function stdinShell(cmd) {
+  cmd = spreadSplit(cmd);
   const parsed = parse(cmd);
   const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading));
   if (parsed.capped) {
@@ -328,13 +329,47 @@ function stdinShell(cmd) {
   }
   return kinds.includes("root") ? "root" : kinds.find(Boolean);
 }
+function spreadSplit(cmd) {
+  const e = cmd.words.findIndex((w) => !w.quoted && program(w.value) === "env");
+  if (e === -1)
+    return cmd;
+  const options = WRAPPERS.get("env");
+  const out = cmd.words.slice(0, e + 1);
+  const rest = cmd.words.slice(e + 1).reverse();
+  let spread = false;
+  for (let w = rest.pop();w; w = rest.pop()) {
+    const v = w.value;
+    const split = SPLIT.exec(v);
+    if (split) {
+      const text = (split[1] || rest.pop()?.value || "").replace(/\$\{[^}]*\}/g, UNKNOWN).replace(/\\[_fnrtv]/g, " ").replace(/['"\\]/g, "");
+      const words = text.split(/\s+/).filter(Boolean);
+      for (let j = words.length - 1;j >= 0; j--)
+        rest.push({ quoted: false, value: words[j] });
+      spread = true;
+      continue;
+    }
+    out.push(w);
+    if (ASSIGN.test(v) || !w.quoted && program(v) === "env")
+      continue;
+    if (!v.startsWith("-") || v === "-" || v === "--")
+      break;
+    if (v === "-C" || v === "--chdir" || optionValue(v, options) === "next") {
+      const value = rest.pop();
+      if (value)
+        out.push(value);
+    }
+  }
+  return spread ? { ...cmd, words: [...out, ...rest.reverse()] } : cmd;
+}
 function stdinShellOf(cmd, { args, first, name, xargs }) {
   if (first && !marked(first.value)) {
     if (name === "." || name === "source")
       return args[0]?.value === "/dev/stdin" ? "shell" : undefined;
-    if (!SHELLS.has(name))
+    const applet = name === "busybox" && args[0] ? program(args[0].value) : name;
+    const words = applet === name ? args : args.slice(1);
+    if (!(applet === name ? SHELLS : BUSYBOX_SHELLS).has(applet))
       return;
-    const { inline, operand } = shellOperand(args, name);
+    const { inline, operand } = shellOperand(words, applet);
     if (xargs && (!operand || xargs.replace !== undefined && operand.value.includes(xargs.replace)))
       return "shell";
     if (inline && operand && cmd.stdin && marked(operand.value))
@@ -385,6 +420,7 @@ function startsRootShell(wrapper, value) {
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
+var BUSYBOX_SHELLS = new Set([...SHELLS, "ash", "hush"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
 var GIT_TAKES = new Set([
@@ -1308,6 +1344,8 @@ function shellOperand(args, shell) {
     const v = args[k].value;
     if (takes.has(v))
       k++;
+    else if (v === "-")
+      return { inline, operand: args[k + 1] };
     else if (/^[-+][A-Za-z]+$/.test(v))
       inline ||= v.startsWith("-") && v.includes("c");
     else if (!v.startsWith("--"))
