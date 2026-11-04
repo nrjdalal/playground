@@ -47,7 +47,7 @@ type Lexer = {
 }
 type Lexed = { commands: Command[]; scopes: number[] }
 type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: boolean }
-// `old` is set by a hook that follows zsh's ~-, `old.dir` the folder the shell last left (unset when the hook cannot tell), which an assignment to OLDPWD leaves as it is, so a pushd of ~- or ~+ reads a folder there; a hook that leaves it unset reads both as typed.
+// `old` is set by a hook that follows zsh's ~-, `old.dir` the folder the shell last left (unset when the hook cannot tell), which an assignment to OLDPWD leaves as it is, so a cd's or pushd's ~- or ~+, and a word opening with either, reads a folder there; a hook that leaves it unset reads both as typed.
 export type Env = {
   // The folder a cd names where the reader can read it, taken as the shell's own: the reading every hook had before the proven folder arrived, kept so a hook that reads this field alone keeps its verdicts. A hook reads the proven folder, and every folder the shell may be in, through `places` instead.
   cwd?: string
@@ -1119,16 +1119,68 @@ export async function examine(
 ): Promise<string | undefined> {
   tick()
   unchain(cmd, env)
-  blindTilde(cmd, env)
   const [primary, ...others] = readings(parse(cmd))
+  const expanded = expandTilde(cmd, primary.name, env)
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
-  const before = others.length > 0 ? apart(env) : env
+  const before = others.length > 0 || expanded ? apart(env) : env
   const verdict = await examineReading(cmd, primary, env, visit, builtins)
   if (verdict) return verdict
   for (const parsed of others) {
     const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins)
     if (verdict) return verdict
   }
+  if (expanded) return examineExpanded(cmd, expanded, before, visit, builtins)
+}
+
+const BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line"
+
+// In a hook that follows ~-, the words a command's unquoted ~- and ~+ expand to, judged beside the typed reading so the hook is never looser than that reading: ~+ as the folder each place reads, ~- as the one folder the shell left when the reader can name it, else as unknown, as a variable the hook cannot expand is, so each guard's own rule for one applies. A cd's own folder word keeps the reading chdirTo gives it.
+function expandTilde(cmd: Command, name: string, env: Env): Command | undefined {
+  if (!env.old || name === "cd" || name === "popd" || name === "pushd") return undefined
+  const opens = (w?: Word): w is Word => !!w?.tilde && /^~[-+](?=\/|$)/.test(w.value)
+  if (!cmd.words.some(opens) && !cmd.redirects.some((r) => opens(r.target))) return undefined
+  const left = leftFolder(env)
+  const expand = (w: Word): Word => {
+    if (!opens(w)) return w
+    const rest = w.value.slice(2)
+    if (w.value[1] === "+") return { ...w, tilde: undefined, value: `.${rest}` }
+    return left === undefined
+      ? { ...w, tilde: undefined, unknown: BLIND, value: UNKNOWN + rest }
+      : { ...w, tilde: undefined, value: left + rest }
+  }
+  return {
+    ...cmd,
+    redirects: cmd.redirects.map((r) => (opens(r.target) ? { ...r, target: expand(r.target) } : r)),
+    words: cmd.words.map(expand),
+  }
+}
+
+// The expanded words are judged on the command itself, swapped in and back, since hooks key their notes on the command, and on a copy of the env before it, as every other reading is.
+async function examineExpanded(
+  cmd: Command,
+  expanded: Command,
+  before: Env,
+  visit: Visit,
+  builtins: boolean,
+): Promise<string | undefined> {
+  const { redirects, words } = cmd
+  cmd.redirects = expanded.redirects
+  cmd.words = expanded.words
+  try {
+    for (const parsed of readings(parse(cmd))) {
+      const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins)
+      if (verdict) return verdict
+    }
+  } finally {
+    cmd.redirects = redirects
+    cmd.words = words
+  }
+}
+
+// The one folder a ~- names in a hook that follows it, when the reader can name it
+function leftFolder(env: Env): string | undefined {
+  const left = env.oldFrom ?? (env.old?.dir === undefined ? [] : [env.old.dir])
+  return left.length === 1 ? left[0] : undefined
 }
 
 const apart = (env: Env): Env => ({
@@ -1284,14 +1336,11 @@ function ancestors(path: string): string[] {
   }
 }
 
-// A word as typed, its ~- or ~+ left to the cd's own reading of it below
-const asTyped = (word: Word): Word => ({ ...word, tilde: undefined })
-
 // The one folder a cd names, taken as the shell's own wherever the reader reads it: `Env.cwd`'s own rule, which every hook read before the proven folder arrived and a hook outside `places` reads still.
 async function cdTarget(name: string, args: Word[], env: Env): Promise<string | undefined> {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   if (!dir) return homedir()
-  const typed = dir.value === "-" ? undefined : await folder(pathOf(asTyped(dir), env))
+  const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env))
   // in a hook that follows ~-, a cd's or pushd's unquoted ~- is the folder the shell last left and ~+ the current one, as the shell expands them; beside a folder named ~- or ~+ the typed reading stays, though the shell still expands the word
   const tilde =
     !typed &&
@@ -1329,7 +1378,7 @@ function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: s
   for (const word of dirs.length > 1 ? dirs : [dir]) {
     for (const base of from.length > 0 ? from : [undefined]) {
       tick()
-      const path = pathOf(asTyped(word), { ...env, cwd: base })
+      const path = pathOf(word, { ...env, cwd: base })
       if (path === undefined) {
         unread = true
         continue
@@ -1650,33 +1699,8 @@ export async function resolveText(text: Text, env: Env): Promise<Text> {
 
 export function pathOf(text: Text, env: Env): string | undefined {
   if (text.unknown || text.reads?.length || text.value === "") return undefined
-  // in a hook that follows ~-, the shell expands a word's unquoted ~+ to the folder it is in and ~- to the one it last left, read only when the reader can name that one folder
-  const sign = env.old && text.tilde ? /^~([-+])(?=\/|$)/.exec(text.value)?.[1] : undefined
-  if (sign) {
-    const base = sign === "+" ? env.cwd : leftFolder(env)
-    return base === undefined ? undefined : resolve(base + text.value.slice(2))
-  }
   if (isAbsolute(text.value)) return text.value
   return env.cwd ? resolve(env.cwd, text.value) : undefined
-}
-
-// The one folder a ~- names in a hook that follows it, when the reader can name it
-function leftFolder(env: Env): string | undefined {
-  const left = env.oldFrom ?? (env.old?.dir === undefined ? [] : [env.old.dir])
-  return left.length === 1 ? left[0] : undefined
-}
-
-const BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line"
-
-// In a hook that follows ~-, a command's unquoted ~- the reader cannot name reads as unknown, as a variable it cannot expand does, so each guard's own rule for one applies; a cd's own folder word keeps its reading of every folder it may go back to. The words are replaced in place, since hooks key their notes on the command itself.
-function blindTilde(cmd: Command, env: Env): void {
-  if (!env.old || leftFolder(env) !== undefined) return
-  const blind = (w?: Word): w is Word => !!w?.tilde && /^~-(?=\/|$)/.test(w.value)
-  const hide = (w: Word): Word =>
-    blind(w) ? { ...w, tilde: undefined, unknown: BLIND, value: UNKNOWN + w.value.slice(2) } : w
-  for (const r of cmd.redirects) if (blind(r.target)) r.target = hide(r.target)
-  if (cmd.words.some(blind) && !["cd", "popd", "pushd"].includes(parse(cmd).name))
-    cmd.words = cmd.words.map(hide)
 }
 
 // Reads a regular file of at most MAX_BYTES; undefined when there is no file at the path.

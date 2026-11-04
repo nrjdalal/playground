@@ -13,6 +13,10 @@ export const groups: Group[] = [
       ["a removal of ~- itself", `cd ${SCOPE}; cd /usr; rm ~-`],
       ["a removal under ~- after a pushd", `pushd ${ROOT}; pushd /usr; rm ~-/login`],
       [
+        "a removal under a ~- the reader cannot name, after a cd it is unsure of",
+        `cd /no-such-folder || cd ${SCOPE}; cd /usr; rm ~-/login`,
+      ],
+      [
         "pushd -n ~-, which zsh fails, staying in the root",
         `cd /usr; cd ${SCOPE}; pushd -n ~-; touch f`,
       ],
