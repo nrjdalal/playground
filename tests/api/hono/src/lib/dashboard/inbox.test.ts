@@ -31,6 +31,7 @@ import {
   slackPlace,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 import { uploadSpec } from "../../../../../../api/hono/src/lib/dashboard/slack-upload"
+import { keychain } from "../../../../../../api/hono/src/lib/yard/keychain"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -847,8 +848,20 @@ describe("a secret ask (PG-59)", () => {
     expect(refused({}, "-e")).toBe(false)
   })
 
+  test("takes a keychain sink naming an allowlisted item, yard alone today, and no other sink", () => {
+    const sinkOf = (sink: object) =>
+      inboxInputSchema.safeParse(decision({ ...SECRET, key: "YARD_TOKEN", sink })).success
+    expect(sinkOf({ item: "yard", type: "keychain" })).toBe(true)
+    expect(sinkOf({ item: "slack", type: "keychain" })).toBe(false)
+    expect(sinkOf({ item: "../x", type: "keychain" })).toBe(false)
+    expect(sinkOf({ type: "keychain" })).toBe(false)
+    expect(sinkOf({ item: "yard", project: "api-made-up", type: "keychain" })).toBe(false)
+    expect(sinkOf({ item: "yard", type: "yard" })).toBe(false)
+    expect(sinkOf({})).toBe(false)
+  })
+
   test("runs one vercel env add an environment, the value never in its argv", () => {
-    const sink = SECRET.sink as SecretSink
+    const sink = SECRET.sink as Extract<SecretSink, { type: "vercel" }>
     expect(sinkArgv(SECRET.key, sink, "preview")).toEqual([
       "vercel",
       "env",
@@ -3079,6 +3092,113 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       // the poster's read closes it, as a deny's read does
       const read = await store.readAnswer(db, provided.item)
       expect(read.answer).toMatchObject({ ackedAt: expect.any(String), choice: "provided" })
+    })
+
+    test("a keychain sink hands the Yard token to the Keychain writer on stdin, and keeps only saved", async () => {
+      const posted = await post({
+        ...decision({
+          key: "YARD_TOKEN",
+          sink: { item: "yard", type: "keychain" },
+          type: "secret",
+        }),
+        from: "dispatcher",
+      })
+      const token = `yard_${VALUE}`
+      const sink = stub()
+      const security: { argv: string[]; input?: string }[] = []
+      const writer = keychain(async (argv, input) => {
+        security.push({ argv, input })
+        return { code: 0, stderr: "", stdout: "" }
+      }, "owner")
+      const sent: Delivery[] = []
+      const logged: string[] = []
+      const console_ = { error: console.error, log: console.log, warn: console.warn }
+      for (const name of ["error", "log", "warn"] as const)
+        console[name] = (...args: unknown[]) => void logged.push(args.map(String).join(" "))
+      let provided: Awaited<ReturnType<typeof store.provideSecret>>
+      try {
+        provided = await store.provideSecret(
+          db,
+          posted.id,
+          { value: token },
+          {
+            actor,
+            deliver: async (delivery) => {
+              sent.push(delivery)
+              return { at: new Date().toISOString(), ok: true, sessionId: "s1" }
+            },
+            run: sink.run,
+            keychain: async (item, value) => {
+              expect(item).toBe("yard")
+              await writer.write(value)
+            },
+          },
+        )
+      } finally {
+        Object.assign(console, console_)
+      }
+      expect(sink.calls).toHaveLength(0)
+      expect(security).toHaveLength(1)
+      expect(security[0]?.argv).toEqual(["security", "-i"])
+      expect(security[0]?.input).toContain(`-w "${token}"`)
+      expect(provided.ok && provided.item.answer).toMatchObject({
+        choice: "provided",
+        results: [{ environment: "Keychain", exitCode: 0, line: "saved" }],
+      })
+      expect(sent[0]?.text).toContain("Keychain: saved")
+      for (const kept of [
+        JSON.stringify(provided),
+        JSON.stringify(sent),
+        logged.join("\n"),
+        await everyRow(),
+      ])
+        expect(kept).not.toContain(VALUE)
+    })
+
+    test("a keychain save that fails keeps the refusal's first line, with the value cut out", async () => {
+      const posted = await post(
+        decision({ key: "YARD_TOKEN", sink: { item: "yard", type: "keychain" }, type: "secret" }),
+      )
+      const refused = await store.provideSecret(
+        db,
+        posted.id,
+        { value: `yard_${VALUE}` },
+        {
+          actor,
+          run: stub().run,
+          keychain: async (_item, value) => {
+            throw new Error(`the Keychain refused it: no item for ${value}\nsecond line`)
+          },
+        },
+      )
+      expect(refused.ok && refused.item.answer).toMatchObject({
+        results: [
+          { environment: "Keychain", exitCode: 1, line: "the Keychain refused it: no item for …" },
+        ],
+      })
+      expect(JSON.stringify(refused)).not.toContain(VALUE)
+      expect(await everyRow()).not.toContain(VALUE)
+    })
+
+    test("a keychain paste off the item's shape is refused before the claim, so the card stays open", async () => {
+      const posted = await post(
+        decision({ key: "YARD_TOKEN", sink: { item: "yard", type: "keychain" }, type: "secret" }),
+      )
+      let saved = 0
+      const refused = await store.provideSecret(
+        db,
+        posted.id,
+        { value: VALUE },
+        { actor, keychain: async () => void saved++, run: stub().run },
+      )
+      expect(refused).toMatchObject({
+        code: "VALIDATION_ERROR",
+        message: "a Yard token starts yard_",
+        ok: false,
+      })
+      expect(saved).toBe(0)
+      expect((await store.getItem(db, posted.id))?.status).toBe("open")
+      expect(JSON.stringify(refused)).not.toContain(VALUE)
     })
 
     test("runs once: a second Submit, or one on words changed since, is refused and runs nothing", async () => {
