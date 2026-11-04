@@ -5,7 +5,7 @@
 # retrying while none does; writes "<who> <its own pid> <iso> <units> <size>" to the slot's .holder file beside it
 # (a quick lane writes "<who> <pid> <iso>", the clone lane adding its two checkouts, clone_ends); runs the command as its
 # child, in a new session and process group; and gives the slot back (rmdir) however it ends: success, failure or a signal. A holder whose
-# pid has died is reclaimed; a slot whose holder line has no pid, or has no holder line, is held until it is 2 hours old. It prints the slot
+# pid has died is reclaimed; a slot whose holder line has no pid, or has no holder line, is held until it is 2 hours old, or while its age reads back empty. It prints the slot
 # it took to stderr and exits with the command's code.
 set -u
 OPS=${RUN_SLOT_OPS:-${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops}
@@ -52,12 +52,15 @@ alive() {
 # whether slot directory $1, whose holder line is $2, is stale: its pid has died, or a line with no pid (or no line, read by the directory's
 # own mtime) has aged 2 hours; a run killed between free()'s rm of its holder and its rmdir leaves a directory with no line
 stale() {
-  local pid
+  local pid m
   pid=$(printf '%s' "$2" | cut -d' ' -f2)
   if printf '%s' "$pid" | grep -Eq '^[0-9]+$'; then
     ! alive "$pid"
   else
-    [ $(( $(date +%s) - $(mtime "$1.holder" || mtime "$1" || date +%s) )) -ge 7200 ]
+    m=$(mtime "$1.holder" || mtime "$1" || date +%s)
+    # an mtime that reads back empty counts as young, rather than as a shell error (4 Nov: "<epoch> -  : syntax error: operand expected")
+    case "$m" in '' | *[!0-9]*) return 1 ;; esac
+    [ $(( $(date +%s) - m )) -ge 7200 ]
   fi
 }
 # a setting's value as JSON, as the settings reader in this script's checkout prints it, its default on a machine with no extensions; a reader that cannot answer says why on stderr
@@ -355,7 +358,7 @@ quick_rule() {
   elif [ "$(basename -- "$first")" = cp ]; then
     for a in "$@"; do a=${a%/.}; case "${a%/}" in node_modules|*/node_modules) echo clone; return ;; esac; done
   elif [ "$(basename -- "$first")" = bun ]; then
-    # a bun test or bun run test:file naming 1 to 3 test files, nothing else, takes run-slot-quick, with --cwd=<p> anywhere or a bare --cwd after run or test, since bun misreads one before the subcommand (scripts/hooks/README.md's no-false-green; ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites; PG-2158)
+    # a bun test or bun run test:file naming 1 to 3 test files under tests/, nothing else, takes run-slot-quick, with --cwd=<p> anywhere or a bare --cwd after run or test, since bun misreads one before the subcommand (scripts/hooks/README.md's no-false-green; ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites; PG-2158)
     # bun run docs:wrap and format:check never run past seconds (run-slot.runs.log, 20 Oct: max 2s and 9s), so they take run-slot-quick too
     for a in "$@"; do case "$a" in docs:wrap|format:check) echo quick; return ;; esac; done
     # bun install --ignore-scripts after a node_modules clone only links what the clone holds (retro 2, 31 Oct: 619 min queued in a day)
@@ -366,7 +369,8 @@ quick_rule() {
       if [ "$a" = --cwd ]; then [ -n "$t" ] && skip=1 || return; continue; fi
       case "$a" in env|*=*|-*) continue ;; esac
       [ "$a" = "$first" ] && continue
-      case "$a" in run|test|test:file) t="$t $a" ;; *.e2e.*) return ;; *.test.ts|*.test.tsx) n=$((n + 1)) ;; *) return ;; esac
+      # only a test file under the repo's tests/ folder counts, so a replay of scratch test files goes through the queue (retro 35: one held the quick slot 30 min, and its waiters waited 87 min in all)
+      case "$a" in run|test|test:file) t="$t $a" ;; *.e2e.*) return ;; tests/*.test.ts|tests/*.test.tsx|./tests/*.test.ts|./tests/*.test.tsx) n=$((n + 1)) ;; *) return ;; esac
     done
     case "$t" in " test" | " run test:file") [ "$n" -ge 1 ] && [ "$n" -le 3 ] && echo quick ;; esac
   fi
@@ -413,7 +417,7 @@ sys.exit(0 if p.returncode == 0 and tasks and all(t["cache"]["status"] == "HIT" 
 PY
   )
 }
-# a commit whose pre-commit build runs next build, a git commit (but -n) staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a one it will stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
+# a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a one it will stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
   local a c f files dir="" commit="" all="" state=lead paths=()
   # commit-slot.ts's build step (`bun run build`) alone, never its type checks, which build nothing
@@ -441,6 +445,9 @@ heavy_build() {
     esac
   done
   [ -n "$commit" ] || return 1
+  # only a repo whose own lefthook.yml pre-commit runs a build builds on commit (the dispatcher, 4 Nov: another repo's lint-staged commit sat 65 min in the big-run queue for a 1 s job)
+  awk '/^[^ #]/ { pre = ($0 ~ /^pre-commit:/) } pre && /^ +run:.* run build( |$)/ { found = 1 } END { exit !found }' \
+    "$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)/lefthook.yml" 2>/dev/null || return 1
   files=$({ git ${dir:+-C "$dir"} diff --cached --name-only; [ -z "$all" ] || git ${dir:+-C "$dir"} diff --name-only
     [ ${#paths[@]} -eq 0 ] || git ${dir:+-C "$dir"} diff --name-only HEAD -- "${paths[@]}"; } 2>/dev/null)
   grep -Evq '^$|\.md$|^tests/.*\.py$' <<<"$files" || return 1
