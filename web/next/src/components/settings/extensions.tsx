@@ -29,7 +29,7 @@ import * as React from "react"
 
 import { ConfirmDialog } from "@/components/common/confirm-dialog"
 import { Hint } from "@/components/hint"
-import { BundledExtensions } from "@/components/settings/bundled"
+import { BundledExtensions } from "@/components/settings/bundled-extensions"
 import { SetUpSettings } from "@/components/settings/set-up-settings"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
