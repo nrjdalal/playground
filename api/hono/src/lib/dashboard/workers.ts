@@ -665,12 +665,12 @@ export function composeWorkers(
         .find(Boolean) ?? `session ${sessionId.slice(0, 8)}`
     const role = roleOf(name, rosterRoleOf(roster.roles, name))
     workers.push({
+      ...(name === roster.assistant && { assistant: true as const }),
       cwd: str(record.cwd),
       effort: read.effort,
       eta: roster.etas.get(name) ?? null,
       failed: read.failed,
       feed,
-      ...(name === roster.assistant && { assistant: true as const }),
       ...(herdr && { herdr: true as const }),
       lastActiveAt: activity.get(sessionId) ?? null,
       lifecycle,
