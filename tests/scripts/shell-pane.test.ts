@@ -1,16 +1,22 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { inboxInputSchema } from "../../api/hono/src/lib/dashboard/inbox"
 import { dataDir } from "../../packages/env/src/data-dir"
 import { UNSET_REPOS } from "../../packages/scripts/src/trace-count/kinds"
 import { mainCheckout } from "../../scripts/hooks/no-main-checkout"
 import {
+  askInbox,
   bashGuards,
   close,
+  GITHUB_LOGIN,
   type Herdr,
+  type Inbox,
+  login,
   main,
+  onStop,
   open,
   read,
   Refusal,
@@ -524,6 +530,279 @@ describe("read waits for the marker", () => {
     expect(await refusal(read("w1:p1", "rc=0", 50, stubHerdr().herdr))).toContain(
       "takes the marker",
     )
+  })
+})
+
+describe("login drives GitHub's browser login and hands the owner its code on a card", () => {
+  const TOKEN = "gho_madeUpTokenNotARealOne0123456789"
+  // The stub's pane prints `lines(marker)` under the typed line, so its text follows the marker run made.
+  function loginHerdr(lines: (marker: string) => string[]) {
+    const stub = stubHerdr()
+    let line = ""
+    const text = () => {
+      const marker = line.match(/__shell_pane_[0-9a-f]{12}/)?.[0] ?? "__none"
+      return [`> ${line}`, ...lines(marker)].join("\n")
+    }
+    const herdr: Herdr = async (args) => {
+      if (args[0] === "pane" && args[1] === "run") line = args[3]!
+      if (args[0] === "pane" && args[1] === "read") return { code: 0, out: text() }
+      if (args[0] === "pane" && args[1] === "wait-output") {
+        const marker = args[args.indexOf("--regex") + 1]!.slice(1).split(" ")[0]!
+        return text().includes(`${marker} rc=`)
+          ? { code: 0, out: JSON.stringify({ result: { read: { text: text() } } }) }
+          : { code: 1, out: JSON.stringify({ error: { code: "timeout", message: "timeout" } }) }
+      }
+      return stub.herdr(args)
+    }
+    return { calls: stub.calls, herdr }
+  }
+  function inbox() {
+    const posted: Record<string, any>[] = []
+    const closed: string[] = []
+    const fake: Inbox = {
+      close: async (id, note) => void closed.push(`${id} ${note}`),
+      post: async (item) => {
+        posted.push(item)
+        return "item-1"
+      },
+    }
+    return { closed, fake, posted }
+  }
+  const noWait = async () => {}
+  const shown = (marker: string) => [
+    "! First copy your one-time code: AB12-CD34",
+    "Open this URL to continue in your web browser: https://github.com/login/device",
+    "✓ Authentication complete.",
+    `token ${TOKEN}`,
+    "✓ Logged in as made-up-login",
+    "",
+    `${marker} rc=0`,
+  ]
+
+  test("the registered guards pass the login, and the card holds the code and link alone, closed once gh sees the sign-in", async () => {
+    const { calls, herdr } = loginHerdr(shown)
+    const { closed, fake, posted } = inbox()
+    expect(await login("w1:p1", 1000, herdr, fake, CHECKOUT, noWait)).toEqual({
+      id: "item-1",
+      rc: 0,
+    })
+    const [[, , , line]] = typed(calls) as [string[]]
+    expect(line!.startsWith(`/bin/zsh -f -c '${GITHUB_LOGIN}'; printf `)).toBe(true)
+    expect(posted).toHaveLength(1)
+    expect(posted[0]).toMatchObject({
+      from: "vtqhxp-worker",
+      title: "Sign in to GitHub for vtqhxp-worker",
+    })
+    expect(posted[0]!.preview.text).toContain("AB12-CD34")
+    expect(posted[0]!.preview.text).toContain("(https://github.com/login/device)")
+    expect(inboxInputSchema.safeParse(posted[0]).error?.issues).toBeUndefined()
+    expect(closed).toEqual(["item-1 Signed in: gh saw the login finish"])
+    expect(JSON.stringify({ closed, posted })).not.toMatch(/gho_|Logged in|made-up-login/)
+  })
+
+  // The caller check main runs first, passed: tests/scripts/hooks/session-state.test.ts drives the real one under a launcher of its own.
+  const PASSED = async () => undefined
+
+  test("main takes github alone, and prints the result and the card, never a line the pane showed", async () => {
+    const log = console.log
+    const error = console.error
+    const printed: string[] = []
+    console.log = (line: string) => printed.push(line)
+    console.error = (line: string) => printed.push(`error: ${line.split("\n")[0]}`)
+    const execArgv = process.execArgv
+    Object.defineProperty(process, "execArgv", {
+      configurable: true,
+      value: [...execArgv, "--no-env-file"],
+    })
+    try {
+      expect(await main(["login", "w1:p1", "gitlab"], loginHerdr(shown).herdr, inbox().fake)).toBe(
+        1,
+      )
+      expect(
+        await main(["login", "w1:p1", "github"], loginHerdr(shown).herdr, inbox().fake, PASSED),
+      ).toBe(0)
+    } finally {
+      console.log = log
+      console.error = error
+      Object.defineProperty(process, "execArgv", { configurable: true, value: execArgv })
+    }
+    expect(printed).toEqual(["error: usage:", "signed in; card item-1 closed"])
+  })
+
+  test("main refuses a run or a login its caller check refuses, typing and posting nothing", async () => {
+    const error = console.error
+    const printed: string[] = []
+    console.error = (line: string) => printed.push(line)
+    const execArgv = process.execArgv
+    Object.defineProperty(process, "execArgv", {
+      configurable: true,
+      value: [...execArgv, "--no-env-file"],
+    })
+    const refused = async () => "shell-pane refuses: a made-up caller"
+    const pane = loginHerdr(shown)
+    const card = inbox()
+    try {
+      expect(await main(["run", "w1:p1", "echo hi"], pane.herdr, card.fake, refused)).toBe(1)
+      expect(await main(["login", "w1:p1", "github"], pane.herdr, card.fake, refused)).toBe(1)
+    } finally {
+      console.error = error
+      Object.defineProperty(process, "execArgv", { configurable: true, value: execArgv })
+    }
+    expect(printed).toEqual(Array(2).fill("shell-pane refuses: a made-up caller"))
+    expect(pane.calls).toEqual([])
+    expect(card.posted).toEqual([])
+  })
+
+  test("no sign-in by the timeout closes the card as unknown, and a gh that ends with no code posts none", async () => {
+    const waiting = loginHerdr(() => [
+      "! First copy your one-time code: AB12-CD34",
+      "Open this URL to continue in your web browser: https://github.com/login/device",
+    ])
+    const late = inbox()
+    expect(await login("w1:p1", 50, waiting.herdr, late.fake, CHECKOUT, noWait)).toEqual({
+      id: "item-1",
+    })
+    expect(late.closed).toEqual(["item-1 No sign-in seen in time: ask again for a new code"])
+    const failed = loginHerdr((marker) => ["error connecting to api.github.com", `${marker} rc=1`])
+    const none = inbox()
+    expect(await refusal(login("w1:p1", 50, failed.herdr, none.fake, CHECKOUT, noWait))).toBe(
+      "gh auth login ended rc=1 before it printed a one-time code",
+    )
+    expect(none.posted).toEqual([])
+  })
+
+  test("a code beside any other link posts no card", async () => {
+    const { herdr } = loginHerdr(() => [
+      "! First copy your one-time code: AB12-CD34",
+      "Open this URL to continue in your web browser: https://example.com/login/device",
+    ])
+    const { fake, posted } = inbox()
+    expect(await refusal(login("w1:p1", 50, herdr, fake, CHECKOUT, noWait))).toBe(
+      "gh auth login printed no one-time code in 30 s",
+    )
+    expect(posted).toEqual([])
+  })
+
+  test("a card the Inbox refuses names the pane still holding gh's login", async () => {
+    const { herdr } = loginHerdr(shown)
+    const refusing: Inbox = {
+      close: async () => {},
+      post: async () => {
+        throw new Refusal("bun run ask new: refused")
+      },
+    }
+    expect(await refusal(login("w1:p1", 50, herdr, refusing, CHECKOUT, noWait))).toBe(
+      "bun run ask new: refused; gh's login still waits in w1:p1 until its code expires, so close its workspace",
+    )
+  })
+
+  test("a pane that cannot be read after the post closes the card, and the error still surfaces", async () => {
+    const waiting = loginHerdr(() => [
+      "! First copy your one-time code: AB12-CD34",
+      "Open this URL to continue in your web browser: https://github.com/login/device",
+    ])
+    const gone: Herdr = async (args) =>
+      args[1] === "wait-output"
+        ? {
+            code: 1,
+            out: JSON.stringify({
+              error: { code: "pane_not_found", message: "pane w1:p1 not found" },
+            }),
+          }
+        : waiting.herdr(args)
+    const { closed, fake } = inbox()
+    expect(await refusal(login("w1:p1", 50, gone, fake, CHECKOUT, noWait))).toContain(
+      "pane w1:p1 not found",
+    )
+    expect(closed).toEqual(["item-1 The sign-in could not be read: ask again for a new code"])
+  })
+
+  test("a stop mid-wait closes the card, and the listener goes once the wait ends", async () => {
+    const { herdr } = loginHerdr(shown)
+    const { closed, fake } = inbox()
+    let closeCard: (() => Promise<void>) | undefined
+    let listening = false
+    const stop = (then: () => Promise<void>) => {
+      closeCard = then
+      listening = true
+      return () => void (listening = false)
+    }
+    await login("w1:p1", 50, herdr, fake, CHECKOUT, noWait, stop)
+    expect(listening).toBe(false)
+    await closeCard!()
+    expect(closed).toEqual([
+      "item-1 Signed in: gh saw the login finish",
+      "item-1 The session stopped waiting: ask again for a new code",
+    ])
+  })
+
+  // the signal is emitted in this process and its exit recorded, since this file imports the refused-forms fixture and so starts no process (fixtures-are-data)
+  test("onStop closes the card on SIGTERM and SIGINT, then exits 143 and 130", async () => {
+    const exit = process.exit
+    const exits: number[] = []
+    let closes = 0
+    process.exit = ((code?: number) => void exits.push(code ?? 0)) as typeof process.exit
+    try {
+      for (const signal of ["SIGTERM", "SIGINT"] as const) {
+        const unlisten = onStop(async () => void closes++)
+        process.emit(signal, signal)
+        await Bun.sleep(10)
+        unlisten()
+      }
+    } finally {
+      process.exit = exit
+    }
+    expect(closes).toBe(2)
+    expect(exits).toEqual([143, 130])
+  })
+
+  test("askInbox closes an open card by settle, an approved one by ack, and a denied one by get --ack, refusing one get still reads open", async () => {
+    const root = join(SCRATCH, "inbox-close")
+    mkdirSync(root)
+    writeFileSync(join(root, "package.json"), JSON.stringify({ scripts: { ask: "sh ask.sh" } }))
+    writeFileSync(
+      join(root, "ask.sh"),
+      [
+        'echo "$1 $3" >> calls',
+        "a=$(cat answer)",
+        'case "$1" in',
+        '  settle) [ "$a" = open ] ;;',
+        '  ack) [ "$a" = approve ] ;;',
+        `  get) [ "$3" = --ack ] || exit 1; case "$a" in deny) echo '"status": "done"' ;; stuck) echo '"status": "open"' ;; *) exit 1 ;; esac ;;`,
+        "  *) exit 1 ;;",
+        "esac",
+      ].join("\n"),
+    )
+    const closing = async (answer: string) => {
+      writeFileSync(join(root, "answer"), answer)
+      writeFileSync(join(root, "calls"), "")
+      await askInbox(root).close("i1", "note")
+      return Bun.file(join(root, "calls")).text()
+    }
+    expect(await closing("open")).toBe("settle --note\n")
+    expect(await closing("approve")).toBe("settle --note\nack --no-link\n")
+    expect(await closing("deny")).toBe("settle --note\nack --no-link\nget --ack\n")
+    expect(await refusal(closing("gone"))).toStartWith("bun run ask could not close i1")
+    expect(await refusal(closing("stuck"))).toBe("bun run ask could not close i1: it is still open")
+  })
+
+  test("askInbox runs bun run ask in the checkout it names, with no POSTGRES_URL, as the clone root's ask forwards it", async () => {
+    const root = join(SCRATCH, "inbox-root")
+    mkdirSync(root)
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({
+        scripts: { ask: 'cat >/dev/null; echo "$(pwd -P) ${POSTGRES_URL:-none}"' },
+      }),
+    )
+    const before = process.env.POSTGRES_URL
+    process.env.POSTGRES_URL = "postgres://made-up"
+    try {
+      expect(await askInbox(root).post({ title: "t" })).toBe(`${realpathSync(root)} none new`)
+    } finally {
+      if (before === undefined) delete process.env.POSTGRES_URL
+      else process.env.POSTGRES_URL = before
+    }
   })
 })
 

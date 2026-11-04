@@ -24,7 +24,7 @@ import { livePair } from "../dev/live-dashboard"
 import { FIX_IDS } from "../onboard/fix-ids"
 import { discard, trashRoots } from "../trash"
 
-// Where the dashboard's data comes from, chosen by who runs the stack (ADR 0008): a person's own clone reads their own machine (cmux's sessions, Claude Code's config folder, git, GitHub and the System panel's probes), and a factory, test or PLAYGROUND_FIXTURE stack reads a fixture, a made-up machine written into a scratch folder of its own, so real rows never reach a screenshot or a PR. A refused source reads nothing at all.
+// Where the dashboard's data comes from, chosen by who runs the stack (ADR 0008): a person's own clone reads their own machine (herdr's sessions, Claude Code's config folder, git, GitHub and the System panel's probes), and a factory, test or PLAYGROUND_FIXTURE stack reads a fixture, a made-up machine written into a scratch folder of its own, so real rows never reach a screenshot or a PR. A refused source reads nothing at all.
 export type DashboardSource =
   | { file: string | null; kind: "fixture"; rule: "factory" | "fixture" | "test" }
   | { kind: "hosted" }

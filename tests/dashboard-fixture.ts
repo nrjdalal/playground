@@ -36,7 +36,11 @@ export async function inFixture(
         key !== "PLAYGROUND_LIVE_READS" && key !== "PLAYGROUND_FIXTURE" && !key.startsWith("CMUX_"),
     ),
   )
-  const proc = Bun.spawn(["bun", "--no-env-file", file], {
+  // under the clock-ahead pass the child takes the same moved clock as the test that reads its times
+  const clock = process.env.CLOCK_AHEAD_DAYS
+    ? [`--preload=${join(import.meta.dir, "clock-ahead.ts")}`]
+    : []
+  const proc = Bun.spawn(["bun", "--no-env-file", ...clock, file], {
     cwd: dir,
     env: {
       ...base,

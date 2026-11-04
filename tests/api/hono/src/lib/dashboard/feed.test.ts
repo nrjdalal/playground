@@ -457,7 +457,7 @@ describe("answerFeed for a herdr session", () => {
     expect(await answerFeed(ask(red), after.deps)).toMatchObject({ code: "UNCONFIRMED" })
   })
 
-  test("a permission or a plan is answered in its terminal alone: nothing is read, typed or recorded, whatever approvals say", async () => {
+  test("a herdr session's permission or plan is not answered here: nothing is read, typed or recorded, whatever approvals say", async () => {
     const plan: FeedAnswer = { feedback: null, kind: "plan", mode: "manual" }
     const on = herdrFakes([permissionItem("s-1"), planItem("s-1")], [PERMISSION, DONE], true)
     expect(await answerFeed(ask(deny, PERMISSION_ID), on.deps)).toMatchObject({
@@ -473,5 +473,25 @@ describe("answerFeed for a herdr session", () => {
       expect(typed).toEqual([])
       expect(recorded).toEqual([])
     }
+  })
+
+  // A dispatcher has no manager to answer through the chat, so its refusal names its terminal.
+  test("a herdr session's refusal names its manager, and a dispatcher's its own terminal", async () => {
+    const plan: FeedAnswer = { feedback: null, kind: "plan", mode: "manual" }
+    const worker = herdrFakes([planItem("s-1")], [DONE], true)
+    expect(await answerFeed(ask(plan, PLAN_ID), worker.deps)).toMatchObject({
+      reason:
+        "The Dashboard answers only a herdr session's pickers: for this plan, ask Playground in the chat, and dispatcher's manager answers it.",
+    })
+    const own = herdrFakes([planItem("s-1")], [DONE], true)
+    const board = own.deps.listLive
+    own.deps.listLive = async () => {
+      const live = await board()
+      return { ...live, workers: live.workers.map((w) => ({ ...w, role: "dispatcher" as const })) }
+    }
+    expect(await answerFeed(ask(plan, PLAN_ID), own.deps)).toMatchObject({
+      reason:
+        "The Dashboard answers only a herdr session's pickers: answer this plan in dispatcher's terminal.",
+    })
   })
 })

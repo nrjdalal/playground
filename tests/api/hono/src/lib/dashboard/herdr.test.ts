@@ -319,7 +319,7 @@ describe("readServer and herdrRecords", () => {
     ])
     herdrRecords([at("kept-a", "idle")], registry, "2026-10-18T10:00:00.000Z")
     herdrRecords([at("kept-a", "blocked")], registry, "2026-10-18T10:00:05.000Z")
-    // a cmux session's listSpace() reads no herdr server, and a failed server's read is left out
+    // a board whose every server failed reads none, and a failed server's read is left out
     herdrRecords([], registry, "2026-10-18T10:00:06.000Z")
     herdrRecords([at("kept-b", "idle")], registry, "2026-10-18T10:00:06.500Z")
     expect(

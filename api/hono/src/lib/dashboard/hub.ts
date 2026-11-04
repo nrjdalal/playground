@@ -4,7 +4,6 @@ import { getSessionNames, type SessionNames } from "@packages/config/kinds"
 import { env } from "@packages/env/api-hono"
 
 import { ActivityWatch, everyInterval, type ActivitySend } from "@/lib/dashboard/activity"
-import { type CmuxStream, herdrAlone, stream } from "@/lib/dashboard/cmux"
 import { onFixtureChange, readsLive } from "@/lib/dashboard/fixture"
 import { herdrEvents, type HerdrEvents, herdrServers } from "@/lib/dashboard/herdr"
 import { sdkHost } from "@/lib/dashboard/sdk"
@@ -17,15 +16,7 @@ import {
   TAIL_BYTES,
   type Entry,
 } from "@/lib/dashboard/transcript"
-import {
-  DISPATCHER,
-  DISPATCHERS,
-  listLive,
-  type Live,
-  onRead,
-  readDue,
-  type Worker,
-} from "@/lib/dashboard/workers"
+import { DISPATCHER, DISPATCHERS, listLive, type Live, type Worker } from "@/lib/dashboard/workers"
 
 export type DashboardFrame =
   | { type: "entries"; entries: Entry[]; sessionId: string }
@@ -50,20 +41,13 @@ export type DashboardFrame =
 
 type Listener = (frame: DashboardFrame) => void
 
-// How the hub keeps pace with cmux's paced full read (workers.ts): `due` says when a board can hold what moved since a moment, `onRead` when a read lands, and `refreshGapMs` spaces the hub's own refreshes, each of which asks cmux for its Feed and workspaces.
-export type Pace = {
-  due: (since: number) => number | null
-  onRead: (listener: () => void) => () => void
-  refreshGapMs: number
-}
-
 const REFRESH_DEBOUNCE_MS = 300
+// Spaces the hub's own refreshes, each of which reads every herdr server.
 const REFRESH_GAP_MS = 1000
 const SAFETY_REFRESH_MS = 10_000
-const EVENTS_RESTART_MS = 3_000
 const REFRESH_TIMEOUT_MS = 8_000
 
-// Tool calls stream through cmux as hook events and Feed telemetry, but only a picker or a message among them changes the board (a message to a manager moves its sender up); prompts, stops and notifications all do.
+// A tool call's hook, in cmux's event shape, moves the board only for a picker or a message (a message to a manager moves its sender up); herdr's events name no hook, so each moves it, and the filter goes with cmux's other code.
 const TOOL_HOOKS = new Set(["PostToolUse", "PostToolUseFailure", "PreToolUse"])
 const BOARD_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode", "SendMessage"])
 
@@ -89,12 +73,16 @@ export const movesTheBoard = (line: string): boolean => {
   return !TOOL_HOOKS.has(hook) || BOARD_TOOLS.has(String(fields.tool_name))
 }
 
-// A slow cmux read would hold the board on its old frame, so a refresh gives up after a while with an error frame; the next starts once that read settles, which run()'s own timeout bounds.
+// A slow sessions read would hold the board on its old frame, so a refresh gives up after a while with an error frame; the next starts once that read settles, which readServer()'s deadline in herdr.ts bounds.
 const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
   new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
       () =>
-        reject(Object.assign(new Error("cmux did not answer in time"), { code: "CMUX_FAILED" })),
+        reject(
+          Object.assign(new Error("the sessions read did not answer in time"), {
+            code: "CMUX_FAILED",
+          }),
+        ),
       ms,
     )
     promise.then(
@@ -118,7 +106,7 @@ export const working = (live: Live | null): Map<string, string> =>
     }),
   )
 
-// One process-wide feed shared by every open board: it runs `cmux events`, re-lists the workers when a session's state moves, and tails each live session's transcript for new entries. It starts with the first subscriber and stops with the last.
+// One process-wide feed shared by every open board: it follows herdr's events, re-lists the workers when a session's state moves, and tails each live session's transcript for new entries. It starts with the first subscriber and stops with the last.
 export class DashboardHub {
   constructor(
     private readonly deps: {
@@ -127,14 +115,14 @@ export class DashboardHub {
       // herdr's events on one stream, every server's (herdr.ts), or null where this machine runs none; herdrEvents() for every server a stack that reads this machine names unless a test stubs it.
       herdr?: () => HerdrEvents | null
       listLive: typeof listLive
-      pace?: Pace
-      // Reads one surface's screen for the activity line, from cmux or herdr (terminal.ts) unless a test stubs it.
+      // Reads one session's screen for the activity line (terminal.ts) unless a test stubs it.
       readScreen?: (surface: string) => Promise<string>
+      refreshGapMs?: number
       refreshTimeoutMs?: number
       stat?: (path: string) => { birthtimeMs: number; size: number }
       // Watches one transcript for changes, fs.watch unless a test fires the change itself: FSEvents drops a file's change under load.
       watch?: (path: string, onChange: () => void) => Pick<FSWatcher, "close">
-    } = { events: true, listLive, pace: { due: readDue, onRead, refreshGapMs: REFRESH_GAP_MS } },
+    } = { events: true, listLive, refreshGapMs: REFRESH_GAP_MS },
   ) {
     this.activity = new ActivityWatch({
       every: everyInterval,
@@ -144,17 +132,12 @@ export class DashboardHub {
 
   private listeners = new Set<Listener>()
   private readonly activity: ActivityWatch
-  private events: CmuxStream | null = null
   private herdr: HerdrEvents | null = null
   private unwatchFixture: (() => void) | null = null
   private unwatchHosted: (() => void) | null = null
-  private eventsRestart: ReturnType<typeof setTimeout> | null = null
   private refreshTimer: ReturnType<typeof setTimeout> | null = null
   private refreshAt = 0
   private refreshedAt = 0
-  // When the board last moved: each refresh asks for records cmux read since then.
-  private movedAt = 0
-  private unwatchRead: (() => void) | null = null
   private safetyTimer: ReturnType<typeof setInterval> | null = null
   // midLine: the offset was set inside the file rather than at a line's end, so the first read starts after the first newline. unnamed: the last read's last line, a message whose image's source line it ended before.
   private tails = new Map<
@@ -172,7 +155,7 @@ export class DashboardHub {
   private live: Live | null = null
   private generation = 0
   private refreshing = false
-  // The live read a refresh started, kept until it settles even after the refresh gave up on it, so a slow `sessions list` never has a second one started beside it.
+  // The live read a refresh started, kept until it settles even after the refresh gave up on it, so a slow read never has a second one started beside it.
   private reading: Promise<Live> | null = null
   private dirty = false
   // When this run of the hub started, and whether it has listed the transcripts once: a transcript created since it started holds nothing any view has been sent.
@@ -183,7 +166,7 @@ export class DashboardHub {
     return this.tails.size
   }
 
-  // The newest live list a refresh read while anyone is subscribed, so a route can answer from what the dashboard already streams rather than asking cmux again. A refresh that failed leaves none, so a route asks cmux itself and meets the same failure.
+  // The newest live list a refresh read while anyone is subscribed, so a route can answer from what the dashboard already streams rather than reading the sessions again. A refresh that failed leaves none, so a route reads them itself and meets the same failure.
   get snapshot(): Live | null {
     return this.live
   }
@@ -208,14 +191,12 @@ export class DashboardHub {
     for (const listener of this.listeners) listener(frame)
   }
 
-  // A fixture has no cmux events: its own writes say when its state moves, and a dashboard that reads herdr alone has herdr's alone. A session the dashboard hosts says so itself.
+  // A fixture's own writes say when its state moves, and a stack that reads this machine follows herdr's events. A session the dashboard hosts says so itself.
   private start() {
     this.startedAt = Date.now()
     this.unwatchHosted = sdkHost.onChange(() => this.scheduleRefresh())
-    this.unwatchRead = this.deps.pace?.onRead(() => this.scheduleRefresh(false)) ?? null
-    if (this.deps.events && readsLive()) {
-      if (!herdrAlone()) this.startEvents()
-    } else if (this.deps.events) this.unwatchFixture = onFixtureChange(() => this.scheduleRefresh())
+    if (this.deps.events && !readsLive())
+      this.unwatchFixture = onFixtureChange(() => this.scheduleRefresh())
     this.startHerdr()
     this.safetyTimer = setInterval(() => this.scheduleRefresh(), SAFETY_REFRESH_MS)
     this.scheduleRefresh()
@@ -223,20 +204,14 @@ export class DashboardHub {
 
   private stop() {
     this.generation += 1
-    if (this.eventsRestart) clearTimeout(this.eventsRestart)
     if (this.refreshTimer) clearTimeout(this.refreshTimer)
     if (this.safetyTimer) clearInterval(this.safetyTimer)
-    this.eventsRestart = this.refreshTimer = this.safetyTimer = null
+    this.refreshTimer = this.safetyTimer = null
     this.unwatchFixture?.()
     this.unwatchFixture = null
     this.unwatchHosted?.()
     this.unwatchHosted = null
-    this.unwatchRead?.()
-    this.unwatchRead = null
     this.dirty = false
-    const events = this.events
-    this.events = null
-    events?.kill()
     const herdr = this.herdr
     this.herdr = null
     herdr?.kill()
@@ -248,45 +223,7 @@ export class DashboardHub {
     this.scanned = false
   }
 
-  private startEvents() {
-    let proc: CmuxStream
-    try {
-      proc = stream(["events", "--category", "agent", "--category", "feed", "--reconnect"])
-    } catch {
-      this.retryEvents()
-      return
-    }
-    this.events = proc
-    void this.readEvents(proc)
-  }
-
-  private retryEvents() {
-    if (this.listeners.size === 0) return
-    this.eventsRestart = setTimeout(() => this.startEvents(), EVENTS_RESTART_MS)
-  }
-
-  // A read that fails (a stream the runtime released under it) ends like an exit: the process goes and a new one starts.
-  private async readEvents(proc: CmuxStream) {
-    const decoder = new TextDecoder()
-    let buffered = ""
-    try {
-      for await (const chunk of proc.stdout) {
-        buffered += decoder.decode(chunk, { stream: true })
-        const lines = buffered.split("\n")
-        buffered = lines.pop() ?? ""
-        if (lines.some(movesTheBoard)) this.scheduleRefresh()
-      }
-    } catch {
-      proc.kill()
-    }
-    await proc.exited
-    if (this.events === proc) {
-      this.events = null
-      this.retryEvents()
-    }
-  }
-
-  // herdr's stream reconnects by itself and ends only when killed, and a herdr move needs no new cmux read, since every board reads herdr afresh: so its moves refresh on the cmux records already read. herdrServers() names none on a hosted or refused stack, and on a fixture stack the fixture's own server, whose events herdrEvents skips.
+  // herdr's stream reconnects by itself and ends only when killed, and every board reads herdr afresh, so a move refreshes the board. herdrServers() names none on a hosted or refused stack, and on a fixture stack the fixture's own server, whose events herdrEvents skips.
   private startHerdr() {
     const servers = this.deps.herdr || !this.deps.events ? [] : herdrServers()
     const events = this.deps.herdr?.() ?? (servers.length ? herdrEvents(servers) : null)
@@ -300,17 +237,19 @@ export class DashboardHub {
           buffered += decoder.decode(chunk, { stream: true })
           const lines = buffered.split("\n")
           buffered = lines.pop() ?? ""
-          if (lines.some(movesTheBoard)) this.scheduleRefresh(false)
+          if (lines.some(movesTheBoard)) this.scheduleRefresh()
         }
       } catch {}
     })()
   }
 
-  // `moved`: the board may have moved now, so the refresh wants records read from now on; a refresh that only catches up on a read keeps the moment it has. An earlier refresh replaces a later one already set.
-  private scheduleRefresh(moved = true, delay = REFRESH_DEBOUNCE_MS) {
+  // An earlier refresh replaces a later one already set.
+  private scheduleRefresh() {
     if (this.listeners.size === 0) return
-    if (moved) this.movedAt = Date.now()
-    const at = Math.max(Date.now() + delay, this.refreshedAt + (this.deps.pace?.refreshGapMs ?? 0))
+    const at = Math.max(
+      Date.now() + REFRESH_DEBOUNCE_MS,
+      this.refreshedAt + (this.deps.refreshGapMs ?? 0),
+    )
     if (this.refreshTimer) {
       if (this.refreshAt <= at) return
       clearTimeout(this.refreshTimer)
@@ -331,18 +270,17 @@ export class DashboardHub {
     this.refreshing = true
     this.refreshedAt = Date.now()
     const generation = this.generation
-    const since = this.movedAt
     try {
       let frame: DashboardFrame
       let live: Live | null = null
       try {
-        const reading = this.deps.listLive({ since, wait: false })
+        const reading = this.deps.listLive()
         this.reading = reading
         const settled = () => {
           this.reading = null
           if (this.dirty && !this.refreshing) {
             this.dirty = false
-            this.scheduleRefresh(false)
+            this.scheduleRefresh()
           }
         }
         reading.then(settled, settled)
@@ -362,7 +300,7 @@ export class DashboardHub {
           code,
           dispatcher: DISPATCHER,
           dispatchers: DISPATCHERS,
-          message: err instanceof Error ? err.message : "cmux failed",
+          message: err instanceof Error ? err.message : "the sessions read failed",
           names: getSessionNames(),
           type: "error",
         }
@@ -377,11 +315,10 @@ export class DashboardHub {
       this.broadcast(frame)
     } finally {
       this.refreshing = false
-      const due = this.deps.pace?.due(since) ?? null
       if (this.dirty) {
         this.dirty = false
-        this.scheduleRefresh(false)
-      } else if (due !== null) this.scheduleRefresh(false, Math.max(REFRESH_DEBOUNCE_MS, due))
+        this.scheduleRefresh()
+      }
     }
   }
 
@@ -450,7 +387,7 @@ export class DashboardHub {
     const last = text.slice(text.lastIndexOf("\n", text.length - 2) + 1, -1)
     tail.unnamed = last.includes("[Image #") && awaitsSource(last) ? last : null
     if (entries.length > 0) this.broadcast({ type: "entries", entries, sessionId })
-    // A session waiting on the owner writes again only once the owner has answered it, which cmux may not report until its turn ends.
+    // A session waiting on the owner writes again only once the owner has answered it, which herdr may not report until its turn ends.
     const waiting = this.live?.workers.some(
       (w) => w.sessionId === sessionId && w.light === "needs-you",
     )

@@ -102,6 +102,11 @@ describe("toFix", () => {
   test("keeps each row still missing, for Settings' list", () => {
     expect(toFix([docker, database, git, portless])).toEqual([docker])
   })
+
+  test("keeps an optional row whose fix the app runs, but never the settings step", () => {
+    const trust: Check = { ...portless, action: { id: "trust", label: "Trust the certificate" } }
+    expect(toFix([docker, git, trust, settings])).toEqual([docker, trust])
+  })
 })
 
 describe("fixJobOf and settled", () => {
