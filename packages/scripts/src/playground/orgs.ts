@@ -300,6 +300,9 @@ const installHome = (io: OrgsIo, plugin: string): number => {
   return code
 }
 
+// whichSkill's refusal when no scope holds name: installed.ts matches it, and api/hono/src/lib/store/extensions.ts reads its words from the CLI's output.
+export const noScopeHolds = (name: string): string => `no scope holds the skill ${name}`
+
 // The folder of the copy of name a session in repo (or a repo of org) loads, the scope it is from and each lower scope whose copy it shadows, or why there is none: a job that runs a skill's script reaches it here, wherever its scope keeps it, through `ext which <skill>`, and `ext why <skill>` prints it.
 export const whichSkill = async (
   io: OrgsIo,
@@ -315,7 +318,7 @@ export const whichSkill = async (
   const winner = resolved.winners.find((w) => w.name === name)
   return winner
     ? { dir: winner.dir, from: winner.from, shadowed: resolved.shadowed.get(name) ?? [] }
-    : { refusal: `no scope holds the skill ${name}` }
+    : { refusal: noScopeHolds(name) }
 }
 
 // playground orgs resolve prints the plugin's folder for spawn.sh; playground orgs home installs the home set; exit 2 on a wrong word or a refusal.
