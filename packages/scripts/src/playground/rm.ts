@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs"
+import { readFileSync, realpathSync } from "node:fs"
 import { homedir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
 import {
@@ -18,40 +18,57 @@ import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
 
 export const RM_USAGE =
-  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--reason "<why>"] | --list | --restore <id>'
+  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--discard [--decision <id>]] [--reason "<why>"] | --list | --restore <id>'
 
 export type RmArgs =
   | { list: true }
   | { restore: string }
-  | { path: string; reason: string; worktree: boolean }
+  | { decision?: string; discard: boolean; path: string; reason: string; worktree: boolean }
 
-// playground rm's words: one path, or --worktree's, with an optional --reason; --list or --restore <id> alone.
+// playground rm's words: one path, or --worktree's with an optional --discard and its --decision, with an optional --reason; --list or --restore <id> alone.
 export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   if (words.length === 1 && words[0] === "--list") return { list: true }
   if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
   let path: string | undefined
   let reason = "playground rm"
   let worktree = false
+  let discard = false
+  let decision: string | undefined
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!
     if (word === "--reason" && words[i + 1] !== undefined) reason = words[++i]!
+    else if (word === "--discard" && !discard) discard = true
+    else if (word === "--decision" && words[i + 1] !== undefined && decision === undefined)
+      decision = words[++i]!
     else if (word === "--worktree" && words[i + 1] !== undefined && path === undefined) {
       worktree = true
       path = words[++i]!
     } else if (!word.startsWith("--") && path === undefined) path = word
     else return { error: RM_USAGE }
   }
-  return path === undefined ? { error: RM_USAGE } : { path, reason, worktree }
+  return path === undefined || (discard && !worktree) || (decision !== undefined && !discard)
+    ? { error: RM_USAGE }
+    : { ...(decision === undefined ? {} : { decision }), discard, path, reason, worktree }
 }
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, every process with a working folder, the ops notify line to the dispatcher, and the session's name.
+// An Inbox item as bun run ask get prints it, read for a delete decision's status and what.
+export type Decision = {
+  kind?: string
+  preview?: { type?: string; what?: string }
+  status?: string
+}
+
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the caller's PLAYGROUND_ROLE, which a factory session sets and the owner's own terminal does not, and the session's name.
 export type RmDeps = {
   clones: () => Clone[]
   data: string
+  decision: (id: string) => Promise<Decision | null>
   home: string
   main: string
+  merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
   procs: () => Proc[] | null
+  role: string | undefined
   session: () => Promise<string>
 }
 
@@ -130,12 +147,49 @@ const processes = (): Proc[] | null => {
   return procs.length ? procs : null
 }
 
-// This machine's: run-slot's running clone, HOME, the data folder, the main checkout, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
+// Whether a merged PR holds the commit, from GitHub's REST list of the commit's PRs in the worktree's own repository, or null when gh cannot answer.
+const merged = (sha: string, at: string): boolean | null => {
+  const run = Bun.spawnSync(
+    [
+      "gh",
+      "api",
+      `repos/{owner}/{repo}/commits/${sha}/pulls`,
+      "--jq",
+      "any(.[]; .merged_at != null)",
+    ],
+    { cwd: at, stderr: "ignore", stdout: "pipe" },
+  )
+  const out = run.stdout.toString().trim()
+  return run.exitCode === 0 && (out === "true" || out === "false") ? out === "true" : null
+}
+
+// An Inbox item from bun run ask get in the Dashboard's checkout, which holds the Inbox's database, or null when none reads.
+const decisionOf =
+  (repo: string) =>
+  async (id: string): Promise<Decision | null> => {
+    try {
+      const { dashboardCheckout } = await import("./probe")
+      const checkout = dashboardCheckout(repo)
+      if (!checkout) return null
+      const run = Bun.spawnSync(["bun", "run", "--cwd", checkout, "ask", "get", id], {
+        stderr: "ignore",
+        stdout: "pipe",
+      })
+      const out = run.stdout.toString()
+      return run.exitCode === 0 ? (JSON.parse(out.slice(out.indexOf("{"))) as Decision) : null
+    } catch {
+      return null
+    }
+  }
+
+// This machine's: run-slot's running clone, HOME, the data folder, the Inbox through the Dashboard's checkout, the main checkout, gh for a merged PR, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
 export const rmDeps = (repo: string): RmDeps => ({
   clones: clones(dataDir()),
   data: dataDir(),
+  decision: decisionOf(repo),
   home: homedir(),
   main: mainCheckout(repo),
+  merged,
   notify: (text) =>
     void Bun.spawnSync(["bash", join(repo, "scripts", "ops", "notify.sh"), "safe-delete", text], {
       env: { ...process.env, NOTIFY_TO: "dispatcher" },
@@ -143,8 +197,37 @@ export const rmDeps = (repo: string): RmDeps => ({
       stdout: "ignore",
     }),
   procs: processes,
+  role: process.env.PLAYGROUND_ROLE || undefined,
   session: sessionName,
 })
+
+// Why a session with a role may not pass --discard here, or null: it names with --decision an approved Inbox delete decision whose what names this path, so the owner's Approve is the authority and the session runs it.
+export const discardRefusal = async (
+  path: string,
+  id: string | undefined,
+  deps: Pick<RmDeps, "decision" | "role">,
+): Promise<string | null> => {
+  const route = `post an Inbox delete decision with bun run ask new naming ${resolve(path)} and why, then run playground rm --worktree ${path} --discard --decision <id> once it is approved`
+  if (id === undefined)
+    return `a session with a role (${deps.role}) passes --discard only with --decision <id>: ${route}`
+  const item = await deps.decision(id)
+  if (!item)
+    return `--decision ${id} names no Inbox item the Dashboard's checkout can read: ${route}`
+  if (item.kind !== "decision" || item.preview?.type !== "delete")
+    return `--decision ${id} is not a delete decision: ${route}`
+  if (item.status !== "approved")
+    return `--decision ${id} is ${item.status ?? "of no status"}, not approved: ${route}`
+  const paths = new Set([resolve(path)])
+  try {
+    paths.add(realpathSync(path))
+  } catch {}
+  const named = (item.preview.what ?? "")
+    .split(/\s+/)
+    .map((word) => word.replace(/^[`'"(]+|[`'",.;:)]+$/g, "").replace(/(.)\/$/, "$1"))
+  if (!named.some((word) => paths.has(word)))
+    return `--decision ${id}'s delete names another path, not ${resolve(path)}: ${route}`
+  return null
+}
 
 // playground rm: one quarantine, list or restore against the deps' HOME, main checkout and trash; a protected or tripwire refusal goes to the dispatcher; exit 0 done, 1 refused, 2 a usage error.
 export async function runRm(words: string[], deps: RmDeps): Promise<number> {
@@ -152,6 +235,12 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   if ("error" in args) {
     console.error(`playground: ${args.error}`)
     return 2
+  }
+  const discarding = "discard" in args && args.discard && deps.role
+  const refusal = discarding ? await discardRefusal(args.path, args.decision, deps) : null
+  if (refusal) {
+    console.error(`playground: ${refusal}`)
+    return 1
   }
   const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
   if ("list" in args) {
@@ -173,7 +262,9 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
             worktree: args.worktree
               ? {
                   clones: deps.clones(),
+                  discard: args.discard,
                   live: STATUSES.live,
+                  merged: deps.merged,
                   procs: deps.procs(),
                   roster: join(deps.data, "roster.json"),
                 }

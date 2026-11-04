@@ -253,7 +253,7 @@ export async function answerFeed(
     try {
       live = await deps.listLive()
     } catch (error) {
-      return refused("CMUX_FAILED", `cmux could not be read: ${messageOf(error)}`)
+      return refused("CMUX_FAILED", `Could not read the sessions: ${messageOf(error)}`)
     }
     const worker = live.workers.find((w) => w.sessionId === sessionId)
     if (!worker) return refused("NOT_FOUND", "That session is not live.")

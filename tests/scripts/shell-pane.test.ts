@@ -600,6 +600,9 @@ describe("login drives GitHub's browser login and hands the owner its code on a 
     expect(JSON.stringify({ closed, posted })).not.toMatch(/gho_|Logged in|made-up-login/)
   })
 
+  // The caller check main runs first, passed: tests/scripts/hooks/session-state.test.ts drives the real one under a launcher of its own.
+  const PASSED = async () => undefined
+
   test("main takes github alone, and prints the result and the card, never a line the pane showed", async () => {
     const log = console.log
     const error = console.error
@@ -615,15 +618,39 @@ describe("login drives GitHub's browser login and hands the owner its code on a 
       expect(await main(["login", "w1:p1", "gitlab"], loginHerdr(shown).herdr, inbox().fake)).toBe(
         1,
       )
-      expect(await main(["login", "w1:p1", "github"], loginHerdr(shown).herdr, inbox().fake)).toBe(
-        0,
-      )
+      expect(
+        await main(["login", "w1:p1", "github"], loginHerdr(shown).herdr, inbox().fake, PASSED),
+      ).toBe(0)
     } finally {
       console.log = log
       console.error = error
       Object.defineProperty(process, "execArgv", { configurable: true, value: execArgv })
     }
     expect(printed).toEqual(["error: usage:", "signed in; card item-1 closed"])
+  })
+
+  test("main refuses a run or a login its caller check refuses, typing and posting nothing", async () => {
+    const error = console.error
+    const printed: string[] = []
+    console.error = (line: string) => printed.push(line)
+    const execArgv = process.execArgv
+    Object.defineProperty(process, "execArgv", {
+      configurable: true,
+      value: [...execArgv, "--no-env-file"],
+    })
+    const refused = async () => "shell-pane refuses: a made-up caller"
+    const pane = loginHerdr(shown)
+    const card = inbox()
+    try {
+      expect(await main(["run", "w1:p1", "echo hi"], pane.herdr, card.fake, refused)).toBe(1)
+      expect(await main(["login", "w1:p1", "github"], pane.herdr, card.fake, refused)).toBe(1)
+    } finally {
+      console.error = error
+      Object.defineProperty(process, "execArgv", { configurable: true, value: execArgv })
+    }
+    expect(printed).toEqual(Array(2).fill("shell-pane refuses: a made-up caller"))
+    expect(pane.calls).toEqual([])
+    expect(card.posted).toEqual([])
   })
 
   test("no sign-in by the timeout closes the card as unknown, and a gh that ends with no code posts none", async () => {
