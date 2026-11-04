@@ -150,16 +150,20 @@ export function asksDecision(reply: string, names: string[] = [], owner: string[
 const STEP = /^\s*\d+[.)]\s/
 const TABLE_ROW = /^\s*\|.*\|\s*$/
 const TABLE_RULE = /^\s*\|\s*:?-{3,}/
-// A line saying the steps went to the dispatcher as a draft: a past-tense hand-off verb, then the dispatcher and a draft on the same line.
+// A sentence saying the steps went to the dispatcher as a draft, never one that says they did not: a past-tense hand-off verb, then the dispatcher, then "as a draft", or the reason's own "the dispatcher has the draft".
 const DRAFT_HANDED =
-  /\b(?:forwarded|gave|handed|passed|sent|went)\b(?=[^\n]*\bdispatcher\b)(?=[^\n]*\bdraft\b)/i
+  /(?<!(?:\bnot|\bnever|n't)\s+(?:\w+\s+)?)\b(?:(?:forwarded|gave|handed|passed|sent)\b[^.;!?\n]*?\bdispatcher\b[^.;!?\n]*?\bas a draft\b|went to the dispatcher as a draft\b|the dispatcher has the draft\b)/i
 
-// Pure: whether the reply keeps steps or a table the owner comes back to, 3 or more numbered lines or a markdown table, code and blockquotes left out, so a bulleted list passes.
-export function keepsForOwner(reply: string): boolean {
-  const lines = reply
+// Pure: the reply's lines with fenced code and blockquotes left out.
+const ownLines = (reply: string) =>
+  reply
     .replace(/```[\s\S]*?(?:```|$)/g, "")
     .split("\n")
     .filter((line) => !BLOCKQUOTE.test(line))
+
+// Pure: whether the reply keeps steps or a table the owner comes back to, 3 or more numbered lines or a markdown table, code and blockquotes left out, so a bulleted list passes.
+export function keepsForOwner(reply: string): boolean {
+  const lines = ownLines(reply)
   return (
     lines.filter((line) => STEP.test(line)).length >= 3 ||
     lines.some((line, i) => TABLE_ROW.test(line) && TABLE_RULE.test(lines[i + 1] ?? ""))
@@ -301,7 +305,7 @@ async function inspect(raw: string, env: Record<string, string | undefined>, dep
   if (asks && asksDecision(reply, await rosterNames(env), owner)) return gate(reply, deps, REASON)
   if (!keeps) return
   if (role === "dispatcher") return gate(reply, deps, STEPS_REASON)
-  if (DRAFT_HANDED.test(reply)) return
+  if (DRAFT_HANDED.test(ownLines(reply).join("\n"))) return
   return gate(reply, deps, DRAFT_REASON)
 }
 

@@ -31,6 +31,7 @@ writeFileSync(
   JSON.stringify({
     agents: [
       { kind: "builder", name: "x7mh4d-builder", role: "manager", status: "working", task: "t" },
+      { kind: "dispatcher", name: "seat-k8w2rd", role: "manager", status: "working", task: "t" },
       { kind: "worker", name: "k3v9q2-worker", role: "worker", status: "working", task: "t" },
       { name: "k3m9px-worker", role: "worker", status: "working", task: "t" },
       { name: "worker-plain-fern", role: "worker", status: "working", task: "t" },
@@ -455,6 +456,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
 
   test("the dispatcher's own steps keep the Inbox reason, a draft line included", async () => {
     expect(await stop(STEPS, { name: "dispatcher", role: "" })).toBe(STEPS_REASON)
+    expect(await stop(STEPS, { name: "seat-k8w2rd", role: "" })).toBe(STEPS_REASON)
     expect(await stop(`${STEPS}\nSent these steps to the dispatcher as a draft.`)).toBe(
       STEPS_REASON,
     )
@@ -464,8 +466,25 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
     ["sent", "Sent these steps to the dispatcher as a draft."],
     ["handed", "I handed the card to the dispatcher as a draft."],
     ["went", "They went to the dispatcher as a draft for one card."],
+    ["says the reason's own words for", "The dispatcher has the draft."],
   ])("passed: a lead's steps it %s to the dispatcher as a draft", async (_name, line) => {
     expect(await stop(`${STEPS}\n${line}`, { role: "lead" })).toBeUndefined()
+  })
+
+  test.each([
+    ["a hand-off not made yet", "I haven't sent the dispatcher the draft yet."],
+    ["a hand-off denied", "I have not sent these to the dispatcher as a draft."],
+    [
+      "a hand-off denied with a word between",
+      "I haven't yet sent these to the dispatcher as a draft.",
+    ],
+    ["a draft line inside a fence", "```\nsent dispatcher draft\n```"],
+    ["a draft line in a blockquote", "> Sent these steps to the dispatcher as a draft."],
+    ["a draft PR in a status line", "All checks passed; the dispatcher reviews the draft PR next."],
+    ["a draft PR beside the dispatcher", "PR #859 went up as a draft; the dispatcher has it."],
+    ["a note on a draft PR", "Sent the dispatcher a note on the draft PR."],
+  ])("refused: a lead's steps beside %s", async (_name, line) => {
+    expect(await stop(`${STEPS}\n${line}`, { role: "lead" })).toBe(DRAFT_REASON)
   })
 
   test("a lead's draft line passes its steps, never a decision it asks", async () => {
