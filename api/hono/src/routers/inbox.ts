@@ -19,7 +19,7 @@ import {
   scheduleItem,
   secretInputSchema,
 } from "@/lib/dashboard/inbox"
-import { runSink } from "@/lib/dashboard/secret-sink"
+import { runSink, saveToKeychain } from "@/lib/dashboard/secret-sink"
 import { slackUpload } from "@/lib/dashboard/slack-upload"
 import { DISPATCHER } from "@/lib/dashboard/workers"
 import {
@@ -227,6 +227,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         deliver,
         dispatcher: DISPATCHER,
         run: runSink,
+        keychain: saveToKeychain,
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
       return c.json({ data: result.item })

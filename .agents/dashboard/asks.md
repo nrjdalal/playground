@@ -267,14 +267,16 @@
   which the owner chose not to send (`staleItems`; an answer delivered before acks were stamped, `ACKS_STAMPED_FROM`, is not listed, since it may have been acked with no stamp, while one never delivered still is, and a go delivered before then, read through bun run ask or typed into its session, reads as closed):
   ops-sweep reminds each live poster on it once, then at most every 4 hours, and a lead hears of a poster that is down (playbook's Sweep).
 - A `secret` ask asks the owner for a value (a client secret, an API key) that goes straight to one sink and is kept nowhere: no row, log line, transcript, response, error or argv holds it.
-  Its `key` is the environment variable's name and its `sink` one of the allowlist in code, `secretSinkSchema` in `api/hono/src/lib/dashboard/inbox.ts`, today Vercel alone: `{type: "vercel", project, scope, environments}`, each environment of `development`, `preview` and `production` named once.
+  Its `key` is the environment variable's name and its `sink` one of the allowlist in code, `secretSinkSchema` in `api/hono/src/lib/dashboard/inbox.ts`, `{type: "vercel", project, scope, environments}`, each environment of `development`, `preview` and `production` named once, or `{type: "keychain", item}`,
+  one of this Mac's Keychain items `KEYCHAIN_ITEMS` in `api/hono/src/lib/keychain-items.ts` allows (`yard` today, the Yard token `playground yard` and the local Dashboard read), so a new item is one entry there.
   Its card shows what Submit does, a masked field and Submit, Enter submitting too, with no comment box, Archive or Chat about it, so nothing else invites the value; Snooze stays.
   Submit posts `{value, seen}`, the value trimmed of its edge whitespace (a pasted newline), to `POST /api/v1/inbox/:id/secret`, which `provideSecret()` claims in one write that holds only while the item is open at the version read, so the sink runs once, then hands the value on stdin to `vercel env add <key> --environment <env> --project <project> --scope <scope> --yes`,
   once an environment in order,
   from the temp folder with its output dropped and only `HOME`, `PATH`, the proxy and CA variables and `VERCEL_*` in its environment (`spawnSink` in `api/hono/src/lib/dashboard/secret-sink.ts`, stopped after 60 seconds).
-  Only a stack that reads the live machine runs the sink; a fixture or test stack runs nothing and records exit 0 (`runSink`).
+  A keychain sink instead hands the value to `keychainItem(<item>).write` (`api/hono/src/lib/keychain.ts`), which checks it against the item's shape and writes it through `security -i` on stdin, so no argv holds it; its one result is `{environment: "Keychain", exitCode, line}`, `line` reading `saved` or the refusal's first line with the value cut out.
+  Only a stack that reads the live machine runs the sink; a fixture or test stack runs nothing and records exit 0 (`runSink`, `saveToKeychain`).
   The item turns `provided`, its answer `{at, choice: "provided", results: [{environment, exitCode}]}` (`exitCode` null once stopped by a signal, 127 when `vercel` could not start), and its poster is typed `Provided at <at>`, each environment's exit status and the `bun run ask get --ack` that closes it, which `bun run ask stale` chases until it does.
-  The card reads `Provided at <time>` with each exit status, green once every environment took it, red while any did not; a value the sink refused takes a new ask, and so does one whose card still reads sending after the sink's minute an environment, since the API restarted mid-run and no exit status came back.
+  The card reads `Provided at <time>` with each exit status (a result's `line` in its place), green once every environment took it, red while any did not; a value the sink refused takes a new ask, and so does one whose card still reads sending after the sink's minute an environment, since the API restarted mid-run and no exit status came back.
 
   ```bash
   bun run ask new <<'EOF'
