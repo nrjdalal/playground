@@ -2296,6 +2296,7 @@ async function inspect(raw, environment, unknown = false) {
     }
     if (opaque) {
       const was = inProgram;
+      const wasArg = argLine;
       inProgram = true;
       try {
         const text = opaque.value.replace(/^--(?:eval|print)=/, "");
@@ -2312,7 +2313,7 @@ async function inspect(raw, environment, unknown = false) {
         }
       } finally {
         inProgram = was;
-        argLine = false;
+        argLine = wasArg;
       }
     }
     const quiet = !whole && quietCommit(cmd, parsed, env);
