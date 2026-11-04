@@ -16,8 +16,9 @@ import {
   appsArgs,
   appsChange,
   answerInputSchema,
+  answerLine,
+  answerPayload,
   checkAnswer,
-  deliveryText,
   inboxCount,
   inboxInputSchema,
   type Delivery,
@@ -26,7 +27,6 @@ import {
   type InboxItem,
   inboxOrder,
   isGo,
-  relayText,
   runResult,
   savesDraft,
   secretInputSchema,
@@ -35,7 +35,13 @@ import {
   slackPlace,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 import { uploadSpec } from "../../../../../../api/hono/src/lib/dashboard/slack-upload"
+import { KEYCHAIN_ITEM_NAMES } from "../../../../../../api/hono/src/lib/keychain-items"
 import { keychain } from "../../../../../../api/hono/src/lib/yard/keychain"
+import {
+  ANSWER_LEAD,
+  answerPayloadSchema,
+  payloadOf,
+} from "../../../../../../packages/config/src/inbox"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -524,6 +530,9 @@ describe("an ask to quit, restart, close or stop something (#1274)", () => {
   })
 })
 
+// an answer's time, as the store writes it
+const AT = "2026-11-04T18:00:00.000Z"
+
 const item = (over: Partial<InboxItem> & Pick<InboxItem, "kind">): InboxItem =>
   ({
     answer: null,
@@ -676,10 +685,9 @@ describe("an answer", () => {
     const was = process.env.PLAYGROUND_DATA_DIR
     process.env.PLAYGROUND_DATA_DIR = data
     try {
-      const it = { id: "abc", ref: 41, title: "T" }
-      expect(deliveryText(it, { choice: "draft" })).toContain(
-        "rewritten to the app form by piping it to made-up-convert (ack refuses",
-      )
+      expect(
+        answerPayload(item({ kind: "draft" }), { at: AT, choice: "draft" }).linkConverter,
+      ).toBe("made-up-convert")
       const parsed = inboxInputSchema.safeParse({
         from: "builder",
         kind: "update",
@@ -696,35 +704,133 @@ describe("an answer", () => {
     }
   })
 
-  test("reaches its poster as a line naming the item, its tag and what to do", () => {
-    const it = { id: "abc", ref: 41, title: "Ship canary 3f9a2c1 to main?" }
-    expect(deliveryText(it, { choice: "approve" })).toBe(
-      'Inbox #i41 (abc) "Ship canary 3f9a2c1 to main?": Approved. Carry it out.',
-    )
-    expect(deliveryText(it, { choice: "edit", editedText: "Wait for #299" })).toContain(
-      "Carry it out with these: Wait for #299",
-    )
-    expect(deliveryText(it, { choice: "deny" })).toContain("Do not carry it out")
-    expect(deliveryText(it, { choice: "send" })).toContain("Send it as written")
-    expect(deliveryText(it, { choice: "send", editedText: "hey" })).toContain("as: hey")
-    expect(deliveryText(it, { choice: "discard" })).toContain("Do not send it")
-    // a clear keeps what is moving and holds only the item's new step, so it reads as neither a deny nor a discard
-    const cleared = deliveryText(it, { choice: "clear" })
-    expect(cleared).toContain("Cleared for now: the owner will talk more about it later.")
-    expect(cleared).toContain("Whatever is already in motion stays in motion")
-    expect(cleared).not.toMatch(/Denied|Discarded|Do not carry it out/)
-    // his note follows the answer on a line of its own, and only when there is one
-    expect(deliveryText(it, { choice: "deny", note: "ask again next week" })).toBe(
-      'Inbox #i41 (abc) "Ship canary 3f9a2c1 to main?": Denied. Do not carry it out.\nThe owner\'s note: ask again next week',
-    )
-    expect(deliveryText(it, { choice: "deny" })).not.toContain("note")
-    // the poster reads only this line, so it names the tool and how to close the item
-    expect(deliveryText(it, { choice: "draft" })).toBe(
-      'Inbox #i41 (abc) "Ship canary 3f9a2c1 to main?": Save it as a Slack draft as written, with slack_send_message_draft, then bun run ask ack it with the channel_link that returns, in its app form (ack refuses the archives form), or with --no-link and why when Slack refuses (draft_already_exists: that conversation holds a draft already). Do not send it.',
-    )
-    expect(deliveryText(it, { choice: "draft", editedText: "hey" })).toMatch(
-      /Save it as a Slack draft with slack_send_message_draft, .* Do not send it\. Save it with changes, as: hey$/,
-    )
+  // every click that reaches a poster types one line of data, which answerPayloadSchema parses, never prose
+  test("every answer click types one [inbox-answer] line that answerPayloadSchema parses", () => {
+    const decided = item({
+      id: "abc",
+      kind: "decision",
+      ref: 41,
+      title: "Ship canary 3f9a2c1 to main?",
+    })
+    const drafted = item({ id: "def", kind: "draft", ref: 42, title: "Tell Merritt" })
+    const secret = item({
+      id: "ghi",
+      kind: "decision",
+      preview: {
+        key: "API_KEY",
+        sink: { item: KEYCHAIN_ITEM_NAMES[0], type: "keychain" },
+        type: "secret",
+      } as never,
+      ref: 43,
+      title: "The API key",
+    })
+    const accepting = item({
+      id: "jkl",
+      kind: "decision",
+      preview: ACCEPT as never,
+      ref: 44,
+      title: "Accept",
+    })
+    const read = (ref: number) => `bun run ask get #i${ref} --ack`
+    const ack = (ref: number) => `bun run ask ack #i${ref} --link <https url>`
+    const cases: [InboxItem, Parameters<typeof answerPayload>[1], Record<string, unknown>][] = [
+      [
+        decided,
+        { at: AT, choice: "approve" },
+        {
+          close: ack(41),
+          go: true,
+          next: "carry-out",
+          option: { index: 0, label: "Approve", letter: "A" },
+          type: "slack",
+          verb: "pick",
+        },
+      ],
+      [
+        decided,
+        { at: AT, choice: "edit", editedText: "Wait for #299" },
+        { go: true, next: "carry-out", text: "Wait for #299", verb: "pick" },
+      ],
+      [
+        decided,
+        { at: AT, choice: "deny", note: "ask again next week" },
+        {
+          close: read(41),
+          comment: "ask again next week",
+          go: false,
+          next: "close",
+          option: { index: 1, label: "Deny", letter: "B" },
+          verb: "pick",
+        },
+      ],
+      [
+        decided,
+        { at: AT, choice: "clear" },
+        { close: read(41), go: false, next: "close", verb: "set-aside" },
+      ],
+      [
+        drafted,
+        { at: AT, choice: "send" },
+        { close: ack(42), go: true, kind: "draft", next: "carry-out", verb: "send" },
+      ],
+      [drafted, { at: AT, choice: "send", editedText: "hey" }, { text: "hey", verb: "send" }],
+      [
+        drafted,
+        { at: AT, choice: "draft" },
+        { close: ack(42), go: true, next: "carry-out", verb: "draft" },
+      ],
+      [
+        drafted,
+        { at: AT, choice: "discard" },
+        { close: read(42), go: false, next: "close", verb: "discard" },
+      ],
+      [
+        secret,
+        {
+          at: AT,
+          choice: "provided",
+          results: [{ environment: "keychain", exitCode: 0, line: "saved" }],
+        },
+        {
+          close: read(43),
+          go: true,
+          next: "close",
+          results: [{ environment: "keychain", exitCode: 0, line: "saved" }],
+          verb: "submit",
+        },
+      ],
+      [
+        accepting,
+        { accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" }, at: AT, choice: "approve" },
+        {
+          accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
+          close: 'bun run ask ack #i44 --no-link "<why>"',
+          next: "nothing",
+          verb: "pick",
+        },
+      ],
+    ]
+    for (const [it, answer, expected] of cases) {
+      const line = answerLine(answerPayload(it, answer))
+      expect(line).toStartWith(`${ANSWER_LEAD} {`)
+      expect(line).not.toContain("\n")
+      const payload = payloadOf(line)
+      expect(answerPayloadSchema.safeParse(payload).success).toBe(true)
+      expect(payload).toMatchObject({
+        at: AT,
+        id: it.id,
+        ref: `#i${it.ref}`,
+        title: it.title,
+        v: 1,
+        ...expected,
+      })
+    }
+    // a comment's line ends stay inside the one line, escaped by JSON
+    const noted = answerLine(answerPayload(decided, { at: AT, choice: "deny", note: "one\ntwo" }))
+    expect(noted.split("\n")).toHaveLength(1)
+    expect(payloadOf(noted)?.comment).toBe("one\ntwo")
+    // no comment, no key
+    expect(answerPayload(decided, { at: AT, choice: "deny" })).not.toHaveProperty("comment")
   })
 
   // Send types the words alone into the poster: a draft's files are shared into Slack by the dashboard itself (PG-649), never handed to the session
@@ -745,11 +851,10 @@ describe("an answer", () => {
       { choice: "send", editedText: "hey" },
       { choice: "draft" },
     ] as const) {
-      expect(deliveryText(shown, answer)).toBe(deliveryText(plain, answer))
-      const relay = relayText(shown, answer)
-      expect(relay).toBe(relayText(plain, answer))
-      expect(relay).not.toContain("before.png")
-      expect(relay).not.toContain("3f0e7a52-1c4b-4d2a-9e6f-0000000000a1")
+      const line = answerLine(answerPayload(shown, { ...answer, at: AT }))
+      expect(line).toBe(answerLine(answerPayload(plain, { ...answer, at: AT })))
+      expect(line).not.toContain("before.png")
+      expect(line).not.toContain("3f0e7a52-1c4b-4d2a-9e6f-0000000000a1")
     }
   })
 })
@@ -2326,14 +2431,19 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     )
     if (!answered.ok) throw new Error(answered.message)
     expect(sent.map((d) => d.to)).toEqual(["worker-eod", "dispatcher"])
+    // the dispatcher gets the poster's line with relay set, and reads the preview with bun run ask get
     const relay = sent[1]?.text ?? ""
-    expect(relay).toContain(`#i${posted.ref}`)
-    expect(relay).toContain("draft")
-    expect(relay).toContain("worker-eod has ended")
-    expect(relay).toContain("goes out through your Slack tool")
-    expect(relay).toContain("bun run ask ack")
-    expect(relay).toContain("hi Merritt, it is live.")
-    expect(relay).toContain("hi Merritt, the fix is on staging.")
+    expect(payloadOf(relay)).toMatchObject({
+      close: `bun run ask ack #i${posted.ref} --link <https url>`,
+      kind: "draft",
+      next: "carry-out",
+      ref: `#i${posted.ref}`,
+      relay: { for: "worker-eod", why: "poster-ended" },
+      text: "hi Merritt, it is live.",
+      verb: "send",
+    })
+    expect(relay).not.toContain("hi Merritt, the fix is on staging.")
+    expect(payloadOf(sent[0]?.text ?? "")).not.toHaveProperty("relay")
     expect(answered.item.delivery).toEqual({
       at: "2026-10-26T06:00:00.000Z",
       status: "delivered",
@@ -2366,7 +2476,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     )
     expect(answered.ok).toBe(true)
     expect(sent.map((d) => d.to)).toEqual(["worker-eod"])
-    expect(sent[0]?.text).not.toContain("has ended")
+    expect(payloadOf(sent[0]?.text ?? "")).not.toHaveProperty("relay")
     expect(answered.ok && answered.item.delivery).toMatchObject({ to: "worker-eod" })
   })
 
@@ -2475,8 +2585,11 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     )
     if (!answered.ok) throw new Error(answered.message)
     expect(answered.item.status).toBe("cleared")
-    expect(sent[0]?.text).toContain("Cleared for now")
-    expect(sent[0]?.text).not.toContain("Denied")
+    expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+      go: false,
+      next: "close",
+      verb: "set-aside",
+    })
     // a go would wait on bun run ask ack with a link; a clear closes on the poster's read, as a deny does
     const read = await store.readAnswer(db, answered.item, new Date("2026-10-07T12:01:00.000Z"))
     expect(read.answer).toMatchObject({ ackedAt: "2026-10-07T12:01:00.000Z", choice: "clear" })
@@ -2609,7 +2722,11 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     ])
     expect([first.ok, second.ok].sort()).toEqual([false, true])
     expect(sent).toHaveLength(1)
-    expect(sent[0]?.text).toContain("Approved. Carry it out.")
+    expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+      go: true,
+      next: "carry-out",
+      verb: "pick",
+    })
     expect(sent[0]?.to).toBe("ops")
     const item = await store.getItem(db, posted.id)
     expect(item?.delivery).toMatchObject({ status: "delivered", via: "session" })
@@ -3427,9 +3544,11 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
       })
       expect(sent).toHaveLength(1)
-      expect(sent[0]?.text).toContain("the dashboard ran the accept: rev 9b8c7d6 is accepted")
-      expect(sent[0]?.text).toContain(`bun run ask ack #i${posted.ref} --no-link`)
-      expect(sent[0]?.text).not.toContain("Carry it out")
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
+        close: `bun run ask ack #i${posted.ref} --no-link "<why>"`,
+        next: "nothing",
+      })
     })
 
     test("a refused accept records the CLI's exit code and its error line, and the poster reads that nothing was accepted", async () => {
@@ -3555,11 +3674,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         },
       )
       const relayed = sent.find((delivery) => delivery.to === "dispatcher")
-      expect(relayed?.text).toStartWith(
-        `worker-eod has ended, and the dashboard already ran this accept, so nothing is carried out: close the item with bun run ask ack #i${posted.ref} --no-link`,
-      )
-      expect(relayed?.text).toContain("the dashboard ran the accept")
-      expect(relayed?.text).not.toContain("you carry this out in its place")
+      const relayedPayload = payloadOf(relayed?.text ?? "")
+      expect(relayedPayload).toMatchObject({
+        close: `bun run ask ack #i${posted.ref} --no-link "<why>"`,
+        next: "nothing",
+        relay: { for: "worker-eod", why: "poster-ended" },
+      })
+      expect(relayedPayload?.accepted?.exitCode).not.toBe(0)
       // an approved accept is a go, which get --ack leaves open, so the relay names the one close that closes it
       expect(relayed?.text).not.toContain("--ack")
     })
@@ -3606,8 +3727,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         },
       })
       expect(answered.ok && answered.item.status).toBe("approved")
-      expect(sent[0]?.text).toContain("Recheck with agent-desktop permissions")
-      expect(sent[0]?.text).toContain(`bun run ask ack #i${posted.ref} --no-link`)
+      // the pane opened, so the poster carries out the recheck asks.md names, then closes it
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        close: `bun run ask ack #i${posted.ref} --no-link "<why>"`,
+        next: "carry-out",
+        opened: { exitCode: 0 },
+        type: "grant",
+        verb: "pick",
+      })
     })
 
     test("an open that fails is recorded, and the poster reads that nothing opened", async () => {
@@ -3629,7 +3756,10 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(answered.ok && answered.item.answer).toMatchObject({
         opened: { exitCode: 1, line: "LSOpenURLsWithRole() failed with error -10814" },
       })
-      expect(sent[0]?.text).toContain("Nothing opened")
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        next: "nothing",
+        opened: { exitCode: 1, line: "LSOpenURLsWithRole() failed with error -10814" },
+      })
     })
 
     test("with no opener, as on a stack showing test data, its Approve is refused and the item stays open; Deny opens nothing", async () => {
@@ -3699,7 +3829,11 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         listed: { exitCode: 0, line: "added Notes; your apps are Slack, Notes" },
       })
       expect(answered.ok && answered.item.status).toBe("approved")
-      expect(sent[0]?.text).toContain("the dashboard changed the owner's apps")
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        listed: { exitCode: 0, line: "added Notes; your apps are Slack, Notes" },
+        next: "nothing",
+        type: "apps",
+      })
     })
 
     test("two Approves that overlap change the list one at a time, so neither app is lost", async () => {

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { extname, join } from "node:path"
 
+import { ANSWER_LEAD, type AnswerPayload, answerPayloadSchema } from "@packages/config/inbox"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
@@ -690,118 +691,116 @@ function answerOf(
   return { message: "A draft is sent, saved as a draft, discarded or cleared" }
 }
 
-// Pure: what is typed into the posting session for its answer, opening with the item's tag and id so `bun run ask get` finds it.
-export function deliveryText(
-  item: Pick<InboxItem, "id" | "ref" | "title">,
-  answer: Omit<InboxAnswer, "at">,
-): string {
-  const words = answerWords(item, answer)
-  return answer.note ? `${words}\nThe owner's note: ${answer.note}` : words
+// An old row's two options, as the card shows them: Approve is A, Deny is B.
+const OLD_OPTIONS = {
+  approve: { index: 0, label: "Approve", letter: "A" },
+  deny: { index: 1, label: "Deny", letter: "B" },
 }
 
-function answerWords(
-  item: Pick<InboxItem, "id" | "ref" | "title">,
-  answer: Omit<InboxAnswer, "at">,
-): string {
-  const head = `Inbox ${itemTag(item.ref)} (${item.id}) "${item.title}":`
-  const edited = answer.editedText
-  const accepted = answer.accepted
-  if (answer.choice === "approve" && accepted) {
-    const close = `bun run ask ack ${itemTag(item.ref)} --no-link`
-    return accepted.exitCode === 0
-      ? `${head} Approved, and the dashboard ran the accept: ${accepted.line}. Nothing is left to carry out: close it with ${close} "accepted in the extensions store".`
-      : `${head} Approved, but the accept the dashboard ran failed (exit ${accepted.exitCode}): ${accepted.line}. Nothing was accepted: read the proposal again, post a new accept decision for its current rev if it still stands, and close this one with ${close} and why.`
+// Pure: what an answer tells its poster, as data: the verb, whether to carry it out, the next step and the exact command that closes the item; the owner's comment in his words, a changed draft's text, a step's or a secret sink's results, never a secret's value; an update takes no answer.
+export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvided): AnswerPayload {
+  if (item.kind === "update") throw new Error("An update takes no answer")
+  const tag = itemTag(item.ref)
+  const ack = `bun run ask ack ${tag} --link <https url>`
+  const read = `bun run ask get ${tag} --ack`
+  const head = {
+    at: answer.at,
+    id: item.id,
+    kind: item.kind,
+    ref: tag,
+    title: item.title,
+    ...(item.kind === "decision" && { type: item.preview.type }),
+    v: 1 as const,
   }
-  const listed = answer.listed
-  if (answer.choice === "approve" && listed) {
-    const close = `bun run ask ack ${itemTag(item.ref)} --no-link`
-    return listed.exitCode === 0
-      ? `${head} Approved, and the dashboard changed the owner's apps: ${listed.line}. Nothing is left to carry out: close it with ${close} "the owner's apps list changed".`
-      : `${head} Approved, but the apps change the dashboard ran failed (exit ${listed.exitCode}): ${listed.line}. The list is as it was: tell your lead, and close this one with ${close} and why.`
+  if (answer.choice === "provided") {
+    return {
+      ...head,
+      close: read,
+      go: true,
+      next: "close",
+      results: answer.results ?? [],
+      verb: "submit",
+    }
   }
-  const opened = answer.opened
-  if (answer.choice === "approve" && opened) {
-    const close = `bun run ask ack ${itemTag(item.ref)} --no-link`
-    return opened.exitCode === 0
-      ? `${head} Approved, and the dashboard ${opened.line}, where the owner grants it. Recheck with agent-desktop permissions every 30 seconds for up to 5 minutes: once it reads granted, close it with ${close} "granted" and tell the session that stopped for it, if one did, that it reads granted; if it never does, close it with ${close} and what it reads, and tell your lead.`
-      : `${head} Approved, but opening System Settings failed (exit ${opened.exitCode}): ${opened.line}. Nothing opened: tell your lead, and close this one with ${close} and why.`
-  }
+  const comment = answer.note ? { comment: answer.note } : {}
+  const text = answer.editedText ? { text: answer.editedText } : {}
   switch (answer.choice) {
     case "approve":
-      return `${head} Approved. Carry it out.`
-    case "deny":
-      return `${head} Denied. Do not carry it out.`
     case "edit":
-      return `${head} Approved with changes. Carry it out with these: ${edited}`
+      // a step the dashboard ran on Approve leaves only its close, and a grant's recheck once its pane opened (asks.md)
+      if (answer.accepted || answer.listed || answer.opened) {
+        const ran = answer.accepted
+          ? { accepted: answer.accepted }
+          : answer.listed
+            ? { listed: answer.listed }
+            : { opened: answer.opened! }
+        return {
+          ...head,
+          ...comment,
+          ...ran,
+          close: `bun run ask ack ${tag} --no-link "<why>"`,
+          go: true,
+          next: answer.opened?.exitCode === 0 ? "carry-out" : "nothing",
+          option: OLD_OPTIONS.approve,
+          verb: "pick",
+        }
+      }
+      return {
+        ...head,
+        ...comment,
+        ...text,
+        close: ack,
+        go: true,
+        next: "carry-out",
+        option: OLD_OPTIONS.approve,
+        verb: "pick",
+      }
+    case "deny":
+      return {
+        ...head,
+        ...comment,
+        close: read,
+        go: false,
+        next: "close",
+        option: OLD_OPTIONS.deny,
+        verb: "pick",
+      }
     case "clear":
-      return `${head} Cleared for now: the owner will talk more about it later. Whatever is already in motion stays in motion; hold only the new step this item asks for, and leave it to him to pick the talk up again.`
+      return { ...head, ...comment, close: read, go: false, next: "close", verb: "set-aside" }
     case "discard":
-      return `${head} Discarded. Do not send it.`
+      return { ...head, ...comment, close: read, go: false, next: "close", verb: "discard" }
     case "send":
-      return edited ? `${head} Send it with changes, as: ${edited}` : `${head} Send it as written.`
+      return { ...head, ...comment, ...text, close: ack, go: true, next: "carry-out", verb: "send" }
     case "draft": {
       const converter = slack("slack.linkConverter")
-      const how = `with slack_send_message_draft, then bun run ask ack it with the channel_link that returns, ${converter ? `rewritten to the app form by piping it to ${converter}` : "in its app form"} (ack refuses the archives form), or with --no-link and why when Slack refuses (draft_already_exists: that conversation holds a draft already). Do not send it.`
-      return edited
-        ? `${head} Save it as a Slack draft ${how} Save it with changes, as: ${edited}`
-        : `${head} Save it as a Slack draft as written, ${how}`
+      return {
+        ...head,
+        ...comment,
+        ...text,
+        close: ack,
+        go: true,
+        ...(converter && { linkConverter: converter }),
+        next: "carry-out",
+        verb: "draft",
+      }
     }
   }
 }
 
-// Pure: what the dispatcher is typed when the poster has ended, so the item's kind and exact words travel with the answer. A go is carried out in the poster's place; a deny, a clear or a discard has nothing to carry out, only an item to close.
-export function relayText(item: InboxItem, answer: Omit<InboxAnswer, "at">): string {
-  const lead = isGo(answer.choice)
-    ? `${item.from} has ended, so you carry this out in its place: a sent Slack message goes out through ${slack("slack.sendServer") || "your Slack tool"} (never the claude.ai connector), a Slack draft is saved with slack_send_message_draft as below, and you bun run ask ack the item with where it landed (bun run ask get shows its link).`
-    : closeLead(item)
-  return relayWith(item, lead, deliveryText(item, answer))
-}
+// Pure: the one line typed into a session for an answer: ANSWER_LEAD, then the payload as JSON, whose escaped line ends keep it one line.
+export const answerLine = (payload: AnswerPayload): string =>
+  `${ANSWER_LEAD} ${JSON.stringify(answerPayloadSchema.parse(payload))}`
 
-const closeLead = (item: InboxItem): string =>
-  `${item.from} has ended, so nothing is carried out: close the item with bun run ask get ${itemTag(item.ref)} --ack.`
-
-function relayWith(item: InboxItem, lead: string, text: string): string {
-  const words = "text" in item.preview ? item.preview.text : JSON.stringify(item.preview)
-  return `${lead} ${text}\nKind: ${item.kind}\nPreview text:\n${words}`
-}
-
-// Pure: an exit status in words: its code, or stopped by a signal.
-const exitWords = (code: number | null): string =>
-  code === null ? "stopped by a signal" : `exit ${code}`
-
-// Pure: what is typed into the poster of a secret ask he answered: when, and each environment's exit status; the value never, since only the sink was handed it.
-function providedText(
-  item: Pick<InboxItem, "id" | "ref" | "title">,
-  answer: Pick<InboxProvided, "at" | "results">,
-): string {
-  const results = (answer.results ?? [])
-    .map((result) => `${result.environment}: ${result.line ?? exitWords(result.exitCode)}`)
-    .join("; ")
-  return `Inbox ${itemTag(item.ref)} (${item.id}) "${item.title}": Provided at ${answer.at}. ${results || "No sink ran"}. Close it with bun run ask get ${itemTag(item.ref)} --ack.`
-}
-
-// Pure: the words for the poster and, once it has ended, for the dispatcher, for any answer that is typed.
+// Pure: the line for the poster and, once it has ended, the same line for the dispatcher with relay set, which reads the item's preview with bun run ask get.
 const textsOf = (
   item: InboxItem,
-  answer: Omit<InboxAnswer, "at"> | InboxProvided,
+  answer: InboxAnswer | InboxProvided,
 ): { relay: string; text: string } => {
-  if (answer.choice === "provided") {
-    const text = providedText(item, answer)
-    return { relay: relayWith(item, closeLead(item), text), text }
+  const payload = answerPayload(item, answer)
+  return {
+    relay: answerLine({ ...payload, relay: { for: item.from, why: "poster-ended" } }),
+    text: answerLine(payload),
   }
-  // an accept the dashboard ran is carried out already, so the dispatcher closes it in an ended poster's place
-  if (answer.accepted) {
-    const text = deliveryText(item, answer)
-    const lead = `${item.from} has ended, and the dashboard already ran this accept, so nothing is carried out: close the item with bun run ask ack ${itemTag(item.ref)} --no-link and why, as below.`
-    return { relay: relayWith(item, lead, text), text }
-  }
-  // an apps change or a grant the dashboard carried out leaves its poster only the close, or a grant's recheck, which the dispatcher does in an ended poster's place
-  if (answer.listed || answer.opened) {
-    const text = deliveryText(item, answer)
-    const lead = `${item.from} has ended, and the dashboard already carried out this decision's Approve, so you finish it in its place, as below.`
-    return { relay: relayWith(item, lead, text), text }
-  }
-  return { relay: relayText(item, answer), text: deliveryText(item, answer) }
 }
 
 // Pure: an answer that did not reach its poster, which asks him to retry it or dismiss it.
@@ -1180,7 +1179,7 @@ export async function answerItem(
   }
   if (!deliver) return { item: answered, ok: true }
   return {
-    item: await send(db, answered, textsOf(answered, given), {
+    item: await send(db, answered, textsOf(answered, { ...given, at: answer.at }), {
       actor,
       deliver,
       dispatcher,

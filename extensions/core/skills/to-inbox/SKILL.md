@@ -70,6 +70,7 @@ Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): y
 7. **Fake data.** Read the text and every attachment once more. Done when no part holds a token, a customer detail or a real database row, and a demo's or screenshot's names and rows are made up.
 
 8. **Post.** Post it with `bun run ask new`, as asks.md says, and read stderr. Done when `bun run ask` prints the item's id and no shape hint; on a hint, the item has already posted, so fix what the hint names and replace it in place with `bun run ask edit <id> < item.json`, until edit prints no hint.
+9. **Answer.** The owner's answer comes back as one line, `[inbox-answer] {json}` (asks.md): do what its `next` says, then run its `close`; a reply in his own words (`re #iN`) asks for changes to the item. Done when `bun run ask get <id>` shows the item closed, or edited for his reply.
 
 ## Example
 
