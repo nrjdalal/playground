@@ -2026,6 +2026,75 @@ function wholeLine(commands, env) {
     return writes || !(narrow(cmd, env) || quietCommit(cmd, parse(cmd), env));
   });
 }
+var ALWAYS_SHELL = new Set(["exec", "execSync"]);
+var SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g;
+var SHELL_TRUE = /\bshell\s*:\s*true\b/;
+function stringLiteral(src, i) {
+  const quote = src[i];
+  if (quote !== '"' && quote !== "'" && quote !== "`")
+    return;
+  let value = "";
+  let k = i + 1;
+  while (k < src.length && src[k] !== quote) {
+    if (src[k] === "\\") {
+      value += src[k + 1] ?? "";
+      k += 2;
+    } else
+      value += src[k++];
+  }
+  if (quote === "`" && value.includes("${"))
+    return;
+  return { end: k + 1, value };
+}
+function commandString(src, open) {
+  let value = "";
+  let k = open;
+  for (;; ) {
+    while (k < src.length && /\s/.test(src[k]))
+      k++;
+    const literal = stringLiteral(src, k);
+    if (!literal)
+      return;
+    value += literal.value;
+    k = literal.end;
+    while (k < src.length && /\s/.test(src[k]))
+      k++;
+    if (src[k] !== "+")
+      break;
+    k++;
+  }
+  return value.includes("$") ? undefined : value;
+}
+function callEnd(src, open) {
+  let depth = 1;
+  let k = open;
+  while (k < src.length && depth > 0) {
+    const c = src[k];
+    if (c === '"' || c === "'" || c === "`") {
+      const literal = stringLiteral(src, k);
+      k = literal ? literal.end : k + 1;
+      continue;
+    }
+    if (c === "(")
+      depth++;
+    else if (c === ")")
+      depth--;
+    k++;
+  }
+  return k;
+}
+function shellRunnerArgs(text) {
+  const out = [];
+  for (const m of text.matchAll(SHELL_RUNNER)) {
+    const open = m.index + m[0].length;
+    const command = commandString(text, open);
+    if (command === undefined)
+      continue;
+    if (ALWAYS_SHELL.has(m[1]) || SHELL_TRUE.test(text.slice(open, callEnd(text, open))))
+      out.push(command);
+  }
+  return out;
+}
 function runsOf(parsed, vars, whole, rootLine) {
   const { args, first, local } = parsed;
   const values = [...local.values(), ...vars].flatMap((text) => {
@@ -2037,6 +2106,7 @@ function runsOf(parsed, vars, whole, rootLine) {
       values.push(text.value.replace(/^!/, ""));
       if (rootLine)
         values.push(...text.value.split("\\n"));
+      values.push(...shellRunnerArgs(text.value));
     }
   values.push(...programLines(parsed, rootLine));
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value));

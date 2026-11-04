@@ -299,6 +299,9 @@ Only the first reading moves the folder, sets variables and records files for th
   `su -c`, `man -P`, `less -P`, GNU `parallel`, `osascript`, `open --args` or `make` as a runner's, so a same-user session can still get past it through any of them.
   A write to a scope's GitHub repository, which `ops:ext-sync` renders into the root, is outside its reach too; [no-extension-repo-write](#no-extension-repo-write) refuses one.
   An awk program that builds the line it runs (`system("rm " x)`) without naming the root literally gets past.
+  It reads the command string a shell-running call in an inline program is given (`exec`, `execSync`, and `spawn`, `spawnSync`, `execFile` or `execFileSync` beside a literal `shell: true`), a `"a" + "b"` concatenation of string literals joined, as a command line of its own, so a leading `~` in it expands to the home the shell reaches rather than a path relative to the cwd,
+  and `execSync("rmdir ~/.play*")` is refused from a worktree as from the home.
+  A command string it cannot read as a run of string literals (one from a variable, a template with a `${…}` substitution, a computed name, or split across a file and an argument list) keeps canary's cwd-relative reading, and an argument list no shell runs keeps its `~` literal; that residual, the same irreversible data-folder loss by a smaller route, is tracked as a follow-up issue.
   A line holding `sed` keeps canary's reading, so `sed -n '/sh -c/p' f` is refused from `~` as on canary.
   It refuses a closed list of write forms, so a same-user session can still get past it by a form outside that list, such as a script file it writes and then runs, an awk program file run with `-f` included.
   An `ext score` after an `unset` or an `export -n` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset or un-exported.

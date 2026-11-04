@@ -618,7 +618,76 @@ function wholeLine(commands: Command[], env: Env): boolean {
   })
 }
 
-// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own; `vars` is the scope's variables set since their lines were last read.
+// Calls whose string argument a shell runs: exec and execSync always, and execFile, execFileSync, spawn and spawnSync beside a literal `shell: true`. A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
+const ALWAYS_SHELL = new Set(["exec", "execSync"])
+const SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g
+const SHELL_TRUE = /\bshell\s*:\s*true\b/
+
+// A JavaScript string literal at `src[i]` (a ', " or ` quote): its content and the index past the close, or undefined when `src[i]` is no quote or a template holds a ${…} substitution.
+function stringLiteral(src: string, i: number): { end: number; value: string } | undefined {
+  const quote = src[i]
+  if (quote !== '"' && quote !== "'" && quote !== "`") return undefined
+  let value = ""
+  let k = i + 1
+  while (k < src.length && src[k] !== quote) {
+    if (src[k] === "\\") {
+      value += src[k + 1] ?? ""
+      k += 2
+    } else value += src[k++]
+  }
+  if (quote === "`" && value.includes("${")) return undefined
+  return { end: k + 1, value }
+}
+
+// The command string a shell-running call is given, read from just after its `(`: a run of string literals joined by `+`, or undefined when the first argument is not a literal run (an array, a variable, a template with a substitution) or holds a shell variable, which the hook judges as canary does.
+function commandString(src: string, open: number): string | undefined {
+  let value = ""
+  let k = open
+  for (;;) {
+    while (k < src.length && /\s/.test(src[k])) k++
+    const literal = stringLiteral(src, k)
+    if (!literal) return undefined
+    value += literal.value
+    k = literal.end
+    while (k < src.length && /\s/.test(src[k])) k++
+    if (src[k] !== "+") break
+    k++
+  }
+  return value.includes("$") ? undefined : value
+}
+
+// The index past a call's closing `)`, counting from just inside its `(`, so a `shell: true` is read from the call's own text.
+function callEnd(src: string, open: number): number {
+  let depth = 1
+  let k = open
+  while (k < src.length && depth > 0) {
+    const c = src[k]
+    if (c === '"' || c === "'" || c === "`") {
+      const literal = stringLiteral(src, k)
+      k = literal ? literal.end : k + 1
+      continue
+    }
+    if (c === "(") depth++
+    else if (c === ")") depth--
+    k++
+  }
+  return k
+}
+
+// Each command string a shell-running call in a program's text is given, so a ~ in one is judged as the shell expands it; a spawn, spawnSync, execFile or execFileSync counts only beside a literal `shell: true`.
+function shellRunnerArgs(text: string): string[] {
+  const out: string[] = []
+  for (const m of text.matchAll(SHELL_RUNNER)) {
+    const open = m.index + m[0].length
+    const command = commandString(text, open)
+    if (command === undefined) continue
+    if (ALWAYS_SHELL.has(m[1]) || SHELL_TRUE.test(text.slice(open, callEnd(text, open))))
+      out.push(command)
+  }
+  return out
+}
+
+// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own, and the command string a shell-running call in it is given; `vars` is the scope's variables set since their lines were last read.
 function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean): string[] {
   const { args, first, local } = parsed
   const values = [...local.values(), ...vars].flatMap((text) => {
@@ -630,6 +699,7 @@ function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean)
       values.push(text.value.replace(/^!/, ""))
       // printf and echo -e print a \n as a line break, which a root shell runs as one
       if (rootLine) values.push(...text.value.split("\\n"))
+      values.push(...shellRunnerArgs(text.value))
     }
   values.push(...programLines(parsed, rootLine))
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
