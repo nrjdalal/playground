@@ -1891,7 +1891,10 @@ async function unreadScript(shell, here, sure, inMain) {
 }
 var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var suCommand = (args) => {
-  for (const [at, { value }] of args.entries()) {
+  for (const [at, word] of args.entries()) {
+    const { value } = word;
+    if (word.unknown !== undefined || word.glob || marked(value))
+      return false;
     if (value === "-c" || value === "--command")
       return at + 1 < args.length;
     if (value.startsWith("--command="))
