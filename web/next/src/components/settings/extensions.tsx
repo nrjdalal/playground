@@ -29,6 +29,7 @@ import * as React from "react"
 
 import { ConfirmDialog } from "@/components/common/confirm-dialog"
 import { Hint } from "@/components/hint"
+import { BundledExtensions } from "@/components/settings/bundled"
 import { SetUpSettings } from "@/components/settings/set-up-settings"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -188,6 +189,7 @@ export function Extensions() {
               </ItemGroup>
             </SortableContext>
           </DndContext>
+          <BundledExtensions />
           <WhyDialog key={why?.name} rows={rows} row={why} onClose={() => setWhy(null)} />
         </>
       ) : rows === null ? (
