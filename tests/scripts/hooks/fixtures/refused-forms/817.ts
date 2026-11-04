@@ -198,6 +198,69 @@ export const groups: Group[] = [
       ["a script's output piped into tcsh with no script", "bun run ask list | tcsh"],
       ["a script's output piped into fish with no script", "bun run ask list | fish"],
       ["a script's output piped into busybox's sh with no script", "bun run ask list | busybox sh"],
+      [
+        "a script's output piped into node with an unlisted option's value and no script",
+        "bun run ask list | node --disable-warning X",
+      ],
+      [
+        "a script's output piped into node with another unlisted option's value",
+        "bun run ask list | node --unhandled-rejections strict",
+      ],
+      [
+        "a script's output piped into node with a warnings file and no script",
+        "bun run ask list | node --redirect-warnings f",
+      ],
+      [
+        "a script's output piped into node with a DNS order and no script",
+        "bun run ask list | node --dns-result-order ipv4first",
+      ],
+      [
+        "a script's output piped into ruby with a feature turned off and no script",
+        "bun run ask list | ruby --disable gems",
+      ],
+      [
+        "a script's output piped into ruby with a feature turned on and no script",
+        "bun run ask list | ruby --enable frozen-string-literal",
+      ],
+      [
+        "a script's output piped into ruby with an encoding and no script",
+        "bun run ask list | ruby --encoding utf-8",
+      ],
+      [
+        "a script's output piped into ruby with an empty field separator before stdin's name",
+        "bun run ask list | ruby -F - x.rb",
+      ],
+      [
+        "a script's output piped into bun with a define before stdin's name",
+        "bun run ask list | bun -d FOO:1 -",
+      ],
+      [
+        "a script's output piped into php running an inline program of its own",
+        "bun run ask list | php -r 'x'",
+      ],
+      [
+        "a script's output piped into php with no ini file running an inline program",
+        "bun run ask list | php -n -r 'x'",
+      ],
+      ["a script's output piped into bun's repl", "bun run ask list | bun repl"],
+      ["a script's output piped into deno's repl", "bun run ask list | deno repl"],
+      ["a script's output piped into bun's exec", "bun run ask list | bun exec x"],
+      [
+        "a script's output piped into deno run with a log level before stdin's name",
+        "bun run ask list | deno run -L info -",
+      ],
+      [
+        "a script's output piped into deno run with a certificate before stdin's name",
+        "bun run ask list | deno run --cert x.pem -",
+      ],
+      [
+        "a script's output piped into luajit with a JIT option before stdin's name",
+        "bun run ask list | luajit -j off -",
+      ],
+      [
+        "a script's output piped into perl with a spaced module before stdin's name",
+        "bun run ask list | perl -M - x.pl",
+      ],
     ],
   },
   // a reader of the root piped into a loop whose body runs each line as code, which runs whatever the reader prints
