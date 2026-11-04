@@ -136,7 +136,7 @@ describe("set", () => {
     const config = configWith([WITH_PR])
     const r = await run(config, ["set", "worker-greed", "kind=wizard"])
     expect(r.code).toBe(2)
-    expect(r.err).toContain("kind takes one of builder, dispatcher")
+    expect(r.err).toContain("kind takes one of assistant, builder, dispatcher")
     expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
   })
 
@@ -205,6 +205,7 @@ describe("set", () => {
     expect(agentOf(retask.roster, "k3v9q2-reviewer")).toEqual({
       ...checker,
       pr: "https://github.com/acme/app/pull/2",
+      prs: ["https://github.com/acme/app/pull/1", "https://github.com/acme/app/pull/2"],
       task: "Review #2",
       title: "Reviewer of b4n8tz-worker",
       worker: "b4n8tz-worker",
@@ -316,6 +317,59 @@ describe("set", () => {
     const read = JSON.parse(readFileSync(join(dataDir(env), "roster.json"), "utf8")) as RosterFile
     expect(agentOf(read, "p4dd1r-worker")?.task).toBe("t")
     expect(existsSync(join(config, "playground", "roster.json"))).toBe(false)
+  })
+})
+
+describe("prs (#706)", () => {
+  const pull = (n: number) => `https://github.com/acme/app/pull/${n}`
+  const ISSUE = "https://github.com/acme/app/issues/9"
+  const reviewer: Agent = {
+    kind: "reviewer",
+    name: "x7rv2k-reviewer",
+    pr: pull(1),
+    role: "worker",
+    status: "working",
+    task: "Review #1",
+    title: "Reviewer of x7rv2k-worker",
+    worker: "x7rv2k-worker",
+  }
+
+  test("prs= sets the list, prs+= adds one, prs-= removes one, and the last removal drops the key", async () => {
+    const config = configWith([reviewer])
+    const set = await run(config, ["set", "x7rv2k-reviewer", "prs=1,#2"])
+    expect(set.code).toBe(0)
+    expect(agentOf(set.roster, "x7rv2k-reviewer")?.prs).toEqual([pull(1), pull(2)])
+    const added = await run(config, ["set", "x7rv2k-reviewer", `prs+=${ISSUE}`, "prs+=2"])
+    expect(agentOf(added.roster, "x7rv2k-reviewer")?.prs).toEqual([pull(1), pull(2), ISSUE])
+    const removed = await run(config, ["set", "x7rv2k-reviewer", "prs-=1", `prs-=${ISSUE}`])
+    expect(agentOf(removed.roster, "x7rv2k-reviewer")?.prs).toEqual([pull(2)])
+    const empty = await run(config, ["set", "x7rv2k-reviewer", "prs-=2"])
+    expect(agentOf(empty.roster, "x7rv2k-reviewer")).toEqual(reviewer)
+  })
+
+  test("a prs entry that is no PR and no issue is refused, naming both forms, and writes nothing", async () => {
+    const config = configWith([reviewer])
+    const r = await run(config, ["set", "x7rv2k-reviewer", "prs+=next"])
+    expect(r.code).toBe(2)
+    expect(r.err).toContain("prs takes https://github.com/<owner>/<name>/pull/<n>")
+    expect(r.err).toContain("https://github.com/<owner>/<name>/issues/<n>")
+    expect(r.roster?.agents).toEqual([reviewer])
+  })
+
+  test("a checker's assign keeps its list and adds the old and the next PR; a worker's assign writes none", async () => {
+    const config = configWith([{ ...reviewer, prs: [pull(1), ISSUE] }, WITH_PR])
+    const next = await run(config, [
+      "assign",
+      "x7rv2k-reviewer",
+      "Reviewer of b4n8tz-worker",
+      "Review #3",
+      "worker=b4n8tz-worker",
+      "pr=3",
+    ])
+    expect(next.code).toBe(0)
+    expect(agentOf(next.roster, "x7rv2k-reviewer")?.prs).toEqual([pull(1), ISSUE, pull(3)])
+    const worker = await run(config, ["assign", "worker-greed", "New chore", "Do it"])
+    expect(agentOf(worker.roster, "worker-greed")?.prs).toBeUndefined()
   })
 })
 
@@ -610,6 +664,21 @@ describe("who", () => {
       expect(r.code).toBe(2)
       expect(r.out).toBe("")
     }
+  })
+
+  // #779: ops-dm-watch hands an unanswered DM to whoever holds the assistant seat, so the Assistant takes it under any name
+  test("who assistant prints the live entry the roster gives the assistant kind, and with none exits 1 printing nothing", async () => {
+    const config = configWith([
+      { kind: "assistant", name: "k3m9px-worker", role: "worker", status: "working", task: "t" },
+    ])
+    const held = await run(config, ["who", "assistant"])
+    expect([held.code, held.out]).toEqual([0, "k3m9px-worker\n"])
+    const none = await run(configWith([]), ["who", "assistant"])
+    expect([none.code, none.out]).toEqual([1, ""])
+    expect(none.err).toContain("no live session holds the assistant seat")
+    const set = await run(configWith([]), ["set", "x7mh4d-worker", "kind=assistant", "task=t"])
+    expect(set.code, set.err).toBe(0)
+    expect(agentOf(set.roster, "x7mh4d-worker")?.role).toBe("manager")
   })
 
   test("refuses a kind that is not a manager's", async () => {

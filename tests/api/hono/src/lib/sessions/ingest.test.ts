@@ -240,7 +240,7 @@ describe.skipIf(!dockerUp())("ingest", () => {
     writeFileSync(paths[2]!, ask(FOREIGN, "another factory's subagent"))
     const pass = async (optIn: string | undefined) => {
       const keys = [
-        "PLAYGROUND_CMUX_SESSIONS",
+        "PLAYGROUND_ALL_SESSIONS",
         "PLAYGROUND_DATA_DIR",
         "PLAYGROUND_FIXTURE",
         "PLAYGROUND_LIVE_READS",
@@ -248,8 +248,8 @@ describe.skipIf(!dockerUp())("ingest", () => {
       const saved = keys.map((key) => [key, process.env[key]] as const)
       Object.assign(process.env, { PLAYGROUND_DATA_DIR: data, PLAYGROUND_LIVE_READS: "1" })
       delete process.env.PLAYGROUND_FIXTURE
-      if (optIn === undefined) delete process.env.PLAYGROUND_CMUX_SESSIONS
-      else process.env.PLAYGROUND_CMUX_SESSIONS = optIn
+      if (optIn === undefined) delete process.env.PLAYGROUND_ALL_SESSIONS
+      else process.env.PLAYGROUND_ALL_SESSIONS = optIn
       try {
         for (const path of paths) await ingestFile(db, projects, path)
         const stored =

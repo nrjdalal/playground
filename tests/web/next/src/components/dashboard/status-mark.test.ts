@@ -19,7 +19,7 @@ const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server
   renderToStaticMarkup: (node: Node) => string
 }
 
-const render = (mark: "delivered" | "failed" | "sending" | "sent", label: string) =>
+const render = (mark: "delivered" | "failed" | "queued" | "sending" | "sent", label: string) =>
   renderToStaticMarkup(createElement(StatusMark, { label, mark }))
 
 // the opening tag of the live region the mark sits in
@@ -87,6 +87,17 @@ describe("the sent message's state as one mark", () => {
       ([mark, label]) => /<svg[^>]*>[\s\S]*?<\/svg>/.exec(render(mark, label))?.[0],
     )
     expect(new Set(svgs).size).toBe(4)
+  })
+
+  test("queued is sent's single check at half strength, in the muted colour, keeping its words, so no clock shows", () => {
+    const svg = (html: string) => /<svg[^>]*>[\s\S]*?<\/svg>/.exec(html)?.[0] ?? ""
+    const shape = (html: string) => svg(html).replace(/class="[^"]*"/, "")
+    const queued = render("queued", "Queued: waiting its turn")
+    expect(shape(queued)).toBe(shape(render("sent", "Sent, waiting for @Playground")))
+    expect(svg(queued)).toContain("text-muted-foreground")
+    expect(svg(queued)).toContain("opacity-50")
+    expect(svg(render("sent", "Sent"))).not.toContain("opacity-50")
+    expect(queued).toContain('<span class="sr-only">Queued: waiting its turn</span>')
   })
 })
 

@@ -90,7 +90,7 @@ describe.skipIf(!dockerUp())("the bun run ingest CLI", () => {
       // the watcher's FSEvents can drop a change under load, so the rescan that catches it runs every 500ms rather than 30s
       INGEST_RESCAN_MS: "500",
       // every scratch transcript is stored, as on a stack opted in to every session (own.ts)
-      PLAYGROUND_CMUX_SESSIONS: "true",
+      PLAYGROUND_ALL_SESSIONS: "true",
       POSTGRES_URL: postgres,
     })
 

@@ -413,9 +413,9 @@ sys.exit(0 if p.returncode == 0 and tasks and all(t["cache"]["status"] == "HIT" 
 PY
   )
 }
-# a commit whose pre-commit build runs next build, a git commit (but -n) staging a file @web/next#build builds from, with -a one it will stage, or one it names as a path, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
+# a commit whose pre-commit build runs next build, a git commit (but -n) staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a one it will stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
-  local a c f dir="" commit="" all="" state=lead paths=()
+  local a c f files dir="" commit="" all="" state=lead paths=()
   # commit-slot.ts's build step (`bun run build`) alone, never its type checks, which build nothing
   case "$WHO" in commit-*) for a in "$@"; do [ "$a" = build ] && commit=1; done ;; esac
   for a in "$@"; do
@@ -434,15 +434,17 @@ heavy_build() {
           --*) ;;
           -?*) f=${a#-}
             while [ -n "$f" ]; do c=${f:0:1}; f=${f:1}
-              case "$c" in a) all=1 ;; n) return 1 ;; [CFcmt]) [ -z "$f" ] && state=value; break ;; esac
+              case "$c" in a) all=1 ;; n) return 1 ;; [CFcmt]) [ -z "$f" ] && state=value; break ;; [uS]) break ;; esac
             done ;;
           *) paths+=("$a") ;;
         esac ;;
     esac
   done
   [ -n "$commit" ] || return 1
-  { git ${dir:+-C "$dir"} diff --cached --name-only; [ -z "$all" ] || git ${dir:+-C "$dir"} diff --name-only; printf '%s\n' ${paths[@]+"${paths[@]}"}; } 2>/dev/null |
-    grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$'
+  files=$({ git ${dir:+-C "$dir"} diff --cached --name-only; [ -z "$all" ] || git ${dir:+-C "$dir"} diff --name-only
+    [ ${#paths[@]} -eq 0 ] || git ${dir:+-C "$dir"} diff --name-only HEAD -- "${paths[@]}"; } 2>/dev/null)
+  grep -Evq '^$|\.md$|^tests/.*\.py$' <<<"$files" || return 1
+  grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$' <<<"$files"
 }
 # a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
 light_run() {
@@ -970,6 +972,12 @@ if [ -n "$MODEL_BOUND" ]; then
   run_command "$@"
 fi
 KIND=$(quick_kind "$@")
+# the merge train's quick run starts at once, past the quick slot's race: only pr:merge's types gate runs as ops-merge-train, inside the merge lock, which keeps it to one run at a time (PG-796, 3 Nov: its 1 s metrics step waited 263 s for the slot, and its cached build ran past the gate's 600 s twice)
+if [ "$KIND" = quick ] && [ "$WHO" = ops-merge-train ]; then
+  [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
+  TOOK=$(date +%s); rlog start "bare waited=$((TOOK - ASKED))s"
+  run_command "$@"
+fi
 if [ -n "$KIND" ]; then
   [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
   waited=0

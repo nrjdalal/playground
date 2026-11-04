@@ -5,7 +5,7 @@ The commands for each start and end are in [SESSIONS.md](SESSIONS.md), and every
 
 ## Roles on the Dashboard
 
-The dashboard lists the dispatcher and dispatcher-2 in the sidebar's header, above the session groups, lists the Planner, both leads and the Optimizer under Orchestrators, A to Z by roster title or in the order the owner dragged them into,
+The dashboard lists the dispatcher and dispatcher-2 in the sidebar's header, above the session groups, lists the Planner, both leads, the Optimizer and any other orchestrator, such as the Assistant, under Orchestrators, A to Z by roster title or in the order the owner dragged them into,
 nests each checker under the worker whose PR it checks (by the `worker` key on the checker's roster entry, set at spawn, else its `pr`, else its name: `reviewer-sloth-2-sendtop` under `worker-sloth-2`),
 and puts probes in Other, where they never wait on the owner.
 Each row reads by a plain name with no @: a manager by its role word alone (Builder, Ops, Planner, Optimizer), a worker by its ticket and pull request with no role word (`ENG-1591#1598`), else its title, and a reviewer,
@@ -60,7 +60,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   the roll gate, the tick (usage marks, a `switch due`, load, the train's slot wait, near-limit marks, and the switch watch, which at a full week writes ops-unstick's move file and tells both dispatchers and both leads), the usage-limit watch (each session on the usage-limit screen named to the builder once with its account, and the lowest-week account with its 5-hour window under 90% to move to),
   the auto-end beat every 5 minutes (`scripts/ops/optimizer/auto_end.ts` over `idle_sessions.ts`'s flags, [SESSIONS.md](SESSIONS.md#end)), each end or `Not ended` line to the session's lead, a `Not ended` line once until its words change,
   ops-up every 5 minutes (`scripts/ops/up.py`, each line it prints told to ops once until it changes, so a reboot or a herdr server that went down brings every job back with no hand step),
-  the sweep (each felled session to its lead once, never a probe or one the roster holds parked, paused, ended or starting, but runner-plain-relay, the relay itself, whose resume line it runs through spawn.sh's capacity gate at every sweep that prints it, with `--brief brief-runner-plain-relay.md` so the relay starts its wait task again,
+  the sweep (each felled session to its lead once, never a probe or one the roster holds done, parked, paused, ended or starting, but runner-plain-relay, the relay itself, whose resume line it runs through spawn.sh's capacity gate at every sweep that prints it, with `--brief brief-runner-plain-relay.md` so the relay starts its wait task again,
   never marked told since a resume keeps the session id and the line returns with the next outage,
   rather than queueing it for a relay that is down, naming the outcome to ops, and load past 30 once a crossing), the GLM credits log line, the optimizer's wake words,
   the canary pull (every clean worktree on `canary` fast-forwarded to origin's head every 5 minutes,
@@ -94,7 +94,8 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   ops-channel-watch is the factory channel's watch: a quick pass every 3 minutes and a full one, which also relays edits, at minutes 7 and 37, each new post sent to the dispatcher as one outbox line; each pass runs `watch.ts` under `vault.py run -e SLACK_TOKEN=local.slack.channel_token`, so the token reaches only that process, and a failure goes to ops once per kind until a pass succeeds.
   Add ops-changelog this way only on a Mac whose `jobs.json` has no job by that name, and ops-channel-watch only on the Mac of the Slack member the `channel.skipUser` setting names, since the watch relays every post but that member's own.
   ops-dm-watch (`jobs.opsDmWatch`, off by default) is the owner's DM watch in Slack mode (DISPATCH.md's Slack mode): each minute, while `slack.mode` is on and `slack.dmChannel` and `slack.dmOwner` are set, it runs `watch.ts` under `vault.py run -e SLACK_TOKEN=local.slack.channel_token`,
-  which sends each new owner message to the dispatcher in full and to dispatcher-2 when none is answered in 3 minutes or the dispatcher's session state has read stuck or failed for 3 minutes, telling Ops of that once through ops-unstick's outbox;
+  which sends each new owner message to the dispatcher in full and to the session in the assistant seat (`roster.ts who assistant`; with none, it logs that the message stays with the dispatcher)
+  when none is answered in 3 minutes while the dispatcher is not mid-turn (its session state `working` and written in the last 3 minutes), or the dispatcher's session state has read stuck or failed for 3 minutes, telling Ops of that once through ops-unstick's outbox;
   every 15 minutes it tells the dispatcher to post an update, and a failure goes to ops once per kind until a pass succeeds.
   ops-herdr is `bun run ops:herdr` in the main checkout: every minute it starts each herdr server that is down, `playground` for every session and `playground-probes` for drills, upgrades and shell panes (names of Playground's own, since herdr keeps each server's state and logs under `~/.config/herdr/sessions/<name>`), under `env -i` with HOME, LANG, LOGNAME, PATH, SHELL, TERM and USER alone,
   on the absolute path the repo's `packages/scripts/src/ops-herdr/pin.json` names, as launchd's child, so stopping the job leaves it running.

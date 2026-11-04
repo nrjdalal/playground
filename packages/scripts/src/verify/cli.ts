@@ -71,9 +71,9 @@ Checks (default: all)
                 the route's own error
   signin        the agent sign-in works and /api/v1/user is LocalAgent
   ws            the dashboard's WebSocket sends a well-formed workers frame
-  system        the machine's room for more workers, idle dev stacks, the usage windows and
-                what did not read, as the Dashboard's System panel shows them: what a lead
-                reads before it spawns
+  system        the machine's room for more workers and orchestrators, idle dev stacks,
+                the usage windows and what did not read, as the Dashboard's System panel
+                shows them: what a lead reads before it spawns
   ended <name>  the session reads Ended as the Dashboard shows it: the roster's ended and no
                 live session of its name (a herdr session's included), failing while live
                 sessions or a herdr server could not be read; what a lead outside herdr
