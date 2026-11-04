@@ -162,15 +162,6 @@ export const factoryRoleOf = (name: string, kind: unknown): string =>
 
 const SEATLESS = new Set(["ended", "parked"])
 
-// Pure: the names the roster still lists as sessions, every entry's but an ended one's, since the roster keeps ended rows for good; a down session whose entry still reads working (a crash) stays listed.
-export const rosteredOf = (agents: unknown): Set<string> =>
-  new Set(
-    (Array.isArray(agents) ? agents : []).flatMap((agent: unknown) => {
-      const { name, status } = (agent ?? {}) as { name?: unknown; status?: unknown }
-      return typeof name === "string" && status !== "ended" ? [name] : []
-    }),
-  )
-
 type Seated = { name: string; slot: unknown; starting: boolean }
 
 // Pure: the roster's live entries of a kind (its `kind`, else the kind its name places as), in roster order; an ended or parked one holds no seat.
