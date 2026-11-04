@@ -66,6 +66,7 @@
   `schedule` is when a runner runs, `always` or a 5-field cron (`0 5 * * *`), which its sidebar row's tooltip holds.
   `ticket` (a Linear ID, such as `FIX-1234`) is the ticket the agent works on, which its sidebar row shows before its title.
   `worker` is a reviewer's or tester's own worker, by its full name, set when the worker spawns it, so its row nests under that worker whatever the two are named.
+  `prs` lists every PR a reviewer or tester serves, its `pr` among them, and a PR not yet opened as its issue's URL; `roster.ts assign` adds each next PR, and auto-end (`scripts/ops/optimizer/auto_end.ts`) keeps the checker while any of them is open; the dashboard does not read it.
   `branch`, `repo` (`owner/name`) and `pr` (a GitHub pull request URL) say where the work went, and the dashboard uses them when the session is down, its checkout is on a default branch, or another live session shares its checkout; a session on a branch of its own shows that branch's pull request instead.
   `lastReport` and `lastReportAt` stand in for a report the transcript does not hold; the later of the two is shown, and a time more than five minutes ahead of the clock counts as none.
   A roster agent pairs with the live session of its name, or of that name without its role prefix (`worker-greed` with a session launched as `greed`), else with the one session in its `workspace` (`workspace:<n>`).

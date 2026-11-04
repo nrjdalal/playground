@@ -339,6 +339,47 @@ describe("collect: a session's PRs, from the roster first, then its transcript",
   })
 })
 
+describe("collect: a checker's prs list (#706)", () => {
+  const SCORED = "https://github.com/o/r/pull/2110"
+  const UNSCORED = "https://github.com/o/r/pull/2111"
+  const ISSUE = "https://github.com/o/r/issues/2112"
+  const states: Record<string, PrState> = {
+    [ISSUE]: { head: "", state: "open", verdicts: [] },
+    [SCORED]: { head: "abc1234567", state: "open", verdicts: ["abc1234"] },
+    [UNSCORED]: { head: "bbb2222", state: "open", verdicts: [] },
+  }
+  const reviewer = (prs?: string[]) =>
+    collect(
+      deps({
+        prState: async (url) => states[url] ?? null,
+        roster: {
+          "x7rv2k-reviewer": {
+            kind: "reviewer",
+            name: "x7rv2k-reviewer",
+            pr: SCORED,
+            ...(prs ? { prs } : {}),
+            worker: "x7rv2k-worker",
+          },
+        },
+        sessions: {
+          "x7rv2k-reviewer": entry({ name: "x7rv2k-reviewer" }),
+          "x7rv2k-worker": entry({ name: "x7rv2k-worker", status: "busy" }),
+        },
+        workerPrs: async (name) => (name === "x7rv2k-worker" ? [SCORED] : []),
+      }),
+    )
+
+  test("checker-nothing keeps a reviewer whose list holds a PR not yet opened, or one not yet scored", async () => {
+    expect(await reviewer([SCORED, ISSUE])).toEqual([])
+    expect(await reviewer([SCORED, UNSCORED])).toEqual([])
+  })
+
+  test("a row with no prs list, or one whose PRs are all scored, is flagged as today", async () => {
+    expect(whys(await reviewer())).toEqual([["checker-nothing (head scored)"]])
+    expect(whys(await reviewer([SCORED]))).toEqual([["checker-nothing (head scored)"]])
+  })
+})
+
 describe("spend: a transcript's Claude cost", () => {
   test("an assistant line costs what the repo's price table gives, deduped and unpriced models free", async () => {
     const dir = emptyDir()
@@ -412,5 +453,19 @@ describe("prStateLive: the PR cache", () => {
     const reopened = reads([pull("closed"), pull("open")])
     expect((await prStateLive(other, 1_000, cache, reopened.api))?.state).toBe("closed")
     expect((await prStateLive(other, 1_000_000, cache, reopened.api))?.state).toBe("open")
+  })
+
+  // A checker's prs list names a PR not yet opened by its issue, open until the PR that closes it merges.
+  test("an issue reads open or closed, with no head and no verdicts (#706)", async () => {
+    const cache = join(emptyDir(), "prs.json")
+    const issue = "https://github.com/o/r/issues/2112"
+    const answers = reads([{ state: "open" }, { state: "closed" }])
+    expect(await prStateLive(issue, 1_000, cache, answers.api)).toMatchObject({
+      head: "",
+      state: "open",
+      verdicts: [],
+    })
+    expect((await prStateLive(issue, 1_000_000, cache, answers.api))?.state).toBe("closed")
+    expect(answers.paths).toEqual(["repos/o/r/issues/2112", "repos/o/r/issues/2112"])
   })
 })

@@ -4,522 +4,6 @@
     "name": "Merritt Rivera"
   },
   "anchor": "2026-01-01T12:00:00.000Z",
-  "cmux": {
-    "feed": [
-      {
-        "created_at": "2026-01-01T11:59:00.000Z",
-        "cwd": "/fixture/playground",
-        "id": "8B000000-0000-4000-8000-000000000003",
-        "kind": "permissionRequest",
-        "request_id": "9A000000-0000-4000-8000-000000000002",
-        "session": "11111111-1111-4111-8111-000000000003",
-        "source": "claude",
-        "title": "Bash",
-        "tool_input": "{\"command\":\"bun run verify all\",\"description\":\"Run the ops checks on the fixture tester stack\"}",
-        "tool_name": "Bash",
-        "updated_at": "2026-01-01T11:59:00.000Z"
-      },
-      {
-        "created_at": "2026-01-01T11:57:00.000Z",
-        "id": "8B000000-0000-4000-8000-000000000004",
-        "kind": "question",
-        "questions": [
-          {
-            "header": "Spacing",
-            "id": "q0",
-            "multi_select": false,
-            "options": [
-              {
-                "description": "6px between rows, twelve sessions fit",
-                "id": "opt0",
-                "label": "Tighter rows"
-              },
-              {
-                "description": "Keep 8px and scroll past ten",
-                "id": "opt1",
-                "label": "Keep as is"
-              }
-            ],
-            "prompt": "Fixture: which row spacing should the sidebar keep?"
-          }
-        ],
-        "request_id": "9A000000-0000-4000-8000-000000000001",
-        "session": "11111111-1111-4111-8111-000000000004",
-        "source": "claude",
-        "title": "AskUserQuestion",
-        "updated_at": "2026-01-01T11:57:00.000Z"
-      },
-      {
-        "created_at": "2026-01-01T11:55:00.000Z",
-        "cwd": "/fixture/playground/.claude/worktrees/test-lust",
-        "default_mode": "manual",
-        "id": "8B000000-0000-4000-8000-000000000009",
-        "kind": "exitPlan",
-        "plan": "{\"plan\":\"## Fixture plan: round 2's browser run\\n\\n1. Start the fixture stack on #101's head.\\n2. Open the Board in light and dark at 1782x972 and 390 wide.\\n3. Take full-page shots, before and after.\"}",
-        "request_id": "9A000000-0000-4000-8000-000000000003",
-        "session": "11111111-1111-4111-8111-000000000009",
-        "source": "claude",
-        "title": "ExitPlanMode",
-        "updated_at": "2026-01-01T11:55:00.000Z"
-      }
-    ],
-    "screens": {
-      "5F000000-0000-4000-8000-000000000003": "⏺ I need to run the ops checks on the tester stack.",
-      "5F000000-0000-4000-8000-000000000004": "⏺ Two spacings read well. I am asking which one to keep.",
-      "5F000000-0000-4000-8000-000000000005": "⏺ Reading the sidebar first.\n\n✻ Formulating… (1m 11s · ↓ 2.1k tokens · thought for 4s)",
-      "5F000000-0000-4000-8000-000000000009": "⏺ I have a plan for round 2's browser run.",
-      "5F000000-0000-4000-8000-00000000000a": "⏺ The demo kettle is warm.",
-      "5F000000-0000-4000-8000-00000000000b": "⏺ Done for the day.",
-      "5F000000-0000-4000-8000-00000000001b": "⏺ Reading the thread's transcript for its title.",
-      "5F000000-0000-4000-8000-00000000001c": "⏺ Round 1 is posted. Which of the two fixes do you want first?"
-    },
-    "sessions": [
-      {
-        "agent": "claude",
-        "agent_lifecycle": "idle",
-        "cwd": "/fixture/playground",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "dispatcher"],
-        "launch_backed": true,
-        "pastes": true,
-        "session_id": "11111111-1111-4111-8111-000000000001",
-        "started_at": "2026-01-01T08:00:00.000Z",
-        "pid": 900001,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000001",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000001.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000001"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "idle",
-        "cwd": "/fixture/playground",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "dispatcher-2"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000020",
-        "started_at": "2026-01-01T08:05:00.000Z",
-        "pid": 900017,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000020",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000020.jsonl",
-        "updated_at": "2026-01-01T11:58:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000020"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "running",
-        "cwd": "/fixture/playground",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "builder"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000002",
-        "started_at": "2026-01-01T08:05:00.000Z",
-        "pid": 900002,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000002",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000002.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000002"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "needsInput",
-        "cwd": "/fixture/playground",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "ops"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000003",
-        "started_at": "2026-01-01T08:06:00.000Z",
-        "pid": 900003,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000003",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000003.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000003"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "idle",
-        "cwd": "/fixture/playground",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "planner"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-00000000000c",
-        "started_at": "2026-01-01T08:07:00.000Z",
-        "pid": 900012,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-00000000000c",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-00000000000c.jsonl",
-        "updated_at": "2026-01-01T11:50:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-00000000000c"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "needsInput",
-        "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "worker-greed"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000004",
-        "started_at": "2026-01-01T11:10:00.000Z",
-        "pid": 900004,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000004",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000004.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000004"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "running",
-        "cwd": "/fixture/playground/.claude/worktrees/board-colours",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "worker-lust-2"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000005",
-        "started_at": "2026-01-01T10:30:00.000Z",
-        "pid": 900005,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000005",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000005.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000005"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "idle",
-        "cwd": "/fixture/playground/.claude/worktrees/composer-paste",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "worker-sloth"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000006",
-        "started_at": "2026-01-01T07:00:00.000Z",
-        "pid": 900006,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000006",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000006.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000006"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "running",
-        "cwd": "/fixture/playground/.claude/worktrees/canary",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "runner-pride"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000007",
-        "started_at": "2026-01-01T08:07:00.000Z",
-        "pid": 900007,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000007",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000007.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000007"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "running",
-        "cwd": "/fixture/playground/.claude/worktrees/review-lust",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "h4n8zt-reviewer"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000008",
-        "started_at": "2026-01-01T11:20:00.000Z",
-        "pid": 900008,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000008",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000008.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000008"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "needsInput",
-        "cwd": "/fixture/playground/.claude/worktrees/test-lust",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "p9c3wx-tester"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000009",
-        "started_at": "2026-01-01T11:21:00.000Z",
-        "pid": 900009,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000009",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000009.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000009"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "idle",
-        "cwd": "/fixture/scratch",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "scratch-demo"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-00000000000a",
-        "started_at": "2026-01-01T05:20:00.000Z",
-        "pid": 900010,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-00000000000a",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-00000000000a.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-00000000000a"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "needsInput",
-        "cwd": "/fixture/playground/.claude/worktrees/old-ghost",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "gluttony"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-00000000000b",
-        "started_at": "2025-12-31T11:00:00.000Z",
-        "pid": 900011,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-00000000000b",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-00000000000b.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-00000000000b"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "running",
-        "cwd": "/fixture/playground/.claude/worktrees/row-wrap",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "worker-bright-lark"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000010",
-        "started_at": "2026-01-01T07:30:00.000Z",
-        "pid": 900013,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000010",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000010.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000010"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "running",
-        "cwd": "/fixture/playground/.claude/worktrees/thread-titles",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "k3m9px-worker"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-00000000001b",
-        "started_at": "2026-01-01T11:40:00.000Z",
-        "pid": 900021,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-00000000001b",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-00000000001b.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-00000000001b"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "needsInput",
-        "cwd": "/fixture/playground/.claude/worktrees/review-106",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "q7w8f2-reviewer"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-00000000001c",
-        "started_at": "2026-01-01T11:45:00.000Z",
-        "pid": 900022,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-00000000001c",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-00000000001c.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-00000000001c"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "running",
-        "cwd": "/fixture/playground/.claude/worktrees/train-test",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "r6t2dv-tester"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000011",
-        "started_at": "2026-01-01T11:35:00.000Z",
-        "pid": 900014,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-00000000000e",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000011.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-00000000000e"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "running",
-        "cwd": "/fixture/playground/.claude/worktrees/review-envy",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "b7k2mq-reviewer"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000012",
-        "started_at": "2026-01-01T11:30:00.000Z",
-        "pid": 900015,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-00000000000d",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000012.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-00000000000d"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "running",
-        "cwd": "/fixture/playground/.claude/worktrees/glm-rows",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "worker-glm-flash"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000013",
-        "started_at": "2026-01-01T11:30:00.000Z",
-        "pid": 900016,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-00000000000f",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000013.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-00000000000f"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "running",
-        "cwd": "/fixture/playground/.claude/worktrees/canary",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "runner-calm-dial"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000014",
-        "started_at": "2026-01-01T08:07:00.000Z",
-        "pid": 900019,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000012",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000014.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000012"
-      },
-      {
-        "agent": "claude",
-        "agent_lifecycle": "running",
-        "cwd": "/fixture/playground/.claude/worktrees/canary",
-        "launch_arguments": ["/usr/local/bin/claude", "-n", "runner-quiet-lamp"],
-        "launch_backed": true,
-        "session_id": "11111111-1111-4111-8111-000000000015",
-        "started_at": "2026-01-01T08:07:00.000Z",
-        "pid": 900018,
-        "stored_pid_exists": true,
-        "surface_id": "5F000000-0000-4000-8000-000000000013",
-        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000015.jsonl",
-        "updated_at": "2026-01-01T12:00:00.000Z",
-        "workspace_id": "7A000000-0000-4000-8000-000000000013"
-      }
-    ],
-    "workspaces": [
-      {
-        "custom_title": "dispatcher",
-        "id": "7A000000-0000-4000-8000-000000000001",
-        "ref": "workspace:1",
-        "title": "dispatcher"
-      },
-      {
-        "custom_title": "dispatcher-2",
-        "id": "7A000000-0000-4000-8000-000000000020",
-        "ref": "workspace:20",
-        "title": "dispatcher-2"
-      },
-      {
-        "custom_title": "builder",
-        "id": "7A000000-0000-4000-8000-000000000002",
-        "ref": "workspace:2",
-        "title": "builder"
-      },
-      {
-        "custom_title": "ops",
-        "id": "7A000000-0000-4000-8000-000000000003",
-        "ref": "workspace:3",
-        "title": "ops"
-      },
-      {
-        "custom_title": "planner",
-        "id": "7A000000-0000-4000-8000-00000000000c",
-        "ref": "workspace:13",
-        "title": "planner"
-      },
-      {
-        "custom_title": "worker-greed",
-        "id": "7A000000-0000-4000-8000-000000000004",
-        "ref": "workspace:4",
-        "title": "worker-greed"
-      },
-      {
-        "custom_title": "worker-lust-2",
-        "id": "7A000000-0000-4000-8000-000000000005",
-        "ref": "workspace:5",
-        "title": "worker-lust-2"
-      },
-      {
-        "custom_title": "worker-sloth",
-        "id": "7A000000-0000-4000-8000-000000000006",
-        "ref": "workspace:6",
-        "title": "worker-sloth"
-      },
-      {
-        "custom_title": "runner-pride",
-        "id": "7A000000-0000-4000-8000-000000000007",
-        "ref": "workspace:7",
-        "title": "runner-pride"
-      },
-      {
-        "custom_title": "h4n8zt-reviewer",
-        "id": "7A000000-0000-4000-8000-000000000008",
-        "ref": "workspace:8",
-        "title": "h4n8zt-reviewer"
-      },
-      {
-        "custom_title": "p9c3wx-tester",
-        "id": "7A000000-0000-4000-8000-000000000009",
-        "ref": "workspace:9",
-        "title": "p9c3wx-tester"
-      },
-      {
-        "custom_title": "scratch-demo",
-        "id": "7A000000-0000-4000-8000-00000000000a",
-        "ref": "workspace:10",
-        "title": "scratch-demo"
-      },
-      {
-        "custom_title": "gluttony",
-        "id": "7A000000-0000-4000-8000-00000000000b",
-        "ref": "workspace:11",
-        "title": "gluttony"
-      },
-      {
-        "custom_title": "worker-bright-lark",
-        "id": "7A000000-0000-4000-8000-000000000010",
-        "ref": "workspace:14",
-        "title": "worker-bright-lark"
-      },
-      {
-        "custom_title": "r6t2dv-tester",
-        "id": "7A000000-0000-4000-8000-00000000000e",
-        "ref": "workspace:15",
-        "title": "r6t2dv-tester"
-      },
-      {
-        "custom_title": "b7k2mq-reviewer",
-        "id": "7A000000-0000-4000-8000-00000000000d",
-        "ref": "workspace:16",
-        "title": "b7k2mq-reviewer"
-      },
-      {
-        "custom_title": "worker-glm-flash",
-        "id": "7A000000-0000-4000-8000-00000000000f",
-        "ref": "workspace:17",
-        "title": "worker-glm-flash"
-      },
-      {
-        "custom_title": "k3m9px-worker",
-        "id": "7A000000-0000-4000-8000-00000000001b",
-        "ref": "workspace:21",
-        "title": "k3m9px-worker"
-      },
-      {
-        "custom_title": "q7w8f2-reviewer",
-        "id": "7A000000-0000-4000-8000-00000000001c",
-        "ref": "workspace:22",
-        "title": "q7w8f2-reviewer"
-      },
-      {
-        "custom_title": "runner-calm-dial",
-        "id": "7A000000-0000-4000-8000-000000000012",
-        "ref": "workspace:18",
-        "title": "runner-calm-dial"
-      },
-      {
-        "custom_title": "runner-quiet-lamp",
-        "id": "7A000000-0000-4000-8000-000000000013",
-        "ref": "workspace:19",
-        "title": "runner-quiet-lamp"
-      }
-    ]
-  },
   "doctor": {
     "checks": [
       {
@@ -1705,6 +1189,42 @@
             "output_tokens": 750
           }
         }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000003",
+        "type": "assistant",
+        "version": "2.1.0",
+        "message": {
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_010",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 6500
+            },
+            "cache_creation_input_tokens": 6500,
+            "cache_read_input_tokens": 150000,
+            "input_tokens": 22,
+            "output_tokens": 750
+          },
+          "content": [
+            {
+              "id": "toolu_fixture_prompt_1",
+              "input": {
+                "command": "bun run verify all",
+                "description": "Run the ops checks on the fixture tester stack"
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ]
+        },
+        "parentUuid": "22222222-2222-4222-8222-000000000013",
+        "timestamp": "2026-01-01T11:59:01.000Z",
+        "uuid": "5c000000-0000-4000-8000-000000000001"
       }
     ],
     "sessions/900003.json": {
@@ -1782,7 +1302,7 @@
       "startedAt": 1767254820000,
       "status": "idle"
     },
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000004.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-sidebar-spacing/11111111-1111-4111-8111-000000000004.jsonl": [
       {
         "agentName": "worker-greed",
         "sessionId": "11111111-1111-4111-8111-000000000004",
@@ -1981,6 +1501,58 @@
             "output_tokens": 930
           }
         }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+        "entrypoint": "cli",
+        "gitBranch": "fix/sidebar-spacing",
+        "sessionId": "11111111-1111-4111-8111-000000000004",
+        "type": "assistant",
+        "version": "2.1.0",
+        "message": {
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_014",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 7500
+            },
+            "cache_creation_input_tokens": 7500,
+            "cache_read_input_tokens": 186000,
+            "input_tokens": 26,
+            "output_tokens": 930
+          },
+          "content": [
+            {
+              "id": "toolu_fixture_prompt_2",
+              "input": {
+                "questions": [
+                  {
+                    "header": "Spacing",
+                    "multiSelect": false,
+                    "options": [
+                      {
+                        "description": "6px between rows, twelve sessions fit",
+                        "label": "Tighter rows"
+                      },
+                      {
+                        "description": "Keep 8px and scroll past ten",
+                        "label": "Keep as is"
+                      }
+                    ],
+                    "question": "Fixture: which row spacing should the sidebar keep?"
+                  }
+                ]
+              },
+              "name": "AskUserQuestion",
+              "type": "tool_use"
+            }
+          ]
+        },
+        "parentUuid": "22222222-2222-4222-8222-00000000001a",
+        "timestamp": "2026-01-01T11:57:01.000Z",
+        "uuid": "5c000000-0000-4000-8000-000000000002"
       }
     ],
     "sessions/900004.json": {
@@ -1994,7 +1566,7 @@
       "startedAt": 1767265800000,
       "status": "idle"
     },
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000005.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-board-colours/11111111-1111-4111-8111-000000000005.jsonl": [
       {
         "agentName": "worker-lust-2",
         "sessionId": "11111111-1111-4111-8111-000000000005",
@@ -2233,7 +1805,7 @@
       "startedAt": 1767263400000,
       "status": "busy"
     },
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000006.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-composer-paste/11111111-1111-4111-8111-000000000006.jsonl": [
       {
         "agentName": "worker-sloth",
         "sessionId": "11111111-1111-4111-8111-000000000006",
@@ -2367,7 +1939,7 @@
       "startedAt": 1767250800000,
       "status": "idle"
     },
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000007.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-canary/11111111-1111-4111-8111-000000000007.jsonl": [
       {
         "agentName": "runner-pride",
         "sessionId": "11111111-1111-4111-8111-000000000007",
@@ -2779,7 +2351,7 @@
       "startedAt": 1767254820000,
       "status": "busy"
     },
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000008.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-review-lust/11111111-1111-4111-8111-000000000008.jsonl": [
       {
         "agentName": "h4n8zt-reviewer",
         "sessionId": "11111111-1111-4111-8111-000000000008",
@@ -2905,7 +2477,7 @@
       "startedAt": 1767266400000,
       "status": "busy"
     },
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000009.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-test-lust/11111111-1111-4111-8111-000000000009.jsonl": [
       {
         "agentName": "p9c3wx-tester",
         "sessionId": "11111111-1111-4111-8111-000000000009",
@@ -2961,6 +2533,42 @@
             "output_tokens": 1425
           }
         }
+      },
+      {
+        "cwd": "/fixture/playground/.claude/worktrees/test-lust",
+        "entrypoint": "cli",
+        "gitBranch": "canary",
+        "sessionId": "11111111-1111-4111-8111-000000000009",
+        "type": "assistant",
+        "version": "2.1.0",
+        "message": {
+          "model": "claude-sonnet-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_025",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 10250
+            },
+            "cache_creation_input_tokens": 10250,
+            "cache_read_input_tokens": 285000,
+            "input_tokens": 37,
+            "output_tokens": 1425
+          },
+          "content": [
+            {
+              "id": "toolu_fixture_prompt_3",
+              "input": {
+                "plan": "## Fixture plan: round 2's browser run\n\n1. Start the fixture stack on #101's head.\n2. Open the Board in light and dark at 1782x972 and 390 wide.\n3. Take full-page shots, before and after."
+              },
+              "name": "ExitPlanMode",
+              "type": "tool_use"
+            }
+          ]
+        },
+        "parentUuid": "22222222-2222-4222-8222-000000000031",
+        "timestamp": "2026-01-01T11:55:01.000Z",
+        "uuid": "5c000000-0000-4000-8000-000000000003"
       }
     ],
     "sessions/900009.json": {
@@ -2974,7 +2582,7 @@
       "startedAt": 1767266460000,
       "status": "idle"
     },
-    "projects/-fixture-playground/11111111-1111-4111-8111-00000000000a.jsonl": [
+    "projects/-fixture-scratch/11111111-1111-4111-8111-00000000000a.jsonl": [
       {
         "cwd": "/fixture/scratch",
         "entrypoint": "cli",
@@ -3099,7 +2707,7 @@
       "startedAt": 1767266520000,
       "status": "busy"
     },
-    "projects/-fixture-playground/11111111-1111-4111-8111-00000000000b.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-old-ghost/11111111-1111-4111-8111-00000000000b.jsonl": [
       {
         "cwd": "/fixture/playground/.claude/worktrees/old-ghost",
         "entrypoint": "cli",
@@ -3147,7 +2755,7 @@
         }
       }
     ],
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000010.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-row-wrap/11111111-1111-4111-8111-000000000010.jsonl": [
       {
         "agentName": "worker-bright-lark",
         "sessionId": "11111111-1111-4111-8111-000000000010",
@@ -3206,7 +2814,7 @@
         }
       }
     ],
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000011.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-train-test/11111111-1111-4111-8111-000000000011.jsonl": [
       {
         "agentName": "r6t2dv-tester",
         "sessionId": "11111111-1111-4111-8111-000000000011",
@@ -3264,7 +2872,7 @@
         }
       }
     ],
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000012.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-review-envy/11111111-1111-4111-8111-000000000012.jsonl": [
       {
         "agentName": "b7k2mq-reviewer",
         "sessionId": "11111111-1111-4111-8111-000000000012",
@@ -3322,7 +2930,7 @@
         }
       }
     ],
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000013.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-glm-rows/11111111-1111-4111-8111-000000000013.jsonl": [
       {
         "agentName": "worker-glm-flash",
         "sessionId": "11111111-1111-4111-8111-000000000013",
@@ -3352,7 +2960,12 @@
         "uuid": "22222222-2222-4222-8222-000000000041",
         "version": "2.1.0",
         "message": {
-          "content": [{ "text": "On it: the row reads GLM 5.3 Flash.", "type": "text" }],
+          "content": [
+            {
+              "text": "On it: the row reads GLM 5.3 Flash.",
+              "type": "text"
+            }
+          ],
           "model": "glm-5.3-flash[1m]",
           "role": "assistant"
         }
@@ -3553,12 +3166,24 @@
     "playground/extensions/taylor/.git/FETCH_HEAD": "",
     "playground/extensions/taylor/rules/short-replies.md": "A made-up rule: keep replies short.\n",
     "playground/extensions/taylor/settings.json": {
-      "ext.links": { "example": ["example"], "teammate-tests": ["example", "example-labs"] },
+      "ext.links": {
+        "example": ["example"],
+        "teammate-tests": ["example", "example-labs"]
+      },
       "ext.order": ["taylor", "example", "teammate-tests"],
-      "ext.repos": { "teammate-tests": "someone-else/qa-skills" },
+      "ext.repos": {
+        "teammate-tests": "someone-else/qa-skills"
+      },
       "usage.accounts": [
-        { "email": "pat@example.com", "label": "work", "provider": "claude" },
-        { "label": "zai", "provider": "glm" }
+        {
+          "email": "pat@example.com",
+          "label": "work",
+          "provider": "claude"
+        },
+        {
+          "label": "zai",
+          "provider": "glm"
+        }
       ]
     },
     "playground/extensions/taylor/skills/daily-notes-extra/SKILL.md": "---\nname: daily-notes-extra\ndescription: A made-up skill for taylor's own notes.\n---\n\nA made-up skill for taylor's own notes.\n",
@@ -3894,16 +3519,36 @@
       },
       "rotation": {
         "pool": [
-          { "account": "alex@example.com", "ending": true, "endsAt": null, "renewsOn": null },
-          { "account": "jo@example.com", "ending": false, "endsAt": null, "renewsOn": 3 },
+          {
+            "account": "alex@example.com",
+            "ending": true,
+            "endsAt": null,
+            "renewsOn": null
+          },
+          {
+            "account": "jo@example.com",
+            "ending": false,
+            "endsAt": null,
+            "renewsOn": 3
+          },
           {
             "account": "pat@example.com",
             "ending": true,
             "endsAt": "2026-01-10T18:30:00.000Z",
             "renewsOn": null
           },
-          { "account": "robin@example.com", "ending": false, "endsAt": null, "renewsOn": null },
-          { "account": "merritt@example.com", "ending": true, "endsAt": null, "renewsOn": null }
+          {
+            "account": "robin@example.com",
+            "ending": false,
+            "endsAt": null,
+            "renewsOn": null
+          },
+          {
+            "account": "merritt@example.com",
+            "ending": true,
+            "endsAt": null,
+            "renewsOn": null
+          }
         ]
       },
       "writtenAt": "2026-01-01T11:59:00.000Z"
@@ -4390,7 +4035,7 @@
       "sentAt": "2026-01-01T11:58:00.000Z",
       "sentHash": "fx000003"
     },
-    "projects/-fixture-playground/11111111-1111-4111-8111-00000000001b.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-thread-titles/11111111-1111-4111-8111-00000000001b.jsonl": [
       {
         "agentName": "k3m9px-worker",
         "sessionId": "11111111-1111-4111-8111-00000000001b",
@@ -4417,7 +4062,7 @@
         }
       }
     ],
-    "projects/-fixture-playground/11111111-1111-4111-8111-00000000001c.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-review-106/11111111-1111-4111-8111-00000000001c.jsonl": [
       {
         "agentName": "q7w8f2-reviewer",
         "sessionId": "11111111-1111-4111-8111-00000000001c",
@@ -4694,7 +4339,7 @@
       "startedAt": 1767254820000,
       "status": "busy"
     },
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000014.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-canary/11111111-1111-4111-8111-000000000014.jsonl": [
       {
         "agentName": "runner-calm-dial",
         "sessionId": "11111111-1111-4111-8111-000000000014",
@@ -4755,7 +4400,7 @@
         }
       }
     ],
-    "projects/-fixture-playground/11111111-1111-4111-8111-000000000015.jsonl": [
+    "projects/-fixture-playground--claude-worktrees-canary/11111111-1111-4111-8111-000000000015.jsonl": [
       {
         "agentName": "runner-quiet-lamp",
         "sessionId": "11111111-1111-4111-8111-000000000015",
@@ -4815,7 +4460,29 @@
           }
         }
       }
-    ]
+    ],
+    "playground/session-state/11111111-1111-4111-8111-000000000003.json": {
+      "at": "2026-01-01T11:59:01.000Z",
+      "event": "PermissionRequest",
+      "reason": "permission",
+      "sessionId": "11111111-1111-4111-8111-000000000003",
+      "state": "stuck",
+      "tool": "Bash"
+    },
+    "playground/session-state/11111111-1111-4111-8111-000000000004.json": {
+      "at": "2026-01-01T11:57:01.000Z",
+      "event": "Notification",
+      "reason": "question",
+      "sessionId": "11111111-1111-4111-8111-000000000004",
+      "state": "stuck"
+    },
+    "playground/session-state/11111111-1111-4111-8111-000000000009.json": {
+      "at": "2026-01-01T11:55:01.000Z",
+      "event": "Notification",
+      "reason": "plan",
+      "sessionId": "11111111-1111-4111-8111-000000000009",
+      "state": "stuck"
+    }
   },
   "git": {
     "/fixture/playground": {
@@ -4854,6 +4521,571 @@
       "branch": "canary",
       "repo": "example/fixture"
     }
+  },
+  "herdr": {
+    "panes": [
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000001"
+        },
+        "agent_status": "idle",
+        "pane_id": "w1:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "dispatcher"],
+            "cwd": "/fixture/playground",
+            "pid": 900001
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000001",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000001",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000001.jsonl",
+        "workspace_id": "w1"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000020"
+        },
+        "agent_status": "idle",
+        "pane_id": "w2:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "dispatcher-2"],
+            "cwd": "/fixture/playground",
+            "pid": 900017
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000020",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000020",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000020.jsonl",
+        "workspace_id": "w2"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000002"
+        },
+        "agent_status": "working",
+        "pane_id": "w3:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "builder"],
+            "cwd": "/fixture/playground",
+            "pid": 900002
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000002",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000002",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000002.jsonl",
+        "workspace_id": "w3"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000003"
+        },
+        "agent_status": "blocked",
+        "pane_id": "w4:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "ops"],
+            "cwd": "/fixture/playground",
+            "pid": 900003
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000003",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000003",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000003.jsonl",
+        "workspace_id": "w4"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-00000000000c"
+        },
+        "agent_status": "idle",
+        "pane_id": "w5:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "planner"],
+            "cwd": "/fixture/playground",
+            "pid": 900012
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-00000000000c",
+        "terminal_id": "t-5f000000-0000-4000-8000-00000000000c",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-00000000000c.jsonl",
+        "workspace_id": "w5"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000004"
+        },
+        "agent_status": "blocked",
+        "pane_id": "w6:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "worker-greed"],
+            "cwd": "/fixture/playground/.claude/worktrees/sidebar-spacing",
+            "pid": 900004
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000004",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000004",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-sidebar-spacing/11111111-1111-4111-8111-000000000004.jsonl",
+        "workspace_id": "w6"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000005"
+        },
+        "agent_status": "working",
+        "pane_id": "w7:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "worker-lust-2"],
+            "cwd": "/fixture/playground/.claude/worktrees/board-colours",
+            "pid": 900005
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000005",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000005",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-board-colours/11111111-1111-4111-8111-000000000005.jsonl",
+        "workspace_id": "w7"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000006"
+        },
+        "agent_status": "idle",
+        "pane_id": "w8:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "worker-sloth"],
+            "cwd": "/fixture/playground/.claude/worktrees/composer-paste",
+            "pid": 900006
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000006",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000006",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-composer-paste/11111111-1111-4111-8111-000000000006.jsonl",
+        "workspace_id": "w8"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000007"
+        },
+        "agent_status": "working",
+        "pane_id": "w9:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "runner-pride"],
+            "cwd": "/fixture/playground/.claude/worktrees/canary",
+            "pid": 900007
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000007",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000007",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-canary/11111111-1111-4111-8111-000000000007.jsonl",
+        "workspace_id": "w9"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000008"
+        },
+        "agent_status": "working",
+        "pane_id": "wA:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "h4n8zt-reviewer"],
+            "cwd": "/fixture/playground/.claude/worktrees/review-lust",
+            "pid": 900008
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000008",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000008",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-review-lust/11111111-1111-4111-8111-000000000008.jsonl",
+        "workspace_id": "wA"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000009"
+        },
+        "agent_status": "blocked",
+        "pane_id": "wB:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "p9c3wx-tester"],
+            "cwd": "/fixture/playground/.claude/worktrees/test-lust",
+            "pid": 900009
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000009",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000009",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-test-lust/11111111-1111-4111-8111-000000000009.jsonl",
+        "workspace_id": "wB"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-00000000000a"
+        },
+        "agent_status": "idle",
+        "pane_id": "wC:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "scratch-demo"],
+            "cwd": "/fixture/scratch",
+            "pid": 900010
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-00000000000a",
+        "terminal_id": "t-5f000000-0000-4000-8000-00000000000a",
+        "transcript_path": "$CONFIG/projects/-fixture-scratch/11111111-1111-4111-8111-00000000000a.jsonl",
+        "workspace_id": "wC"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-00000000000b"
+        },
+        "agent_status": "blocked",
+        "pane_id": "wD:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "gluttony"],
+            "cwd": "/fixture/playground/.claude/worktrees/old-ghost",
+            "pid": 900011
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-00000000000b",
+        "terminal_id": "t-5f000000-0000-4000-8000-00000000000b",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-old-ghost/11111111-1111-4111-8111-00000000000b.jsonl",
+        "workspace_id": "wD"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000010"
+        },
+        "agent_status": "working",
+        "pane_id": "wE:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "worker-bright-lark"],
+            "cwd": "/fixture/playground/.claude/worktrees/row-wrap",
+            "pid": 900013
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000010",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000010",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-row-wrap/11111111-1111-4111-8111-000000000010.jsonl",
+        "workspace_id": "wE"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-00000000001b"
+        },
+        "agent_status": "working",
+        "pane_id": "wI:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "k3m9px-worker"],
+            "cwd": "/fixture/playground/.claude/worktrees/thread-titles",
+            "pid": 900021
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-00000000001b",
+        "terminal_id": "t-5f000000-0000-4000-8000-00000000001b",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-thread-titles/11111111-1111-4111-8111-00000000001b.jsonl",
+        "workspace_id": "wI"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-00000000001c"
+        },
+        "agent_status": "blocked",
+        "pane_id": "wJ:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "q7w8f2-reviewer"],
+            "cwd": "/fixture/playground/.claude/worktrees/review-106",
+            "pid": 900022
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-00000000001c",
+        "terminal_id": "t-5f000000-0000-4000-8000-00000000001c",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-review-106/11111111-1111-4111-8111-00000000001c.jsonl",
+        "workspace_id": "wJ"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000011"
+        },
+        "agent_status": "working",
+        "pane_id": "wF:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "r6t2dv-tester"],
+            "cwd": "/fixture/playground/.claude/worktrees/train-test",
+            "pid": 900014
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000011",
+        "terminal_id": "t-5f000000-0000-4000-8000-00000000000e",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-train-test/11111111-1111-4111-8111-000000000011.jsonl",
+        "workspace_id": "wF"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000012"
+        },
+        "agent_status": "working",
+        "pane_id": "wG:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "b7k2mq-reviewer"],
+            "cwd": "/fixture/playground/.claude/worktrees/review-envy",
+            "pid": 900015
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000012",
+        "terminal_id": "t-5f000000-0000-4000-8000-00000000000d",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-review-envy/11111111-1111-4111-8111-000000000012.jsonl",
+        "workspace_id": "wG"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000013"
+        },
+        "agent_status": "working",
+        "pane_id": "wH:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "worker-glm-flash"],
+            "cwd": "/fixture/playground/.claude/worktrees/glm-rows",
+            "pid": 900016
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000013",
+        "terminal_id": "t-5f000000-0000-4000-8000-00000000000f",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-glm-rows/11111111-1111-4111-8111-000000000013.jsonl",
+        "workspace_id": "wH"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000014"
+        },
+        "agent_status": "working",
+        "pane_id": "wK:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "runner-calm-dial"],
+            "cwd": "/fixture/playground/.claude/worktrees/canary",
+            "pid": 900019
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000014",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000012",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-canary/11111111-1111-4111-8111-000000000014.jsonl",
+        "workspace_id": "wK"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000015"
+        },
+        "agent_status": "working",
+        "pane_id": "wL:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "runner-quiet-lamp"],
+            "cwd": "/fixture/playground/.claude/worktrees/canary",
+            "pid": 900018
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000015",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000013",
+        "transcript_path": "$CONFIG/projects/-fixture-playground--claude-worktrees-canary/11111111-1111-4111-8111-000000000015.jsonl",
+        "workspace_id": "wL"
+      }
+    ],
+    "prompts": {
+      "w6:p1": "Fixture: which row spacing should the sidebar keep?\n\n❯ 1. Tighter rows\n     6px between rows, twelve sessions fit\n  2. Keep as is\n     Keep 8px and scroll past ten\n  3. Type something."
+    },
+    "screens": {
+      "w4:p1": "⏺ I need to run the ops checks on the tester stack.",
+      "w6:p1": "⏺ Two spacings read well. I am asking which one to keep.",
+      "w7:p1": "⏺ Reading the sidebar first.\n\n✻ Formulating… (1m 11s · ↓ 2.1k tokens · thought for 4s)",
+      "wB:p1": "⏺ I have a plan for round 2's browser run.",
+      "wC:p1": "⏺ The demo kettle is warm.",
+      "wD:p1": "⏺ Done for the day.",
+      "wI:p1": "⏺ Reading the thread's transcript for its title.",
+      "wJ:p1": "⏺ Round 1 is posted. Which of the two fixes do you want first?"
+    },
+    "workspaces": [
+      {
+        "label": "dispatcher",
+        "workspace_id": "w1"
+      },
+      {
+        "label": "dispatcher-2",
+        "workspace_id": "w2"
+      },
+      {
+        "label": "builder",
+        "workspace_id": "w3"
+      },
+      {
+        "label": "ops",
+        "workspace_id": "w4"
+      },
+      {
+        "label": "planner",
+        "workspace_id": "w5"
+      },
+      {
+        "label": "worker-greed",
+        "workspace_id": "w6"
+      },
+      {
+        "label": "worker-lust-2",
+        "workspace_id": "w7"
+      },
+      {
+        "label": "worker-sloth",
+        "workspace_id": "w8"
+      },
+      {
+        "label": "runner-pride",
+        "workspace_id": "w9"
+      },
+      {
+        "label": "h4n8zt-reviewer",
+        "workspace_id": "wA"
+      },
+      {
+        "label": "p9c3wx-tester",
+        "workspace_id": "wB"
+      },
+      {
+        "label": "scratch-demo",
+        "workspace_id": "wC"
+      },
+      {
+        "label": "gluttony",
+        "workspace_id": "wD"
+      },
+      {
+        "label": "worker-bright-lark",
+        "workspace_id": "wE"
+      },
+      {
+        "label": "r6t2dv-tester",
+        "workspace_id": "wF"
+      },
+      {
+        "label": "b7k2mq-reviewer",
+        "workspace_id": "wG"
+      },
+      {
+        "label": "worker-glm-flash",
+        "workspace_id": "wH"
+      },
+      {
+        "label": "k3m9px-worker",
+        "workspace_id": "wI"
+      },
+      {
+        "label": "q7w8f2-reviewer",
+        "workspace_id": "wJ"
+      },
+      {
+        "label": "runner-calm-dial",
+        "workspace_id": "wK"
+      },
+      {
+        "label": "runner-quiet-lamp",
+        "workspace_id": "wL"
+      }
+    ]
   },
   "merged": {
     "example/fixture": [
@@ -5307,19 +5539,39 @@
   "work": [
     {
       "baseRef": {
-        "branchProtectionRule": { "requiredApprovingReviewCount": 1 },
-        "rules": { "nodes": [] }
+        "branchProtectionRule": {
+          "requiredApprovingReviewCount": 1
+        },
+        "rules": {
+          "nodes": []
+        }
       },
       "baseRefName": "main",
       "commits": {
-        "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }]
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "SUCCESS"
+              }
+            }
+          }
+        ]
       },
       "isDraft": false,
-      "latestOpinionatedReviews": { "nodes": [{ "state": "APPROVED" }] },
+      "latestOpinionatedReviews": {
+        "nodes": [
+          {
+            "state": "APPROVED"
+          }
+        ]
+      },
       "mergeStateStatus": "CLEAN",
       "mergeable": "MERGEABLE",
       "number": 412,
-      "repository": { "nameWithOwner": "example/web" },
+      "repository": {
+        "nameWithOwner": "example/web"
+      },
       "reviewDecision": "APPROVED",
       "title": "Show the delivery window on the order page",
       "updatedAt": "2026-01-01T09:10:00.000Z",
@@ -5327,19 +5579,39 @@
     },
     {
       "baseRef": {
-        "branchProtectionRule": { "requiredApprovingReviewCount": 2 },
-        "rules": { "nodes": [] }
+        "branchProtectionRule": {
+          "requiredApprovingReviewCount": 2
+        },
+        "rules": {
+          "nodes": []
+        }
       },
       "baseRefName": "main",
       "commits": {
-        "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }]
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "SUCCESS"
+              }
+            }
+          }
+        ]
       },
       "isDraft": false,
-      "latestOpinionatedReviews": { "nodes": [{ "state": "APPROVED" }] },
+      "latestOpinionatedReviews": {
+        "nodes": [
+          {
+            "state": "APPROVED"
+          }
+        ]
+      },
       "mergeStateStatus": "CLEAN",
       "mergeable": "MERGEABLE",
       "number": 88,
-      "repository": { "nameWithOwner": "example/api" },
+      "repository": {
+        "nameWithOwner": "example/api"
+      },
       "reviewDecision": "REVIEW_REQUIRED",
       "title": "Retry the invoice export once on a timeout",
       "updatedAt": "2026-01-01T08:20:00.000Z",
@@ -5347,19 +5619,39 @@
     },
     {
       "baseRef": {
-        "branchProtectionRule": { "requiredApprovingReviewCount": 1 },
-        "rules": { "nodes": [] }
+        "branchProtectionRule": {
+          "requiredApprovingReviewCount": 1
+        },
+        "rules": {
+          "nodes": []
+        }
       },
       "baseRefName": "main",
       "commits": {
-        "nodes": [{ "commit": { "statusCheckRollup": { "state": "FAILURE" } } }]
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "FAILURE"
+              }
+            }
+          }
+        ]
       },
       "isDraft": false,
-      "latestOpinionatedReviews": { "nodes": [{ "state": "APPROVED" }] },
+      "latestOpinionatedReviews": {
+        "nodes": [
+          {
+            "state": "APPROVED"
+          }
+        ]
+      },
       "mergeStateStatus": "CLEAN",
       "mergeable": "MERGEABLE",
       "number": 405,
-      "repository": { "nameWithOwner": "example/web" },
+      "repository": {
+        "nameWithOwner": "example/web"
+      },
       "reviewDecision": "APPROVED",
       "title": "Keep the basket when the session refreshes",
       "updatedAt": "2026-01-01T11:30:00.000Z",
@@ -5367,19 +5659,39 @@
     },
     {
       "baseRef": {
-        "branchProtectionRule": { "requiredApprovingReviewCount": 1 },
-        "rules": { "nodes": [] }
+        "branchProtectionRule": {
+          "requiredApprovingReviewCount": 1
+        },
+        "rules": {
+          "nodes": []
+        }
       },
       "baseRefName": "develop",
       "commits": {
-        "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }]
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "SUCCESS"
+              }
+            }
+          }
+        ]
       },
       "isDraft": false,
-      "latestOpinionatedReviews": { "nodes": [{ "state": "APPROVED" }] },
+      "latestOpinionatedReviews": {
+        "nodes": [
+          {
+            "state": "APPROVED"
+          }
+        ]
+      },
       "mergeStateStatus": "BEHIND",
       "mergeable": "MERGEABLE",
       "number": 91,
-      "repository": { "nameWithOwner": "example/api" },
+      "repository": {
+        "nameWithOwner": "example/api"
+      },
       "reviewDecision": "APPROVED",
       "title": "Add the stock count to the product feed",
       "updatedAt": "2026-01-01T10:05:00.000Z",
@@ -5387,19 +5699,35 @@
     },
     {
       "baseRef": {
-        "branchProtectionRule": { "requiredApprovingReviewCount": 1 },
-        "rules": { "nodes": [] }
+        "branchProtectionRule": {
+          "requiredApprovingReviewCount": 1
+        },
+        "rules": {
+          "nodes": []
+        }
       },
       "baseRefName": "main",
       "commits": {
-        "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }]
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "SUCCESS"
+              }
+            }
+          }
+        ]
       },
       "isDraft": true,
-      "latestOpinionatedReviews": { "nodes": [] },
+      "latestOpinionatedReviews": {
+        "nodes": []
+      },
       "mergeStateStatus": "DRAFT",
       "mergeable": "MERGEABLE",
       "number": 419,
-      "repository": { "nameWithOwner": "example/web" },
+      "repository": {
+        "nameWithOwner": "example/web"
+      },
       "reviewDecision": "REVIEW_REQUIRED",
       "title": "Draft the new checkout steps",
       "updatedAt": "2026-01-01T11:50:00.000Z",
@@ -5407,19 +5735,35 @@
     },
     {
       "baseRef": {
-        "branchProtectionRule": { "requiredApprovingReviewCount": 1 },
-        "rules": { "nodes": [] }
+        "branchProtectionRule": {
+          "requiredApprovingReviewCount": 1
+        },
+        "rules": {
+          "nodes": []
+        }
       },
       "baseRefName": "main",
       "commits": {
-        "nodes": [{ "commit": { "statusCheckRollup": { "state": "SUCCESS" } } }]
+        "nodes": [
+          {
+            "commit": {
+              "statusCheckRollup": {
+                "state": "SUCCESS"
+              }
+            }
+          }
+        ]
       },
       "isDraft": false,
-      "latestOpinionatedReviews": { "nodes": [] },
+      "latestOpinionatedReviews": {
+        "nodes": []
+      },
       "mergeStateStatus": "DIRTY",
       "mergeable": "CONFLICTING",
       "number": 86,
-      "repository": { "nameWithOwner": "example/api" },
+      "repository": {
+        "nameWithOwner": "example/api"
+      },
       "reviewDecision": "CHANGES_REQUESTED",
       "title": "Rename the shipping zones",
       "updatedAt": "2025-12-31T16:00:00.000Z",
@@ -5427,7 +5771,12 @@
     }
   ],
   "worktrees": [
-    { "branch": "canary", "path": "/fixture/playground", "project": "playground", "url": "$WEB" },
+    {
+      "branch": "canary",
+      "path": "/fixture/playground",
+      "project": "playground",
+      "url": "$WEB"
+    },
     {
       "branch": "feat/board-colours",
       "path": "/fixture/playground/.claude/worktrees/board-colours",
@@ -5440,7 +5789,12 @@
       "project": "playground",
       "url": "https://fix-sidebar-spacing.playground.localhost"
     },
-    { "branch": "main", "path": "/fixture/yard", "project": "yard", "url": null },
+    {
+      "branch": "main",
+      "path": "/fixture/yard",
+      "project": "yard",
+      "url": null
+    },
     {
       "branch": "feat/rooms",
       "path": "/fixture/yard/.claude/worktrees/rooms",
