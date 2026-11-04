@@ -333,16 +333,12 @@ function startsRootShell(wrapper, value) {
 }
 var FAMILIES = {
   bun: {
-    inline: "ep",
-    long: ["--eval", "--print"],
     takes: ["--config", "--cwd", "--env-file", "--preload", "--tsconfig-override"],
     values: "r"
   },
-  deno: { inline: "", long: [], takes: ["--config", "--import-map"], values: "c" },
-  lua: { inline: "e", long: [], takes: [], values: "l" },
+  deno: { takes: ["--config", "--import-map"], values: "c" },
+  lua: { takes: [], values: "l" },
   node: {
-    inline: "ep",
-    long: ["--eval", "--print"],
     takes: [
       "--conditions",
       "--env-file",
@@ -358,11 +354,11 @@ var FAMILIES = {
     ],
     values: "Cr"
   },
-  osascript: { inline: "e", long: [], takes: [], values: "ls" },
-  perl: { inline: "eE", long: [], takes: [], values: "IMm" },
-  php: { inline: "BER", long: [], own: "f", takes: [], values: "cdf" },
-  python: { inline: "c", long: [], own: "m", takes: ["--check-hash-based-pycs"], values: "QWXm" },
-  ruby: { inline: "e", long: [], takes: [], values: "CEFIr" }
+  osascript: { takes: [], values: "ls" },
+  perl: { takes: [], values: "I" },
+  php: { own: "f", takes: [], values: "cdf" },
+  python: { own: "m", takes: ["--check-hash-based-pycs"], values: "WXm" },
+  ruby: { takes: [], values: "CEIr" }
 };
 var FAMILY = /^(bun|deno|lua|luajit|node|nodejs|osascript|perl|php|python|ruby)[\d.]*$/;
 var familyOf = (name) => {
@@ -378,33 +374,29 @@ function interpreted(family, args, xargs) {
     if (value === "--")
       return !own(args[k + 1]);
     if (value.startsWith("--")) {
-      const name = value.split("=")[0];
-      if (family.long.includes(name))
+      if (!family.takes.includes(value.split("=")[0]))
         return true;
-      if (family.takes.includes(name) && !value.includes("="))
+      if (!value.includes("="))
         k++;
       continue;
     }
     if (value.startsWith("-") && value !== "-") {
-      for (const [at, c] of [...value.slice(1)].entries()) {
-        if (family.inline.includes(c))
-          return true;
-        if (!family.values.includes(c))
-          continue;
-        const attached = value.slice(at + 2);
-        if (c === family.own)
-          return !own(attached ? { ...args[k], value: attached } : args[k + 1]);
-        if (!attached)
-          k++;
-        break;
-      }
+      const [letter, attached] = [value[1], value.slice(2)];
+      if (!family.values.includes(letter))
+        return true;
+      if (letter === family.own)
+        return !own(attached ? { ...args[k], value: attached } : args[k + 1]);
+      if (!attached)
+        k++;
       continue;
     }
-    if (!sub && (family === FAMILIES.bun || family === FAMILIES.deno) && ["eval", "run"].includes(value)) {
-      if (value === "eval")
+    if (!sub && (family === FAMILIES.bun || family === FAMILIES.deno)) {
+      if (["eval", "exec", "repl"].includes(value))
         return true;
-      sub = true;
-      continue;
+      if (value === "run") {
+        sub = true;
+        continue;
+      }
     }
     return !own(args[k]);
   }
