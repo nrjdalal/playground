@@ -1,8 +1,10 @@
 import { isAbsolute, join } from "node:path"
 
 import { dataDir } from "@packages/env/data-dir"
+import { readPolicyOrDefaults } from "@packages/settings"
 
 import { REPO } from "../ops-job/job"
+import { SLACK_NOT_SET_UP, slackSetUp, vaultRefusal } from "../playground/installed"
 import { orgsIo, whichSkill } from "../playground/orgs"
 import { underVault } from "./slack"
 
@@ -18,9 +20,19 @@ if (!sending && !uploading) {
   )
   process.exit(2)
 }
+// Slack first, for a send to the owner's DM alone (an upload's place comes from its item), then the vault that holds the token, so each line names what this Mac really lacks
+const policy = readPolicyOrDefaults(dataDir())
+if (policy.refusal !== undefined) {
+  console.error(`dm ${verb}: ${policy.refusal}`)
+  process.exit(2)
+}
+if (sending && !slackSetUp(policy.settings)) {
+  console.error(`dm send: ${SLACK_NOT_SET_UP}`)
+  process.exit(2)
+}
 const vault = await whichSkill(orgsIo(REPO, dataDir()), "vault")
-if (!vault.dir) {
-  console.error(`dm ${verb}: ${vault.refusal}`)
+if (vault.refusal !== undefined) {
+  console.error(`dm ${verb}: ${vaultRefusal(vault.refusal)}`)
   process.exit(2)
 }
 const script = join(import.meta.dir, sending ? "send.ts" : "upload.ts")

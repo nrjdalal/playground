@@ -6,6 +6,7 @@ import { readPolicy, slackSettings } from "@packages/settings"
 import { underVault } from "../dm/slack"
 import { REPO, scheduled } from "../ops-job/job"
 import type { Beat } from "../ops-tick/tick"
+import { slackSetUp, vaultRefusal } from "../playground/installed"
 import { orgsIo, whichSkill } from "../playground/orgs"
 
 const told = new Set<string>()
@@ -14,11 +15,7 @@ const told = new Set<string>()
 const slackMode = async (): Promise<boolean> => {
   const policy = await readPolicy(dataDir())
   if (policy.refusal !== undefined) throw new Error(`the settings refuse: ${policy.refusal}`)
-  const get = (key: "slack.dmChannel" | "slack.dmOwner" | "slack.mode") =>
-    slackSettings.get(policy.settings, key)
-  return (
-    get("slack.mode") === true && Boolean(get("slack.dmChannel")) && Boolean(get("slack.dmOwner"))
-  )
+  return slackSettings.get(policy.settings, "slack.mode") === true && slackSetUp(policy.settings)
 }
 
 // The token reaches only watch.ts's own process, through vault, so this job's command stays a plain bun.
@@ -29,9 +26,10 @@ export const BEATS: Beat[] = [
     run: async (ctx) => {
       if (!(await slackMode())) return
       const vault = await whichSkill(orgsIo(REPO, dataDir()), "vault")
-      const { code, out } = vault.dir
-        ? await ctx.run(underVault(vault.dir, join(import.meta.dir, "watch.ts"), []))
-        : { code: 2, out: `error: ${vault.refusal}` }
+      const { code, out } =
+        vault.refusal === undefined
+          ? await ctx.run(underVault(vault.dir, join(import.meta.dir, "watch.ts"), []))
+          : { code: 2, out: `error: ${vaultRefusal(vault.refusal)}` }
       if (code === 0) {
         told.clear()
         return
