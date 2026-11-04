@@ -39,7 +39,7 @@ const clip = (text: string, size = CLIP): string => {
 export function managerFor(
   name: string,
   agents: Agent[],
-  reportsTo: string | undefined,
+  briefReportsTo: string | undefined,
   live: ReadonlySet<string>,
 ): string | null {
   const agent = agents.find((entry) => entry?.name === name)
@@ -56,7 +56,7 @@ export function managerFor(
     to = managerOf(agents, workerKind === "ops" ? "ops" : "builder")
   } else
     to =
-      reportsTo ??
+      briefReportsTo ??
       managerOf(agents, kind === "runner" ? "ops" : kind === "researcher" ? "planner" : "builder")
   return to !== name && live.has(to) ? to : primary
 }
