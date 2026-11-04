@@ -7,6 +7,8 @@ export type Post = {
   firstInDm: boolean
   kind: string
   postRule: string
+  // the post goes to the sender's own self channel
+  self: boolean
   text: string
   via: "token" | "web"
 }
@@ -18,10 +20,11 @@ export const mentionsOf = (text: string): string[] => [
   ),
 ]
 
-// Why a post waits as pending for its sender's web session, or null when it sends at once: a post from a signed-in browser is the person's own, so only a token's post is held, when it is a held kind, names someone, opens a DM or goes to an owner-only channel. v1 takes no attachments; one added later holds too.
+// Why a post waits as pending for its sender's web session, or null when it sends at once: a post from a signed-in browser is the person's own, so only a token's post is held, when it is a held kind, names someone, opens a DM or goes to an owner-only channel; in the sender's own self channel, which nobody else reads, only a held kind holds. v1 takes no attachments; one added later holds too.
 export const heldBecause = (post: Post): string | null => {
   if (post.via === "web") return null
   if ((HELD_KINDS as readonly string[]).includes(post.kind)) return `a ${post.kind} post`
+  if (post.self) return null
   if (mentionsOf(post.text).length > 0) return "a mention"
   if (post.firstInDm) return "a first message in a DM"
   if (post.postRule === "owner") return "a post to an owner-only channel"

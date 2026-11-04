@@ -1,6 +1,6 @@
 "use client"
 
-import { RiArrowRightSLine, RiHashtag, RiUserLine } from "@remixicon/react"
+import { RiArrowRightSLine, RiHashtag, RiRemoteControlLine, RiUserLine } from "@remixicon/react"
 import { cn } from "cn"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -20,17 +20,23 @@ import {
 import { config } from "@/lib/config"
 import { isPlainClick } from "@/lib/threads"
 import { channelHref, channelTitle, type YardChannel, yardBadge, yardGroups } from "@/lib/yard"
-import { useYardChannels } from "@/lib/yard-api"
+import { useYardChannels, useYardSelf } from "@/lib/yard-api"
 
-// The Channels and Direct messages groups, read from the API's Yard router; each is absent while it has no rows, and both while the stack has no Yard. Each collapses as the Scripts group does, its label the toggle, open to start, and counts its rows.
-export function YardGroups() {
+// The Channels and Direct messages groups, read from the API's Yard router; each is absent while it has no rows, and both while the stack has no Yard. Each collapses as the Scripts group does, its label the toggle, open to start, and counts its rows. With remote, the hosted web's owner, a Remote row above them opens the owner's own self channel, made on the first visit.
+export function YardGroups({ remote = false }: { remote?: boolean }) {
   const { data } = useYardChannels()
+  const { data: self } = useYardSelf(remote)
   const [channelsOpen, setChannelsOpen] = useState(true)
   const [dmsOpen, setDmsOpen] = useState(true)
   if (!data) return null
   const { channels, dms } = yardGroups(data)
   return (
     <>
+      {self && (
+        <SidebarGroup>
+          <YardRows rows={[data.find((row) => row.id === self.id) ?? self]} />
+        </SidebarGroup>
+      )}
       {channels.length > 0 && (
         <SidebarGroup>
           <SidebarGroupLabel
@@ -95,7 +101,13 @@ function YardRows({ rows }: { rows: YardChannel[] }) {
               aria-description={tip}
               className={ROW_BOX}
             >
-              {row.kind === "dm" ? <RiUserLine /> : <RiHashtag />}
+              {row.kind === "dm" ? (
+                <RiUserLine />
+              ) : row.kind === "self" ? (
+                <RiRemoteControlLine />
+              ) : (
+                <RiHashtag />
+              )}
               <span className="truncate text-xs">{title}</span>
             </SidebarMenuButton>
             {badge && (

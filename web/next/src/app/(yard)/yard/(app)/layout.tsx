@@ -1,3 +1,4 @@
+import { roleAtLeast } from "@packages/auth/access"
 import { redirect } from "next/navigation"
 
 import { ApiRetry } from "@/components/common/api-retry"
@@ -9,7 +10,7 @@ import { auth } from "@/lib/auth"
 import { sessionOrUnavailable, UNAVAILABLE } from "@/lib/auth/session"
 import { yardGate } from "@/lib/yard"
 
-// The hosted app's session gate: a signed-out visit goes home to Sign in with GitHub, a user without an invite to the invite page, and a member gets the sidebar's Channels and Direct messages beside the page, with no Inbox aside.
+// The hosted app's session gate: a signed-out visit goes home to Sign in with GitHub, a user without an invite to the invite page, and a member gets the sidebar's Channels and Direct messages beside the page, the owner with a Remote row above them, with no Inbox aside.
 export default async function YardAppLayout({ children }: { children: React.ReactNode }) {
   const session = await sessionOrUnavailable(() =>
     auth.api.getSession({ disableCookieCache: true }),
@@ -21,7 +22,7 @@ export default async function YardAppLayout({ children }: { children: React.Reac
   return (
     <SidebarShell
       homeHref="/yard"
-      nav={<YardGroups />}
+      nav={<YardGroups remote={roleAtLeast(session?.user.role, "owner")} />}
       footer={<YardFooter login={session?.user.login ?? session?.user.name ?? ""} />}
     >
       <YardLive />

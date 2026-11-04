@@ -52,6 +52,17 @@ describe("the hosted mount allowlist", () => {
     expect(paths.filter((path) => !ALLOWED.test(path))).toEqual([])
     expect(paths).toContain("/api/health")
     expect(paths.some((path) => path.startsWith("/api/auth/"))).toBe(true)
+    expect(paths).toContain("/api/v1/yard/self")
+  })
+
+  // the self channel is made from a signed-in browser alone, refused to a token before any read of it
+  test("POST /api/v1/yard/self refuses a bearer token and a signed-out call", () => {
+    const run = child(
+      `const { app } = await import(${JSON.stringify(join(SRC, "index.ts"))}); const token = await app.request("/api/v1/yard/self", { headers: { authorization: "Bearer yard_made-up" }, method: "POST" }); const signedOut = await app.request("/api/v1/yard/self", { headers: { origin: "http://127.0.0.1:3000" }, method: "POST" }); console.log(JSON.stringify([token.status, signedOut.status])); process.exit(0)`,
+      { PLAYGROUND_HOSTED: "1" },
+    )
+    expect(run.code).toBe(0)
+    expect(JSON.parse(run.out.trim().split("\n").at(-1) ?? "[]")).toEqual([403, 401])
   })
 
   test("the hosted entry refuses to start without PLAYGROUND_HOSTED=1", () => {
@@ -205,4 +216,5 @@ describe("the hosted entry's import graph", () => {
 test("the hosted RPC type names Yard's routes", () => {
   const client = hc<HostedAppType>("http://127.0.0.1")
   expect(typeof client.api.v1.yard.channels.$get).toBe("function")
+  expect(typeof client.api.v1.yard.self.$post).toBe("function")
 })

@@ -35,7 +35,7 @@ const token = (id: string, owner = false): Caller => ({
 })
 
 // Posts with the limits out of the way, since a test posts faster than once a second; the limits have their own test.
-const UNLIMITED = { channelHour: 1e6, loginDay: 1e6, loginSecond: 1e6 }
+const UNLIMITED = { channelHour: 1e6, loginDay: 1e6, loginSecond: 1e6, selfDay: 1e6 }
 
 describe.skipIf(!dockerUp())("Yard's store", () => {
   let container = ""
@@ -563,6 +563,102 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       await expect(store.redeemInvite(db, web("di"), invite.code)).rejects.toMatchObject({
         status: 404,
       })
+    })
+  })
+  // last in the file, so no earlier list of the owner's channels meets the owner's self channel
+  describe("self channels", () => {
+    test("two opens at once make one self channel, named by its owner's id, with its owner its one member", async () => {
+      const [a, b] = await Promise.all([
+        store.openSelf(db, web("ada", true)),
+        store.openSelf(db, web("ada", true)),
+      ])
+      expect(a).toEqual(b)
+      expect(a).toMatchObject({ joined: true, kind: "self", name: "self:ada" })
+      const members = await sql`select user_id from yard_member where channel_id = ${a.id}`
+      expect(members.map((row: { user_id: string }) => row.user_id)).toEqual(["ada"])
+    })
+
+    test("a member lists their own self channel alone, and no other member's", async () => {
+      const own = await store.openSelf(db, web("ada", true))
+      const bos = await store.openSelf(db, web("bo"))
+      const selfOf = async (caller: Caller) =>
+        (await store.channels(db, caller)).filter((c) => c.kind === "self").map((c) => c.id)
+      expect(await selfOf(web("ada", true))).toEqual([own.id])
+      expect(await selfOf(web("bo"))).toEqual([bos.id])
+      expect(await selfOf(web("di"))).toEqual([])
+      // a membership row in another's self channel, which nothing writes, still lists nothing
+      await sql`insert into yard_member (channel_id, user_id) values (${own.id}, 'di')`
+      expect(await selfOf(web("di"))).toEqual([])
+      await sql`delete from yard_member where channel_id = ${own.id} and user_id = 'di'`
+    })
+
+    test("another member's post is refused, a membership row in it included", async () => {
+      const own = await store.openSelf(db, web("ada", true))
+      await expect(send(web("bo"), own.id, { kind: "text", text: "hi" })).rejects.toMatchObject({
+        status: 404,
+      })
+      await sql`insert into yard_member (channel_id, user_id) values (${own.id}, 'bo')`
+      await expect(send(web("bo"), own.id, { kind: "text", text: "hi" })).rejects.toMatchObject({
+        status: 403,
+      })
+      await expect(send(token("bo"), own.id, { kind: "text", text: "hi" })).rejects.toMatchObject({
+        status: 403,
+      })
+      await sql`delete from yard_member where channel_id = ${own.id} and user_id = 'bo'`
+      expect((await send(web("ada", true), own.id, { kind: "text", text: "mine" })).status).toBe(
+        "sent",
+      )
+    })
+
+    test("a second self channel for one member, and a self name on another kind, are refused", async () => {
+      await store.openSelf(db, web("ada", true))
+      await expect(
+        sql`insert into yard_channel (id, kind, name) values ('second', 'self', 'self:ada')`,
+      ).rejects.toThrow()
+      await expect(
+        sql`insert into yard_channel (id, kind, name) values ('unnamed', 'self', 'remote')`,
+      ).rejects.toThrow()
+      await expect(
+        sql`insert into yard_channel (id, kind, name) values ('posing', 'channel', 'self:bo')`,
+      ).rejects.toThrow()
+      const [{ count }] =
+        await sql`select count(*)::int as count from yard_channel where kind = 'self' and name = 'self:ada'`
+      expect(count).toBe(1)
+    })
+
+    test("its owner's token reply sends at once, a mention included, while a held kind waits", async () => {
+      const own = await store.openSelf(db, web("ada", true))
+      expect(
+        (await send(token("ada", true), own.id, { kind: "answer", text: "done" })).status,
+      ).toBe("sent")
+      expect(
+        (await send(token("ada", true), own.id, { kind: "text", text: "cc @bo" })).status,
+      ).toBe("sent")
+      expect((await send(token("ada", true), own.id, { kind: "steps", text: "run" })).status).toBe(
+        "pending",
+      )
+    })
+
+    test("counts its posts a day under self:<user id> in place of the login's day, and keeps the second's", async () => {
+      const own = await store.openSelf(db, web("bo"))
+      const limits = { ...UNLIMITED, loginDay: 0 }
+      await store.post(db, web("bo"), own.id, { kind: "text", text: "one" }, limits)
+      const [{ count }] =
+        await sql`select coalesce(sum(count), 0)::int as count from yard_rate where key = 'self:bo'`
+      expect(count).toBeGreaterThan(0)
+      await expect(
+        store.post(db, web("bo"), own.id, { kind: "text", text: "two" }, { ...limits, selfDay: 0 }),
+      ).rejects.toMatchObject({ status: 429 })
+      await expect(
+        store.post(
+          db,
+          web("bo"),
+          own.id,
+          { kind: "text", text: "three" },
+          { ...limits, loginSecond: 0 },
+        ),
+      ).rejects.toMatchObject({ status: 429 })
+      expect(store.POST_LIMITS.selfDay).toBe(1000)
     })
   })
 })

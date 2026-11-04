@@ -19,7 +19,7 @@ import { user } from "@/schema/auth"
 const oneOf = (name: string, column: string, values: readonly string[]) =>
   check(name, sql.raw(`${column} in (${values.map((value) => `'${value}'`).join(", ")})`))
 
-export const CHANNEL_KINDS = ["channel", "dm"] as const
+export const CHANNEL_KINDS = ["channel", "dm", "self"] as const
 export const INVITE_STATUSES = ["open", "redeemed", "requested", "revoked"] as const
 export const POST_RULES = ["members", "owner"] as const
 
@@ -49,7 +49,7 @@ export const yardInvite = pgTable(
   ],
 )
 
-// A named channel, or a DM named dm:<user id>:<user id> with the two ids sorted, so both sides open the same one; post_rule owner lets only the owner rung post (#releases).
+// A named channel, a DM named dm:<user id>:<user id> with the two ids sorted, so both sides open the same one, or a member's own self channel named self:<user id>, so each member has one at most; post_rule owner lets only the owner rung post (#releases).
 export const yardChannel = pgTable(
   "yard_channel",
   {
@@ -64,6 +64,10 @@ export const yardChannel = pgTable(
     check("yard_channel_dm_name_check", sql`(${table.kind} = 'dm') = (${table.name} like 'dm:%')`),
     oneOf("yard_channel_kind_check", "kind", CHANNEL_KINDS),
     oneOf("yard_channel_post_rule_check", "post_rule", POST_RULES),
+    check(
+      "yard_channel_self_name_check",
+      sql`(${table.kind} = 'self') = (${table.name} like 'self:%')`,
+    ),
   ],
 )
 

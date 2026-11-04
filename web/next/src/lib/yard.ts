@@ -47,8 +47,13 @@ export const channelHref = (channel: Pick<YardChannel, "id">, hosted: boolean) =
 export const approveHref = (message: Pick<YardMessage, "id">, hosted: boolean) =>
   hosted ? approvePath(message.id) : null
 
+// A DM shows as its peer, your own self channel as Remote, where you reach the factory, and a channel as #name.
 export const channelTitle = (channel: Pick<YardChannel, "kind" | "name" | "peer">) =>
-  channel.kind === "dm" ? (channel.peer?.login ?? "Direct message") : `#${channel.name}`
+  channel.kind === "dm"
+    ? (channel.peer?.login ?? "Direct message")
+    : channel.kind === "self"
+      ? "Remote"
+      : `#${channel.name}`
 
 // The sidebar's two groups, each in the API's order: the channels you have joined (the API lists every one), and every DM.
 export const yardGroups = (channels: YardChannel[]) => ({

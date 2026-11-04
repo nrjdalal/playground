@@ -6,6 +6,7 @@ const post = {
   firstInDm: false,
   kind: "text",
   postRule: "members",
+  self: false,
   text: "hello",
   via: "token" as const,
 }
@@ -26,12 +27,22 @@ describe("heldBecause", () => {
     expect(heldBecause({ ...post, postRule: "owner" })).toBe("a post to an owner-only channel")
   })
 
+  test("in the sender's own self channel, sends a token's reply at once, a mention included, and holds only a held kind", () => {
+    const self = { ...post, self: true }
+    for (const kind of ["answer", "notice", "question", "text"])
+      expect(heldBecause({ ...self, kind })).toBeNull()
+    expect(heldBecause({ ...self, text: "ping @octocat" })).toBeNull()
+    for (const kind of ["bug", "fix", "log", "steps"])
+      expect(heldBecause({ ...self, kind })).toBe(`a ${kind} post`)
+  })
+
   test("sends anything from a signed-in browser at once", () => {
     expect(
       heldBecause({
         firstInDm: true,
         kind: "steps",
         postRule: "owner",
+        self: false,
         text: "@octocat",
         via: "web",
       }),

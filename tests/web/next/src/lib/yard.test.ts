@@ -217,3 +217,9 @@ describe("inviteRequests", () => {
     expect(inviteRequests(list).map((row) => row.id)).toEqual(["a", "c"])
   })
 })
+
+describe("your self channel", () => {
+  test("reads Remote, whatever its name", () => {
+    expect(channelTitle(channel({ id: "s1", kind: "self", name: "self:u1" }))).toBe("Remote")
+  })
+})

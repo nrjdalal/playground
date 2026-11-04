@@ -184,6 +184,16 @@ export const yardRouter = new Hono<{ Variables: YardVariables }>()
         data: { channel: await store.openDm(db, c.get("caller"), c.req.valid("json").login) },
       }),
   )
+  // the owner's own self channel, opened from a signed-in browser alone, so no token makes or finds it
+  .post(
+    "/self",
+    doc(
+      "Opens your own self channel, the one you alone post in, or returns the one there is",
+      z.object({ channel: channelSchema }),
+    ),
+    owner,
+    async (c) => c.json({ data: { channel: await store.openSelf(db, c.get("caller")) } }),
+  )
   .get(
     "/channels/:id/messages",
     doc(

@@ -86,7 +86,10 @@ const joinOwnChannels = async (tx: Pick<Database, "insert" | "select">, userId: 
   }
 }
 
-// Every channel and DM a caller sees, each with its unread and mention counts since the caller last read it: every channel, joined or not, and the DMs the caller is in; a member not in both of Yard's own channels joins the one it lacks on a list, so one cut short mends on the next, since the owner reaches Yard with no invite to redeem.
+// A member's own self channel's name, one per member by the name's unique constraint.
+export const selfName = (userId: string) => `self:${userId}`
+
+// Every channel and DM a caller sees, each with its unread and mention counts since the caller last read it: every channel, joined or not, the DMs the caller is in, and the caller's own self channel alone; a member not in both of Yard's own channels joins the one it lacks on a list, so one cut short mends on the next, since the owner reaches Yard with no invite to redeem.
 export const channels = async (db: Database, caller: Caller, id?: string): Promise<Channel[]> => {
   if (!id) {
     const [{ joined }] = await db
@@ -107,7 +110,7 @@ export const channels = async (db: Database, caller: Caller, id?: string): Promi
   const rows = await db.execute<{
     id: string
     joined: boolean
-    kind: "channel" | "dm"
+    kind: Channel["kind"]
     last_message_at: Date | string | null
     mentions: number
     name: string
@@ -130,7 +133,8 @@ export const channels = async (db: Database, caller: Caller, id?: string): Promi
       ) end as peer
     from yard_channel c
     left join yard_member m on m.channel_id = c.id and m.user_id = ${caller.id}
-    where (c.kind = 'channel' or m.user_id is not null) ${id ? sql`and c.id = ${id}` : sql``}
+    where (c.kind = 'channel' or m.user_id is not null)
+      and (c.kind <> 'self' or c.name = ${selfName(caller.id)}) ${id ? sql`and c.id = ${id}` : sql``}
     order by c.kind, c.name
   `)
   return [...rows].map((row) => ({
@@ -210,6 +214,27 @@ export const openDm = async (db: Database, caller: Caller, login: string): Promi
     .from(yardChannel)
     .where(eq(yardChannel.name, name))
   return channelFor(db, caller, row!.id)
+}
+
+// The caller's own self channel, made on its first open with the caller its one member; the name's unique constraint and on-conflict-do-nothing inserts keep two opens at once to one row.
+export const openSelf = async (db: Database, caller: Caller): Promise<Channel> => {
+  const name = selfName(caller.id)
+  const id = await db.transaction(async (tx) => {
+    await tx
+      .insert(yardChannel)
+      .values({ id: crypto.randomUUID(), kind: "self", name })
+      .onConflictDoNothing()
+    const [row] = await tx
+      .select({ id: yardChannel.id })
+      .from(yardChannel)
+      .where(eq(yardChannel.name, name))
+    await tx
+      .insert(yardMember)
+      .values({ channelId: row!.id, userId: caller.id })
+      .onConflictDoNothing()
+    return row!.id
+  })
+  return channelFor(db, caller, id)
 }
 
 // The channel, when the caller is a member of it; a channel the caller is not in reads as missing.
@@ -307,10 +332,15 @@ export const waiting = async (
     .sort((a, b) => (key(a) < key(b) ? -1 : 1))
 }
 
-// The owner's #i6 limits: a login posts once a second and 200 times a day, and a channel takes 60 posts an hour.
-export const POST_LIMITS = { channelHour: 60, loginDay: 200, loginSecond: 1 } as const
+// The owner's #i6 limits: a login posts once a second and 200 times a day, and a channel takes 60 posts an hour; a self channel's posts count 1,000 a day under its own key in place of the login's day, since the owner's phone, the factory's replies and its updates all post there as one login.
+export const POST_LIMITS = {
+  channelHour: 60,
+  loginDay: 200,
+  loginSecond: 1,
+  selfDay: 1000,
+} as const
 
-// What one channel kind checks before a post: whether the caller may post there, and what decides a token's hold. A later kind (a self channel) adds its own.
+// What one channel kind checks before a post: whether the caller may post there, and what decides a token's hold.
 const POST_RULES: Record<
   YardChannel["kind"],
   (db: Database, caller: Caller, channel: YardChannel) => Promise<{ firstInDm: boolean }>
@@ -331,6 +361,12 @@ const POST_RULES: Record<
           .limit(1)
       ).length === 0,
   }),
+  // A self channel takes its owner's posts alone, whoever else a membership row might name.
+  self: async (_db, caller, channel) => {
+    if (channel.name !== selfName(caller.id))
+      throw new ApiError(403, "FORBIDDEN", "Only its owner posts in a self channel")
+    return { firstInDm: false }
+  },
 }
 
 export const post = async (
@@ -353,10 +389,18 @@ export const post = async (
     if (parent.parentId)
       throw new ApiError(400, "BAD_REQUEST", "Reply to the thread's first message")
   }
+  const self = channel.kind === "self"
   await take(db, `post:${caller.login}`, "second", limits.loginSecond)
-  await take(db, `post:${caller.login}`, "day", limits.loginDay)
+  if (self) await take(db, selfName(caller.id), "day", limits.selfDay)
+  else await take(db, `post:${caller.login}`, "day", limits.loginDay)
   await take(db, `channel:${channelId}`, "hour", limits.channelHour)
-  const held = heldBecause({ ...body, firstInDm, postRule: channel.postRule, via: caller.via })
+  const held = heldBecause({
+    ...body,
+    firstInDm,
+    postRule: channel.postRule,
+    self,
+    via: caller.via,
+  })
   const [row] = await db
     .insert(yardMessage)
     .values({

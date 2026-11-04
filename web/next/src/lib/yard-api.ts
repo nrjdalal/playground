@@ -93,6 +93,8 @@ export const yardApi = {
     yard<{ invite: unknown }>("/invites/request", { body: { forLogin }, method: "POST" }),
   revokeToken: (id: string) =>
     yard<{ token: YardToken }>(`/tokens/${segment(id)}`, { method: "DELETE" }),
+  // gets or makes your own self channel, from the signed-in browser alone
+  self: () => yard<{ channel: YardChannel }>("/self", { method: "POST" }),
   tokens: () => yard<{ tokens: YardToken[] }>("/tokens"),
 }
 
@@ -108,6 +110,15 @@ export const useYardChannels = () =>
     refetchInterval: (query) => channelsEvery(config.hosted, query.state.error),
     retry: (count, error) =>
       (error as { code?: string }).code !== "NOT_FOUND" && queryRetry(count, error),
+  })
+
+// The owner's own self channel on the hosted web, got or made once per tab: its POST makes nothing new after the first.
+export const useYardSelf = (enabled: boolean) =>
+  useQuery({
+    enabled,
+    queryFn: async () => (await yardApi.self()).channel,
+    queryKey: [...YARD_KEY, "self"],
+    staleTime: Number.POSITIVE_INFINITY,
   })
 
 export const useYardMessages = (channel: string) =>
