@@ -65,6 +65,13 @@ describe("playground dm on a Mac that lacks Slack or the vault", () => {
     expect(stderr).toStartWith("dm send: the vault is not installed:")
   })
 
+  test("an upload, whose place comes from its item, needs no DM settings: with no vault it names the vault alone", async () => {
+    const { data } = machine({})
+    const { code, stderr } = await dm(data, ["upload", "12345678-1234-1234-1234-123456789abc"])
+    expect(code).toBe(2)
+    expect(stderr).toStartWith("dm upload: the vault is not installed:")
+  })
+
   test("a wrong verb or file prints the usage, before any check of what is set up", async () => {
     const { data } = machine({})
     const { code, stderr } = await dm(data, ["send", "relative.md"])

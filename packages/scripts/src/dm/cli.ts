@@ -20,16 +20,14 @@ if (!sending && !uploading) {
   )
   process.exit(2)
 }
-// Slack first, then the vault that holds its token, so each line names what this Mac really lacks
+// Slack first, for a send to the owner's DM alone (an upload's place comes from its item), then the vault that holds the token, so each line names what this Mac really lacks
 const policy = readPolicyOrDefaults(dataDir())
-const missing =
-  policy.refusal !== undefined
-    ? policy.refusal
-    : slackSetUp(policy.settings)
-      ? undefined
-      : SLACK_NOT_SET_UP
-if (missing) {
-  console.error(`dm ${verb}: ${missing}`)
+if (policy.refusal !== undefined) {
+  console.error(`dm ${verb}: ${policy.refusal}`)
+  process.exit(2)
+}
+if (sending && !slackSetUp(policy.settings)) {
+  console.error(`dm send: ${SLACK_NOT_SET_UP}`)
   process.exit(2)
 }
 const vault = await whichSkill(orgsIo(REPO, dataDir()), "vault")
