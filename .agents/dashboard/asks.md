@@ -194,7 +194,7 @@
   `bun run ask new` checks every file first, then copies each into the attachments folder (`keepAttachments`, through `storeAttachment`: bytes sniffed, 10 MB a file, a week's retention), and the item keeps `{id, kind, name, label?, group?}`.
   It refuses, with one line naming the file, an unknown key, a relative path, a missing file, a file over the cap, and bytes that do not match the kind; it takes every kind (code, doc, html, image and pdf).
   `GET /api/v1/inbox/attachments/:id` serves a kept file behind `requireTrustedOrigin`, `requireLoopback` and the owner rung, so the web fetches it with its cookie into a blob URL (`useAttachment`), since an `<img>` sends no Origin.
-  A 404 (a fixture stack's restart drops its files, or the week's sweep took one) settles as missing for the page's life, asked once and never retried, and the card shows Missing in the file's place.
+  A 404 (a fixture stack's restart drops its files, or the week's sweep took one) settles as missing for the page's life, asked once and never retried, and the card shows Missing in the file's place, or a folded pair's before alone when its after is the one gone.
   The card shows its files under the text gap-3 below the words:
   a lone HTML page live at its full width through the viewer's own HTML view, links opening in a tab, never taking the focus, an `h-80` box with a full-screen square in its corner that opens the viewer (`LivePage`),
   a lone before/after pair at its full width with Before above After, each in an `h-48` box, the picture `object-contain` (`WideSide`, Up and Down a side), else in a four-by-four grid of squares gap-3 apart, up to sixteen thumbnails or fifteen and a `+N` tile (`AttachmentThumbs` in `web/next/src/components/dashboard/viewer/thumbnails.tsx`),

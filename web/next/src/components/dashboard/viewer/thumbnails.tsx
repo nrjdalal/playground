@@ -8,7 +8,7 @@ import { HTML_VIEWER } from "@/components/dashboard/viewer/documents"
 import { FileIcon } from "@/components/dashboard/viewer/file-icons"
 import { type ViewerItem, VIEWERS } from "@/components/dashboard/viewer/registry"
 import { useAttachment } from "@/components/dashboard/viewer/use-attachment-url"
-import { Viewer } from "@/components/dashboard/viewer/viewer"
+import { Missing, Viewer } from "@/components/dashboard/viewer/viewer"
 import { Hint } from "@/components/hint"
 import { Button } from "@/components/ui/button"
 import { BAR_ITEM, FLOATING_BAR } from "@/lib/floating-bar"
@@ -102,7 +102,7 @@ function WideSide({
         {url ? (
           <img alt={item.name} className="size-full object-contain" src={url} />
         ) : missing ? (
-          <span className="text-muted-foreground text-xs">Missing</span>
+          <Missing />
         ) : null}
       </button>
     </div>
@@ -120,7 +120,7 @@ function LivePage({ item, onOpen }: { item: ViewerItem; onOpen: () => void }) {
       {url ? (
         <HTML_VIEWER.View active={false} item={item} onEdge={stay} url={url} />
       ) : missing ? (
-        <span className="text-muted-foreground text-xs">Missing</span>
+        <Missing />
       ) : null}
       <div className={cn(FLOATING_BAR, "absolute top-2 right-2")}>
         <Button

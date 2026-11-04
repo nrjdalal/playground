@@ -30,6 +30,3 @@ export function useAttachment(
   const { data } = useQuery(attachmentQuery(id, enabled))
   return { missing: data === MISSING, url: data && data !== MISSING ? data : null }
 }
-
-export const useAttachmentUrl = (id: string, enabled = true): string | null =>
-  useAttachment(id, enabled).url
