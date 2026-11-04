@@ -109,9 +109,9 @@ function PageDownload({ apiUrl, page }: { apiUrl: string; page: Preview }) {
   )
 }
 
-// Pure: what the delete confirm says: the newest version's file and caption go, and a row's older versions stay, so the row still showing reads as the next version, not a failed delete.
-export const deleteDescription = (name: string, older: number): string => {
-  const gone = `${name} and its caption leave the previews folder for good.`
+// Pure: what the delete confirm says: the newest version's file and caption go, its PDF too when one stands beside it, and a row's older versions stay, so the row still showing reads as the next version, not a failed delete.
+export const deleteDescription = (name: string, older: number, pdf = false): string => {
+  const gone = `${name} and its caption${pdf ? " and PDF" : ""} leave the previews folder for good.`
   if (!older) return gone
   return older === 1
     ? `${gone} Its older version stays and takes its row.`
@@ -278,6 +278,7 @@ export function Pages({ all, session }: { all: boolean; session: string }) {
         description={deleteDescription(
           shown.current?.preview.name ?? "Its file",
           shown.current?.older ?? 0,
+          Boolean(shown.current?.preview.pdf),
         )}
         action="Delete"
         variant="destructive"

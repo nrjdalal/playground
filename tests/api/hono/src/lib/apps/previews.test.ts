@@ -512,6 +512,18 @@ describe("deletePage", () => {
     expect(problems).toEqual(["pages.jsonl line 3: not a page's record"])
   })
 
+  test("takes the PDF beside the page with it, so a page kept again under the name offers none (#783)", async () => {
+    const dir = kept()
+    put(dir, "lookup.pdf", PDF)
+    put(dir, "mock.pdf", PDF)
+    expect(await deletePage("lookup.html", dir, now)).toBe(true)
+    expect(existsSync(join(dir, "lookup.pdf"))).toBe(false)
+    expect(existsSync(join(dir, "mock.pdf"))).toBe(true)
+    put(dir, "lookup.html", HTML)
+    const pdfs = (await readPreviews(dir)).previews.map((p) => [p.name, p.pdf ?? null])
+    expect(Object.fromEntries(pdfs)).toMatchObject({ "lookup.html": null, "mock.html": "mock.pdf" })
+  })
+
   test("a page kept again under a deleted name lists again, since a later line wins", async () => {
     const dir = kept()
     await deletePage("lookup.html", dir, now)

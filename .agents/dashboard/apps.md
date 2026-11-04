@@ -23,7 +23,7 @@
   each with the caption a `.txt` of the same name holds, and `?topic=` keeps to the topics it names.
   A page `playground page` kept (`packages/scripts/src/playground/page.ts`) is one more HTML file there, its title the caption, with one line in `pages.jsonl` beside it (`{"at","by","file","for","title"}`, appended, so no lock), which the list returns as the preview's `page`; a line that is neither a page's record nor a tombstone is named in `problems`.
   The Pages tab deletes a kept page with `DELETE /api/v1/apps/previews/:name` (`deletePage()`): only an HTML file `pages.jsonl` keeps a record for, found as the file route finds it, a tombstone line (`{"at","deleted":true,"file"}`) appended first, so a `playground page` append running beside it stays and a failed delete leaves no record naming a freed name,
-  then its file and caption unlinked one by one;
+  then its file, caption and the PDF beside it unlinked one by one, so a page kept later under the freed name offers no PDF of this one;
   the reader drops a tombstoned file's record, a later record for the name keeps it again, and any other name is a 404 that touches nothing.
   The API's `?session=<name>` keeps to the pages that session made or that were made for it, every page for the primary dispatcher (`PLAYGROUND_DISPATCHER`), newest kept first: the agent view's Pages tab (dashboard.md).
   It serves only a PNG, GIF, WebP or HTML file, or a PDF beside a page (`<page>.pdf` beside `<page>.html`, `pdfPageOf`), by a name with no `/` or `..`, sitting directly in a folder this user owns (a symlinked or another user's folder holds none) as a regular file with one link, read through an O_NOFOLLOW handle and only when its bytes are what its name says, as attachments are;
