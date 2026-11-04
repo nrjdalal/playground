@@ -27,7 +27,7 @@ import type { UsageLimit } from "@/lib/dashboard/unstick"
 import { ApiError } from "@/lib/error"
 import { claudeDir, dataDir, transcriptPath } from "@/lib/sessions/paths"
 
-// The dashboard's herdr provider (C4), the one file that speaks herdr v0.9.5's socket API (herdr.test.ts holds that boundary): it lists, reads and messages the Claude sessions in herdr's servers beside cmux's, and since a server answers one request per connection in about a millisecond (measured at 30 panes: session.snapshot p50 1.2 ms, pane.process_info p50 0.2 ms, the whole server p50 4 ms), every board reads every server afresh, with no cache and no pacing, herdr's events only telling the hub when to read again, so a server that went away is read again on the next board.
+// The dashboard's herdr provider (C4), the one file that speaks herdr v0.9.5's socket API (herdr.test.ts holds that boundary): it lists, reads and messages the Claude sessions in herdr's servers, and since a server answers one request per connection in about a millisecond (measured at 30 panes: session.snapshot p50 1.2 ms, pane.process_info p50 0.2 ms, the whole server p50 4 ms), every board reads every server afresh, with no cache and no pacing, herdr's events only telling the hub when to read again, so a server that went away is read again on the next board.
 
 type Json = Record<string, unknown>
 

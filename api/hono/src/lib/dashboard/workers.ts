@@ -510,10 +510,10 @@ export const rosterFacts = (roster: Roster | null): RosterFacts => ({
   ),
 })
 
-// What proves a cmux record live, read once per refresh: Claude's registry, when each registered pid's process started (null when ps could not be run), and the transcripts folder of the Claude config that registry belongs to.
+// What proves a session record live (herdr's, as herdrRecords() shapes it), read once per refresh: Claude's registry, when each registered pid's process started (null when ps could not be run), and the transcripts folder of the Claude config that registry belongs to.
 export type LiveProof = { projects: string; registry: Registry; starts: Map<number, string> | null }
 
-// Pure: whether a cmux record is a Claude session running now. cmux keeps a record after its session ends and only checks that some process holds the pid it stored, which macOS hands to the next process that starts (a record whose session ended yesterday read live as another program's pid, a needsInput row with a red light). Claude writes a registry file at its pid while it runs, naming its session and when its process started; a clean exit removes the file, a crash leaves it. So the record is live only when the file at its pid names its session and that pid's process started when the file says, which a reused pid's never did. A file mid-rewrite, a registry or ps that cannot be read (proof null with neither), or a session under another Claude config, whose registry this one cannot see, leaves cmux's word standing.
+// Pure: whether a session record is a Claude session running now. A record outlives its session's end at the pid it stored, which macOS hands to the next process that starts (a record whose session ended yesterday read live as another program's pid, a needsInput row with a red light). Claude writes a registry file at its pid while it runs, naming its session and when its process started; a clean exit removes the file, a crash leaves it. So the record is live only when the file at its pid names its session and that pid's process started when the file says, which a reused pid's never did. A file mid-rewrite, a registry or ps that cannot be read (proof null with neither), or a session under another Claude config, whose registry this one cannot see, leaves the record's word standing.
 export function isLiveRecord(record: Json, proof: LiveProof | null): boolean {
   const sessionId = str(record.session_id)
   if (!sessionId || record.stored_pid_exists !== true || record.agent !== "claude") return false
@@ -531,10 +531,10 @@ export function isLiveRecord(record: Json, proof: LiveProof | null): boolean {
 
 declare const LIVE: unique symbol
 
-// cmux's session list with every record that is not a live Claude session left out. Only liveRecords() makes one, so a read that takes it (composeWorkers, tasksFor, sessionsRead) cannot be handed cmux's raw list.
+// The session records with every one that is not a live Claude session left out. Only liveRecords() makes one, so a read that takes it (composeWorkers, tasksFor, sessionsRead) cannot be handed a raw list.
 export type LiveRecords = { readonly [LIVE]: true; sessions: Json[] }
 
-// Pure: cmux's session list as LiveRecords. A null proof takes cmux's word for every record, as with no registry to read.
+// Pure: a session list as LiveRecords. A null proof takes each record's word, as with no registry to read.
 export const liveRecords = (sessions: unknown, proof: LiveProof | null): LiveRecords =>
   ({
     sessions: list(isRecord(sessions) ? sessions.sessions : undefined).filter((record) =>
@@ -562,7 +562,7 @@ export const surfacesOf = (tree: unknown): Map<string, { ref: string; title: str
   return out
 }
 
-// Pure: cmux's session records, workspace list and pending Feed items in, one row per live Claude session out, the ones that need the owner first.
+// Pure: the session records and workspace list in, with cmux's Feed and tree, which listLive passes as null, one row per live Claude session out, the ones that need the owner first.
 export function composeWorkers(
   sessions: LiveRecords,
   workspaces: unknown,

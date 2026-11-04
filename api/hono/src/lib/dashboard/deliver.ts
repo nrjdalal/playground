@@ -532,7 +532,7 @@ async function target(to: string, read: () => Promise<Live>): Promise<Refusal | 
   try {
     live = await read()
   } catch (error) {
-    return refused("CMUX_FAILED", `Could not read cmux: ${messageOf(error)}`)
+    return refused("CMUX_FAILED", `Could not read the sessions: ${messageOf(error)}`)
   }
   const { count, worker } = reached(live.workers, to)
   if (!count) return refused("NOT_FOUND", `No live session is named ${to}.`)

@@ -47,7 +47,7 @@ const REFRESH_GAP_MS = 1000
 const SAFETY_REFRESH_MS = 10_000
 const REFRESH_TIMEOUT_MS = 8_000
 
-// Tool calls stream through herdr's events, but only a picker or a message among them changes the board (a message to a manager moves its sender up); prompts, stops and notifications all do.
+// A tool call's hook, in cmux's event shape, moves the board only for a picker or a message (a message to a manager moves its sender up); herdr's events name no hook, so each moves it, and the filter goes with cmux's other code.
 const TOOL_HOOKS = new Set(["PostToolUse", "PostToolUseFailure", "PreToolUse"])
 const BOARD_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode", "SendMessage"])
 

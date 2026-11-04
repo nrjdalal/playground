@@ -268,7 +268,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
 - Writes: read `.agents/dashboard/writes.md` before you change a dashboard write or a `bun run verify` check, and before you add, move or remove a dashboard page, a sidebar group or an owner-rung API route.
   - ALWAYS: Guard every dashboard write with `requireTrustedOrigin` and `requireLoopback` (`api/hono/src/middlewares/dashboard.ts`) before the session is read, then the owner rung; first run's writes, with no session yet, take `requireThisMachine` in place of the rung.
     Under `PLAYGROUND_HOSTED=1` Yard's writes take the `member` rung or the one their route names, no `requireLoopback`, and a browser's write `requireTrustedOrigin`.
-  - ALWAYS: Test a dashboard write on a fixture stack, and reach a real cmux session only from a live-reads stack opted in to cmux's sessions, against a throwaway probe.
+  - ALWAYS: Test a dashboard write on a fixture stack, and reach a real session only from a live-reads stack, against a throwaway probe.
   - ALWAYS: Verify dashboard work with `bun run verify` (`--help` lists its checks) rather than a script of your own.
   - ALWAYS: Keep the dashboard map current.
     `packages/scripts/src/verify/dashboard-map.json` changes in the same PR as a dashboard page, a sidebar group or an owner-rung API route.
