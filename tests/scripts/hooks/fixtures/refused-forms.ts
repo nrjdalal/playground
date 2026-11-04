@@ -13,9 +13,9 @@ const SOURCE_FILE = /^(\d+)\.ts$/
 
 type SourceFile = { allowed?: string[]; groups: Group[] }
 
-// Each source file in the folder, by its number, and a refusal for any other file but _shared.ts, so a misnamed file fails rather than drops its rows.
+// Each source file in the folder, by its number, and a refusal for any other file but _shared.ts and a dotfile (a .DS_Store), so a misnamed file fails rather than drops its rows.
 const files = readdirSync(FOLDER)
-  .filter((name) => name !== "_shared.ts")
+  .filter((name) => name !== "_shared.ts" && !name.startsWith("."))
   .map((name) => {
     const n = name.match(SOURCE_FILE)?.[1]
     if (!n)
