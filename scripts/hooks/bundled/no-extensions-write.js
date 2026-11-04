@@ -351,17 +351,16 @@ function stdinShell(cmd) {
   return kinds.includes("root") ? "root" : kinds.find(Boolean);
 }
 function stdinShellOf(cmd, { args, first, name, xargs }) {
+  const fed = !!cmd.stdin || !!xargs;
   if (first && !marked(first.value)) {
-    if (name === "." || name === "source")
-      return args[0]?.value === "/dev/stdin" ? "shell" : undefined;
+    if (name === "." || name === "source" || name === "eval")
+      return fed || name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "") ? "shell" : undefined;
     if (!SHELLS.has(name))
       return;
+    if (fed)
+      return "shell";
     const { inline, operand } = shellOperand(args, name);
-    if (xargs && (!operand || xargs.replace !== undefined && operand.value.includes(xargs.replace)))
-      return "shell";
-    if (inline && operand && cmd.stdin && marked(operand.value))
-      return "shell";
-    return inline || operand ? undefined : "shell";
+    return inline || operand && !STDIN_PATHS.has(operand.value) ? undefined : "shell";
   }
   let at = 0;
   for (let w = cmd.words[at];w && !w.quoted; w = cmd.words[at]) {
@@ -376,7 +375,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
   const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
   if (k === -1)
-    return;
+    return fed && first ? "shell" : undefined;
   const wrapper = program(before[k].value);
   const shells = ROOT_SHELLS.get(wrapper);
   const { flags, values } = WRAPPERS.get(wrapper);
@@ -394,8 +393,29 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]/.test(value) && clustered(value));
   return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
 }
+function codeFed(commands) {
+  const fed = new Map;
+  for (const [k, cmd] of commands.entries()) {
+    if (!cmd.stdin)
+      continue;
+    if (stdinShell(cmd))
+      fed.set(cmd.stdin, cmd);
+    let depth = 0;
+    for (let j = k;j < commands.length; j++) {
+      const body = commands[j];
+      for (const m of markers(body.words))
+        depth += OPENS.has(m) ? 1 : CLOSES.has(m) ? -1 : 0;
+      if (j > k && stdinShell({ ...body, stdin: cmd.stdin }))
+        fed.set(cmd.stdin, cmd);
+      if (depth <= 0)
+        break;
+    }
+  }
+  return fed;
+}
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
+var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
 var GIT_TAKES = new Set([
@@ -1090,9 +1110,10 @@ async function runAll(lexed, env, visit, builtins) {
     envs.set(scope, child);
     return child;
   };
-  for (const cmd of lexed.commands)
-    if (cmd.stdin && stdinShell(cmd))
-      cmd.stdin.feedsShell = true;
+  for (const [producer, consumer] of codeFed(lexed.commands)) {
+    producer.feedsShell = true;
+    consumer.runsStdin = true;
+  }
   for (const cmd of lexed.commands) {
     const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins);
     if (verdict)
@@ -1113,6 +1134,18 @@ async function examine(cmd, env, visit, builtins) {
     if (verdict)
       return verdict;
   }
+  if (!cmd.runsStdin || stdinScript(primary))
+    return;
+  const script = await stdinOf(cmd, env);
+  return nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins));
+}
+function stdinScript({ args, name }) {
+  if (name === "." || name === "source")
+    return STDIN_PATHS.has(args[0]?.value ?? "");
+  if (!SHELLS.has(name))
+    return false;
+  const { inline, operand } = shellOperand(args, name);
+  return !operand || !inline && STDIN_PATHS.has(operand.value);
 }
 var apart = (env) => ({
   ...env,
@@ -1158,7 +1191,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
     verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
-  else if ((name === "source" || name === ".") && (args[0]?.procs || args[0]?.value === "/dev/stdin")) {
+  else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
     const script = await scriptOf(args[0], cmd, here);
     verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(lexScript(known(script), env), here, visit, builtins));
   } else if (name === "eval") {
@@ -1363,10 +1396,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    const verdict = await run(lexScript(script, env), subshell(env), visit, builtins);
-    if (verdict || !cmd.stdin || !marked(operand.value))
-      return verdict;
-    return run(lexScript(known(await stdinOf(cmd, env)), env), subshell(env), visit, builtins);
+    return run(lexScript(script, env), subshell(env), visit, builtins);
   }
   const script = await scriptOf(operand, cmd, env);
   return run(lexScript(known(script), env), subshell(env), visit, builtins);
@@ -1374,7 +1404,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const script = !operand || operand.value === "/dev/stdin" ? await stdinOf(cmd, env) : operand.procs ? await outputs(operand.procs, env) : unknown("a script file");
+  const script = !operand || STDIN_PATHS.has(operand.value) ? await stdinOf(cmd, env) : operand.procs ? await outputs(operand.procs, env) : unknown("a script file");
   if (deadline !== undefined && script.unknown === LARGE)
     throw new RangeError(LARGE);
   return script;
@@ -2111,6 +2141,8 @@ function narrow(cmd, env) {
   return false;
 }
 function rooted(commands) {
+  if (codeFed(commands).size > 0)
+    return true;
   return commands.some((cmd) => !!stdinShell(cmd) || !!cmd.inner && rooted(cmd.inner()) || [...cmd.words, ...cmd.redirects.flatMap((r) => r.target ? [r.target] : [])].some((word) => !!word.procs && rooted(word.procs)));
 }
 function quietCommit(cmd, parsed, env) {
