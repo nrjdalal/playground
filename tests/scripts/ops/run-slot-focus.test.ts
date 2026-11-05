@@ -118,6 +118,23 @@ describe("run-slot.sh preempt", () => {
     await stop(own.p)
   })
 
+  test("leaves alone a recorded pid that is not the holder's own child leading its own group", async () => {
+    const m = machine()
+    m.hold("run-slot", 1, "small")
+    const outside = Bun.spawn(["sleep", "60"])
+    writeFileSync(join(m.ops, "run-slot.child"), `${outside.pid}\n`)
+    await set(m, "worker-f", "focus", "--for", "30m", "--reason", "an urgent ticket")
+    const r = await preempt(m)
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(
+      "run-slot: worker-held's run has no child of its holder leading its own group; left alone",
+    )
+    expect(existsSync(join(m.ops, "run-slot.preempted"))).toBe(false)
+    expect(outside.exitCode).toBeNull()
+    outside.kill()
+    await outside.exited
+  })
+
   test("with no focus standing, stops nothing and says so", async () => {
     const m = machine()
     hang(m)

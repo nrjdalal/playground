@@ -34,7 +34,7 @@ describe("focus holds every new session", () => {
     const until = new Date(Date.now() + 3_600_000)
     for (const role of ["reviewer", "tester"]) {
       const own = await spawn(
-        ["column", role, `owner-${role}`, "owner-desk", "w1:p2", "r.md"],
+        ["column", role, `${role}-owner`, "owner-desk", "w1:p2", "r.md"],
         [],
         {},
         script,
@@ -54,6 +54,23 @@ describe("focus holds every new session", () => {
     expect(other.code).not.toBe(0)
     expect(placing(other)).toEqual([])
     expect(other.err).toContain(`focus stands for owner-desk until ${until.toISOString()}`)
+  })
+
+  test("on, a --firefighting start goes on while a firefighting trigger file stands, and is refused while none does", async () => {
+    const until = new Date(Date.now() + 3_600_000)
+    for (const trigger of ["firefighting-stop.json", "firefighting-headstart.json"]) {
+      const r = await spawn([...lead, "--firefighting"], [], {}, script, undefined, (home) => {
+        focus(until)(home)
+        writeFileSync(join(home, ".playground", trigger), "{}")
+      })
+      expect(r.code).toBe(0)
+    }
+    const none = await spawn([...lead, "--firefighting"], [], {}, script, undefined, focus(until))
+    expect(none.code).not.toBe(0)
+    expect(placing(none)).toEqual([])
+    expect(none.err).toContain(
+      "--firefighting starts only while a firefighting trigger file stands in",
+    )
   })
 
   test("lapsed, past its end, the start goes on", async () => {
