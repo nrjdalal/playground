@@ -415,12 +415,13 @@ if [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" 
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# a `sh -c`, `bash -c` or `zsh -c` chain's steps, or those of a `bash <script file>`, whose arguments only a $ word reads (5 Nov: a script that only commits waited
-# in the general queue), one a line, each step's words joined by the unit separator, as python's shlex splits the script at each run of &, |, ;, <, >
-# and parentheses, zsh's |& and &| among them (a `\` line break is joined first, as sh does, a newline then counts as ;, and a line whose first word
-# starts with # is a comment, dropped); a cd beside any other separator than && or ; keeps it as a word, since that cd does not carry to the next
-# step, and env words before the shell (a BASH_ENV or PATH changes what it runs) are a step of their own; nothing for any other command, a file after
-# an option word (`--rcfile a.sh b.sh` runs b.sh), or a script shlex cannot split or a file over 64 KB
+# a `sh -c`, `bash -c` or `zsh -c` chain's steps, or those of a `bash <script file>`, whose arguments only a $ word reads (5 Nov: a script that only
+# commits waited in the general queue), one a line, each step's words joined by the unit separator, as python's shlex splits the script at each run of
+# &, |, ;, <, > and parentheses, zsh's |& and &| among them (a line whose first word starts with # is a comment, dropped whatever it ends with, a line
+# ending in an odd run of `\` is joined to the next, as sh does, and a newline then counts as ;); a cd beside any other separator than && or ; keeps
+# it as a word, since that cd does not carry to the next step, and env words before the shell (a BASH_ENV or PATH changes what it runs) are a step of
+# their own; nothing for any other command, a file after an option word (`--rcfile a.sh b.sh` runs b.sh), or a script shlex cannot split or a file
+# over 64 KB
 chain_steps() {
   local a first="" script="" next="" file="" opt="" lead=""
   for a in "$@"; do
@@ -442,7 +443,17 @@ try:
             text = f.read(65537)
         if len(text) > 65536:
             sys.exit(1)
-    text = "\n".join(line for line in text.replace("\\\n", "").split("\n") if not line.lstrip().startswith("#"))
+    lines, buf = [], None
+    for line in text.split("\n"):
+        if buf is None and line.lstrip().startswith("#"):
+            continue
+        buf = line if buf is None else buf + line
+        if (len(buf) - len(buf.rstrip("\\"))) % 2:
+            buf = buf[:-1]
+            continue
+        lines.append(buf)
+        buf = None
+    text = "\n".join(lines + ([buf] if buf is not None else []))
     lex = shlex.shlex(text.replace("\n", "\n;"), posix=True, punctuation_chars=True)
     lex.whitespace_split = True
     lex.commenters = ""
@@ -481,8 +492,8 @@ git_verb() {
 plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['* | *'{'* | *'#'*) return 1 ;; esac; done; }
 # a chain's git add words, failing closed (builder, 5 Nov): paths, and only the flags whose staging chain_add reads, never -f, which stages ignored files
 add_flags() { local w; for w in "$@"; do case "$w" in -A | --all | -u | --update | -- | --pathspec-from-file=*) ;; -*) return 1 ;; esac; done; }
-# a script's `set` words that only switch shell options, as a chain script's `set -euo pipefail` does
-set_flags() { local w; for w in "$@"; do case "$w" in pipefail) ;; [-+] | [-+]*[!a-z]*) return 1 ;; [-+]*) ;; *) return 1 ;; esac; done; }
+# a script's `set` words that only switch -e, -o pipefail, -u or -x, as a chain script's `set -euo pipefail` does (set -k reads a later VAR=x as env)
+set_flags() { local w; for w in "$@"; do case "$w" in pipefail) ;; [-+] | [-+]*[!eoux]*) return 1 ;; [-+]*) ;; *) return 1 ;; esac; done; }
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
 # Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form

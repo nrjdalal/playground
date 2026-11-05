@@ -492,6 +492,10 @@ describe("a sh -c chain of git steps", () => {
     "(cd ROOT); git commit -m x",
     // review round 1 of the cached-commit change: sh joins a \ line break before it reads a # line as a comment
     "cd ROOT && git commit -m x\\\n#;bun run build",
+    // review round 2 of the cached-commit change: a line ending in an even run of \ is not joined, a # line ends at its newline, and set -k reads a later VAR=x as env
+    "cd ROOT && git commit -m a\\\\\nbun run build",
+    "# note \\\nbun run build\ncd ROOT && git commit -m x",
+    "set -k\ncd ROOT && git commit -m x",
   ])
     test(`a chain that commits with a step off the list counts as a build: ${steps}`, async () => {
       const m = repo({ idle: 30 }, ["docs/notes.md"])
@@ -624,6 +628,17 @@ describe("a bash script file", () => {
       [...COMMITS.slice(0, 5), "git commit -m x\\", "#;bun run build", ...COMMITS.slice(6)],
       [],
     ],
+    [
+      "an even run of \\ before a line break",
+      [...COMMITS.slice(0, 5), "git commit -m a\\\\", "bun run build", ...COMMITS.slice(6)],
+      [],
+    ],
+    [
+      "a # line ending in \\",
+      [...COMMITS.slice(0, 5), "# note \\", "bun run build", ...COMMITS.slice(5)],
+      [],
+    ],
+    ["a set -k", ["set -k", ...COMMITS], []],
   ] as const)
     test(`with ${what} waits and never takes run-slot-commit`, async () => {
       const m = repo({ idle: 30 }, [], ["docs/notes.md"])
