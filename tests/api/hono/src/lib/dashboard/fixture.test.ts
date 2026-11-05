@@ -9,6 +9,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
@@ -25,6 +26,7 @@ import {
   fixtureDir,
   fixtureHerdrInput,
   loadFixture,
+  markLaunched,
   readFixtureHerdr,
   writeFixture,
 } from "../../../../../../api/hono/src/lib/dashboard/fixture"
@@ -409,6 +411,64 @@ describe("writeFixture", () => {
         else process.env[key] = value
       }
     }
+  })
+
+  // A worker's run on #665 read an old copy: ensureFixture returned once a stamp existed, so an edit to the fixture's source never reached the next run.
+  // beside: a CLI in the checkout of a stack whose launcher runs ("live") or has gone ("gone").
+  const edited = (launched: boolean, beside?: "gone" | "live") => {
+    const root = scratch("fixture-newer")
+    const dir = join(root, "fixture")
+    const file = join(root, "source.json")
+    const source = { file, kind: "fixture", rule: "fixture" } as const
+    const saved = {
+      dir: process.env.PLAYGROUND_FIXTURE_DIR,
+      launched: process.env.PLAYGROUND_FIXTURE_LAUNCHED,
+    }
+    process.env.PLAYGROUND_FIXTURE_DIR = dir
+    delete process.env.PLAYGROUND_FIXTURE_LAUNCHED
+    try {
+      writeFileSync(file, JSON.stringify({ ...shipped(), origin: "first" }))
+      ensureFixture(source)
+      const stamp = join(dir, "stamp.json")
+      // The stamp goes back from its own mtime, the disk's clock, since the clock-ahead pass moves Date.now() and not the disk's.
+      const back = new Date(statSync(stamp).mtimeMs - 60_000)
+      utimesSync(stamp, back, back)
+      if (beside === "live") markLaunched(dir)
+      if (beside === "gone") {
+        writeFileSync(
+          join(dir, "launcher.json"),
+          JSON.stringify({ pid: process.pid, started: "gone" }),
+        )
+      }
+      writeFileSync(file, JSON.stringify({ ...shipped(), origin: "edited" }))
+      if (launched) process.env.PLAYGROUND_FIXTURE_LAUNCHED = "1"
+      expect(ensureFixture(source)).toBe(dir)
+      return JSON.parse(readFileSync(join(dir, "machine.json"), "utf8")).origin
+    } finally {
+      for (const [key, value] of [
+        ["PLAYGROUND_FIXTURE_DIR", saved.dir],
+        ["PLAYGROUND_FIXTURE_LAUNCHED", saved.launched],
+      ] as const) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  }
+
+  test("a source edited after its copy was stamped is written into the copy on the next call", () => {
+    expect(edited(false)).toBe("edited")
+  })
+
+  test("a launched stack keeps its copy after the same edit, since the launcher owns it", () => {
+    expect(edited(true)).toBe("first")
+  })
+
+  test("a CLI beside a running stack keeps the stack's copy after the same edit", () => {
+    expect(edited(false, "live")).toBe("first")
+  })
+
+  test("a copy whose launcher has gone is written again after the same edit", () => {
+    expect(edited(false, "gone")).toBe("edited")
   })
 
   test("replaces its own folder whole, so a stack starts from the fixture again", () => {
