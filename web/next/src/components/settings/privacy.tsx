@@ -16,7 +16,7 @@ import {
   type PrivacyForm,
   privacyFormSchema,
   privacyQueryKey,
-  privacyValues,
+  privacyWrites,
   readPrivacySetting,
   savePrivacySetting,
 } from "@/lib/privacy"
@@ -25,7 +25,7 @@ const text = (value: unknown) => (typeof value === "string" ? value : "")
 const list = (value: unknown) =>
   Array.isArray(value) ? value.filter((name) => typeof name === "string").join(", ") : ""
 
-// Settings > Privacy: the names you go by and the private archive repository, which the trace count and the leak guard read, each saved at your login's scope once it changes. While the first reads are pending it holds its space empty; before the settings are set up it shows Set up settings, as Accounts does.
+// Settings > Privacy: the names you go by and the private archive repository, each saved at your login's scope when it holds a value or you cleared it, so a Save also rebuilds a broken policy.json. While the first reads are pending it holds its space empty; before the settings are set up it shows Set up settings, as Accounts does.
 export function Privacy() {
   const login = useQuery({ queryKey: ACCOUNTS_QUERY_KEY, queryFn: readAccounts })
   const archive = useQuery({
@@ -66,20 +66,17 @@ export function Privacy() {
 
 function PrivacyFields({ saved, scope }: { saved: PrivacyForm; scope: string }) {
   const queryClient = useQueryClient()
-  const before = privacyValues(saved)
   const form = useForm({
     defaultValues: saved,
     onSubmit: async ({ value }) => {
-      const changed = privacyValues(value).filter(
-        (field, i) => JSON.stringify(field.value) !== JSON.stringify(before[i]!.value),
-      )
+      const writes = privacyWrites(saved, value)
       try {
-        for (const field of changed) await savePrivacySetting(field.key, field.value, scope)
-        toast.add({ title: changed.length ? "Privacy saved" : "Nothing changed", type: "success" })
+        for (const field of writes) await savePrivacySetting(field.key, field.value, scope)
+        toast.add({ title: writes.length ? "Privacy saved" : "Nothing to save", type: "success" })
       } catch (error) {
         toast.add({ title: (error as Error).message, type: "error" })
       } finally {
-        for (const field of changed)
+        for (const field of writes)
           await queryClient.invalidateQueries({ queryKey: privacyQueryKey(field.key) })
       }
     },

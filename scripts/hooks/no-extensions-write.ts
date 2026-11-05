@@ -48,7 +48,14 @@ const shown = (word: Word): string =>
 const ROUTE =
   "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand."
 
-const refuse = (what: string) => `no-extensions-write hook refuses ${what}: ${ROUTE}`
+// The guard keys Privacy on the Dashboard's Settings page saves at your login's scope, so a write there names that page as its route.
+const PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"])
+const PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves"
+const PRIVACY_ROUTE =
+  "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand."
+
+const refuse = (what: string) =>
+  `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`
 
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
@@ -907,19 +914,23 @@ function cliWrite(words: Word[]): string | undefined {
   const unread = rest.includes(undefined)
   const positional: (string | undefined)[] = []
   let dry = false
+  let scoped = false
   for (let k = 0; k < rest.length; k++) {
     const word = rest[k]
     if (word !== undefined && switches.includes(word)) dry ||= word === "--dry-run"
-    else if (word?.startsWith("--")) k++
-    else positional.push(word)
+    else if (word?.startsWith("--")) {
+      scoped ||= word.startsWith("--scope")
+      k++
+    } else positional.push(word)
   }
   if (command === "settings") {
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
-    return GUARD_KEYS.has(key)
-      ? `playground settings ${verb} of ${key}, a key a guard reads`
-      : undefined
+    if (!GUARD_KEYS.has(key)) return
+    return PRIVACY_KEYS.has(key) && !scoped
+      ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}`
+      : `playground settings ${verb} of ${key}, a key a guard reads`
   }
   if (verb === "accept")
     return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set"

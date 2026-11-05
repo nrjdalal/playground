@@ -84,7 +84,8 @@ playground settings import-jobs <jobs.json> [--launch-agents <dir>] [--scope <sc
 | `usage.switchAccount`       | unset                                                     | the ops tick, which tells Ops once this account's week reaches 98%, and the dispatchers and both leads at 100%, so the factory moves off it while a second dispatcher is seated                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 A repository is written `owner/name`.
-While `factory.publicRepo` and `factory.archiveRepo` are unset, the leak guard and the trace count use the repositories they used before these keys.
+While `factory.publicRepo` and `factory.archiveRepo` are unset, the leak guard uses the repositories it used before these keys.
+The trace count counts nothing until `factory.archiveRepo` and `owner.names` are both set in Settings, under Privacy.
 
 ## Extensions
 

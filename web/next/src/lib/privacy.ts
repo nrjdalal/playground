@@ -43,6 +43,16 @@ export const privacyValues = (form: PrivacyForm) => [
   { key: PRIVACY_KEYS.names, value: namesOf(form.names) },
 ]
 
+// Pure: the fields a Save writes: each that holds a value, so a Save rebuilds a broken policy.json, and each you cleared.
+export const privacyWrites = (saved: PrivacyForm, form: PrivacyForm) => {
+  const before = new Map(privacyValues(saved).map((field) => [field.key, field.value]))
+  return privacyValues(form).filter(
+    (field) =>
+      field.value.length > 0 ||
+      JSON.stringify(field.value) !== JSON.stringify(before.get(field.key)),
+  )
+}
+
 // Pure: what PUT /api/v1/settings/:key takes to save one field at your login's scope.
 export const privacyWrite = (key: PrivacyKey, value: string | string[], scope: string) => ({
   json: { by: "Settings", reason: `Set ${key} in Settings > Privacy`, scope, value },
