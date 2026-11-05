@@ -649,11 +649,12 @@ export type InboxItem =
       preview: InboxUpdate
     })
 
-// The list the dashboard shows, in the order it shows it, and the count on its Inbox tab; snoozed: the open items and updates put away until a time still ahead, and archived: those he archived, each kept out of items, which every reader takes as awake, for the Inbox's Later and Archive shelves alone.
+// The list the dashboard shows, in the order it shows it, and the count on its Inbox tab; snoozed: the open items and updates put away until a time still ahead, and archived: those he archived, each kept out of items, which every reader takes as awake, for the Inbox's Later and Archive shelves alone; quiet: the ids of the items in the list that came in while focus stands, which the count, the Inbox square and the tab's dot leave out until it ends.
 export type InboxList = {
   items: InboxItem[]
   archived: InboxItem[]
   count: number
+  quiet: string[]
   snoozed: InboxItem[]
 }
 
@@ -1079,6 +1080,15 @@ const UNREAD = (item: InboxItem, now: Date): boolean =>
 export const inboxCount = (items: InboxItem[], now = new Date()): number =>
   items.filter((item) => NEEDS_YOU(item, now) || UNREAD(item, now)).length
 
+// Pure: the ids of the items that came in since focus began, while it stands, which the Inbox holds quiet; an alert update stays loud, since the 5% battery alert or a failed ship cannot wait for focus to end.
+export const quietIds = (items: InboxItem[], focus: { since: string } | null): string[] =>
+  focus === null
+    ? []
+    : items
+        .filter((item) => Date.parse(item.createdAt) >= Date.parse(focus.since))
+        .filter((item) => item.kind !== "update" || item.preview.outcome !== "alert")
+        .map((item) => item.id)
+
 // Pure: the list in priority order: what needs him, then unread updates, then everything else, each newest first by when it was posted (#i545); a scheduled item sleeps in with the rest until its time.
 export function inboxOrder(items: InboxItem[], now = new Date()): InboxItem[] {
   const rank = (item: InboxItem) => (NEEDS_YOU(item, now) ? 0 : UNREAD(item, now) ? 1 : 2)
@@ -1220,8 +1230,12 @@ export async function attachmentDownloadName(db: Database, id: string): Promise<
   return fileNameOf(title, extname(id).slice(1))
 }
 
-// Everything still waiting on him or on a verb, and whatever else moved in the last week.
-export async function listItems(db: Database, now = new Date()): Promise<InboxList> {
+// Everything still waiting on him or on a verb, and whatever else moved in the last week; focus, the one standing now (focus.ts), holds what came in since it began quiet.
+export async function listItems(
+  db: Database,
+  now = new Date(),
+  focus: { since: string } | null = null,
+): Promise<InboxList> {
   const since = new Date(now.getTime() - KEEP_MS)
   // a scheduled item is out of the list and the count until its time, and an archived one until he moves it back or dismisses it
   const awakeSql = sql`((${inboxItem.answer} ->> 'snoozedUntil' is null or (${inboxItem.answer} ->> 'snoozedUntil')::timestamptz <= ${now.toISOString()}::timestamptz) and (${inboxItem.answer} ->> 'archivedAt' is null or ${inboxItem.answer} ->> 'dismissedAt' is not null))`
@@ -1295,7 +1309,9 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
   const asleep = shelved.filter((row) => row.status !== "cleared").map(toItem)
   const archived = asleep.filter((item) => archivedAt(item) !== null)
   const snoozed = asleep.filter((item) => archivedAt(item) === null)
-  return { items, archived, count: inboxCount(items, now), snoozed }
+  const quiet = quietIds(items, focus)
+  const loud = items.filter((item) => !quiet.includes(item.id))
+  return { items, archived, count: inboxCount(loud, now), quiet, snoozed }
 }
 
 const NOT_FOUND: Refused = { code: "NOT_FOUND", message: "No inbox item with that id", ok: false }

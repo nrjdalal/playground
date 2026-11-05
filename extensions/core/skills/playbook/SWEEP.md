@@ -35,8 +35,8 @@ For every agent of yours that `ListAgents` lists, or the roster shows with a sta
   When the command's shape prompted (a shell wrapper, a compound one-liner), deny it and have the session rerun it as plain commands.
   When the action itself prompted and you cannot judge it (a delete, a protected path), deny it and post it as an Inbox decision (**ask**).
   An allow is your own call as its manager, never presented as the owner's, and the action never moves to another session to dodge the prompt.
-- **Idle**, and its last turn ended without a report to you: ask it for its report.
-- **Silent**: a worker with no push and no report to you for 60 minutes after a review round (one worker chased a side bug for 3.5 hours unreported).
+- **Idle**, and its last turn ended without a report to you: ask it for its report, unless it idles under an urgent ticket's stop, which holds it idle until the all-clear (its brief's **stop**).
+- **Silent**: a worker with no push and no report to you for 60 minutes after a review round, the time under a stop left out (one worker chased a side bug for 3.5 hours unreported).
   Ask it why, then record its answer in the roster or redirect it.
 - **Off scope**: a worker chasing a bug outside its chore.
   Have it file the bug as its own issue at once (an issue in the repo where the bug's work lives, by [ADR 0016](../../../../.agents/adr/0016-playground-is-generic-with-a-small-core.md); a work-org ticket goes up the chain under **tickets**) and go back to its chore, unless the bug blocks its PR.
@@ -57,7 +57,7 @@ Done when every agent of yours is working, has reported, or has had its state ac
 
 ## 4. Run the recovery scan and chase stalled PRs (the Builder)
 
-The Builder runs code-review-loop's [recovery scan](../code-review-loop/SKILL.md#the-recovery-scan) and acts on every row it leaves, and chases at once each `pr-stalled` entry in `~/.playground/ops/alerts-pending.json`.
+The Builder runs code-review-loop's [recovery scan](../code-review-loop/SKILL.md#the-recovery-scan) and acts on every row it leaves, and chases at once each `pr-stalled` entry in `~/.playground/ops/alerts-pending.json`, leaving a PR whose sessions idle under an urgent ticket's stop until the all-clear.
 ops-sweep writes them to `ops/alerts-prs.json` every 5 minutes (`stalledPrs` in `packages/scripts/src/ops-sweep/sweep.ts`) and ops-unstick folds that in, one entry per open PR of ours in the factory repo or a live roster row's PR repo, for either reason:
 
 - an idle PR: no opening, new commit, verdict or comment for 30 minutes (after one sat two hours unnoticed), unless it waits on its checks or merge-on-ready;
