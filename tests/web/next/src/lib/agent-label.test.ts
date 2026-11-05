@@ -45,6 +45,16 @@ describe("labelOf", () => {
   })
 
   // An orchestrator of a manager kind outside the named four reads its kind's word, under any name, as a builder reads Builder (#805).
+  test("two orchestrators read apart, each its kind's word with its id", () => {
+    expect(labelOf(facts("c8m3nr-orchestrator", { kind: "orchestrator" }), none)).toBe(
+      "Orchestrator C8m3nr",
+    )
+    expect(labelOf(facts("d9p4qs-orchestrator", { kind: "orchestrator" }), none)).toBe(
+      "Orchestrator D9p4qs",
+    )
+    expect(agentLabel("c8m3nr-orchestrator")).toBe("Orchestrator C8m3nr")
+  })
+
   test("an assistant-kind manager reads Assistant, a worker's name or an <id>-assistant", () => {
     expect(labelOf(facts("r4qmq4-worker", { kind: "assistant" }), none)).toBe("Assistant")
     expect(labelOf(facts("w8x2zc-assistant", { kind: "assistant" }), none)).toBe("Assistant")
