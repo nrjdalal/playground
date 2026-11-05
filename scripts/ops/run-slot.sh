@@ -389,10 +389,10 @@ plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* 
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
 # Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form
-# a reading of cd, ~ or env let through): a `cd` to an absolute folder in a repo, a git add, commit or push after it or as `git -C <that kind of
-# folder>`, and `bun run precommit:light`, each word plain. CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a
-# line; else CHAIN_BAD holds the first step outside the list. Any other form, an env prefix, ~, $HOME, a backquote, cd -, a relative folder or
-# no folder at all, is outside it, with no attempt to resolve it.
+# a reading of cd, ~ or env let through): a git add, commit or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add,
+# commit or push after it or as `git -C <that kind of folder>`, and `bun run precommit:light`, each word plain. CHAIN_SAFE then holds each git step
+# as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env
+# prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
 CHAIN_SAFE="" CHAIN_BAD=""
 chain_safe() {
   local line words cdir="" folder verb rest=()
@@ -412,8 +412,7 @@ chain_safe() {
       abs_in_repo "${words[2]:-}" || return 1
       folder=${words[2]} verb=${words[3]:-} rest=("${words[@]:4}")
     else
-      [ -n "$cdir" ] || return 1
-      folder=$cdir verb=${words[1]:-} rest=("${words[@]:2}")
+      folder=${cdir:-$PWD} verb=${words[1]:-} rest=("${words[@]:2}")
     fi
     case "$verb" in add|commit|push) ;; *) return 1 ;; esac
     CHAIN_SAFE+=$(printf '%s\x1f' git -C "$folder" "$verb" ${rest[@]+"${rest[@]}"})$'\n'
@@ -619,7 +618,7 @@ if [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
   WHY=$(chain_lane "$@")
   case "$WHY" in
     "general "*)
-      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since \`${WHY#general }\` is not a form the commit lane takes (a cd or git -C to an absolute folder in the repo, git add, commit or push there, bun run precommit:light); run the commit as one of those to take the commit lane" >&2
+      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since \`${WHY#general }\` is not a form the commit lane takes (git add, commit or push in run-slot's folder, or after a cd or as git -C to an absolute folder in the repo, and bun run precommit:light); run the commit as one of those to take the commit lane" >&2
       rlog why "general: \`${WHY#general }\` is outside the commit lane's forms" ;;
   esac
 fi

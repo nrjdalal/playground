@@ -297,9 +297,10 @@ commit-msg:
 
 // 4 Nov: a commit inside a sh -c chain counts as the bare commit would, so one that runs next build still waits as a big run
 // builder, 5 Nov: three review rounds each found one more form that a reading of cd, ~ or env let through, so a chain takes the commit lane only
-// when every step is a form on a closed list, and any other form in a chain that commits counts as a build; each chain starts outside the repo
+// when every step is a form on a closed list, and any other form in a chain that commits counts as a build; a chain starts outside the repo
+// unless it is given the repo, where a bare git step runs in run-slot's own folder
 describe("a sh -c chain of git steps", () => {
-  const start = (m: ReturnType<typeof repo>, steps: string) => {
+  const start = (m: ReturnType<typeof repo>, steps: string, inRepo = false) => {
     const outside = join(m.root, "outside")
     mkdirSync(outside, { recursive: true })
     return m.start(
@@ -307,12 +308,12 @@ describe("a sh -c chain of git steps", () => {
       {},
       undefined,
       ["sh", "-c", steps.replaceAll("ROOT", m.root)],
-      outside,
+      inRepo ? m.root : outside,
     )
   }
   // the lane a chain on the closed list takes, read from its start line once it has run
-  const lane = async (m: ReturnType<typeof repo>, steps: string) => {
-    await start(m, steps).p.exited
+  const lane = async (m: ReturnType<typeof repo>, steps: string, inRepo = false) => {
+    await start(m, steps, inRepo).p.exited
     return log(m).match(/ start worker-x \d+ (\S+) waited=/)?.[1]
   }
 
@@ -328,6 +329,14 @@ describe("a sh -c chain of git steps", () => {
     }
   })
 
+  // builder, 5 Nov: a bare git step runs in run-slot's own folder, so the chain the issue names takes the commit lane from inside the repo
+  test("a chain of bare git steps run from the repo takes run-slot-commit beside a big run", async () => {
+    const steps = "git add . && git commit -m x && git push origin"
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    expect(await lane(m, steps, true)).toBe("run-slot-commit")
+  })
+
   // the first three rows are the forms review round 3 measured slipping through
   for (const steps of [
     "cd ~ && git add . && git commit -m x",
@@ -336,7 +345,6 @@ describe("a sh -c chain of git steps", () => {
     "cd .. && git commit -m x",
     "cd - && git commit -m x",
     "cd `echo ROOT` && git commit -m x",
-    "git add . && git commit -m x",
     "git -c user.name=x -C ROOT commit -m x",
     "cd ROOT && bun run test && git commit -m x",
   ])
@@ -344,6 +352,18 @@ describe("a sh -c chain of git steps", () => {
       const m = repo({ idle: 30 }, ["docs/notes.md"])
       m.hold("run-slot", 3, "big")
       expect(await start(m, steps).waits()).toBe(true)
+      expect(log(m)).not.toContain("run-slot-commit")
+    })
+
+  // builder, 5 Nov: from the repo too, where a bare git step alone is on the list, one after a cd - or a relative cd still counts as a build
+  for (const steps of [
+    "cd - && git add . && git commit -m x",
+    "cd docs && git add . && git commit -m x",
+  ])
+    test(`a bare git step after a cd off the list, run from the repo, counts as a build: ${steps}`, async () => {
+      const m = repo({ idle: 30 }, ["docs/notes.md"])
+      m.hold("run-slot", 3, "big")
+      expect(await start(m, steps, true).waits()).toBe(true)
       expect(log(m)).not.toContain("run-slot-commit")
     })
 
