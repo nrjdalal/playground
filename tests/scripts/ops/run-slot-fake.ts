@@ -43,7 +43,7 @@ export type Setup = {
   load1?: number
   load5?: number
   mergeQueue?: unknown
-  // the epoch second every `date` that names no time of its own reads, so a log line written seconds back keeps its age through every look
+  // the epoch second every `date` that names no time of its own reads, so a log line written seconds back keeps its age through every look; an age run-slot.sh reads from a file's real mtime (the queue's AGED pin, the switch expiry, a stale holder, the gauges cache) then reads below zero and never trips, so a test of one of those leaves it unset
   now?: number
   off?: string[]
   peers?: string[]
