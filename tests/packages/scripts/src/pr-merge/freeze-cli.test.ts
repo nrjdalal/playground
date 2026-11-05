@@ -80,3 +80,22 @@ test('ship:freeze status prints the "*" line and its since, and says when it has
     expect(readFileSync(path, "utf8")).toBe(before)
   }
 })
+
+test("ship:freeze status prints focus's line with its until, and says when it has lapsed", async () => {
+  const line = "worker-a has focus: every merge waits until focus ends"
+  // focus lapses at its until, so an hour ahead holds every PR and an hour ago holds none
+  for (const [hours, lapsed] of [
+    [1, false],
+    [-1, true],
+  ] as const) {
+    const path = join(mkdtempSync(join(tmpdir(), "freeze-")), "held-prs.json")
+    const until = new Date(Date.now() + hours * 3_600_000).toISOString()
+    const before = JSON.stringify({ held: { "*": line }, until: { "*": until } })
+    writeFileSync(path, before)
+    const status = await run(path, "status")
+    expect(status.code).toBe(0)
+    expect(status.out).toContain(`${line} (until ${until})`)
+    expect(status.out.includes("lapsed: it holds no PR")).toBe(lapsed)
+    expect(readFileSync(path, "utf8")).toBe(before)
+  }
+})

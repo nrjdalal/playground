@@ -39,7 +39,7 @@ try {
     const status = await freezeStatus(heldPath(), Date.now())
     console.log(
       status
-        ? `ship:freeze: "*": ${status.line} (since ${status.since ?? "no time"})${status.lapsed ? ", lapsed: it holds no PR" : ""}`
+        ? `ship:freeze: "*": ${status.line} (${status.until ? `until ${status.until}` : `since ${status.since ?? "no time"}`})${status.lapsed ? ", lapsed: it holds no PR" : ""}`
         : 'ship:freeze: no "*" line is set',
     )
   } else if (!/^v\d+\.\d+\.\d+$/.test(version)) {
