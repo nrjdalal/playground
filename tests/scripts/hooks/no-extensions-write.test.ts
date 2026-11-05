@@ -587,6 +587,27 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["cut at a quoted brace", "cut -d'{' -f1 /dev/null"],
     ["sort keyed at a quoted bracket", "sort -t'[' -k2 /dev/null"],
     ["awk matching a regex that starts at / and holds a glob", "awk '/^a*b/' /dev/null"],
+    ["sed printing a bold list item's lines", "sed -n '/^- \\*\\*/p' ~/.playground/x.md"],
+    [
+      "sed printing a bold list item's text",
+      "sed -n 's/^- \\*\\*\\([^*]*\\)\\*\\*.*/\\1/p' ~/.playground/x.md",
+    ],
+    [
+      "sed printing a range between two regex addresses",
+      "sed -n '/## latest (proposal, round 2/,/^## Notes/p' notes.md",
+    ],
+    [
+      "awk printing a range between two regexes by a flag",
+      "awk '/^## latest \\(proposal, round 2/{f=1} /^## Notes/{f=0} f' notes.md",
+    ],
+    ["sed printing from a regex to the last line", "sed -n '/[Nn]it/,$p' notes.md"],
+    ["sed printing a regex and the six lines after it", "sed -n '/[Rr]eviewer/,+6p' notes.md"],
+    ["sed printing a function's lines", "sed -n '/^f() {/,/^}/p' notes.md"],
+    [
+      "perl printing each match of a /g regex",
+      `perl -ne 'print "$1\\n" while /#(\\d+)/g' notes.md`,
+    ],
+    ["perl printing every match with -l", "perl -lne 'print for /PG-\\d+/g' notes.md"],
     ["git -c with a literal pager", "git -c core.pager=less log"],
     ["rm of a glob in a build folder", "rm -rf build/*"],
     ["rm of a held folder's glob", "X=build; rm -rf $X/*"],

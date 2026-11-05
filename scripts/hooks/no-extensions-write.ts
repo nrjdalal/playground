@@ -787,6 +787,81 @@ function programLines({ args, first }: Parsed, rooted: boolean): string[] {
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
 }
 
+const SEDS = new Set(["gsed", "sed"])
+// sed's options that write nothing and read no script from elsewhere: -n, -E, -r, -s, -u and -z, alone or clustered, and their long names
+const SED_FLAG =
+  /^-[nErsuz]+$|^--(?:null-data|posix|quiet|regexp-extended|separate|silent|unbuffered)$/
+const SED_RE = String.raw`/(?:[^/\\\n]|\\.)*/`
+const SED_ADDRESS = String.raw`(?:\d+|\$|${SED_RE})`
+const SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[pdqQnNlP=]|s${SED_RE.slice(0, -1)}${SED_RE}[gpiImM0-9]*)[ \t]*`
+// a sed script read whole by a closed grammar: addresses, then p, d, q, Q, n, N, l, P, = or s/// with flags from g, p, i, I, m, M and digits, so it holds no w or W write, no e run and no r read of another file
+const SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`)
+
+// Whether a sed call only reads and prints: every option on SED_FLAG's list, and every script (each -e value, else the first operand) a literal word, unglobbed, that SED_SCRIPT holds
+function sedReads(args: Word[]): boolean {
+  const scripts: Word[] = []
+  const operands: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "-e" || value === "--expression") {
+      if (!args[k + 1]) return false
+      scripts.push(args[++k])
+    } else if (value.startsWith("--expression="))
+      scripts.push({ ...args[k], value: value.slice(13) })
+    else if (value === "--") {
+      operands.push(...args.slice(k + 1))
+      break
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!SED_FLAG.test(value)) return false
+    } else operands.push(args[k])
+  }
+  const read = scripts.length ? scripts : operands.slice(0, 1)
+  return (
+    read.length > 0 && read.every((w) => !w.glob && !marked(w.value) && SED_SCRIPT.test(w.value))
+  )
+}
+
+// perl's options that run no other code and write nothing: n, p, l, a and w clustered, the last of them may be e or E, whose script is the next word; -i, -M, -m, -I, -x, -d, -s and the rest are off it
+const PERL_FLAG = /^-[nplaw]*[eE]?$/
+// a regex with no variable, no array and no code block (`(?{`, `(??{`, `(*{`), its $ only an anchor
+const PERL_RE = String.raw`/(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`
+// a value print may name: a string holding only text, \n, \t and the match variables $1 to $9 and $&, or one of those variables, or $_
+const PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|\$[1-9&])*"|\$[1-9&_])`
+const PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:if|unless|while|for)[ \t]+${PERL_RE}[gimsx]*)?`
+const PERL_SUB = String.raw`s${PERL_RE.slice(0, -1)}/(?:[^/\\\n@$]|\\.|\$[1-9&])*/[gimsx]*`
+const PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`
+// a perl one-liner read whole by a closed grammar: print statements of match variables and plain strings, each optionally under if, unless, while or for a regex, and s/// with flags from g, i, m, s and x, so no regex holds a variable, an array or a code block and no replacement interpolates code
+const PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`)
+
+// a file operand perl's -n and -p open as a file alone: its 2-arg open runs a name ending or starting in | as a command, and reads <, >, + and & as modes
+const PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/
+
+// Whether a perl call only reads and prints: every option on PERL_FLAG's list, at least one -e or -E script, every script a literal word, unglobbed, that PERL_SCRIPT holds, every file operand a literal PERL_FILE, and no PERL variable set, since PERL5OPT and PERL5LIB load code
+function perlReads({ args, local }: Parsed, env: Env): boolean {
+  if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL"))) return false
+  const scripts: Word[] = []
+  let k = 0
+  for (; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "--") {
+      k++
+      break
+    }
+    if (!value.startsWith("-") || value === "-") break
+    if (!PERL_FLAG.test(value)) return false
+    if (/[eE]$/.test(value)) {
+      if (!args[k + 1]) return false
+      scripts.push(args[++k])
+    }
+  }
+  const files = args.slice(k)
+  return (
+    scripts.length > 0 &&
+    scripts.every((w) => !w.glob && !marked(w.value) && PERL_SCRIPT.test(w.value)) &&
+    files.every((w) => !w.glob && !marked(w.value) && PERL_FILE.test(w.value))
+  )
+}
+
 // Whether a call's program is its command's own first word, read outright, bare or by a system path, so no wrapper or file of another folder runs in its place
 function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   return (
@@ -796,7 +871,7 @@ function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   )
 }
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, grep, head, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, grep, head, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
   const { args, first } = parsed
@@ -817,6 +892,8 @@ function narrow(cmd: Command, env: Env): boolean {
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
+  if (SEDS.has(base)) return sedReads(args)
+  if (base === "perl") return perlReads(parsed, env)
   if (base === "cut") return true
   // a read-only gh call is narrow when its jq filter is the only word that holds a space
   if (base === "gh") {
