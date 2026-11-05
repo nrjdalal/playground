@@ -78,9 +78,16 @@ describe("the dashboard's local pages on the hosted build", () => {
   test("their layout refuses before it reads anything but the hosted session", async () => {
     const source = await Bun.file(layout).text()
     const body = source.slice(source.indexOf("export default async function Layout"))
-    expect(body.split("\n")[1]?.trim()).toBe(
-      "localPagesOnly(config.hosted, config.hosted ? await hostedUser() : null)",
-    )
+    expect(
+      body
+        .split("\n")
+        .slice(2, 5)
+        .map((line) => line.trim()),
+    ).toEqual([
+      "const hosted = config.hosted ? await readSession() : null",
+      "if (hosted === UNAVAILABLE) return <ApiRetry />",
+      "localPagesOnly(config.hosted, hosted?.user ?? null)",
+    ])
   })
 
   test("the hosted build draws the dashboard only while the Mac holds the relay", async () => {

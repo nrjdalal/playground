@@ -2,7 +2,7 @@ import { Hono, type MiddlewareHandler } from "hono"
 import { describeRoute } from "hono-openapi"
 import type { UpgradeWebSocket } from "hono/ws"
 
-import { ApiError, authErrorResponses, forbiddenErrorResponses } from "@/lib/error"
+import { ApiError, authErrorResponses, errorResponse, forbiddenErrorResponses } from "@/lib/error"
 import type { Hub } from "@/lib/relay/hub"
 import { RELAY_PREFIX, relayAllowed } from "@/lib/relay/protocol"
 import type { YardVariables } from "@/lib/yard/caller"
@@ -33,7 +33,11 @@ export function relayRouter({
       describeRoute({
         description:
           "The owner's Mac holds this socket, opened with the owner's own yard_ token: the hub sends it each read the owner's browser makes, as a request frame, and it answers each with a response frame.",
-        responses: { 101: { description: "Switching Protocols" }, ...authErrorResponses },
+        responses: {
+          101: { description: "Switching Protocols" },
+          ...authErrorResponses,
+          ...forbiddenErrorResponses,
+        },
         tags: ["Yard"],
       }),
       mac,
@@ -76,7 +80,12 @@ export function relayRouter({
       describeRoute({
         description:
           "A read of the owner's own dashboard, answered by the owner's Mac through the relay: only the dashboard reads the relay carries (no first-run route and no write), refused with 503 while the Mac is offline",
-        responses: { 200: { description: "The Mac's answer" }, ...authErrorResponses },
+        responses: {
+          200: { description: "The Mac's answer" },
+          ...authErrorResponses,
+          ...forbiddenErrorResponses,
+          503: errorResponse("MAC_OFFLINE", "Your Mac is offline"),
+        },
         tags: ["Yard"],
       }),
       owner,

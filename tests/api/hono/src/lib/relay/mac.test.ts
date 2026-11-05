@@ -336,6 +336,35 @@ describe("startRelay, this Mac's socket to the hub", () => {
     }
   })
 
+  // a next socket that died while the old one still owed an answer fell back to the retiring old one, whose own close retried again, so two sockets opened
+  test("a next socket that dies while the old one finishes its answer opens one socket again, not two", async () => {
+    const { connect, made } = sockets()
+    const held: (() => void)[] = []
+    const stop = relay(connect, {
+      dispatch: async () => {
+        await new Promise<void>((resolve) => held.push(resolve))
+        return new Response('{"data":[]}', { headers: { "content-type": "application/json" } })
+      },
+      recycleMs: 30,
+    })
+    try {
+      await until("the socket", () => made.length === 1)
+      made[0]!.open()
+      made[0]!.feed(frame({ at: new Date().toISOString(), id: crypto.randomUUID() }))
+      await until("the read", () => held.length === 1)
+      await until("the next socket", () => made.length === 2)
+      made[1]!.open()
+      made[1]!.close()
+      held[0]!()
+      await until("the old socket closing", () => made[0]!.readyState === 3)
+      await until("a socket after the backoff", () => made.length === 3)
+      await Bun.sleep(2500)
+      expect(made).toHaveLength(3)
+    } finally {
+      stop()
+    }
+  }, 15_000)
+
   // a socket the hub had dropped stayed open on this Mac, so the Mac read as offline until the recycle
   test("a hub gone silent closes the socket and opens a new one, while its answered heartbeats keep it", async () => {
     const { connect, made } = sockets()

@@ -142,6 +142,7 @@ export function startRelay(deps: RelayDeps): () => void {
   const seen: SeenIds = new Map()
   // every socket not yet closed, each with what lets it go once the answers it owes are out
   const sockets = new Map<RelaySocket, () => void>()
+  const retiring = new Set<RelaySocket>()
   let socket: RelaySocket | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let backoff = RETRY_MS
@@ -149,6 +150,7 @@ export function startRelay(deps: RelayDeps): () => void {
 
   const later = (ms: number) => {
     if (stopped) return
+    if (timer) clearTimeout(timer)
     timer = setTimeout(() => void open(), ms)
     timer.unref?.()
   }
@@ -174,21 +176,22 @@ export function startRelay(deps: RelayDeps): () => void {
       let ended = false
       let heard = Date.now()
       let recycle: ReturnType<typeof setTimeout> | null = null
-      let retiring = false
       sockets.set(opened, () => {
-        retiring = true
+        retiring.add(opened)
         if (answering === 0) opened.close()
       })
       const end = () => {
         if (ended) return
         ended = true
         sockets.delete(opened)
+        retiring.delete(opened)
         if (beat) clearInterval(beat)
         if (recycle) clearTimeout(recycle)
         // a socket a newer one replaced ends with nothing more to do
         if (socket !== opened) return
         // a replacement that never opened leaves the old socket holding the relay
-        socket = previous?.readyState === WebSocket.OPEN ? previous : null
+        socket =
+          previous?.readyState === WebSocket.OPEN && !retiring.has(previous) ? previous : null
         retry()
       }
       opened.addEventListener("open", () => {
@@ -214,7 +217,7 @@ export function startRelay(deps: RelayDeps): () => void {
           // whichever socket is open takes the answer, so a read in flight across a recycle still reaches the hub
           const out = [opened, socket].find((one) => one?.readyState === WebSocket.OPEN)
           if (answer && out) out.send(JSON.stringify(answer))
-          if (--answering === 0 && retiring) opened.close()
+          if (--answering === 0 && retiring.has(opened)) opened.close()
         })
       })
       opened.addEventListener("close", end)
