@@ -2,14 +2,14 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { machine, type Setup } from "./run-slot-fake"
+import { machine, type Setup, stop, WAITING } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
 
 // Playground's own lefthook.yml, whose pre-commit runs the build
 const LEFTHOOK = readFileSync(join(import.meta.dir, "../../../lefthook.yml"), "utf8")
-// A machine whose fake git fails on a `-C` folder that is not one, answers `git rev-parse --show-toplevel` with its folder (the root, from `docs`, `web` or a folder under it), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths (each pathspec read from the `-C` folder, `.` included), `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, every one for `:/`, as git prints them), and touches its last argument for anything else, as a commit's marker
+// A machine whose fake git fails on a `-C` folder that is not one, answers `git config --get alias.<verb>` by whether the root's `aliases` file lists that key, answers `git rev-parse --show-toplevel` with its folder (the root, from `docs`, `web` or a folder under it), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths (each pathspec read from the `-C` folder, `.` included), `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, every one for `:/`, as git prints them), and touches its last argument for anything else, as a commit's marker
 const repo = (
   setup: Setup,
   staged: string[],
@@ -24,6 +24,7 @@ const repo = (
     `#!/bin/bash
 [ "$1" = -C ] && { [ -d "$2" ] || exit 128; }
 d=$PWD; [ "$1" = -C ] && d=$2
+case " $* " in *" config --get "*) grep -qxF -- "\${@: -1}" ${m.root}/aliases 2>/dev/null; exit ;; esac
 case " $* " in *" rev-parse --show-toplevel "*) case "$d" in ${m.root}/web | ${m.root}/web/* | ${m.root}/docs) echo ${m.root} ;; *) cd "$d"; pwd ;; esac; exit 0 ;; esac
 pre=""; case "$d" in ${m.root}/*) pre=\${d#${m.root}/}/ ;; esac
 full=""; case " $* " in *" --full-name "*) full=1 ;; esac
@@ -186,7 +187,6 @@ describe("a commit whose pre-commit runs next build", () => {
     ["commit", "--no-such-flag", "-m", "x"],
     ["commit", "-Zm", "x"],
     ["commit", "-pm", "x"],
-    ["commit", "-e", "-m", "x"],
     ["commit", "-m", "x", "--pathspec-fr=list.txt"],
     ["-c", "core.hooksPath=/x", "commit", "-m", "x"],
     ["--git-dir", "/x/.git", "commit", "-m", "x"],
@@ -311,6 +311,17 @@ describe("a commit whose pre-commit runs next build", () => {
 describe("a commit whose next build turbo replays from its cache", () => {
   test("takes run-slot-commit beside a big run", async () => {
     const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"])
+    turbo(m, "HIT")
+    m.hold("run-slot", 3, "big")
+    expect(
+      await m.start("worker-x", {}, undefined, ["git", "-C", m.root, "commit", "-m", "x"]).ran(),
+    ).toBe(true)
+    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
+  })
+
+  // 5 Nov: its pre-commit tsc over packages/scripts then runs bare in the commit's slot, which ran at most 8 s in 32 runs (run-slot.runs.log, 5 Nov), as a bare commit's runs on run-slot-commit too
+  test("staging a packages/scripts file takes run-slot-commit beside a big run, its type check with it", async () => {
+    const m = repo({ idle: 30 }, ["packages/scripts/src/pr-merge/cli.ts"])
     turbo(m, "HIT")
     m.hold("run-slot", 3, "big")
     expect(
@@ -676,5 +687,285 @@ describe("a bash script file", () => {
     m.hold("run-slot", 3, "big")
     expect(await m.start("worker-x", {}, undefined, ["bash", script(m, NEXT)]).waits()).toBe(true)
     expect(log(m)).not.toContain("run-slot-commit")
+  })
+})
+
+// 5 Nov: forms that read heavier than they cost, each waiting on canary before this change, and the forms beside them that still count as a build
+describe("commit-lane forms that cost no build", () => {
+  const outside = (m: ReturnType<typeof repo>) => {
+    mkdirSync(join(m.root, "outside"), { recursive: true })
+    return join(m.root, "outside")
+  }
+  // the lane a run takes, read from its start line, or "waited" once it prints a waiting line, when it is stopped
+  const takes = async (
+    m: ReturnType<typeof repo>,
+    argv: string[],
+    cwd = outside(m),
+    extra: Record<string, string> = {},
+  ) => {
+    const run = m.start("worker-x", extra, undefined, argv, cwd)
+    if (await run.saw(WAITING)) {
+      await stop(run.p)
+      return "waited"
+    }
+    return log(m).match(/ start worker-x \d+ (\S+) waited=/)?.[1]
+  }
+  const chain = (m: ReturnType<typeof repo>, steps: string, shell = "sh") => [
+    shell,
+    "-c",
+    steps.replaceAll("ROOT", m.root),
+  ]
+  const PAGE = "web/next/src/app/page.tsx"
+
+  // each as [the form, staged, unstaged, untracked]; a held big slot at 30% idle leaves no room for a big run
+  for (const [what, steps, staged, unstaged, untracked] of [
+    // 1: -u stages tracked changes alone, never an untracked file
+    [
+      "git add -u beside an untracked web/next file",
+      "cd ROOT && git add -u && git commit -m x",
+      [],
+      ["docs/notes.md"],
+      ["web/next/src/app/new.tsx"],
+    ],
+    // 2: -v and -n change nothing staged, -N and -p stage only the paths they name
+    [
+      "git add -v",
+      "cd ROOT && git add -v docs/notes.md && git commit -m x",
+      [],
+      ["docs/notes.md"],
+      [],
+    ],
+    [
+      "git add -n of a web/next file",
+      `cd ROOT && git add -n ${PAGE} && git commit -m x`,
+      [],
+      [PAGE],
+      [],
+    ],
+    [
+      "git add --dry-run of a web/next file",
+      `cd ROOT && git add --dry-run ${PAGE} && git commit -m x`,
+      [],
+      [PAGE],
+      [],
+    ],
+    ["git add -N", "cd ROOT && git add -N docs/new.md && git commit -m x", [], [], ["docs/new.md"]],
+    [
+      "git add -p",
+      "cd ROOT && git add -p docs/notes.md && git commit -m x",
+      [],
+      ["docs/notes.md"],
+      [],
+    ],
+    // 3: the pathspec file as its own word
+    [
+      "git add --pathspec-from-file <f>",
+      "cd ROOT && git add --pathspec-from-file list.txt && git commit -m x",
+      [],
+      ["docs/notes.md"],
+      [],
+    ],
+    // 5: one folder named two ways
+    [
+      "git -C R add and git -C R/ commit",
+      "git -C ROOT add docs/notes.md && git -C ROOT/ commit -m x",
+      [],
+      ["docs/notes.md"],
+      [],
+    ],
+    // 11: a quoted message's #, ?, [ and { are its own text
+    [
+      "a quoted # in the message",
+      'cd ROOT && git commit -m "closes #899"',
+      ["docs/notes.md"],
+      [],
+      [],
+    ],
+    ["a quoted ? in the message", "cd ROOT && git commit -m 'what?'", ["docs/notes.md"], [], []],
+    ["a quoted [ in the message", 'cd ROOT && git commit -m "[x] y"', ["docs/notes.md"], [], []],
+    ["a quoted { in the message", "cd ROOT && git commit -m '{a} b'", ["docs/notes.md"], [], []],
+    // 13: -n runs no hook, whatever the add before it staged
+    [
+      "git commit -n after a web/next add",
+      `cd ROOT && git add ${PAGE} && git commit -n -m x`,
+      [],
+      [PAGE],
+      [],
+    ],
+  ] as const)
+    test(`a chain with ${what} takes run-slot-commit beside a big run`, async () => {
+      const m = repo({ idle: 30 }, [...staged], [...unstaged], LEFTHOOK, [...untracked])
+      m.hold("run-slot", 3, "big")
+      expect(await takes(m, chain(m, steps))).toBe("run-slot-commit")
+    })
+
+  for (const [what, steps, unstaged, untracked] of [
+    [
+      "git add -u of a tracked web/next change",
+      "cd ROOT && git add -u && git commit -m x",
+      [PAGE],
+      [],
+    ],
+    [
+      "git add -p of a web/next file",
+      `cd ROOT && git add -p ${PAGE} && git commit -m x`,
+      [PAGE],
+      [],
+    ],
+    [
+      "git add -N of an untracked web/next file",
+      "cd ROOT && git add -N web/next/src/app/new.tsx && git commit -m x",
+      [],
+      ["web/next/src/app/new.tsx"],
+    ],
+    [
+      "git add --pathspec-from-file <f> with a web/next change",
+      "cd ROOT && git add --pathspec-from-file list.txt && git commit -m x",
+      [PAGE],
+      [],
+    ],
+    // 8: an option after -c other than -e, -u, -x, -v or -o pipefail reads no steps
+    ["bash -c -O <opt>", "-O", [], []],
+    // 13: a glued a(b) splits at its (, and b is off the list
+    ["a glued a(b)", "cd ROOT && git commit -m a(b)", [], []],
+  ] as const)
+    test(`a chain with ${what} still waits as a big run`, async () => {
+      const m = repo({ idle: 30 }, ["docs/notes.md"], [...unstaged], LEFTHOOK, [...untracked])
+      m.hold("run-slot", 3, "big")
+      const argv =
+        steps === "-O"
+          ? ["bash", "-c", "-O", "extglob", `cd ${m.root} && git commit -m x`]
+          : chain(m, steps)
+      expect(await takes(m, argv)).toBe("waited")
+    })
+
+  // 8: bash -c reads -e, -u, -x, -v and -o pipefail as options before its script, which zsh -c runs as sh does
+  for (const argv of [
+    ["bash", "-c", "-x", "cd ROOT && git commit -m x"],
+    ["bash", "-c", "-eu", "-o", "pipefail", "cd ROOT && git commit -m x"],
+    ["zsh", "-c", "cd ROOT && git commit -m x"],
+  ])
+    test(`${argv.join(" ")} takes run-slot-commit beside a big run`, async () => {
+      const m = repo({ idle: 30 }, ["docs/notes.md"])
+      m.hold("run-slot", 3, "big")
+      expect(
+        await takes(
+          m,
+          argv.map((a) => a.replaceAll("ROOT", m.root)),
+        ),
+      ).toBe("run-slot-commit")
+    })
+
+  // 13: precommit:light runs the script of the repo it runs in, so after a cd to another repo it is off the list
+  test("a chain with bun run precommit:light after a cd to another repo waits", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    mkdirSync(join(m.root, "other"), { recursive: true })
+    m.hold("run-slot", 3, "big")
+    const steps = "cd ROOT/other && bun run precommit:light && cd ROOT && git commit -m x"
+    expect(await takes(m, chain(m, steps), m.root)).toBe("waited")
+  })
+
+  test("while one after a cd inside run-slot's own repo takes run-slot-commit", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    mkdirSync(join(m.root, "docs"), { recursive: true })
+    m.hold("run-slot", 3, "big")
+    const steps = "cd ROOT/docs && bun run precommit:light && git commit -m x"
+    expect(await takes(m, chain(m, steps), m.root)).toBe("run-slot-commit")
+  })
+
+  // 13: a cd after && that a ; follows may not have run when the commit does
+  test("a chain whose cd joins by && and then ; waits", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    const steps = "git add docs/notes.md && cd ROOT ; git commit -m x"
+    expect(await takes(m, chain(m, steps), m.root)).toBe("waited")
+  })
+
+  // 4, 6 and 9: a lone commit whose flags or env words run no build, beside one that still does
+  for (const [what, words, staged] of [
+    ["commit -e", ["commit", "-e", "-m", "x"], ["docs/notes.md"]],
+    ["commit --edit", ["commit", "--edit", "-m", "x"], ["docs/notes.md"]],
+    ["commit -nz of a web/next file", ["commit", "-nz", "-m", "x"], [PAGE]],
+    ["commit -n -z of a web/next file", ["commit", "-n", "-z", "-m", "x"], [PAGE]],
+  ] as const)
+    test(`git ${what} takes run-slot-commit beside a big run`, async () => {
+      const m = repo({ idle: 30 }, [...staged])
+      m.hold("run-slot", 3, "big")
+      expect(await takes(m, ["git", "-C", m.root, ...words])).toBe("run-slot-commit")
+    })
+
+  for (const [what, words] of [
+    ["commit -e of a web/next file", ["commit", "-e", "-m", "x"]],
+    ["commit -zn of a web/next file, whose -z may take n", ["commit", "-zn", "-m", "x"]],
+  ] as const)
+    test(`git ${what} still waits as a big run`, async () => {
+      const m = repo({ idle: 30 }, [PAGE])
+      m.hold("run-slot", 3, "big")
+      expect(await takes(m, ["git", "-C", m.root, ...words])).toBe("waited")
+    })
+
+  for (const env of [
+    "SKIP_ENV_VALIDATION=true",
+    "TURBO_CACHE_DIR=/tmp/turbo",
+    "GIT_AUTHOR_NAME=x",
+    "GIT_COMMITTER_EMAIL=x@y.z",
+  ])
+    test(`env ${env} git commit takes run-slot-commit beside a big run`, async () => {
+      const m = repo({ idle: 30 }, ["docs/notes.md"])
+      m.hold("run-slot", 3, "big")
+      const argv = ["env", env, "git", "-C", m.root, "commit", "-m", "x"]
+      expect(await takes(m, argv)).toBe("run-slot-commit")
+    })
+
+  // 10: a git run that commits nothing, with a listed option or env word, keeps the commit lane
+  for (const words of [
+    ["-c", "a.b=c", "push", "origin"],
+    ["--no-pager", "merge", "main"],
+  ])
+    test(`git ${words.join(" ")} takes run-slot-commit beside a big run`, async () => {
+      const m = repo({ idle: 30 }, ["docs/notes.md"])
+      m.hold("run-slot", 3, "big")
+      expect(await takes(m, ["git", "-C", m.root, ...words])).toBe("run-slot-commit")
+    })
+
+  test("GIT_SSH_COMMAND=<cmd> git push takes run-slot-commit beside a big run", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    const argv = ["env", "GIT_SSH_COMMAND=ssh", "git", "-C", m.root, "push", "origin"]
+    expect(await takes(m, argv)).toBe("run-slot-commit")
+  })
+
+  test("git -c core.hooksPath=<dir> push still waits as a big run", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    const argv = ["git", "-C", m.root, "-c", "core.hooksPath=/x", "push", "origin"]
+    expect(await takes(m, argv)).toBe("waited")
+  })
+
+  // 7 and 12: beside held commit and clone lanes a medium run starts and a big one waits, so each row reads whether the run counted as a build
+  const lanes = (aliases = "") => {
+    const m = repo({}, ["docs/notes.md"])
+    if (aliases) writeFileSync(join(m.root, "aliases"), aliases)
+    holdLane(m, "run-slot-commit", "commit-wt")
+    holdLane(m, "run-slot-clone", "worker-c")
+    return m
+  }
+  const medium = { RUN_SLOT_SIZE: "medium" }
+
+  // 7: git -p reads past to its verb, log, so the commit word in its --grep is not a commit
+  test("git -p log --grep commit runs as a medium run", async () => {
+    const m = lanes()
+    const argv = ["git", "-C", m.root, "-p", "log", "--grep", "commit"]
+    expect(await takes(m, argv, m.root, medium)).toMatch(/^run-slot/)
+  })
+
+  test("git ci, an alias in the repo's config, counts as a build", async () => {
+    const m = lanes("alias.ci\n")
+    expect(await takes(m, ["git", "-C", m.root, "ci", "-m", "x"], m.root, medium)).toBe("waited")
+  })
+
+  test("while git frob, which no alias names, runs as a medium run", async () => {
+    const m = lanes("alias.ci\n")
+    expect(await takes(m, ["git", "-C", m.root, "frob"], m.root, medium)).toMatch(/^run-slot/)
   })
 })
