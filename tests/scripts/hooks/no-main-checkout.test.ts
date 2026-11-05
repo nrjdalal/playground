@@ -291,6 +291,24 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     },
   )
 
+  const interpreters: [string, string][] = [
+    ["node", "| node"],
+    ["python3", "| python3"],
+    ["perl", "| perl"],
+    ["ruby", "| ruby"],
+    ["osascript", "| osascript"],
+    ["bun -", "| bun -"],
+    ["python3 -", "| python3 -"],
+    ["node /dev/stdin", "| node /dev/stdin"],
+    ["deno run -", "| deno run -"],
+    ["nice python3 -", "| nice python3 -"],
+    ["xargs node", "| xargs node"],
+    ["xargs python3", "| xargs python3"],
+    ["xargs running node -e on each line", "| xargs -I{} node -e {}"],
+    ["xargs perl -e", "| xargs perl -e"],
+    ["a while loop handing each line to python3", "| while read l; do python3; done"],
+  ]
+
   test.each([
     [". /dev/fd/0", "| . /dev/fd/0"],
     ["source /dev/fd/0", "| source /dev/fd/0"],
@@ -311,21 +329,7 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     ["nice sh /dev/fd/0", "| nice sh /dev/fd/0"],
     ["a brace group that evals a line", '| { read a; eval "$a"; }'],
     ["an until loop handing each line to sh -c", '| until ! read l; do sh -c "$l"; done'],
-    ["node", "| node"],
-    ["python3", "| python3"],
-    ["perl", "| perl"],
-    ["ruby", "| ruby"],
-    ["osascript", "| osascript"],
-    ["bun -", "| bun -"],
-    ["python3 -", "| python3 -"],
-    ["node /dev/stdin", "| node /dev/stdin"],
-    ["deno run -", "| deno run -"],
-    ["nice python3 -", "| nice python3 -"],
-    ["xargs node", "| xargs node"],
-    ["xargs python3", "| xargs python3"],
-    ["xargs running node -e on each line", "| xargs -I{} node -e {}"],
-    ["xargs perl -e", "| xargs perl -e"],
-    ["a while loop handing each line to python3", "| while read l; do python3; done"],
+    ...interpreters,
   ])(
     "a script's output piped into %s, a command that can run its input as code, is judged as a pipe into a shell",
     async (_name, tail) => {
@@ -335,6 +339,18 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
       )
     },
   )
+
+  // the hook reads no other language, so even a harmless input it reads is refused when it feeds an interpreter, while a shell fed the same text runs
+  test.each(interpreters)(
+    "a harmless input the hook reads, piped into %s, is refused from the main checkout",
+    async (_name, tail) => {
+      expect(await bash(`echo x ${tail}`)).toContain("no-main-checkout hook refuses")
+    },
+  )
+
+  test("a harmless input the hook reads, piped into sh, runs from the main checkout", async () => {
+    expect(await bash("echo x | sh")).toBeUndefined()
+  })
 
   test.each([
     ["xargs sh -c of a script that only reads", "echo 'git status' | xargs sh -c"],
