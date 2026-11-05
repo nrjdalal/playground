@@ -123,7 +123,6 @@ esac`,
 fake(
   "top",
   `echo "$*" >> "$HOME/top.calls"
-[ -n "$FAKE_TOP_BROKEN" ] && exit 1
 echo "CPU usage: 30.00% user, 20.00% sys, 50.00% idle"
 echo "CPU usage: 60.00% user, 40.00% sys, \${FAKE_CPU_IDLE:-0.00}% idle"`,
 )
