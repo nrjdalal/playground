@@ -54,7 +54,6 @@ import {
 } from "react"
 import { flushSync } from "react-dom"
 
-import { COMPOSER_ID } from "@/components/dashboard/composer"
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { PreviewPane } from "@/components/dashboard/preview-pane"
 import { Attachments } from "@/components/dashboard/viewer/thumbnails"
@@ -117,6 +116,7 @@ import {
   type CardKey,
   changedAt,
   checkAnswerNote,
+  commentRefused,
   decisionChoices,
   deliveryNote,
   dismissable,
@@ -141,6 +141,7 @@ import {
   provideSecret,
   reopenable,
   reopenKey,
+  replyItem,
   resultLink,
   retryable,
   retryItem,
@@ -160,7 +161,7 @@ import {
 } from "@/lib/inbox"
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
-import { setReply, useReply, useTypedReply } from "@/lib/reply"
+import { useTypedReply } from "@/lib/reply"
 import { iconTone, type ShownState, statusIcon } from "@/lib/status-icons"
 import { inboxMark, readMark } from "@/lib/tab-dot"
 import { fullTime, relativeTime } from "@/lib/time"
@@ -276,7 +277,7 @@ function KindBand({
             <span className="text-info">Updated</span>
           </>
         )}
-        {/* the item the composer is replying to, until the reply is sent */}
+        {/* the item the composer's words name as re #iN, until they are sent */}
         {replying && (
           <>
             <span aria-hidden>·</span>
@@ -610,29 +611,7 @@ const QUESTION = "item"
 
 type Answer = (action: InboxAction, text?: string, option?: number) => Promise<void>
 
-// Reply: opens Playground's chat replying to this item; the composer's chip names it, the card's band reads Replying, and the message carries its id.
-function ReplyButton({ item }: { item: InboxItem }) {
-  return (
-    <Hint content="Reply">
-      <Button
-        size="icon-sm"
-        variant="outline"
-        aria-label={`Reply to ${itemTag(item)}`}
-        className="ml-auto shrink-0"
-        onClick={() => {
-          // rendered at once, so the aside shows Playground's chat before the focus below
-          flushSync(() => setReply({ ref: item.ref, title: item.title }))
-          // in the click's own frame, so a paste sent at once (a dictation app's Cmd+V) lands in the box
-          document.getElementById(COMPOSER_ID)?.focus()
-        }}
-      >
-        <RiReplyLine />
-      </Button>
-    </Hint>
-  )
-}
-
-// Opens a folded card to its full self, a chat reply's its answers and Later back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
+// Opens a folded card to its full self, a reply's its answers and Later back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
 function Reopen({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
   const label = open ? "Collapse" : "Expand"
   return (
@@ -796,15 +775,15 @@ export function InboxCard({
     setError(null)
     try {
       await write()
+      return true
     } catch (failure) {
       setError((failure as Error).message)
+      return false
     } finally {
       await queryClient.invalidateQueries({ queryKey: INBOX_QUERY_KEY })
       setPending(false)
     }
   }
-  const onAnswer: Answer = (action, text, option) =>
-    settle(() => answerItem(item, action, text, note.trim() || undefined, option))
   const onProvide = () => {
     const value = secret
     setSecret("")
@@ -822,7 +801,7 @@ export function InboxCard({
     setDay(undefined)
     setTime(PICKED_TIME)
   }
-  // every card opens and folds by its chevron, a click on a folded one or E; one that folds by default (all but one that needs an answer now) starts folded, and a chat reply's card opens to its answers and Later
+  // every card opens and folds by its chevron, a click on a folded one or E; one that folds by default (all but one that needs an answer now) starts folded, and a reply's card opens to its answers and Later
   const [toggled, setToggled] = useState<boolean | null>(defaultOpen ? true : null)
   const folds = foldsByDefault(item, now)
   const open = toggled ?? !folds
@@ -845,6 +824,29 @@ export function InboxCard({
   const hold = paused ? OFF_FOCUSABLE : {}
   const held = paused ? PAUSED_WHY : undefined
   const quiet = (outcome !== null && !failed) || (item.kind === "update" && item.readAt !== null)
+  // the comment rides an answer as its note where the card still takes one, a secret's Submit aside, so its value travels alone
+  const noted = outcome === null && item.kind !== "update" && !secretAsk
+  // an answer takes his comment as its note, so the box empties once it is in; Archive and Move back, and any verb on a card that takes no answer, carry none, so his words stay
+  const onAnswer: Answer = async (action, text, option) => {
+    const sent = await settle(() =>
+      answerItem(item, action, text, note.trim() || undefined, option),
+    )
+    if (sent && noted && action !== "archive" && action !== "unarchive") setNote("")
+  }
+  const commentId = useId()
+  // Reply opens a folded card, or an empty box, to its comment box, focused in the click's own frame so a paste sent at once lands there; with words in the box it sends them alone
+  const onReply = () => {
+    const text = note.trim()
+    if (folded || text === "") {
+      // only a folded card is opened, so one open by default still folds once answered
+      if (folded) flushSync(() => setToggled(true))
+      document.getElementById(commentId)?.focus()
+      return
+    }
+    const refused = secretAsk ? commentRefused(note, secret) : null
+    if (refused) return setError(refused)
+    void settle(() => replyItem(item.id, text)).then((sent) => sent && setNote(""))
+  }
 
   const title =
     item.kind === "update" && item.preview.link ? (
@@ -1145,8 +1147,19 @@ export function InboxCard({
           () => void onAnswer("dismiss"),
         )}
       <Reopen open={open} setOpen={setToggled} />
-      {/* an open secret ask offers no chat, so its value is never typed where a transcript keeps it; a folded card shows its toggle alone */}
-      {!folded && !(secretAsk && outcome === null) && <ReplyButton item={item} />}
+      <Hint content={held ?? "Reply: your comment alone, to its poster"}>
+        <Button
+          size="icon-sm"
+          variant="outline"
+          aria-label={`Reply to ${itemTag(item)}`}
+          className="shrink-0"
+          disabled={busy}
+          {...hold}
+          onClick={onReply}
+        >
+          <RiReplyLine />
+        </Button>
+      </Hint>
     </div>
   )
 
@@ -1352,12 +1365,14 @@ export function InboxCard({
             {result}
           </CardHeader>
           {body && <CardContent>{body}</CardContent>}
-          {/* the card's last block before its buttons: his note, which goes with whatever he answers */}
-          {outcome === null && item.kind !== "update" && !secretAsk && !folded && (
+          {/* the card's last block before its buttons: his comment, the note with whatever he answers, or alone through Reply */}
+          {!folded && (
             // the same gap-2 above it as between the choices
             <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
               <NoteBox
                 disabled={busy}
+                id={commentId}
+                placeholder={noted ? "Add an optional comment" : "Add a comment"}
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
               />
@@ -1372,7 +1387,12 @@ export function InboxCard({
 }
 
 // The note under an ask, as tall as its first choice whatever that grows to (a Hint's render overwrites the choice's own data-slot, so it is read as the choices' first child), and growing past it as he types; as tall as an Approve choice on a card with no choices.
-function NoteBox(props: Pick<ComponentProps<typeof Textarea>, "disabled" | "onChange" | "value">) {
+function NoteBox(
+  props: Pick<
+    ComponentProps<typeof Textarea>,
+    "disabled" | "id" | "onChange" | "placeholder" | "value"
+  >,
+) {
   const box = useRef<HTMLTextAreaElement>(null)
   useLayoutEffect(() => {
     const area = box.current
@@ -1386,15 +1406,7 @@ function NoteBox(props: Pick<ComponentProps<typeof Textarea>, "disabled" | "onCh
     observer.observe(choice)
     return () => observer.disconnect()
   }, [])
-  return (
-    <Textarea
-      ref={box}
-      aria-label="Comment"
-      className={cn("min-h-14 py-2", BOX)}
-      placeholder="Add an optional comment"
-      {...props}
-    />
-  )
+  return <Textarea ref={box} aria-label="Comment" className={cn("min-h-14 py-2", BOX)} {...props} />
 }
 
 // Taking what waits behind the pill glides the rows already in view down from the top while the taken ones fade in above them, this long; nothing moves under reduced motion.
@@ -1675,9 +1687,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     // a row in a hidden tab cannot scroll yet, so it is tried again once its tab shows
     return row !== null && row.offsetParent !== null
   })
-  const picked = useReply()
-  const typed = useTypedReply()
-  const reply = picked ?? typed
+  const reply = useTypedReply()
   if (isPending) return <InboxLoading />
   if (error) return <p className="text-destructive text-sm">{error.message}</p>
   const summary = inboxSummary(shown)

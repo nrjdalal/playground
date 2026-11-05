@@ -5,6 +5,7 @@ import { OwnerOnly } from "@/components/dashboard/owner-only"
 import { Accounts } from "@/components/settings/accounts"
 import { Extensions } from "@/components/settings/extensions"
 import { MacChecks } from "@/components/settings/mac-checks"
+import { Privacy } from "@/components/settings/privacy"
 import { Remote } from "@/components/settings/remote"
 import { PageHeader } from "@/components/shell/page-header"
 
@@ -15,13 +16,14 @@ export function SettingsHome() {
     <>
       <PageHeader
         title="Settings"
-        description="This Mac's accounts, extensions and how the Dashboard runs."
+        description="This Mac's accounts, extensions, privacy and how the Dashboard runs."
       />
       {allowed ? (
         <div className="flex flex-col gap-6">
           <MacChecks />
           <Accounts />
           <Extensions />
+          <Privacy />
           <Remote />
         </div>
       ) : (
