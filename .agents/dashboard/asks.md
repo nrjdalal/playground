@@ -19,7 +19,10 @@
   after which each item keeps its place instead of jumping the list: one that arrives waits behind a pill on the open row (below), white, left of Mark all as read, on that one line at every width (its words truncating first, the pill reading `1 new` in a pane under 24rem, its whole words still read to a screen reader),
   so it never covers a card and its coming and going moves nothing,
   sliding in and fading out (none under reduced motion), `1 new update` (`pinnedView` and `newLabel` in `web/next/src/lib/inbox.ts`), whose click puts what waits on top (the order lasts as long as the page, so what arrives while they are on another tab waits behind the pill too), newest first, the rows below gliding down (none under reduced motion);
-  a take by the keyboard hands focus to the first card it puts on top (`focusAfterTake`), since the pill leaves; and the action buttons of every card that moved pause for 1 second (`movedRows`, `MOVED_PAUSE_MS`, the guard a short pause so a stray click during the move cannot misfire), still focusable and saying why on hover;
+  a take by the keyboard hands focus to the first card it puts on top (`focusAfterTake`), since the pill leaves; and the action buttons of every card that moved pause for 1 second (`movedRows`, `MOVED_PAUSE_MS`, the guard a short pause so a stray click during the move cannot misfire), still focusable and saying why on hover,
+  while each such card's comment box and a secret ask's value field stay enabled,
+  so focus and a dictated paste stay in them (a disabled field drops focus to the page), and turn read-only only while an answer is on its way;
+  the comment box lands a paste as the text its event carried (`insertPaste`), as the composer does (messages.md), since the browser's own insert reads the clipboard again, which a dictation app may have put back by then;
   Each card is a stock Card holding one question on shadcn's Questionnaire (its title the item's, its description what Approve does or, once it is answered or settled, the result, on its own line above the footer; Cmd/Ctrl+Enter in a draft's box presses Send, and on a decision sends the picked option, once one is),
   and its footer holds the item's actions on the left and its verbs then Reply on the right (`verbs` in `web/next/src/lib/inbox.ts`), Seen being the band's tick (below):
   Seen while unread, then Later, Archive and Dismiss while it waits; Done, Later, Archive and Dismiss on an update in the list; Done and Dismiss once answered, working or failed; Later, Move back and Dismiss on the Archive shelf; and Dismiss on Done until it is dismissed, with Move back on one set aside while it waited,
@@ -63,7 +66,7 @@
   Each item sits flat, led by one muted band the pane's full width (`KindBand`, `bg-muted` with square corners bleeding over the pane's `--pane-x` padding, which `dashboard-aside.tsx` sets on each scroll pane, its words lined up with the card's),
   which gives its kind as an icon and a word,
   its id `#i<ref>` (`ref` is an identity column, so an id is stable and never reused) and who posted it (Alpha's name `text-info`, Bravo's `text-bravo`, the theme's purple), then at its right end one time and a tick: `posted <time>`,
-  or `updated <time>` once a decision or draft changed (its `updatedAt` a second or more after its `createdAt`: an answer, a delivery, an ack, a settle, an edit or a Later, `scheduleItem` setting it too), or once its poster edited an update (`bun run ask edit`; an update's read, Dismiss or resolve leaves it `posted`;
+  or `updated <time>` once a decision or draft changed (its `updatedAt`, stamped by the API's clock as its `createdAt` is, a second or more after its `createdAt`: an answer, a delivery, an ack, a settle, an edit or a Later, `scheduleItem` setting it too), or once its poster edited an update (`bun run ask edit`; an update's read, Dismiss or resolve leaves it `posted`;
   `changedAt` in `web/next/src/lib/inbox.ts`), reading `read <time>` on hover once read, and a blue `Updated` when it changed after the owner's look before this one and by the time this one began (`updatedSince`; the inbox's look mark, `inboxMark` in `web/next/src/lib/tab-dot.ts`, takes in changes too), so a change made as the owner looks shows in place, with the change's own time beside it,
   since a relative minute alone can hide an update that landed after the last look.
   Colour says what an item is and where it stands, as the sidebar's lights do: its kind's on its icon alone (a decision `warning`, a draft `info`, an update `success`, an alert `destructive`), the card's own edges plain, no thick coloured border,
@@ -78,6 +81,7 @@
   An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
   A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
   `ASK_CODE_COLUMNS` (`@packages/config/inbox`) is the widest drawing line that fits the narrowest card at 12px.
+  A `delete` decision's `why` renders the same, so a link it holds opens, while its `what` stays plain text, the paths Approve removes.
   Every other preview's words, a Slack message's included, stay plain text, since they go out exactly as written, marked as quoted by a `border-l-2` rule rather than a background, and no card's body, a Done one's included, sits on gray, the band alone muted.
   The card's header is one `minmax(0,1fr)` column and a card's table cells wrap, so a wide table or drawing stays inside the card.
   A decision previews exactly what Approve does, then its options as shadcn's questionnaire choices, except a secret ask (below), and no card offers Edit: a change goes in the comment box, while the API still reads `edit` on an older row.
@@ -107,7 +111,9 @@
   Every open card ends in a comment box above its buttons, named Comment, the same gap above it as between the card's other parts, at least as tall as its first choice (`NoteBox`):
   on an open decision or draft it reads Add an optional comment, and what the owner types there goes with whatever he answers, as `answer.note` (at most 4000 characters), its poster reading it as the answer line's `comment`, the answered card reading `Your note: ...` under its result and the box emptying;
   on any other card (an update, an answered card, a secret ask) it reads Add a comment, and Reply alone sends it.
-  Reply (the reply icon, named `Reply to #iN`) opens a folded card, or an open card whose box is empty, to its box, with focus in the box in the click's own frame, so a dictation app's Cmd+V sent at once lands there (`bun run verify reply-focus`);
+  Reply (the reply icon, named `Reply to #iN`) with the box empty hands the card's ref to Playground's composer (`outbox.reply` in `web/next/src/lib/chat.ts`, `replyRoute` and `withRef` in `web/next/src/lib/reply.ts`),
+  which starts with `re #iN: `, before the words it held and in place of another item's ref they opened with, the aside showing that chat, with focus in its box in the click's own frame and the caret at the end, so a dictation app's Cmd+V sent at once lands there (`bun run verify reply-focus`);
+  a secret ask's Reply opens its own box instead, so a secret never reaches the chat, and so does any card's while Playground's session is down (`dispatcherOf`), since no composer would take the hand until it is back, and a folded card's with words in its box;
   with words in the box it sends them alone through `POST /api/v1/inbox/:id/reply` (`replyItem()` in `api/hono/src/lib/dashboard/inbox.ts`), typed into the poster through `deliver()` as `re #iN: <words>`, or into the dispatcher once the poster has ended (`posterGone`), the box emptying once it is in;
   one that reaches no session is refused with why, its words kept in the box.
   On an open decision or draft with no answer yet it is recorded as his reply (`recordReply`, below), and the poster changes the card in place with `bun run ask edit`, which takes the reply off (`editItem()`), so the card waits on him again, open and marked Updated; on any other card the answer and its delivery stay as they were.
@@ -151,6 +157,8 @@
   His comment rides as `comment`, a changed draft's words as `text`, a Slack draft's link command as `linkConverter`, what the dashboard ran on Approve as `accepted` (an accept),
   `listed` (an apps change) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
   A comment alone (the card's Reply or a chat reply, `re #iN`) stays his own words, typed as he wrote them.
+  In every chat the line reads as one answer chip in his bubble, an outline badge holding the item's `ref` and the option's `label`, else the `verb`, with the `comment` as the bubble's words after it (`answerChipOf` in `web/next/src/lib/answer-chip.ts`, `TranscriptBubble`), and a line `payloadOf` cannot parse shows as written.
+  A click on the chip opens that card in the aside's Inbox, opening the shelf that holds it first.
   A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `textsOf`).
   Any other `NOT_FOUND` (`now names another session`, `has no terminal to type into`) comes from a live session and stays failed, so the go is never carried out twice.
   A sessions read that was cut short (`Live.partial`, cmux.md) that misses the poster is read once more, fresh rather than the hub's board, and still missing it reads `CMUX_FAILED`, never `NOT_FOUND`, so a live poster's answer is never relayed (`target()` in `deliver.ts`).
@@ -215,7 +223,8 @@
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with its options labelled one line each, `options`, 1 to 5 rows of `{label, description?}`, one row for a yes or no and 2 or more for lettered choices, or the older `approve` alone, never both, and an optional `deny` naming the no-go row (Deny, or None of these past one option),
   and optional `attachments`, below), `slack` (`to`, `text`, optional `attachments`),
-  `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below) or `secret` (`key`, `sink`); a decision with none is refused.
+  `ship` (`sha`, `prs` of `{number, title, url?}`, where `bun run ask new` and `edit` fill each `url` into the factory's repo, `factory.repo` else the checkout's origin, so the card links each PR),
+  `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below) or `secret` (`key`, `sink`); a decision with none is refused.
   A `delete`'s `what` names each target by its full path, the one `playground rm --decision` matches, so one approval is enough: `bun run ask new` refuses a short name that is there (a relative or `~` path, a worktree's bare folder name), naming the full path to write, unless that full path stands beside it (`deleteRefusal` in `api/hono/src/lib/dashboard/delete-targets.ts`).
   An `ask`'s `attachments`, a draft's, a `slack` decision's and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
@@ -384,7 +393,9 @@
   A job of several steps leads with to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`).
 
   `bun run ask example code|decision|slack|ui` prints each worked example as an item to fill in, the three asks below and the slack decision above.
-  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options, or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
+  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
+  a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
+  or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
   The three, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown

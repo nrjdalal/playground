@@ -332,7 +332,16 @@ export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     ...place,
     prs: z
-      .array(z.strictObject({ number: z.number().int().positive(), title: oneLine(LIMITS.line) }))
+      .array(
+        z.strictObject({
+          number: z.number().int().positive(),
+          title: oneLine(LIMITS.line),
+          url: z
+            .url({ protocol: /^https$/ })
+            .max(2000)
+            .optional(),
+        }),
+      )
       .min(1)
       .max(LIMITS.prs),
     sha: z.string().regex(/^[0-9a-f]{7,40}$/, "Must be a commit SHA"),
@@ -1119,11 +1128,12 @@ const toItem = (row: Row): InboxItem =>
 export const KEEP_MS = 7 * 24 * 60 * 60 * 1000
 const MAX_SHOWN = 200
 
-// threadId files the item under a thread (bun run ask new --thread), refused when no thread has it.
+// threadId files the item under a thread (bun run ask new --thread), refused when no thread has it. now stamps createdAt and updatedAt, from the clock every later write stamps with, so changedAt, quietIds and listItems compare stamps of one clock.
 export async function postItem(
   db: Database,
   input: unknown,
   threadId?: string,
+  now = new Date(),
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const parsed = inboxInputSchema.safeParse(input)
   if (!parsed.success) {
@@ -1137,8 +1147,10 @@ export async function postItem(
     .insert(inboxItem)
     .values({
       ...parsed.data,
+      createdAt: now,
       status: parsed.data.kind === "update" ? "done" : "open",
       threadId,
+      updatedAt: now,
     })
     .returning()
   return { item: toItem(row as Row), ok: true }

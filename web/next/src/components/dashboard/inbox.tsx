@@ -54,6 +54,7 @@ import {
 } from "react"
 import { flushSync } from "react-dom"
 
+import { COMPOSER_ID } from "@/components/dashboard/composer"
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { PreviewPane } from "@/components/dashboard/preview-pane"
 import { Attachments } from "@/components/dashboard/viewer/thumbnails"
@@ -108,7 +109,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
-import { useNow } from "@/lib/dashboard"
+import { dispatcherOf, useNow } from "@/lib/dashboard"
 import {
   answerItem,
   canDraft,
@@ -160,8 +161,9 @@ import {
   waiting,
 } from "@/lib/inbox"
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
+import { insertPaste } from "@/lib/paste"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
-import { useTypedReply } from "@/lib/reply"
+import { replyRoute, useTypedReply } from "@/lib/reply"
 import { iconTone, type ShownState, statusIcon } from "@/lib/status-icons"
 import { inboxMark, readMark } from "@/lib/tab-dot"
 import { fullTime, relativeTime } from "@/lib/time"
@@ -514,7 +516,19 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           <ul className="text-foreground list-disc pl-5">
             {preview.prs.map((pr) => (
               <li key={pr.number}>
-                #{pr.number} {pr.title}
+                {pr.url ? (
+                  <a
+                    href={pr.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary font-medium underline"
+                  >
+                    #{pr.number}
+                  </a>
+                ) : (
+                  `#${pr.number}`
+                )}{" "}
+                {pr.title}
               </li>
             ))}
           </ul>
@@ -538,7 +552,7 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
         <>
           <p>On Approve, this is deleted:</p>
           <p className={QUOTE}>{preview.what}</p>
-          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+          <TranscriptMarkdown card>{`Why: ${preview.why}`}</TranscriptMarkdown>
         </>
       )
     case "schema":
@@ -761,7 +775,7 @@ export function InboxCard({
   updated: boolean
 }) {
   const queryClient = useQueryClient()
-  const { dispatcher, outbox } = useDashboard()
+  const { allowed, dispatcher, outbox, workers } = useDashboard()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Check it for me sends its note once
@@ -847,10 +861,18 @@ export function InboxCard({
     if (sent && noted && action !== "archive" && action !== "unarchive") setNote("")
   }
   const commentId = useId()
-  // Reply opens a folded card, or an empty box, to its comment box, focused in the click's own frame so a paste sent at once lands there; with words in the box it sends them alone
+  // Playground's live session, whose composer, the page's or the aside's, takes a Reply's hand, as the dashboard mounts it
+  const chat = allowed ? dispatcherOf(workers, dispatcher) : null
+  // Reply with an empty box hands the card's ref to Playground's composer (a secret ask's, or any while that session is down, opens its own box), and with words opens a folded card to them or sends them alone; either box takes focus in the click's own frame, so a paste sent at once lands there
   const onReply = () => {
     const text = note.trim()
-    if (folded || text === "") {
+    const route = replyRoute({ chat: chat !== null, folded, secret: secretAsk, text })
+    if (route === "composer" && chat) {
+      flushSync(() => outbox.reply(chat.name, item.ref))
+      document.getElementById(COMPOSER_ID)?.focus()
+      return
+    }
+    if (route !== "send") {
       // only a folded card is opened, so one open by default still folds once answered
       if (folded) flushSync(() => setToggled(true))
       document.getElementById(commentId)?.focus()
@@ -909,15 +931,15 @@ export function InboxCard({
   ) : choices ? (
     <AskChoices busy={busy} choices={choices} paused={paused} pick={pick} setPick={setPick} />
   ) : secretAsk ? (
-    // masked, never saved by the browser, and a key here stays in the field; Enter submits
+    // masked, never saved by the browser, and a key here stays in the field; Enter submits; enabled while the card is paused, as the comment box is, so a paste in that second lands
     <Input
       aria-label={`Value for ${secretKey}`}
       autoComplete="new-password"
       className={BOX}
       data-1p-ignore
       data-lpignore="true"
-      disabled={busy}
       placeholder="Paste the value"
+      readOnly={pending}
       spellCheck={false}
       type="password"
       value={secret}
@@ -1160,7 +1182,14 @@ export function InboxCard({
           () => void onAnswer("dismiss"),
         )}
       <Reopen open={open} setOpen={setToggled} />
-      <Hint content={held ?? "Reply: your comment alone, to its poster"}>
+      <Hint
+        content={
+          held ??
+          (secretAsk || !chat
+            ? "Reply: your comment alone, to its poster"
+            : "Reply: your comment alone, to its poster, or with the box empty, in your chat")
+        }
+      >
         <Button
           size="icon-sm"
           variant="outline"
@@ -1383,10 +1412,11 @@ export function InboxCard({
           {!folded && (
             // the same gap-2 above it as between the choices
             <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
+              {/* a box turned disabled drops focus to the page, so words dictated or typed as a card above leaves land nowhere: it stays enabled while the card is paused and turns read-only while its answer is on its way */}
               <NoteBox
-                disabled={busy}
                 id={commentId}
                 placeholder={noted ? "Add an optional comment" : "Add a comment"}
+                readOnly={pending}
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
               />
@@ -1404,7 +1434,7 @@ export function InboxCard({
 function NoteBox(
   props: Pick<
     ComponentProps<typeof Textarea>,
-    "disabled" | "id" | "onChange" | "placeholder" | "value"
+    "id" | "onChange" | "placeholder" | "readOnly" | "value"
   >,
 ) {
   const box = useRef<HTMLTextAreaElement>(null)
@@ -1420,7 +1450,16 @@ function NoteBox(
     observer.observe(choice)
     return () => observer.disconnect()
   }, [])
-  return <Textarea ref={box} aria-label="Comment" className={cn("min-h-14 py-2", BOX)} {...props} />
+  return (
+    <Textarea
+      ref={box}
+      aria-label="Comment"
+      className={cn("min-h-14 py-2", BOX)}
+      // a paste lands as the text its event carried, as the composer's does, since the browser's own insert reads the clipboard again, which a dictation app may have put back by then
+      onPaste={(event) => void insertPaste(event)}
+      {...props}
+    />
+  )
 }
 
 // Taking what waits behind the pill glides the rows already in view down from the top while the taken ones fade in above them, this long; nothing moves under reduced motion.
@@ -1633,6 +1672,13 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   // Archive holds what he archived, kept out of items, and what was set aside before Archive kept items open
   const archived = [...(data?.archived ?? []), ...setAside].sort((a, b) => b.ref - a.ref)
   const snoozed = data?.snoozed ?? []
+  // the shelves under the open items, each row's label, icon, cards and place, read by the accordion and by a link to a shelved card
+  const shelves = [
+    ["In progress", RiProgress4Line, progress, "progress"],
+    ["Later", RiZzzLine, snoozed, "snoozed"],
+    ["Archive", RiArchive2Line, archived, "archived"],
+    ["Done", RiCheckDoubleLine, done, "done"],
+  ] as const
   const { held, rows } = pinnedView(shown, order)
   const pill = usePill(held.length)
   // the look before this one and the newest change as this one began: a card changed between the two reads Updated until he looks away and back, while one that changes as he looks shows in place
@@ -1697,6 +1743,14 @@ export function Inbox({ viewing }: { viewing: boolean }) {
       setListOpen(true)
       return false
     }
+    // a card on a shut shelf (an answer's chip names one) opens its shelf first, so the next try finds its row
+    const shelf = shelves.find(([, , list]) =>
+      list.some((item) => needsYouAnchor(item.id) === anchor),
+    )?.[0]
+    if (shelf && !shelvesOpen.includes(shelf)) {
+      setShelvesOpen((keys) => [...keys, shelf])
+      return false
+    }
     const row = document.getElementById(anchor)
     row?.scrollIntoView({ block: "center" })
     // a row in a hidden tab cannot scroll yet, so it is tried again once its tab shows
@@ -1711,12 +1765,9 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     .filter((item) => item.readAt === null && (item.kind === "update" || item.status === "open"))
     .map((item) => item.id)
   const clearing = unreadIds.length
-  const shelfSizes: Record<string, number> = {
-    Archive: archived.length,
-    Done: done.length,
-    "In progress": progress.length,
-    Later: snoozed.length,
-  }
+  const shelfSizes: Record<string, number> = Object.fromEntries(
+    shelves.map(([label, , shelf]) => [label, shelf.length]),
+  )
   const actions = (pill || rows.length > 0) && (
     <div className="absolute top-1.5 right-[calc(var(--pane-x,0px)+1.75rem)] flex items-center gap-2">
       {pill && <NewPill ref={pillButton} count={pill.count} leaving={pill.leaving} onTake={take} />}
@@ -1823,14 +1874,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
           </AccordionContent>
         </AccordionItem>
         <div ref={below}>
-          {(
-            [
-              ["In progress", RiProgress4Line, progress, "progress"],
-              ["Later", RiZzzLine, snoozed, "snoozed"],
-              ["Archive", RiArchive2Line, archived, "archived"],
-              ["Done", RiCheckDoubleLine, done, "done"],
-            ] as const
-          ).map(([label, Icon, shelf, place]) => (
+          {shelves.map(([label, Icon, shelf, place]) => (
             <AccordionItem
               key={label}
               value={label}
