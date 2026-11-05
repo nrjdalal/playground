@@ -428,7 +428,9 @@ describe("writeFixture", () => {
       writeFileSync(file, JSON.stringify({ ...shipped(), origin: "first" }))
       ensureFixture(source)
       const stamp = join(dir, "stamp.json")
-      utimesSync(stamp, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000))
+      // The stamp goes back from its own mtime, the disk's clock, since the clock-ahead pass moves Date.now() and not the disk's.
+      const back = new Date(statSync(stamp).mtimeMs - 60_000)
+      utimesSync(stamp, back, back)
       writeFileSync(file, JSON.stringify({ ...shipped(), origin: "edited" }))
       if (launched) process.env.PLAYGROUND_FIXTURE_LAUNCHED = "1"
       expect(ensureFixture(source)).toBe(dir)
