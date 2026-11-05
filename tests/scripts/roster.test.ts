@@ -503,6 +503,59 @@ describe("eta", () => {
   })
 })
 
+// owner= marks the owner's own ask a session works on, which run-slot.sh ranks after the merge gates; it names the ask, never a person
+describe("owner", () => {
+  test.each([
+    ["a word", "me"],
+    ["a session name", "dispatcher"],
+    ["a bare number", "12"],
+    ["a Linear URL", "https://linear.app/x/issue/AB-1"],
+  ])(
+    "%s is refused by set, report and assign, naming the forms, and writes nothing",
+    async (_case, value) => {
+      for (const args of [
+        ["set", "worker-greed", `owner=${value}`],
+        ["report", "worker-greed", "PR opened", `owner=${value}`],
+        ["assign", "worker-greed", "Export fix", "Fix the export", `owner=${value}`],
+      ]) {
+        const r = await run(configWith([WITH_PR]), args)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain("owner takes the owner's ask it serves")
+        expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
+      }
+    },
+  )
+
+  test("an Inbox item, an issue or PR, or a decision is stored, and an empty owner= clears it", async () => {
+    const config = configWith([WITH_PR])
+    for (const value of [
+      "#i949",
+      "#1057",
+      "https://github.com/acme/app/issues/3",
+      "https://github.com/acme/app/pull/4",
+      "d-0935",
+    ]) {
+      const r = await run(config, ["set", "worker-greed", `owner=${value}`])
+      expect(r.code).toBe(0)
+      expect(agentOf(r.roster, "worker-greed")?.owner).toBe(value)
+    }
+    const cleared = await run(config, ["set", "worker-greed", "owner="])
+    expect(cleared.code).toBe(0)
+    expect(agentOf(cleared.roster, "worker-greed")).not.toHaveProperty("owner")
+  })
+
+  test("assign clears it with the old task's pr", async () => {
+    const r = await run(configWith([{ ...WITH_PR, owner: "#i949" }]), [
+      "assign",
+      "worker-greed",
+      "New chore",
+      "Do the new chore",
+    ])
+    expect(r.code).toBe(0)
+    expect(agentOf(r.roster, "worker-greed")).not.toHaveProperty("owner")
+  })
+})
+
 describe("assign, report and backlog", () => {
   test("assign gives a new task, clearing the old one's pr, branch, repo and report, its kind kept", async () => {
     const r = await run(configWith([WITH_PR]), [
