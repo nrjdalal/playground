@@ -296,60 +296,90 @@ commit-msg:
 })
 
 // 4 Nov: a commit inside a sh -c chain counts as the bare commit would, so one that runs next build still waits as a big run
+// builder, 5 Nov: three review rounds each found one more form that a reading of cd, ~ or env let through, so a chain takes the commit lane only
+// when every step is a form on a closed list, and any other form in a chain that commits counts as a build; each chain starts outside the repo
 describe("a sh -c chain of git steps", () => {
-  // the chain's last git step touches the marker, its script's $0
-  const chain = ["sh", "-c", 'git add . && git commit -m x && git push "$0"']
+  const start = (m: ReturnType<typeof repo>, steps: string) => {
+    const outside = join(m.root, "outside")
+    mkdirSync(outside, { recursive: true })
+    return m.start(
+      "worker-x",
+      {},
+      undefined,
+      ["sh", "-c", steps.replaceAll("ROOT", m.root)],
+      outside,
+    )
+  }
+  // the lane a chain on the closed list takes, read from its start line once it has run
+  const lane = async (m: ReturnType<typeof repo>, steps: string) => {
+    await start(m, steps).p.exited
+    return log(m).match(/ start worker-x \d+ (\S+) waited=/)?.[1]
+  }
 
-  test("staging a web/next file waits as a big run, off run-slot-commit", async () => {
-    const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"])
-    m.hold("run-slot", 3, "big")
-    expect(await m.start("worker-x", {}, undefined, chain).waits()).toBe(true)
-    expect(log(m)).not.toContain("run-slot-commit")
-  })
-
-  test("staging only Markdown takes run-slot-commit at once, beside a big run", async () => {
-    const m = repo({ idle: 30 }, ["docs/notes.md"])
-    m.hold("run-slot", 3, "big")
-    expect(await m.start("worker-x", {}, undefined, chain).ran()).toBe(true)
-    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
-  })
-
-  // round 1 of the review: read against the index alone, a chain whose own add staged a next file took run-slot-commit while its pre-commit built
-  for (const [what, add, unstaged, untracked] of [
-    ["the whole tree", "git add .", ["web/next/src/app/page.tsx"], []],
-    ["a path it names", "git add web/next/src/app/page.tsx", ["web/next/src/app/page.tsx"], []],
-    ["an untracked file, with -A", "git add -A", [], ["web/next/src/app/new.tsx"]],
-  ] as const)
-    test(`a chain whose own add stages a web/next file, ${what}, waits as a big run`, async () => {
-      const m = repo({ idle: 30 }, [], [...unstaged], LEFTHOOK, [...untracked])
+  test("a chain whose every step is on the closed list takes run-slot-commit beside a big run", async () => {
+    for (const steps of [
+      "cd ROOT && git add . && git commit -m x && git push origin",
+      "git -C ROOT add . && git -C ROOT commit -m x && git -C ROOT push origin",
+      "bun run precommit:light && cd ROOT && git commit -m x",
+    ]) {
+      const m = repo({ idle: 30 }, ["docs/notes.md"])
       m.hold("run-slot", 3, "big")
-      const own = ["sh", "-c", `${add} && git commit -m x && git push "$0"`]
-      expect(await m.start("worker-x", {}, undefined, own).waits()).toBe(true)
+      expect([steps, await lane(m, steps)]).toEqual([steps, "run-slot-commit"])
+    }
+  })
+
+  // the first three rows are the forms review round 3 measured slipping through
+  for (const steps of [
+    "cd ~ && git add . && git commit -m x",
+    "cd $HOME && git add . && git commit -m x",
+    "cd ROOT && env A=1 git add . && env A=1 git commit -m x",
+    "cd .. && git commit -m x",
+    "cd - && git commit -m x",
+    "cd `echo ROOT` && git commit -m x",
+    "git add . && git commit -m x",
+    "git -c user.name=x -C ROOT commit -m x",
+    "cd ROOT && bun run test && git commit -m x",
+  ])
+    test(`a chain that commits with a step off the list counts as a build: ${steps}`, async () => {
+      const m = repo({ idle: 30 }, ["docs/notes.md"])
+      m.hold("run-slot", 3, "big")
+      expect(await start(m, steps).waits()).toBe(true)
       expect(log(m)).not.toContain("run-slot-commit")
     })
 
-  // round 2 of the review: a cd before the add and commit was ignored, so a chain started outside the repo read the folder it started in
-  for (const [what, to] of [
-    ["an absolute path", (root: string) => root],
-    ["a relative one", () => ".."],
+  // on the list, a chain still builds when its commit would: review round 1 found a chain whose own add staged a next file read against the index alone
+  for (const [what, add, staged, unstaged, untracked] of [
+    ["staged before the run", "git add .", ["web/next/src/app/page.tsx"], [], []],
+    [
+      "staged by the chain's add of the whole tree",
+      "git add .",
+      [],
+      ["web/next/src/app/page.tsx"],
+      [],
+    ],
+    [
+      "staged by an add naming its path",
+      "git add web/next/src/app/page.tsx",
+      [],
+      ["web/next/src/app/page.tsx"],
+      [],
+    ],
+    ["untracked, staged by add -A", "git add -A", [], [], ["web/next/src/app/new.tsx"]],
   ] as const)
-    test(`a chain started outside the repo that cds in by ${what} reads the repo's files there`, async () => {
-      const m = repo({ idle: 30 }, [], ["web/next/src/app/page.tsx"])
-      const outside = join(m.root, "outside")
-      mkdirSync(outside)
+    test(`a chain on the list whose commit takes a web/next file ${what} waits as a big run`, async () => {
+      const m = repo({ idle: 30 }, [...staged], [...unstaged], LEFTHOOK, [...untracked])
       m.hold("run-slot", 3, "big")
-      const own = ["sh", "-c", `cd ${to(m.root)} && git add . && git commit -m x && git push "$0"`]
-      expect(await m.start("worker-x", {}, undefined, own, outside).waits()).toBe(true)
+      expect(
+        await start(m, `cd ROOT && ${add} && git commit -m x && git push origin`).waits(),
+      ).toBe(true)
       expect(log(m)).not.toContain("run-slot-commit")
     })
 
   test("while one whose add names only a Markdown file takes run-slot-commit", async () => {
     const m = repo({ idle: 30 }, [], ["docs/notes.md", "web/next/src/app/page.tsx"])
-    // the fake git's add touches its last word, so the folder it names must exist
-    mkdirSync(join(m.root, "docs"))
     m.hold("run-slot", 3, "big")
-    const own = ["sh", "-c", 'git add docs/notes.md && git commit -m x && git push "$0"']
-    expect(await m.start("worker-x", {}, undefined, own).ran()).toBe(true)
-    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
+    expect(await lane(m, "cd ROOT && git add docs/notes.md && git commit -m x")).toBe(
+      "run-slot-commit",
+    )
   })
 })

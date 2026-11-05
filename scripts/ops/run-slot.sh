@@ -384,23 +384,54 @@ git_verb() {
     esac
   done
 }
-# a chain's lane: `commit` when every step is a cd or a git commit, push or add and one commits or pushes, so it ends in seconds as a bare commit does
-# (4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue); else, for a chain that commits beside a
-# heavier step, `general <that step>`, which run-slot says, so its worker can run the commit on its own; else nothing
-chain_lane() {
-  local line verb words commits="" heavier=""
+# a word sh would leave as written: no $, backquote, ~ or glob, so the word run-slot reads is the word the command gets
+plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['*) return 1 ;; esac; done; }
+# an absolute folder in a git repo, written plain
+abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
+# Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form
+# a reading of cd, ~ or env let through): a `cd` to an absolute folder in a repo, a git add, commit or push after it or as `git -C <that kind of
+# folder>`, and `bun run precommit:light`, each word plain. CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a
+# line; else CHAIN_BAD holds the first step outside the list. Any other form, an env prefix, ~, $HOME, a backquote, cd -, a relative folder or
+# no folder at all, is outside it, with no attempt to resolve it.
+CHAIN_SAFE="" CHAIN_BAD=""
+chain_safe() {
+  local line words cdir="" folder verb rest=()
+  CHAIN_SAFE="" CHAIN_BAD=""
   while IFS= read -r line; do
     IFS=$'\x1f' read -ra words <<< "$line"
     [ ${#words[@]} -gt 0 ] || continue
-    verb=$(git_verb "${words[@]}")
-    case "$verb" in
-      commit|push) commits=1 ;;
-      add) ;;
-      *) [ "${words[0]}" = cd ] || { [ -z "$heavier" ] && heavier=${line//$'\x1f'/ }; } ;;
+    CHAIN_BAD=${line//$'\x1f'/ }
+    case "${words[0]}" in
+      cd) [ ${#words[@]} -eq 2 ] && abs_in_repo "${words[1]}" || return 1; cdir=${words[1]}; continue ;;
+      bun) [ "${words[1]:-}" = run ] && [ "${words[2]:-}" = precommit:light ] && plain "${words[@]}" || return 1; continue ;;
+      git) ;;
+      *) return 1 ;;
     esac
+    plain "${words[@]}" || return 1
+    if [ "${words[1]:-}" = -C ]; then
+      abs_in_repo "${words[2]:-}" || return 1
+      folder=${words[2]} verb=${words[3]:-} rest=("${words[@]:4}")
+    else
+      [ -n "$cdir" ] || return 1
+      folder=$cdir verb=${words[1]:-} rest=("${words[@]:2}")
+    fi
+    case "$verb" in add|commit|push) ;; *) return 1 ;; esac
+    CHAIN_SAFE+=$(printf '%s\x1f' git -C "$folder" "$verb" ${rest[@]+"${rest[@]}"})$'\n'
+  done < <(chain_steps "$@")
+  CHAIN_BAD=""
+}
+# a chain's lane: `commit` when it commits or pushes and chain_safe takes every step, so it ends in seconds as a bare commit does (4 Nov: a
+# docs-only commit and push inside sh -c waited about 45 minutes in the general queue); `general <step>` for one that commits or pushes with a
+# step outside that list, which run-slot says, so its worker can run the commit on its own; else nothing
+chain_lane() {
+  local line words commits=""
+  while IFS= read -r line; do
+    IFS=$'\x1f' read -ra words <<< "$line"
+    [ ${#words[@]} -gt 0 ] || continue
+    case "$(git_verb "${words[@]}")" in commit|push) commits=1 ;; esac
   done < <(chain_steps "$@")
   [ -n "$commits" ] || return
-  if [ -z "$heavier" ]; then echo commit; else echo "general $heavier"; fi
+  if chain_safe "$@"; then echo commit; else echo "general $CHAIN_BAD"; fi
 }
 # Quick slots, outside the queue, one holder each: a plain git commit (its pre-commit build, about 17s) takes run-slot-commit (builder,
 # 13 Oct: five commits waited in a fifteen-deep queue; a commit with a longer hook goes through the queue as <who> -- bash -c '...'), and a
@@ -497,28 +528,30 @@ chain_add() {
 }
 # a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a one it will stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
-  local a c f files dir="" commit="" all="" state=lead paths=() line words first="" cdir="" t
-  # a chain builds when one of its git commit steps would, read as that commit with the files the chain's git add steps before it stage (the first word found outside a $( ), since bash 3.2 misparses a case inside one)
+  local a c f files dir="" commit="" all="" state=lead paths=() line words first=""
+  # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with the
+  # files the chain's git add steps before it stage (the first word is found outside a $( ), since bash 3.2 misparses a case inside one)
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
   case "$(basename -- "$first")" in
     sh|bash|zsh)
-      CHAIN_ADD_ALL="" CHAIN_ADD=()
       while IFS= read -r line; do
         IFS=$'\x1f' read -ra words <<< "$line"
-        [ ${#words[@]} -gt 0 ] || continue
-        # a cd step sets the folder its later git steps are read in, relative to the one before, as git -C does
-        if [ "${words[0]}" = cd ]; then
-          t=${words[${#words[@]}-1]}; [ ${#words[@]} -gt 1 ] || t=$HOME
-          case "$t" in /*) cdir=$t ;; *) cdir=${cdir:-.}/$t ;; esac
-          continue
-        fi
-        [ -n "$cdir" ] && [ "$(basename -- "${words[0]}")" = git ] && words=("${words[0]}" -C "$cdir" "${words[@]:1}")
-        case "$(git_verb "${words[@]}")" in
-          add) chain_add "${words[@]}" ;;
-          commit) heavy_build "${words[@]}" && { CHAIN_ADD_ALL="" CHAIN_ADD=(); return 0; } ;;
-        esac
+        [ ${#words[@]} -gt 0 ] && [ "$(git_verb "${words[@]}")" = commit ] && commit=1
       done < <(chain_steps "$@")
-      CHAIN_ADD_ALL="" CHAIN_ADD=() ;;
+      if [ -n "$commit" ]; then
+        chain_safe "$@" || return 0
+        CHAIN_ADD_ALL="" CHAIN_ADD=()
+        while IFS= read -r line; do
+          IFS=$'\x1f' read -ra words <<< "$line"
+          [ ${#words[@]} -gt 0 ] || continue
+          case "${words[3]}" in
+            add) chain_add "${words[@]}" ;;
+            commit) heavy_build "${words[@]}" && { CHAIN_ADD_ALL="" CHAIN_ADD=(); return 0; } ;;
+          esac
+        done <<< "$CHAIN_SAFE"
+        CHAIN_ADD_ALL="" CHAIN_ADD=()
+        return 1
+      fi ;;
   esac
   # commit-slot.ts's build step (`bun run build`) alone, never its type checks, which build nothing
   case "$WHO" in commit-*) for a in "$@"; do [ "$a" = build ] && commit=1; done ;; esac
@@ -586,8 +619,8 @@ if [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
   WHY=$(chain_lane "$@")
   case "$WHY" in
     "general "*)
-      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since it holds \`${WHY#general }\` beside its git commit; run the commit on its own to take the commit lane" >&2
-      rlog why "general: holds \`${WHY#general }\`" ;;
+      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since \`${WHY#general }\` is not a form the commit lane takes (a cd or git -C to an absolute folder in the repo, git add, commit or push there, bun run precommit:light); run the commit as one of those to take the commit lane" >&2
+      rlog why "general: \`${WHY#general }\` is outside the commit lane's forms" ;;
   esac
 fi
 read -r SIZE UNITS <<EOF

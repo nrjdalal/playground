@@ -155,10 +155,16 @@ describe("a quick run takes its own slot past a full queue", () => {
     const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
     m.hold("run-slot", 3, "big")
     if (as.waiter) m.ticket(1, "worker-w", "s2 23 3 big")
+    // each fake touches its last word; git answers rev-parse, as a repo's folder does
     for (const bin of ["bun", "git"]) {
-      writeFileSync(join(m.bin, bin), '#!/bin/bash\ntouch "${@: -1}"\n')
+      writeFileSync(
+        join(m.bin, bin),
+        '#!/bin/bash\ncase " $* " in *" rev-parse "*) exit 0 ;; esac\ntouch "${@: -1}"\n',
+      )
       chmodSync(join(m.bin, bin), 0o755)
     }
+    // ROOT in a word stands for the machine's folder
+    argv = argv.map((a) => a.replaceAll("ROOT", m.root))
     // the marker is the line's last word, a test file under the repo's tests/ folder, since only such a word counts toward the quick rule's files
     mkdirSync(join(m.root, "tests"))
     const marker = "tests/a.test.ts"
@@ -305,26 +311,28 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(await quick(["bun", "run", "build"], [], { ...STEP, who: "worker-q" })).toBe(false)
   })
 
-  // 4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue, while a bare git commit takes the commit lane within a minute; the marker is the script's $0, which the last git step touches, and the fake git touches each step's last word, so the add stages `.`
-  test("a sh -c chain of git add, commit and push takes run-slot-commit", async () => {
-    expect(
-      await quick(["sh", "-c", 'git add . && git commit -m "a b" && git push "$0"'], [], {
+  // 4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue, while a bare git commit takes the commit lane within a minute; these read the slot each took, since a chain's own steps never touch the marker
+  test("a sh -c chain of a cd to the repo, then git add, commit and push, takes run-slot-commit", async () => {
+    await quick(
+      ["sh", "-c", `cd ROOT && git add . && git commit -m "a b" && git push origin`],
+      [],
+      {
         waiter: true,
-      }),
-    ).toBe(true)
+      },
+    )
     expect(took).toBe("run-slot-commit")
   })
 
-  // a login shell's profile puts the system's git ahead of the fake one, so this reads the slot it took, not the marker
-  test("and so does a bash -lc chain that starts with cd", async () => {
-    await quick(["bash", "-lc", 'cd . && git commit -m x; git push "$0"'])
+  // a login shell's profile puts the system's git ahead of the fake one, which the slot it took does not depend on
+  test("and so does a bash -lc chain of git -C steps", async () => {
+    await quick(["bash", "-lc", `git -C ROOT commit -m x; git -C ROOT push origin`])
     expect(took).toBe("run-slot-commit")
   })
 
   test("but a chain that commits beside a test goes through the queue and says why", async () => {
-    expect(await quick(["bash", "-c", 'bun run test && git commit -m x "$0"'])).toBe(false)
+    expect(await quick(["bash", "-c", `cd ROOT && bun run test && git commit -m x`])).toBe(false)
     expect(said).toContain(
-      "run-slot.sh: this chain goes through the general queue, not the commit lane, since it holds `bun run test` beside its git commit",
+      "run-slot.sh: this chain goes through the general queue, not the commit lane, since `bun run test` is not a form the commit lane takes",
     )
   })
 
