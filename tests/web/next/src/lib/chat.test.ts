@@ -19,6 +19,7 @@ import {
 } from "../../../../../web/next/src/lib/chat"
 import { historyOf, withOlder, withSteps } from "../../../../../web/next/src/lib/dashboard"
 import { UNSENT_MARKER, type OutboxMessage } from "../../../../../web/next/src/lib/outbox"
+import { READ_ONLY_LINE } from "../../../../../web/next/src/lib/relay"
 
 const step = (fields: Partial<Entry> & Pick<Entry, "id" | "kind">): Entry => ({
   at: "2026-10-06T10:00:00.000Z",
@@ -716,5 +717,48 @@ describe("transcriptFor", () => {
 
   test("an empty slot naming the session the other slot reads fills no chat", () => {
     expect(transcriptFor({ entries: [], sessionId: null, sessionName: "dispatcher" })).toBeNull()
+  })
+})
+
+describe("the hosted build's outbox", () => {
+  // the hosted relay carries reads alone, so a message read "retry 3 · <session> is not live" and retried with no end
+  test("fails a new message at once with the read-only line, sends nothing and never retries it", async () => {
+    const { calls, send } = fakeSend()
+    const chats = new DashboardChats({ label: (name) => name, readOnly: true, send })
+    chats.post("dispatcher", { attachments: [], text: "hello" })
+    await settle()
+    const [dropped] = chats.outbox()
+    expect(dropped?.state).toBe("failed")
+    expect(dropped?.reason).toBe(READ_ONLY_LINE)
+    chats.retry("dispatcher", dropped!.id)
+    await settle()
+    expect(calls).toEqual([])
+    expect(chats.outbox().map((m) => m.state)).toEqual(["failed"])
+  })
+
+  test("drops what a reloaded tab still held, with the same reason, and sends none of it", async () => {
+    const kept = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => void kept.set(key, value),
+    }
+    const before = fakeSend()
+    const page = new DashboardChats({ label: (name) => name, send: before.send, storage })
+    page.resume()
+    page.post("dispatcher", { attachments: [], text: "held" })
+    await settle()
+    before.calls[0]?.resolve(refused("NETWORK_ERROR"))
+    await settle()
+    const after = fakeSend()
+    const hosted = new DashboardChats({
+      label: (name) => name,
+      readOnly: true,
+      send: after.send,
+      storage,
+    })
+    hosted.resume()
+    await settle()
+    expect(after.calls).toEqual([])
+    expect(hosted.outbox().map((m) => [m.state, m.reason])).toEqual([["failed", READ_ONLY_LINE]])
   })
 })

@@ -23,7 +23,7 @@ import STATUSES from "./roster-statuses.json"
 export const USAGE = `Usage:
   roster.ts set <name> key=value [key=value ...]    (creates the agent if missing, its role from kind= or its name; a new one needs task=)
   roster.ts report <name> <text> [key=value ...]    (sets lastReport, stamps lastReportAt; a new one needs task=)
-  roster.ts assign <name> <title> <task> [k=v ...]  (new task, or a checker's next PR with worker= pr=, which joins its prs list; clears pr/branch/repo/lastReport)
+  roster.ts assign <name> <title> <task> [k=v ...]  (new task, or a checker's next PR with worker= pr=, which joins its prs list; clears pr/branch/repo/owner/lastReport)
   roster.ts backlog <text>
   roster.ts backlog-done <index> <issue>            (marks the 0-based entry filed: "[#<issue>] <text>")
   roster.ts backfill                                (gives each entry with no kind the one its name's prefix gives)
@@ -190,11 +190,25 @@ function checkEta(pairs: [string, string][]): void {
   }
 }
 
+// owner= names the owner's own ask a session works on, which run-slot.sh ranks after the merge gates: an Inbox item, an issue, a PR or a decision, never a person. An empty owner= clears it.
+const OWNER_REF =
+  /^(?:#i?\d+|PG-\d+|d-\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)$/
+
+function checkOwner(pairs: [string, string][]): void {
+  const owner = pairs.find(([k, v]) => k === "owner" && v !== "" && !OWNER_REF.test(v))
+  if (owner)
+    throw new Refusal(
+      `roster.ts: owner takes the owner's ask it serves, #i<n> (an Inbox item), PG-<n>, #<n> or an issue or PR URL, or d-<n> (a decision), not ${owner[1]}`,
+      2,
+    )
+}
+
 // Every key=value check set, report and assign share.
 function checkPairs(name: string, pairs: [string, string][]): void {
   checkKind(pairs)
   checkStatus(name, pairs)
   checkEta(pairs)
+  checkOwner(pairs)
 }
 
 // A checker moved by halves keeps its old worker or pr, and the sidebar nests it under that worker's ended row.
@@ -284,7 +298,16 @@ async function main(argv: string[]): Promise<void> {
     const checker = ["reviewer", "tester"].includes(kindOf(entry.name, entry.kind) ?? "")
     const served =
       checker && entry.pr && !pairs.some(([k]) => PRS_KEYS.has(k)) ? [entry.pr as string] : []
-    for (const k of ["pr", "branch", "repo", "lastReport", "lastReportAt", "eta", "ticket"])
+    for (const k of [
+      "pr",
+      "branch",
+      "repo",
+      "lastReport",
+      "lastReportAt",
+      "eta",
+      "ticket",
+      "owner",
+    ])
       delete entry[k]
     Object.assign(entry, { status: "working", task })
     apply(entry, [["title", title], ...pairs], factoryRepo)
