@@ -1,8 +1,6 @@
 import type { InferResponseType } from "hono/client"
 
-import { apiClient } from "@/lib/api/client"
-import { config } from "@/lib/config"
-import { refusalOf } from "@/lib/onboard"
+import { apiClient, unwrap } from "@/lib/api/client"
 import { EFFORT_LABELS, isEffort } from "@/lib/session-setting"
 
 export type TemplateRow = InferResponseType<
@@ -12,24 +10,19 @@ export type TemplateRow = InferResponseType<
 
 export const TEMPLATES_QUERY_KEY = ["session-templates"] as const
 
-const TEMPLATES_URL = `${config.api.url}/api/v1/sessions/templates`
-
 export async function readTemplates(): Promise<TemplateRow[]> {
-  const response = await fetch(TEMPLATES_URL, { credentials: "include" })
-  const body = await response.json().catch(() => null)
-  if (!response.ok) throw new Error(refusalOf(body, response.status))
-  return (body as { data: TemplateRow[] }).data
+  const { data, error } = await unwrap(apiClient.v1.sessions.templates.$get())
+  if (error) throw new Error(error.message)
+  return data
 }
 
 // Starts a template's session, or throws the API's words whole: spawn.sh's last line on a refusal.
 export async function startTemplate(id: string): Promise<string> {
-  const response = await fetch(`${TEMPLATES_URL}/${encodeURIComponent(id)}/start`, {
-    credentials: "include",
-    method: "POST",
-  })
-  const body = await response.json().catch(() => null)
-  if (!response.ok) throw new Error(refusalOf(body, response.status))
-  return (body as { data: { name: string } }).data.name
+  const { data, error } = await unwrap(
+    apiClient.v1.sessions.templates[":id"].start.$post({ param: { id } }),
+  )
+  if (error) throw new Error(error.message)
+  return data.name
 }
 
 // Pure: a picker row as drawn: its label, then its backend or model and effort, muted, and the reason it is disabled, the API's (no second account, no brief), else a dispatcher template's while the second dispatcher already runs; null when it can start.
