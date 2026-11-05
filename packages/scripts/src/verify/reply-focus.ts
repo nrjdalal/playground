@@ -45,9 +45,12 @@ const settleCard = (id: string): string | null => {
   return run.exitCode === 0 ? null : lastLine(run.stderr) || `exit ${run.exitCode}`
 }
 
+// The card's Reply button, by the aria-label inbox.tsx gives it.
+export const replyButton = (tag: string): string => `[aria-label="Reply to ${tag}"]`
+
 // Clicks the posted card's own Reply, its box empty, and reads where focus is in the same task, before any frame runs: "comment" for that card's own box.
 const click = (tag: string) =>
-  `(() => { const button = document.querySelector(${JSON.stringify(`[aria-label="Reply to ${tag}"]`)}); if (!button) return "no card"; button.click(); const active = document.activeElement; const card = button.closest("[role=listitem]"); if (active?.getAttribute("aria-label") === "Comment" && card?.contains(active)) return "comment"; return active?.id || active?.getAttribute("data-slot") || active?.tagName.toLowerCase() || null })()`
+  `(() => { const button = document.querySelector(${JSON.stringify(replyButton(tag))}); if (!button) return "no card"; button.click(); const active = document.activeElement; const card = button.closest("[role=listitem]"); if (active?.getAttribute("aria-label") === "Comment" && card?.contains(active)) return "comment"; return active?.id || active?.getAttribute("data-slot") || active?.tagName.toLowerCase() || null })()`
 
 // At 1280x800, opens /dashboard, waits for the card's Reply, clicks it and reads where focus is at once.
 export const clickFocus = async (
@@ -58,7 +61,7 @@ export const clickFocus = async (
 ): Promise<Result> => {
   await browser.viewport({ height: 800, width: 1280 })
   await browser.visit(`${web}/dashboard`)
-  await browser.run("wait", `[aria-label="Reply to ${tag}"]`)
+  await browser.run("wait", replyButton(tag))
   return focusResult(check, await browser.eval<string | null>(click(tag)))
 }
 

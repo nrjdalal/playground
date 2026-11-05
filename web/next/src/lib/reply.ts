@@ -1,7 +1,7 @@
 import type { InboxItem } from "@api/hono"
 import { useSyncExternalStore } from "react"
 
-// The inbox item Playground's composer is replying to, named in its words as re #iN; the list marks it until it is sent.
+// The inbox item Playground's composer is replying to, named in its words as re #iN; its card's band reads Replying until it is sent.
 export type Reply = Pick<InboxItem, "ref" | "title">
 
 // One value React reads and the composer sets whenever the item its words name changes, notifying only on a change.

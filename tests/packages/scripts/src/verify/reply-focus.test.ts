@@ -1,10 +1,18 @@
 import { describe, expect, test } from "bun:test"
 
-import { clickFocus, focusResult } from "../../../../../packages/scripts/src/verify/reply-focus"
+import {
+  clickFocus,
+  focusResult,
+  replyButton,
+} from "../../../../../packages/scripts/src/verify/reply-focus"
 
 describe("focusResult", () => {
   test("passes focus in the card's own box the moment Reply is clicked", () => {
     expect(focusResult("f", "comment").ok).toBe(true)
+  })
+
+  test("finds the card's Reply by the aria-label the Inbox gives it", () => {
+    expect(replyButton("#i1")).toBe('[aria-label="Reply to #i1"]')
   })
 
   test("fails focus left on the button, where a paste sent at once goes (PG-1015)", () => {

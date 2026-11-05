@@ -241,7 +241,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Later: push an open decision or draft, or an update, out of the inbox and its count until a time, when it asks again, taking an archived one off the Archived shelf; answering it or replying to it in chat wakes it at once",
+        "Later: push an open decision or draft, or an update, out of the inbox and its count until a time, when it asks again, taking an archived one off the Archive shelf; answering it or replying to it in chat wakes it at once",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
