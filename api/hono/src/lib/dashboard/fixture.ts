@@ -46,6 +46,9 @@ export const DASHBOARD_RULES: Record<DashboardRule, string> = {
 // PLAYGROUND_FIXTURE=shipped names the fixture that ships in api/hono/src/fixtures/dashboard.json.
 export const SHIPPED_FIXTURE = "shipped"
 
+// The shipped fixture's own file, whose mtime tells a copy written from it that it changed.
+const SHIPPED_PATH = join(import.meta.dir, "../../fixtures/dashboard.json")
+
 const yes = (value: string | undefined): boolean => /^(1|true)$/i.test(value?.trim() ?? "")
 
 const set = (value: string | undefined): boolean => Boolean(value?.trim())
@@ -472,14 +475,19 @@ export function ensureFixture(source: DashboardSource = currentSource()): string
     )
   }
   const dir = fixtureDir()
-  if (existsSync(join(dir, STAMP))) return dir
+  const stamp = join(dir, STAMP)
+  const launched = yes(process.env.PLAYGROUND_FIXTURE_LAUNCHED)
+  // A copy is written again only when its source file changed after the copy was stamped, read from disk so the edit reaches it; a launched stack's copy is the launcher's, kept with its own writes.
+  const from = source.file ?? SHIPPED_PATH
+  const newer = (): boolean => existsSync(from) && statSync(from).mtimeMs > statSync(stamp).mtimeMs
+  if (existsSync(stamp) && (launched || !newer())) return dir
   // The launcher wrote this stack's fixture and drops it as the stack stops, so a process that outlives the stop (the API until its group is killed) finds it gone and writes nothing back.
-  if (yes(process.env.PLAYGROUND_FIXTURE_LAUNCHED)) {
+  if (launched) {
     throw new Error(
       `the stack's fixture at ${dir} went when it stopped; start it again with bun run dev`,
     )
   }
-  const loaded = loadFixture(source.file)
+  const loaded = loadFixture(existsSync(stamp) ? from : source.file)
   if (!loaded.ok) throw new Error(loaded.error)
   writeFixture(loaded.fixture, dir, trashRoots())
   return dir

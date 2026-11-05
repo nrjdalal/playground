@@ -9,6 +9,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
@@ -409,6 +410,46 @@ describe("writeFixture", () => {
         else process.env[key] = value
       }
     }
+  })
+
+  // A worker's run on #665 read an old copy: ensureFixture returned once a stamp existed, so an edit to the fixture's source never reached the next run.
+  const edited = (launched: boolean) => {
+    const root = scratch("fixture-newer")
+    const dir = join(root, "fixture")
+    const file = join(root, "source.json")
+    const source = { file, kind: "fixture", rule: "fixture" } as const
+    const saved = {
+      dir: process.env.PLAYGROUND_FIXTURE_DIR,
+      launched: process.env.PLAYGROUND_FIXTURE_LAUNCHED,
+    }
+    process.env.PLAYGROUND_FIXTURE_DIR = dir
+    delete process.env.PLAYGROUND_FIXTURE_LAUNCHED
+    try {
+      writeFileSync(file, JSON.stringify({ ...shipped(), origin: "first" }))
+      ensureFixture(source)
+      const stamp = join(dir, "stamp.json")
+      utimesSync(stamp, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000))
+      writeFileSync(file, JSON.stringify({ ...shipped(), origin: "edited" }))
+      if (launched) process.env.PLAYGROUND_FIXTURE_LAUNCHED = "1"
+      expect(ensureFixture(source)).toBe(dir)
+      return JSON.parse(readFileSync(join(dir, "machine.json"), "utf8")).origin
+    } finally {
+      for (const [key, value] of [
+        ["PLAYGROUND_FIXTURE_DIR", saved.dir],
+        ["PLAYGROUND_FIXTURE_LAUNCHED", saved.launched],
+      ] as const) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  }
+
+  test("a source edited after its copy was stamped is written into the copy on the next call", () => {
+    expect(edited(false)).toBe("edited")
+  })
+
+  test("a launched stack keeps its copy after the same edit, since the launcher owns it", () => {
+    expect(edited(true)).toBe("first")
   })
 
   test("replaces its own folder whole, so a stack starts from the fixture again", () => {
