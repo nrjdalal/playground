@@ -37,7 +37,7 @@ export async function answerItem(
   return data
 }
 
-// The Archived shelf's Dismiss all: each card's own Dismiss in turn, so one that still waits is set aside and anything else marked dismissed, each poster told as that card's own click tells it.
+// The Archive shelf's Dismiss all: each card's own Dismiss in turn, so one that still waits is set aside and anything else marked dismissed, each poster told as that card's own click tells it.
 export async function dismissEach(items: Pick<InboxItem, "id" | "updatedAt">[]) {
   for (const item of items) await answerItem(item, "dismiss")
 }
@@ -73,7 +73,7 @@ export async function dismissItems(ids: string[], tell?: true) {
   return data
 }
 
-// Later: puts an open decision or draft, or an update, away until a time, when it asks again; it leaves the list and the count until then, and the Archived shelf when it was there.
+// Later: puts an open decision or draft, or an update, away until a time, when it asks again; it leaves the list and the count until then, and the Archive shelf when it was there.
 export async function scheduleItem(id: string, at: string) {
   const { data, error } = await unwrap(
     apiClient.v1.inbox[":id"].schedule.$post({ json: { at }, param: { id } }),
@@ -325,7 +325,7 @@ export const needsYou = (item: InboxItem): boolean =>
       ? item.readAt === null
       : (item.status === "open" && chosen(item)?.choice !== "replied") || sendFailed(item)
 
-// Pure: whether a card shows folded until he opens it: every card but one that needs an answer now, so a snoozed ask folds until its time and a card that rises to needing him shows open.
+// Pure: whether a card shows folded until he opens it: every card but one that needs an answer now, so an ask put away with Later folds until its time and a card that rises to needing him shows open.
 export const foldsByDefault = (item: InboxItem, now: number): boolean =>
   !needsYou(item) ||
   (item.kind !== "update" &&
@@ -373,7 +373,7 @@ export const inboxWaiting = (items: InboxItem[]): string[] =>
 const working = (item: InboxItem): boolean =>
   !answeredDismissedAt(item) && itemState(item) === "sending"
 
-// Pure: whether a card stays in the list: it asks something of him; he only commented on it, so he still owes its answer while its poster reads the comment; or it is an update he read and has not sent to Done, dismissed or seen resolved, read since CLOCKS_STOPPED_AT, one woken from Snooze included.
+// Pure: whether a card stays in the list: it asks something of him; he only commented on it, so he still owes its answer while its poster reads the comment; or it is an update he read and has not sent to Done, dismissed or seen resolved, read since CLOCKS_STOPPED_AT, one woken from Later included.
 const listed = (item: InboxItem): boolean =>
   needsYou(item) ||
   (reopenable(item) && !answeredDismissedAt(item)) ||
@@ -393,7 +393,7 @@ const doneAt = (item: InboxItem): number => {
   return Date.parse(chosen(item)?.at ?? item.updatedAt)
 }
 
-// Pure: the list as shown, moved by a verb alone, never a clock: the items that ask something of him, the cards he only commented on and the updates he has not dismissed, in the API's order; In progress, the answers their posters are carrying out, newest first; Archived, what he set aside to talk about later (Archive's `cleared`) and has not dismissed, newest first; and Done, the rest, the newest first. Nothing is deleted.
+// Pure: the list as shown, moved by a verb alone, never a clock: the items that ask something of him, the cards he only commented on and the updates he has not dismissed, in the API's order; In progress, the answers their posters are carrying out, newest first; Archive, what he set aside to talk about later (Archive's `cleared`) and has not dismissed, newest first; and Done, the rest, the newest first. Nothing is deleted.
 export function inboxView(items: InboxItem[]): {
   archived: InboxItem[]
   done: InboxItem[]

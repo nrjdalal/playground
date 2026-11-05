@@ -24,7 +24,7 @@ In chat, step 2's picture is a fenced block (an ASCII flow or a diff; a work sta
 Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, and you resolve an alert update that has fixed itself.
 Every other update stays editable until the owner presses Done or Dismiss, as an ask stays editable, answered or not, until it closes, so a card you will replace (a mock's first version) or a progress you carry takes `bun run ask edit` before that.
 
-Beside its choices, every card offers the owner five verbs (asks.md's footer line): ✓ Seen, Snooze and Archive change only his view, so your item keeps waiting and nothing is typed to you; ✓✓ Done sends an update or an answered card to Done; and Dismiss sends any card to Done, typing you `set-aside` while it still waits, so you hold only its new step, and `dismiss`, drop it, once answered.
+Beside its choices, every card offers the owner five verbs (asks.md's footer line): ✓ Seen, Later and Archive change only his view, so your item keeps waiting and nothing is typed to you; ✓✓ Done sends an update or an answered card to Done; and Dismiss sends any card to Done, typing you `set-aside` while it still waits, so you hold only its new step, and `dismiss`, drop it, once answered.
 On an update, Done types you `done` and Dismiss `dismiss`: post a new card for more, since `ask edit` refuses this one.
 
 ## Steps

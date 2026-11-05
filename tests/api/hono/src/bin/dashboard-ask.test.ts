@@ -504,11 +504,11 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
   })
 
   // a chat-replied item the owner had moved to Done kept its open status, so it still listed as open
-  test("open lists a snoozed item and one replied to in chat until it moves to Done, and never an update", async () => {
+  test("open lists an item put away with Later and one replied to in chat until it moves to Done, and never an update", async () => {
     const snoozed = await post({
       ...DECISION,
       from: "worker-open-c",
-      title: "Ship the snoozed one?",
+      title: "Ship the one put away?",
     })
     const replied = await post({
       ...DECISION,
