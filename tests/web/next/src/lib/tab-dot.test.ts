@@ -16,6 +16,7 @@ type Item = Parameters<typeof newInInbox>[0][number]
 
 const item = (createdAt: string, fields: Record<string, unknown> = {}): Item =>
   ({
+    answer: null,
     createdAt,
     id: `i-${createdAt}`,
     kind: "decision",

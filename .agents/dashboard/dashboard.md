@@ -7,6 +7,7 @@
   the Assistant, the session the roster seats under the `assistant` kind whatever its name (`seatOf`, marked `Worker.assistant` by `rosterFacts` in `api/hono/src/lib/dashboard/workers.ts`), has one the same way, opened from its row under Orchestrators, its heading and box reading Assistant (`chatLabel`, `hasChat`);
   Needs you's inbox count stays on the primary's (`isPrimary` in `web/next/src/lib/dashboard.ts`).
   A link with no `?worker=` and a `#needs-you-<id>` anchor goes on to the session or app page that holds that card (`cardHref` in `web/next/src/lib/needs-you.ts`), unless your chat holds it.
+  In every chat, a message another session sent folds into a closed Received from row, as a tool call does (messages.md), so the stream reads as you and the session you talk to.
   Every other session's view stays read-only, but for the session the dashboard hosts on the Agent SDK (`probe-sdk`, `Worker.hosted`), whose view has the composer too (messages.md), and the Assistant's.
   `POST /api/v1/dashboard/dispatcher/start` (`startDispatcher()` in `api/hono/src/lib/dashboard/dispatcher-start.ts`) starts the primary through one fixed argv, the CLI's `dispatcher` step: exit 0 answers 200, 3 (already running) 409, 1 (spawn.sh refused) 502 with the CLI's last stderr line, anything else 500;
   a fixture stack spawns nothing: on a fixture whose herdr panes run no dispatcher it makes a made-up one's pane, with its registry file, transcript and ps row, and on one that does it answers already running (`fixtureStart()`).

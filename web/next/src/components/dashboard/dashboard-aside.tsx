@@ -301,9 +301,7 @@ export function DashboardAside({ children }: { children: ReactNode }) {
     )
 
   // the bar counts what needs you and arrived since you last looked at the Inbox, so a look clears it with no answer given
-  const count = inbox.data
-    ? newInInboxCount(inboxView(inbox.data.items, inbox.dataUpdatedAt).shown, inboxSeenAt)
-    : 0
+  const count = inbox.data ? newInInboxCount(inboxView(inbox.data.items).shown, inboxSeenAt) : 0
   // which squares show hangs on the socket's first frame (the view, Playground's chat), so the bar keeps its room but shows none until then, then all at once, never growing under the eye; an error frame sets dispatchers too, so a dashboard that cannot read its sessions still shows its Inbox
   const bar = cn(TAB_BAR, !dispatchers && "invisible")
   const squares: Partial<Record<AsideTab, ReactNode>> = {
