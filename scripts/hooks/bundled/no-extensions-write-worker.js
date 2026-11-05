@@ -2379,7 +2379,7 @@ function narrow(cmd, env) {
     const programs = awkPrograms(args);
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value));
   }
-  if (["cat", "grep", "head", "tail", "wc"].includes(base))
+  if (["cat", "git", "grep", "head", "tail", "wc"].includes(base))
     return reads(parsed, env);
   if (SEDS.has(base))
     return sedReads(args);
