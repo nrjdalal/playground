@@ -144,6 +144,7 @@ import {
   type Outbox,
 } from "@/lib/chat"
 import { readChatPrefs, prefsOf, saveChatPrefs, useChatPrefs } from "@/lib/chat-mode"
+import { config } from "@/lib/config"
 import { fetchSubagentSteps, oneLine, type Older } from "@/lib/dashboard"
 import { stepOf } from "@/lib/live-activity"
 import {
@@ -794,7 +795,7 @@ function PendingMessage({
             }}
           />
         ) : null}
-        {failed ? (
+        {failed && !config.hosted ? (
           <FooterAction
             Icon={RiEditLine}
             label={`Edit "${short}"`}
@@ -1472,7 +1473,7 @@ export function WorkerStream({
                           <NeedsYouCard
                             item={item.need.item}
                             now={now}
-                            onAnswer={item.need.onAnswer}
+                            onAnswer={config.hosted ? null : item.need.onAnswer}
                             resolution={item.need.resolution}
                           />
                           {needsYouAnchor(item.need.item.id) === newest ? status : null}

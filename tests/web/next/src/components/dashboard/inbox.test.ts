@@ -680,8 +680,8 @@ describe("Schedule's row", () => {
     const click = source.slice(at, source.indexOf("</button>", at))
     expect(click).toContain("onClick={onRead}")
     expect(source).toContain("onRead={() => read()}")
-    expect(source).toContain(
-      "const read = () => (unread && !paused ? void settle(() => markRead([item.id])) : undefined)",
+    expect(source).toMatch(
+      /const read = \(\) =>\s+unread && !paused && !config\.hosted \? void settle\(\(\) => markRead\(\[item\.id\]\)\) : undefined/,
     )
     expect(source).not.toContain('answerItem(item.id, "read"')
     expect(source).not.toContain('answerItem(item, "read"')
@@ -1011,8 +1011,8 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
   })
 
   test("Done's ✓✓ marks every item in it read, and is gone once all are", () => {
-    expect(source).toContain(
-      '{label !== "Later" && label !== "In progress" && shelf.length > 0 && (',
+    expect(source).toMatch(
+      /\{label !== "Later" &&\s+label !== "In progress" &&\s+shelf\.length > 0 &&\s+!config\.hosted && \(/,
     )
     const button = (ids: string[]) =>
       /<button[^>]*>/.exec(
@@ -1052,8 +1052,8 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
   test("each row ends in its ShelfMark, the open row and every shelf, and In progress offers no ✓ since its poster closes it", () => {
     expect(source).toContain("<ShelfMark empty={shown.length === 0} />")
     expect(source).toContain("<ShelfMark empty={shelf.length === 0} />")
-    expect(source).toContain(
-      '{label !== "Later" && label !== "In progress" && shelf.length > 0 && (',
+    expect(source).toMatch(
+      /\{label !== "Later" &&\s+label !== "In progress" &&\s+shelf\.length > 0 &&\s+!config\.hosted && \(/,
     )
   })
 
@@ -1081,7 +1081,7 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
     const actions = source.slice(source.indexOf("const actions ="), source.indexOf("const bulk ="))
     expect(actions).toContain("const actions = (pill || rows.length > 0) && (")
     expect(actions).toMatch(
-      /\{clearing === 0 \? \(\n\s+<span[^>]*>\n\s+<RiCheckDoubleLine className="size-3" aria-label="All read" \/>/,
+      /\{config\.hosted \? null : clearing === 0 \? \(\n\s+<span[^>]*>\n\s+<RiCheckDoubleLine className="size-3" aria-label="All read" \/>/,
     )
     expect(actions).toContain("<RiCheckLine />")
     const shelf = source.slice(
