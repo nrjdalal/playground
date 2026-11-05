@@ -47,7 +47,7 @@ export const RETRY_MS = 5_000
 
 type Answer = { exitCode: number | null; stderr: string; stdout: string }
 
-// One page, asked again after RETRY_MS up to TRIES times in all when gh exits non-zero (a 5xx among them) or its body does not parse, since GitHub cuts off or 502s a large search answer now and then; the last failure names the page's cursor.
+// One page, asked again after RETRY_MS up to TRIES times in all when it holds no search (gh exiting non-zero on a 5xx) or its body does not parse, since GitHub cuts off or 502s a large search answer now and then; a body is read whatever gh's exit code, since gh exits 1 on an answer whose errors sit beside its data; the last failure names the page's cursor.
 export const pageOf = async (
   ask: () => Answer,
   after: string | null,
@@ -58,12 +58,13 @@ export const pageOf = async (
     if (tried > 1) await wait(RETRY_MS)
     const gh = ask()
     let answer: { data?: { search?: Page }; errors?: unknown } | null = null
-    try {
-      answer = gh.exitCode === 0 ? JSON.parse(gh.stdout) : null
-    } catch {
-      why = `a body that does not parse: ${gh.stdout.slice(0, 80)}`
-      continue
-    }
+    if (gh.stdout.trimStart().startsWith("{"))
+      try {
+        answer = JSON.parse(gh.stdout)
+      } catch {
+        why = `a body that does not parse: ${gh.stdout.slice(0, 80)}`
+        continue
+      }
     if (answer?.errors) console.error(JSON.stringify(answer.errors))
     if (answer?.data?.search) return answer.data.search
     why = gh.stderr.trim() || JSON.stringify(answer?.errors ?? answer)
@@ -126,14 +127,14 @@ export const rowsOf = (prs: Pr[], owner: string, now: Date): string[] => {
 if (import.meta.main) {
   const flag = (name: string) => {
     const at = process.argv.indexOf(name)
-    return at === -1 ? undefined : process.argv[at + 1]
+    return at === -1 ? null : (process.argv[at + 1] ?? "")
   }
   const since = flag("--since")
   const until = flag("--until")
   if (
     !since ||
     Number.isNaN(Date.parse(since)) ||
-    (until !== undefined && Number.isNaN(Date.parse(until)))
+    (until !== null && Number.isNaN(Date.parse(until)))
   ) {
     console.error("usage: table.ts --since <ISO 8601 time> [--until <ISO 8601 time>]")
     process.exit(2)
@@ -150,7 +151,7 @@ if (import.meta.main) {
           "-f",
           `query=${QUERY}`,
           "-f",
-          `q=${searchOf(repo, since, until)}`,
+          `q=${searchOf(repo, since, until ?? undefined)}`,
           ...(after ? ["-f", `after=${after}`] : []),
         ],
         { stderr: "pipe", stdout: "pipe" },

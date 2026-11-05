@@ -9,8 +9,10 @@ import {
   pageOf,
   QUERY,
   readAll,
+  RETRY_MS,
   rowsOf,
   searchOf,
+  TRIES,
 } from "../../../../../packages/scripts/src/retro/table"
 
 const by = (login: string, body: string) => ({ author: { login }, body })
@@ -105,9 +107,8 @@ const fakeGh = async (answers: { code: number; err?: string; out: string }[]) =>
     await Bun.write(join(dir, `${i}.err`), a.err ?? "")
     await Bun.write(join(dir, `${i}.code`), String(a.code))
   }
-  const gh = join(dir, "gh")
   await Bun.write(
-    gh,
+    join(dir, "gh"),
     `#!/bin/bash
 n=$(cat "${dir}/count" 2>/dev/null || echo 0)
 echo $((n + 1)) > "${dir}/count"
@@ -117,12 +118,15 @@ cat "${dir}/$n.err" >&2
 exit "$(cat "${dir}/$n.code")"
 `,
   )
-  return { dir, gh }
+  chmodSync(join(dir, "gh"), 0o755)
+  return dir
 }
 
-const runTable = async (dir: string) => {
-  chmodSync(join(dir, "gh"), 0o755)
-  const proc = Bun.spawn(["bun", "--no-env-file", TABLE, "--since", "2026-10-31T00:00:00Z"], {
+// a case that waits out the retries gets their full wait on top of the run's own time
+const RETRIES_TIMEOUT = (TRIES - 1) * RETRY_MS + 20_000
+
+const runTable = async (dir: string, args = ["--since", "2026-10-31T00:00:00Z"]) => {
+  const proc = Bun.spawn(["bun", "--no-env-file", TABLE, ...args], {
     env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
     stderr: "pipe",
     stdout: "pipe",
@@ -135,40 +139,55 @@ const runTable = async (dir: string) => {
   return { code, err, out }
 }
 
-test("a page that fails once with a 502 is read again, and its rows print", async () => {
-  const { dir } = await fakeGh([
-    { code: 1, err: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)", out: "" },
-    { code: 0, out: answer({ nodes: [pr()], pageInfo: { endCursor: null, hasNextPage: false } }) },
-  ])
-  const run = await runTable(dir)
-  expect(run.err).toBe("")
-  expect(run.code).toBe(0)
-  expect(run.out).toContain("12\tM\t10:00\t11:30\t90m")
-}, 30_000)
+test(
+  "a page that fails once with a 502 is read again, and its rows print",
+  async () => {
+    const dir = await fakeGh([
+      { code: 1, err: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)", out: "" },
+      {
+        code: 0,
+        out: answer({ nodes: [pr()], pageInfo: { endCursor: null, hasNextPage: false } }),
+      },
+    ])
+    const run = await runTable(dir)
+    expect(run.err).toBe("")
+    expect(run.code).toBe(0)
+    expect(run.out).toContain("12\tM\t10:00\t11:30\t90m")
+  },
+  RETRIES_TIMEOUT,
+)
 
-test("a page that fails three times, cut off and then 502s, exits 1 naming its cursor", async () => {
-  const { dir } = await fakeGh([
-    {
-      code: 0,
-      out: answer({ nodes: [pr()], pageInfo: { endCursor: "Y3Vyc29yOjI1", hasNextPage: true } }),
-    },
-    { code: 0, out: '{"data":{"search":{"issueCount":1,"nodes":[{"num' },
-    { code: 1, err: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)", out: "" },
-    { code: 1, err: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)", out: "" },
-  ])
-  const run = await runTable(dir)
-  expect(run.code).toBe(1)
-  expect(run.err).toContain("Y3Vyc29yOjI1")
-  expect(run.err).toContain("3 times")
-  expect(await Bun.file(join(dir, "args.3")).text()).toContain("after=Y3Vyc29yOjI1")
-}, 30_000)
+test(
+  "a page that fails three times, cut off and then 502s, exits 1 naming its cursor",
+  async () => {
+    const dir = await fakeGh([
+      {
+        code: 0,
+        out: answer({ nodes: [pr()], pageInfo: { endCursor: "Y3Vyc29yOjI1", hasNextPage: true } }),
+      },
+      { code: 0, out: '{"data":{"search":{"issueCount":1,"nodes":[{"num' },
+      { code: 1, err: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)", out: "" },
+      { code: 1, err: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)", out: "" },
+    ])
+    const run = await runTable(dir)
+    expect(run.code).toBe(1)
+    expect(run.err).toContain("Y3Vyc29yOjI1")
+    expect(run.err).toContain("3 times")
+    expect(await Bun.file(join(dir, "args.3")).text()).toContain("after=Y3Vyc29yOjI1")
+  },
+  RETRIES_TIMEOUT,
+)
 
-test("a page that answers with data and errors returns its data and prints the errors", async () => {
+test("a page that answers with data and errors, which gh exits 1 on, returns its data and prints the errors", async () => {
   const page = { nodes: [pr()], pageInfo: { endCursor: null, hasNextPage: false } }
   const errors = [{ message: "Something went wrong while resolving a comment" }]
   const printed = spyOn(console, "error").mockImplementation(() => {})
   const read = await pageOf(
-    () => ({ exitCode: 0, stderr: "", stdout: JSON.stringify({ data: { search: page }, errors }) }),
+    () => ({
+      exitCode: 1,
+      stderr: "gh: Something went wrong while resolving a comment",
+      stdout: JSON.stringify({ data: { search: page }, errors }),
+    }),
     null,
     async () => {},
   )
@@ -176,3 +195,57 @@ test("a page that answers with data and errors returns its data and prints the e
   expect(printed).toHaveBeenCalledWith(JSON.stringify(errors))
   printed.mockRestore()
 })
+
+test("a page gh exits 1 on with data beside its errors prints its rows from one read", async () => {
+  const errors = [{ message: "Something went wrong while resolving a comment" }]
+  const dir = await fakeGh([
+    {
+      code: 1,
+      err: "gh: Something went wrong while resolving a comment",
+      out: JSON.stringify({
+        data: {
+          search: {
+            issueCount: 1,
+            nodes: [pr()],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+        errors,
+      }),
+    },
+  ])
+  const run = await runTable(dir)
+  expect(run.code).toBe(0)
+  expect(run.out).toContain("12\tM\t10:00\t11:30\t90m")
+  expect(run.err).toContain(JSON.stringify(errors))
+  expect(await Bun.file(join(dir, "count")).text()).toBe("1\n")
+}, 30_000)
+
+test("an --until with no time after it is a usage error", async () => {
+  const dir = await fakeGh([])
+  const run = await runTable(dir, ["--since", "2026-10-31T00:00:00Z", "--until"])
+  expect(run.code).toBe(2)
+  expect(run.err).toContain("usage: table.ts")
+  expect(await Bun.file(join(dir, "count")).exists()).toBe(false)
+}, 30_000)
+
+test(
+  "a page whose errors come with no data is asked again and then exits 1, never an empty table",
+  async () => {
+    const limited = {
+      code: 1,
+      err: "gh: API rate limit exceeded",
+      out: JSON.stringify({
+        data: null,
+        errors: [{ message: "API rate limit exceeded", type: "RATE_LIMITED" }],
+      }),
+    }
+    const dir = await fakeGh([limited, limited, limited])
+    const run = await runTable(dir)
+    expect(run.code).toBe(1)
+    expect(run.out).toBe("")
+    expect(run.err).toContain("the page after cursor (the first page) failed 3 times")
+    expect(await Bun.file(join(dir, "count")).text()).toBe("3\n")
+  },
+  RETRIES_TIMEOUT,
+)
