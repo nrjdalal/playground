@@ -13,6 +13,7 @@ import {
   type Roots,
 } from "@packages/safe-delete"
 
+import { procOf, sessionAbove, type Proc as Process } from "../../../../scripts/hooks/session-state"
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
@@ -58,8 +59,9 @@ export type Decision = {
   status?: string
 }
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the caller's PLAYGROUND_ROLE, which a factory session sets and the owner's own terminal does not, and the session's name.
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the session the caller is (callerOf), and the session's name.
 export type RmDeps = {
+  caller: () => Promise<string | undefined>
   clones: () => Clone[]
   data: string
   decision: (id: string) => Promise<Decision | null>
@@ -68,8 +70,21 @@ export type RmDeps = {
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
   procs: () => Proc[] | null
-  role: string | undefined
   session: () => Promise<string>
+}
+
+// Who a caller that may be a session is, or undefined for a terminal no Claude Code session runs in: its PLAYGROUND_ROLE, a call detached from its parent or whose parent the system cannot read, since no terminal's own call is, else the claude process the shell-pane caller check (sessionAbove) finds above it, which no prefix on the call reaches.
+export const callerOf = async (
+  environment: Record<string, string | undefined>,
+  pid: number,
+  procs: (pid: number) => Process | undefined = procOf,
+): Promise<string | undefined> => {
+  if (environment.PLAYGROUND_ROLE) return `a session (role ${environment.PLAYGROUND_ROLE})`
+  if (pid <= 1) return "a detached call (its parent is pid 1)"
+  if (!procs(pid)) return `a call whose parent the system cannot read (pid ${pid})`
+  const above = await sessionAbove(pid, procs)
+  if (!above) return undefined
+  return `a session (${above.sessionId ? `session ${above.sessionId}` : `claude pid ${above.pid}`})`
 }
 
 // lsof -F's names for each pid: its "p<pid>" line, then each "n<name>" line under it.
@@ -182,8 +197,9 @@ const decisionOf =
     }
   }
 
-// This machine's: run-slot's running clone, HOME, the data folder, the Inbox through the Dashboard's checkout, the main checkout, gh for a merged PR, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
+// This machine's: the caller above this process, run-slot's running clone, HOME, the data folder, the Inbox through the Dashboard's checkout, the main checkout, gh for a merged PR, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
 export const rmDeps = (repo: string): RmDeps => ({
+  caller: () => callerOf(process.env, process.ppid),
   clones: clones(dataDir()),
   data: dataDir(),
   decision: decisionOf(repo),
@@ -197,19 +213,18 @@ export const rmDeps = (repo: string): RmDeps => ({
       stdout: "ignore",
     }),
   procs: processes,
-  role: process.env.PLAYGROUND_ROLE || undefined,
   session: sessionName,
 })
 
-// Why a session with a role may not pass --discard here, or null: it names with --decision an approved Inbox delete decision whose what names this path, so the owner's Approve is the authority and the session runs it.
+// Why a caller callerOf names may not pass --discard here, or null: it names with --decision an approved Inbox delete decision whose what names this path, so the owner's Approve is the authority and the session runs it.
 export const discardRefusal = async (
   path: string,
   id: string | undefined,
-  deps: Pick<RmDeps, "decision" | "role">,
+  caller: string,
+  deps: Pick<RmDeps, "decision">,
 ): Promise<string | null> => {
   const route = `post an Inbox delete decision with bun run ask new naming ${resolve(path)} and why, then run playground rm --worktree ${path} --discard --decision <id> once it is approved`
-  if (id === undefined)
-    return `a session with a role (${deps.role}) passes --discard only with --decision <id>: ${route}`
+  if (id === undefined) return `${caller} passes --discard only with --decision <id>: ${route}`
   const item = await deps.decision(id)
   if (!item)
     return `--decision ${id} names no Inbox item the Dashboard's checkout can read: ${route}`
@@ -236,11 +251,13 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     console.error(`playground: ${args.error}`)
     return 2
   }
-  const discarding = "discard" in args && args.discard && deps.role
-  const refusal = discarding ? await discardRefusal(args.path, args.decision, deps) : null
-  if (refusal) {
-    console.error(`playground: ${refusal}`)
-    return 1
+  if ("discard" in args && args.discard) {
+    const caller = await deps.caller()
+    const refusal = caller ? await discardRefusal(args.path, args.decision, caller, deps) : null
+    if (refusal) {
+      console.error(`playground: ${refusal}`)
+      return 1
+    }
   }
   const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
   if ("list" in args) {

@@ -908,10 +908,11 @@ describe("install.sh", () => {
       expect(out).toEndWith("playground started\n")
     }, 60_000)
 
-    test("a proxy already up, on 443 with no plist or on a port of 1024 or above, asks for no password, even with no terminal", () => {
+    test("a proxy already up, on 443 with no plist, on 1355 or on another port of 1024 or above, asks for no password, even with no terminal", () => {
       for (const proxy of [
         { answers: true, plist: false },
-        { answers: false, plist: false, port: "1355" },
+        { answers: true, plist: false, port: "1355" },
+        { answers: false, plist: false, port: "8443" },
       ]) {
         const { calls, code, left, out } = setup({ proxy }).run()
         expect(code).toBe(0)
@@ -920,6 +921,15 @@ describe("install.sh", () => {
         expect(out).toEndWith("playground started\n")
       }
     }, 120_000)
+
+    // the stack's own rule, proxyDown: a saved 1355 that answers nothing reads as 443 down, so playground doctor's fix, running the installer again, sets it up
+    test("a saved 1355 that answers nothing is installed on 443", () => {
+      const { run } = setup({ proxy: { answers: false, plist: false, port: "1355" }, tty: true })
+      const { calls, code, out } = run()
+      expect(code).toBe(0)
+      expect(sudos(calls)).toHaveLength(1)
+      expect(out).toEndWith("playground started\n")
+    }, 60_000)
 
     test("off a Mac it is skipped: no password, no list item, no plist named, and playground starts", () => {
       const { calls, code, left, out } = setup({ proxy: NONE, tty: true }).run({

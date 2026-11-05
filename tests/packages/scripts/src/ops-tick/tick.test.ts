@@ -1251,17 +1251,18 @@ describe("canary pull", () => {
 describe("relay watch", () => {
   const ID = "f167b6b9-f570-4f15-a4b4-eb15b8c4876f"
 
-  // The relay's outbox with its three cursors last moved at moved, and the ops manager in the roster.
-  const outbox = (ops: string, moved: Date) => {
+  // The relay's outbox with its three cursors last moved at moved, and the ops manager in the roster, beside the relay's own row unless the machine has no relay.
+  const outbox = (ops: string, moved: Date, relay = true) => {
     mkdirSync(join(ops, "outbox"), { recursive: true })
     for (const file of ["cursor.json", "dm-cursor.json", "linear-cursor.json"]) {
       writeFileSync(join(ops, "outbox", file), "{}")
       utimesSync(join(ops, "outbox", file), moved, moved)
     }
-    writeFileSync(
-      join(ops, "..", "roster.json"),
-      JSON.stringify({ agents: [{ kind: "ops", name: OLD.ops, role: "manager" }] }),
-    )
+    const agents: { kind: string; name: string; role: string }[] = [
+      { kind: "ops", name: OLD.ops, role: "manager" },
+    ]
+    if (relay) agents.push({ kind: "runner", name: "runner-plain-relay", role: "runner" })
+    writeFileSync(join(ops, "..", "roster.json"), JSON.stringify({ agents }))
   }
 
   // A context whose runs answer bun run ask, recording each call with its stdin; a "pending" peek leaves a line in a queue past cursor.json's offset for drain.ts's peek to read, any other leaves none.
@@ -1320,6 +1321,24 @@ describe("relay watch", () => {
       ],
     ])
     expect(existsSync(join(ops, "tick", "relay-watch.json"))).toBe(false)
+  })
+
+  test("a machine with no relay, neither its roster row nor its resume record, posts nothing however long a line waits, since the Ops sweep relays there", async () => {
+    const ops = scratch()
+    outbox(ops, at(14, 7), false)
+    const asks: unknown[] = []
+    for (const minute of [20, 25, 30, 45]) {
+      const tick = watch(ops, at(14, minute), "pending: ops-session-resume.jsonl")
+      await beat("relay-watch").run(tick.ctx)
+      asks.push(...tick.asks)
+    }
+    expect(asks).toEqual([])
+    mkdirSync(join(ops, "..", "resume"), { recursive: true })
+    writeFileSync(join(ops, "..", "resume", "runner-plain-relay.sh"), "exit 0\n")
+    await beat("relay-watch").run(watch(ops, at(14, 50), "pending: ops-session-resume.jsonl").ctx)
+    const recorded = watch(ops, at(15, 0), "pending: ops-session-resume.jsonl")
+    await beat("relay-watch").run(recorded.ctx)
+    expect(recorded.asks).toHaveLength(1)
   })
 
   test("posts nothing while nothing waits, and times the wait itself, not the cursors' age", async () => {

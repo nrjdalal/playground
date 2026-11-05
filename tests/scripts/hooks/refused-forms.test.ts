@@ -294,6 +294,7 @@ const guardsOf = (
   "no-main-checkout": {
     folders: {
       checkout: [join(PATHS.MAIN, ".claude", "worktrees", "a"), HOME],
+      home: [HOME, HOME],
       "main checkout": [PATHS.MAIN, HOME],
     },
     run: (raw, home) => c.mainCheckout(raw, { HOME: home }, PATHS.MAIN),
