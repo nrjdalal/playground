@@ -184,7 +184,6 @@ test("a page that answers with data and errors, which gh exits 1 on, returns its
   const printed = spyOn(console, "error").mockImplementation(() => {})
   const read = await pageOf(
     () => ({
-      exitCode: 1,
       stderr: "gh: Something went wrong while resolving a comment",
       stdout: JSON.stringify({ data: { search: page }, errors }),
     }),
@@ -249,3 +248,38 @@ test(
   },
   RETRIES_TIMEOUT,
 )
+
+test("a comment and a PR that GraphQL nulled beside their errors are skipped, and the other rows print", async () => {
+  const errors = [
+    {
+      message: "Something went wrong while resolving a comment",
+      path: ["search", "nodes", 0, "comments", "nodes", 1, "body"],
+    },
+    {
+      message: "Something went wrong while resolving a PR",
+      path: ["search", "nodes", 1, "timelineItems"],
+    },
+  ]
+  const nulled = pr()
+  nulled.comments.nodes[1] = null
+  const dir = await fakeGh([
+    {
+      code: 1,
+      err: "gh: Something went wrong while resolving a comment",
+      out: JSON.stringify({
+        data: {
+          search: {
+            issueCount: 2,
+            nodes: [nulled, null],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        },
+        errors,
+      }),
+    },
+  ])
+  const run = await runTable(dir)
+  expect(run.code).toBe(0)
+  expect(run.out).toContain("12\tM\t10:00\t11:30\t90m\tc4\tfp1\tr2")
+  expect(run.err).toContain(JSON.stringify(errors))
+}, 30_000)
