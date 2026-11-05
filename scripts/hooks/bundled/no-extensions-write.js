@@ -588,6 +588,7 @@ function walk(lx, scope, nested, inherit) {
   let depth = 0;
   let loops = 0;
   let after = "";
+  const bodies = [];
   const end = (op) => {
     const done = cmd;
     const pipe = op === "|" || op === "|&";
@@ -615,6 +616,14 @@ function walk(lx, scope, nested, inherit) {
       done.chain = lx.token;
       if (reserved.some((w) => HELD.has(w)))
         done.held = true;
+      if (done.held || bodies.includes(true))
+        done.kept = true;
+      for (const w of reserved) {
+        if (OPENS.has(w))
+          bodies.push(HELD.has(w));
+        else if (CLOSES.has(w))
+          bodies.pop();
+      }
       if (loops > 0 || loop)
         done.repeated = true;
       depth = Math.max(0, depth + opened - closed);
@@ -791,7 +800,7 @@ function word(lx) {
       merge(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
-    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
+    } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir3();
       lx.i++;
     } else {
@@ -804,11 +813,16 @@ function word(lx) {
     out.unknown ??= "a brace expansion";
   if (GLOB_CHARS.test(bare))
     out.glob = true;
+  out.source = src.slice(start, lx.i);
   if (marked(out.value))
-    out.raw = src.slice(start, lx.i);
+    out.raw = out.source;
+  if (src[start] === "~" && TILDE.test(out.value))
+    out.tilde = true;
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
+var TILDE = /^~[-+](?=\/|$|\u0000)/;
+var ends = (c = "") => c === "" || c === "/" || BREAK.has(c);
 function double(lx) {
   const { src } = lx;
   const out = { value: "" };
@@ -1115,7 +1129,8 @@ async function examine(cmd, env, visit, builtins) {
   tick();
   unchain(cmd, env);
   const [primary, ...others] = readings(parse(cmd));
-  const before = others.length > 0 ? apart(env) : env;
+  const expanded = expandTilde(cmd, primary.name, env);
+  const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
   if (verdict)
     return verdict;
@@ -1124,6 +1139,58 @@ async function examine(cmd, env, visit, builtins) {
     if (verdict)
       return verdict;
   }
+  for (const variant of expanded) {
+    const verdict = await examineExpanded(cmd, variant, before, visit, builtins);
+    if (verdict)
+      return verdict;
+  }
+}
+var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
+function expandTilde(cmd, name, env) {
+  if (!env.old)
+    return [];
+  const opens = (w) => !!w?.tilde && TILDE.test(w.value);
+  const moves = name === "cd" || name === "popd" || name === "pushd";
+  const words = moves ? [] : cmd.words.filter(opens);
+  const targets = cmd.redirects.filter((r) => opens(r.target));
+  if (words.length === 0 && targets.length === 0)
+    return [];
+  const left = leftFolder(env);
+  const lefts = cmd.kept ? [...left === undefined ? [] : [left], undefined] : [left];
+  return lefts.map((dir) => {
+    const expand = (w) => {
+      if (!opens(w))
+        return w;
+      const rest = w.value.slice(2);
+      if (w.value[1] === "+")
+        return { ...w, tilde: undefined, value: `.${rest}` };
+      return dir === undefined ? { ...w, tilde: undefined, unknown: BLIND, value: UNKNOWN + rest } : { ...w, tilde: undefined, value: dir + rest };
+    };
+    return {
+      ...cmd,
+      redirects: cmd.redirects.map((r) => opens(r.target) ? { ...r, target: expand(r.target) } : r),
+      words: moves ? cmd.words : cmd.words.map(expand)
+    };
+  });
+}
+async function examineExpanded(cmd, expanded, before, visit, builtins) {
+  const { redirects, words } = cmd;
+  cmd.redirects = expanded.redirects;
+  cmd.words = expanded.words;
+  try {
+    for (const parsed of readings(parse(cmd))) {
+      const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins);
+      if (verdict)
+        return verdict;
+    }
+  } finally {
+    cmd.redirects = redirects;
+    cmd.words = words;
+  }
+}
+function leftFolder(env) {
+  const left = env.oldFrom ?? (env.old?.dir === undefined ? [] : [env.old.dir]);
+  return left.length === 1 ? left[0] : undefined;
 }
 var apart = (env) => ({
   ...env,
@@ -1146,7 +1213,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   let verdict;
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name);
   if (followed && builtins && cmd.redirects.length > 0) {
-    const bare = { ...cmd, words: [] };
+    const bare = { ...cmd, bareOf: cmd, words: [] };
     verdict = await visit(bare, parse(bare), here);
     if (verdict)
       return verdict;
@@ -1231,13 +1298,14 @@ function ancestors(path) {
       return out;
   }
 }
+var tildeSign = (name, dir, env) => (name === "cd" || name === "pushd") && env.old && dir?.tilde && !dir.unknown && !dir.reads?.length ? dir.value[1] : undefined;
 async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir3();
   const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
-  const tilde = !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
-  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd);
+  const sign = typed ? undefined : tildeSign(name, dir, env);
+  const base = sign && (sign === "-" ? env.old?.dir : env.cwd);
   return base ? await folder(base + dir.value.slice(2)) : typed;
 }
 async function folder(path) {
@@ -1273,19 +1341,19 @@ function cdTargets(name, cmd, parsed, env, from) {
   }
   return { back: dirs.length > 1, paths: [...paths], unread };
 }
-function pushdTilde(move, name, parsed, env, from, back) {
+function tildeMove(move, name, parsed, env, from, back) {
   const dir = parsed.args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
-  const tilde = name === "pushd" && env.old && dir && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
-  if (!tilde || !dir)
+  const sign = tildeSign(name, dir, env);
+  if (!sign || !dir)
     return move;
-  const bases = tilde[1] === "-" ? back : from;
+  const bases = sign === "-" ? back : from;
   const paths = [
     ...move.paths,
     ...bases.map((base) => base + dir.value.slice(2)),
     ...env.cwd === undefined ? [] : [env.cwd]
   ];
   return {
-    back: move.back || tilde[1] === "-",
+    back: move.back || sign === "-",
     paths: [...new Set(paths)],
     unread: move.unread || bases.length === 0
   };
@@ -1295,10 +1363,12 @@ async function chdirTo(name, cmd, parsed, env) {
   env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(name, parsed.args, env);
   if (env.old)
     env.old = name === "popd" ? {} : { dir: env.cwd === undefined ? undefined : left };
+  if (env.old)
+    env.oldFrom = [];
   const from = startFolders(env);
   const back = [...new Set([...env.cwdBack ?? [], ...from])];
   const bases = [...new Set([...from, ...env.cwdHeld ?? []])];
-  const move = name === "popd" ? { back: true, paths: [], unread: true } : pushdTilde(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back);
+  const move = name === "popd" ? { back: true, paths: [], unread: true } : tildeMove(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back);
   const { paths, unread } = move;
   const named = [left, env.cwd].filter((dir) => dir !== undefined);
   env.cwdBack = keep([...new Set([...back, ...paths, ...named])], env);
@@ -1312,6 +1382,8 @@ async function chdirTo(name, cmd, parsed, env) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
     env.cwdUnread = false;
+    if (env.old)
+      env.oldFrom = bases;
     if (chained) {
       env.cwdChain = keep([...new Set([...env.cwdChain ?? [], ...from])], env);
       env.cwdChainToken = cmd.chain;
@@ -1328,6 +1400,8 @@ function unchain(cmd, env) {
     return;
   env.cwdMaybe = keep([...new Set([...env.cwdMaybe ?? [], ...env.cwdSure ? [env.cwdSure] : [], ...env.cwdChain])], env);
   env.cwdSure = undefined;
+  if (env.old)
+    env.oldFrom = [];
   env.cwdChain = [];
   env.cwdChainToken = undefined;
 }
@@ -1670,6 +1744,8 @@ var GIT_MOVES = new Set([
 var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
 var RUNNER_TAKES = new Set(["--package", "-p"]);
 var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
+var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
+var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 if (false) {}
 
 // scripts/hooks/no-extensions-write.ts
@@ -1706,7 +1782,7 @@ var GIT_READS = new Set([
   "show",
   "status"
 ]);
-var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
+var EXPORTS3 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var DUPLICATE = /^(?:\d+|-)$/;
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
@@ -1772,10 +1848,91 @@ function ghFilters(parsed) {
   return filters;
 }
 var READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/;
+var EVALUATES = [
+  /\(\([^)]*[A-Za-z_]/,
+  /\$\[[^\]]*[A-Za-z_]/,
+  /\[\[.*\s-(?:eq|ge|gt|le|lt|ne)\s/s,
+  /\$\{[#!]?\w+:(?![-+=?:])[^}]*[A-Za-z_]/,
+  /@P\}/
+];
+var SUBSCRIPT = /\w\[(?!(?:[@*]|[-\d:,\s]*)\]|\^)/;
+var INDIRECTS = /\$\{!(?!\}|[A-Za-z_]\w*(?:[*@]|\[[*@]\])\})/;
+var QUALIFIER = /[^\s(|&;<>$=]\((?:#q)?[^()\s|]*?(?:e(?:\[[^]*?\]|\{[^]*?\}|<[^]*?>|([^\s[{<])[^]*?\1)|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>`}])/;
+function singleQuotesOut(command) {
+  if (command.includes("$'"))
+    return command;
+  let out = "";
+  let double = false;
+  const docs = [];
+  for (let i = 0;i < command.length; i++) {
+    const c = command[i];
+    if (c === "\\") {
+      out += command.slice(i, i + 2);
+      i++;
+    } else if (double) {
+      if (c === '"')
+        double = false;
+      out += c;
+    } else if (c === '"') {
+      double = true;
+      out += c;
+    } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
+      const end = command.indexOf(`
+`, i);
+      const stop = end === -1 ? command.length : end;
+      out += command.slice(i, stop);
+      i = stop - 1;
+    } else if (c === "'") {
+      const end = command.indexOf("'", i + 1);
+      if (end === -1)
+        return command;
+      out += "x";
+      i = end;
+    } else if (command.startsWith("<<<", i)) {
+      out += "<<<";
+      i += 2;
+    } else if (command.startsWith("<<", i)) {
+      const doc = command.slice(i).match(/^<<(-?)[ \t]*(?:'([^'\n]*)'|"([^"\n]*)"|\\?([\w.-]+))/);
+      if (!doc)
+        return command;
+      docs.push({ delim: doc[2] ?? doc[3] ?? doc[4], strip: doc[1] === "-" });
+      out += doc[0];
+      i += doc[0].length - 1;
+    } else if (c === `
+` && docs.length) {
+      out += c;
+      let at = i + 1;
+      for (const { delim, strip } of docs) {
+        for (;; ) {
+          if (at > command.length)
+            return command;
+          const end = command.indexOf(`
+`, at);
+          const stop = end === -1 ? command.length : end;
+          const line = command.slice(at, stop);
+          out += command.slice(at, Math.min(stop + 1, command.length));
+          at = stop + 1;
+          if ((strip ? line.replace(/^\t+/, "") : line) === delim)
+            break;
+          if (end === -1)
+            return command;
+        }
+      }
+      docs.length = 0;
+      i = at - 1;
+    } else
+      out += c;
+  }
+  return double || docs.length ? command : out;
+}
 function namings(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
+  let blind = EVALUATES.some((evaluates) => evaluates.test(command)) || SUBSCRIPT.test(command) || SUBSCRIPT.test(unquoted(command)) || QUALIFIER.test(singleQuotesOut(command)) || INDIRECTS.test(command);
+  for (const [, flags, closed] of command.matchAll(/\$\{\(([^)]*)(\)?)/g))
+    if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags))
+      blind = true;
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
     const [whole, expanded, key] = m;
     const next = command.slice(m.index + whole.length);
@@ -1805,7 +1962,7 @@ function namings(command) {
     if (from[end] - from[m.index] !== end - m.index)
       add(m[0]);
   }
-  return { counts, plain };
+  return { blind, counts, plain };
 }
 var SHELL_SETS = new Set([
   "ARGC",
@@ -1857,41 +2014,193 @@ var SHELL_SETS = new Set([
   "UID",
   "USERNAME",
   "VENDOR",
+  "ZCURSES_COLORS",
+  "ZCURSES_COLOR_PAIRS",
+  "ZPCRE_OP",
   "_",
+  "aliases",
   "argv",
+  "builtins",
+  "commands",
+  "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
+  "funcfiletrace",
+  "funcsourcetrace",
+  "funcstack",
+  "functions",
+  "functions_source",
+  "functrace",
+  "galiases",
+  "history",
+  "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "langinfo",
+  "mapfile",
   "match",
   "mbegin",
   "mend",
+  "modules",
+  "nameddirs",
+  "options",
+  "parameters",
+  "patchars",
   "pipestatus",
   "reply",
+  "reswords",
+  "saliases",
   "signals",
-  "status"
+  "status",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
+  "widgets",
+  "zcurses_attrs",
+  "zcurses_colors",
+  "zcurses_keycodes",
+  "zcurses_windows",
+  "zgdbm_tied"
 ]);
-var SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZSH_|zsh_)/;
+var SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZFTP_|ZSH_|zsh_)/;
+var TIED = new Set([
+  "CDPATH",
+  "FIGNORE",
+  "FPATH",
+  "HISTCHARS",
+  "MAILPATH",
+  "MANPATH",
+  "MODULE_PATH",
+  "PATH",
+  "PROMPT",
+  "PROMPT2",
+  "PROMPT3",
+  "PROMPT4",
+  "PS1",
+  "PS2",
+  "PS3",
+  "PS4",
+  "PSVAR",
+  "WATCH",
+  "cdpath",
+  "fignore",
+  "fpath",
+  "histchars",
+  "mailpath",
+  "manpath",
+  "module_path",
+  "path",
+  "prompt",
+  "psvar",
+  "watch"
+]);
 function holdable(key, named, counts) {
-  return counts.get(key) === 1 && named.plain.has(key) && !SHELL_SETS.has(key) && !SHELL_SETS_PREFIX.test(key);
+  return counts.get(key) === 1 && named.plain.has(key) && !SHELL_SETS.has(key) && !SHELL_SETS_PREFIX.test(key) && !TIED.has(key);
 }
 var NONE = { has: () => false };
 var NAME_SETTERS = new Set([
+  "compgen",
   "declare",
   "export",
+  "float",
+  "getln",
   "getopts",
+  "integer",
   "let",
   "local",
   "mapfile",
+  "pcre_match",
+  "print",
   "printf",
+  "private",
   "read",
   "readarray",
   "readonly",
+  "set",
+  "shift",
+  "stat",
+  "strftime",
+  "syserror",
+  "sysopen",
+  "sysread",
+  "syswrite",
   "typeset",
-  "unset"
+  "unset",
+  "vared",
+  "wait",
+  "zcurses",
+  "zformat",
+  "zgdbmpath",
+  "zgetattr",
+  "zlistattr",
+  "zmodload",
+  "zparseopts",
+  "zpty",
+  "zregexparse",
+  "zselect",
+  "zsocket",
+  "zstat",
+  "zstyle",
+  "zsystem",
+  "ztcp",
+  "ztie",
+  "zuntie"
 ]);
+var PRINTS = new Set(["print", "printf"]);
+var NUMERIC = new Set(["float", "integer"]);
+var TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var RUNS_TEXT = new Set([".", "eval", "source"]);
+var TESTS = new Set(["[", "[[", "test"]);
+var PLAIN_NAME = /^[A-Za-z_]\w*$/;
+var EXPANDS = /\$(?![A-Za-z_]\w*|\{[A-Za-z_]\w*\})|`|[<>]\(/;
+var BINARY = new Set([
+  "!=",
+  "-a",
+  "-ef",
+  "-eq",
+  "-ge",
+  "-gt",
+  "-le",
+  "-lt",
+  "-ne",
+  "-nt",
+  "-o",
+  "-ot",
+  "<",
+  "=",
+  "==",
+  "=~",
+  ">"
+]);
+var testsAName = (args, expands) => args.some((w, k) => {
+  const next = args[k + 1];
+  if (w.value === "-v")
+    return next !== undefined && !PLAIN_NAME.test(next.source ?? "");
+  if (!expands)
+    return false;
+  if (EXPANDS.test(w.source ?? "$"))
+    return true;
+  if (!marked(w.value))
+    return false;
+  return !w.quoted || next !== undefined && next.value !== "]" && !BINARY.has(next.value);
+});
 var OPENS2 = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES2 = new Set(["done", "esac", "fi", "}"]);
 var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
 function steadyNames(named, commands) {
-  if (named.counts.has("IFS"))
+  if (named.blind || named.counts.has("IFS"))
     return () => NONE;
   const counts = new Map(named.counts);
   const parses = commands.map((cmd) => parse(cmd));
@@ -1899,16 +2208,26 @@ function steadyNames(named, commands) {
     const { name } = parses[at];
     if (RUNS_TEXT.has(name))
       return () => NONE;
+    const flagged = (letters) => cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value));
+    if (NUMERIC.has(name) || TYPESETS.has(name) && flagged(/[EFin]/))
+      return () => NONE;
+    if (name === "let" && cmd.words.some((w, k) => k > 0 && /[A-Za-z_]/.test(w.value)))
+      return () => NONE;
+    if (name === "print" && flagged(/P/))
+      return () => NONE;
+    if (TESTS.has(name) && testsAName(parses[at].args, name !== "[["))
+      return () => NONE;
     const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
     if (!NAME_SETTERS.has(name) && loop === -1)
       continue;
-    const v = cmd.words.findIndex((w) => /^-v/.test(w.value));
-    const vName = cmd.words[v]?.value === "-v" ? cmd.words[v + 1] : cmd.words[v] && { ...cmd.words[v], value: cmd.words[v].value.slice(2) };
-    const names = loop !== -1 ? [cmd.words[loop + 1]] : name === "printf" ? [vName] : cmd.words;
+    const vNames = cmd.words.flatMap((w, k) => k > 0 && /^-[^-\s]*v/.test(w.value) ? [{ ...w, value: w.value.slice(w.value.indexOf("v") + 1) }, cmd.words[k + 1]] : []);
+    const names = loop !== -1 ? [cmd.words[loop + 1]] : PRINTS.has(name) ? vNames : cmd.words;
     for (const word of names) {
       if (!word)
         continue;
       if (marked(word.value.split("=")[0]))
+        return () => NONE;
+      if (word.quoted && word.value.includes("["))
         return () => NONE;
       for (const key of word.value.match(/[A-Za-z_]\w*/g) ?? [])
         counts.set(key, (counts.get(key) ?? 0) + 1);
@@ -2334,7 +2653,7 @@ async function inspect(raw, environment, unknown = false) {
       if (named)
         return refuse(named);
     }
-    if (!first || EXPORTS2.has(name) || reader)
+    if (!first || EXPORTS3.has(name) || reader)
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
     const remover = REMOVERS.has(name);

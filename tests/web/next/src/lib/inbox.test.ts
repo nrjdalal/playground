@@ -18,6 +18,7 @@ import {
   ACKS_STAMPED_FROM,
   canDraft,
   checkAnswerNote,
+  deliveryNote,
   cardKey,
   changedAt,
   dismissable,
@@ -139,6 +140,32 @@ describe("a secret ask (PG-59)", () => {
     expect(itemState(provided([{ environment: "production", exitCode: 1 }]))).toBe("failed")
     expect(itemState(provided())).toBe("sending")
   })
+
+  test("a saved secret its poster was not told of still reads saved, with the failed telling as a note of its own that offers Retry (PG-880)", () => {
+    const untold = {
+      ...provided([{ environment: "Keychain", exitCode: 0, line: "saved" } as never]),
+      delivery: {
+        code: "CMUX_FAILED",
+        reason:
+          "The sessions read was cut short (a herdr server or pane did not answer whole), so dispatcher was not found; nothing was typed.",
+        status: "failed",
+      },
+      from: "dispatcher",
+    } as InboxItem
+    expect(itemState(untold)).toBe("done")
+    expect(inboxLight(untold)).toBe("done")
+    expect(outcomeLine(untold)).toEndWith(" · Keychain: saved")
+    expect(deliveryNote(untold)).toStartWith("Not told to ")
+    expect(deliveryNote(untold)).toContain("cut short")
+    expect(retryable(untold)).toBe(true)
+    expect(
+      itemState({
+        ...untold,
+        answer: { ...untold.answer, results: [{ environment: "Keychain", exitCode: 1 }] },
+      } as InboxItem),
+    ).toBe("failed")
+    expect(deliveryNote(provided([{ environment: "production", exitCode: 0 }]))).toBeNull()
+  })
 })
 
 describe("an accept decision (PG-658)", () => {
@@ -185,6 +212,64 @@ describe("an accept decision (PG-658)", () => {
       "You approved it · Accepted: rev 9b8c7d6 is accepted · Send failed: cmux is not running",
     )
     expect(itemState(unsent)).toBe("failed")
+  })
+})
+
+describe("an apps decision and a grant decision (PG-658)", () => {
+  const apps = { app: "Notes", change: "add", type: "apps", why: "It holds your notes" }
+  const grant = { permission: "accessibility", type: "grant", why: "It drives Notes" }
+  const approved = (preview: object, step: object, rest: object = {}) =>
+    item({
+      answer: { at: "2026-11-03T20:00:00.000Z", choice: "approve", ...step },
+      delivery: { at: "x", status: "delivered", via: "session" },
+      kind: "decision",
+      preview,
+      status: "approved",
+      ...rest,
+    } as never)
+
+  test("each needs you while open, and reads by what Approve does", () => {
+    const asked = item({ kind: "decision", preview: apps } as never)
+    expect(kindWord(asked)).toBe("Your apps")
+    expect(needsYou(asked)).toBe(true)
+    expect(kindWord(item({ kind: "decision", preview: grant } as never))).toBe("Permission")
+  })
+
+  test("an apps change reads the list the dashboard wrote, done or failed by its exit code", () => {
+    const ran = approved(apps, {
+      listed: { exitCode: 0, line: "added Notes; your apps are Notes" },
+    })
+    expect(outcomeLine(ran)).toBe("You approved it · Your apps: added Notes; your apps are Notes")
+    expect(itemState(ran)).toBe("done")
+    const refused = approved(apps, {
+      listed: { exitCode: 1, line: "Notes is not on your own apps list, so nothing changed" },
+    })
+    expect(outcomeLine(refused)).toBe(
+      "You approved it · Apps change failed (exit 1): Notes is not on your own apps list, so nothing changed",
+    )
+    expect(itemState(refused)).toBe("failed")
+  })
+
+  test("a grant that opened its pane waits on its poster's recheck, and one that opened nothing failed", () => {
+    const opened = {
+      opened: { exitCode: 0, line: "opened System Settings at Privacy & Security > Accessibility" },
+    }
+    const waiting = approved(grant, opened)
+    expect(outcomeLine(waiting)).toBe(
+      "You approved it · Opened System Settings at Privacy & Security > Accessibility · Being carried out by Ops…",
+    )
+    expect(itemState(waiting)).toBe("sending")
+    const rechecked = approved(grant, {
+      ...opened,
+      ackedAt: "2026-11-03T20:02:00.000Z",
+      noLink: "granted",
+    })
+    expect(itemState(rechecked)).toBe("done")
+    const failed = approved(grant, { opened: { exitCode: 1, line: "LSOpenURLsWithRole() failed" } })
+    expect(outcomeLine(failed)).toBe(
+      "You approved it · Opening System Settings failed (exit 1): LSOpenURLsWithRole() failed",
+    )
+    expect(itemState(failed)).toBe("failed")
   })
 })
 

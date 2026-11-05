@@ -47,10 +47,7 @@ const REFRESH_GAP_MS = 1000
 const SAFETY_REFRESH_MS = 10_000
 const REFRESH_TIMEOUT_MS = 8_000
 
-// A tool call's hook, in cmux's event shape, moves the board only for a picker or a message (a message to a manager moves its sender up); herdr's events name no hook, so each moves it, and the filter goes with cmux's other code.
-const TOOL_HOOKS = new Set(["PostToolUse", "PostToolUseFailure", "PreToolUse"])
-const BOARD_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode", "SendMessage"])
-
+// Every herdr event moves the board (a pane opening, exiting, closing or moving, or a state change), and so does a (re)connect ack; a heartbeat or a line that does not parse does not.
 export const movesTheBoard = (line: string): boolean => {
   let event: unknown
   try {
@@ -59,18 +56,8 @@ export const movesTheBoard = (line: string): boolean => {
     return false
   }
   if (typeof event !== "object" || event === null) return false
-  const { name, payload, type } = event as { name?: unknown; payload?: unknown; type?: unknown }
-  if (type === "ack") return true
-  if (type !== "event") return false
-  const fields =
-    typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {}
-  const hook =
-    typeof fields.hook_event_name === "string"
-      ? fields.hook_event_name
-      : typeof name === "string"
-        ? (name.split(".").at(-1) ?? "")
-        : ""
-  return !TOOL_HOOKS.has(hook) || BOARD_TOOLS.has(String(fields.tool_name))
+  const { type } = event as { type?: unknown }
+  return type === "ack" || type === "event"
 }
 
 // A slow sessions read would hold the board on its old frame, so a refresh gives up after a while with an error frame; the next starts once that read settles, which readServer()'s deadline in herdr.ts bounds.
@@ -115,7 +102,7 @@ export class DashboardHub {
       // herdr's events on one stream, every server's (herdr.ts), or null where this machine runs none; herdrEvents() for every server a stack that reads this machine names unless a test stubs it.
       herdr?: () => HerdrEvents | null
       listLive: typeof listLive
-      // Reads one session's screen for the activity line (terminal.ts) unless a test stubs it.
+      // Reads one session's herdr pane for the activity line (terminal.ts) unless a test stubs it.
       readScreen?: (surface: string) => Promise<string>
       refreshGapMs?: number
       refreshTimeoutMs?: number

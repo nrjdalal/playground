@@ -4,6 +4,7 @@ import type { InboxAction, InboxItem, InboxPreview, InboxUpdate } from "@api/hon
 import type { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 import {
   RiAlarmWarningLine,
+  RiAppsLine,
   RiArchive2Line,
   RiArrowDownSLine,
   RiArrowUpLine,
@@ -27,6 +28,7 @@ import {
   RiReplyLine,
   RiSearchEyeLine,
   RiSendPlaneLine,
+  RiShieldKeyholeLine,
   RiShipLine,
   RiSlackLine,
   RiTableLine,
@@ -112,6 +114,7 @@ import {
   type CardKey,
   changedAt,
   checkAnswerNote,
+  deliveryNote,
   dismissable,
   dismissItems,
   filesCount,
@@ -158,9 +161,11 @@ import { fullTime, relativeTime } from "@/lib/time"
 
 const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   accept: RiPuzzleLine,
+  apps: RiAppsLine,
   ask: RiQuestionAnswerLine,
   budget: RiMoneyDollarCircleLine,
   delete: RiDeleteBinLine,
+  grant: RiShieldKeyholeLine,
   schema: RiTableLine,
   secret: RiKey2Line,
   ship: RiShipLine,
@@ -552,6 +557,29 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
       )
+    case "apps":
+      return (
+        <>
+          <p>
+            On Approve, the dashboard {preview.change === "add" ? "adds" : "removes"}{" "}
+            <code className="font-mono">{preview.app}</code>{" "}
+            {preview.change === "add" ? "to" : "from"} your apps, which no session may drive.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "grant":
+      return (
+        <>
+          <p>
+            On Approve, System Settings opens at Privacy &amp; Security &gt;{" "}
+            {preview.permission === "accessibility" ? "Accessibility" : "Screen Recording"}, where
+            you turn it on for the app that runs {agentLabel(item.from)}, and{" "}
+            {agentLabel(item.from)} checks it again.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
   }
 }
 
@@ -793,7 +821,8 @@ export function InboxCard({
   const who = agentLabel(takenBy(item))
   const at = outcome === null ? -1 : outcome.indexOf(who)
   const linked = resultLink(item)
-  const failed = sendFailed(item)
+  const untold = deliveryNote(item)
+  const failed = sendFailed(item) && !untold
   const light = inboxLight(item)
   // an update, or an ask or draft still open, that he has not marked read; reading answers nothing
   const unread = item.readAt === null && (item.kind === "update" || item.status === "open")
@@ -917,6 +946,7 @@ export function InboxCard({
               Your note: {item.answer.note}
             </span>
           )}
+        {untold && <span className="text-muted-foreground mt-1 block">{untold}</span>}
         {linked && (
           <>
             {" · "}

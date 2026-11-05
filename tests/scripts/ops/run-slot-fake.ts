@@ -36,6 +36,8 @@ afterAll(() => {
 })
 
 export type Setup = {
+  // disk0's transfers/s and MB/s in iostat's second sample
+  disk?: [number, number]
   free?: number
   idle?: number
   load1?: number
@@ -51,8 +53,9 @@ export type Setup = {
   topDelay?: number
 }
 
-// A scratch state folder and config folder, with a fake sysctl on PATH giving the load asked for (load5 and load15 as load1 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, and a fake vm_stat whose last row reads the swap-ins asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
+// A scratch state folder and config folder, with a fake sysctl on PATH giving the load asked for (load5 and load15 as load1 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, a fake vm_stat whose last row reads the swap-ins asked for, and a fake iostat whose second sample reads disk0's transfers/s and MB/s asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
 export const machine = ({
+  disk = [120, 3.5],
   free = 80,
   idle = 80,
   load1 = 2,
@@ -109,6 +112,12 @@ esac
     `#!/bin/bash\necho "Mach Virtual Memory Statistics: (page size of 16384 bytes)"\necho "    free   active  pageins  pageout  swapins swapouts"\necho "  203349   476233   253407  3087181  4049933   116968"\necho "  194438   485624        0        0  ${swapins}        0"\n`,
   )
   chmodSync(join(bin, "vm_stat"), 0o755)
+  // iostat -d -c 2 -w 1 disk0's first row counts since boot and its second the last second, as the real one prints them
+  writeFileSync(
+    join(bin, "iostat"),
+    `#!/bin/bash\necho "              disk0 "\necho "    KB/t  tps  MB/s "\necho "   32.98 2576 82.98 "\necho "   30.00 ${disk[0]} ${disk[1].toFixed(2)} "\n`,
+  )
+  chmodSync(join(bin, "iostat"), 0o755)
   if (sandboxed) {
     writeFileSync(
       join(bin, "ps"),

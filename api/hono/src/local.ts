@@ -247,6 +247,7 @@ export type { AttachmentKind, EntryAttachment } from "@/lib/dashboard/attachment
 export type { DashboardFrame } from "@/lib/dashboard/hub"
 export type {
   InboxAction,
+  InboxAnswer,
   InboxAttachment,
   InboxAttachmentKind,
   InboxDelivery,
