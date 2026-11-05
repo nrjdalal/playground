@@ -40,4 +40,11 @@ describe("the hosted dashboard is read-only", () => {
     ]
     for (const [file, line] of writes) expect(await read(file)).toContain(line)
   })
+
+  test("Settings keeps Remote alone under the line on the hosted build, since pairing a browser is the one write it sends", async () => {
+    const source = await read("../settings/settings-home.tsx")
+    expect(source).toMatch(
+      /\{allowed && config\.hosted \? \(\n\s+<div className="flex flex-col gap-6">\n\s+<ReadOnlyLine \/>\n\s+<Remote \/>\n\s+<\/div>\n\s+\) : allowed \? \(/,
+    )
+  })
 })

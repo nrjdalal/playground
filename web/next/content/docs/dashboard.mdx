@@ -213,7 +213,7 @@ Signed in to the hosted Yard as its owner, open `/dashboard` there to read this 
 This Mac dials out to Yard, so nothing here listens beyond this machine: it holds the connection while its Dashboard reads your own machine, `YARD_API_URL` is set and `playground yard login` has put a token in the Keychain ([the playground command](/docs/cli#yard-playground-yard)).
 Yard keeps nothing this Mac sends, and only the owner reaches the page; anyone else gets the 404.
 For now it reads alone, the board refreshing every 5 seconds and the Inbox's Preview row showing no preview there.
-It shows no message box and no button that changes anything: "Read-only on Yard: send from your Mac" stands in the message box's place and at the top of the Inbox, and a message the page still held is dropped with that reason, never sent.
+It shows no message box and no button that changes anything: "Read-only on Yard: send from your Mac" stands in the message box's place, at the top of the Inbox and on Settings, which keeps only Remote there, and a message the page still held is dropped with that reason, never sent.
 Sending from Yard will count only what a browser you paired signs; pair one from Settings under [Remote](/docs/settings#remote).
 While this Mac sleeps or is offline, the page says "Your Mac is offline since" and the time.
 When you come back to the tab, it checks again at once, and it says the Mac is offline only once a second check agrees.
