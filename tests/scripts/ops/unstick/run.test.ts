@@ -1162,28 +1162,39 @@ describe("ops-unstick's slot alerts", () => {
     "  999454 999453 bun packages/scripts/src/test-sandbox.ts tests/packages/scripts/src/trace-count/count.test.ts",
     "  999455 999454 bun test tests/packages/scripts/src/trace-count/count.test.ts",
   ]
+  // the same tree with bun test straight under the script, the form before trace-count ran through test:file
+  const precommitLightBare = [
+    ...precommitLight.slice(0, 2),
+    precommitLight[4]!.replace("999454", "999452"),
+  ]
 
-  test("precommit:light's test, which runs outside the slots by rule, is no job and raises no outside-slot", async () => {
-    const jobs = await call(scratch(), "heavy_jobs", precommitLight)
-    expect(jobs).toEqual([])
-    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([])
-  })
+  for (const [form, rows] of [
+    ["bun run test:file", precommitLight],
+    ["bun test tests", precommitLightBare],
+  ] as const)
+    test(`precommit:light's ${form}, which runs outside the slots by rule, is no job and raises no outside-slot`, async () => {
+      const jobs = await call(scratch(), "heavy_jobs", rows)
+      expect(jobs).toEqual([])
+      expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([])
+    })
 
-  test("a bare bun test with no precommit:light above it and no holder still raises outside-slot", async () => {
-    const jobs = await call(scratch(), "heavy_jobs", [
-      precommitLight.at(-1)!.replace("999454", "     1"),
-    ])
-    expect(jobs).toEqual([{ inside: false, kind: "suite", pid: "999455", where: "?" }])
-    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([
-      {
-        at,
-        kind: "outside-slot",
-        line: "a suite runs outside the run slots (pid 999455); use run-slot.sh",
-        name: "?",
-        since: at,
-      },
-    ])
-  })
+  for (const [form, row, pid] of [
+    ["bun run test:file", precommitLight[2]!.replace("999452", "     1"), "999453"],
+    ["bun test tests", precommitLight[4]!.replace("999454", "     1"), "999455"],
+  ] as const)
+    test(`a bare ${form} with no precommit:light above it and no holder still raises outside-slot`, async () => {
+      const jobs = await call(scratch(), "heavy_jobs", [row])
+      expect(jobs).toEqual([{ inside: false, kind: "suite", pid, where: "?" }])
+      expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([
+        {
+          at,
+          kind: "outside-slot",
+          line: `a suite runs outside the run slots (pid ${pid}); use run-slot.sh`,
+          name: "?",
+          since: at,
+        },
+      ])
+    })
 
   test("the slots read are run-slot.sh's own, each model slot by its name", async () => {
     const script = readFileSync(
