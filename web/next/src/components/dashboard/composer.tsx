@@ -53,7 +53,7 @@ export function sendsOnEnter(event: EnterKey, enterAddsLine = false) {
   return !enterAddsLine || event.metaKey || event.ctrlKey
 }
 
-// The box's id, so a pending bubble's Unsend, Dismiss or Retry can hand focus back to it once the button is gone. Playground's own box keeps the bare id, which an Inbox card's Chat about it focuses; any other box takes its session's name and thread after it, so two boxes on one page never share an id.
+// The box's id, so a pending bubble's Unsend, Dismiss or Retry can hand focus back to it once the button is gone. Playground's own box keeps the bare id; any other box takes its session's name and thread after it, so two boxes on one page never share an id.
 export const COMPOSER_ID = "composer"
 export const composerId = (
   worker: Pick<Worker, "name" | "role">,
