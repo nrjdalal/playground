@@ -916,7 +916,7 @@ describe("a sent draft before its poster acks it", () => {
       ...over,
     } as Partial<InboxItem> & Pick<InboxItem, "kind">)
 
-  test("reads Sent, its light still sending even once typed into the session (Merritt, on #i115 reading Delivered before Slack had it)", () => {
+  test("reads Sent, its light still sending even once typed into the session (#i115 read Delivered before Slack had it)", () => {
     const typed = { at: "x", status: "delivered", via: "session" } as const
     expect(outcomeLine(sent({ delivery: typed }))).toBe("Sent")
     expect(itemState(sent({ delivery: typed }))).toBe("sending")
