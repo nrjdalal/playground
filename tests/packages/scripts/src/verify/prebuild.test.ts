@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -179,6 +180,41 @@ test("unbuilt names a package whose dist lacks a name the sources import, and pa
     }
     const names = { "@packages/fresh": ["a", "b"], "@packages/stale": ["a", "b"] }
     expect(unbuilt(["@packages/stale", "@packages/fresh"], dir, names)).toEqual(["@packages/stale"])
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+// check-types:tests once failed after a canary merge on types a dist built before it lacked, every name the sources import still there; a rebuild under a running stack hangs it, so a stack up keeps the dist.
+test("unbuilt names a package whose src holds a file newer than its dist while no stack runs, by a dist folder's newest file, and passes a file served from src", () => {
+  const dir = mkdtempSync(join(tmpdir(), "prebuild-mtime-"))
+  try {
+    const at = (path: string, seconds: number) => utimesSync(path, seconds, seconds)
+    const files: Record<string, string> = {}
+    for (const [name, srcAt, distAt, served] of [
+      ["stale", 2000, 1000, "dist/index.mjs"],
+      ["fresh", 1000, 2000, "dist/index.mjs"],
+      ["folder", 1500, 2000, "dist"],
+      ["source", 2000, 1000, "src/index.ts"],
+    ] as const) {
+      const pkg = join(dir, name)
+      mkdirSync(join(pkg, "dist"), { recursive: true })
+      mkdirSync(join(pkg, "src"))
+      writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: `@packages/${name}` }))
+      writeFileSync(join(pkg, "src/index.ts"), "export const a = 1\n")
+      writeFileSync(join(pkg, "src/other.ts"), "export const b = 2\n")
+      writeFileSync(join(pkg, "dist/index.mjs"), "export const a = 1\n")
+      at(join(pkg, "src/index.ts"), 1000)
+      at(join(pkg, "src/other.ts"), srcAt)
+      at(join(pkg, "dist/index.mjs"), distAt)
+      at(join(pkg, "dist"), 500)
+      files[`@packages/${name}`] = join(pkg, served)
+    }
+    const resolve = (specifier: string) => files[specifier]
+    expect({
+      stackDown: unbuilt(Object.keys(files), dir, {}, resolve, false),
+      stackUp: unbuilt(Object.keys(files), dir, {}, resolve, true),
+    }).toEqual({ stackDown: ["@packages/stale"], stackUp: [] })
   } finally {
     rmSync(dir, { force: true, recursive: true })
   }

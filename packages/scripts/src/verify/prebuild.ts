@@ -2,9 +2,10 @@ import "@packages/env/aliases"
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
+import { stackIn } from "../../../../api/hono/src/lib/dev/stop"
 import { withoutShebang } from "../shebang"
 
-// verify, pr:merge, the dev launcher, test:file and check-types:tests reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow by adding an export; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists but lacks a name the target's sources import from it, those it reaches through relative and `@/` imports included, counts as unbuilt; any other stale dist is left as it is.
+// verify, pr:merge, the dev launcher, test:file and check-types:tests reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists counts as unbuilt when a file under its package's `src` is newer than it while no stack runs in this checkout (`bun run verify` checks a running one, and a rebuild under it hangs it), or when it lacks a name the target's sources import from it, those it reaches through relative and `@/` imports included.
 const VERIFY = import.meta.dir
 const SRC = join(VERIFY, "..")
 const ROOT = join(VERIFY, "../../../..")
@@ -102,12 +103,39 @@ export const importedNames = (sources: string[]): Record<string, string[]> => {
   )
 }
 
-// The imports that resolve to nothing yet, an exports target whose file is missing among them, and those whose file lacks a name the sources import from it; a file that re-exports with `export *` is taken as exporting every name.
+// The newest mtime among the files under a folder, 0 for none, read once per folder a run.
+const newestTimes = new Map<string, number>()
+const newestUnder = (dir: string): number => {
+  const known = newestTimes.get(dir)
+  if (known !== undefined) return known
+  let newest = 0
+  for (const name of new Bun.Glob("**/*").scanSync(dir))
+    newest = Math.max(newest, statSync(join(dir, name)).mtimeMs)
+  newestTimes.set(dir, newest)
+  return newest
+}
+
+// A built file older than a file under its package's src, as a pull leaves it; a dist folder reads by its newest file, since its own mtime moves only when an entry is added or removed, and a file its package serves from src, or a package with no src, reads as current.
+const outgrown = (file: string): boolean => {
+  const real = realpathSync(file)
+  let pkg = dirname(real)
+  while (!existsSync(join(pkg, "package.json"))) {
+    if (dirname(pkg) === pkg) return false
+    pkg = dirname(pkg)
+  }
+  const src = join(pkg, "src")
+  if (!existsSync(src) || real.startsWith(`${src}/`)) return false
+  const built = statSync(real).isDirectory() ? newestUnder(real) : statSync(real).mtimeMs
+  return newestUnder(src) > built
+}
+
+// The imports that resolve to nothing yet, an exports target whose file is missing among them, those older than a file under their package's src while no stack runs in this checkout, and those whose file lacks a name the sources import from it; a file that re-exports with `export *` is taken as exporting every name.
 export const unbuilt = (
   specifiers: string[],
   from: string,
   names: Record<string, string[]> = {},
   resolve: (specifier: string, from: string) => string = Bun.resolveSync,
+  stackUp: boolean = Boolean(stackIn(ROOT)),
 ): string[] =>
   specifiers.filter((specifier) => {
     let file: string
@@ -116,6 +144,7 @@ export const unbuilt = (
     } catch {
       return true
     }
+    if (!stackUp && outgrown(file)) return true
     const wanted = names[specifier] || []
     if (wanted.length === 0) return false
     const code = readFileSync(file, "utf8")
