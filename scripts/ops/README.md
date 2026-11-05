@@ -90,7 +90,7 @@ An ops switch is a file under the state folder that bends run-slot while it stan
 Turn one on with `run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]`, its switch named without the `run-slot.` or `runner-host/` prefix (`run-slot.sh set ops slot-off --reason "box queue 17 deep" --for 2h`); a set with no reason is refused.
 It writes `<who> <iso set> <iso expiry> <reason>`, with the value on the line below: for `load5-cap`, the highest load5 (the third field of `sysctl -n vm.loadavg`) `run-slot-2` opens under in single-slot mode, 22 at most, and the default expiry is 4 hours.
 Every run-slot run drops each switch past its expiry, moving it to `<name>.expired-<ts>` with an `expire` line in `run-slot.runs.log`, so the readers that only look for the file (the merge train, Checks, the leads' sweep) find it gone too.
-A file with no such line, as a hand-written one, counts as set at its mtime with the default expiry.
+A file with no such line, as a hand-written one, counts as set at its mtime with the default expiry, and as off while that mtime reads back empty; `run-slot.priority` likewise names no pick then.
 Lift one before its expiry by moving it to `<name>.lifted-<ts>` (`mv run-slot.3-off run-slot.3-off.lifted-$(date -u +%Y%m%dT%H%MZ)`).
 While one stands, `playground sweep ops` lists it once an hour with its age, expiry and reason (a hand-set `runner-host/slot-off` kept the runner box idle for two days).
 
