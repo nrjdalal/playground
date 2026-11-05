@@ -19,6 +19,7 @@ import {
   ACKS_STAMPED_FROM,
   canDraft,
   checkAnswerNote,
+  commentRefused,
   decisionChoices,
   deliveryNote,
   cardKey,
@@ -1118,6 +1119,14 @@ describe("an item changed after it was posted shows when it was updated", () => 
     expect(changedAt(item({ createdAt: posted, kind: "decision", updatedAt: posted }))).toBeNull()
   })
 
+  test("reads an edit 999 ms after its post as unchanged, and one 1000 ms after as changed", () => {
+    const after = (ms: number) => new Date(Date.parse(posted) + ms).toISOString()
+    const edited = (ms: number) =>
+      item({ createdAt: posted, kind: "decision", updatedAt: after(ms) })
+    expect(changedAt(edited(999))).toBeNull()
+    expect(changedAt(edited(1000))).toBe(after(1000))
+  })
+
   test("reads an update's change time only for its poster's edit, not his read, Dismiss or a resolve", () => {
     const at = "2026-10-12T11:00:00.000Z"
     const update = { createdAt: posted, kind: "update" as const, updatedAt: at }
@@ -1960,5 +1969,18 @@ describe("an answer queued, delivered or lost", () => {
     expect(retryable(queued, at + STUCK_QUEUED_MS - 1)).toBe(false)
     expect(retryable(queued, at + STUCK_QUEUED_MS)).toBe(true)
     expect(API_retryable(queued, new Date(at + STUCK_QUEUED_MS))).toBe(true)
+  })
+})
+
+// ib-7: a secret ask's comment goes through Reply alone, so a value typed there would reach a transcript.
+describe("commentRefused", () => {
+  test("refuses a comment equal to the value field, its edges trimmed", () => {
+    expect(commentRefused(" sk-made-up-123 ", "sk-made-up-123\n")).toContain("That is the value")
+  })
+
+  test("passes any other comment, and any comment while the field is empty", () => {
+    expect(commentRefused("Which project is this for?", "sk-made-up-123")).toBeNull()
+    expect(commentRefused("sk-made-up-123", "")).toBeNull()
+    expect(commentRefused("", "  ")).toBeNull()
   })
 })

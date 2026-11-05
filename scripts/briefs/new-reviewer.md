@@ -21,6 +21,8 @@ Its scope as your worker's lead ruled it, the bar you score against, and any har
 
 Run one plain command per call, with absolute paths and `git -C`, and no `cd`, `rm` or `sh -c` wrapper, under the factory's **signal** and **slots** rules.
 
+**stop**: an urgent ticket gets the Mac, so on the Builder's stop set your round aside in your scratchpad, stop your own queued and running slot tasks by their own handle (`TaskStop`), and go idle, with no new round, merge or spawn; at the all-clear, carry on where you stopped. Only the urgent ticket's own session and its checkers keep working, the stop naming that session.
+
 ## Steps
 
 1. Load the playbook skill with the Skill tool, then code-review-loop. Done when both are in your context.

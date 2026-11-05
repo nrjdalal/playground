@@ -706,6 +706,27 @@ describe("Schedule's row", () => {
     expect(html).toContain('aria-label="Comment"')
   })
 
+  // a focused box that turns disabled drops focus to the page, so words dictated or typed while a card above it leaves land nowhere
+  test("the comment box stays enabled on a card that just moved under him, and only reads read-only while its answer is on its way", () => {
+    const box = (html: string) => html.match(/<textarea[^>]*aria-label="Comment"[^>]*>/)?.[0] ?? ""
+    expect(box(render(true))).not.toBe("")
+    expect(box(render(true))).not.toMatch(/\sdisabled=""/)
+    expect(box(render(false))).not.toMatch(/\sdisabled=""|\sreadonly=""/i)
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    expect(source).toMatch(/<NoteBox[^>]*readOnly=\{pending\}/)
+    expect(source).toMatch(/placeholder="Paste the value"\s+readOnly=\{pending\}/)
+  })
+
+  // the browser's own paste reads the clipboard again at the insert, which a dictation app may have put back by then, so the box inserts the text its paste event carried, as the composer does
+  test("the comment box lands a paste as the text its event carried, through insertPaste", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const box = source.slice(
+      source.indexOf("function NoteBox("),
+      source.indexOf("// Taking what waits behind the pill"),
+    )
+    expect(box).toContain("onPaste={(event) => void insertPaste(event)}")
+  })
+
   test("an unread ask keeps its light and draws no unread dot, which stays an update's", () => {
     expect(render(false)).not.toContain("bg-primary size-2 rounded-full")
     expect(
@@ -762,7 +783,7 @@ describe("a settled card's footer", () => {
     const resultAt = html.indexOf("Decided by")
     const footerAt = html.indexOf('data-slot="card-footer"')
     const dismissAt = html.indexOf(named(html, "Dismiss"))
-    const replyAt = html.indexOf('aria-description="Reply"')
+    const replyAt = html.indexOf('aria-label="Reply to #i41"')
     expect(resultAt).toBeGreaterThan(-1)
     expect(footerAt).toBeGreaterThan(-1)
     expect(dismissAt).toBeGreaterThan(-1)
@@ -814,6 +835,91 @@ describe("a settled card's right-hand group", () => {
     const between = html.slice(dismissAt, replyAt)
     expect(between.split("<button").length - 1, "Collapse, then Reply's own").toBe(2)
     expect(between).toContain('aria-label="Collapse"')
+  })
+})
+
+// ib-7: one comment box on every open card, and Reply on every card, folded rows included, in place of Chat about it.
+describe("the comment box and Reply on every card", () => {
+  const answered = {
+    ...decision,
+    answer: { at: "2026-10-12T10:05:00.000Z", choice: "approve" },
+    delivery: { at: "2026-10-12T10:05:01.000Z", status: "delivered", to: "ops", via: "session" },
+    status: "approved",
+  } as InboxItem
+  const update = {
+    ...decision,
+    kind: "update",
+    preview: { outcome: "merged" },
+    readAt: "2026-10-12T10:01:00.000Z",
+    title: "Merged #270",
+  } as InboxItem
+  const secret = {
+    ...decision,
+    preview: { key: "API_KEY", sink: { item: "slack", type: "keychain" }, type: "secret" },
+    title: "Paste the Slack token",
+  } as InboxItem
+  const cards = { answered, open: decision, secret, update }
+
+  test("every open card shows the box: an open ask, an answered one, an update and a secret ask", () => {
+    for (const [name, item] of Object.entries(cards)) {
+      expect(opened(item), name).toContain('aria-label="Comment"')
+    }
+  })
+
+  test("a secret ask's value field stays enabled on a card that just moved under him, so a paste in that second lands", () => {
+    const field = (html: string) =>
+      html.match(/<input[^>]*placeholder="Paste the value"[^>]*>/)?.[0] ?? ""
+    const paused = render(true, secret, false, { defaultOpen: true })
+    expect(field(paused)).not.toBe("")
+    expect(field(paused)).not.toMatch(/\sdisabled=""|\sreadonly=""/i)
+    expect(field(paused)).toContain('type="password"')
+  })
+
+  test("the box reads optional where it rides an answer as its note, and plain where Reply alone sends it", () => {
+    expect(opened(decision)).toContain('placeholder="Add an optional comment"')
+    for (const item of [answered, update, secret]) {
+      expect(opened(item)).toContain('placeholder="Add a comment"')
+    }
+  })
+
+  test("every card offers Reply, folded or open, and none offers Chat about it", () => {
+    for (const [name, item] of Object.entries(cards)) {
+      for (const html of [render(false, item), opened(item)]) {
+        expect(named(html, "Reply to #i41"), name).not.toBe("")
+        expect(html).not.toContain("Chat about")
+      }
+    }
+    expect(render(false, update)).not.toContain('aria-label="Comment"')
+  })
+
+  test("Reply with an empty box hands the card's ref to Playground's composer, which the aside brings forward, focused in the click's frame (#1045)", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const reply = source.slice(source.indexOf("const onReply = () => {"))
+    // the hand goes only while Playground's session is live, the one whose composer the dashboard mounts, else the card's own box opens as before
+    expect(source).toContain("const chat = allowed ? dispatcherOf(workers, dispatcher) : null")
+    expect(reply).toContain("replyRoute({ chat: chat !== null, folded, secret: secretAsk, text })")
+    expect(reply).toContain('if (route === "composer" && chat) {')
+    expect(reply).toContain("flushSync(() => outbox.reply(chat.name, item.ref))")
+    expect(reply).toContain("document.getElementById(COMPOSER_ID)?.focus()")
+    // the hand goes to the primary dispatcher's box alone, the page's own chat or the aside's, and the aside shows that chat on every hand, so it never lands in a box out of sight
+    const aside = readFileSync(join(web, "src/components/dashboard/dashboard-aside.tsx"), "utf8")
+    expect(aside).toContain("const handed = outbox.draft")
+    expect(aside).toContain("else showChat()")
+    const composer = readFileSync(join(web, "src/components/dashboard/composer.tsx"), "utf8")
+    expect(composer).toContain(
+      'const text = takeHanded(form.getFieldValue("text"), draft, worker.name, taken.current)',
+    )
+    expect(composer).toContain("if (threadId) return")
+  })
+
+  test("Reply opens a folded card to its box, focused in the click's frame, and sends the words alone, a secret's guarded by its value", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const reply = source.slice(source.indexOf("const onReply = () => {"))
+    expect(reply).toContain("flushSync(() => setToggled(true))")
+    expect(reply).toContain("document.getElementById(commentId)?.focus()")
+    expect(reply).toContain("secretAsk ? commentRefused(note, secret) : null")
+    expect(reply).toContain("replyItem(item.id, text)")
+    expect(source).not.toContain("setReply")
   })
 })
 
@@ -1455,6 +1561,39 @@ describe("an ask's files in its card", () => {
   })
 })
 
+describe("a ship decision's PRs", () => {
+  test("each opens its page from the card when the item names it, and an older item's reads as before", () => {
+    const html = render(false, {
+      ...decision,
+      preview: {
+        prs: [{ number: 270, title: "x", url: "https://github.com/acme/app/pull/270" }],
+        sha: "3f9a2c1",
+        type: "ship",
+      },
+    } as InboxItem)
+    expect(html).toMatch(
+      /<a [^>]*href="https:\/\/github.com\/acme\/app\/pull\/270"[^>]*target="_blank"[^>]*>#270<\/a> x/,
+    )
+    expect(render(false)).toContain("#270 x")
+  })
+})
+
+describe("a delete decision's why", () => {
+  test("renders as markdown, so each target's PR opens from the card, while what stays the plain text Approve deletes", () => {
+    const html = render(false, {
+      ...decision,
+      preview: {
+        type: "delete",
+        what: "- worktree `/m/.claude/worktrees/pg-2`",
+        why: "Left over.\n\n- worktree `pg-2`: [#12](https://github.com/acme/app/pull/12)",
+      },
+      title: "Delete 1 leftover the nightly cleanup found",
+    } as InboxItem)
+    expect(html).toMatch(/<a [^>]*href="https:\/\/github.com\/acme\/app\/pull\/12"[^>]*>#12<\/a>/)
+    expect(html).toContain("- worktree `/m/.claude/worktrees/pg-2`")
+  })
+})
+
 describe("a held Yard post's card", () => {
   test("its Approve is a link that opens Yard's approve page in a new tab, never an answer", () => {
     const html = render(false, {
@@ -1516,7 +1655,7 @@ describe("one word a meaning: Later, Archive, Reply and Replying (PG-900)", () =
     expect(tipsOf(html)).toContain("Later: put it away until a time, then it asks again")
   })
 
-  test("the chat button is Reply, and the card it is replying to reads Replying in its band, with no fill", () => {
+  test("the card's button is Reply, and the card the chat's words name as re #iN reads Replying in its band, with no fill", () => {
     const html = opened(answered)
     expect(html).toContain('aria-label="Reply to #i41"')
     expect(html).not.toContain("Chat about")

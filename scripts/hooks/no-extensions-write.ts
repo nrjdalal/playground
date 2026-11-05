@@ -9,6 +9,7 @@ import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
   ASSIGN,
+  codeFed,
   type Command,
   type Env,
   examine,
@@ -48,7 +49,14 @@ const shown = (word: Word): string =>
 const ROUTE =
   "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand."
 
-const refuse = (what: string) => `no-extensions-write hook refuses ${what}: ${ROUTE}`
+// The guard keys Privacy on the Dashboard's Settings page saves at your login's scope, so a write there names that page as its route.
+const PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"])
+const PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves"
+const PRIVACY_ROUTE =
+  "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand."
+
+const refuse = (what: string) =>
+  `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`
 
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
@@ -829,8 +837,9 @@ function narrow(cmd: Command, env: Env): boolean {
   return false
 }
 
-// Whether a line holds a shell reading its script from stdin (`sudo -s`, `sh`) anywhere, its groups' and substitutions' included, which runs whatever a reader prints into it
+// Whether a line holds a shell reading its script from stdin (`sudo -s`, `sh`) or a command its pipe feeds as code (codeFed) anywhere, its groups' and substitutions' included, which runs whatever a reader prints into it
 function rooted(commands: Command[]): boolean {
+  if (codeFed(commands).size > 0) return true
   return commands.some(
     (cmd) =>
       !!stdinShell(cmd) ||
@@ -874,7 +883,69 @@ function wholeLine(commands: Command[], env: Env): boolean {
   })
 }
 
-// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own; `vars` is the scope's variables set since their lines were last read.
+// Calls whose string argument a shell runs: exec and execSync in a program that names child_process, and execFile, execFileSync, spawn and spawnSync in a program that names `shell` other than as a key whose whole value is a literal `false` (true, a shell's path, a value read at run time or an expression that starts with `false` all run one). A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
+const IMPLICIT_SHELL = new Set(["exec", "execSync"])
+const SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g
+// `shell`, a quoted key's quotes included, and the `: false` after it when that is its whole value, ended by a comma or a closing bracket.
+const SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b(?=\s*[,})]))?/g
+
+// Whether a program names a `shell` other than a key whose whole value is a literal false: read across the program, since a shorthand property, a spread or an options object passed by name carries the option outside the call's own text.
+function namesShell(text: string): boolean {
+  return [...text.matchAll(SHELL_WORD)].some((m) => !m[2])
+}
+
+function skipSpace(src: string, k: number): number {
+  while (k < src.length && /\s/.test(src[k])) k++
+  return k
+}
+
+// A JavaScript string literal at `src[i]` (a ', " or ` quote): its content and the index past the close, or undefined when `src[i]` is no quote or a template holds a ${…} substitution.
+function stringLiteral(src: string, i: number): { end: number; value: string } | undefined {
+  const quote = src[i]
+  if (quote !== '"' && quote !== "'" && quote !== "`") return undefined
+  let value = ""
+  let k = i + 1
+  while (k < src.length && src[k] !== quote) {
+    if (src[k] === "\\") {
+      value += src[k + 1] ?? ""
+      k += 2
+    } else value += src[k++]
+  }
+  if (quote === "`" && value.includes("${")) return undefined
+  return { end: k + 1, value }
+}
+
+// The command string a shell-running call is given, read from just after its `(`: a run of string literals joined by `+`, or undefined when the first argument is not a literal run (an array, a variable, a template with a substitution). A shell variable ($VAR) inside the literal is kept and judged as the shell reads it, so the rest of the line is still judged.
+function commandString(src: string, open: number): string | undefined {
+  let value = ""
+  let k = open
+  for (;;) {
+    k = skipSpace(src, k)
+    const literal = stringLiteral(src, k)
+    if (!literal) return undefined
+    value += literal.value
+    k = skipSpace(src, literal.end)
+    if (src[k] !== "+") break
+    k++
+  }
+  return value
+}
+
+// Each command string a shell-running call in a program's text is given, so a ~ in one is judged as the shell expands it; exec and execSync count only in a program that names child_process, so a regex's or a query's `.exec` is left alone, and a spawn, spawnSync, execFile or execFileSync counts only in a program that names a `shell` other than a key whose whole value is a literal `false`.
+function shellRunnerArgs(text: string): string[] {
+  const out: string[] = []
+  const childProcess = text.includes("child_process")
+  const shell = namesShell(text)
+  for (const m of text.matchAll(SHELL_RUNNER)) {
+    const open = m.index + m[0].length
+    const command = commandString(text, open)
+    if (command === undefined) continue
+    if ((IMPLICIT_SHELL.has(m[1]) && childProcess) || shell) out.push(command)
+  }
+  return out
+}
+
+// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own, and the command string a shell-running call in it is given; `vars` is the scope's variables set since their lines were last read.
 function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean): string[] {
   const { args, first, local } = parsed
   const values = [...local.values(), ...vars].flatMap((text) => {
@@ -886,6 +957,7 @@ function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean)
       values.push(text.value.replace(/^!/, ""))
       // printf and echo -e print a \n as a line break, which a root shell runs as one
       if (rootLine) values.push(...text.value.split("\\n"))
+      values.push(...shellRunnerArgs(text.value))
     }
   values.push(...programLines(parsed, rootLine))
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
@@ -907,19 +979,23 @@ function cliWrite(words: Word[]): string | undefined {
   const unread = rest.includes(undefined)
   const positional: (string | undefined)[] = []
   let dry = false
+  let scoped = false
   for (let k = 0; k < rest.length; k++) {
     const word = rest[k]
     if (word !== undefined && switches.includes(word)) dry ||= word === "--dry-run"
-    else if (word?.startsWith("--")) k++
-    else positional.push(word)
+    else if (word?.startsWith("--")) {
+      scoped ||= word.startsWith("--scope")
+      k++
+    } else positional.push(word)
   }
   if (command === "settings") {
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
-    return GUARD_KEYS.has(key)
-      ? `playground settings ${verb} of ${key}, a key a guard reads`
-      : undefined
+    if (!GUARD_KEYS.has(key)) return
+    return PRIVACY_KEYS.has(key) && !scoped
+      ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}`
+      : `playground settings ${verb} of ${key}, a key a guard reads`
   }
   if (verb === "accept")
     return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set"

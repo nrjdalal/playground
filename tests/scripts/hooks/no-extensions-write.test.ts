@@ -523,6 +523,65 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
     })
     expect(await check(raw, real)).toBeUndefined()
   })
+
+  // A folder below the home that is neither the root nor above it, so canary's whole-program-glob fallback resolves there and runs, which is what makes the extraction the only thing that can refuse these rows.
+  const worktree = join(homedir(), "worktree")
+
+  // PG-840: the command string a shell-running call is given runs through a shell, which expands its leading ~ to the home, so a data-folder glob in it is judged against the home from any folder, a worktree included; canary read only the program's own call parens as a glob in the worktree, so it ran this from a worktree.
+  test.each([
+    [
+      "a data-folder glob removed through execSync",
+      `node -e 'require("child_process").execSync("rmdir ~/.play*")'`,
+    ],
+    [
+      "a data-folder glob removed through execSync joined from two strings",
+      `node -e 'require("child_process").execSync("rmdir " + "~/.play*")'`,
+    ],
+    [
+      "a data-folder glob removed through spawnSync with shell true",
+      `node -e 'require("child_process").spawnSync("rmdir ~/.play*", { shell: true })'`,
+    ],
+    [
+      "a data-folder glob removed through execSync beside an unrelated shell variable",
+      `node -e 'require("child_process").execSync("rmdir ~/.play* $1")'`,
+    ],
+    [
+      "a data-folder glob removed through execSync before an echo of a variable",
+      `node -e 'require("child_process").execSync("rmdir ~/.play*; echo $HOME")'`,
+    ],
+  ])("%s is refused from a worktree", async (_, command) => {
+    const reason = await check(
+      JSON.stringify({ cwd: worktree, tool_input: { command }, tool_name: "Bash" }),
+      real,
+    )
+    expect(reason).toContain("no-extensions-write hook refuses")
+  })
+
+  // PG-840 residual, named in the hook's README as the guard's known limit: a command string the hook cannot read as literals (a variable, a template with a substitution), an argument list no shell runs its ~, and a regex's .exec whose string no shell runs, each stays as canary judged them, so none is newly refused from a worktree. The README names the rest of the residual, whose working forms are kept out of this file.
+  test.each([
+    [
+      "a removal built from a variable through execSync",
+      `node -e 'const d=process.argv[1]; require("child_process").execSync("rmdir " + d)' ~/.play`,
+    ],
+    [
+      "an argument list no shell runs, its ~ left literal",
+      `bun -e 'Bun.spawnSync(["rmdir", "~/.play*"])'`,
+    ],
+    [
+      "a benign home path removed through execSync",
+      `node -e 'require("child_process").execSync("rmdir ~/.no-such-benign-dir")'`,
+    ],
+    [
+      "a regex exec whose string no shell runs",
+      `node -e 'const re = /a b/; re.exec("rmdir ~/.play*")'`,
+    ],
+  ])("%s runs from a worktree", async (_, command) => {
+    const reason = await check(
+      JSON.stringify({ cwd: worktree, tool_input: { command }, tool_name: "Bash" }),
+      real,
+    )
+    expect(reason).toBeUndefined()
+  })
 })
 
 // A quoted argument with a space is read as a command line unless every command on the line is on a closed list of readers (awk with a program that runs nothing, cat, grep, head, tail, wc, sort, uniq, cut), with no redirect that writes a file; an awk program that runs a command has its literals read wherever it stands, and sed keeps canary's reading.
@@ -1534,14 +1593,6 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
       "ext put past a word it cannot read",
       'playground ext put "$(printf -- --dry-run)" login list x /tmp/x.json --reason r',
     ],
-    [
-      "settings set past --yes, which settings takes as an option",
-      `playground settings set --yes ui.theme owner.names '["x"]' --reason r`,
-    ],
-    [
-      "settings reset past --yes",
-      "playground settings reset --yes ui.theme owner.names --reason r",
-    ],
     ["settings set of live.branch", "playground settings set live.branch x --reason r"],
     ["settings set of paths.codeRoot", "playground settings set paths.codeRoot / --reason r"],
     ["settings set of sessions.names", "playground settings set sessions.names '{}' --reason r"],
@@ -1561,11 +1612,6 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
     ["ext order", "playground ext order acme login"],
     ["ext remove with a --dry-run it ignores", "playground ext remove acme --dry-run"],
     ["settings set of ext.links", "playground settings set ext.links '{}' --reason x"],
-    ["settings set of owner.names", "playground settings set owner.names '[]' --reason x"],
-    [
-      "settings set of factory.archiveRepo",
-      "playground settings set factory.archiveRepo a/b --reason x",
-    ],
     [
       "settings set of factory.publicRepo",
       "playground settings set factory.publicRepo a/b --reason x",
@@ -1593,6 +1639,37 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
     const reason = await bash(command)
     expect(reason).toContain("no-extensions-write hook refuses")
     expect(reason).toContain("!")
+  })
+
+  test.each([
+    ["settings set of owner.names", "playground settings set owner.names '[]' --reason x"],
+    [
+      "settings set of factory.archiveRepo",
+      "playground settings set factory.archiveRepo a/b --reason x",
+    ],
+    [
+      "settings set past --yes, which settings takes as an option",
+      `playground settings set --yes ui.theme owner.names '["x"]' --reason r`,
+    ],
+    [
+      "settings reset past --yes",
+      "playground settings reset --yes ui.theme owner.names --reason r",
+    ],
+  ])(
+    "%s at your login's scope routes the owner to Privacy on the Settings page",
+    async (_, command) => {
+      const reason = await bash(command)
+      expect(reason).toContain("no-extensions-write hook refuses")
+      expect(reason).toContain(
+        "tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page.",
+      )
+      expect(reason).not.toContain("terminal window")
+    },
+  )
+
+  test("a Privacy key at an org's scope, which Privacy does not save, keeps the ! route", async () => {
+    const reason = await bash("playground settings set --scope acme owner.names '[]' --reason x")
+    expect(reason).toContain("in the dispatcher's terminal window")
   })
 
   test.each([
