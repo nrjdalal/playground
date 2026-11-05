@@ -116,7 +116,7 @@ export const DISPATCHERS: readonly string[] = [...new Set([DISPATCHER, DISPATCHE
 export const dispatcherSlots = (names: readonly string[], shown: ReadonlySet<string>): number =>
   names.filter((name, i) => i === 0 || shown.has(name)).length
 
-// The header's dispatcher slot count from Claude's registry and the roster, two file reads, so /api/health never asks cmux; a crashed session's leftover file can count one row the board then drops. A stack that reads this machine without the opt-in to every session (own.ts) counts the roster's alone, where every session Playground starts lands, since the registry names every session on the machine; one that opts in reads the registry even while the launcher keeps it on herdr alone.
+// The header's dispatcher slot count from Claude's registry and the roster, two file reads, so /api/health never asks cmux; a crashed session's leftover file can count one row the board then drops. A stack that reads this machine without the opt-in to every session (own.ts) counts the roster's alone, where every session Playground starts lands, since the registry names every session on the machine; one that opts in reads the registry.
 export const readDispatcherSlots = async (): Promise<number> => {
   const [files, { roster }] = await Promise.all([
     everySession() ? readRegistry() : null,
@@ -485,7 +485,9 @@ export function unansweredFeed(feed: unknown, pickersOf: (sessionId: string) => 
   return { ...feed, items: feed.items.filter((item) => !(isRecord(item) && gone.has(item))) }
 }
 
+// partial: some herdr server's read was partial (ServerRead.partial).
 export type Live = {
+  partial?: true
   surfaces: Map<string, string>
   transcripts: Map<string, string>
   workers: Worker[]
@@ -863,7 +865,8 @@ export async function listLive(): Promise<Live> {
   }))
   const marked = blockedSessions(blocked, held)
   unstickConflicts = { at: Date.now(), lines: marked.conflicts }
-  return withHosted(withBlocked(live, marked.sessions, usage), hosted())
+  const shown = withHosted(withBlocked(live, marked.sessions, usage), hosted())
+  return servers.some((read) => read.partial) ? { ...shown, partial: true } : shown
 }
 
 // Pure: a session ops-unstick finds stuck on a dialog waits on the owner, as one on a picker does, so it reads Waiting on you wherever its light shows and deliver() types nothing into it. One the usage limit alone holds, with no prompt of its own, also carries usageLimit, so its light reads paused rather than stuck. A probe's dialogs are its spawner's, as its pickers are, so it never does.

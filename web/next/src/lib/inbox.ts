@@ -550,14 +550,14 @@ const draftRefused = (item: InboxItem): boolean => {
 }
 
 export function itemState(item: InboxItem): ItemState {
-  if (sendFailed(item)) return "failed"
-  if (needsYou(item)) return "open"
-  // a secret he provided is done once every environment took it, and failed while any did not, a dismiss included, so the record stays
+  // a secret he provided follows its sink alone: done once every environment took it, failed while any did not, a dismiss included, so the record stays; a poster not yet told of it is deliveryNote's
   const provided = chosen(item)
   if (provided?.choice === "provided") {
     if (!provided.results) return "sending"
     return provided.results.every((result) => result.exitCode === 0) ? "done" : "failed"
   }
+  if (sendFailed(item)) return "failed"
+  if (needsYou(item)) return "open"
   // an accept or an apps change the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out; a grant that opened nothing failed, and one that opened its pane waits on its poster's recheck
   const { accepted, listed, opened } = stepsOf(provided)
   const ran = accepted ?? listed
@@ -573,6 +573,12 @@ export function itemState(item: InboxItem): ItemState {
   // a failure he dismissed never reached its poster, so no one is carrying it out
   return item.delivery?.status === "failed" ? "closed" : "sending"
 }
+
+// Pure: the note a provided secret's card shows under its result when telling its poster failed, so the sink's result keeps the card's colour; null otherwise.
+export const deliveryNote = (item: InboxItem): string | null =>
+  sendFailed(item) && chosen(item)?.choice === "provided" && item.delivery?.status === "failed"
+    ? `Not told to ${agentLabel(takenBy(item))} yet: ${item.delivery.reason}`
+    : null
 
 // Each state's light, the sidebar's state that means the same, so its icon and colour come from status-icons.ts's one table: waiting on him, being carried out, carried out, failed to send, closed.
 const INBOX_LIGHTS: Record<ItemState, ShownState> = {

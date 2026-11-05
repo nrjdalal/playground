@@ -19,7 +19,6 @@ import { dataDirOf } from "@packages/env/data-dir"
 
 import { claudeBinary } from "@/lib/claude-binary"
 import { withAttachments } from "@/lib/dashboard/attachments"
-import type { FeedReply } from "@/lib/dashboard/cmux"
 import {
   deliverDeps,
   deliveryEvent,
@@ -33,6 +32,7 @@ import {
   canApprove,
   replyFor,
   type FeedAnswering,
+  type FeedReply,
   type FeedResult,
 } from "@/lib/dashboard/feed"
 import { settingSummary, type SessionEffort, type SessionSetting } from "@/lib/dashboard/setting"
@@ -40,7 +40,7 @@ import { feedItemOf, hostSessions, type FeedItem, type Worker } from "@/lib/dash
 import { SESSION_FILE } from "@/lib/sessions/own"
 import { transcriptPath } from "@/lib/sessions/paths"
 
-// The dashboard's second way to reach a session, beside the cmux one: a session it hosts itself on the Claude Agent SDK, which runs the installed `claude` on this user's own login. Phase 1 hosts one throwaway session, probe-sdk, in the folder PLAYGROUND_SDK_PROBE_DIR names. A message goes in as a user message on its input stream, never typed into a terminal, and its replies reach the dashboard from its transcript, as every other session's do. What it asks (a tool to run, a picker, a plan) waits on its canUseTool callback, shown as a NeedsYou card and answered by the card's Submit.
+// The dashboard's second way to reach a session, beside herdr's: a session it hosts itself on the Claude Agent SDK, which runs the installed `claude` on this user's own login. Phase 1 hosts one throwaway session, probe-sdk, in the folder PLAYGROUND_SDK_PROBE_DIR names. A message goes in as a user message on its input stream, never typed into a terminal, and its replies reach the dashboard from its transcript, as every other session's do. What it asks (a tool to run, a picker, a plan) waits on its canUseTool callback, shown as a NeedsYou card and answered by the card's Submit.
 export const SDK_PROBE = "probe-sdk"
 
 export { SESSION_FILE }
@@ -434,7 +434,7 @@ export function startSdkProbe(
   )
 }
 
-// Whether the dashboard hosts this session itself, so its messages and answers go through here rather than cmux.
+// Whether the dashboard hosts this session itself, so its messages and answers go through here rather than herdr.
 export const hosts = (sessionId: string, host: SdkHost = sdkHost): boolean =>
   host.sessionId !== null && host.sessionId === sessionId
 
