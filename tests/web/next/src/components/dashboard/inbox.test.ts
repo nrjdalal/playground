@@ -893,7 +893,7 @@ describe("the comment box and Reply on every card", () => {
     const reply = source.slice(source.indexOf("const onReply = () => {"))
     // the hand goes only while Playground's session is live, the one whose composer the dashboard mounts, else the card's own box opens as before
     expect(source).toContain("const chat = allowed ? dispatcherOf(workers, dispatcher) : null")
-    expect(reply).toContain("replyRoute({ chat: chat !== null, folded, secret: secretAsk, text })")
+    expect(reply).toContain("replyRoute({ chat: chat !== null, folded, secret: keepsReply, text })")
     expect(reply).toContain('if (route === "composer" && chat) {')
     expect(reply).toContain("flushSync(() => outbox.reply(chat.name, item.ref))")
     expect(reply).toContain("document.getElementById(COMPOSER_ID)?.focus()")

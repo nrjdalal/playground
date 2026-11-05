@@ -488,7 +488,6 @@ function Shown({ preview }: { preview: Pick<InboxUpdate, "attachments" | "text">
   )
 }
 
-// Exactly what Approve does, the card's description: our own words around the session's, a Slack message's plain text that hides nothing and an ask's rendered as its chat would show them.
 // How long a shown value stays on screen before it hides itself.
 export const REVEAL_SHOWN_MS = 30_000
 
@@ -546,6 +545,7 @@ function RevealField({ id }: { id: string }) {
   )
 }
 
+// Exactly what Approve does, the card's description: our own words around the session's, a Slack message's plain text that hides nothing and an ask's rendered as its chat would show them.
 function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
   const preview = item.preview
   switch (preview.type) {
@@ -872,6 +872,8 @@ export function InboxCard({
   const secretKey =
     item.kind === "decision" && item.preview.type === "secret" ? item.preview.key : null
   const secretAsk = secretKey !== null
+  // a secret ask's or a reveal card's Reply stays in its own box, never the chat's composer, so its value reaches no chat (the API refuses a reveal card's comment that holds its value)
+  const keepsReply = secretAsk || (item.kind === "decision" && item.preview.type === "reveal")
   const titleId = useId()
   const settle = async (write: () => Promise<unknown>) => {
     setPending(true)
@@ -942,7 +944,7 @@ export function InboxCard({
   // Reply with an empty box hands the card's ref to Playground's composer (a secret ask's, or any while that session is down, opens its own box), and with words opens a folded card to them or sends them alone; either box takes focus in the click's own frame, so a paste sent at once lands there
   const onReply = () => {
     const text = note.trim()
-    const route = replyRoute({ chat: chat !== null, folded, secret: secretAsk, text })
+    const route = replyRoute({ chat: chat !== null, folded, secret: keepsReply, text })
     if (route === "composer" && chat) {
       flushSync(() => outbox.reply(chat.name, item.ref))
       document.getElementById(COMPOSER_ID)?.focus()

@@ -178,6 +178,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         dispatcher: DISPATCHER,
         // a stack showing test data opens nothing on this Mac's screen
         grant: readsLive() ? runArgv : undefined,
+        reveal: readFromKeychain(),
         upload: slackUpload(),
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
@@ -209,6 +210,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         actor: { email: user.email, id: user.id },
         deliver,
         dispatcher: DISPATCHER,
+        reveal: readFromKeychain(),
       })
       if (!result.ok) {
         if (result.code === "UNDELIVERED") throw new ApiError(502, "CMUX_FAILED", result.message)

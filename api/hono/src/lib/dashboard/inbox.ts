@@ -308,7 +308,7 @@ export type KeychainRead = (item: string) => Promise<string | null>
 
 const OPTIONS_MESSAGE = `An ask offers 1 to ${MAX_OPTIONS} options, each with a label: one for a yes or no, two or more for lettered choices`
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change or a grant's System Settings pane, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in ELI5 / ASD-STE100, one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change or a grant's System Settings pane, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in ELI5 / ASD-STE100, one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere. A reveal shows the owner a Keychain item's value on the owner's click instead, kept nowhere either.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
@@ -765,7 +765,12 @@ function answerOf(
     if (item.preview.type === "accept" && action === "edit") {
       return { message: "An accept is approved or denied as its proposal reads" }
     }
-    if ((item.preview.type === "apps" || item.preview.type === "grant") && action === "edit") {
+    if (
+      (item.preview.type === "apps" ||
+        item.preview.type === "grant" ||
+        item.preview.type === "reveal") &&
+      action === "edit"
+    ) {
       return { message: "This decision is approved or denied as it reads" }
     }
     // Clear: neither a yes nor a no; he has set the talk aside and will pick it up later, while whatever is already moving keeps moving
@@ -1341,6 +1346,7 @@ export async function answerItem(
     dispatcher,
     grant,
     now = new Date(),
+    reveal,
     upload,
     wait,
   }: {
@@ -1351,6 +1357,7 @@ export async function answerItem(
     dispatcher?: string
     grant?: ArgvRun
     now?: Date
+    reveal?: KeychainRead
   } & Pick<Sending, "upload" | "wait">,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
@@ -1362,6 +1369,7 @@ export async function answerItem(
       ok: false,
     }
   }
+  if (await holdsRevealed(current, [input.note, input.text], reveal)) return REVEALED
   if (input.action === "archive") return archive(db, current, now)
   if (input.action === "unarchive") return unarchive(db, current, now)
   if (input.action === "dismiss" && !waits(current)) {
@@ -1916,6 +1924,25 @@ export async function revealSecret(
   return { ok: true, value }
 }
 
+const REVEALED: Refused = {
+  code: "VALIDATION_ERROR",
+  message: "That is the card's value: it stays out of a comment",
+  ok: false,
+}
+
+// Whether his words hold a reveal card's value, read again from the Keychain, so a Copy pasted into the card's own comment never reaches its poster; false on any other card, with no words or with no reader.
+async function holdsRevealed(
+  item: InboxItem,
+  words: (string | undefined)[],
+  read: KeychainRead | undefined,
+): Promise<boolean> {
+  if (!read || item.kind !== "decision" || item.preview.type !== "reveal") return false
+  const said = words.filter((word): word is string => Boolean(word?.trim()))
+  if (said.length === 0) return false
+  const value = await read(item.preview.service)
+  return value !== null && said.some((word) => word.includes(value))
+}
+
 // Keeps how many files a send shared in its answer, 0 on a stack that shares none, so a Retry after the words failed to type shares none twice.
 async function recordUploaded(db: Database, id: string, count: number): Promise<InboxItem | null> {
   const [row] = await db
@@ -2023,7 +2050,13 @@ export async function replyItem(
   db: Database,
   id: string,
   input: ReplyInput,
-  { actor, deliver, dispatcher, now = new Date() }: Omit<Telling, "now" | "wait"> & { now?: Date },
+  {
+    actor,
+    deliver,
+    dispatcher,
+    now = new Date(),
+    reveal,
+  }: Omit<Telling, "now" | "wait"> & { now?: Date; reveal?: KeychainRead },
 ): Promise<
   { item: InboxItem; ok: true } | Refused | { code: "UNDELIVERED"; message: string; ok: false }
 > {
@@ -2033,6 +2066,7 @@ export async function replyItem(
   }
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
+  if (await holdsRevealed(current, [parsed.data.text], reveal)) return REVEALED
   const text = `re ${itemTag(current.ref)}: ${parsed.data.text}`
   const one = (to: string) => ({ actor, id: crypto.randomUUID(), text, to })
   let delivery = await attempt(deliver, one(current.from), now)

@@ -4319,6 +4319,73 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(asked).toEqual([])
     })
 
+    // a Copy pasted into the card's own comment box would type the value into its poster's transcript, so a reply or an answer's note that holds it is refused before anything is sent
+    test("a reveal card's reply or note that holds its value is refused and sends nothing, while other words go, and its Edit is refused", async () => {
+      const posted = await post({ ...decision(REVEAL), from: "dispatcher" })
+      const sent: Delivery[] = []
+      const deliver = async (delivery: Delivery) => {
+        sent.push(delivery)
+        return { at: "2026-11-05T22:00:00.000Z", ok: true as const, sessionId: "s1" }
+      }
+      const reveal = async () => VALUE
+      const refused = {
+        code: "VALIDATION_ERROR",
+        message: "That is the card's value: it stays out of a comment",
+        ok: false,
+      } as const
+      expect(
+        await store.replyItem(
+          db,
+          posted.id,
+          { text: `here: ${VALUE}` },
+          { actor, deliver, reveal },
+        ),
+      ).toEqual(refused)
+      expect(
+        await store.answerItem(
+          db,
+          posted.id,
+          { action: "approve", note: VALUE, option: 0 },
+          { actor, deliver, reveal },
+        ),
+      ).toEqual(refused)
+      expect(sent).toEqual([])
+      expect(await everyRow()).not.toContain(VALUE)
+      expect(
+        await store.answerItem(db, posted.id, { action: "edit", text: "other words" }, { actor }),
+      ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      const replied = await store.replyItem(
+        db,
+        posted.id,
+        { text: "Pasted it, thanks" },
+        { actor, deliver, reveal },
+      )
+      expect(replied.ok).toBe(true)
+      expect(sent.map((delivery) => delivery.text)).toEqual([
+        `re #i${posted.ref}: Pasted it, thanks`,
+      ])
+    })
+
+    test("a comment on any other card never reads the Keychain", async () => {
+      const posted = await post(decision(PREVIEWS.ask))
+      const asked: string[] = []
+      const replied = await store.replyItem(
+        db,
+        posted.id,
+        { text: VALUE },
+        {
+          actor,
+          deliver: async () => ({ at: "2026-11-05T22:00:00.000Z", ok: true, sessionId: "s1" }),
+          reveal: async (item) => {
+            asked.push(item)
+            return VALUE
+          },
+        },
+      )
+      expect(replied.ok).toBe(true)
+      expect(asked).toEqual([])
+    })
+
     test("an item with no value of its shape reads not found, naming no value", async () => {
       const posted = await post(decision(REVEAL))
       expect(await store.revealSecret(db, posted.id, async () => null)).toEqual({

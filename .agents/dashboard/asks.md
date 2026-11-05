@@ -114,7 +114,7 @@
   on any other card (an update, an answered card, a secret ask) it reads Add a comment, and Reply alone sends it.
   Reply (the reply icon, named `Reply to #iN`) with the box empty hands the card's ref to Playground's composer (`outbox.reply` in `web/next/src/lib/chat.ts`, `replyRoute` and `withRef` in `web/next/src/lib/reply.ts`),
   which starts with `re #iN: `, before the words it held and in place of another item's ref they opened with, the aside showing that chat, with focus in its box in the click's own frame and the caret at the end, so a dictation app's Cmd+V sent at once lands there (`bun run verify reply-focus`);
-  a secret ask's Reply opens its own box instead, so a secret never reaches the chat, and so does any card's while Playground's session is down (`dispatcherOf`), since no composer would take the hand until it is back, and a folded card's with words in its box;
+  a secret ask's or a reveal card's Reply opens its own box instead (`keepsReply`), so a secret never reaches the chat, and so does any card's while Playground's session is down (`dispatcherOf`), since no composer would take the hand until it is back, and a folded card's with words in its box;
   with words in the box it sends them alone through `POST /api/v1/inbox/:id/reply` (`replyItem()` in `api/hono/src/lib/dashboard/inbox.ts`), typed into the poster through `deliver()` as `re #iN: <words>`, or into the dispatcher once the poster has ended (`posterGone`), the box emptying once it is in;
   one that reaches no session is refused with why, its words kept in the box.
   On an open decision or draft with no answer yet it is recorded as his reply (`recordReply`, below), and the poster changes the card in place with `bun run ask edit`, which takes the reply off (`editItem()`), so the card waits on him again, open and marked Updated; on any other card the answer and its delivery stay as they were.
@@ -347,7 +347,8 @@
   Show draws the value until Hide, the card folding or 30 seconds (`REVEAL_SHOWN_MS`); Copy puts it on the clipboard and never draws it.
   The route refuses a closed, dismissed or archived card with a 409, so an old card reads nothing, and the agent sign-in's account with a 403 (`refuseAgent`); it is a POST, so the relay, which carries GETs on `RELAY_GETS` alone, never carries it.
   Only a stack that reads the live machine runs `security find-generic-password -w`, the value on its stdout; a fixture or test stack shows `FIXTURE_REVEAL`, made up (`readFromKeychain` in `api/hono/src/lib/dashboard/secret-sink.ts`).
-  Its choices are `Done, I have it` and `I do not need it`, so its poster hears which, and never the value.
+  Its choices are `Done, I have it` and `I do not need it`, so its poster hears which, and never the value; Edit is refused, since neither takes words.
+  A reply or an answer's note on it that holds the value, a Copy pasted into its own comment box, is refused before anything is sent (`holdsRevealed` reads the item again for `answerItem` and `replyItem`), and its Reply stays in that box, never the chat's composer.
 
   ```bash
   bun run ask new <<'EOF'
