@@ -11,7 +11,7 @@ Your spec is the slice file your lead names, in ~/.playground/notes/rush/. It li
 
 - Change only the files you own. If you need a change in a file you don't own, stop and tell the Builder: it goes to that file's slice, or waits.
 - Keep the diff small: no refactors, no renames, no drive-by fixes.
-- When another PR merges into canary, do NOT merge canary into yours by default: run `git merge-tree --write-tree origin/canary HEAD`. If it is clean, keep your head: pr:merge takes a head that merges clean, with its 5/5 and checks as they stand, once its `types` gate type-checks the merged tree. Merge canary in only when merge-tree shows a conflict or the `types` gate refuses, then tell the Builder first, since the new head needs its checks and a 5/5.
+- When another PR merges into canary, do NOT merge canary into yours by default: run `git merge-tree --write-tree origin/canary HEAD`. If it is clean, keep your head: pr:merge takes a head that merges clean, with its 5/5 and checks as they stand, once its `types` gate type-checks the merged tree. Merge canary in when merge-tree shows a conflict or the `types` gate refuses, telling the Builder first, since the new head needs its checks and a 5/5, and when your reviewer asks for it in the push that carries its fixes (code-review-loop's step 8), since that push is a new head for review anyway and the 5/5 candidate then scores a head canary has not moved past.
 
 Plan: send the Builder 3 lines (files, done list, ETA) before building, then build without waiting.
 
