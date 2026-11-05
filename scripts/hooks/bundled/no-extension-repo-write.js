@@ -201,6 +201,24 @@ function jsonStringifyReplacer(_, value) {
     return value.toString();
   return value;
 }
+
+class Cached {
+  constructor(getter) {
+    this._getter = getter;
+    this._value = undefined;
+  }
+  get value() {
+    const getter = this._getter;
+    if (getter !== undefined) {
+      this._value = getter();
+      this._getter = undefined;
+    }
+    return this._value;
+  }
+}
+function cached(getter) {
+  return new Cached(getter);
+}
 function nullish(input) {
   return input === null || input === undefined;
 }
@@ -221,6 +239,52 @@ function rawShape(def) {
   const desc = Object.getOwnPropertyDescriptor(def, "shape");
   return desc?.get ? desc.get.raw : desc?.value;
 }
+function sourceShape(schema) {
+  return rawShape(schema._zod.def) ?? schema._zod.def.shape;
+}
+function deferProp(target, key, getter) {
+  Object.defineProperty(target, key, {
+    get() {
+      const value = getter();
+      assignProp(this, key, value);
+      return value;
+    },
+    enumerable: true,
+    configurable: true
+  });
+}
+function putProp(target, key, value) {
+  if (key in target)
+    assignProp(target, key, value);
+  else
+    target[key] = value;
+}
+function mirrorShape(target, source, keys, wrap) {
+  const raw = sourceShape(source);
+  for (const key of keys) {
+    const desc = Object.getOwnPropertyDescriptor(raw, key);
+    if (!desc.enumerable)
+      continue;
+    if (desc.get) {
+      deferProp(target, key, () => {
+        const value = source._zod.def.shape[key];
+        return wrap ? wrap(value, key) : value;
+      });
+    } else
+      putProp(target, key, wrap ? wrap(desc.value, key) : desc.value);
+  }
+}
+function mirrorProps(target, source) {
+  for (const key of Reflect.ownKeys(source)) {
+    const desc = Object.getOwnPropertyDescriptor(source, key);
+    if (!desc.enumerable)
+      continue;
+    if (desc.get)
+      deferProp(target, key, () => source[key]);
+    else
+      putProp(target, key, desc.value);
+  }
+}
 function mergeDefs(...defs) {
   const mergedDescriptors = {};
   for (const def of defs) {
@@ -229,6 +293,9 @@ function mergeDefs(...defs) {
   }
   return Object.defineProperties({}, mergedDescriptors);
 }
+function esc(str) {
+  return JSON.stringify(str);
+}
 function slugify(input) {
   return input.toLowerCase().trim().replace(/[^\w\s-]/g, "").replace(/[\s_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
@@ -236,6 +303,21 @@ var captureStackTrace = "captureStackTrace" in Error ? Error.captureStackTrace :
 function isObject(data) {
   return typeof data === "object" && data !== null && !Array.isArray(data);
 }
+var allowsEval = /* @__PURE__ */ cached(() => {
+  if (globalConfig.jitless) {
+    return false;
+  }
+  if (typeof navigator !== "undefined" && navigator?.userAgent?.includes("Cloudflare")) {
+    return false;
+  }
+  try {
+    const F = Function;
+    new F("");
+    return true;
+  } catch (_) {
+    return false;
+  }
+});
 function isPlainObject(o) {
   if (isObject(o) === false)
     return false;
@@ -296,6 +378,11 @@ function stringifyPrimitive(value) {
     return `"${value}"`;
   return `${value}`;
 }
+function optionalKeys(shape) {
+  return Object.keys(shape).filter((k) => {
+    return shape[k]._zod.optin !== undefined && shape[k]._zod.optout === "optional";
+  });
+}
 var NUMBER_FORMAT_RANGES = /* @__PURE__ */ (() => ({
   safeint: [Number.MIN_SAFE_INTEGER, Number.MAX_SAFE_INTEGER],
   int32: [-2147483648, 2147483647],
@@ -307,6 +394,106 @@ var BIGINT_FORMAT_RANGES = {
   int64: [/* @__PURE__ */ BigInt("-9223372036854775808"), /* @__PURE__ */ BigInt("9223372036854775807")],
   uint64: [/* @__PURE__ */ BigInt(0), /* @__PURE__ */ BigInt("18446744073709551615")]
 };
+function pick(schema, mask) {
+  const currDef = schema._zod.def;
+  const checks = currDef.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    throw new Error(".pick() cannot be used on object schemas containing refinements");
+  }
+  const newShape = {};
+  mirrorShape(newShape, schema, maskedKeys(schema, mask));
+  return clone(schema, mergeDefs(currDef, { shape: newShape, checks: [] }));
+}
+function maskedKeys(schema, mask) {
+  const raw = sourceShape(schema);
+  const keys = [];
+  for (const key of Reflect.ownKeys(mask)) {
+    if (!Object.getOwnPropertyDescriptor(raw, key)?.enumerable) {
+      throw new Error(`Unrecognized key: "${String(key)}"`);
+    }
+    if (mask[key])
+      keys.push(key);
+  }
+  return keys;
+}
+function omit(schema, mask) {
+  const currDef = schema._zod.def;
+  const checks = currDef.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    throw new Error(".omit() cannot be used on object schemas containing refinements");
+  }
+  const omitted = new Set(maskedKeys(schema, mask));
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)).filter((key) => !omitted.has(key)));
+  return clone(schema, mergeDefs(currDef, { shape: newShape, checks: [] }));
+}
+function extend(schema, shape) {
+  if (!isPlainObject(shape)) {
+    throw new Error("Invalid input to extend: expected a plain object");
+  }
+  const checks = schema._zod.def.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    const existingShape = sourceShape(schema);
+    for (const key of Reflect.ownKeys(shape)) {
+      if (Object.getOwnPropertyDescriptor(existingShape, key) !== undefined) {
+        throw new Error("Cannot overwrite keys on object schemas containing refinements. Use `.safeExtend()` instead.");
+      }
+    }
+  }
+  return clone(schema, mergeDefs(schema._zod.def, { shape: extended(schema, shape) }));
+}
+function extended(schema, shape) {
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)));
+  mirrorProps(newShape, shape);
+  return newShape;
+}
+function safeExtend(schema, shape) {
+  if (!isPlainObject(shape)) {
+    throw new Error("Invalid input to safeExtend: expected a plain object");
+  }
+  return clone(schema, mergeDefs(schema._zod.def, { shape: extended(schema, shape) }));
+}
+function merge(a, b) {
+  if (!b?._zod?.def) {
+    throw new Error("Invalid input to merge: expected an object schema. To merge a plain shape, use `.extend()`.");
+  }
+  if (a._zod.def.checks?.length) {
+    throw new Error(".merge() cannot be used on object schemas containing refinements. Use .safeExtend() instead.");
+  }
+  const newShape = {};
+  mirrorShape(newShape, a, Reflect.ownKeys(sourceShape(a)));
+  mirrorShape(newShape, b, Reflect.ownKeys(sourceShape(b)));
+  const def = mergeDefs(a._zod.def, {
+    shape: newShape,
+    get catchall() {
+      return b._zod.def.catchall;
+    },
+    checks: b._zod.def.checks ?? []
+  });
+  return clone(a, def);
+}
+function partial(Class, schema, mask, name = "partial") {
+  const currDef = schema._zod.def;
+  const checks = currDef.checks;
+  const hasChecks = checks && checks.length > 0;
+  if (hasChecks) {
+    throw new Error(`.${name}() cannot be used on object schemas containing refinements`);
+  }
+  const selected = mask ? new Set(maskedKeys(schema, mask)) : undefined;
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), Class && ((value, key) => selected && !selected.has(key) ? value : new Class({ type: "optional", innerType: value })));
+  return clone(schema, mergeDefs(schema._zod.def, { shape: newShape, checks: [] }));
+}
+function required(Class, schema, mask) {
+  const selected = mask ? new Set(maskedKeys(schema, mask)) : undefined;
+  const newShape = {};
+  mirrorShape(newShape, schema, Reflect.ownKeys(sourceShape(schema)), (value, key) => selected && !selected.has(key) ? value : new Class({ type: "nonoptional", innerType: value }));
+  return clone(schema, mergeDefs(schema._zod.def, { shape: newShape }));
+}
 function aborted(x, startIndex = 0) {
   if (x.aborted === true)
     return true;
@@ -477,6 +664,10 @@ function defineBound(proto, key, fn) {
     }
   });
 }
+function claim(inst, sentinel) {
+  const proto = Object.getPrototypeOf(inst);
+  return sentinel in proto ? undefined : proto;
+}
 var installing;
 var broke = false;
 var breaker = {
@@ -515,6 +706,24 @@ function defineLazyInternal(inst, key, compute) {
     },
     set(value) {
       Object.defineProperty(this, key, { configurable: true, writable: true, value });
+    }
+  });
+}
+function installLazyProp(inst, key, make, enumerable) {
+  const proto = claim(inst, key);
+  if (!proto)
+    return;
+  Object.defineProperty(proto, key, {
+    configurable: true,
+    get() {
+      const desc = { configurable: true, writable: true, enumerable, value: undefined };
+      Object.defineProperty(this, key, desc);
+      desc.value = make(this);
+      Object.defineProperty(this, key, desc);
+      return desc.value;
+    },
+    set(value) {
+      Object.defineProperty(this, key, { configurable: true, writable: true, enumerable, value });
     }
   });
 }
@@ -959,6 +1168,7 @@ function datetime(args) {
 var anyString = /^[\s\S]{0,}$/;
 var integer = /^-?\d+$/;
 var number = /^-?\d+(?:\.\d+)?$/;
+var boolean = /^(?:true|false)$/i;
 var lowercase = /^[^A-Z]*$/;
 var uppercase = /^[^a-z]*$/;
 
@@ -1147,6 +1357,48 @@ var $ZodCheckOverwrite = /* @__PURE__ */ $constructor("$ZodCheckOverwrite", (ins
     payload.value = def.tx(payload.value);
   };
 });
+
+// node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/doc.js
+class Doc {
+  constructor(args = [], closed = {}) {
+    this.content = [];
+    this.indent = 0;
+    this.args = args;
+    this.closed = closed;
+  }
+  indented(fn) {
+    this.indent += 1;
+    try {
+      fn(this);
+    } finally {
+      this.indent -= 1;
+    }
+  }
+  write(arg) {
+    if (typeof arg === "function") {
+      arg(this, { execution: "sync" });
+      arg(this, { execution: "async" });
+      return;
+    }
+    const content = arg;
+    const lines = content.split(`
+`).filter((x) => x);
+    const minIndent = Math.min(...lines.map((x) => x.length - x.trimStart().length));
+    const dedented = lines.map((x) => x.slice(minIndent)).map((x) => " ".repeat(this.indent * 2) + x);
+    for (const line of dedented) {
+      this.content.push(line);
+    }
+  }
+  compile() {
+    const F = Function;
+    const content = this?.content ?? [``];
+    const factory = new F(...Object.keys(this.closed), `return function (${this.args.join(", ")}) {
+${content.join(`
+`)}
+};`);
+    return factory(...Object.values(this.closed));
+  }
+}
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/versions.js
 var version = {
@@ -1641,6 +1893,42 @@ var $ZodJWT = /* @__PURE__ */ $constructor("$ZodJWT", (inst, def) => {
     });
   };
 });
+var $ZodBoolean = /* @__PURE__ */ $constructor("$ZodBoolean", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.pattern = boolean;
+  inst._zod.parse = (payload, _ctx) => {
+    if (def.coerce)
+      try {
+        payload.value = Boolean(payload.value);
+      } catch (_) {}
+    const input = payload.value;
+    if (typeof input === "boolean")
+      return payload;
+    payload.issues.push({
+      expected: "boolean",
+      code: "invalid_type",
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodUnknown = /* @__PURE__ */ $constructor("$ZodUnknown", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload) => payload;
+});
+var $ZodNever = /* @__PURE__ */ $constructor("$ZodNever", (inst, def) => {
+  $ZodType.init(inst, def);
+  inst._zod.parse = (payload, _ctx) => {
+    payload.issues.push({
+      expected: "never",
+      code: "invalid_type",
+      input: payload.value,
+      inst
+    });
+    return payload;
+  };
+});
 function capSize(inst, size) {
   const caps = sizeCaps(inst._zod.def.checks);
   if (!caps.length)
@@ -1708,6 +1996,310 @@ var $ZodArray = /* @__PURE__ */ $constructor("$ZodArray", (inst, def) => {
     return payload;
   };
   capSize(inst, arraySize);
+});
+function handlePropertyResult(result, final, key, input, optin, optout) {
+  const isPresent = key in input;
+  const isOptionalOut = optout === "optional";
+  if (!isPresent && isOptionalOut && optin === "optional") {
+    return;
+  }
+  if (result.issues.length) {
+    if (optin !== undefined && isOptionalOut && !isPresent) {
+      return;
+    }
+    final.issues.push(...prefixIssues(key, result.issues));
+  }
+  if (!isPresent && optin === undefined) {
+    if (!result.issues.length) {
+      final.issues.push({
+        code: "invalid_type",
+        expected: "nonoptional",
+        input: undefined,
+        path: [key]
+      });
+    }
+    return;
+  }
+  if (result.value === undefined) {
+    if (isPresent || optin === "defaulted" && !isOptionalOut) {
+      final.value[key] = undefined;
+    }
+  } else {
+    final.value[key] = result.value;
+  }
+}
+var NO_SYMBOL_KEYS = [];
+function normalizeDef(def) {
+  const keys = Object.keys(def.shape);
+  const ownSymbols = Object.getOwnPropertySymbols(def.shape);
+  const symbolKeys = ownSymbols.length ? ownSymbols : NO_SYMBOL_KEYS;
+  const allKeys = symbolKeys.length ? [...keys, ...symbolKeys] : keys;
+  for (const k of allKeys) {
+    if (!def.shape?.[k]?._zod?.traits?.has("$ZodType")) {
+      throw new Error(`Invalid element at key "${String(k)}": expected a Zod schema`);
+    }
+  }
+  const okeys = optionalKeys(def.shape);
+  return {
+    ...def,
+    allKeys,
+    symbolKeys,
+    keySet: new Set(keys),
+    numKeys: keys.length,
+    optionalKeys: new Set(okeys)
+  };
+}
+function handleCatchall(proms, input, payload, ctx, def, inst, abortEarly) {
+  const unrecognized = [];
+  const keySet = def.keySet;
+  const _catchall = def.catchall._zod;
+  const t = _catchall.def.type;
+  const optin = _catchall.optin;
+  const optout = _catchall.optout;
+  let seen = 0;
+  for (const key in input) {
+    if (abortEarly && payload.issues.length !== seen) {
+      if (aborted(payload, seen))
+        break;
+      seen = payload.issues.length;
+    }
+    if (keySet.has(key))
+      continue;
+    if (key === "__proto__") {
+      if (t === "never")
+        unrecognized.push(key);
+      continue;
+    }
+    if (t === "never") {
+      unrecognized.push(key);
+      continue;
+    }
+    const r = _catchall.run({ value: input[key], issues: [] }, ctx);
+    if (r instanceof Promise) {
+      proms.push(r.then((r) => handlePropertyResult(r, payload, key, input, optin, optout)));
+    } else {
+      handlePropertyResult(r, payload, key, input, optin, optout);
+    }
+  }
+  if (unrecognized.length) {
+    payload.issues.push({
+      code: "unrecognized_keys",
+      keys: unrecognized,
+      input,
+      inst,
+      continue: true
+    });
+  }
+  if (!proms.length)
+    return payload;
+  return Promise.all(proms).then(() => {
+    return payload;
+  });
+}
+var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
+  $ZodType.init(inst, def);
+  const desc = Object.getOwnPropertyDescriptor(def, "shape");
+  const sh = desc?.get ? desc.get.raw : def.shape ?? {};
+  if (sh) {
+    const get = () => {
+      const newSh = { ...sh };
+      Object.defineProperty(def, "shape", { value: newSh });
+      get.raw = newSh;
+      return newSh;
+    };
+    get.raw = sh;
+    Object.defineProperty(def, "shape", { get });
+  }
+  const _normalized = cached(() => normalizeDef(def));
+  defineLazyInternal(inst, "propValues", (zod) => {
+    const shape = zod.def.shape;
+    const propValues = {};
+    for (const key in shape) {
+      const field = shape[key]._zod;
+      if (field.values) {
+        if (!Object.prototype.hasOwnProperty.call(propValues, key)) {
+          assignProp(propValues, key, new Set);
+        }
+        for (const v of field.values)
+          propValues[key].add(v);
+        if (field.optin !== undefined)
+          propValues[key].add(undefined);
+      }
+    }
+    return propValues;
+  });
+  const isObject2 = isObject;
+  const catchall = def.catchall;
+  let value;
+  const memo = globalConfig.memoizer;
+  memo?.attach(inst);
+  inst._zod.parse = (payload, ctx) => {
+    value ?? (value = _normalized.value);
+    const input = payload.value;
+    if (!isObject2(input)) {
+      payload.issues.push({
+        expected: "object",
+        code: "invalid_type",
+        input,
+        inst
+      });
+      return payload;
+    }
+    payload.value = memo ? memo.alloc(inst, payload, {}, ctx) : {};
+    const proms = [];
+    const shape = value.shape;
+    const abortEarly = ctx?.abortEarly;
+    let seen = payload.issues.length;
+    for (const key of value.allKeys) {
+      if (abortEarly && payload.issues.length !== seen) {
+        if (aborted(payload, seen))
+          break;
+        seen = payload.issues.length;
+      }
+      if (key === "__proto__")
+        continue;
+      const el = shape[key];
+      const optin = el._zod.optin;
+      const optout = el._zod.optout;
+      const r = el._zod.run({ value: input[key], issues: [] }, ctx);
+      if (r instanceof Promise) {
+        proms.push(r.then((r) => handlePropertyResult(r, payload, key, input, optin, optout)));
+      } else {
+        handlePropertyResult(r, payload, key, input, optin, optout);
+      }
+    }
+    if (!catchall) {
+      return proms.length ? Promise.all(proms).then(() => payload) : payload;
+    }
+    return handleCatchall(proms, input, payload, ctx, _normalized.value, inst, abortEarly === true);
+  };
+});
+var $ZodObjectJIT = /* @__PURE__ */ $constructor("$ZodObjectJIT", (inst, def) => {
+  $ZodObject.init(inst, def);
+  const superParse = inst._zod.parse;
+  const _normalized = cached(() => normalizeDef(def));
+  const memo = globalConfig.memoizer;
+  const generateFastpass = (shape) => {
+    const normalized = _normalized.value;
+    const syms = normalized.symbolKeys;
+    const doc = new Doc(["payload", "ctx"], { shape, inst, memo, syms });
+    const parseStr = (k) => `shape[${k}]._zod.run({ value: input[${k}], issues: [] }, ctx)`;
+    const prefixStr = (id, k) => `
+          let ${id}_ab = false;
+          for (let i = 0; i < ${id}.issues.length; i++) {
+            const iss = ${id}.issues[i];
+            iss.path = iss.path ? [${k}, ...iss.path] : [${k}];
+            payload.issues.push(iss);
+            if (iss.continue !== true) ${id}_ab = true;
+          }
+          if (${id}_ab && ctx && ctx.abortEarly) {
+            payload.value = newResult;
+            return payload;
+          }`;
+    doc.write(`const input = payload.value;`);
+    const ids = Object.create(null);
+    let counter = 0;
+    for (const key of normalized.allKeys) {
+      ids[key] = `key_${counter++}`;
+    }
+    doc.write(memo ? `const newResult = memo.alloc(inst, payload, {}, ctx);` : `const newResult = {};`);
+    for (const key of normalized.allKeys) {
+      if (key === "__proto__")
+        continue;
+      const id = ids[key];
+      const k = typeof key === "symbol" ? `syms[${syms.indexOf(key)}]` : esc(key);
+      const isPresent = `${k} in input`;
+      const schema = shape[key];
+      const optin = schema?._zod?.optin;
+      const isOptionalIn = optin !== undefined;
+      const isOptionalOut = schema?._zod?.optout === "optional";
+      doc.write(`const ${id} = ${parseStr(k)};`);
+      if (isOptionalIn && isOptionalOut) {
+        const assign = optin === "optional" ? `${id}_present` : `${id}.value !== undefined || ${id}_present`;
+        doc.write(`
+        const ${id}_present = ${isPresent};
+        if (!${id}.issues.length || ${id}_present) {
+          if (${id}.issues.length) {${prefixStr(id, k)}
+          }
+
+          if (${assign}) {
+            newResult[${k}] = ${id}.value;
+          }
+        }
+
+      `);
+      } else if (!isOptionalIn) {
+        doc.write(`
+        const ${id}_present = ${isPresent};
+        if (${id}.issues.length) {${prefixStr(id, k)}
+        }
+        if (!${id}_present && !${id}.issues.length) {
+          payload.issues.push({
+            code: "invalid_type",
+            expected: "nonoptional",
+            input: undefined,
+            path: [${k}]
+          });
+          if (ctx && ctx.abortEarly) {
+            payload.value = newResult;
+            return payload;
+          }
+        }
+
+        if (${id}_present) {
+          newResult[${k}] = ${id}.value;
+        }
+
+      `);
+      } else {
+        doc.write(`
+        if (${id}.issues.length) {${prefixStr(id, k)}
+        }
+      `);
+        if (optin === "defaulted") {
+          doc.write(`newResult[${k}] = ${id}.value;`);
+        } else {
+          doc.write(`
+        if (${id}.value !== undefined || ${isPresent}) {
+          newResult[${k}] = ${id}.value;
+        }
+      `);
+        }
+      }
+    }
+    doc.write(`payload.value = newResult;`);
+    doc.write(`return payload;`);
+    return doc.compile();
+  };
+  let fastpass;
+  const isObject2 = isObject;
+  const jit = !globalConfig.jitless;
+  const allowsEval2 = allowsEval;
+  const fastEnabled = jit && allowsEval2.value;
+  const catchall = def.catchall;
+  let value;
+  inst._zod.parse = (payload, ctx) => {
+    value ?? (value = _normalized.value);
+    const input = payload.value;
+    if (!isObject2(input)) {
+      payload.issues.push({
+        expected: "object",
+        code: "invalid_type",
+        input,
+        inst
+      });
+      return payload;
+    }
+    if (jit && fastEnabled && ctx?.async === false && ctx.jitless !== true) {
+      if (!fastpass)
+        fastpass = generateFastpass(def.shape);
+      payload = fastpass(payload, ctx);
+      if (!catchall)
+        return payload;
+      return handleCatchall([], input, payload, ctx, value, inst, ctx?.abortEarly === true);
+    }
+    return superParse(payload, ctx);
+  };
 });
 function handleUnionResults(results, final, inst, ctx) {
   for (const result of results) {
@@ -2060,6 +2652,28 @@ var $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
     payload.issues.push({
       code: "invalid_value",
       values,
+      input,
+      inst
+    });
+    return payload;
+  };
+});
+var $ZodLiteral = /* @__PURE__ */ $constructor("$ZodLiteral", (inst, def) => {
+  $ZodType.init(inst, def);
+  const values = new Set(def.values);
+  inst._zod.values = values;
+  defineLazyInternal(inst, "pattern", (zod) => {
+    const vals = zod.def.values;
+    return new RegExp(vals.length ? `^(${vals.map((o) => typeof o === "string" ? escapeRegex(o) : o ? escapeRegex(o.toString()) : String(o)).join("|")})$` : "^[^\\s\\S]$");
+  });
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (values.has(input)) {
+      return payload;
+    }
+    payload.issues.push({
+      code: "invalid_value",
+      values: def.values,
       input,
       inst
     });
@@ -3003,6 +3617,23 @@ function _isoDuration(Class, params) {
     ...normalizeParams(params)
   });
 }
+function _boolean(Class, params) {
+  return new Class({
+    type: "boolean",
+    ...normalizeParams(params)
+  });
+}
+function _unknown(Class) {
+  return new Class({
+    type: "unknown"
+  });
+}
+function _never(Class, params) {
+  return new Class({
+    type: "never",
+    ...normalizeParams(params)
+  });
+}
 function _maxLength(maximum, params) {
   const ch = new $ZodCheckMaxLength({
     check: "max_length",
@@ -3793,6 +4424,13 @@ var stringProcessor = (schema, ctx, _json, _params) => {
     }
   }
 };
+var booleanProcessor = (_schema, _ctx, json, _params) => {
+  json.type = "boolean";
+};
+var neverProcessor = (_schema, _ctx, json, _params) => {
+  json.not = {};
+};
+var unknownProcessor = (_schema, _ctx, _json, _params) => {};
 var enumProcessor = (schema, _ctx, json, _params) => {
   const def = schema._zod.def;
   const values = getEnumValues(def.entries);
@@ -3805,6 +4443,45 @@ var enumProcessor = (schema, _ctx, json, _params) => {
   if (values.every((v) => typeof v === "string"))
     json.type = "string";
   json.enum = values;
+};
+var literalProcessor = (schema, ctx, json, params) => {
+  const def = schema._zod.def;
+  if (def.values.length === 0) {
+    json.not = {};
+    return;
+  }
+  const vals = [];
+  for (const val of def.values) {
+    if (val === undefined) {
+      if (handleUnrepresentable(schema, ctx, json, params, "Literal `undefined` cannot be represented in JSON Schema"))
+        return;
+    } else if (typeof val === "bigint") {
+      if (handleUnrepresentable(schema, ctx, json, params, "BigInt literals cannot be represented in JSON Schema"))
+        return;
+      vals.push(Number(val));
+    } else {
+      vals.push(val);
+    }
+  }
+  if (vals.length === 0) {} else if (vals.length === 1) {
+    const val = vals[0];
+    json.type = val === null ? "null" : typeof val;
+    if (ctx.target === "draft-04" || ctx.target === "openapi-3.0") {
+      json.enum = [val];
+    } else {
+      json.const = val;
+    }
+  } else {
+    if (vals.every((v) => typeof v === "number"))
+      json.type = "number";
+    if (vals.every((v) => typeof v === "string"))
+      json.type = "string";
+    if (vals.every((v) => typeof v === "boolean"))
+      json.type = "boolean";
+    if (vals.every((v) => v === null))
+      json.type = "null";
+    json.enum = vals;
+  }
 };
 var customProcessor = (schema, ctx, json, params) => {
   handleUnrepresentable(schema, ctx, json, params, "Custom types cannot be represented in JSON Schema");
@@ -3836,6 +4513,44 @@ function inputOptin(schema) {
   }
   return schema._zod.optin;
 }
+var objectProcessor = (schema, ctx, _json, params) => {
+  const json = _json;
+  const def = schema._zod.def;
+  const shape = def.shape;
+  const symbolKeys = Object.getOwnPropertySymbols(shape);
+  if (symbolKeys.length && handleUnrepresentable(schema, ctx, json, params, "Symbol keys cannot be represented in JSON Schema")) {
+    return;
+  }
+  json.type = "object";
+  json.properties = {};
+  for (const key in shape) {
+    assignProp(json.properties, key, processSchema(shape[key], ctx, {
+      ...params,
+      path: [...params.path, "properties", key]
+    }));
+  }
+  const requiredKeys = [];
+  for (const key of Object.keys(shape)) {
+    const field = def.shape[key];
+    if (ctx.io === "input" ? inputOptin(field) === undefined : field._zod.optout === undefined) {
+      requiredKeys.push(key);
+    }
+  }
+  if (requiredKeys.length > 0) {
+    json.required = requiredKeys;
+  }
+  if (def.catchall?._zod.def.type === "never") {
+    json.additionalProperties = false;
+  } else if (!def.catchall) {
+    if (ctx.io === "output")
+      json.additionalProperties = false;
+  } else if (def.catchall) {
+    json.additionalProperties = processSchema(def.catchall, ctx, {
+      ...params,
+      path: [...params.path, "additionalProperties"]
+    });
+  }
+};
 var unionProcessor = (schema, ctx, json, params) => {
   const def = schema._zod.def;
   const isExclusive = def.inclusive === false;
@@ -4535,6 +5250,30 @@ var ZodJWT = /* @__PURE__ */ $constructor("ZodJWT", (inst, def) => {
   $ZodJWT.init(inst, def);
   ZodStringFormat.init(inst, def);
 });
+var ZodBoolean = /* @__PURE__ */ $constructor("ZodBoolean", (inst, def) => {
+  $ZodBoolean.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => booleanProcessor(inst, ctx, json, params);
+});
+function boolean2(params) {
+  return _boolean(ZodBoolean, params);
+}
+var ZodUnknown = /* @__PURE__ */ $constructor("ZodUnknown", (inst, def) => {
+  $ZodUnknown.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => unknownProcessor(inst, ctx, json, params);
+});
+function unknown() {
+  return _unknown(ZodUnknown);
+}
+var ZodNever = /* @__PURE__ */ $constructor("ZodNever", (inst, def) => {
+  $ZodNever.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => neverProcessor(inst, ctx, json, params);
+});
+function never(params) {
+  return _never(ZodNever, params);
+}
 var ZodArray = /* @__PURE__ */ $constructor("ZodArray", (inst, def) => {
   _ensureDefaultMemoizer();
   $ZodArray.init(inst, def);
@@ -4560,6 +5299,64 @@ var ZodArray = /* @__PURE__ */ $constructor("ZodArray", (inst, def) => {
 });
 function array(element, params) {
   return _array(ZodArray, element, params);
+}
+var ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
+  _ensureDefaultMemoizer();
+  $ZodObjectJIT.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => objectProcessor(inst, ctx, json, params);
+  installLazyProp(inst, "shape", (self) => self._zod.def.shape, false);
+}, {
+  keyof() {
+    return _enum(Object.keys(this._zod.def.shape));
+  },
+  catchall(catchall) {
+    return this.clone(mergeDefs(this._zod.def, { catchall }));
+  },
+  passthrough() {
+    return this.clone(mergeDefs(this._zod.def, { catchall: unknown() }));
+  },
+  loose() {
+    return this.clone(mergeDefs(this._zod.def, { catchall: unknown() }));
+  },
+  strict() {
+    return this.clone(mergeDefs(this._zod.def, { catchall: never() }));
+  },
+  strip() {
+    return this.clone(mergeDefs(this._zod.def, { catchall: undefined }));
+  },
+  extend(incoming) {
+    return extend(this, incoming);
+  },
+  safeExtend(incoming) {
+    return safeExtend(this, incoming);
+  },
+  merge(other) {
+    return merge(this, other);
+  },
+  pick(mask) {
+    return pick(this, mask);
+  },
+  omit(mask) {
+    return omit(this, mask);
+  },
+  partial(...args) {
+    return partial(ZodOptional, this, args[0]);
+  },
+  exactPartial(...args) {
+    return partial(ZodExactOptional, this, args[0], "exactPartial");
+  },
+  required(...args) {
+    return required(ZodNonOptional, this, args[0]);
+  }
+});
+function strictObject(shape, params) {
+  return new ZodObject({
+    type: "object",
+    shape,
+    catchall: never(),
+    ...normalizeParams(params)
+  });
 }
 var ZodUnion = /* @__PURE__ */ $constructor("ZodUnion", (inst, def) => {
   $ZodUnion.init(inst, def);
@@ -4653,6 +5450,27 @@ function _enum(values, params) {
   return new ZodEnum({
     type: "enum",
     entries,
+    ...normalizeParams(params)
+  });
+}
+var ZodLiteral = /* @__PURE__ */ $constructor("ZodLiteral", (inst, def) => {
+  $ZodLiteral.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => literalProcessor(inst, ctx, json, params);
+  inst.values = new Set(def.values);
+  Object.defineProperty(inst, "value", {
+    get() {
+      if (def.values.length > 1) {
+        throw new Error("This schema contains multiple valid literal values. Use `.values` instead.");
+      }
+      return def.values[0];
+    }
+  });
+});
+function literal(value, params) {
+  return new ZodLiteral({
+    type: "literal",
+    values: Array.isArray(value) ? value : [value],
     ...normalizeParams(params)
   });
 }
@@ -4882,6 +5700,45 @@ var extSettings = defineSettings({
   }
 });
 
+// packages/settings/src/slack.ts
+var gatedSendsSchema = strictObject({
+  path: string2().min(1),
+  selfDm: string2().regex(/^D[A-Z0-9]+$/, "a Slack DM id"),
+  servers: array(string2().min(1)).min(1)
+});
+var slackSettings = defineSettings({
+  "slack.dmChannel": {
+    default: "",
+    description: "The Slack id of the owner's own DM, which the DM watch reads and playground dm send posts to; neither runs until it is set.",
+    schema: string2().regex(/^(?:D[A-Z0-9]+)?$/, "a Slack DM id")
+  },
+  "slack.dmOwner": {
+    default: "",
+    description: "The owner's Slack member id: the DM watch hands on only this member's messages, and dm send posts as this member; neither runs until it is set.",
+    schema: string2().regex(/^(?:[UW][A-Z0-9]+)?$/, "a Slack member id")
+  },
+  "slack.gatedSends": {
+    default: "",
+    description: "An org's Slack gate, set in that org's extension: the MCP servers its workspace posts through, its self-DM and the send path every other post takes, as {path, selfDm, servers}; no-playground-leak then refuses every Slack MCP write on those servers but a post to the self-DM, and any curl to a Slack URL but an /api/ read. None when empty.",
+    schema: union([literal(""), gatedSendsSchema])
+  },
+  "slack.linkConverter": {
+    default: "",
+    description: "The command an agent pipes a Slack archives link through to get its app form, which the Inbox's link refusal and a draft's instructions name; none when empty.",
+    schema: string2()
+  },
+  "slack.mode": {
+    default: false,
+    description: "Slack mode: the owner is away and the DM is the owner's remote access, so the DM watch hands each owner message to the dispatcher, nudges it for an update every 15 minutes and fails over to the session in the assistant seat; off until the owner turns it on, on until the owner turns it off.",
+    schema: boolean2()
+  },
+  "slack.sendServer": {
+    default: "",
+    description: "The MCP server a sent Slack message goes through, which the Inbox names when the dispatcher carries out an ended poster's send; your Slack tool when empty.",
+    schema: string2()
+  }
+});
+
 // scripts/hooks/shell.ts
 import { homedir as homedir2 } from "os";
 import { basename as basename2, dirname as dirname2, isAbsolute, resolve as resolve2 } from "path";
@@ -4923,7 +5780,7 @@ function filled(script, mark, value) {
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
-var held = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
+var held = (text) => text.value.length > MAX_BYTES ? unknown2(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
 var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
@@ -5281,7 +6138,7 @@ var ESCAPES = {
   t: "\t",
   v: "\v"
 };
-var unknown = (why) => ({ unknown: why, value: UNKNOWN });
+var unknown2 = (why) => ({ unknown: why, value: UNKNOWN });
 var setLog = new WeakMap;
 var setVar = (vars, key, value) => {
   vars.set(key, value);
@@ -5291,7 +6148,7 @@ var setVar = (vars, key, value) => {
   else
     setLog.set(vars, [key]);
 };
-var merge = (out, part) => {
+var merge2 = (out, part) => {
   out.value += part.value;
   if (part.unknown)
     out.unknown ??= part.unknown;
@@ -5305,7 +6162,7 @@ var join4 = (parts, separator = "") => {
   parts.forEach((part, k) => {
     if (k > 0)
       out.value += separator;
-    merge(out, part);
+    merge2(out, part);
   });
   return out;
 };
@@ -5591,7 +6448,7 @@ function procSub(lx) {
   return {
     procs: topLevel(lx.commands.slice(from), scope),
     quoted: false,
-    ...unknown("a process substitution")
+    ...unknown2("a process substitution")
   };
 }
 function heredocs(lx, pending, nested) {
@@ -5654,15 +6511,15 @@ function word(lx) {
     } else if (c === '"') {
       out.quoted = true;
       lx.i++;
-      merge(out, double(lx));
+      merge2(out, double(lx));
     } else if (c === "$" && next === "'") {
       out.quoted = true;
-      merge(out, ansi(lx));
+      merge2(out, ansi(lx));
     } else if (c === "$" && next === '"')
       lx.i++;
     else if (c === "$" || c === "`") {
       const text = c === "$" ? dollar(lx) : backtick(lx);
-      merge(out, text);
+      merge2(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
@@ -5700,9 +6557,9 @@ function double(lx) {
         out.value += '$`"\\'.includes(next) ? next : c + next;
       lx.i += 2;
     } else if (c === "$")
-      merge(out, dollar(lx));
+      merge2(out, dollar(lx));
     else if (c === "`")
-      merge(out, backtick(lx));
+      merge2(out, backtick(lx));
     else {
       out.value += c;
       lx.i++;
@@ -5724,12 +6581,12 @@ function dollar(lx) {
   tick();
   const { src } = lx;
   const next = src[lx.i + 1] ?? "";
-  const variable = (name) => name !== undefined && lx.known[name] !== undefined ? { value: lx.known[name], variable: name } : { ...unknown("a shell variable"), variable: name };
+  const variable = (name) => name !== undefined && lx.known[name] !== undefined ? { value: lx.known[name], variable: name } : { ...unknown2("a shell variable"), variable: name };
   if (src.startsWith("$((", lx.i)) {
     const end = balanced(src, lx.i + 1, "(", ")");
     inner(lx, src.slice(lx.i + 3, end - 2));
     lx.i = end;
-    return unknown("an arithmetic expansion");
+    return unknown2("an arithmetic expansion");
   }
   if (next === "(") {
     lx.i += 2;
@@ -5756,7 +6613,7 @@ function dollar(lx) {
   }
   if (/[\d@*#?$!-]/.test(next)) {
     lx.i += 2;
-    return unknown("a shell variable");
+    return unknown2("a shell variable");
   }
   lx.i++;
   return { value: "$" };
@@ -5804,12 +6661,12 @@ function backtick(lx) {
   }
   lx.i = i + 1;
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
-  return unknown("a command substitution");
+  return unknown2("a command substitution");
 }
 function substituted(inner, known) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
-    return unknown("a command substitution");
+    return unknown2("a command substitution");
   const made = mktempPath(only, known);
   if (made)
     return { value: made };
@@ -5825,7 +6682,7 @@ function substituted(inner, known) {
   if (only.words.length === 0 && only.redirects.length === 1 && input.op === "<" && input.target) {
     return { reads: [input.target], value: READ };
   }
-  return unknown("a command substitution");
+  return unknown2("a command substitution");
 }
 var MKTEMP_FLAGS = new Set(["d", "q"]);
 var MKTEMP_LONG = new Set(["--directory", "--quiet"]);
@@ -6332,7 +7189,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const script = !operand || STDIN_PATHS.has(operand.value) ? await stdinOf(cmd, env) : operand.procs ? await outputs(operand.procs, env) : unknown("a script file");
+  const script = !operand || STDIN_PATHS.has(operand.value) ? await stdinOf(cmd, env) : operand.procs ? await outputs(operand.procs, env) : unknown2("a script file");
   if (deadline !== undefined && script.unknown === LARGE)
     throw new RangeError(LARGE);
   return script;
@@ -6348,7 +7205,7 @@ async function record2(cmd, name, args, env) {
     if (!path)
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
-    const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
+    const out = stdout ? await outputOf(cmd, env) : unknown2(`what ${name || "a command"} writes to stderr`);
     env.files.set(path, held(r.op === ">>" ? join4([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
@@ -6370,7 +7227,7 @@ async function outputOf(cmd, env) {
   if (name === "") {
     if (cmd.inner)
       return outputs(cmd.inner(), env);
-    return cmd.group || cmd.words.some((w) => GROUPING.has(w.value) && !w.quoted) ? unknown("the output of a command group") : { value: "" };
+    return cmd.group || cmd.words.some((w) => GROUPING.has(w.value) && !w.quoted) ? unknown2("the output of a command group") : { value: "" };
   }
   if (name === "cat") {
     const sources = args.filter((a) => a.value === "-" || !a.value.startsWith("-"));
@@ -6384,7 +7241,7 @@ async function outputOf(cmd, env) {
       const part = s.value !== "-" ? await readPath(s, env) : k === first ? await stdinOf(cmd, env) : { value: "" };
       size += part.value.length;
       if (size > MAX_BYTES)
-        return unknown(LARGE);
+        return unknown2(LARGE);
       parts.push(part);
     }
     return join4(parts);
@@ -6392,7 +7249,7 @@ async function outputOf(cmd, env) {
   if (name === "tee")
     return stdinOf(cmd, env);
   if (!PRINTERS.has(name))
-    return unknown(`the output of ${name}`);
+    return unknown2(`the output of ${name}`);
   const values = await Promise.all(args.map((a) => resolveText(a, env)));
   const hidden = values.find((v) => v.unknown);
   if (hidden)
@@ -6434,12 +7291,12 @@ async function stdinText(cmd, env) {
   if (input?.target?.procs)
     return outputs(input.target.procs, env);
   if (input?.op === "<" || input?.op === "<>")
-    return input.target ? readPath(input.target, env) : unknown("an input redirect");
+    return input.target ? readPath(input.target, env) : unknown2("an input redirect");
   if (input)
-    return input.body ? resolveText(input.body, env) : unknown("a heredoc the hook could not read");
+    return input.body ? resolveText(input.body, env) : unknown2("a heredoc the hook could not read");
   if (cmd.stdin)
     return outputOf(cmd.stdin, env);
-  return unknown("stdin the hook cannot see");
+  return unknown2("stdin the hook cannot see");
 }
 async function resolveText(text, env) {
   if (text.unknown || !text.reads?.length)
@@ -6454,7 +7311,7 @@ async function resolveText(text, env) {
     if (k + 1 < pieces.length)
       value += file.value + pieces[k + 1];
     if (value.length > MAX_BYTES)
-      return unknown(LARGE);
+      return unknown2(LARGE);
   }
   for (const piece of pieces.slice(text.reads.length + 1))
     value += READ + piece;
@@ -6472,23 +7329,23 @@ async function readFile(path) {
   try {
     const stats = await file.stat();
     if (!stats.isFile())
-      return unknown(`${path}, which is not a regular file`);
+      return unknown2(`${path}, which is not a regular file`);
     if (stats.size > MAX_BYTES)
-      return unknown(`${path}, which is too large to read`);
+      return unknown2(`${path}, which is too large to read`);
     return { value: await file.text() };
   } catch (error) {
     if (error.code === "ENOENT")
       return;
-    return unknown(`${path}, which the hook cannot read`);
+    return unknown2(`${path}, which the hook cannot read`);
   }
 }
 async function readPath(path, env) {
   const resolved = pathOf(path, env);
   if (!resolved && path.unknown)
-    return unknown(`a file path built from ${path.unknown}, which the hook cannot expand: name the file by its literal absolute path`);
+    return unknown2(`a file path built from ${path.unknown}, which the hook cannot expand: name the file by its literal absolute path`);
   if (!resolved)
-    return unknown("a file path the hook cannot resolve");
-  return env.files.get(resolved) ?? await readFile(resolved) ?? unknown(`${resolved}, which does not exist yet`);
+    return unknown2("a file path the hook cannot resolve");
+  return env.files.get(resolved) ?? await readFile(resolved) ?? unknown2(`${resolved}, which does not exist yet`);
 }
 function parseFlags(args, takes) {
   const flags = [];
@@ -6527,7 +7384,7 @@ var unreadable = (text) => Boolean(text.unknown) || Boolean(text.reads?.length) 
 var fromXargs = (text, xargs) => Boolean(xargs?.replace) && text.value.includes(xargs?.replace ?? "");
 var flagFromXargs = (text, xargs) => fromXargs(text, xargs) && (text.value.startsWith(xargs?.replace ?? "") || text.value.startsWith("-"));
 function viaXargs(text, xargs) {
-  return fromXargs(text, xargs) ? unknown(`what xargs puts in place of ${xargs?.replace}`) : text;
+  return fromXargs(text, xargs) ? unknown2(`what xargs puts in place of ${xargs?.replace}`) : text;
 }
 function ghCommand(args) {
   const repos = [];
@@ -6577,11 +7434,11 @@ async function ghApi(args, cmd, env, xargs) {
   if (xargs && !xargs.replace) {
     fields.push({
       key: "body",
-      text: unknown("the arguments xargs appends; a read passes with -X GET")
+      text: unknown2("the arguments xargs appends; a read passes with -X GET")
     });
   }
   if (args.some((a) => flagFromXargs(a, xargs))) {
-    fields.push({ key: "body", text: unknown(`what xargs puts in place of ${xargs?.replace}`) });
+    fields.push({ key: "body", text: unknown2(`what xargs puts in place of ${xargs?.replace}`) });
   }
   const sent = fields.length + inputs.length > 0;
   return { endpoint, fields, inputs, method: method ?? (sent ? "POST" : "GET") };
@@ -7343,7 +8200,7 @@ async function gh(args, cmd, env, local, xargs) {
     const posts = found.texts.includes(name) || found.files.includes(name);
     if (!value) {
       if (posts)
-        texts.push(unknown(`${name} with no value`));
+        texts.push(unknown2(`${name} with no value`));
     } else if (found.texts.includes(name))
       texts.push(value);
     else if (found.files.includes(name)) {
@@ -7352,9 +8209,9 @@ async function gh(args, cmd, env, local, xargs) {
       repos.push(value);
   }
   if (xargs && !xargs.replace)
-    texts.push(unknown("the arguments xargs appends"));
+    texts.push(unknown2("the arguments xargs appends"));
   if (rest.some((a) => flagFromXargs(a, xargs))) {
-    texts.push(unknown(`what xargs puts in place of ${xargs?.replace}`));
+    texts.push(unknown2(`what xargs puts in place of ${xargs?.replace}`));
   }
   const flagged = repos.map((r) => fromXargs(r, xargs) ? undefined : repoOf(r));
   const urls = positionals.flatMap((p) => {
@@ -7437,7 +8294,7 @@ function prCreate(rest, env) {
   if (values.some((v) => v === "-f" || v.startsWith("--fill"))) {
     const at = values.findIndex((v) => /^(?:-B|--base)(?:=|$)/.test(v));
     const base = at === -1 ? "HEAD" : values[at].includes("=") ? values[at].split("=")[1] : values[at + 1];
-    texts.push(base && !base.includes(UNKNOWN) ? gitText(env.cwd, ["log", "--format=%B", "-n", "500", `origin/${base}..HEAD`], "the commits --fill reads") : unknown("the base --fill reads from"));
+    texts.push(base && !base.includes(UNKNOWN) ? gitText(env.cwd, ["log", "--format=%B", "-n", "500", `origin/${base}..HEAD`], "the commits --fill reads") : unknown2("the base --fill reads from"));
   }
   return texts;
 }
@@ -7568,13 +8425,15 @@ function conversation(route) {
     return true;
   return segments[0] === "pulls" && !segments.some((s) => s === "merge" || s === "update-branch");
 }
+var hostOf = (url) => /^[a-z][a-z\d+.-]*:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i.exec(url)?.[1]?.toLowerCase().replace(/\.+$/, "");
+var slackHost = (host) => host === "slack.com" || !!host?.endsWith(".slack.com");
 function hostTarget(url) {
-  const host = /^[a-z][a-z\d+.-]*:\/\/([^/?#:]+)/i.exec(url)?.[1]?.toLowerCase();
+  const host = hostOf(url);
   if (!host || !policy.hosts)
     return;
   if (host === "linear.app" || host.endsWith(".linear.app"))
     return { label: "Linear", where: "guarded" };
-  if (host === "slack.com" || host.endsWith(".slack.com"))
+  if (slackHost(host))
     return { label: "Slack", where: "guarded" };
 }
 async function curl(args, cmd, env, xargs) {
@@ -7610,6 +8469,11 @@ async function curl(args, cmd, env, xargs) {
   const target = targets.find((t) => t.where === "guarded") ?? targets.find((t) => t.where === "unknown");
   if (!target)
     return;
+  if (targets.some((t) => t.label === "Slack")) {
+    const gated = gatedCurl(urls);
+    if (gated)
+      return gated;
+  }
   const data = await curlData(flags, cmd, env);
   const get = flags.some((f) => f.name === "-G" || f.name === "--get");
   const writes = data.length > 0 && !get || urls.some((u) => /\/api\/chat\./i.test(u.value));
@@ -7621,7 +8485,7 @@ async function curl(args, cmd, env, xargs) {
     }
   }
   if (xargs && !xargs.replace)
-    data.push(unknown("the arguments xargs appends"));
+    data.push(unknown2("the arguments xargs appends"));
   return judge("curl", target, data.map((t) => viaXargs(t, xargs)), env, urls);
 }
 function curlWrites(flags) {
@@ -7686,12 +8550,12 @@ function clearedPost(what, input, at, signedOnly) {
 }
 function gitText(dir, args, what) {
   if (!dir)
-    return unknown(`${what}, in a checkout the hook cannot resolve`);
+    return unknown2(`${what}, in a checkout the hook cannot resolve`);
   const proc = Bun.spawnSync(["git", "-C", dir, ...args], {
     env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
     stderr: "ignore"
   });
-  return proc.exitCode === 0 ? { value: proc.stdout.toString() } : unknown(what);
+  return proc.exitCode === 0 ? { value: proc.stdout.toString() } : unknown2(what);
 }
 async function git(args, cmd, env, local = new Map, depth = 0) {
   let dir = env.cwd;
@@ -7795,7 +8659,7 @@ async function git(args, cmd, env, local = new Map, depth = 0) {
     else if (name === "-F" || name === "--file") {
       texts.push(value.value === "-" && !value.unknown ? await stdinOf(cmd, here) : await readPath(value, here));
     } else if (["-C", "-c", "--reedit-message", "--reuse-message"].includes(name)) {
-      texts.push(value.unknown || value.reads?.length ? unknown("the message of a commit the hook cannot name") : gitText(dir, ["log", "-1", "--format=%B", value.value], `the message of ${value.value}`));
+      texts.push(value.unknown || value.reads?.length ? unknown2("the message of a commit the hook cannot name") : gitText(dir, ["log", "-1", "--format=%B", value.value], `the message of ${value.value}`));
     } else
       extras.push(value);
   }
@@ -7928,6 +8792,50 @@ async function push(rest, env, checkout, takes = PUSH_TAKES) {
   }
   return judge("git push", target, texts, env);
 }
+var GATED_READS = new Set(["usergroups_me", "users_conversations"]);
+function gatedPost(tool, server, name, input) {
+  const read = name.replace(/^slack_/, "");
+  if (READ_TOOL.test(read) || GATED_READS.has(read))
+    return;
+  const connector = name === CONNECTOR_TOOL;
+  const posting = CHAT_TOOL.test(name) || connector;
+  const what = tool.replace(/^mcp__/, "");
+  for (const gate of policy.gates ?? []) {
+    if ("broken" in gate) {
+      if (/slack/i.test(server))
+        return brokenGate(what, gate);
+      continue;
+    }
+    if (!gate.servers.includes(server))
+      continue;
+    const keys = connector ? CONNECTOR_KEYS : POST_KEYS;
+    const alone = posting && input !== undefined && input[keys.channel] === gate.selfDm && !Object.keys(input).some((k) => k !== keys.channel && OTHER_DESTINATION.test(k));
+    if (!alone)
+      return `no-playground-leak hook refused ${what}: the ${gate.org} extension gates its Slack sends on ${server}, so every write there goes through ${gate.path}; only a post whose one destination is its self-DM (${gate.selfDm}) passes here. Send it through that path.`;
+  }
+}
+var brokenGate = (what, gate) => `no-playground-leak hook refused ${what}: the ${gate.org} extension's slack.gatedSends does not read (${gate.broken}), so the hook cannot tell which Slack writes its gate covers. Tell your lead: it is set in that extension's settings as {"path": "<its send path>", "selfDm": "D\u2026", "servers": ["<MCP server>"]}, or "" for no gate; then run the call again.`;
+var SLACK_READ_METHOD = /^(?:auth\.test|search\.[a-z]+|(?:[a-z]+\.)+(?:history|info|list|replies|unreads|get[A-Za-z]*|lookup[A-Za-z]*))$/;
+function gatedCurl(urls) {
+  const gates = policy.gates ?? [];
+  if (!gates.length)
+    return;
+  const writes = urls.some((u) => {
+    const value = visible(u.value);
+    const url = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `http://${value}`;
+    if (!slackHost(hostOf(url)))
+      return false;
+    const method = /^[a-z][a-z\d+.-]*:\/\/[^/?#]*\/api\/([^/?#]+)(?:[?#]|$)/i.exec(url)?.[1];
+    return !method || !SLACK_READ_METHOD.test(method);
+  });
+  if (!writes)
+    return;
+  const broken = gates.find((g) => ("broken" in g));
+  if (broken && "broken" in broken)
+    return brokenGate("curl", broken);
+  const paths = gates.flatMap((g) => ("path" in g) ? [`${g.org}'s ${g.path}`] : []);
+  return `no-playground-leak hook refused curl to Slack's API: an org gates its Slack sends (slack.gatedSends), so a Slack write goes through ${paths.join(" or ")}, and curl passes only a read method on /api/. Send it through that path.`;
+}
 function strings(node) {
   if (typeof node === "string")
     return [node];
@@ -7939,6 +8847,9 @@ function strings(node) {
 }
 function mcp(tool, input) {
   const [, server = "", name = ""] = MCP_TOOL.exec(tool) ?? [];
+  const gated = gatedPost(tool, server, name, input);
+  if (gated)
+    return gated;
   const surface = /linear/i.test(server) ? "Linear" : /slack/i.test(server) ? "Slack" : /github/i.test(server) ? "GitHub" : undefined;
   if (!surface || READ_TOOL.test(name) || surface !== "GitHub" && !policy.hosts)
     return;
