@@ -32,7 +32,16 @@ if (Number.isNaN(now)) {
 const read = (): State => {
   if (!existsSync(statePath)) return emptyState()
   try {
-    return JSON.parse(readFileSync(statePath, "utf8"))
+    const s = JSON.parse(readFileSync(statePath, "utf8"))
+    const isMap = (v: unknown) => typeof v === "object" && v !== null && !Array.isArray(v)
+    // a state of another shape starts again from 0, since update would throw on it every cycle
+    return isMap(s) &&
+      isMap(s.buckets) &&
+      isMap(s.files) &&
+      isMap(s.recent) &&
+      typeof s.lastRun === "number"
+      ? s
+      : emptyState()
   } catch {
     return emptyState()
   }

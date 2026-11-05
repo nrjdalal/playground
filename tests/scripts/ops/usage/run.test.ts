@@ -398,6 +398,12 @@ test.each([
     "statusline cost: exit 1: made-up failure",
   ],
   ["outlasts its timeout", "await Bun.sleep(5000)", 1, "statusline cost: TimeoutExpired"],
+  [
+    "fails with a byte that is not UTF-8",
+    "process.stderr.write(new Uint8Array([0xff])); process.exit(1)",
+    30,
+    "statusline cost: exit 1: \ufffd",
+  ],
 ])("a CLI that %s leaves the last figures as they are", (name, body, timeout, problem) => {
   const home = join(scratch, `cost-${name.replace(/ /g, "-")}`)
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })

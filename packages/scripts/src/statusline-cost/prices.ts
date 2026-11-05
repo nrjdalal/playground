@@ -3,10 +3,12 @@ type Rate = { cacheRead: number; input: number; output: number; write1h: number;
 type Price = Rate & { fast?: { input: number; output: number }; over?: { at: number; rate: Rate } }
 
 const opus4 = { cacheRead: 0.5, input: 5, output: 25, write1h: 10, write5m: 6.25 }
+const sonnet4 = { cacheRead: 0.3, input: 3, output: 15, write1h: 6, write5m: 3.75 }
 
 export const PRICES: Record<string, Price> = {
   "claude-fable-5": { cacheRead: 1, input: 10, output: 50, write1h: 20, write5m: 12.5 },
   "claude-fable-5-1": { cacheRead: 0.25, input: 10, output: 50, write1h: 20, write5m: 12.5 },
+  "claude-haiku-4-5": { cacheRead: 0.1, input: 1, output: 5, write1h: 2, write5m: 1.25 },
   "claude-haiku-5-5": {
     cacheRead: 0.01,
     input: 0.1,
@@ -18,6 +20,9 @@ export const PRICES: Record<string, Price> = {
     write1h: 0.2,
     write5m: 0.125,
   },
+  "claude-opus-4-5": opus4,
+  "claude-opus-4-6": opus4,
+  "claude-opus-4-7": opus4,
   "claude-opus-4-8": { ...opus4, fast: { input: 10, output: 50 } },
   "claude-opus-5": { ...opus4, fast: { input: 10, output: 50 } },
   "claude-opus-5-5": {
@@ -28,6 +33,8 @@ export const PRICES: Record<string, Price> = {
     write1h: 8,
     write5m: 5,
   },
+  "claude-sonnet-4-5": sonnet4,
+  "claude-sonnet-4-6": sonnet4,
   "claude-sonnet-5": { cacheRead: 0.2, input: 2, output: 10, write1h: 4, write5m: 2.5 },
   "claude-sonnet-5-5": { cacheRead: 0.1, input: 2, output: 10, write1h: 4, write5m: 2.5 },
 }

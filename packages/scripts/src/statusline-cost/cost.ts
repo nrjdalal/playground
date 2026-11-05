@@ -9,12 +9,12 @@ export const BUCKET_MS = 15 * 60_000
 export const HOLD_MS = 2 * 3_600_000
 export const KEEP_MS = 8 * 86_400_000
 
-// buckets: $ and unpriced messages per 15-minute UTC start; files: each transcript's inode and the offset read to; recent: each message seen within HOLD_MS, its time and the $ it added
+// buckets: $ and unpriced messages per 15-minute UTC start; files: each transcript's inode and the offset read to; recent: each message seen within HOLD_MS, its time, the $ it added and 1 once it counted as unpriced
 export type State = {
   buckets: Record<string, [number, number]>
   files: Record<string, [number, number]>
   lastRun: number
-  recent: Record<string, [number, number]>
+  recent: Record<string, [number, number, number]>
 }
 
 export const emptyState = (): State => ({ buckets: {}, files: {}, lastRun: 0, recent: {} })
@@ -95,9 +95,11 @@ function add(s: State, line: string, since: number) {
   const slot = (at: number) =>
     (s.buckets[String(Math.floor(at / BUCKET_MS) * BUCKET_MS)] ??= [0, 0])
   if (prev) slot(prev[0])[0] -= prev[1]
-  else if (v === undefined && m.tokens.input + m.tokens.output > 0) slot(m.at)[1]++
+  // an unpriced message counts once, on its first line with tokens
+  const unpriced = v === undefined && m.tokens.input + m.tokens.output > 0 && !prev?.[2]
+  if (unpriced) slot(m.at)[1]++
   slot(m.at)[0] += v ?? 0
-  s.recent[m.key] = [m.at, v ?? 0]
+  s.recent[m.key] = [m.at, v ?? 0, unpriced || prev?.[2] ? 1 : 0]
 }
 
 // Reads every transcript under root from where the last run stopped; a file with a new inode or cut shorter is read again from 0, and one untouched for KEEP_MS is marked read unopened
@@ -138,7 +140,7 @@ export function localMidnight(now: number, back: number, zone: string): number {
   })
   const [y, m, d] = fmt.format(now).split("-").map(Number)
   const guess = Date.UTC(y!, m! - 1, d! - back)
-  const parts = new Intl.DateTimeFormat("en-US", {
+  const wall = new Intl.DateTimeFormat("en-US", {
     day: "numeric",
     hour: "numeric",
     hourCycle: "h23",
@@ -146,9 +148,14 @@ export function localMidnight(now: number, back: number, zone: string): number {
     month: "numeric",
     timeZone: zone,
     year: "numeric",
-  }).formatToParts(guess)
-  const p = (type: string) => Number(parts.find((x) => x.type === type)!.value)
-  return guess - (Date.UTC(p("year"), p("month") - 1, p("day"), p("hour"), p("minute")) - guess)
+  })
+  const offset = (t: number) => {
+    const parts = wall.formatToParts(t)
+    const p = (type: string) => Number(parts.find((x) => x.type === type)!.value)
+    return Date.UTC(p("year"), p("month") - 1, p("day"), p("hour"), p("minute")) - t
+  }
+  // the offset at the first answer, not at the guess, so a day the clocks change on still starts at its own midnight
+  return guess - offset(guess - offset(guess))
 }
 
 // weekly: today and the 6 local days before it, as the status line's `date -v-6d` counts them; day24: the last 24 hours, the oldest bucket prorated by its part inside; unpriced: weekly's messages whose model has no price

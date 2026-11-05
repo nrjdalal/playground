@@ -226,7 +226,7 @@ def statusline_cost(cli=None, timeout=120):
     cli = cli or os.path.join(checkout(), "packages", "scripts", "src", "statusline-cost", "cli.ts")
     bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
     try:
-        r = subprocess.run([bun, "--no-env-file", cli, "--state", os.path.join(OPS, "statusline-cost.json")], capture_output=True, text=True, timeout=timeout, cwd="/")
+        r = subprocess.run([bun, "--no-env-file", cli, "--state", os.path.join(OPS, "statusline-cost.json")], capture_output=True, text=True, errors="replace", timeout=timeout, cwd="/")
     except (OSError, subprocess.TimeoutExpired) as e:
         return f"statusline cost: {type(e).__name__}"
     return None if r.returncode == 0 else f"statusline cost: exit {r.returncode}: {r.stderr.strip()[-120:]}"

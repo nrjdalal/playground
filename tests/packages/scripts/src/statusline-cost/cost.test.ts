@@ -235,4 +235,67 @@ describe("the status line's retail $", () => {
     const again = Bun.spawnSync(args, { env })
     expect(JSON.parse(again.stdout.toString()).bytes).toBe(0)
   })
+
+  test("a state file of another shape starts again from 0, rather than failing every run", () => {
+    const root = projects()
+    writeFileSync(
+      join(root, "shape.jsonl"),
+      line({ at: "2026-11-05T10:00:00Z", id: "msg_shape", output: M }),
+    )
+    const base = join(root, "..", "..")
+    const state = join(base, "shape-state.json")
+    for (const wrong of ["{}", "[]", "null", '{"lastRun":1}']) {
+      writeFileSync(state, wrong)
+      const args = [
+        "bun",
+        cli,
+        "--cache",
+        join(base, "shape-cache"),
+        "--now",
+        "2026-11-05T12:00:00Z",
+        "--root",
+        join(root, ".."),
+        "--state",
+        state,
+      ]
+      const got = Bun.spawnSync(args, { env: { ...process.env, TZ: "UTC" } })
+      expect(got.exitCode).toBe(0)
+      expect(JSON.parse(got.stdout.toString()).weekly).toBe(20)
+    }
+  })
+
+  test("on a day the clocks change, the week still starts at that day's midnight", () => {
+    // Melbourne left summer time at 03:00 on 6 Apr 2025, so that day's midnight was 13:00Z on 5 Apr, at +11
+    expect(
+      new Date(
+        localMidnight(Date.parse("2025-04-12T02:00:00Z"), 6, "Australia/Melbourne"),
+      ).toISOString(),
+    ).toBe("2025-04-05T13:00:00.000Z")
+  })
+
+  test("an unpriced message whose first line holds no tokens counts once its tokens arrive", () => {
+    const root = projects()
+    writeFileSync(
+      join(root, "late.jsonl"),
+      line({ at: "2026-11-05T10:00:00Z", id: "msg_late", model: "made-up-model" }) +
+        line({ at: "2026-11-05T10:00:01Z", id: "msg_late", model: "made-up-model", output: M }) +
+        line({ at: "2026-11-05T10:00:02Z", id: "msg_late", model: "made-up-model", output: 2 * M }),
+    )
+    expect(run(root).unpriced).toBe(1)
+  })
+
+  test("an older model with a dated id takes its row", () => {
+    const root = projects()
+    writeFileSync(
+      join(root, "older.jsonl"),
+      line({
+        at: "2026-11-05T10:00:00Z",
+        id: "msg_old_model",
+        model: "claude-sonnet-4-5-20250929",
+        output: M,
+      }),
+    )
+    // Sonnet 4.5: $15 per million output
+    expect(run(root).weekly).toBeCloseTo(15, 6)
+  })
 })
