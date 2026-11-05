@@ -618,13 +618,13 @@ heavy_build() {
           --all | --pathspec-from-file=*) all=1 ;;
           --pathspec-from-file) all=1; state=value ;;
           --author|--cleanup|--date|--file|--fixup|--message|--reedit-message|--reuse-message|--squash|--template|--trailer) state=value ;;
-          --allow-empty | --allow-empty-message | --amend | --edit | --gpg-sign | --gpg-sign=* | --include | --no-edit | --no-gpg-sign | --no-signoff \
+          --allow-empty | --allow-empty-message | --amend | --gpg-sign | --gpg-sign=* | --include | --no-edit | --no-gpg-sign | --no-signoff \
             | --only | --pathspec-file-nul | --quiet | --reset-author | --signoff | --untracked-files | --untracked-files=* | --verbose | --author=* \
             | --cleanup=* | --date=* | --file=* | --fixup=* | --message=* | --reedit-message=* | --reuse-message=* | --squash=* | --template=* | --trailer=*) ;;
           --*) odd=1 ;;
           -?*) f=${a#-}
             while [ -n "$f" ]; do c=${f:0:1}; f=${f:1}
-              case "$c" in a) all=1 ;; n) return 1 ;; [CFcmt]) [ -z "$f" ] && state=value; break ;; [uS]) break ;; [eioqsv]) ;; *) odd=1 ;; esac
+              case "$c" in a) all=1 ;; n) return 1 ;; [CFcmt]) [ -z "$f" ] && state=value; break ;; [uS]) break ;; [ioqsv]) ;; *) odd=1 ;; esac
             done ;;
           *) paths+=("$a") ;;
         esac ;;

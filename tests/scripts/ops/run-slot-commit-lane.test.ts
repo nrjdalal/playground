@@ -172,6 +172,8 @@ describe("a commit whose pre-commit runs next build", () => {
   for (const flags of [
     ["commit", "--no-such-flag", "-m", "x"],
     ["commit", "-Zm", "x"],
+    ["commit", "-pm", "x"],
+    ["commit", "-e", "-m", "x"],
     ["commit", "-m", "x", "--pathspec-fr=list.txt"],
     ["-c", "core.hooksPath=/x", "commit", "-m", "x"],
   ])
