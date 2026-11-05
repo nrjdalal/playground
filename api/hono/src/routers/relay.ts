@@ -48,7 +48,7 @@ export function relayRouter({
         let release = () => {}
         return {
           onClose: () => release(),
-          onMessage: (event) => hub.answer(userId, String(event.data)),
+          onMessage: (event, socket) => hub.answer(userId, String(event.data), socket),
           onOpen: (_, socket) => {
             release = hub.attach(userId, socket)
           },

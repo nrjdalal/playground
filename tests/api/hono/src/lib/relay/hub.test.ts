@@ -111,6 +111,15 @@ describe("a Mac that goes silent", () => {
     expect(closed).toBe(1)
     expect(await hub.forward("u1", "owner", "/api/v1/workers")).toEqual({ type: "offline" })
   })
+
+  // the hub never answered a heartbeat, so the Mac could not tell a socket the hub had dropped from a quiet one
+  test("answers each heartbeat on the socket that sent it", () => {
+    const hub = createHub()
+    const socket = mac()
+    hub.attach("u1", socket)
+    hub.answer("u1", JSON.stringify({ type: "heartbeat" }), socket)
+    expect(socket.sent).toEqual(['{"type":"heartbeat"}'])
+  })
 })
 
 describe("the relay's hub across instances", () => {
@@ -144,6 +153,24 @@ describe("the relay's hub across instances", () => {
     release()
     expect(await waiting).toEqual({ type: "offline" })
     expect(await other.status("u1")).toEqual({ online: false, since: AT.toISOString() })
+  })
+
+  // a replaced socket's close published gone, which failed a read the Mac answered on its new socket on another instance
+  test("a Mac that moves its socket to another instance stays online, and a read sent on the old socket gets its answer through the new one", async () => {
+    const { holder, other } = instances({ ackMs: 50, now: () => AT })
+    let sent = ""
+    const release = holder.attach("u1", {
+      send: (data) => void (sent = (JSON.parse(data) as { id: string }).id),
+    })
+    const forwarded = holder.forward("u1", "owner", "/api/v1/workers")
+    other.attach("u1", mac())
+    release()
+    await Bun.sleep(80)
+    other.answer("u1", answer(sent, "workers"))
+    const got = await forwarded
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
+    expect(await holder.status("u1")).toEqual({ online: true, since: null })
+    expect(await other.status("u1")).toEqual({ online: true, since: null })
   })
 
   test("an answer settles only a request its own owner's Mac was sent", async () => {

@@ -301,14 +301,69 @@ describe("startRelay, this Mac's socket to the hub", () => {
     }
   })
 
-  test("stop closes the socket and opens no other", async () => {
+  // the recycle closed the old socket on the new one's open, so a read it was still answering never reached the hub
+  test("a read in flight across a recycle gets its answer, on the old socket while it is open and on the new one once it is not", async () => {
     const { connect, made } = sockets()
-    const stop = relay(connect)
+    const held: (() => void)[] = []
+    const stop = relay(connect, {
+      dispatch: async () => {
+        await new Promise<void>((resolve) => held.push(resolve))
+        return new Response('{"data":[]}', { headers: { "content-type": "application/json" } })
+      },
+      recycleMs: 30,
+    })
+    const answered = (one: Fake) => one.sent.some((data) => data.includes('"response"'))
+    try {
+      await until("the socket", () => made.length === 1)
+      made[0]!.open()
+      made[0]!.feed(frame({ at: new Date().toISOString(), id: crypto.randomUUID() }))
+      await until("the read", () => held.length === 1)
+      await until("the next socket", () => made.length === 2)
+      made[1]!.open()
+      expect(made[0]!.readyState).toBe(1)
+      held[0]!()
+      await until("the answer on the old socket", () => answered(made[0]!))
+      await until("the old socket closing", () => made[0]!.readyState === 3)
+      made[1]!.feed(frame({ at: new Date().toISOString(), id: crypto.randomUUID() }))
+      await until("the second read", () => held.length === 2)
+      await until("the third socket", () => made.length === 3)
+      made[2]!.open()
+      made[1]!.close()
+      held[1]!()
+      await until("the answer on the new socket", () => answered(made[2]!))
+    } finally {
+      stop()
+    }
+  })
+
+  // a socket the hub had dropped stayed open on this Mac, so the Mac read as offline until the recycle
+  test("a hub gone silent closes the socket and opens a new one, while its answered heartbeats keep it", async () => {
+    const { connect, made } = sockets()
+    const stop = relay(connect, { heartbeatMs: 10, silentMs: 60 })
+    try {
+      await until("the socket", () => made.length === 1)
+      made[0]!.open()
+      for (let i = 0; i < 6; i++) {
+        await Bun.sleep(20)
+        made[0]!.feed('{"type":"heartbeat"}')
+      }
+      expect(made[0]!.readyState).toBe(1)
+      await until("the silent socket closing", () => made[0]!.readyState === 3)
+      await until("a new socket", () => made.length === 2)
+    } finally {
+      stop()
+    }
+  })
+
+  test("stop closes the socket, and one still connecting, and opens no other", async () => {
+    const { connect, made } = sockets()
+    const stop = relay(connect, { recycleMs: 30 })
     await until("the socket", () => made.length === 1)
     made[0]!.open()
+    await until("the next socket", () => made.length === 2)
     stop()
-    expect(made[0]!.readyState).toBe(3)
+    expect([made[0]!.readyState, made[1]!.readyState]).toEqual([3, 3])
     await Bun.sleep(1200)
-    expect(made).toHaveLength(1)
+    expect(made).toHaveLength(2)
   })
 })

@@ -86,12 +86,35 @@ export function createHub({
       if (found.userId === userId) settle(key, { type: "offline" })
   }
 
-  // Lets a held socket go, as of since, on every instance.
+  // Whether another instance holds the owner's Mac, which answers a ping within ackMs.
+  const heldElsewhere = async (userId: string): Promise<boolean> => {
+    if (!bus) return false
+    const ping = id()
+    const there = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), ackMs)
+      pings.set(ping, () => {
+        clearTimeout(timer)
+        resolve(true)
+      })
+      void send({ id: ping, kind: "ping", userId })
+    })
+    pings.delete(ping)
+    return there
+  }
+
+  // Lets a held socket go, as of since, on every instance, unless the Mac has moved its socket to another instance, whose reads still get their answers.
   const drop = (userId: string, held: Held, since: string) => {
     if (macs.get(userId) !== held) return
     macs.delete(userId)
-    goneHere(userId, since)
-    void send({ kind: "gone", since, userId })
+    const gone = () => {
+      if (macs.has(userId)) return
+      goneHere(userId, since)
+      void send({ kind: "gone", since, userId })
+    }
+    if (!bus) return gone()
+    void heldElsewhere(userId).then((there) => {
+      if (!there) gone()
+    })
   }
 
   // The socket this instance holds for the owner while it still answers; one silent past silentMs is dropped and closed here.
@@ -155,8 +178,8 @@ export function createHub({
       return () => drop(userId, held, now().toISOString())
     },
 
-    // Takes a frame the owner's Mac sent, which says it is there: a heartbeat says only that, an answer settles its own request, here or on the instance that waits on it, and anything else is dropped.
-    answer(userId: string, raw: string): void {
+    // Takes a frame the owner's Mac sent on socket, which says it is there: a heartbeat is answered with one, so the Mac hears the hub too, an answer settles its own request, here or on the instance that waits on it, and anything else is dropped.
+    answer(userId: string, raw: string, socket?: MacSocket): void {
       const held = macs.get(userId)
       if (held) held.heard = now().getTime()
       let parsed: unknown
@@ -165,7 +188,14 @@ export function createHub({
       } catch {
         return
       }
-      if (relayHeartbeatSchema.safeParse(parsed).success) return
+      if (relayHeartbeatSchema.safeParse(parsed).success) {
+        try {
+          socket?.send(raw)
+        } catch (error) {
+          console.error("[relay] answering a heartbeat failed", String(error))
+        }
+        return
+      }
       const frame = relayResponseSchema.safeParse(parsed)
       if (!frame.success) return
       const found = waiting.get(frame.data.id)
@@ -211,19 +241,8 @@ export function createHub({
     // Whether the owner's Mac holds the relay on any instance, and since when it is offline when an instance saw it go.
     async status(userId: string): Promise<RelayStatus> {
       if (live(userId)) return { online: true, since: null }
-      const offline = () => ({ online: false, since: offlineSince.get(userId) ?? null })
-      if (!bus) return offline()
-      const ping = id()
-      const online = await new Promise<boolean>((resolve) => {
-        const timer = setTimeout(() => resolve(false), ackMs)
-        pings.set(ping, () => {
-          clearTimeout(timer)
-          resolve(true)
-        })
-        void send({ id: ping, kind: "ping", userId })
-      })
-      pings.delete(ping)
-      return online ? { online: true, since: null } : offline()
+      if (await heldElsewhere(userId)) return { online: true, since: null }
+      return { online: false, since: offlineSince.get(userId) ?? null }
     },
   }
 }

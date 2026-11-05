@@ -8,6 +8,7 @@ import { unwrap } from "@/lib/api/client"
 import { config } from "@/lib/config"
 import { offlineLine, RELAY_STATUS_KEY, RELAY_STATUS_MS } from "@/lib/relay"
 
+// a hand fetch, since `/status` sits outside AppType and apiClient points at the relay itself
 async function readRelayStatus(): Promise<RelayStatus> {
   const { data, error } = await unwrap(
     fetch(`${config.api.url}${RELAY_PREFIX}/status`, { credentials: "include" }) as Promise<{

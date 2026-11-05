@@ -602,10 +602,8 @@ export function useDashboardSocket(enabled: boolean) {
       const read = async () => {
         const { data } = await unwrap(apiClient.v1.board.$get())
         if (closed) return
-        if (data) {
-          setConnected(true)
-          onFrame(data)
-        }
+        setConnected(Boolean(data))
+        if (data) onFrame(data)
         retry = setTimeout(() => void read(), BOARD_POLL_MS)
       }
       fresh = true
