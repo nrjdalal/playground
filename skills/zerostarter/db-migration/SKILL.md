@@ -62,6 +62,8 @@ Done when `docker port` prints a `127.0.0.1:` line and the worktree's `.env` nam
 bun run db:migrate
 ```
 
+Apply with `db:migrate` alone: `drizzle-kit push` stops at a rename prompt when no TTY is attached, and still exits 0, so a half-applied schema reads as done. So each app gets its own database: in a shared one, a second app's push reads the first app's tables as renames.
+
 For the dashboard, which is never deployed, this is local or ad-hoc only, so ZeroStarter's deploy-time auto-apply never runs for it: the runner hosting the live dashboard runs `bun run db:migrate` in its checkout after a reset that brings a migration (the dev skill's "The live dashboard's build").
 The hosted build (Yard, `PLAYGROUND_HOSTED=1`) is the one deploy: `api/hono/vercel.json` runs that auto-apply, `packages/scripts/src/migrate-on-deploy.ts`, before `build:vercel`, so a production or `canary` deploy applies pending migrations to the hosted database, while a PR preview skips them.
 
