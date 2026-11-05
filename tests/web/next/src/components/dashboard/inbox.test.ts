@@ -680,8 +680,8 @@ describe("Schedule's row", () => {
     const click = source.slice(at, source.indexOf("</button>", at))
     expect(click).toContain("onClick={onRead}")
     expect(source).toContain("onRead={() => read()}")
-    expect(source).toContain(
-      "const read = () => (unread && !paused ? void settle(() => markRead([item.id])) : undefined)",
+    expect(source).toMatch(
+      /const read = \(\) =>\s+unread && !paused && !config\.hosted \? void settle\(\(\) => markRead\(\[item\.id\]\)\) : undefined/,
     )
     expect(source).not.toContain('answerItem(item.id, "read"')
     expect(source).not.toContain('answerItem(item, "read"')
