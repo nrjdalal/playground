@@ -3153,7 +3153,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(await store.markRead(db, [one.id])).toBe(0)
     const list = await store.listItems(db)
     const unread = list.items
-      .filter((i) => i.kind === "update" && i.readAt === null)
+      // its own three alone: an unread update stays listed at any age, so another test's can show here too
+      .filter((i) => [one.id, two.id, three.id].includes(i.id) && i.readAt === null)
       .map((i) => i.id)
     expect(unread).toEqual([three.id, two.id])
     // only the updates named are marked, so one that arrived since stays unread

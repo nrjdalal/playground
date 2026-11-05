@@ -1061,7 +1061,7 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
     // coalesced, since a null here would make the rest's not (...) null too and drop every row with no delivery
     sql`coalesce(${inboxItem.delivery} ->> 'status', '') = 'failed' and ${inboxItem.answer} ->> 'dismissedAt' is null`,
   )
-  const stopped = new Date(CLOCKS_STOPPED_AT).toISOString()
+  const stopped = CLOCKS_STOPPED_AT
   // since the clocks stopped, a card moves by a verb alone: one answered that its poster has not closed (a go it carries out, a comment it reads) and an update he read and has not dismissed stay at any age, where one from before keeps the week
   const pending = and(
     sql`not (${needsYou})`,
