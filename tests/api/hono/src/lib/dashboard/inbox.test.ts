@@ -3295,7 +3295,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
             code: "CMUX_FAILED",
             ok: false,
             reason:
-              "The sessions read was cut short (herdr did not answer in time), so dispatcher was not found; nothing was typed.",
+              "The sessions read was cut short (a herdr server or pane did not answer whole), so dispatcher was not found; nothing was typed.",
           }),
           keychain: keychainSink,
           run: sink.run,

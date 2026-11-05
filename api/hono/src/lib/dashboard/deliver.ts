@@ -480,26 +480,24 @@ type Target = { surface: string; worker: Worker }
 
 // The named session as the read shows it, or why it cannot take a message. A read cut short (a herdr server or pane that did not answer in time) that misses the name is read once more, and still missing it is a failed read, never a session gone, so no answer is relayed past a poster that is still live.
 async function target(to: string, read: () => Promise<Live>): Promise<Refusal | Target> {
-  const readOnce = async (): Promise<Live | Refusal> => {
+  let live: Live
+  let found: ReturnType<typeof reached>
+  let tries = 0
+  do {
     try {
-      return await read()
+      live = await read()
     } catch (error) {
       return refused("CMUX_FAILED", `Could not read the sessions: ${messageOf(error)}`)
     }
+    found = reached(live.workers, to)
+  } while (!found.count && live.partial && ++tries < 2)
+  if (!found.count && live.partial) {
+    return refused(
+      "CMUX_FAILED",
+      `The sessions read was cut short (a herdr server or pane did not answer whole), so ${to} was not found; nothing was typed.`,
+    )
   }
-  let live = await readOnce()
-  if ("ok" in live) return live
-  if (live.partial && !reached(live.workers, to).count) {
-    live = await readOnce()
-    if ("ok" in live) return live
-    if (live.partial && !reached(live.workers, to).count) {
-      return refused(
-        "CMUX_FAILED",
-        `The sessions read was cut short (herdr did not answer in time), so ${to} was not found; nothing was typed.`,
-      )
-    }
-  }
-  const { count, worker } = reached(live.workers, to)
+  const { count, worker } = found
   if (!count) return refused("NOT_FOUND", `No live session is named ${to}.`)
   if (!worker) return refused("AMBIGUOUS", `${count} live sessions are named ${to}.`)
   if (worker.light === "needs-you") {

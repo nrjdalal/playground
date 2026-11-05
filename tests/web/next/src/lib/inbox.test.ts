@@ -147,7 +147,7 @@ describe("a secret ask (PG-59)", () => {
       delivery: {
         code: "CMUX_FAILED",
         reason:
-          "The sessions read was cut short (herdr did not answer in time), so dispatcher was not found; nothing was typed.",
+          "The sessions read was cut short (a herdr server or pane did not answer whole), so dispatcher was not found; nothing was typed.",
         status: "failed",
       },
       from: "dispatcher",

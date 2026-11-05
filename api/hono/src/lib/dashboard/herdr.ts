@@ -306,7 +306,7 @@ export async function readServer(
     )
       .then((result) => processInfoSchema.safeParse(result))
       .catch(() => null)
-    if (info === null) partial = true
+    if (!info?.success) partial = true
     const listed = info?.success ? (info.data.process_info.foreground_processes ?? []) : []
     panes.push({ ...pane, processes: each(processSchema, listed) })
   }

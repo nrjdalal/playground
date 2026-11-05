@@ -125,7 +125,7 @@
   The answer is recorded in one write that holds only while the item is open at the version read, then typed into the posting session through `deliver()` (`Inbox #i41 (<id>) "<title>": Approved. Carry it out.`), and the item records how that delivery went.
   A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `relayText`).
   Any other `NOT_FOUND` (`now names another session`, `has no terminal to type into`) comes from a live session and stays failed, so the go is never carried out twice.
-  A sessions read cut short (a herdr server or pane that did not answer in time, `Live.partial`) that misses the poster is read once more, fresh rather than the hub's board, and still missing it reads `CMUX_FAILED`, never `NOT_FOUND`, so a live poster's answer is never relayed (`target()` in `deliver.ts`).
+  A sessions read that was cut short (`Live.partial`, cmux.md) that misses the poster is read once more, fresh rather than the hub's board, and still missing it reads `CMUX_FAILED`, never `NOT_FOUND`, so a live poster's answer is never relayed (`target()` in `deliver.ts`).
   The dispatcher is typed the same text, led by a line saying the poster has ended: for a go, that it posts a sent message through the MCP server `slack.sendServer` names, else its Slack tool, or saves a draft as the text says and then acks the item; for a deny, a clear, a discard or a provided secret, that nothing is carried out and the item closes with `bun run ask get --ack`;
   for an accept the Dashboard ran (below), that nothing is carried out and the item closes with `bun run ask ack --no-link`;
   for an apps change or a grant it ran, that the dispatcher finishes it in the poster's place by the poster's text, which follows, a grant's recheck included.
@@ -286,6 +286,7 @@
   The item turns `provided`, its answer `{at, choice: "provided", results: [{environment, exitCode, line?}]}` (`exitCode` null once stopped by a signal, 127 when `vercel` could not start), and its poster is typed `Provided at <at>`, each environment's exit status and the `bun run ask get --ack` that closes it, which `bun run ask stale` chases until it does.
   The card reads `Provided at <time>` with each exit status (a result's `line` in its place), green once every environment took it, red while any did not, whether or not its poster was told; a value the sink refused takes a new ask, and so does one whose card still reads sending after the sink's minute an environment, since the API restarted mid-run and no exit status came back.
   A telling that failed leaves that colour as it is and draws `Not told to <taker> yet: <reason>` muted under the result (`deliveryNote`), with a Retry that types the same lines again and runs no sink (`retryDelivery`).
+  Until it is told or dismissed it still counts as failed to send and shows open (`needsYou`, `inboxSummary`), so its Retry stays in view.
 
   ```bash
   bun run ask new <<'EOF'
