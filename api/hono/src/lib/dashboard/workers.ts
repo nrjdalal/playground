@@ -144,6 +144,7 @@ const ROLE_OF_KIND: Record<RosterKind, Role> = {
   dispatcher: "manager",
   ops: "manager",
   optimizer: "manager",
+  orchestrator: "manager",
   planner: "manager",
   probe: "other",
   researcher: "worker",
