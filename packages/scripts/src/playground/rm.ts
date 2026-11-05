@@ -81,7 +81,7 @@ export const callerOf = async (
 ): Promise<string | undefined> => {
   if (environment.PLAYGROUND_ROLE) return `a session (role ${environment.PLAYGROUND_ROLE})`
   if (pid <= 1) return "a detached call (its parent is pid 1)"
-  if (!procs(pid)) return `a call whose parent ps cannot read (pid ${pid})`
+  if (!procs(pid)) return `a call whose parent the system cannot read (pid ${pid})`
   const above = await sessionAbove(pid, procs)
   if (!above) return undefined
   return `a session (${above.sessionId ? `session ${above.sessionId}` : `claude pid ${above.pid}`})`

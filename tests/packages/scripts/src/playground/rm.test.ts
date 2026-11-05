@@ -320,7 +320,9 @@ test("a detached call, or one whose parent the system cannot read, needs the dec
   const { deps, main, root } = machine()
   const { procs } = registry(root)
   expect(await callerOf({}, 1, procs)).toBe("a detached call (its parent is pid 1)")
-  expect(await callerOf({}, 400, procs)).toBe("a call whose parent ps cannot read (pid 400)")
+  expect(await callerOf({}, 400, procs)).toBe(
+    "a call whose parent the system cannot read (pid 400)",
+  )
   const { route, wt } = dirtyWorktree(main)
   const caller = () => callerOf({}, 1, procs)
   expect(await discardBy(wt, { ...deps, caller })).toEqual({
@@ -333,7 +335,7 @@ test("a detached call, or one whose parent the system cannot read, needs the dec
 })
 
 // PG-828 flipped the residual this pinned: the registry is found through the claude process's own environment, so a prefix that moves CLAUDE_CONFIG_DIR or HOME hides nothing
-test("a caller whose prefix moved the registry still reads as the session above it, and a claude process the registry does not name is a session too", async () => {
+test("a caller whose prefix moved the registry still reads as the session above it, and a claude process the registry does not name, or whose environment reads back empty, is a session too", async () => {
   const { deps, main, root } = machine()
   const { procs } = registry(root)
   const moved = { CLAUDE_CONFIG_DIR: join(root, "elsewhere"), HOME: join(root, "elsewhere") }
@@ -341,6 +343,9 @@ test("a caller whose prefix moved the registry still reads as the session above 
   const unnamed = (pid: number): Proc | undefined =>
     pid === 300 ? { comm: "claude", env: { HOME: join(root, "elsewhere") }, ppid: 1 } : procs(pid)
   expect(await callerOf({}, 100, unnamed)).toBe("a session (claude pid 300)")
+  const unread = (pid: number): Proc | undefined =>
+    pid === 300 ? { comm: "claude", env: {}, ppid: 1 } : procs(pid)
+  expect(await callerOf({}, 100, unread)).toBe("a session (claude pid 300)")
   const { route, wt } = dirtyWorktree(main)
   const caller = () => callerOf(moved, 100, procs)
   expect(await discardBy(wt, { ...deps, caller })).toEqual({

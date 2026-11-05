@@ -621,7 +621,7 @@ Only the first reading moves the folder, sets variables and records files for th
   The file also holds the shell-pane launcher's caller check (`procOf`, `sessionAbove`, `callerRefusal`): `run` and `login` refuse a call whose `PLAYGROUND_ROLE` or `CLAUDE_CODE_SESSION_ID` is not its claude process's own;
   [the shell-pane docs page](../../docs/playground/shell-pane.md#where-it-fits) says what the check reads and the gaps it leaves open.
   `playground rm --discard` reads the same lookup (`sessionAbove`) the other way (`callerOf` in `packages/scripts/src/playground/rm.ts`): a claude process above the call makes it a session's, which needs an approved delete decision, and none makes it a terminal's.
-  Before the lookup, rm refuses a call whose parent is pid 1 or one `ps` cannot read without that decision, since a detached call's climb would find no claude process.
+  Before the lookup, rm refuses a call whose parent is pid 1 or one the system cannot read without that decision, since a detached call's climb would find no claude process.
   When it writes `stuck` or `failed` for a factory session, it also queues one line in the ops outbox (`ops-stuck-alert.jsonl`, which the relay sends by SendMessage) for the session's manager alone, by `managerFor()` in `packages/scripts/src/stuck-alert.ts`: the session, its roster task, the reason, the command or question, and its last message (playbook's **unstick**);
   An orchestrator's manager, the Assistant's for one, is the session its roster row reports to.
   The dispatcher's own and a session outside the factory queue nothing.
