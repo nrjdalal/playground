@@ -1,16 +1,18 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { send } from "../../../../../packages/scripts/src/dm/send"
+import { send } from "../../../../../../extensions/slack/skills/slack/scripts/send"
 import {
+  NO_TOKEN,
   ownerMessages,
   PLAYGROUND,
   readSent,
   USER,
-} from "../../../../../packages/scripts/src/dm/slack"
+} from "../../../../../../extensions/slack/skills/slack/scripts/slack"
 import { DM, fakeDm, OWNER } from "./fake-dm"
+import { fakeKeychain } from "./fake-keychain"
 
 const dirs: string[] = []
 afterAll(() => {
@@ -135,18 +137,32 @@ describe("two sends at once", () => {
 })
 
 describe("send.ts as dm send runs it", () => {
-  test("with no token, it exits 1 with one plain error line", async () => {
-    const script = join(import.meta.dir, "../../../../../packages/scripts/src/dm/send.ts")
-    const env: Record<string, string | undefined> = { ...process.env }
-    delete env.SLACK_TOKEN
-    const child = Bun.spawn([process.execPath, script, "/nonexistent/body.md"], {
-      env,
-      stderr: "pipe",
-    })
+  test("with no token in the Keychain, it exits 1 with one plain error line, and a token in its env is not read", async () => {
+    const script = join(
+      import.meta.dir,
+      "../../../../../../extensions/slack/skills/slack/scripts/send.ts",
+    )
+    const data = mkdtempSync(join(tmpdir(), "dm-send-main-"))
+    dirs.push(data)
+    mkdirSync(join(data, "extensions"))
+    writeFileSync(
+      join(data, "extensions", "policy.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        values: { "slack.dmChannel": DM, "slack.dmOwner": OWNER },
+      }),
+    )
+    const body = join(data, "body.md")
+    writeFileSync(body, "hello\n")
+    const env = {
+      ...process.env,
+      PATH: fakeKeychain(data),
+      PLAYGROUND_DATA_DIR: data,
+      SLACK_TOKEN: "xoxp-from-the-env",
+    }
+    const child = Bun.spawn([process.execPath, script, body], { env, stderr: "pipe" })
     const [err, code] = await Promise.all([new Response(child.stderr).text(), child.exited])
     expect(code).toBe(1)
-    expect(err).toBe(
-      "error: usage: SLACK_TOKEN=<token> send.ts <file>, run by playground dm send\n",
-    )
+    expect(err).toBe(`error: ${NO_TOKEN}\n`)
   })
 })

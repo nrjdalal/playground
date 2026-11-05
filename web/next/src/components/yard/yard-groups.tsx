@@ -4,7 +4,6 @@ import { RiArrowRightSLine, RiHashtag, RiUserLine } from "@remixicon/react"
 import { cn } from "cn"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useState } from "react"
 
 import { GroupCount } from "@/components/shell/group-count"
 import { ROW_BOX } from "@/components/shell/row-box"
@@ -18,15 +17,16 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { config } from "@/lib/config"
+import { useGroupOpen } from "@/lib/sidebar-groups"
 import { isPlainClick } from "@/lib/threads"
 import { channelHref, channelTitle, type YardChannel, yardBadge, yardGroups } from "@/lib/yard"
 import { useYardChannels } from "@/lib/yard-api"
 
-// The Channels and Direct messages groups, read from the API's Yard router; each is absent while it has no rows, and both while the stack has no Yard. Each collapses as the Scripts group does, its label the toggle, open to start, and counts its rows.
+// The Channels and Direct messages groups, read from the API's Yard router; each is absent while it has no rows, and both while the stack has no Yard. Each collapses as every sidebar group does, its label the toggle, open to start and kept as you left it across reloads, and counts its rows.
 export function YardGroups() {
   const { data } = useYardChannels()
-  const [channelsOpen, setChannelsOpen] = useState(true)
-  const [dmsOpen, setDmsOpen] = useState(true)
+  const [channelsOpen, setChannelsOpen] = useGroupOpen("Channels", true)
+  const [dmsOpen, setDmsOpen] = useGroupOpen("Direct messages", true)
   if (!data) return null
   const { channels, dms } = yardGroups(data)
   return (
@@ -66,8 +66,8 @@ const Chevron = ({ open }: { open: boolean }) => (
   <RiArrowRightSLine className={cn("transition-transform", open && "rotate-90")} />
 )
 
-// A group's rows, each a Threads row's shape: the stock 32px row, its title cut at its end, its unread count as the badge.
-function YardRows({ rows }: { rows: YardChannel[] }) {
+// A group's rows, each a Threads row's shape: the stock 32px row, its icon, then a channel's bare name (the # icon is its one hash) or the other member's login, cut at its end, its unread count as the badge.
+export function YardRows({ rows }: { rows: YardChannel[] }) {
   const pathname = usePathname()
   const { isMobile, setOpenMobile } = useSidebar()
   return (
@@ -96,7 +96,7 @@ function YardRows({ rows }: { rows: YardChannel[] }) {
               className={ROW_BOX}
             >
               {row.kind === "dm" ? <RiUserLine /> : <RiHashtag />}
-              <span className="truncate text-xs">{title}</span>
+              <span className="truncate text-xs">{row.kind === "dm" ? title : row.name}</span>
             </SidebarMenuButton>
             {badge && (
               <SidebarMenuBadge
