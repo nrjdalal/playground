@@ -295,7 +295,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
             session,
             worktree: args.worktree
               ? {
-                  clones: deps.clones(),
+                  clones: deps.clones,
                   discard: args.discard,
                   live: STATUSES.live,
                   merged: deps.merged,

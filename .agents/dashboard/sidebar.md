@@ -136,7 +136,7 @@
   wears the plain red dot while something there is new, one mark a square (`cornerMarks`);
   the plain dot clears with the same look.
   A look is the Inbox tab in front on any dashboard page, with the tab visible, which `DashboardAside` records as a per-browser mark in localStorage (`writeMark`, every access in try/catch, a mark that only moves forward); before any look, everything there counts as new.
-  An inbox look marks the newest time an item was posted, changed or put away with Snooze, the server's clock, never this browser's. The dot's reads poll in a hidden tab too (`TAB_DOT_POLLING`, `refetchIntervalInBackground`), since TanStack Query skips a plain interval there and a hidden tab is where the dot is read.
+  An inbox look marks the newest time an item was posted, changed or put away with Later, the server's clock, never this browser's. The dot's reads poll in a hidden tab too (`TAB_DOT_POLLING`, `refetchIntervalInBackground`), since TanStack Query skips a plain interval there and a hidden tab is where the dot is read.
   Nothing else lights it: no session's prompt, Playground's own included, and no chat reply.
   `TabDot` in `web/next/src/components/dashboard/tab-dot.tsx` draws the dot on a canvas copy of the icon, flush in its top right corner with a ring cut out around it so the tab bar's own colour shows (`DOT`), and puts the plain one back when the Dashboard is left.
   Every dashboard page's tab title is the product's name alone, Playground, a fixture stack's `Test data | Playground` (`tabTitle` in `web/next/src/lib/test-data.ts`); so is Home's on any stack, as the root layout's default for a page with no title of its own.
