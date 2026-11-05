@@ -4,13 +4,13 @@ import type { Browser, Result, Target } from "./checks"
 
 const ROOT = join(import.meta.dir, "../../../..")
 
-// Pure: Chat about it hands focus to Playground's box in the click's own frame, so a paste sent at once lands there (a dictation app's Cmd+V right after the click went to the button).
+// Pure: Reply hands focus to Playground's box in the click's own frame, so a paste sent at once lands there (a dictation app's Cmd+V right after the click went to the button).
 export const focusResult = (check: string, active: string | null): Result =>
   active === "composer"
-    ? { check, detail: "focus is in the box the moment Chat about it is clicked", ok: true }
+    ? { check, detail: "focus is in the box the moment Reply is clicked", ok: true }
     : {
         check,
-        detail: `focus is on ${active ?? "nothing"} the moment Chat about it is clicked, not the box`,
+        detail: `focus is on ${active ?? "nothing"} the moment Reply is clicked, not the box`,
         ok: false,
       }
 
@@ -45,11 +45,14 @@ const settleCard = (id: string): string | null => {
   return run.exitCode === 0 ? null : lastLine(run.stderr) || `exit ${run.exitCode}`
 }
 
-// Clicks the posted card's own Chat about it and reads where focus is in the same task, before any frame runs.
-const click = (tag: string) =>
-  `(() => { const button = document.querySelector(${JSON.stringify(`[aria-label="Chat about ${tag}"]`)}); if (!button) return "no card"; button.click(); const active = document.activeElement; return active?.id || active?.getAttribute("data-slot") || active?.tagName.toLowerCase() || null })()`
+// Clicks the posted card's own Reply and reads where focus is in the same task, before any frame runs.
+// The card's Reply button, by the aria-label inbox.tsx gives it.
+export const replyButton = (tag: string): string => `[aria-label="Reply to ${tag}"]`
 
-// At 1280x800, opens /dashboard, waits for the card's Chat about it and for Playground's box, clicks it and reads where focus is at once; on a loaded host the box can mount after the card, and a click then has no box to focus.
+const click = (tag: string) =>
+  `(() => { const button = document.querySelector(${JSON.stringify(replyButton(tag))}); if (!button) return "no card"; button.click(); const active = document.activeElement; return active?.id || active?.getAttribute("data-slot") || active?.tagName.toLowerCase() || null })()`
+
+// At 1280x800, opens /dashboard, waits for the card's Reply and for Playground's box, clicks it and reads where focus is at once; on a loaded host the box can mount after the card, and a click then has no box to focus.
 export const clickFocus = async (
   browser: Pick<Browser, "eval" | "run" | "viewport" | "visit">,
   web: string,
@@ -58,12 +61,12 @@ export const clickFocus = async (
 ): Promise<Result> => {
   await browser.viewport({ height: 800, width: 1280 })
   await browser.visit(`${web}/dashboard`)
-  await browser.run("wait", `[aria-label="Chat about ${tag}"]`)
+  await browser.run("wait", replyButton(tag))
   await browser.run("wait", "#composer")
   return focusResult(check, await browser.eval<string | null>(click(tag)))
 }
 
-// At 1280x800, posts a card, clicks its Chat about it on /dashboard and reads where focus is at once; it then settles the card, sending nothing, and fails when the card is left open.
+// At 1280x800, posts a card, clicks its Reply on /dashboard and reads where focus is at once; it then settles the card, sending nothing, and fails when the card is left open.
 export const replyFocus = async (browser: Browser, { web }: Target): Promise<Result> => {
   const check = "reply-focus 1280"
   const card = postCard()

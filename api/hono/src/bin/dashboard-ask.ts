@@ -45,7 +45,7 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 replaces your own item's title, preview and attachments
                                                 in place, checked as new checks it, so one card carries a
                                                 progress to its end: an update until it is Done or dismissed,
-                                                an ask, answered or not, until it closes; a snoozed item stays snoozed
+                                                an ask, answered or not, until it closes; one put away with Later stays put away
        bun run ask example <code|decision|slack|ui>
                                                 prints an item to start from: an ask's picture of the point, bullets,
                                                 then what Approve does (.agents/dashboard/asks.md, The ask's shape),

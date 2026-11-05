@@ -238,6 +238,7 @@ function KindBand({
   item,
   now,
   onRead,
+  replying,
   unread,
   updated,
 }: {
@@ -245,6 +246,7 @@ function KindBand({
   item: InboxItem
   now: number
   onRead: () => void
+  replying: boolean
   unread: boolean
   updated: boolean
 }) {
@@ -270,6 +272,13 @@ function KindBand({
           <>
             <span aria-hidden>·</span>
             <span className="text-info">Updated</span>
+          </>
+        )}
+        {/* the item the composer is replying to, until the reply is sent */}
+        {replying && (
+          <>
+            <span aria-hidden>·</span>
+            <Badge variant="secondary">Replying</Badge>
           </>
         )}
         {/* at the right end one time, the last change, then a tick: one to mark it read, two once read, muted */}
@@ -597,14 +606,14 @@ const QUESTION = "item"
 
 type Answer = (action: InboxAction, text?: string) => Promise<void>
 
-// Opens Playground's chat replying to this item: the composer's chip names it, and the message carries its id, so the owner can talk about an item with the dispatcher as with a reply.
-function ChatAbout({ item }: { item: InboxItem }) {
+// Reply: opens Playground's chat replying to this item; the composer's chip names it, the card's band reads Replying, and the message carries its id.
+function ReplyButton({ item }: { item: InboxItem }) {
   return (
-    <Hint content="Chat about it">
+    <Hint content="Reply">
       <Button
         size="icon-sm"
         variant="outline"
-        aria-label={`Chat about ${itemTag(item)}`}
+        aria-label={`Reply to ${itemTag(item)}`}
         className="ml-auto shrink-0"
         onClick={() => {
           // rendered at once, so the aside shows Playground's chat before the focus below
@@ -619,7 +628,7 @@ function ChatAbout({ item }: { item: InboxItem }) {
   )
 }
 
-// Opens a folded card to its full self, a chat reply's its answers and Snooze back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
+// Opens a folded card to its full self, a chat reply's its answers and Later back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
 function Reopen({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
   const label = open ? "Collapse" : "Expand"
   return (
@@ -649,7 +658,7 @@ function Reopen({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => 
   )
 }
 
-// Snooze (put an ask away until a time, and it asks again then, which is not a schedule), an icon beside Reply: the fixed times, each with its day and time, or Pick a time, whose row the card draws as its own footer line, since this right group never wraps; the item leaves the list and the count until then.
+// Later (put an ask away until a time, and it asks again then, which is not a schedule), an icon beside Reply: the fixed times, each with its day and time, or Pick a time, whose row the card draws as its own footer line, since this right group never wraps; the item leaves the list and the count until then.
 // The owner's zone, the clock.ownerZone setting, which Schedule's fixed times read in.
 const readOwnerZone = async (): Promise<string> => {
   const { data, error } = await unwrap(
@@ -681,16 +690,10 @@ function Schedule({
   const zone = isError ? "UTC" : data
   return (
     <DropdownMenu>
-      <Hint content={held ?? "Snooze: put it away until a time, then it asks again"}>
+      <Hint content={held ?? "Later: put it away until a time, then it asks again"}>
         <DropdownMenuTrigger
           render={
-            <Button
-              aria-label="Snooze"
-              size="icon-sm"
-              variant="outline"
-              disabled={busy}
-              {...hold}
-            />
+            <Button aria-label="Later" size="icon-sm" variant="outline" disabled={busy} {...hold} />
           }
         >
           <RiZzzLine />
@@ -1170,7 +1173,7 @@ export function InboxCard({
         )}
       <Reopen open={open} setOpen={setToggled} />
       {/* an open secret ask offers no chat, so its value is never typed where a transcript keeps it; a folded card shows its toggle alone */}
-      {!folded && !(secretAsk && outcome === null) && <ChatAbout item={item} />}
+      {!folded && !(secretAsk && outcome === null) && <ReplyButton item={item} />}
     </div>
   )
 
@@ -1282,11 +1285,9 @@ export function InboxCard({
       // focusable from script alone, so taking the pill can hand focus to the card it put on top
       tabIndex={-1}
       size="sm"
-      // the item a reply is being written about takes a muted fill, until it is sent
       className={cn(
         // no outer card: the item sits flat on the Inbox, edge to edge, under its KindBand
         "wrap-anywhere overflow-visible rounded-none bg-transparent px-0 pt-0 ring-0 outline-none [&_[data-slot=card-content]]:px-0 [&_[data-slot=card-footer]]:rounded-none [&_[data-slot=card-footer]]:border-t-0 [&_[data-slot=card-footer]]:bg-transparent [&_[data-slot=card-footer]]:px-0 [&_[data-slot=card-header]]:px-0",
-        marked && "bg-muted/50",
         folded && "cursor-pointer",
       )}
       // a click on a folded card opens it, and E opens or folds it, with focus anywhere in the card but its box
@@ -1308,6 +1309,7 @@ export function InboxCard({
         item={item}
         now={now}
         onRead={() => read()}
+        replying={marked}
         unread={unread}
         updated={updated}
       />
@@ -1615,7 +1617,7 @@ function InboxLoading() {
   )
 }
 
-// Playground's Inbox: one list of cards, each keeping its place while he looks, what arrived since waiting behind a pill until he takes it, then In progress, Snoozed, Archived and Done as rows that open and shut.
+// Playground's Inbox: one list of cards, each keeping its place while he looks, what arrived since waiting behind a pill until he takes it, then In progress, Later, Archive and Done as rows that open and shut.
 export function Inbox({ viewing }: { viewing: boolean }) {
   const { allowed } = useDashboard()
   const { data, error, isPending } = useInbox(allowed)
@@ -1628,7 +1630,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   const items = data?.items ?? []
   // a card moves by a verb alone: an answer its poster carries out goes to In progress, and one he dismissed or its poster closed to Done
   const { archived: setAside, done, progress, shown } = inboxView(items)
-  // Archived holds what he archived, kept out of items, and what was set aside before Archive kept items open
+  // Archive holds what he archived, kept out of items, and what was set aside before Archive kept items open
   const archived = [...(data?.archived ?? []), ...setAside].sort((a, b) => b.ref - a.ref)
   const snoozed = data?.snoozed ?? []
   const { held, rows } = pinnedView(shown, order)
@@ -1644,7 +1646,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   const updated = (item: InboxItem) => look !== null && updatedSince(item, look.since, look.upto)
   const rowIds = rows.map((item) => item.id)
   if (data && order?.join(" ") !== rowIds.join(" ")) setOrder(rowIds)
-  // a card he moved back from Archived takes the list's top once it arrives, his own click, never behind the pill
+  // a card he moved back from Archive takes the list's top once it arrives, his own click, never behind the pill
   const [back, setBack] = useState<string | null>(null)
   if (back !== null && held.some((item) => item.id === back)) {
     setBack(null)
@@ -1711,10 +1713,10 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     .map((item) => item.id)
   const clearing = unreadIds.length
   const shelfSizes: Record<string, number> = {
-    Archived: archived.length,
+    Archive: archived.length,
     Done: done.length,
     "In progress": progress.length,
-    Snoozed: snoozed.length,
+    Later: snoozed.length,
   }
   const actions = (pill || rows.length > 0) && (
     <div className="absolute top-1.5 right-[calc(var(--pane-x,0px)+1.75rem)] flex items-center gap-2">
@@ -1803,7 +1805,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
             </span>
             <ShelfMark empty={shown.length === 0} />
           </AccordionTrigger>
-          {/* kept mounted while folded, so a fold keeps what a card holds: a draft typed, a picked side, a half-set Snooze, a reopened card */}
+          {/* kept mounted while folded, so a fold keeps what a card holds: a draft typed, a picked side, a half-set Later, a reopened card */}
           <AccordionContent keepMounted className={SHELF_PANEL}>
             {bulkError && <p className="text-destructive pt-4 text-xs">{bulkError}</p>}
             <div ref={list} role="list" className="flex flex-col gap-6 pt-8 pb-3">
@@ -1824,8 +1826,8 @@ export function Inbox({ viewing }: { viewing: boolean }) {
           {(
             [
               ["In progress", RiProgress4Line, progress, "progress"],
-              ["Snoozed", RiZzzLine, snoozed, "snoozed"],
-              ["Archived", RiArchive2Line, archived, "archived"],
+              ["Later", RiZzzLine, snoozed, "snoozed"],
+              ["Archive", RiArchive2Line, archived, "archived"],
               ["Done", RiCheckDoubleLine, done, "done"],
             ] as const
           ).map(([label, Icon, shelf, place]) => (
@@ -1846,19 +1848,21 @@ export function Inbox({ viewing }: { viewing: boolean }) {
                 header={(props) => (
                   <h3 {...props} className={cn(props.className, STICKY_HEADER)}>
                     {props.children}
-                    {/* the Archived shelf empties in one click, each card's own Dismiss in turn; Done marks what settled on its own read, typing nothing into any session, greyed once all are */}
-                    {label !== "Snoozed" && label !== "In progress" && shelf.length > 0 && (
+                    {/* the Archive shelf empties in one click, each card's own Dismiss in turn; Done marks what settled on its own read, typing nothing into any session, greyed once all are */}
+                    {label !== "Later" && label !== "In progress" && shelf.length > 0 && (
                       <ShelfDismiss
                         disabled={bulkPending}
-                        ids={(label === "Archived" ? shelf : shelf.filter(dismissable)).map(
+                        ids={(label === "Archive" ? shelf : shelf.filter(dismissable)).map(
                           (item) => item.id,
                         )}
                         label={
-                          label === "Archived" ? "Dismiss all archived" : "Mark all done as read"
+                          label === "Archive"
+                            ? "Dismiss all in Archive"
+                            : "Mark all in Done as read"
                         }
                         onDismiss={(ids) =>
                           void bulk(() =>
-                            label === "Archived"
+                            label === "Archive"
                               ? dismissEach(shelf.filter((item) => ids.includes(item.id)))
                               : dismissItems(ids),
                           )
