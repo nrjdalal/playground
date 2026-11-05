@@ -56,11 +56,13 @@ const dispatcherRole = (name: string): string => {
   return DISPATCHER_SLOT_LABELS[slot] ?? dispatcherLabelOfName(name) ?? DISPATCHER_SLOT_LABELS[0]
 }
 
-// A manager's role word, by its kind or else its name, so a builder under any name reads Builder, and an orchestrator of any other manager kind its kind's word (Assistant); a dispatcher's, a set name or an `<id>-dispatcher`, Alpha or Bravo by its slot; null for any other session, a dispatcher under another name (PLAYGROUND_DISPATCHER) included, which its chat names by its model.
+// A manager's role word, by its kind or else its name, so a builder under any name reads Builder, and an orchestrator of any other manager kind its kind's word (Assistant), and one of the orchestrator kind that word with its id (Orchestrator C8m3nr); a dispatcher's, a set name or an `<id>-dispatcher`, Alpha or Bravo by its slot; null for any other session, a dispatcher under another name (PLAYGROUND_DISPATCHER) included, which its chat names by its model.
 export const roleLabel = (name: string, kind: RosterKind | null = null): string | null => {
   const manager = isManagerKind(kind) ? kind : managerKindOfName(name)
   if (manager) return MANAGER_LABELS[manager]
   const placed = kind ?? kindOfName(name)
+  // any number of orchestrators run at once, so each reads its kind's word with its id: Orchestrator C8m3nr
+  if (placed === "orchestrator") return `Orchestrator ${mention(withoutIdKind(name))}`
   if (placed && placed !== "dispatcher" && ROSTER_ROLE_OF_KIND[placed] === "manager")
     return capitalise(placed)
   return dispatcherLabelOfName(name) || kindOfName(name) === "dispatcher"
