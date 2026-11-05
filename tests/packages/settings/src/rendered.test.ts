@@ -57,7 +57,7 @@ test("a root that lacks the file refuses, so a guard fails closed, and an empty 
     `the extensions root (${extensionsDir(data("bad"))}) holds no hooks/no-public-leak.json: tell your lead, and the dispatcher hands the owner ! playground ext put <login> list no-public-leak <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`,
   )
   expect((await readRendered(data("bad"), "settings.json")).refusal).toBe(
-    `the extensions root (${extensionsDir(data("bad"))}) holds no settings.json: tell your lead, and the dispatcher asks the owner to set up settings and save Privacy on the Dashboard's Settings page, which writes it`,
+    `the extensions root (${extensionsDir(data("bad"))}) holds no settings.json: tell your lead, and the dispatcher asks the owner to set up settings, then fill in and save Privacy on the Dashboard's Settings page, which writes it`,
   )
 })
 
