@@ -278,7 +278,9 @@ function KindBand({
         {replying && (
           <>
             <span aria-hidden>·</span>
-            <Badge variant="secondary">Replying</Badge>
+            <Badge variant="outline" className="text-2xs h-4 px-1.5">
+              Replying
+            </Badge>
           </>
         )}
         {/* at the right end one time, the last change, then a tick: one to mark it read, two once read, muted */}

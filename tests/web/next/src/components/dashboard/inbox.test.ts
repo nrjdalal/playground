@@ -1489,6 +1489,11 @@ describe("one word a meaning: Later, Archive, Reply and Replying (PG-900)", () =
     expect(html).not.toContain(">Replying<")
     const marked = render(false, answered, false, { defaultOpen: true, marked: true })
     expect(marked).toContain(">Replying<")
+    // an outline chip at the band's 16px line, so the band keeps its height and the chip draws its pill on the muted band
+    const chip = marked.slice(0, marked.indexOf(">Replying<")).split("<").at(-1)!
+    for (const kept of ['data-slot="badge"', "h-4", "text-2xs", "border-border"])
+      expect(chip).toContain(kept)
+    for (const gone of ["h-5", "bg-secondary"]) expect(chip).not.toContain(gone)
     expect(marked.split(">")[0]).toContain('data-slot="card"')
     expect(marked.split(">")[0]).not.toContain("bg-muted/50")
   })

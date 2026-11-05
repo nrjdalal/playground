@@ -45,10 +45,10 @@ const settleCard = (id: string): string | null => {
   return run.exitCode === 0 ? null : lastLine(run.stderr) || `exit ${run.exitCode}`
 }
 
-// Clicks the posted card's own Reply and reads where focus is in the same task, before any frame runs.
 // The card's Reply button, by the aria-label inbox.tsx gives it.
 export const replyButton = (tag: string): string => `[aria-label="Reply to ${tag}"]`
 
+// Clicks the posted card's own Reply and reads where focus is in the same task, before any frame runs.
 const click = (tag: string) =>
   `(() => { const button = document.querySelector(${JSON.stringify(replyButton(tag))}); if (!button) return "no card"; button.click(); const active = document.activeElement; return active?.id || active?.getAttribute("data-slot") || active?.tagName.toLowerCase() || null })()`
 
