@@ -3,14 +3,10 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } fr
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 
-import {
-  isMainCheckout,
-  prebuildStep,
-  sourcesIn,
-  staleInstall,
-  unbuilt,
-  workspaceImports,
-} from "../../../../../packages/scripts/src/verify/prebuild"
+import * as prebuild from "../../../../../packages/scripts/src/verify/prebuild"
+
+const { isMainCheckout, prebuildStep, sourcesIn, staleInstall, unbuilt, workspaceImports } =
+  prebuild
 
 const ROOT = join(import.meta.dir, "../../../../..")
 
@@ -138,6 +134,46 @@ test("unbuilt names a package whose exports target is missing, and passes one wh
   } finally {
     rmSync(dir, { force: true, recursive: true })
   }
+})
+
+// pr:merge once stopped on "Export named 'dispatcherSeatOf' not found" in a config dist built before a canary merge added it, the file there all along.
+test("unbuilt names a package whose dist lacks a name the sources import, and passes one that exports every name", () => {
+  const dir = mkdtempSync(join(tmpdir(), "prebuild-names-"))
+  try {
+    for (const [name, dist] of [
+      ["stale", "const a = 1\nexport { a }\n"],
+      ["fresh", "const a = 1, b = 2\nexport { a, b }\n"],
+    ]) {
+      const pkg = join(dir, "node_modules/@packages", name)
+      mkdirSync(join(pkg, "dist"), { recursive: true })
+      writeFileSync(
+        join(pkg, "package.json"),
+        JSON.stringify({ exports: { ".": "./dist/index.mjs" }, name: `@packages/${name}` }),
+      )
+      writeFileSync(join(pkg, "dist/index.mjs"), dist)
+    }
+    const names = { "@packages/fresh": ["a", "b"], "@packages/stale": ["a", "b"] }
+    expect(unbuilt(["@packages/stale", "@packages/fresh"], dir, names)).toEqual(["@packages/stale"])
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test("importedNames lists the value names each workspace import takes, by their exported names, with no type-only one", () => {
+  expect(
+    prebuild.importedNames([
+      'import { a, type B, c as d } from "@packages/config/kinds"\nimport type { X } from "@packages/env"\nimport def, { e } from "@packages/db"\nexport { f } from "@packages/config/org"\nimport { g } from "./map"\nexport const y = (q: B, r: X) => [a, d, def, e, g]',
+    ]),
+  ).toEqual({
+    "@packages/config/kinds": ["a", "c"],
+    "@packages/config/org": ["f"],
+    "@packages/db": ["default", "e"],
+  })
+})
+
+// pr-merge reaches @packages/config/kinds only through merge.ts, ops-job and ops-tick, outside its own folder.
+test("prebuild given pr-merge reads every source it reaches through a relative import, outside its own folder too", async () => {
+  expect(workspaceImports(await sourcesIn("pr-merge"))).toContain("@packages/config/kinds")
 })
 
 test("every workspace package verify or pr-merge imports is a dependency of @packages/scripts, so its build covers it", async () => {
