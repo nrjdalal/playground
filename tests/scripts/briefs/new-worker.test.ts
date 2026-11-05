@@ -19,3 +19,13 @@ test("the worker template carries the stop: commit, stop your own slot tasks, go
   expect(line).toContain("on your lead's all-clear, carry on where you stopped")
   expect(line).toContain("the urgent ticket's own session and its checkers keep working")
 })
+
+// a runner's job (a dev server, the live dashboard) stays up through the stop, and only its heavy upkeep waits
+test("the worker template, which runners read too, keeps a runner's job up through the stop", async () => {
+  const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/new-worker.md")).text()
+  const line = text.split("\n").find((l) => l.startsWith("A runner keeps")) ?? ""
+  expect(line).toContain("keeps its long-running job up through an urgent stop")
+  expect(line).toContain(
+    "only its heavy upkeep (an install, a build, a clone) waits for the all-clear",
+  )
+})

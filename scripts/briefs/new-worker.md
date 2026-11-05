@@ -16,3 +16,4 @@ Every git call names its tree, `git -C <your worktree> ...`, so a shell left in 
 Your PR's checkers (its reviewer and tester) are yours to brief, as playbook's SESSIONS.md (Spawn) says: the spawn passes a filled copy of the template (`~/.playground/<name>-reviewer-<pr>.md`), never the bare template. A run your checker has already measured at the same head is not queued again: ask for its result and cite it.
 
 **stop**: an urgent ticket gets the Mac, so on your lead's stop commit your work, stop your own queued and running slot tasks by their own handle (`TaskStop`), and go idle, with no new round, merge or spawn; on your lead's all-clear, carry on where you stopped. Only the urgent ticket's own session and its checkers keep working, the stop naming that session.
+A runner keeps its long-running job up through an urgent stop; only its heavy upkeep (an install, a build, a clone) waits for the all-clear.
