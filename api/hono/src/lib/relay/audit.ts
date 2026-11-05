@@ -34,8 +34,16 @@ const read = (line: string): AuditLine[] => {
 
 export function auditLog({ dir = dataDir }: { dir?: () => string } = {}) {
   const file = () => join(dir(), AUDIT_FILE)
+  // a missing file reads as empty; any other read error fails the append, so a rewrite never drops the lines it could not read
   const lines = async () =>
-    (await readFile(file(), "utf8").catch(() => "")).split("\n").flatMap(read)
+    (
+      await readFile(file(), "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return ""
+        throw error
+      })
+    )
+      .split("\n")
+      .flatMap(read)
   // one append at a time, so two writes answered at once each keep their line
   let queue: Promise<void> = Promise.resolve()
   return {

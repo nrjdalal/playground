@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, statSync } from "node:fs"
+import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -42,6 +42,19 @@ describe("the relayed writes' audit, in the data folder", () => {
       Array.from({ length: AUDIT_KEPT }, (_, i) => line(i + 5)),
     )
     expect(statSync(join(dir, AUDIT_FILE)).mode & 0o777).toBe(0o600)
+  })
+
+  test("a file it cannot read fails the append and keeps its lines, where a missing one reads as empty", async () => {
+    const dir = mkdtempSync(join(scratch, "data-"))
+    const audit = auditLog({ dir: () => dir })
+    await audit.append(line(1))
+    chmodSync(join(dir, AUDIT_FILE), 0o000)
+    try {
+      await expect(audit.append(line(2))).rejects.toThrow()
+    } finally {
+      chmodSync(join(dir, AUDIT_FILE), 0o600)
+    }
+    expect(await audit.recent()).toEqual([line(1)])
   })
 
   test("skips a line that does not read as one", async () => {

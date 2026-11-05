@@ -3,6 +3,7 @@ import { signedBytes } from "@packages/message"
 import { type AuditLog, remoteAudit } from "@/lib/relay/audit"
 import { type KeyStore, type PairedKey, remoteKeys } from "@/lib/relay/key"
 import {
+  cardOf,
   pathOn,
   RELAY_HEADERS,
   RELAY_HEARTBEAT_MS,
@@ -10,7 +11,6 @@ import {
   RELAY_PREFIX,
   RELAY_SILENT_MS,
   relayAllowed,
-  RELAY_ANSWER,
   RELAY_ANSWER_KINDS,
   relayPairSchema,
   RELAY_WRITES,
@@ -119,9 +119,6 @@ export async function requireSignedWrite(
   return { write }
 }
 
-// The one route whose card's kind a relayed write is checked against.
-const ANSWER_ROUTES = [RELAY_ANSWER] as const
-
 // The answer a route gave, as a frame: its status, the headers on RELAY_HEADERS, and its bytes.
 const framed = async (id: string, response: Response): Promise<RelayResponse> => ({
   body: Buffer.from(await response.arrayBuffer()).toString("base64"),
@@ -155,8 +152,8 @@ async function runWrite(
   write: RelayWrite,
   { cookie, dispatch, kindOf }: Pick<AnswerDeps, "cookie" | "dispatch" | "kindOf">,
 ): Promise<RelayResponse> {
-  if (pathOn(ANSWER_ROUTES, write.path)) {
-    const card = write.path.split("?")[0]!.split("/")[4]!
+  const card = cardOf(write.path)
+  if (card !== null) {
     const kind = await (kindOf?.(card) ?? Promise.resolve(null)).catch(() => null)
     if (kind === null || !(RELAY_ANSWER_KINDS as readonly string[]).includes(kind))
       return json(write.id, 403, "FORBIDDEN", "Answer it on the Mac")

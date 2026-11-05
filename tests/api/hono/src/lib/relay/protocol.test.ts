@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  cardOf,
   pathOn,
   RELAY_ANSWER_KINDS,
   RELAY_GETS,
@@ -111,5 +112,25 @@ describe("the Inbox cards a relayed answer may reach", () => {
   test("leave every Approve the Mac carries out itself, a delete and a secret ask on the Mac", () => {
     for (const kind of ["accept", "apps", "delete", "grant", "secret"])
       expect((RELAY_ANSWER_KINDS as readonly string[]).includes(kind)).toBe(false)
+  })
+})
+
+describe("cardOf, the card a relayed answer names", () => {
+  test("reads the id from an answer's path, its query aside", () => {
+    expect(cardOf("/api/v1/inbox/0b9c6f1e-1111-4111-8111-000000000001/answer?x=1")).toBe(
+      "0b9c6f1e-1111-4111-8111-000000000001",
+    )
+  })
+
+  test("names no card for any other write or a path that only looks like an answer", () => {
+    for (const path of [
+      "/api/v1/inbox/abc/schedule",
+      "/api/v1/inbox/dismiss",
+      "/api/v1/messages",
+      "/api/v1/inbox/../answer",
+      "/api/v1/inbox/a%2Fb/answer",
+      "/api/v1/inbox/abc/answer/more",
+    ])
+      expect([path, cardOf(path)]).toEqual([path, null])
   })
 })

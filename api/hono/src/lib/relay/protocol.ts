@@ -45,6 +45,12 @@ export const RELAY_GETS = [
 // An Inbox card's answer, the one write whose card's kind the Mac checks against RELAY_ANSWER_KINDS.
 export const RELAY_ANSWER = "/api/v1/inbox/:id/answer"
 
+const ANSWER_ROUTES = [RELAY_ANSWER]
+
+// Pure: the card id a path on RELAY_ANSWER names, or null for any other path.
+export const cardOf = (path: string): string | null =>
+  pathOn(ANSWER_ROUTES, path) ? (path.split("?")[0]!.split("/")[4] ?? null) : null
+
 // The dashboard's writes the relay carries, A to Z, every one a POST the owner's paired key signs: the composer's send, an Inbox card's answer (its Archive among them), and Later's schedule and Done's dismiss. No first-run, onboarding, delete, secret or settings route, and no route on the never-from-Yard list.
 export const RELAY_WRITES = [
   RELAY_ANSWER,
