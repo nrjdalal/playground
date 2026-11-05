@@ -9,3 +9,12 @@ test("the Ops brief raises the stop and the all-clear from the extension's signa
   expect(line).toContain("raise the stop")
   expect(line).toContain("raise the all-clear")
 })
+
+// for an urgent ticket the owner wants everything else stopped, so the stop gives the ticket's session focus and preempts the runs already in a slot
+test("the Ops brief's stop gives the ticket's session focus, preempts, and ends focus at the all-clear", async () => {
+  const text = await Bun.file(join(import.meta.dir, "../../../scripts/briefs/ops.md")).text()
+  const line = text.split("\n").find((l) => l.startsWith("**stop**:")) ?? ""
+  expect(line).toContain("playground focus on --session")
+  expect(line).toContain("run-slot.sh preempt")
+  expect(line).toContain("playground focus off")
+})
