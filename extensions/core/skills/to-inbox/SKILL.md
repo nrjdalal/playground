@@ -16,6 +16,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 - A `secret` ask carries only its key and sink, which the card words itself: its title takes step 4, then step 8; the value itself is the owner's to type into the card, so it appears nowhere in the item.
 
 A message outside the Inbox, a dispatcher's reply in chat or a Slack or Yard DM, takes steps 2 to 5 and 7, since Choices and Post belong to a card alone; a relay in chat, the dispatcher passing a session's message on to the owner, is one such message, its picture and bullets the session's point in the owner's words.
+In chat, step 2's picture is a fenced block (a work status block, an ASCII flow or a diff), since no-chat-question sends a table, or three or more numbered steps, to one Inbox card instead (`scripts/hooks/README.md`).
 
 Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, you resolve an alert update that has fixed itself, and every other update stays editable until the owner dismisses it, so a card you will replace (a mock's first version) takes `bun run ask edit` before that.
 

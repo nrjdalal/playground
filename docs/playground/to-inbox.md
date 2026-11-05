@@ -11,6 +11,7 @@ The defining constraint is the card itself: it sits in the aside's narrow column
 
 Agent-fired: a session loads it before every `playground ask new` and before it writes to the owner, and the owner can name it too.
 A message outside the Inbox takes the same picture, bullets, plain words, callout and fake-data check, and leaves out the card's choices and its post; a relay in chat, the dispatcher passing a session's message on, is one of them.
+In chat the picture is a fenced block, since a table or a list of three or more numbered steps goes in an Inbox card.
 
 | You are posting                                   | What it leads with                          |
 | ------------------------------------------------- | ------------------------------------------- |
