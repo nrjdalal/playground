@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test"
+import { chmodSync, mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import {
   type Page,
@@ -72,6 +75,9 @@ test("the search reads the factory's PRs updated since a time, and the query pag
   expect(searchOf("acme/factory", "2026-10-31T00:00:00Z")).toBe(
     "repo:acme/factory is:pr updated:>=2026-10-31T00:00:00Z",
   )
+  expect(searchOf("acme/factory", "2026-10-31T00:00:00Z", "2026-10-31T06:00:00Z")).toBe(
+    "repo:acme/factory is:pr updated:2026-10-31T00:00:00Z..2026-10-31T06:00:00Z",
+  )
   for (const field of [
     "after: $after",
     "allCommits",
@@ -84,4 +90,74 @@ test("the search reads the factory's PRs updated since a time, and the query pag
     "totalCount",
   ])
     expect(QUERY).toContain(field)
+  expect(QUERY).toContain("first: 25, after: $after")
 })
+
+const TABLE = join(import.meta.dir, "../../../../../packages/scripts/src/retro/table.ts")
+const answer = (page: Page) => JSON.stringify({ data: { search: { issueCount: 1, ...page } } })
+
+// A fake gh first on PATH: the first page's read and each read after a cursor answer in turn from the folder's numbered files, each an exit code, an answer and a stderr line.
+const fakeGh = async (answers: { code: number; err?: string; out: string }[]) => {
+  const dir = mkdtempSync(join(tmpdir(), "retro-gh-"))
+  for (const [i, a] of answers.entries()) {
+    await Bun.write(join(dir, `${i}.out`), a.out)
+    await Bun.write(join(dir, `${i}.err`), a.err ?? "")
+    await Bun.write(join(dir, `${i}.code`), String(a.code))
+  }
+  const gh = join(dir, "gh")
+  await Bun.write(
+    gh,
+    `#!/bin/bash
+n=$(cat "${dir}/count" 2>/dev/null || echo 0)
+echo $((n + 1)) > "${dir}/count"
+printf '%s' "$*" > "${dir}/args.$n"
+cat "${dir}/$n.out"
+cat "${dir}/$n.err" >&2
+exit "$(cat "${dir}/$n.code")"
+`,
+  )
+  return { dir, gh }
+}
+
+const runTable = async (dir: string) => {
+  chmodSync(join(dir, "gh"), 0o755)
+  const proc = Bun.spawn(["bun", "--no-env-file", TABLE, "--since", "2026-10-31T00:00:00Z"], {
+    env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+    stderr: "pipe",
+    stdout: "pipe",
+  })
+  const [out, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+  return { code, err, out }
+}
+
+test("a page that fails once with a 502 is read again, and its rows print", async () => {
+  const { dir } = await fakeGh([
+    { code: 1, err: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)", out: "" },
+    { code: 0, out: answer({ nodes: [pr()], pageInfo: { endCursor: null, hasNextPage: false } }) },
+  ])
+  const run = await runTable(dir)
+  expect(run.err).toBe("")
+  expect(run.code).toBe(0)
+  expect(run.out).toContain("12\tM\t10:00\t11:30\t90m")
+}, 30_000)
+
+test("a page that fails three times, cut off and then 502s, exits 1 naming its cursor", async () => {
+  const { dir } = await fakeGh([
+    {
+      code: 0,
+      out: answer({ nodes: [pr()], pageInfo: { endCursor: "Y3Vyc29yOjI1", hasNextPage: true } }),
+    },
+    { code: 0, out: '{"data":{"search":{"issueCount":1,"nodes":[{"num' },
+    { code: 1, err: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)", out: "" },
+    { code: 1, err: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)", out: "" },
+  ])
+  const run = await runTable(dir)
+  expect(run.code).toBe(1)
+  expect(run.err).toContain("Y3Vyc29yOjI1")
+  expect(run.err).toContain("3 times")
+  expect(await Bun.file(join(dir, "args.3")).text()).toContain("after=Y3Vyc29yOjI1")
+}, 30_000)
