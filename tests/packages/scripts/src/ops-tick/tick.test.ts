@@ -1577,7 +1577,7 @@ describe("the focus card", () => {
     expect(standing.runs).toEqual([])
     const ended = fake(ops, new Date("2026-10-19T09:00:30.000Z"))
     await beat("focus-card").run(ended.ctx)
-    expect(ended.runs).toEqual([["bun", "run", "--cwd", "/repo", "ask", "new"]])
+    expect(ended.runs).toEqual([["bun", "run", "--silent", "--cwd", "/repo", "ask", "new"]])
     expect(JSON.parse(ended.inputs[0]!)).toMatchObject({
       from: OLD.ops,
       kind: "update",
@@ -1600,7 +1600,7 @@ describe("the focus card", () => {
       }),
     )
     const failing = fake(ops, new Date("2026-10-19T09:01:00.000Z"), {
-      "ask new": { code: 1, out: "ask: refused" },
+      "ask new": { code: 1, err: "ask: refused\n" },
     })
     await expect(beat("focus-card").run(failing.ctx)).rejects.toThrow(
       "bun run ask new: ask: refused",

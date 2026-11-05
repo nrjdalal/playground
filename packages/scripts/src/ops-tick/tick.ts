@@ -159,7 +159,7 @@ const focusCardBeat = async (ctx: Context) => {
       agents?: unknown
     } | null
     const posted = await ctx.run(
-      ["bun", "run", "--cwd", ctx.repo, "ask", "new"],
+      ["bun", "run", "--silent", "--cwd", ctx.repo, "ask", "new"],
       120_000,
       JSON.stringify({ from: managerOf(roster?.agents, "ops"), ...card }),
     )
