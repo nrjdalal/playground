@@ -269,6 +269,7 @@
         "Below the owner rung, a lock.",
         "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
         "Extensions: every extension in the order sessions read them, first wins, each a card with its place, name and repo, its Linked to chips (an org, or everywhere) with a cross on each but the login's and + org, its skills, rules and lists counted and when it last synced, dragged by its handle (or Space and the arrows) into a new order, and a menu: Sync now, Open on GitHub, Why… (which extension a session in a repo of an org takes a skill from, and the copies it hides) and Remove (not on the login's, its folder kept); core last, locked, built into Playground; Add extension (a name, a repo or the login's playground-<name>, and its links), which checks GitHub as you type (repo is private and has skills/ with its count, or the repo will be created, private) and names a repo not on GitHub yet in a confirm before it is made; before the settings are set up, the same Set up settings step as Accounts, and a read that fails says Extensions could not be read; below them, Bundled with Playground: each extension Playground ships under extensions/ (Slack today), off until its switch turns it on, read after your extensions and before core, shown once the settings are set up.",
+        "Privacy: Names you go by (owner.names: your first name and handles, lowercase, separated by commas) and Private archive repository (factory.archiveRepo, as owner/name), each read from its setting into its field, with Save, which writes each field that holds a value and each one you cleared at your login's scope, so it also rebuilds a settings file a guard could not read, and says Privacy saved, or Nothing to save when both stay empty; a value its setting's schema refuses shows under its field; before the settings are set up, the same Set up settings step as Accounts, and a read that fails says Privacy could not be read.",
         "Things to fix: each check first run finds missing on this Mac, or optional with a fix the app runs (portless's Set up the web address or Trust the certificate), read live whatever the done mark says (GET /api/v1/onboard/checks?live=1, the onboard router's, outside the owner rung), with why and the button that fixes it, and Re-check; shown only while it lists one, so a Mac with nothing to fix shows nothing here."
       ],
       "title": "Settings"
@@ -414,7 +415,7 @@
     },
     {
       "route": "GET /api/v1/settings/:key",
-      "use": "One setting's value as it applies, at its narrowest scope, the same value `playground settings get` reads from the folder itself."
+      "use": "One setting's value as it applies, at its narrowest scope, the same value `playground settings get` reads from the folder itself; Settings' Privacy reads its two fields through it."
     },
     {
       "route": "GET /api/v1/settings/:key/why",
@@ -462,7 +463,7 @@
     },
     {
       "route": "PUT /api/v1/settings/:key",
-      "use": "Sets a setting at a scope, with a reason, checked by its key's schema, the same write `playground settings set` makes in the folder itself."
+      "use": "Sets a setting at a scope, with a reason, checked by its key's schema, the same write `playground settings set` makes in the folder itself; Settings' Privacy saves each field it changed through it."
     }
   ]
 }
