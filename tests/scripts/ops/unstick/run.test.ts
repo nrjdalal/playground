@@ -1154,6 +1154,37 @@ describe("ops-unstick's slot alerts", () => {
     expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toHaveLength(1)
   })
 
+  // precommit:light's tree as ps shows it: bun run, the script, then trace-count's test:file, its sandbox and bun test
+  const precommitLight = [
+    "  999451      1 bun run precommit:light /x/msg.txt",
+    "  999452 999451 bun packages/scripts/src/precommit-light.ts /x/msg.txt",
+    "  999453 999452 bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
+    "  999454 999453 bun packages/scripts/src/test-sandbox.ts tests/packages/scripts/src/trace-count/count.test.ts",
+    "  999455 999454 bun test tests/packages/scripts/src/trace-count/count.test.ts",
+  ]
+
+  test("precommit:light's test, which runs outside the slots by rule, is no job and raises no outside-slot", async () => {
+    const jobs = await call(scratch(), "heavy_jobs", precommitLight)
+    expect(jobs).toEqual([])
+    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([])
+  })
+
+  test("a bare bun test with no precommit:light above it and no holder still raises outside-slot", async () => {
+    const jobs = await call(scratch(), "heavy_jobs", [
+      precommitLight.at(-1)!.replace("999454", "     1"),
+    ])
+    expect(jobs).toEqual([{ inside: false, kind: "suite", pid: "999455", where: "?" }])
+    expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([
+      {
+        at,
+        kind: "outside-slot",
+        line: "a suite runs outside the run slots (pid 999455); use run-slot.sh",
+        name: "?",
+        since: at,
+      },
+    ])
+  })
+
   test("the slots read are run-slot.sh's own, each model slot by its name", async () => {
     const script = readFileSync(
       join(import.meta.dir, "../../../../scripts/ops/run-slot.sh"),

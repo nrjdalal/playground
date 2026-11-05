@@ -428,6 +428,8 @@ def stall(live, state):
 # dispatcher, 8 Oct (load 80 on 15 cores, the dashboard 5.7s): at most 2 heavy jobs at once (3 while slot 3 is open). A heavy job is a full suite, a
 # build or type check, or a dev stack other than the live dashboard's. slot_alerts says which of them raise the outside-slot alert.
 HEAVY = re.compile(r"(NODE_ENV=test bun test|(^|/)bun test tests|bun run test(:skills)?\b|turbo run (build|check-types)|api/hono/src/bin/dev\.ts)")
+# precommit:light runs outside the slots by rule (scripts/ops/README.md), its trace-count test a few seconds long, so nothing under it is a job
+PRECOMMIT_LIGHT = re.compile(r"^(\S*/)?bun\s+(\S*/)?packages/scripts/src/precommit-light\.ts(\s|$)")
 
 
 ORGS = None
@@ -484,6 +486,8 @@ def heavy_jobs(rows=None):
             p = parent.get(p)
         # one job per tree: skip a heavy process whose ancestor is itself a heavy process already counted
         if any(a in cmds and HEAVY.search(cmds[a]) for a in chain):
+            continue
+        if any(PRECOMMIT_LIGHT.match(cmds.get(a, "")) for a in chain):
             continue
         cwd = subprocess.run(["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"], capture_output=True, text=True, timeout=10).stdout
         # a self-hosted runner's CI job runs the workflow's own steps, so it takes no run slot; it still counts toward the cap
