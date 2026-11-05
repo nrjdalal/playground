@@ -1,5 +1,11 @@
 import type { InboxAction, InboxAnswer, InboxItem } from "@api/hono"
-import { type ChoiceRow, type Choices, choicesOf, CLOCKS_STOPPED_AT } from "@packages/config/inbox"
+import {
+  type ChoiceRow,
+  type Choices,
+  choicesOf,
+  CLOCKS_STOPPED_AT,
+  rowOfAnswer,
+} from "@packages/config/inbox"
 import { useQuery } from "@tanstack/react-query"
 
 import { agentLabel } from "@/lib/agent-label"
@@ -819,11 +825,9 @@ export const decisionChoices = (item: InboxItem): Choices | null =>
 // Pure: the row an approved or denied decision's answer picked: the go row its option names, the first when it names none, or the no-go row; null for any other answer.
 export function pickedRow(item: InboxItem): ChoiceRow | null {
   if (item.kind !== "decision" || !item.answer || !("choice" in item.answer)) return null
-  const rows = decisionChoices(item)?.rows ?? []
-  if (item.answer.choice === "deny") return rows.find((row) => !row.go) ?? null
-  if (item.answer.choice !== "approve") return null
-  const option = "option" in item.answer ? item.answer.option : undefined
-  return rows.filter((row) => row.go)[option ?? 0] ?? null
+  const { choice } = item.answer
+  if (choice !== "approve" && choice !== "deny") return null
+  return rowOfAnswer(item.preview, item.answer)
 }
 
 // Pure: the result line's lead for a decision's pick, naming the option as the card showed it: a lettered row by its letter and label, a yes or no by its side and its own label, and an unlabelled Approve or Deny by its side alone.

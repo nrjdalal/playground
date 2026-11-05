@@ -8,6 +8,7 @@ import {
   choicesOf,
   CLOCKS_STOPPED_AT,
   MAX_OPTIONS,
+  rowOfAnswer,
 } from "@packages/config/inbox"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
@@ -775,13 +776,9 @@ function answerOf(
   return { message: "A draft is sent, saved as a draft, discarded or cleared" }
 }
 
-// The option the owner picked, as the card lettered and labelled it (choicesOf): a go row by the answer's option, the first when it names none, or the no-go row.
+// The option the owner picked, as the card lettered and labelled it (rowOfAnswer, which the result line reads too).
 function optionOf(item: InboxItem, answer: { choice: string; option?: number }) {
-  const rows = item.kind === "decision" ? (choicesOf(item.preview)?.rows ?? []) : []
-  const row =
-    answer.choice === "deny"
-      ? rows.find((r) => !r.go)
-      : rows.filter((r) => r.go)[answer.option ?? 0]
+  const row = item.kind === "decision" ? rowOfAnswer(item.preview, answer) : null
   return row ? { index: row.index, label: row.label, letter: row.letter } : undefined
 }
 

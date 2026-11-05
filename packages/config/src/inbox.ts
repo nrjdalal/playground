@@ -164,5 +164,18 @@ export function choicesOf(preview: ChoicePreview): Choices | null {
 const lettered = (rows: Omit<ChoiceRow, "index" | "letter">[]): ChoiceRow[] =>
   rows.map((row, index) => ({ ...row, index, letter: optionLetter(index) }))
 
+// Pure: the row an answer picked, for the poster's payload and the owner's result line alike: a deny's no-go row, else the go row its option names, the first when it names none; null for a secret or an option past the rows.
+export function rowOfAnswer(
+  preview: ChoicePreview,
+  answer: { choice: string; option?: number },
+): ChoiceRow | null {
+  const rows = choicesOf(preview)?.rows ?? []
+  const row =
+    answer.choice === "deny"
+      ? rows.find((r) => !r.go)
+      : rows.filter((r) => r.go)[answer.option ?? 0]
+  return row ?? null
+}
+
 // When the Inbox stopped moving cards by the clock, set at this change's last code commit before the live dashboard took it: the old clock had already moved every card answered or read before then to Done, so those keep the list's week, while each one since stays in the Inbox until a verb moves it (inboxView in the web, listItems in the API).
 export const CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z"
