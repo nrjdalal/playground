@@ -3080,11 +3080,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { text: "Name the folders" },
         { actor, deliver: reached },
       )
-      const edited = await store.editItem(db, posted.id, {
-        ...decision(PREVIEWS.delete),
-        from: "ops",
-        title: "Delete these 47 worktrees?",
-      })
+      // a second after the post's stamp: Postgres stamps the post and this process the edit, and both read to the millisecond can tie (#1028)
+      const later = new Date(Date.parse(posted.updatedAt) + 1000)
+      const edited = await store.editItem(
+        db,
+        posted.id,
+        { ...decision(PREVIEWS.delete), from: "ops", title: "Delete these 47 worktrees?" },
+        later,
+      )
       if (!edited.ok) throw new Error(edited.message)
       expect(edited.item).toMatchObject({ answer: null, status: "open" })
       expect(Date.parse(edited.item.updatedAt)).toBeGreaterThan(Date.parse(posted.updatedAt))
