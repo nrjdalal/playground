@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, statSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -129,6 +129,15 @@ describe("the paired key, on this Mac", () => {
       await keys.paired(),
       keys.pending(),
     ]).toEqual([false, null, null])
+  })
+
+  test("an Approve whose write fails leaves no half-written key file behind", async () => {
+    const { dir, keys } = store()
+    mkdirSync(join(dir, KEY_FILE, "in-the-way"), { recursive: true })
+    const browser = await browserKey()
+    await keys.offer(browser.frame)
+    await expect(keys.approve(browser.frame.id)).rejects.toThrow()
+    expect(readdirSync(dir)).toEqual([KEY_FILE])
   })
 
   test("a Revoke pressed while an Approve is still writing the key wins, so no key is left paired", async () => {

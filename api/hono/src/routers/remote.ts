@@ -22,7 +22,7 @@ const pendingSchema = z.object({
   login: z.string(),
 })
 
-const doc = (description: string, data: z.ZodType) =>
+const doc = (description: string, data: z.ZodType, errors = {}) =>
   describeRoute({
     tags: ["Dashboard"],
     description,
@@ -33,8 +33,7 @@ const doc = (description: string, data: z.ZodType) =>
       },
       ...authErrorResponses,
       ...forbiddenErrorResponses,
-      ...notFoundErrorResponses,
-      ...validationErrorResponses,
+      ...errors,
     },
   })
 
@@ -71,6 +70,7 @@ export const remoteRouter = new Hono<{ Variables: Session }>()
     doc(
       "Pairs the waiting request's key with this Mac, which revokes the key paired before it",
       pairedSchema,
+      { ...notFoundErrorResponses, ...validationErrorResponses },
     ),
     sValidator("json", z.strictObject({ id: z.uuid() }), (result) => {
       if (!result.success)

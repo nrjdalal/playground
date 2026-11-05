@@ -1,6 +1,6 @@
 # A write from Yard counts only when the paired key signs it
 
-The Yard relay carries the owner's reads alone, so sending from Yard needs a way for this Mac to tell the owner's own click from anything else the hosted side could send. The owner chose a paired key in Inbox #i353 ("Build sending from Yard"): the owner's browser makes an ECDSA P-256 key with WebCrypto, non-extractable and kept in IndexedDB, and the Mac takes a write only when that key signed it. The hosted server forwards each write and holds no key, so trusting the Mac's writes never means trusting the hosted deploy.
+The Yard relay carries the owner's reads alone, so sending from Yard needs a way for this Mac to tell the owner's own click from anything else the hosted side could send. The owner chose a paired key in Inbox #i353: the owner's browser makes an ECDSA P-256 key with WebCrypto, non-extractable and kept in IndexedDB, and the Mac takes a write only when that key signed it. The hosted server forwards each write and holds no key, so trusting the Mac's writes never means trusting the hosted deploy.
 
 ## Decision
 
@@ -20,7 +20,7 @@ The Yard relay carries the owner's reads alone, so sending from Yard needs a way
 | A stolen or lost device | Revoke on the Mac refuses its next frame; the key is non-extractable, so a copied browser profile carries no usable key. |
 | A different GitHub login signs in on Yard | The frame's login must match both the Mac's token's login and the paired key's login. |
 | A write aims at a route outside the list | The write list is checked before any route runs, and the route's own rung and limits run after. |
-| **Residual: the hosted web's script is compromised** | The script that holds the key is served by the hosted deploy, so a compromised deploy can ask the key to sign writes on the list while the owner's tab is open, which means messages to sessions in the owner's voice. The short list, the rate limits, the Mac's audit list and Revoke bound it, and nothing here prevents it. The owner accepted this risk in Inbox #i354 ("Go on with part 2 as planned"). |
+| **Residual: the hosted web's script is compromised** | The script that holds the key is served by the hosted deploy, so a compromised deploy can ask the key to sign writes on the list while the owner's tab is open, which means messages to sessions in the owner's voice. The short list, the rate limits, the Mac's audit list and Revoke bound it, and nothing here prevents it. The owner accepted this risk in Inbox #i354. |
 
 ## Considered options
 

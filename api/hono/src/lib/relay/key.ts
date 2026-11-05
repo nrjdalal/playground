@@ -82,8 +82,13 @@ export function keyStore({
         }
         await mkdir(dir(), { mode: 0o700, recursive: true })
         const next = `${file()}.${crypto.randomUUID()}`
-        await writeFile(next, JSON.stringify(paired), { flag: "wx", mode: 0o600 })
-        await rename(next, file())
+        try {
+          await writeFile(next, JSON.stringify(paired), { flag: "wx", mode: 0o600 })
+          await rename(next, file())
+        } catch (error) {
+          await rm(next, { force: true })
+          throw error
+        }
         if (waiting === request) waiting = null
         return paired
       }),
