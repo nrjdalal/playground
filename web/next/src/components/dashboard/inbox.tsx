@@ -1184,7 +1184,7 @@ export function InboxCard({
       <Hint
         content={
           held ??
-          (secretAsk
+          (secretAsk || !chat
             ? "Reply: your comment alone, to its poster"
             : "Reply: your comment alone, to its poster, or with the box empty, in your chat")
         }
