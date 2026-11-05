@@ -40,7 +40,7 @@ export async function uploadSpec(
   return { ...shared.place, files }
 }
 
-// A Slack send's files, shared by `playground dm upload <item id>` from the API's own checkout, which reads the place and the files from the item itself, so the Slack token stays in that run's process (vault) and never passes through a session or an argv. A stack that does not read this machine (a fixture's, a test's) shares nothing and counts none, since its items are made up.
+// A Slack send's files, shared by `playground dm upload <item id>` from the API's own checkout, which reads the place and the files from the item itself, so the Slack token stays in that run's process (the slack skill's upload.ts reads it from the Keychain) and never passes through a session or an argv. A stack that does not read this machine (a fixture's, a test's) shares nothing and counts none, since its items are made up.
 export const slackUpload =
   ({ live = readsLive(), root = checkoutRoot() } = {}): Upload =>
   async (item) => {

@@ -7,9 +7,9 @@ import {
   share,
   type Spec,
   upload,
-} from "../../../../../packages/scripts/src/dm/upload"
+} from "../../../../../../extensions/slack/skills/slack/scripts/upload"
 
-const REPO = join(import.meta.dir, "..", "..", "..", "..", "..")
+const REPO = join(import.meta.dir, "..", "..", "..", "..", "..", "..")
 
 type Step = { at: string; params?: Record<string, string>; size?: number }
 
@@ -175,7 +175,7 @@ describe("dm upload (PG-649)", () => {
     })
   })
 
-  // dm upload takes one item id: a channel, a thread or a path a caller adds is refused before the vault runs
+  // dm upload takes one item id: a channel, a thread or a path a caller adds is refused before the slack extension's script runs
   test("playground dm upload refuses anything but one item id", () => {
     for (const args of [
       [],
