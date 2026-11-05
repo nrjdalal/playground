@@ -44,14 +44,14 @@ export const loginOf = (
 // Where an item lives in its scope's folder, without its extension.
 export const itemPath = (kind: string, key: string): string => `${kind}s/${key}`
 
-// How to write a root file that is missing: a guard list core ships from the checkout's list files, one it does not from a scope's own list, any other file from the settings that derive it, which need the login ext init writes; the owner types each in the dispatcher's terminal window, since no-extensions-write refuses a factory session's own run.
+// How to write a root file that is missing: a guard list core ships from the checkout's list files, one it does not from a scope's own list, any other file from the settings that derive it, which Settings' Set up settings and a Privacy save write; the owner types each list command in the dispatcher's terminal window, since no-extensions-write refuses a factory session's own run.
 export const fixFor = (file: string): string => {
   const list = /^hooks\/(.+)\.json$/.exec(file)?.[1]
   if (list && !existsSync(join(coreDir(), "lists", `${list}.json`)))
     return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`
   return file.startsWith("hooks/")
     ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists"
-    : "tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it"
+    : "tell your lead, and the dispatcher asks the owner to set up settings, then fill in and save Privacy on the Dashboard's Settings page, which writes it"
 }
 
 export type Read =

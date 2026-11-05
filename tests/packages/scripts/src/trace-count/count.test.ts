@@ -339,7 +339,7 @@ describe("no-public-leak's list", () => {
     expect(none.stdout.toString()).toBe("")
     expect(none.stderr.toString()).toContain("factory.archiveRepo and owner.names are unset")
     expect(none.stderr.toString()).toContain(
-      "tell your lead, and the dispatcher hands the owner ! playground settings set to type in the dispatcher's terminal window, which sets them",
+      "tell your lead, and the dispatcher asks the owner to fill in Privacy on the Dashboard's Settings page, which sets them",
     )
     expect(none.stderr.toString()).toContain("nothing was counted")
     expect(none.stderr.toString()).toContain(
@@ -348,6 +348,10 @@ describe("no-public-leak's list", () => {
     const named = run({ "factory.archiveRepo": "qmarsh/vault" })
     expect(named.exitCode).toBe(2)
     expect(named.stderr.toString()).toContain("owner.names is unset")
+    expect(named.stderr.toString()).toContain(
+      "Privacy on the Dashboard's Settings page, which sets it",
+    )
+    expect(none.stderr.toString() + named.stderr.toString()).not.toContain("terminal")
     expect(named.stderr.toString()).toContain("nothing was counted")
     expect(named.stderr.toString()).toContain(
       "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",

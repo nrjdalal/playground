@@ -1,5 +1,11 @@
 import type { InboxAction, InboxAnswer, InboxItem } from "@api/hono"
-import { CLOCKS_STOPPED_AT } from "@packages/config/inbox"
+import {
+  type ChoiceRow,
+  type Choices,
+  choicesOf,
+  CLOCKS_STOPPED_AT,
+  rowOfAnswer,
+} from "@packages/config/inbox"
 import { useQuery } from "@tanstack/react-query"
 
 import { agentLabel } from "@/lib/agent-label"
@@ -26,16 +32,32 @@ export async function answerItem(
   action: InboxAction,
   text?: string,
   note?: string,
+  option?: number,
 ) {
   const { data, error } = await unwrap(
     apiClient.v1.inbox[":id"].answer.$post({
-      json: { action, note, seen: updatedAt, text },
+      json: { action, note, option, seen: updatedAt, text },
       param: { id },
     }),
   )
   if (error) throw new Error(error.message)
   return data
 }
+
+// A card's Reply: his comment alone, typed into its poster as re #iN.
+export async function replyItem(id: string, text: string) {
+  const { data, error } = await unwrap(
+    apiClient.v1.inbox[":id"].reply.$post({ json: { text }, param: { id } }),
+  )
+  if (error) throw new Error(error.message)
+  return data
+}
+
+// Pure: why Reply holds a comment back: a secret ask's value typed as the comment, which would reach a transcript; null for any other.
+export const commentRefused = (comment: string, value: string): string | null =>
+  value.trim() !== "" && comment.trim() === value.trim()
+    ? "That is the value: it goes in its field and Submit, never in a comment"
+    : null
 
 // The Archive shelf's Dismiss all: each card's own Dismiss in turn, so one that still waits is set aside and anything else marked dismissed, each poster told as that card's own click tells it.
 export async function dismissEach(items: Pick<InboxItem, "id" | "updatedAt">[]) {
@@ -191,17 +213,17 @@ const chosen = (item: InboxItem) =>
 type Steps = Pick<InboxAnswer, "accepted" | "listed" | "opened">
 const stepsOf = (answer: object | null): Steps => (answer ?? {}) as Steps
 
-// Pure: whether a card a chat reply collapsed opens again to its full self, its answers and Schedule back: an open decision or draft whose answer is that reply, its poster not done with it, which an answer or a Schedule from the card replaces.
+// Pure: whether a card a reply collapsed opens again to its full self, its answers and Schedule back: an open decision or draft whose answer is that reply, its poster not done with it, which an answer or a Schedule from the card replaces.
 export const reopenable = (item: InboxItem): boolean => {
   const answer = chosen(item)
   return item.status === "open" && answer?.choice === "replied" && !answer.ackedAt
 }
 
-// Pure: whether Schedule is offered, the API's scheduleItem rule restated: an open decision or draft whose answer holds no choice yet, one still sleeping included, which Schedule puts away again, or a chat reply its poster is not done with.
+// Pure: whether Schedule is offered, the API's scheduleItem rule restated: an open decision or draft whose answer holds no choice yet, one still sleeping included, which Schedule puts away again, or a reply its poster is not done with.
 export const schedulable = (item: InboxItem): boolean =>
   item.kind !== "update" && item.status === "open" && (!chosen(item) || reopenable(item))
 
-// Pure: whether a key opens or folds a card a chat reply collapsed: E alone, Caps Lock's too, never typed in the card's box, held down or composing text.
+// Pure: whether a key opens or folds a card a reply collapsed: E alone, Caps Lock's too, never typed in the card's box, held down or composing text.
 export const reopenKey = (key: Omit<CardKey, "keyCode">): boolean =>
   key.key.toLowerCase() === "e" &&
   !(key.altKey || key.ctrlKey || key.metaKey || key.shiftKey || key.repeat || key.isComposing) &&
@@ -317,7 +339,7 @@ export function pickedAt(day: Date | undefined, time: string, now: Date): Date |
 const isArchived = (item: InboxItem): boolean =>
   item.answer !== null && "archivedAt" in item.answer && !("dismissedAt" in item.answer)
 
-// Pure: whether an item asks something of the owner now: an open decision or draft, an answer that failed to send, or an update not read yet. A chat reply took an item off his hands, so it waits on its poster alone, and one he archived waits on him moving it back.
+// Pure: whether an item asks something of the owner now: an open decision or draft, an answer that failed to send, or an update not read yet. A reply took an item off his hands, so it waits on its poster alone, and one he archived waits on him moving it back.
 export const needsYou = (item: InboxItem): boolean =>
   isArchived(item)
     ? false
@@ -339,7 +361,7 @@ export type Shelf = "archived" | "done" | "inbox" | "progress" | "snoozed"
 // A card's verbs, beside its own answers and Reply: Seen marks it read, Done sends it to Done, Later puts it off until a time, Archive takes it off his list unanswered and Move back returns it, and Dismiss sends it to Done marked dismissed.
 export type Verb = "archive" | "dismiss" | "done" | "later" | "moveBack" | "seen"
 
-// Pure: whether an item still waits on his answer: an open decision, draft or secret ask he has not replied to in chat.
+// Pure: whether an item still waits on his answer: an open decision, draft or secret ask he has not replied to.
 export const waiting = (item: InboxItem): boolean =>
   item.kind !== "update" && item.status === "open" && chosen(item)?.choice !== "replied"
 
@@ -450,7 +472,7 @@ export const movedStep = (
 ): { before: string[] | null; moved: string[] } =>
   ids === null ? { before, moved: [] } : { before: ids, moved: movedRows(before, ids) }
 
-// A key pressed on a card, as cardKey and reopenKey read it: where it was pressed, its box, a labelled ask's choice or elsewhere.
+// A key pressed on a card, as cardKey and reopenKey read it: where it was pressed, its box, a decision's choice or elsewhere.
 export type CardKey = {
   altKey: boolean
   ctrlKey: boolean
@@ -463,7 +485,7 @@ export type CardKey = {
   target: "box" | "choice" | "elsewhere"
 }
 
-// Pure: what a card does with Cmd/Ctrl+Enter, the Questionnaire's submit key, by where it was pressed: null leaves the key alone (a labelled ask's picked side goes through the Questionnaire's submit, and Shift, Alt or a key that composes text is not the shortcut); "leave" keeps a key pressed on a link or a button from the Questionnaire, so the browser does what it does there (Cmd+Enter on Open thread opens it in a tab); in the card's box, "send" presses the draft's Send, and "hold" takes the key with nothing to send, a repeat or a labelled ask with no side picked included, so the item is never checked and marked invalid.
+// Pure: what a card does with Cmd/Ctrl+Enter, the Questionnaire's submit key, by where it was pressed: null leaves the key alone (a decision's picked option goes through the Questionnaire's submit, and Shift, Alt or a key that composes text is not the shortcut); "leave" keeps a key pressed on a link or a button from the Questionnaire, so the browser does what it does there (Cmd+Enter on Open thread opens it in a tab); in the card's box, "send" presses the draft's Send, and "hold" takes the key with nothing to send, a repeat or a decision with no option picked included, so the item is never checked and marked invalid.
 export function cardKey(
   key: CardKey,
   card: {
@@ -481,16 +503,16 @@ export function cardKey(
   return card.draftReady ? "send" : "hold"
 }
 
-// Pure: why a labelled ask's Send is off, its hover and screen-reader words, until a side is picked.
-export const sendWhy = (pick: "approve" | "deny" | null): string | null =>
-  pick === null ? "Pick Approve or Deny first" : null
+// Pure: why a decision's Send is off, its hover and screen-reader words, until a row is picked.
+export const sendWhy = (pick: ChoiceRow | null): string | null =>
+  pick === null ? "Pick an option first" : null
 
-// Pure: whether Dismiss is offered: an answered decision or draft, one that failed to send included, one he replied to in chat, which stays open, or any update, read or not, still in the list; dismissing an update marks it read.
+// Pure: whether Dismiss is offered: an answered decision or draft, one that failed to send included, one he replied to, which stays open, or any update, read or not, still in the list; dismissing an update marks it read.
 export const dismissable = (item: InboxItem): boolean =>
   (item.kind === "update" || item.status !== "open" || chosen(item)?.choice === "replied") &&
   !answeredDismissedAt(item)
 
-// Pure: the line over the list: what needs him, the drafts, the answers that failed to send and the unread updates, each left out at none. A chat reply took an item off his hands, so it reads here no more.
+// Pure: the line over the list: what needs him, the drafts, the answers that failed to send and the unread updates, each left out at none. A reply took an item off his hands, so it reads here no more.
 export function inboxSummary(items: InboxItem[]): string | null {
   const open = items.filter(
     (item) =>
@@ -552,7 +574,7 @@ const carriedOut = (item: InboxItem): boolean => {
   )
 }
 
-// Where an item stands, which its card's colour says: open while it needs him, sending while a go or a chat reply is being carried out, done once its poster closed it or every environment took a secret, failed when the answer did not reach its poster or a secret's sink refused it, closed once denied, discarded, settled, read, a Draft Slack refused, or a failure he dismissed.
+// Where an item stands, which its card's colour says: open while it needs him, sending while a go or a reply is being carried out, done once its poster closed it or every environment took a secret, failed when the answer did not reach its poster or a secret's sink refused it, closed once denied, discarded, settled, read, a Draft Slack refused, or a failure he dismissed.
 export type ItemState = "closed" | "done" | "failed" | "open" | "sending"
 
 // Pure: a Draft its poster closed with no link, which only Slack refusing it leaves (draft_already_exists), so nothing was saved.
@@ -579,7 +601,7 @@ export function itemState(item: InboxItem): ItemState {
   const ran = accepted ?? listed
   if (ran) return ran.exitCode === 0 ? "done" : "failed"
   if (opened && opened.exitCode !== 0) return "failed"
-  // a chat reply is being carried out by its poster until it is closed, then done
+  // a reply is being carried out by its poster until it is closed, then done
   if (item.kind !== "update" && chosen(item)?.choice === "replied")
     return carriedOut(item) ? "done" : "sending"
   const answer = chosen(item)
@@ -664,9 +686,9 @@ export function outcomeLine(item: InboxItem): string | null {
     return carriedOut(item) ? said : `${said} · ${who} is on it…`
   }
   let done = {
-    approve: "You approved it",
+    approve: pickedLine(item, "You approved"),
     clear: `Archived ${fullTime(item.answer.at)}`,
-    deny: "You denied it",
+    deny: pickedLine(item, "You denied"),
     discard: "You discarded it",
     draft: item.answer.editedText
       ? "You saved it as a draft with changes"
@@ -791,7 +813,7 @@ export function inboxWaitOf(
   return open ? { id: open.id, ref: open.ref } : null
 }
 
-// Pure: the sessions waiting on an open decision or draft they posted, probes left out; a chat reply took the item off the owner's hands, so its poster reads there no more.
+// Pure: the sessions waiting on an open decision or draft they posted, probes left out; a reply took the item off the owner's hands, so its poster reads there no more.
 export const inboxPosters = (items: readonly InboxItem[]): Set<string> =>
   new Set(
     items
@@ -809,4 +831,27 @@ export const inboxPosters = (items: readonly InboxItem[]): Set<string> =>
 export const inboxTarget = (anchor: string, items: readonly InboxItem[]): boolean => {
   const prefix = needsYouAnchor("")
   return anchor.startsWith(prefix) && items.some((item) => item.id === anchor.slice(prefix.length))
+}
+
+// Pure: a decision's rows as its card shows them (choicesOf), or null for a secret and any other item.
+export const decisionChoices = (item: InboxItem): Choices | null =>
+  item.kind === "decision" ? choicesOf(item.preview) : null
+
+// Pure: the row an approved or denied decision's answer picked: the go row its option names, the first when it names none, or the no-go row; null for any other answer.
+export function pickedRow(item: InboxItem): ChoiceRow | null {
+  if (item.kind !== "decision" || !item.answer || !("choice" in item.answer)) return null
+  const { choice } = item.answer
+  if (choice !== "approve" && choice !== "deny") return null
+  return rowOfAnswer(item.preview, item.answer)
+}
+
+// Pure: the result line's lead for a decision's pick, naming the option as the card showed it: a lettered row by its letter and label, a yes or no by its side and its own label, and an unlabelled Approve or Deny by its side alone.
+function pickedLine(item: InboxItem, side: "You approved" | "You denied"): string {
+  const picked = pickedRow(item)
+  if (!picked) return `${side} it`
+  if (decisionChoices(item)?.shape === "letters")
+    return `You picked ${picked.letter}: ${picked.label}`
+  return picked.label === "Approve" || picked.label === "Deny"
+    ? `${side} it`
+    : `${side}: ${picked.label}`
 }

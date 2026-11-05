@@ -104,7 +104,7 @@ const RETRY_MAX_MS = 60_000
 export type RelaySocket = {
   addEventListener: (
     type: "close" | "message" | "open",
-    listener: (event: { data?: unknown }) => void,
+    listener: (event: { code?: number; data?: unknown; reason?: string }) => void,
   ) => void
   close: () => void
   readyState: number
@@ -243,7 +243,14 @@ export function startRelay(deps: RelayDeps): () => void {
           if (--answering === 0 && retiring.has(opened)) opened.close()
         })
       })
-      opened.addEventListener("close", () => end("the socket closed"))
+      // the hub closes a socket it refuses with 4000 + the status and its reason (refusedUpgradeCloses in lib/server.ts)
+      opened.addEventListener("close", ({ code, reason }) =>
+        end(
+          code
+            ? `the socket closed (${[code, reason].filter(Boolean).join(" ")})`
+            : "the socket closed",
+        ),
+      )
     } catch (error) {
       console.error("[relay] could not open", error)
       if (socket === previous) retry()

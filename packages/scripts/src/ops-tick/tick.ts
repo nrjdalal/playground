@@ -19,6 +19,7 @@ import {
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { pending } from "../ops-outbox/drain"
+import { focusCard } from "../playground/focus"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
 import { guardProbe } from "./guard-probe"
@@ -145,6 +146,21 @@ const postAlert = async (ctx: Context, title: string): Promise<{ by: string; id:
     .find((l) => /^[0-9a-f-]{36}$/.test(l))
   if (posted.code !== 0 || !id) throw new Error(`bun run ask new: ${lines(posted.out).at(-1)}`)
   return { by, id }
+}
+
+// Once focus has ended, by off or at its end, one Inbox update under the ops manager's name names what queued while it stood (focusCard)
+const focusCardBeat = async (ctx: Context) => {
+  await focusCard(join(ctx.ops, ".."), ctx.now, async (card) => {
+    const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+      agents?: unknown
+    } | null
+    const posted = await ctx.run(
+      ["bun", "run", "--cwd", ctx.repo, "ask", "new"],
+      120_000,
+      JSON.stringify({ from: managerOf(roster?.agents, "ops"), ...card }),
+    )
+    if (posted.code !== 0) throw new Error(`bun run ask new: ${lines(posted.out).at(-1)}`)
+  })
 }
 
 // The usage marks, the login flip, the load, the train's slot wait and the near-limit marks, each routed as the old tick routed it.
@@ -675,6 +691,7 @@ export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
   { cron: "*/5 * * * *", name: "relay-watch", run: relayWatch, to: "the Inbox, by bun run ask" },
   { cron: "*/10 * * * *", name: "guard-probe", run: guardProbe, to: "dispatcher" },
+  { cron: "* * * * *", name: "focus-card", run: focusCardBeat, to: "the Inbox, by bun run ask" },
   {
     cron: "* * * * *",
     name: "dashboard-watch",
