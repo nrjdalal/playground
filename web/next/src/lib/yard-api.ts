@@ -101,8 +101,9 @@ export const channelsEvery = (hosted: boolean, error: unknown): number | false =
   hosted || (error as { code?: string } | null)?.code === "NOT_FOUND" ? false : 30_000
 
 // The sidebar's channels and DMs; a stack with no Yard (the local routes absent) reads an error, and the groups stay away.
-export const useYardChannels = () =>
+export const useYardChannels = (enabled = true) =>
   useQuery({
+    enabled,
     queryFn: async () => (await yardApi.channels()).channels ?? [],
     queryKey: CHANNELS_KEY,
     refetchInterval: (query) => channelsEvery(config.hosted, query.state.error),

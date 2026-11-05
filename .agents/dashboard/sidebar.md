@@ -211,7 +211,7 @@
   or as idle when an interrupt followed the answer (Esc on a picker runs no Stop hook); a permission or a plan stays, since it may be a subagent's. The hub re-reads the board the moment a session waiting on them writes a line.
   AI Runners holds the runner sessions alone.
   Scripts, after it, lists the ops jobs Ops runs as scripts with no Claude session, A to Z, collapsed until its label is clicked, so the jobs never read as a crowd of runners, a Failing or Down script still showing, in red,
-  under the collapsed label (`scriptsShown` in `web/next/src/lib/ops.ts`; its open state lives in `DashboardProvider`, as Other's does).
+  under the collapsed label (`scriptsShown` in `web/next/src/lib/ops.ts`; its open state lives in `DashboardProvider`, as Other's does, kept across reloads as every group's is).
   On the collapsed rail the group is one icon (`scriptsRail`), red while any script it lists is failing or down, its tooltip the label's count and how many are failing or down; a click opens the sidebar on the scripts.
   They are read by `GET /api/v1/ops` from the heartbeat each writes to `~/.playground/ops/<job>.json` (`api/hono/src/lib/dashboard/ops.ts`, zod-checked, read-only): every `ops-*.json` there is a job, so a new one (ops-report, ops-sweep) shows with no code change,
   while `report.json` and `alerts.log` beside them are not jobs, which is why they show in no runner row.
@@ -225,14 +225,19 @@
   A script row opens nothing.
   Every group label ends with one number at its right, ZeroSDK's `countCell`, muted with tabular digits (`GroupCount`):
   Orchestrators and Subagents count the sessions their rows hold, each nested reviewer and tester included, so a checker under a gone worker's muted roster row counts once (`heldCount` in `web/next/src/lib/dashboard.ts`); AI Runners and Other count their sessions, Scripts the jobs it lists, the paused ones it hides left out (`scriptCount`), and Yard's two groups their rows.
-  On Scripts and Other the chevron follows the label's word, so every count keeps the right-hand column.
+  On every group the chevron follows the label's word, so every count keeps the right-hand column.
   A manager's row reads its role word alone (`Ops`, in place of 22 Oct's names), its raw name, model and state in its tooltip, and a dispatcher's state keeps its label (`Alpha · Waiting on you`).
   An AI runner's tooltip adds when it runs, from the roster's `schedule` (`always` or a 5-field cron; `Opus 5.5 high · Working · every day at 5:00 AM`).
   See the glossary's Dispatcher, Manager, Worker and Runner.
-- Yard's two groups, **Channels** then **Direct messages** (`YardGroups` in `web/next/src/components/yard/yard-groups.tsx`), close the nav, after Other, so their arrival moves no row above them; the hosted build's sidebar holds them alone.
+- Every group's label opens and closes it, the label one button with its chevron after its word (`labelToggle` and `LabelChevron` in `app-sidebar.tsx`; Threads' word and chevron alone, beside its pager), and this browser keeps each group's state across reloads in localStorage's `dashboard.sidebar.groups.v1` (`useGroupOpen` in `web/next/src/lib/sidebar-groups.ts`).
+  Scripts and Other start closed and every other group open.
+  A closed group still shows a session waiting on you or open in the view (`keepsOther`, as Other keeps its rows; a Subagents row while its lead or a checker under it does), so closing a group hides nothing that waits on you.
+  A closed Orchestrators shows those rows unsorted, so no drag reorders part of the list; a closed Threads hides its pager with its rows, and a closed Yard group shows no row.
+  On the collapsed rail, where no label shows, a closed group shows those kept rows alone, as Other does there.
+- Yard's two groups, **Channels** then **Direct messages** (`YardGroups` in `web/next/src/components/yard/yard-groups.tsx`), follow Threads, above Orchestrators (`navGroups`' `Yard` slot), and the nav waits for Yard's first try as it does for the threads' (`holdsForThreads`), so their arrival moves no row below them; the hosted build's sidebar holds them alone.
   They read `GET /api/v1/yard/channels` (`useYardChannels` in `web/next/src/lib/yard-api.ts`), on the hosted API or locally through the Yard routes that hold the Mac's token, and each is absent with no rows, both on a stack with no Yard (the read's 404).
-  Each collapses as Scripts does, its label the toggle with the chevron after its word, open to start, and its `GroupCount` counts its rows.
-  Each row is a Threads row's shape: the stock 32px row, a `#` icon or a person's, `#name` or the other member's login cut at its end, its full title as its tooltip (with its unread count while it has one, and "mentions you" while one does),
+  Each opens and closes as every group does, open to start, and its `GroupCount` counts its rows.
+  Each row is a Threads row's shape: the stock 32px row, a `#` icon or a person's, then a channel's bare name, the icon its one hash, or the other member's login, cut at its end, its full title as its tooltip (with its unread count while it has one, and "mentions you" while one does),
   and its unread count in `SidebarMenuBadge` (`countLabel`, `99+` past 99), in the mention colour (`bg-destructive`) while any of them names you, absent once read (`yardBadge` in `web/next/src/lib/yard.ts`).
   A click opens the channel in the chat pane (`channelHref`: `/dashboard/yard/<id>` locally, `/yard/c/<id>` hosted), whose view marks it read.
 - The Console's user menu, in its sidebar footer, names this Mac over the Claude account the usage readings reflect (with sign-in going); the Dashboard's, the aside toolbar's square, shows this Mac's initials, with a green dot while an update waits, and opens the same items (`UserMenuItems`), under Auto-hide tab bar on a wide screen:

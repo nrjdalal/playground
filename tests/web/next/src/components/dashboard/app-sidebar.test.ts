@@ -1198,16 +1198,18 @@ describe("ThreadsGroup", () => {
   const badges = (html: string) =>
     [...html.matchAll(/data-sidebar="menu-badge"[^>]*>([^<]*)</g)].map(([, text]) => text)
 
-  // the dispatchers' rows sit in the header, so Threads leads the nav
-  test("is the nav's first group once the threads are read, and is left out before; no Dispatchers group", () => {
+  // the dispatchers' rows sit in the header, so Threads leads the nav, and Yard's Channels and Direct messages follow it, above Orchestrators
+  test("is the nav's first group once the threads are read, and is left out before; Yard's groups next; no Dispatchers group", () => {
     expect(navGroups(true, []).map(({ label }) => label)).toEqual([
       "Threads",
+      "Yard",
       "Orchestrators",
       "Subagents",
       "AI Runners",
       "Scripts",
     ])
     expect(navGroups(false, []).map(({ label }) => label)).toEqual([
+      "Yard",
       "Orchestrators",
       "Subagents",
       "AI Runners",
@@ -1281,7 +1283,8 @@ describe("ThreadsGroup", () => {
     expect(openTag(first, /<button[^>]*aria-label="Next page"[^>]*>/)).toContain(
       'aria-disabled="false"',
     )
-    const label = openTag(first, /<div[^>]*data-sidebar="group-label"[^>]*>/)
+    // the label is the group's toggle button, and the pager sits beside it
+    const label = openTag(first, /<button[^>]*data-sidebar="group-label"[^>]*>/)
     expect(first.indexOf("Previous page")).toBeGreaterThan(first.indexOf(label))
     expect(first.indexOf("Next page")).toBeGreaterThan(first.indexOf("1 / 2"))
     expect(first.indexOf("Previous page")).toBeLessThan(first.indexOf("1 / 2"))
