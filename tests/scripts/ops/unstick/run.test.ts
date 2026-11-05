@@ -1300,12 +1300,12 @@ describe("ops-unstick's slot alerts", () => {
     expect(await idleCheck(rows, 0, 1000, ["999478"])).toEqual([])
   })
 
-  test("a tree of the pids the last check saw, at flat CPU past SLOT_IDLE, still raises slot-idle (#1043)", async () => {
+  test("a tree of the pids the last check saw, at flat CPU past SLOT_IDLE, still raises slot-idle, its times summed in hundredths (#1043)", async () => {
     const rows = [
-      `  999478 ${process.pid} 0:00.00 bash -c batch`,
-      "  999479 999478 0:00.50 bun test",
+      `  999478 ${process.pid} 0:00.04 bash -c batch`,
+      "  999479 999478 0:00.30 bun test",
     ]
-    expect(await idleCheck(rows, 0.5, 1000, ["999478", "999479"])).toEqual(["slot-idle"])
+    expect(await idleCheck(rows, 0.34, 1000, ["999478", "999479"])).toEqual(["slot-idle"])
   })
 
   test("a bun install process at near 0% CPU waits SLOT_IDLE_INSTALL, then still raises slot-idle, and a wrapper naming one in its argv waits SLOT_IDLE", async () => {

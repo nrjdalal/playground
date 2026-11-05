@@ -837,7 +837,8 @@ def slot_idle_alerts(state, now_t):
             c = todo.pop()
             tree.append(c)
             todo += kids.get(c, [])
-        total = sum(cpu.get(c, 0.0) for c in tree)
+        # ps reads CPU time in hundredths, so the sum is rounded to them and the same times never read as a drop
+        total = round(sum(cpu.get(c, 0.0) for c in tree), 2)
         key = f"{slot}:{pid}"
         e = prev.get(key)
         # a total below the saved one means a step exited and took its CPU time with it, so the next step is measured from the new total
