@@ -623,5 +623,21 @@ with tempfile.TemporaryDirectory() as repo:
           "10o rule 4: a test that runs git grep over the repo is listed, by argv or shell, wrapped or after -C, with no list edited (#2323's missed old-proxy); git log --grep stays out",
           listed + [err])
 
+with tempfile.TemporaryDirectory() as repo:
+    scratch_repo(repo, {
+        "api/hono/src/hosted.ts": "x\n",
+        "tests/api/hono/src/routers/yard.test.ts": 'const API = join(ROOT, "api/hono")\nconst HOSTED = join(API, "src/hosted.ts")\n',
+        "tests/api/hono/src/routers/hosted-longer.test.ts": 'const other = join(API, "src/hostedx.ts")\n',
+        "tests/api/hono/src/routers/src-prose.test.ts": 'const folder = "src"\n',
+        "tests/web/next/src/lib/outbox-reader.test.ts": 'const WEB = join(ROOT, "web/next")\nconst outbox = await read(join(WEB, "src/lib/outbox"))\n',
+        "web/next/src/lib/outbox.ts": "x\n",
+    })
+    write(repo, {"api/hono/src/hosted.ts": "y\n", "web/next/src/lib/outbox.ts": "y\n"})
+    git(repo, "commit", "-qam", "change two sources")
+    code, listed, err = touched(repo)
+    check(code == 0 and listed == ["tests/api/hono/src/routers/yard.test.ts", "tests/web/next/src/lib/outbox-reader.test.ts"],
+          "10p rule 3: a test joining a changed file's path from its package root, \"src/hosted.ts\" or \"src/lib/outbox\", is listed (yard.test.ts's miss); a longer name and a bare \"src\" stay out",
+          listed + [err])
+
 print(f"\n{len(failures)} failed" if failures else "\nall passed")
 sys.exit(1 if failures else 0)
