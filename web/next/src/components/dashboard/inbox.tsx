@@ -847,7 +847,9 @@ export function InboxCard({
   // a folded row keeps its verbs, and the answers that need nothing its body holds; Seen is the band's tick, on a card in his list he has not marked read, and reading answers nothing
   const buttons = verbs(item, shelf)
   const unread = buttons.includes("seen")
-  const read = () => (unread && !paused ? void settle(() => markRead([item.id])) : undefined)
+  // the hosted build's relay carries no write, so a click there leaves the read mark to this Mac
+  const read = () =>
+    unread && !paused && !config.hosted ? void settle(() => markRead([item.id])) : undefined
   const busy = pending || paused
   // a row that just moved under him keeps its buttons focusable, dimmed and saying why, so focus stays put and a click meant for another item lands on none
   const hold = paused ? OFF_FOCUSABLE : {}
@@ -896,7 +898,7 @@ export function InboxCard({
       >
         {item.title}
       </a>
-    ) : unread ? (
+    ) : unread && !config.hosted ? (
       <button type="button" className="text-left" onClick={read}>
         {item.title}
       </button>

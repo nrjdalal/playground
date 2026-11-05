@@ -28,10 +28,18 @@ describe("the hosted dashboard is read-only", () => {
     const writes: [string, string][] = [
       ["app-sidebar.tsx", "i === 0 && !muted && !config.hosted ? ("],
       ["app-sidebar.tsx", "!message || config.hosted) return null"],
-      ["app-sidebar.tsx", "{!config.hosted && (\n          <ContextMenuContent>"],
+      [
+        "app-sidebar.tsx",
+        '{config.hosted ? (\n        <SidebarGroupLabel className="w-full pl-2.5" render={labelToggle(open, setOpen)}>',
+      ],
       ["app-sidebar.tsx", ") : muted || config.hosted ? ("],
       ["app-sidebar.tsx", "{!config.hosted && (\n                <DropdownMenu>"],
       ["thread-view.tsx", "if (unread === 0 || config.hosted) return"],
+      ["inbox.tsx", "unread && !paused && !config.hosted ? void settle(() => markRead([item.id]))"],
+      [
+        "inbox.tsx",
+        ') : unread && !config.hosted ? (\n      <button type="button" className="text-left" onClick={read}>',
+      ],
       [
         "../../plugins/changelog/view.tsx",
         "const mark = config.hosted ? null : seenMark(newest, seenAt)",

@@ -1410,23 +1410,29 @@ function ManagersGroup({
   const moveTo = (from: number, to: number) => managers.move(arrayMove(names, from, to))
   return (
     <SidebarGroup>
-      <ContextMenu>
-        <ContextMenuTrigger
-          render={
-            <SidebarGroupLabel
-              className="w-full pl-2.5"
-              render={labelToggle(open, setOpen)}
-              aria-description={MENU_HINT}
-              onKeyDown={openMenuByKey}
-            />
-          }
-        >
+      {/* the order is a write, so the hosted build keeps A to Z with no Reset, no menu and no drag */}
+      {config.hosted ? (
+        <SidebarGroupLabel className="w-full pl-2.5" render={labelToggle(open, setOpen)}>
           Orchestrators
           <LabelChevron open={open} />
           <GroupCount count={count} />
-        </ContextMenuTrigger>
-        {/* the order is a write, so the hosted build keeps A to Z with no Reset and no drag */}
-        {!config.hosted && (
+        </SidebarGroupLabel>
+      ) : (
+        <ContextMenu>
+          <ContextMenuTrigger
+            render={
+              <SidebarGroupLabel
+                className="w-full pl-2.5"
+                render={labelToggle(open, setOpen)}
+                aria-description={MENU_HINT}
+                onKeyDown={openMenuByKey}
+              />
+            }
+          >
+            Orchestrators
+            <LabelChevron open={open} />
+            <GroupCount count={count} />
+          </ContextMenuTrigger>
           <ContextMenuContent>
             <ContextMenuGroup>
               <ContextMenuItem
@@ -1438,8 +1444,8 @@ function ManagersGroup({
               </ContextMenuItem>
             </ContextMenuGroup>
           </ContextMenuContent>
-        )}
-      </ContextMenu>
+        </ContextMenu>
+      )}
       <SidebarMenu
         aria-busy={muted || undefined}
         className={cn("space-y-0.5", muted && "opacity-60")}
