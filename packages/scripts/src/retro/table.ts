@@ -144,6 +144,7 @@ if (import.meta.main) {
   }
   const repo = await factoryRepoOf()
   let found = 0
+  let seen = 0
   const prs = await readAll(async (after) => {
     const ask = () => {
       const gh = Bun.spawnSync(
@@ -166,9 +167,10 @@ if (import.meta.main) {
       process.exit(1)
     })
     found = page.issueCount ?? found
+    seen += page.nodes.length
     return page
   })
   console.log(rowsOf(prs, repo.split("/")[0]!, new Date()).join("\n"))
-  // GitHub's search returns at most 1000 results, so a since that far back reads short
-  if (found > prs.length) console.log(`read ${prs.length} of ${found} PRs: give a later --since`)
+  // GitHub's search returns at most 1000 results, so a since that far back reads short; a PR GraphQL nulled beside its error was read, so it counts as seen
+  if (found > seen) console.log(`read ${seen} of ${found} PRs: give a later --since`)
 }

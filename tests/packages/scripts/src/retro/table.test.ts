@@ -280,6 +280,7 @@ test("a comment and a PR that GraphQL nulled beside their errors are skipped, an
   ])
   const run = await runTable(dir)
   expect(run.code).toBe(0)
-  expect(run.out).toContain("12\tM\t10:00\t11:30\t90m\tc4\tfp1\tr2")
+  expect(run.out).toContain("12\tM\t10:00\t11:30\t90m\tc4\tfp1")
+  expect(run.out).not.toContain("give a later --since")
   expect(run.err).toContain(JSON.stringify(errors))
 }, 30_000)
