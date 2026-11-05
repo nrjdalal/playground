@@ -38,7 +38,7 @@ export const DROPPED: Record<string, string> = {
   SKIP_ENV_VALIDATION: "so .env is validated",
 }
 
-// Every stack registers on portless's own proxy, https on 443 as `portless service install` keeps it, with the hosts file left alone.
+// Every stack registers on portless's own proxy, https on 443 as `portless service install` keeps it, or on 1355 while that is down (`startFallback()`), with the hosts file left alone.
 export const PORTLESS = { PORTLESS_SYNC_HOSTS: "0" }
 
 // The bare names the live dashboard takes beside its own `desk.`-prefixed names, as portless names their hosts.

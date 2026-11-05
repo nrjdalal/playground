@@ -633,11 +633,11 @@ describe("the shell-pane launcher checks its environment against the claude proc
     ).toBeUndefined()
   })
 
-  test("a claude process whose environment reads back empty names no session, and one naming no config or home folder names no session id", async () => {
+  test("a claude process whose environment reads back empty, or names no config or home folder, names no session id and is refused", async () => {
     const empty = procsOf("", undefined, undefined, {})
-    expect(await sessionAbove(100, empty)).toBeUndefined()
+    expect(await sessionAbove(100, empty)).toEqual({ pid: 300, role: "" })
     expect(await callerRefusal({ CLAUDE_CODE_SESSION_ID: ID }, 100, empty)).toContain(
-      "no Claude Code session runs above it",
+      "registry names no session for the claude process above it (300)",
     )
     const homeless = procsOf("", "worker", undefined, { PLAYGROUND_ROLE: "worker" })
     expect(
