@@ -240,6 +240,7 @@ describe("tick", () => {
       { text: "week passed 80% on pride@", to: "dispatcher" },
     ])
     expect(alertTitles(inputs)).toEqual(["ALERT 98 pride@example.com: week at 98%, past 98%"])
+    expect(JSON.parse(inputs[0]!).preview.text).toContain("[System page](/dashboard/system)")
   })
 
   test("an Inbox alert that fails to post is named to the builder, and its line still goes", async () => {
@@ -1251,7 +1252,10 @@ describe("relay watch", () => {
     expect(JSON.parse(first.asks[0]!.stdin!)).toEqual({
       from: OLD.ops,
       kind: "update",
-      preview: { outcome: "alert" },
+      preview: {
+        outcome: "alert",
+        text: "- 🔎 The relay's row is under AI Runners in the sidebar (runner-plain-relay on hover), and this Mac's state is on the [System page](/dashboard/system).",
+      },
       title: `The ops relay is down: no ops line has gone out since ${at(14, 7)
         .toISOString()
         .replace(/\.\d{3}Z$/, "Z")}. Resume runner-plain-relay.`,
@@ -1299,6 +1303,9 @@ describe("relay watch", () => {
       `Ops' sweep is late: no ops line has gone out since ${iso(at(14, 7))}. Ops runs its sweep, whose step 2 runs ops:outbox.`,
     )
     expect(title).not.toContain("runner-plain-relay")
+    expect(JSON.parse(late.asks[0]!.stdin!).preview.text).toBe(
+      "- 🔎 Ops' row is under Orchestrators in the sidebar, since its sweep relays here, and this Mac's state is on the [System page](/dashboard/system).",
+    )
     expect(late.sent).toEqual([])
   })
 

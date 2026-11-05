@@ -130,8 +130,12 @@ const loadReport = async (ctx: Context): Promise<string[]> =>
     .slice(0, 4)
     .map(({ command, cpu, pid }) => `${command} pid ${pid}: ${Math.round(cpu)}% CPU`)
 
-// Posts one Inbox alert update under the ops manager's name with bun run ask, and answers its item's id.
-const postAlert = async (ctx: Context, title: string): Promise<{ by: string; id: string }> => {
+// Posts one Inbox alert update under the ops manager's name with bun run ask, its text the line that links where the owner looks next, and answers its item's id.
+const postAlert = async (
+  ctx: Context,
+  title: string,
+  text: string,
+): Promise<{ by: string; id: string }> => {
   const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
     agents?: unknown
   } | null
@@ -139,7 +143,7 @@ const postAlert = async (ctx: Context, title: string): Promise<{ by: string; id:
   const posted = await ctx.run(
     ["bun", "run", "--cwd", ctx.repo, "ask", "new"],
     120_000,
-    JSON.stringify({ from: by, kind: "update", preview: { outcome: "alert" }, title }),
+    JSON.stringify({ from: by, kind: "update", preview: { outcome: "alert", text }, title }),
   )
   const id = lines(posted.out)
     .map((l) => l.trim())
@@ -169,7 +173,7 @@ const tick = async (ctx: Context) => {
   for (const line of marks.filter((l) => l.includes("ALERT"))) {
     // an alert that fails to post is named to the builder beside its line, which prints once a week and so goes out either way
     if (/ALERT 9[78]\b/.test(line))
-      await postAlert(ctx, line).catch((error: Error) =>
+      await postAlert(ctx, line, USAGE_LINK).catch((error: Error) =>
         ctx.send("builder", `Inbox alert not posted: ${error.message}`),
       )
     await ctx.send("builder", line)
@@ -611,6 +615,14 @@ const neverRanSince = async (ctx: Context, outbox: string): Promise<string | und
   return ctx.now.toISOString()
 }
 
+// The week-usage alert's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
+export const USAGE_LINK = "- 💰 Each account's week shows on the [System page](/dashboard/system)."
+// Pure: the relay-down alert's link line, naming the row that relays on this machine: the relay runner under AI Runners, else Ops under Orchestrators, whose sweep relays.
+export const relayLink = (relay: boolean): string =>
+  relay
+    ? `- 🔎 The relay's row is under AI Runners in the sidebar (${RELAY} on hover), and this Mac's state is on the [System page](/dashboard/system).`
+    : "- 🔎 Ops' row is under Orchestrators in the sidebar, since its sweep relays here, and this Mac's state is on the [System page](/dashboard/system)."
+
 // The Inbox alert's title: the relay's own on a machine that runs it, else the sweep's, each with the next step and naming only what this machine runs.
 const relayDown = (relay: boolean, moved: number): string => {
   const since = moved ? `since ${isoSeconds(new Date(moved))}` : "since the watch began"
@@ -663,7 +675,7 @@ const relayWatch = async (ctx: Context) => {
   }
   const relay = await hasRelay(ctx)
   if (ctx.now.getTime() - since < 2 * (relay ? RELAY_CYCLE_MS : SWEEP_CYCLE_MS)) return
-  const { by, id } = await postAlert(ctx, relayDown(relay, moved))
+  const { by, id } = await postAlert(ctx, relayDown(relay, moved), relayLink(relay))
   await writeAtomic(
     statePath,
     JSON.stringify({ at: ctx.now.toISOString(), by, id, pendingSince: state?.pendingSince }),

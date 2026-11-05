@@ -1507,6 +1507,39 @@ describe("an ask's files in its card", () => {
   })
 })
 
+describe("a ship decision's PRs", () => {
+  test("each opens its page from the card when the item names it, and an older item's reads as before", () => {
+    const html = render(false, {
+      ...decision,
+      preview: {
+        prs: [{ number: 270, title: "x", url: "https://github.com/acme/app/pull/270" }],
+        sha: "3f9a2c1",
+        type: "ship",
+      },
+    } as InboxItem)
+    expect(html).toMatch(
+      /<a [^>]*href="https:\/\/github.com\/acme\/app\/pull\/270"[^>]*target="_blank"[^>]*>#270<\/a> x/,
+    )
+    expect(render(false)).toContain("#270 x")
+  })
+})
+
+describe("a delete decision's why", () => {
+  test("renders as markdown, so each target's PR opens from the card, while what stays the plain text Approve deletes", () => {
+    const html = render(false, {
+      ...decision,
+      preview: {
+        type: "delete",
+        what: "- worktree `/m/.claude/worktrees/pg-2`",
+        why: "Left over.\n\n- worktree `pg-2`: [#12](https://github.com/acme/app/pull/12)",
+      },
+      title: "Delete 1 leftover the nightly cleanup found",
+    } as InboxItem)
+    expect(html).toMatch(/<a [^>]*href="https:\/\/github.com\/acme\/app\/pull\/12"[^>]*>#12<\/a>/)
+    expect(html).toContain("- worktree `/m/.claude/worktrees/pg-2`")
+  })
+})
+
 describe("a held Yard post's card", () => {
   test("its Approve is a link that opens Yard's approve page in a new tab, never an answer", () => {
     const html = render(false, {
