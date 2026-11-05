@@ -2466,7 +2466,7 @@ function wholeLine(commands, env) {
 }
 var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
 var SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g;
-var SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b)?/g;
+var SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b(?=\s*[,})]))?/g;
 function namesShell(text) {
   return [...text.matchAll(SHELL_WORD)].some((m) => !m[2]);
 }
