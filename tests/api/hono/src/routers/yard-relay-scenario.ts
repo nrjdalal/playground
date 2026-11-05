@@ -31,12 +31,26 @@ out.offline = await status("/api/v1/workers", { ...owner, origin: web })
 
 const requests: Record<string, unknown>[] = []
 const pairs: Record<string, unknown>[] = []
+const writes: Record<string, unknown>[] = []
 const mac = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/yard/relay/socket`, {
   headers: { authorization: `Bearer ${process.env.OWNER_TOKEN}` },
 } as never)
 mac.onmessage = (event) => {
   const request = JSON.parse(String(event.data))
   // a pair request waits on the Mac for the owner's Approve, which answers it with the key's fingerprint
+  // a signed write runs on the Mac, which answers with the route's own status
+  if (request.type === "write") {
+    writes.push(request)
+    return mac.send(
+      JSON.stringify({
+        body: body({ data: { sent: true } }),
+        headers: { "content-type": "application/json" },
+        id: request.id,
+        status: 201,
+        type: "response",
+      }),
+    )
+  }
   if (request.type === "pair") {
     pairs.push(request)
     return mac.send(
@@ -111,6 +125,37 @@ out.pairNotAKey = (await pair({ ...owner, origin: web }, { key: { ...key, crv: "
 out.write = (
   await fetch(`${relay}/api/v1/workers`, { headers: { ...owner, origin: web }, method: "POST" })
 ).status
+// a write frame as the owner's browser signs it, whose body holds a word the hosted side never keeps
+const frame = (over: Record<string, unknown> = {}) => ({
+  at: new Date().toISOString(),
+  body: JSON.stringify({ text: "body-kept-nowhere" }),
+  id: crypto.randomUUID(),
+  keyId: "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+  login: "ow",
+  method: "POST",
+  path: "/api/v1/messages",
+  sig: "c2lnbmVk",
+  type: "write",
+  ...over,
+})
+const write = async (headers: Record<string, string>, sent: unknown) => {
+  const answer = await fetch(`${relay}/write`, {
+    body: JSON.stringify(sent),
+    headers: { ...headers, "content-type": "application/json" },
+    method: "POST",
+  })
+  return [answer.status, (await answer.json()).data ?? null]
+}
+out.signedWrite = await write({ ...owner, origin: web }, frame())
+out.writes = writes.map(({ login, path, type }) => ({ login, path, type }))
+out.writeMember = (await write({ ...member, origin: web }, frame({ login: "bo" })))[0]
+out.writeNoOrigin = (await write(owner, frame()))[0]
+out.writeWrongOrigin = (await write({ ...owner, origin: "https://elsewhere.example" }, frame()))[0]
+out.writeOtherLogin = (await write({ ...owner, origin: web }, frame({ login: "bo" })))[0]
+out.writeOffList = (
+  await write({ ...owner, origin: web }, frame({ path: "/api/v1/remote/revoke" }))
+)[0]
+out.writeNotAFrame = (await write({ ...owner, origin: web }, frame({ method: "DELETE" })))[0]
 await new Promise((done) => {
   mac.onclose = done
   mac.close()

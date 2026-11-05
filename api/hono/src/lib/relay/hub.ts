@@ -13,10 +13,15 @@ import {
   type RelayResponse,
   relayResponseSchema,
   type RelayStatus,
+  type RelayWrite,
+  relayWriteSchema,
 } from "@/lib/relay/protocol"
 import { redisChannel } from "@/lib/yard/channel"
 
 type MacSocket = { close?: () => void; send: (data: string) => void }
+
+// A frame the hub carries to the Mac: a read, a pair request or a signed write.
+type Frame = RelayPair | RelayRequest | RelayWrite
 
 // A socket the hub holds, and when it last heard from it.
 type Held = { heard: number; socket: MacSocket }
@@ -34,7 +39,7 @@ export type Forwarded = RelayResponse | { type: "offline" } | { type: "timeout" 
 // How long an instance waits, from when its message reaches the bus, for the one holding the Mac's socket to say it took a request or a ping, before it reads the Mac as offline.
 export const RELAY_ACK_MS = 2000
 
-// What the instances tell each other over Redis, in transit alone: a request for the instance holding the Mac's socket, its ack, the Mac's answer, a status ping and its pong, and a socket gone.
+// What the instances tell each other over Redis, in transit alone: a request, a pair request or a signed write for the instance holding the Mac's socket, its ack, the Mac's answer, a status ping and its pong, and a socket gone.
 const busSchema = z.discriminatedUnion("kind", [
   z.object({ id: z.string(), kind: z.literal("ack") }),
   z.object({ kind: z.literal("gone"), since: z.string(), userId: z.string() }),
@@ -42,7 +47,7 @@ const busSchema = z.discriminatedUnion("kind", [
   z.object({ id: z.string(), kind: z.literal("pong") }),
   z.object({
     kind: z.literal("request"),
-    request: z.union([relayRequestSchema, relayPairSchema]),
+    request: z.union([relayRequestSchema, relayPairSchema, relayWriteSchema]),
     userId: z.string(),
   }),
   z.object({ kind: z.literal("response"), response: relayResponseSchema, userId: z.string() }),
@@ -153,7 +158,7 @@ export function createHub({
   }
 
   // Hands a request to the Mac's socket on this instance, and says whether one took it.
-  const deliver = (userId: string, request: RelayPair | RelayRequest) => {
+  const deliver = (userId: string, request: Frame) => {
     const socket = live(userId)
     if (!socket) return false
     try {
@@ -190,7 +195,7 @@ export function createHub({
   }
 
   // Sends one frame to the owner's Mac, through the instance holding its socket, and waits for its answer.
-  const carry = (userId: string, request: RelayPair | RelayRequest): Promise<Forwarded> => {
+  const carry = (userId: string, request: Frame): Promise<Forwarded> => {
     const here = live(userId) !== null
     if (!here && !bus) return Promise.resolve({ type: "offline" })
     return new Promise((resolve) => {
@@ -265,6 +270,11 @@ export function createHub({
     // Sends the owner's browser's public key to the owner's Mac as a pair request, which waits there for the owner's Approve, and waits for the Mac's answer.
     pair(userId: string, login: string, key: PairKey): Promise<Forwarded> {
       return carry(userId, { at: now().toISOString(), id: id(), key, login, type: "pair" })
+    },
+
+    // Carries one write the owner's browser signed to the owner's Mac as it was signed, through the instance holding its socket, and waits for its answer: its body is kept nowhere, only in memory until the Mac has it.
+    write(userId: string, write: RelayWrite): Promise<Forwarded> {
+      return carry(userId, write)
     },
 
     // Whether this instance still needs the bus: a socket held, or a request or a ping waiting.

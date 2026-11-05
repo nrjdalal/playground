@@ -14,6 +14,7 @@ import {
   useSyncExternalStore,
 } from "react"
 
+import { useYardWrites } from "@/hooks/use-yard-writes"
 import { attachmentUrl } from "@/lib/attachments"
 import { config } from "@/lib/config"
 import { sendMessage, toolLabel } from "@/lib/dashboard"
@@ -283,8 +284,8 @@ export class DashboardChats {
   private readonly chats = new Map<string, Chat<DashboardMessage>>()
   private readonly listeners = new Set<() => void>()
   private readonly label: (name: string) => string
-  // the hosted build, whose relay carries reads alone: a message it holds fails at once with READ_ONLY_LINE, and nothing sends or retries it
-  private readonly readOnly: boolean
+  // a hosted page in a browser that keeps no paired key, or one that has not read yet whether it keeps one: a message it holds fails at once with READ_ONLY_LINE, and nothing sends or retries it
+  private readOnly: boolean
   private resumed = false
   private readonly send: Send
   private readonly storage: OutboxStorage | null
@@ -346,6 +347,11 @@ export class DashboardChats {
     try {
       this.storage.setItem(OUTBOX_KEY, JSON.stringify(unsent))
     } catch {}
+  }
+
+  // Opens or closes the outbox to sends, as the hosted build learns whether this browser keeps a paired key.
+  setReadOnly(readOnly: boolean) {
+    this.readOnly = readOnly
   }
 
   // Sends again what the tab's page held unsent when it reloaded, each under its own id, so one an earlier try got through is answered as delivered rather than typed twice.
@@ -595,7 +601,13 @@ export function useDashboardChats(
   useStreamIn(chats, messages, dispatcher)
   useStreamIn(chats, messages, selected)
 
-  useEffect(() => chats.resume(), [chats])
+  // what an earlier page held goes again only once the page knows whether it may send, so a hosted page never drops it before reading its key
+  const writes = useYardWrites()
+  useEffect(() => {
+    if (!writes.ready) return
+    chats.setReadOnly(!writes.send)
+    chats.resume()
+  }, [chats, writes.ready, writes.send])
 
   useEffect(() => {
     const { release, saw } = pickerMoves(messages, workers)
