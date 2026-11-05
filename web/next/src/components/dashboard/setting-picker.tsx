@@ -33,7 +33,7 @@ import {
   type SessionSetting,
 } from "@/lib/session-setting"
 
-// The session's model and effort in the composer's toolbar, directly left of Send at the row's 28px, as /model and /effort set them in a terminal: one menu with a radio group for each, where a pick sets that value on the session as the owner's own act (typed into a dispatcher, through the SDK on the hosted session).
+// The session's model and effort in the composer's toolbar, directly left of Send at the row's 28px, as /model and /effort set them in a terminal: one menu with a radio group for each, where a pick sets that value on the session as the owner's own act (typed into a dispatcher or the assistant, through the SDK on the hosted session).
 export function SettingPicker({ label, worker }: { label: string; worker: Worker }) {
   const reported = reportedSetting(worker)
   const [model, setModel] = useState<Pending<SessionModel> | null>(null)

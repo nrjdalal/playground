@@ -15,7 +15,8 @@ A stack that shows test data instead, a made-up machine for tests and screenshot
 ## Your chat
 
 `/dashboard` opens your chat with the dispatcher, the session you talk to (`sessions.names`' dispatcher, `dispatcher` by default, unless `PLAYGROUND_DISPATCHER` names another), with the box to message it.
-A second dispatcher can run beside it on another model (the first's name plus `-2`, unless `PLAYGROUND_DISPATCHER_SECONDARY` names another), with a chat and a box of its own, opened from its row in the sidebar.
+A second dispatcher runs only when you start one (`playground add --dispatcher`), beside the first on another model (the first's name plus `-2`, unless `PLAYGROUND_DISPATCHER_SECONDARY` names another), with a chat and a box of its own, opened from its row in the sidebar.
+The Assistant has a chat and a box of its own too, opened from its **Assistant** row under Orchestrators, whatever its session is named.
 Each dispatcher's chat and its box are named by its label, such as Message Alpha; the model its newest reply ran shows in its sidebar row's tooltip.
 A menu directly left of the box's send button, such as **Opus · High**, shows the model and effort the dispatcher's newest reply ran with, and a pick types `/model` or `/effort` into it for you; the row shows the new one from its next reply.
 On a first run the chat starts with **Let's check this Mac**, each check marked there or missing with the button that fixes it, then **Continue**, which makes you this Mac's owner ([Where to start](/docs#where-to-start)).
@@ -31,7 +32,7 @@ The half keeps its size and the square you picked as you move between pages.
 Drag the divider to resize the two halves; let go near the middle and it snaps there.
 On a phone the same bar sits at the bottom of the page, with the page itself as its first square and Menu, which opens the sidebar, as its last.
 
-A link to `/dashboard` that names another session (`?worker=`) opens that session's own view, read-only, and one that names a session that has ended opens your chat.
+A link to `/dashboard` that names another session (`?worker=`) opens that session's own view, read-only but for one with a box of its own (the Assistant's, the second dispatcher's or the hosted session's), and one that names a session that has ended opens your chat.
 A link to something waiting on you (`#needs-you-<id>`) opens the view that holds it.
 
 ### Send a message
@@ -117,10 +118,10 @@ Each icon shows its number beside it, green while its reading is normal, orange 
 Hover or Tab to an icon for its full reading and level, and click it to open the System page.
 The icons are gray outlines with no number before the first reading and once sampling stops, and dim when live sessions cannot be read, which also shows one toast with the reason.
 
-Under the top line, with no title, sits a row for each dispatcher, Alpha and then Bravo, its model, effort and state in its hover.
+Under the top line, with no title, sits a row for each dispatcher, Alpha, and then Bravo while a second one runs, its model, effort and state in its hover.
 The first opens your chat at `/dashboard`, the second its own chat.
 While the first is not running its row reads Alpha, Not running, so the rows below never move.
-The second's row shows only while its session runs or the roster lists it.
+The second's row shows only while its session runs or the roster lists it as not yet done or ended.
 
 The name, GitHub and the system icons are hidden when the sidebar is collapsed, where each session row, the dispatchers' included, shows its icon alone.
 Click the sidebar's right edge, or press Cmd+B (Ctrl+B), to collapse or expand it.

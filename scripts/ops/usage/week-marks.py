@@ -19,7 +19,7 @@ u = json.load(open(os.path.join(os.path.dirname(OPS), "usage.json")))
 account = u.get("account") or "?"
 # the factory's accounts, from usage.accounts; each week resets on its own day.
 # usage.json's resets_at is the authority (it is the account's own); an account's weekReset guards a reading with no reset.
-# Nothing parks: at 100% Bravo switches the factory to the next account (#i823).
+# Nothing parks: at 100% a seated second dispatcher switches the factory to the next account (#i823).
 ACCOUNTS = {a["email"]: a.get("weekReset") for a in setting("usage.accounts") if a.get("provider", "claude") == "claude"}
 FACTORY = tuple(ACCOUNTS)
 # a logged-in account usage.accounts does not list is not counted, while each listed spare still is
@@ -75,7 +75,7 @@ if not counted:
     print(f"{account}: not a factory account; nothing counted (the factory runs on {', '.join(FACTORY)})")
 else:
     print(f"{account}: week {used:g}% (resets {time.strftime('%a %H:%MZ', time.gmtime(reset))}), rate {'?' if rate is None else f'{rate:.1f}'}%/h{eta(90)}{eta(98)}; today {spent:g}% spent, on pace for {projected:.0f}% (no daily cap){combined}{unread}")
-drain_tail = "; nothing parks: at 100% Bravo switches the factory to the next account (#i823)"
+drain_tail = "; nothing parks: at 100% a seated second dispatcher switches the factory to the next account (#i823)"
 # the logged-in account first, then each spare usage.accounts lists, each keyed by its own week reset
 for who, week_used, week_reset, pct_h in [*([(account, used, reset, rate)] if counted else []), *((a, r["week"], r["weekReset"], others[a]) for a, r in spares.items() if a in FACTORY)]:
     key = f"{who}:{round(week_reset / 3600)}"
