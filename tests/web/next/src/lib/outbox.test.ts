@@ -1038,14 +1038,11 @@ describe("typedHeld", () => {
 // The ticks survive a reload: a reload keeps only unsent records, so a message the transcript holds is delivered on its own word.
 describe("deliveredAt", () => {
   test("his message the transcript holds reads delivered at its transcript time once a reload has dropped its record", () => {
-    expect(deliveredAt({ at: T0, peer: false, sent: null })).toBe(T0)
+    expect(deliveredAt({ at: T0, sent: null })).toBe(T0)
   })
   test("the outbox's own time wins while the tab still holds the record", () => {
     const sent = message("a", { deliveredAt: "2026-10-06T19:37:04.000Z", state: "delivered" })
-    expect(deliveredAt({ at: T0, peer: false, sent })).toBe("2026-10-06T19:37:04.000Z")
-  })
-  test("another session's message is never his to tick", () => {
-    expect(deliveredAt({ at: T0, peer: true, sent: null })).toBeNull()
+    expect(deliveredAt({ at: T0, sent })).toBe("2026-10-06T19:37:04.000Z")
   })
 })
 

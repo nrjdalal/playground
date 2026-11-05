@@ -5,6 +5,7 @@ import {
   applyOutbox,
   attachmentsOf,
   DashboardChats,
+  firstLineOf,
   keepTurnIds,
   outboxMessage,
   outboxOf,
@@ -90,9 +91,20 @@ describe("toUIMessages", () => {
     }
   })
 
-  test("a peer's message keeps its sender", () => {
-    const [message] = toUIMessages([step({ from: "builder", id: "p1", kind: "peer", text: "go" })])
+  test("a peer's message keeps its sender and its whole text, which its folded row opens to", () => {
+    const text = "PR #12 merged.\n\n- the sha is abc123\n- next is #13"
+    const [message] = toUIMessages([step({ from: "builder", id: "p1", kind: "peer", text })])
     expect(message?.metadata).toMatchObject({ from: "builder", kind: "peer" })
+    expect(message?.role).toBe("user")
+    expect(message?.parts).toEqual([{ text, type: "text" }])
+  })
+
+  // A folded row shows a message's first line, its first line with words, its thread marker aside.
+  test("firstLineOf: the first line holding words, trimmed, a leading thread marker dropped", () => {
+    expect(firstLineOf("PR #12 merged.\n\n- the sha is abc123")).toBe("PR #12 merged.")
+    expect(firstLineOf("\n\n   \n  Done, see below  \nmore")).toBe("Done, see below")
+    expect(firstLineOf("[thread:k7mq] the plan is ready\nnext")).toBe("the plan is ready")
+    expect(firstLineOf("   ")).toBe("")
   })
 
   test("a session's turn is one assistant message, its thinking, words and calls in order, named for its first step", () => {
