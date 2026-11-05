@@ -1012,7 +1012,7 @@ disk_rate() {
 SWAPINS_MAX=100
 # what a look says once a run while another takes the first reading of the gauges
 BUSY_TOLD="run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands"
-# `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s> <the last reading's swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0, as spawn.sh's load gate reads it), the swap-ins a second in
+# `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s> <the last reading's swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0), the swap-ins a second in
 # vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them) and disk_rate's two figures, which lanes lines log and no verdict reads (a bound on disk load waits on a day of them), each - when unread; every look shares one reading through run-slot.gauges
 # (`<epoch> <idle> <swapins> <tps> <MB/s> <last swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and some 27 waiters each look every 15 s;
 # one look refreshes it, under gauges_lock, while the rest keep the reading they have, or `busy busy` when there is none yet, since without the
