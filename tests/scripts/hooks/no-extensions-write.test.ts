@@ -604,6 +604,18 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["sed printing a regex and the six lines after it", "sed -n '/[Rr]eviewer/,+6p' notes.md"],
     ["sed printing a function's lines", "sed -n '/^f() {/,/^}/p' notes.md"],
     [
+      "awk printing a function's range from git show's output",
+      "git show c668f859:scripts/ops/run-slot.sh | awk '/^memstat\\(\\)/,/^}/' | head -30",
+    ],
+    [
+      "sed printing a function's range from git show's output",
+      "git show c668f859:scripts/ops/run-slot.sh | sed -n '/^memstat()/,/^}/p'",
+    ],
+    [
+      "awk after a sed that prints a line naming a shell",
+      "sed -n '/sh -c/p' /dev/null; awk '$3 ~ /runner/' /dev/null",
+    ],
+    [
       "perl printing each match of a /g regex",
       `perl -ne 'print "$1\\n" while /#(\\d+)/g' notes.md`,
     ],
@@ -912,8 +924,8 @@ describe("a quoted argument is read as a command line only where a program runs 
       "exec uniq watch 'rm -rf ~/.playground/extensions/.no-such-folder'",
     ],
     [
-      "awk after a sed, which keeps canary's reading",
-      "sed -n '/sh -c/p' /dev/null; awk '$3 ~ /runner/' /dev/null",
+      "awk after a printf, which keeps canary's reading",
+      "printf '%s\\n' '/sh -c/p'; awk '$3 ~ /runner/' /dev/null",
     ],
     [
       "sed -i '' inserting a removal into a git hook",

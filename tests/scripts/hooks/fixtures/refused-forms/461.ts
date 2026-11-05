@@ -24,7 +24,7 @@ export const groups: Group[] = [
       ["sed's s/// w flag", "sed 's/a/b/w ~/.playground/extensions/.no-such-folder/x' notes.md"],
       [
         "sed's s/// e flag",
-        "sed 's/.*/rm -rf ~\\/.playground\\/extensions\\/.no-such-folder/e' notes.md",
+        "sed 's|.*|rm -rf ~/.playground/extensions/.no-such-folder|e' notes.md",
       ],
       ["sed's e command", "sed -n '1e rm -rf ~/.playground/extensions/.no-such-folder' notes.md"],
       [
@@ -33,7 +33,7 @@ export const groups: Group[] = [
       ],
       [
         "sed printing a command into a shell",
-        "sed -n 's/a/rm -rf ~\\/.playground\\/extensions\\/.no-such-folder/p' notes.md | sh",
+        "sed -n 's|a|rm -rf ~/.playground/extensions/.no-such-folder|p' notes.md | sh",
       ],
       [
         "perl -i editing in place",
@@ -65,8 +65,21 @@ export const groups: Group[] = [
         "perl -ne 'print if /a/' '|rm -rf ~/.playground/extensions/.no-such-folder'",
       ],
       [
+        "git with a pager set by -c, before an awk",
+        "git -c core.pager='rm -rf ~/.playground/extensions/.no-such-folder' log | awk '/a/'",
+      ],
+      [
+        "git with a pager set by GIT_PAGER, before an awk",
+        "GIT_PAGER='rm -rf ~/.playground/extensions/.no-such-folder' git log | awk '/a/'",
+      ],
+      [
+        "git log writing its output into the root, before an awk",
+        "git log --output=~/.playground/extensions/.no-such-folder/x | awk '/a/'",
+      ],
+      [
         "perl's output redirected into the root",
         "perl -ne 'print if /a/' notes.md > ~/.playground/extensions/.no-such-folder/x",
+        "process home",
       ],
     ],
   },
