@@ -56,6 +56,9 @@ export const replyButton = (tag: string): string => `[aria-label="Reply to ${tag
 const click = (tag: string) =>
   `(() => { const button = document.querySelector(${JSON.stringify(replyButton(tag))}); if (!button) return "no card"; button.click(); const active = document.activeElement; if (active?.id === "composer" && active.value.startsWith(${JSON.stringify(`re ${tag}: `)})) return "composer"; return active?.id || active?.getAttribute("data-slot") || active?.tagName.toLowerCase() || null })()`
 
+// Selects the composer's words, so one Backspace, a key React hears, empties it; agent-browser's fill with no words changes the box but not React's state, so the words came back on the next render.
+const SELECT_COMPOSER = `(() => { const box = document.getElementById("composer"); box?.focus(); box?.setSelectionRange(0, box.value.length); return null })()`
+
 // At 1280x800, opens /dashboard, waits for the card's Reply, clicks it and reads where focus is at once, then empties the composer, sending nothing.
 export const clickFocus = async (
   browser: Pick<Browser, "eval" | "run" | "viewport" | "visit">,
@@ -67,7 +70,8 @@ export const clickFocus = async (
   await browser.visit(`${web}/dashboard`)
   await browser.run("wait", replyButton(tag))
   const result = focusResult(check, await browser.eval<string | null>(click(tag)))
-  await browser.run("fill", "#composer", "")
+  await browser.eval(SELECT_COMPOSER)
+  await browser.run("press", "Backspace")
   return result
 }
 
