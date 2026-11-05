@@ -891,7 +891,9 @@ function narrow(cmd: Command, env: Env): boolean {
     const programs = awkPrograms(args)
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))
   }
-  if (["cat", "git", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
+  if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
+  // a git reader with a word the hook cannot read keeps canary's reading, since that word may be an option that writes or runs (`--output=…`)
+  if (base === "git") return reads(parsed, env) && !args.some(({ value }) => marked(value))
   if (SEDS.has(base)) return sedReads(args)
   if (base === "perl") return perlReads(parsed, env)
   if (base === "cut") return true

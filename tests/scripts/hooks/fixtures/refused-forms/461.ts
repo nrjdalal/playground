@@ -77,6 +77,10 @@ export const groups: Group[] = [
         "git log --output=~/.playground/extensions/.no-such-folder/x | awk '/a/'",
       ],
       [
+        "git given a word the hook cannot read, before an awk whose regex reads as a glob",
+        "git log \"$REV\" | awk '/^a(b)/'",
+      ],
+      [
         "perl's output redirected into the root",
         "perl -ne 'print if /a/' notes.md > ~/.playground/extensions/.no-such-folder/x",
         "process home",
