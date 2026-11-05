@@ -124,6 +124,7 @@ import {
   rowText,
   statusParts,
 } from "@/lib/agents"
+import { config } from "@/lib/config"
 import {
   checkerOf,
   dispatcherOf,
@@ -571,7 +572,7 @@ export function useDashboardUpdate(): MenuUpdate | null {
   const close = useCloseSheet()
   const hover = updateHover(data?.update, new Date(now))
   const message = updateMessage(data?.update, new Date(now))
-  if (!allowed || !hover || !message) return null
+  if (!allowed || !hover || !message || config.hosted) return null
   const live = dispatcherOf(workers, dispatcher)
   const to = live?.name ?? null
   const label = live ? chatLabel(live, dispatcher) : dispatcherLabel(null, true)
@@ -639,7 +640,7 @@ export function DashboardDispatchers({ rows = 1 }: { rows?: number }) {
           ) : undefined
         // Alpha's plus, in its effort's place, starts a session from a template
         const action =
-          i === 0 && !muted ? (
+          i === 0 && !muted && !config.hosted ? (
             <TemplatePicker
               className={cn("right-1.5", TOGGLE_SHOWN)}
               secondRunning={shown.slots.slice(1).some((slot) => slot.worker)}
