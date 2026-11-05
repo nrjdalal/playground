@@ -18,7 +18,7 @@ import type { Context } from "./tick"
 const GB = 1024 ** 3
 const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
 
-export type Pr = { headRefOid: string; number: number; state: "CLOSED" | "MERGED" | "OPEN" }
+export type Pr = { headRefOid: string; state: "CLOSED" | "MERGED" | "OPEN" }
 export type Prs = { byBranch: Map<string, Pr>; byNumber: Map<number, Pr> }
 export type Ref = { name: string; sha: string }
 export type Target = { kind: "branch" | "container" | "volume" | "worktree"; name: string }
@@ -54,17 +54,17 @@ export const worktreesIn = (porcelain: string, main: string): Worktree[] =>
     return [{ branch: /^branch refs\/heads\/(.+)$/m.exec(block)?.[1] ?? null, path }]
   })
 
-// Pure: the worktrees whose PR is merged or closed: its branch's newest PR, else a review-<n> or test-<n> clone's PR n; a worktree with no PR, or an open one, stays.
-export const staleWorktrees = (worktrees: Worktree[], prs: Prs): Worktree[] =>
-  worktrees.filter((w) => {
+// Pure: the worktrees whose PR is merged or closed, each with that PR: its branch's newest PR, else a review-<n> or test-<n> clone's PR n; a worktree with no PR, or an open one, stays.
+export const staleWorktrees = (worktrees: Worktree[], prs: Prs): (Worktree & { pr: Pr })[] =>
+  worktrees.flatMap((w) => {
     const n = /^(?:review|test)-(\d+)$/.exec(basename(w.path))?.[1]
     const pr =
       (w.branch ? prs.byBranch.get(w.branch) : undefined) ??
       (n ? prs.byNumber.get(Number(n)) : undefined)
-    return pr !== undefined && pr.state !== "OPEN"
+    return pr !== undefined && pr.state !== "OPEN" ? [{ ...w, pr }] : []
   })
 
-// Pure: what the branch step does. A local branch merged into origin/canary goes with -d, one whose merged or closed PR still holds its head with -D, and a remote one whose merged or closed PR holds its head is deleted on origin, since GitHub restores it from the PR's page; an unmerged local branch with no PR, or one ahead of its PR's head, goes to the decision list. A kept branch (canary, main, the live dashboard's), one a worktree has checked out, and one with an open PR stay.
+// Pure: what the branch step does. A local branch merged into origin/canary, or one whose merged or closed PR still holds its head, goes with -D (the main checkout's HEAD is main, so -d would refuse one merged into canary alone), and a remote one whose merged or closed PR holds its head is deleted on origin, since GitHub restores it from the PR's page; an unmerged local branch with no PR, or one ahead of its PR's head, goes to the decision list. A kept branch (canary, main, the live dashboard's), one a worktree has checked out, and one with an open PR stay.
 export const staleBranches = (input: {
   checkedOut: Set<string>
   keep: Set<string>
@@ -72,19 +72,18 @@ export const staleBranches = (input: {
   merged: Set<string>
   prs: Map<string, Pr>
   remote: Ref[]
-}): { decide: string[]; local: { force: boolean; name: string }[]; remote: string[] } => {
+}): { decide: string[]; local: string[]; remote: string[] } => {
   const done = (pr: Pr | undefined, sha: string) =>
     pr !== undefined && pr.state !== "OPEN" && pr.headRefOid === sha
   const out = {
     decide: [] as string[],
-    local: [] as { force: boolean; name: string }[],
+    local: [] as string[],
     remote: [] as string[],
   }
   for (const b of input.local) {
     if (input.keep.has(b.name) || input.checkedOut.has(b.name)) continue
     const pr = input.prs.get(b.name)
-    if (input.merged.has(b.name)) out.local.push({ force: false, name: b.name })
-    else if (done(pr, b.sha)) out.local.push({ force: true, name: b.name })
+    if (input.merged.has(b.name) || done(pr, b.sha)) out.local.push(b.name)
     else if (pr?.state !== "OPEN") out.decide.push(b.name)
   }
   for (const r of input.remote)
@@ -110,14 +109,14 @@ export const staleContainers = (
   return out
 }
 
-// Pure: docker system df -v's volumes no container uses that hold over 1 GB, for the decision list.
+// Pure: docker system df -v's volumes no container uses (its Links a string, "0") that hold over 1 GB, for the decision list.
 export const staleVolumes = (df: string): string[] => {
   try {
     const volumes = (
-      JSON.parse(df) as { Volumes?: { Links?: number; Name?: string; Size?: string }[] }
+      JSON.parse(df) as { Volumes?: { Links?: string; Name?: string; Size?: string }[] }
     ).Volumes
     return (volumes ?? [])
-      .filter((v) => v.Name && v.Links === 0 && bytesOf(v.Size ?? "") > GB)
+      .filter((v) => v.Name && Number(v.Links) === 0 && bytesOf(v.Size ?? "") > GB)
       .map((v) => v.Name!)
   } catch {
     return []
@@ -195,8 +194,9 @@ export const decisionOf = (
 export const discardable = (line: string): boolean =>
   / (uncommitted work|unpushed commits)$/.test(line) || line.includes("--discard removes it anyway")
 
+// --silent, since bun run's "$ bun ..." line goes to stderr, which ctx.run joins after stdout, and get's JSON would not parse
 const ask = async (ctx: Context, args: string[], stdin?: string) =>
-  ctx.run(["bun", "run", "--cwd", ctx.repo, "ask", ...args], 120_000, stdin)
+  ctx.run(["bun", "run", "--silent", "--cwd", ctx.repo, "ask", ...args], 120_000, stdin)
 
 const idOf = (out: string): string | undefined =>
   lines(out)
@@ -290,7 +290,7 @@ export const nightlyClean =
       said.push(`last decision: failed: ${err.message}`)
       return false
     })
-    await ctx.run(
+    const fetched = await ctx.run(
       [
         join(ctx.ops, "run-slot.sh"),
         "ops-tick",
@@ -305,6 +305,7 @@ export const nightlyClean =
       ],
       10 * 60_000,
     )
+    if (fetched.code !== 0) said.push(`fetch: failed, so the refs read are the last fetch's`)
     const refs = async (where: string, format: string): Promise<Ref[]> =>
       lines((await git(["for-each-ref", where, `--format=${format} %(objectname)`])).out)
         .map((l) => ({ name: l.split(" ")[0]!, sha: l.split(" ")[1] ?? "" }))
@@ -323,7 +324,9 @@ export const nightlyClean =
       if (!prs) return "GitHub unreadable, none read"
       const out: string[] = []
       for (const w of staleWorktrees(worktrees, prs)) {
-        const line = await cleanWorktree(w.path, "nightly-clean", cleanup)
+        const line = await cleanWorktree(w.path, "nightly-clean", cleanup, {
+          pushed: w.pr.headRefOid,
+        })
         out.push(line)
         if (discardable(line)) decide.push({ kind: "worktree", name: w.path })
       }
@@ -343,13 +346,10 @@ export const nightlyClean =
         remote,
       })
       let locals = 0
-      for (const b of plan.local)
-        if ((await git(["branch", b.force ? "-D" : "-d", b.name])).code === 0) locals++
-      const remotes = plan.remote.length
-        ? (await git(["push", "-q", "origin", "--delete", ...plan.remote])).code === 0
-          ? plan.remote.length
-          : 0
-        : 0
+      for (const name of plan.local) if ((await git(["branch", "-D", name])).code === 0) locals++
+      let remotes = 0
+      for (const name of plan.remote)
+        if ((await git(["push", "-q", "origin", "--delete", name])).code === 0) remotes++
       for (const name of plan.decide) decide.push({ kind: "branch", name })
       return `deleted ${locals} local, ${remotes} remote; ${plan.decide.length} to decide`
     })
@@ -390,7 +390,7 @@ export const nightlyClean =
       await Bun.file(join(ctx.ops, "log", "trash-purge.log"))
         .text()
         .catch(() => ""),
-      Date.parse(state.at ?? "") || 0,
+      Date.parse(state.at ?? "") || ctx.now.getTime() - 86_400_000,
     )
     said.push(`trash: ${purged} batches purged since the last run`)
     const after = deps.free(data)
@@ -439,6 +439,27 @@ export const nightlyClean =
     )
   }
 
+// Pure: one gh api graphql answer read into prs, its b<i> aliases by branch and n<i> by number, a null alias (a number that is no PR) skipped; false when it holds no repository. Its stdout's one JSON line alone, since that answer exits 1 with its data and errors there and a "gh: ..." line on stderr, which ctx.run joins after it.
+export const readPrs = (out: string, branches: string[], numbers: number[], prs: Prs): boolean => {
+  let found: Record<string, unknown> | undefined
+  try {
+    found = (
+      JSON.parse(out.split("\n")[0] ?? "") as { data?: { repository?: Record<string, unknown> } }
+    ).data?.repository
+  } catch {
+    return false
+  }
+  if (!found) return false
+  for (const [alias, value] of Object.entries(found)) {
+    const at = Number(alias.slice(1))
+    if (alias.startsWith("b")) {
+      const pr = (value as { nodes?: Pr[] } | null)?.nodes?.[0]
+      if (pr) prs.byBranch.set(branches[at]!, pr)
+    } else if (value) prs.byNumber.set(numbers[at]!, value as Pr)
+  }
+  return true
+}
+
 // This machine's: auto_end's cleanup deps, statfs, GitHub's PRs in batched GraphQL reads through gh, and the shared turbo cache.
 const liveNight: NightDeps = {
   cleanup: cleanupDeps,
@@ -451,7 +472,7 @@ const liveNight: NightDeps = {
     const repo = /github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/.exec(url)
     if (!repo) return null
     const q = JSON.stringify
-    const fields = "number state headRefOid"
+    const fields = "state headRefOid"
     const parts = [
       ...branches.map(
         (b, i) =>
@@ -463,22 +484,7 @@ const liveNight: NightDeps = {
     for (let i = 0; i < parts.length; i += 100) {
       const query = `query { repository(owner: ${q(repo[1])}, name: ${q(repo[2])}) { ${parts.slice(i, i + 100).join(" ")} } }`
       const read = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], 120_000)
-      const found = (() => {
-        try {
-          return (JSON.parse(read.out) as { data?: { repository?: Record<string, unknown> } }).data
-            ?.repository
-        } catch {
-          return undefined
-        }
-      })()
-      if (!found) return null
-      for (const [alias, value] of Object.entries(found)) {
-        const at = Number(alias.slice(1))
-        if (alias.startsWith("b")) {
-          const pr = (value as { nodes?: Pr[] } | null)?.nodes?.[0]
-          if (pr) prs.byBranch.set(branches[at]!, pr)
-        } else if (value) prs.byNumber.set(numbers[at]!, value as Pr)
-      }
+      if (!readPrs(read.out, branches, numbers, prs)) return null
     }
     return prs
   },

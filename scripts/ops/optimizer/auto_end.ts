@@ -245,12 +245,12 @@ export const containersFor = (
   return [`playground-${name}-db`, `playground-${name}-redis`].filter((c) => !live(c))
 }
 
-// One worktree a closed session used, cleaned once its work is saved, a hold by its PR's number alone from another session of that PR (the merging worker, a sibling checker) not counting: a Playground worktree's dev stack stopped, the worktree moved to the trash by playground rm (which refuses one a live session or a process holds), then its containers removed by exact name; another repo's worktree removed by git with no force flag, then pruned; then its branch deleted. The line saying what went, or why it stayed.
+// One worktree a closed session used, cleaned once its work is saved, a hold by its PR's number alone from another session of that PR (the merging worker, a sibling checker) not counting, and a commit pushed counts as saved (a PR's head GitHub keeps after its branch is deleted on merge): a Playground worktree's dev stack stopped, the worktree moved to the trash by playground rm (which refuses one a live session or a process holds), then its containers removed by exact name; another repo's worktree removed by git with no force flag, then pruned; then its branch deleted. The line saying what went, or why it stayed.
 export async function cleanWorktree(
   path: string,
   reason: string,
   deps: CleanupDeps,
-  pr?: string,
+  { pr, pushed }: { pr?: string; pushed?: string } = {},
 ): Promise<string> {
   const [gitDir, commonDir] = (
     (await deps.git(path, [
@@ -266,7 +266,14 @@ export async function cleanWorktree(
   const status = await deps.git(path, ["status", "--porcelain"])
   if (status === null) return `kept ${path}: could not read its git status`
   if (status) return `kept ${path}: uncommitted work`
-  const ahead = await deps.git(path, ["rev-list", "--count", "HEAD", "--not", "--remotes"])
+  const ahead = await deps.git(path, [
+    "rev-list",
+    "--count",
+    "HEAD",
+    "--not",
+    "--remotes",
+    ...(pushed ? [pushed] : []),
+  ])
   if (ahead === null) return `kept ${path}: could not count its unpushed commits`
   if (Number(ahead) > 0) return `kept ${path}: unpushed commits`
   const repo = dirname(commonDir)
@@ -361,7 +368,7 @@ export const cleanupLive =
     if (!deps) return ["could not find the main checkout, so nothing was cleaned"]
     const lines: string[] = []
     for (const dir of dirs)
-      lines.push(await cleanWorktree(dir, `${target.name} ended`, deps, target.pr))
+      lines.push(await cleanWorktree(dir, `${target.name} ended`, deps, { pr: target.pr }))
     return lines
   }
 

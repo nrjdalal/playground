@@ -21,6 +21,7 @@ import {
   type Pr,
   type Prs,
   pruneTurbo,
+  readPrs,
   staleBranches,
   staleContainers,
   staleVolumes,
@@ -41,11 +42,7 @@ const scratch = (): string => {
   return root
 }
 
-const pr = (state: Pr["state"], headRefOid = "h1", number = 1): Pr => ({
-  headRefOid,
-  number,
-  state,
-})
+const pr = (state: Pr["state"], headRefOid = "h1"): Pr => ({ headRefOid, state })
 const prsOf = (byBranch: Record<string, Pr>, byNumber: Record<number, Pr> = {}): Prs => ({
   byBranch: new Map(Object.entries(byBranch)),
   byNumber: new Map(Object.entries(byNumber).map(([n, p]) => [Number(n), p])),
@@ -144,10 +141,7 @@ test("branches: merged ones and a done PR's still at its head go, the rest are a
   })
   expect(plan).toEqual({
     decide: ["PG-3-ahead", "scratch"],
-    local: [
-      { force: false, name: "PG-1-merged" },
-      { force: true, name: "PG-2-squashed" },
-    ],
+    local: ["PG-1-merged", "PG-2-squashed"],
     remote: ["PG-7-remote"],
   })
 })
@@ -179,13 +173,35 @@ test("containers: an exited worktree container whose folder is gone goes; the li
 test("volumes no container uses that hold over 1 GB are asked, and an unreadable df asks none", () => {
   const df = JSON.stringify({
     Volumes: [
-      { Links: 0, Name: "big-unused", Size: "2.5GB" },
-      { Links: 1, Name: "big-used", Size: "9GB" },
-      { Links: 0, Name: "small", Size: "20MB" },
+      { Links: "0", Name: "big-unused", Size: "2.5GB" },
+      { Links: "1", Name: "big-used", Size: "9GB" },
+      { Links: "0", Name: "small", Size: "20MB" },
     ],
   })
   expect(staleVolumes(df)).toEqual(["big-unused"])
   expect(staleVolumes("not json")).toEqual([])
+})
+
+test("gh's PR answer reads from its stdout line alone, a number that is no PR skipped and its errors and stderr line no bar", () => {
+  const prs = prsOf({})
+  const out = [
+    JSON.stringify({
+      data: {
+        repository: {
+          b0: { nodes: [{ headRefOid: "h1", state: "MERGED" }] },
+          b1: { nodes: [] },
+          n0: null,
+          n1: { headRefOid: "h2", state: "CLOSED" },
+        },
+      },
+      errors: [{ message: "Could not resolve to a PullRequest with the number of 939." }],
+    }),
+    "gh: Could not resolve to a PullRequest with the number of 939.",
+  ].join("\n")
+  expect(readPrs(out, ["PG-1-a", "no-pr"], [939, 12], prs)).toBe(true)
+  expect([...prs.byBranch]).toEqual([["PG-1-a", { headRefOid: "h1", state: "MERGED" }]])
+  expect([...prs.byNumber]).toEqual([[12, { headRefOid: "h2", state: "CLOSED" }]])
+  expect(readPrs("gh: HTTP 502", [], [], prsOf({}))).toBe(false)
 })
 
 test("the trash count adds each purge line's batches after the last run", () => {
@@ -290,7 +306,10 @@ describe("one night's run against a fixture data folder", () => {
         runs.push(argv)
         if (stdin) inputs.push(stdin)
         const key = Object.keys(all).find((k) => argv.join(" ").includes(k))
-        return { code: 0, out: key ? all[key]! : "" }
+        // bun run's "$ bun ..." line on stderr, which a real run joins after stdout, unless --silent
+        const echo =
+          argv[0] === "bun" && argv[1] === "run" && !argv.includes("--silent") ? "\n$ bun ask" : ""
+        return { code: 0, out: `${key ? all[key]! : ""}${echo}` }
       },
       send: async () => true,
     }
@@ -301,7 +320,7 @@ describe("one night's run against a fixture data folder", () => {
         if (args[0] === "rev-parse") return `${dir}/.git\n${main}/.git`
         if (args[0] === "symbolic-ref") return `PG-${dir.slice(-1)}`
         if (args[0] === "status") return dir.endsWith("pg-2") ? " M wip.ts" : ""
-        if (args[0] === "rev-list") return "0"
+        if (args[0] === "rev-list") return args.includes("h1") ? "0" : "3"
         return ""
       },
       held: async (path) =>
@@ -340,7 +359,7 @@ describe("one night's run against a fixture data folder", () => {
     expect(log).not.toContain(wt("pg-3"))
     expect(log).toContain(`decision ${ID}: 1 targets`)
     expect(runs.map((r) => r.join(" "))).toContain("docker rm -fv playground-gone-db")
-    expect(runs.map((r) => r.join(" "))).toContain(`git -C ${ctx.repo} branch -d PG-9-done`)
+    expect(runs.map((r) => r.join(" "))).toContain(`git -C ${ctx.repo} branch -D PG-9-done`)
     expect(runs.map((r) => r.join(" "))).toContain(
       `git -C ${ctx.repo} push -q origin --delete PG-8-gone`,
     )
@@ -360,7 +379,7 @@ describe("one night's run against a fixture data folder", () => {
       decision: { id: OLD, targets: [] },
     }))
     await nightlyClean(deps)(ctx)
-    expect(runs.map((r) => r.slice(4).join(" "))).toContain(
+    expect(runs.map((r) => r.slice(5).join(" "))).toContain(
       `ask settle ${OLD} --note Carried into the next night's decision, ${ID}`,
     )
   })
@@ -378,7 +397,7 @@ describe("one night's run against a fixture data folder", () => {
     }))
     await nightlyClean(denied.deps)(denied.ctx)
     const asked = denied.runs.map((r) => r.join(" "))
-    expect(asked).toContain(`bun run --cwd ${denied.ctx.repo} ask get ${OLD} --ack`)
+    expect(asked).toContain(`bun run --silent --cwd ${denied.ctx.repo} ask get ${OLD} --ack`)
     expect(denied.inputs.some((i) => JSON.parse(i).kind === "decision")).toBe(false)
     const kept = JSON.parse(readFileSync(join(denied.ops, "tick", "nightly-clean.json"), "utf8"))
     expect(kept.denied).toEqual([`worktree ${denied.wt("pg-2")}`])

@@ -662,6 +662,18 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(branches(main)).toContain("PG-1-thing")
   })
 
+  test("a commit on no remote ref counts as pushed once named as a PR's head GitHub keeps, as after a merge deletes its branch", async () => {
+    const { main, wt } = machine()
+    const { deps } = fakes(main, [])
+    writeFileSync(join(wt, "wip.txt"), "x\n")
+    run(wt, "git", "add", "wip.txt")
+    run(wt, "git", "commit", "-qm", "wip")
+    const head = Bun.spawnSync(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.toString().trim()
+    expect(await cleanWorktree(wt, "r ended", deps, { pushed: head })).toBe(
+      `removed ${wt}, branch PG-1-thing`,
+    )
+  })
+
   test("a worktree playground rm refuses is kept with its refusal, and its containers and branch stay", async () => {
     const { main, wt } = machine()
     const refusal = `${wt} is held by pid 7 (zsh) working in ${wt}`
@@ -706,7 +718,9 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
         return { ok: true, out: "" }
       },
     })
-    expect(await cleanWorktree(wt, "r ended", deps, url)).toBe(`removed ${wt}, branch PG-1-thing`)
+    expect(await cleanWorktree(wt, "r ended", deps, { pr: url })).toBe(
+      `removed ${wt}, branch PG-1-thing`,
+    )
     expect(asked).toEqual([url, url])
   })
 
