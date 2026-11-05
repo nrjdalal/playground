@@ -16,6 +16,7 @@ import {
   focusPath,
   runFocus,
   standing,
+  UPKEEP,
   waits,
 } from "../../../../../packages/scripts/src/playground/focus"
 import {
@@ -109,6 +110,33 @@ describe("playground focus", () => {
     expect(readdirSync(m.data).some((f) => f.startsWith("focus.json.ended-"))).toBe(true)
   })
 
+  test("on with an unreadable held-prs.json fails and leaves no part standing", async () => {
+    const m = machine()
+    writeFileSync(m.deps.heldPath, "not json")
+    expect(await on(m.deps)).toBe(1)
+    expect(printed.join("\n")).toContain("focus is off, since merges could not be held")
+    expect(readdirSync(join(m.data, "ops"))).not.toContain("run-slot.focus")
+    expect(existsSync(focusPath(m.data))).toBe(false)
+  })
+
+  test("off with an unreadable held-prs.json still lifts the switch and sets focus.json aside, and says the hold stays", async () => {
+    const m = machine()
+    await on(m.deps)
+    writeFileSync(m.deps.heldPath, "not json")
+    expect(await runFocus(["off"], m.deps)).toBe(1)
+    expect(printed.join("\n")).toContain("focus's merge hold stays")
+    expect(readdirSync(join(m.data, "ops"))).not.toContain("run-slot.focus")
+    expect(await standing(m.data, NOW)).toBeUndefined()
+  })
+
+  test("off says a ship's freeze it leaves still holds merges", async () => {
+    const m = machine()
+    await on(m.deps)
+    await startFreeze(m.deps.heldPath, "v1.2.3", NOW)
+    expect(await runFocus(["off"], m.deps)).toBe(0)
+    expect(printed.join("\n")).toContain('merges stay held by another "*" line')
+  })
+
   test("lapsed at its end, the merge hold and the standing focus hold nothing, with no off", async () => {
     const m = machine()
     await on(m.deps)
@@ -119,6 +147,9 @@ describe("playground focus", () => {
   })
 
   test("off names the measured waits of every run but the focus session's and ops' upkeep", async () => {
+    const dead = Bun.spawn(["true"])
+    await dead.exited
+    const gone = dead.pid
     const end = new Date(NOW.getTime() + 10 * MIN)
     const m = machine()
     await on(m.deps)
@@ -131,7 +162,9 @@ describe("playground focus", () => {
         `${at(2)} start worker-a 11 run-slot waited=420s`,
         `${at(1)} ask worker-b 12 bun run test`,
         `${at(4)} start worker-b 12 run-slot waited=180s`,
-        `${at(3)} ask worker-c 13 bun install`,
+        `${at(3)} ask worker-c ${process.pid} bun install`,
+        `${at(-30)} ask worker-e ${process.pid} bun run build`,
+        `${at(5)} ask worker-g ${gone} bun run build`,
         `${at(1)} ask worker-f 14 bun run build`,
         `${at(1)} ask ops-tick 15 bun install`,
         `${at(-9)} ask worker-d 16 true`,
@@ -139,11 +172,16 @@ describe("playground focus", () => {
       ].join("\n"),
     )
     expect(await runFocus(["off"], { ...m.deps, now: () => end })).toBe(0)
-    // worker-a 2 minutes inside focus, worker-b 3 and worker-c 7 to off: 3 runs, 12 minutes
+    // worker-a 2 minutes inside focus, worker-b 3 and worker-c, still waiting, 7 to off: 3 runs, 12 minutes; worker-e asked before focus and worker-g's waiter is gone, each with no start or end line, so neither counts
     expect(printed.at(-1)).toBe(
-      "focus ended for worker-f: 3 runs waited 12m0s in all (measured from run-slot.runs.log)",
+      "focus ended for worker-f: 3 runs queued while it stood, 12m0s in all (measured from run-slot.runs.log)",
     )
   })
+})
+
+test("the upkeep sessions focus leaves out of its count are the ones run-slot.sh never holds", () => {
+  const holds = readFileSync(SCRIPT, "utf8").match(/case "\$WHO" in "\$h" \| (.*)\) return 1/)?.[1]
+  expect(holds?.split(" | ").toSorted()).toEqual(UPKEEP)
 })
 
 describe("focus's merge hold beside a ship's freeze", () => {

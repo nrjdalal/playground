@@ -9,7 +9,7 @@ import { endFocus, startFocus } from "../pr-merge/held"
 export const MAX_MINUTES = 180
 const DEFAULT_MINUTES = 120
 // ops' upkeep, which focus never holds (run-slot.sh's focus_holds names the same two)
-const UPKEEP = ["ops-dashboard", "ops-tick"]
+export const UPKEEP = ["ops-dashboard", "ops-tick"]
 
 export type Focus = { reason: string; session: string; since: string; until: string }
 
@@ -40,8 +40,23 @@ export async function standing(data: string, now: Date): Promise<Focus | undefin
 
 const stamp = (at: Date) => at.toISOString().replace(/[-:]/g, "").slice(0, 13) + "Z"
 
-// Every run but the focus session's and ops' upkeep that waited in run-slot while focus stood, read from run-slot.runs.log's ask and start lines: how many, and their waits' seconds inside the focus window in all
-export function waits(log: string, focus: Focus, end: Date): { runs: number; seconds: number } {
+// Whether pid runs, for an ask the log closes with no start or end line
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Every run but the focus session's and ops' upkeep that queued in run-slot while focus stood, read from run-slot.runs.log's ask, start and end lines: how many, and their waits' seconds inside the focus window in all. An ask with neither line counts only when it came inside the window and its waiter still runs, since a waiter killed in the queue writes neither.
+export function waits(
+  log: string,
+  focus: Focus,
+  end: Date,
+  running: (pid: number) => boolean = alive,
+): { runs: number; seconds: number } {
   const from = Date.parse(focus.since)
   const to = Math.min(end.getTime(), Date.parse(focus.until))
   const asked = new Map<string, number>()
@@ -58,6 +73,7 @@ export function waits(log: string, focus: Focus, end: Date): { runs: number; sec
   let runs = 0
   let ms = 0
   for (const [run, at] of asked) {
+    if (!waited.has(run) && (at < from || !running(Number(run.split(" ")[1])))) continue
     const overlap = Math.min(waited.get(run) ?? to, to) - Math.max(at, from)
     if (overlap <= 0) continue
     runs++
@@ -92,7 +108,13 @@ const on = async (args: string[], deps: FocusDeps): Promise<number> => {
   const until = new Date(now.getTime() + minutes * 60_000)
   const slot = deps.runSlot(["set", session, "focus", "--reason", reason, "--for", `${minutes}m`])
   if (slot.code !== 0) return fail(`run-slot.sh set refused focus: ${slot.err.trim()}`)
-  const merges = await startFocus(deps.heldPath, session, until)
+  let merges: { kept: boolean; line: string }
+  try {
+    merges = await startFocus(deps.heldPath, session, until)
+  } catch (error) {
+    await lift(deps.data, now)
+    return fail(`focus is off, since merges could not be held: ${(error as Error).message}`, 1)
+  }
   const focus: Focus = { reason, session, since: now.toISOString(), until: until.toISOString() }
   await Bun.write(focusPath(deps.data), `${JSON.stringify(focus, null, 2)}\n`)
   console.log(
@@ -101,30 +123,40 @@ const on = async (args: string[], deps: FocusDeps): Promise<number> => {
   return 0
 }
 
+// run-slot.focus lifted through the .lifted move, when it stands
+const lift = async (data: string, now: Date) => {
+  const path = join(data, "ops", "run-slot.focus")
+  if (await Bun.file(path).exists()) await rename(path, `${path}.lifted-${stamp(now)}`)
+}
+
 const off = async (deps: FocusDeps): Promise<number> => {
   const now = deps.now()
   const focus = await readFocus(deps.data)
-  await endFocus(deps.heldPath)
-  const ops = join(deps.data, "ops")
-  const switchFile = join(ops, "run-slot.focus")
-  if (await Bun.file(switchFile).exists())
-    await rename(switchFile, `${switchFile}.lifted-${stamp(now)}`)
+  await lift(deps.data, now)
+  if (focus) await rename(focusPath(deps.data), `${focusPath(deps.data)}.ended-${stamp(now)}`)
+  let merges: "kept" | "none" | "removed"
+  try {
+    merges = await endFocus(deps.heldPath)
+  } catch (error) {
+    return fail(`focus's merge hold stays: ${(error as Error).message}`, 1)
+  }
+  if (merges === "kept")
+    console.log(`focus: merges stay held by another "*" line in ${deps.heldPath}`)
   if (!focus) {
     console.log("focus: none stands")
     return 0
   }
-  await rename(focusPath(deps.data), `${focusPath(deps.data)}.ended-${stamp(now)}`)
-  const log = Bun.file(join(ops, "run-slot.runs.log"))
+  const log = Bun.file(join(deps.data, "ops", "run-slot.runs.log"))
   const { runs, seconds } = waits((await log.exists()) ? await log.text() : "", focus, now)
   console.log(
-    `focus ended for ${focus.session}: ${runs} runs waited ${Math.floor(seconds / 60)}m${seconds % 60}s in all (measured from run-slot.runs.log)`,
+    `focus ended for ${focus.session}: ${runs} runs queued while it stood, ${Math.floor(seconds / 60)}m${seconds % 60}s in all (measured from run-slot.runs.log)`,
   )
   return 0
 }
 
-const fail = (why: string) => {
+const fail = (why: string, code = 2) => {
   console.error(`playground: ${why}`)
-  return 2
+  return code
 }
 
 export async function runFocus([verb, ...args]: string[], deps: FocusDeps): Promise<number> {

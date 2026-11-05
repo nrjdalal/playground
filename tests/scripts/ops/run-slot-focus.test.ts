@@ -2,7 +2,7 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, machine } from "./run-slot-fake"
+import { SCRIPT, WAITING, machine, stop } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -37,6 +37,15 @@ describe("run-slot.focus", () => {
     expect(await m.waits("worker-x", { RUN_SLOT_SIZE: "small" })).toBe(true)
     expect(await m.runs("worker-f", { RUN_SLOT_SIZE: "small" })).toBe(true)
     expect(await m.runs("ops-tick", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+
+  test("on, the focus session's run starts while an older run of another session waits in the queue", async () => {
+    const m = machine()
+    await set(m, "worker-f", "focus", "--for", "30m", "--reason", "demo")
+    const older = m.start("worker-x", { RUN_SLOT_SIZE: "small" })
+    expect(await older.saw(WAITING)).toBe(true)
+    expect(await m.runs("worker-f", { RUN_SLOT_SIZE: "small" })).toBe(true)
+    await stop(older.p)
   })
 
   test("off, lifted through the .lifted move, the heavy run goes on", async () => {

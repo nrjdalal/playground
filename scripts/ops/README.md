@@ -97,7 +97,9 @@ How to read an account's week for the factory's **usage** rule (`extensions/core
 ## Ops switches
 
 An ops switch is a file under the state folder that bends run-slot while it stands: `run-slot.3-off`, `run-slot.4-off`, `run-slot.clone-off`, `run-slot.focus`, `run-slot.load5-cap`, `run-slot.single`, `runner-host/off` and `runner-host/slot-off`.
-`run-slot.focus`, which `playground focus on` sets (playbook's LIFECYCLE.md), names its session as `<who>` and stands 180 minutes at most: while it stands that session is the `run-slot.priority` pick whatever the priority file says, and every other session's run waits in the queue, its commit build, merge or clone included, while the quick slot's short runs, `ops-tick`'s and `ops-dashboard`'s runs go on.
+`run-slot.focus`, which `playground focus on` sets (playbook's LIFECYCLE.md), names its session as `<who>` and stands 180 minutes at most: while it stands that session is the `run-slot.priority` pick whatever the priority file says, and every other session's heavy run in this Mac's queue waits, its commit build, merge or clone lane included.
+The quick slot's short runs, a runner-host box run, a `--model-bound` run, and `ops-tick`'s and `ops-dashboard`'s runs go on.
+`playground focus off` ends it, lifting the switch with the merge hold and `focus.json`, so lift it that way rather than by a move or a fresh `set`.
 Turn one on with `run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]`, its switch named without the `run-slot.` or `runner-host/` prefix (`run-slot.sh set ops slot-off --reason "box queue 17 deep" --for 2h`); a set with no reason is refused.
 It writes `<who> <iso set> <iso expiry> <reason>`, with the value on the line below: for `load5-cap`, the highest load5 (the third field of `sysctl -n vm.loadavg`) `run-slot-2` opens under in single-slot mode, 22 at most, and the default expiry is 4 hours.
 Every run-slot run drops each switch past its expiry, moving it to `<name>.expired-<ts>` with an `expire` line in `run-slot.runs.log`, so the readers that only look for the file (the merge train, Checks, the leads' sweep) find it gone too.

@@ -98,7 +98,7 @@ No factory session blocks on him: one that posted a decision carries on or ends 
 For a focused stretch, such as a timed test, a demo or an hour of deep work, `playground focus on --session <name> --reason "<why>"` gives one session the Mac for up to 180 minutes.
 While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep keeps running.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
-`playground focus off` ends it early and says how many runs waited and for how long.
+`playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
 
 ## Tickets
 
