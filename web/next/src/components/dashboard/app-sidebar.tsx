@@ -65,6 +65,7 @@ import {
 
 import { countLabel } from "@/components/dashboard/count-badge"
 import { useDashboard } from "@/components/dashboard/dashboard"
+import { TemplatePicker } from "@/components/dashboard/template-picker"
 import { StatusIcon } from "@/components/dashboard/worker-light"
 import { Hint, OFF_FOCUSABLE } from "@/components/hint"
 import { GroupCount } from "@/components/shell/group-count"
@@ -634,8 +635,16 @@ export function DashboardDispatchers({ rows = 1 }: { rows?: number }) {
               read={read}
             />
           ) : undefined
+        // Alpha's plus, in its effort's place, starts a session from a template
+        const action =
+          i === 0 && !muted ? (
+            <TemplatePicker
+              className={cn("right-1.5", TOGGLE_SHOWN)}
+              secondRunning={shown.slots.slice(1).some((slot) => slot.worker)}
+            />
+          ) : undefined
         return worker ? (
-          row(worker, [], view, muted, { label, trailing })
+          row(worker, [], view, muted, { action, label, trailing })
         ) : (
           <NoDispatcherRow
             key={name || i}
@@ -778,7 +787,7 @@ function MemberRow({
 const TOGGLE_SHOWN =
   "peer-data-active/menu-button:text-sidebar-accent-foreground md:opacity-0 md:group-hover/menu-item:opacity-100 md:group-has-[:focus-visible]/menu-item:opacity-100 group-data-[open]/menu-item:opacity-100"
 const EFFORT_HIDDEN =
-  "max-md:invisible md:group-hover/menu-item:invisible md:group-has-[:focus-visible]/menu-item:invisible group-data-[open]/menu-item:invisible"
+  "max-md:invisible md:group-hover/menu-item:invisible md:group-has-[:focus-visible]/menu-item:invisible group-data-[open]/menu-item:invisible group-has-data-[popup-open]/menu-item:invisible"
 
 const MODEL_ICON = "text-muted-foreground flex shrink-0 group-data-[collapsible=icon]:hidden"
 
@@ -872,6 +881,7 @@ export type RowMember = {
 function SessionRowView({
   agent = null,
   close,
+  action,
   drag,
   label,
   light,
@@ -890,6 +900,8 @@ function SessionRowView({
   waitsOn = null,
   worker,
 }: {
+  // a button in its effort's place, shown as a toggle is (Alpha's plus, TemplatePicker)
+  action?: React.ReactNode
   agent?: Agent | null
   close: () => void
   // a dispatcher's name on its row (dispatcherRowLabel), which leads in place of its title
@@ -1018,7 +1030,11 @@ function SessionRowView({
         </span>
       </Hint>
       {trailing}
-      <ModelIcons effort={worker.effort} model={worker.model} toggles={expandable} />
+      <ModelIcons
+        effort={worker.effort}
+        model={worker.model}
+        toggles={expandable || Boolean(action)}
+      />
     </SidebarMenuButton>
   )
   return (
@@ -1040,6 +1056,7 @@ function SessionRowView({
       ) : (
         row
       )}
+      {action}
       {expandable && (
         <Chevron label={`${open ? "Hide" : "Show"} ${what}`} onClick={onToggle} open={open} />
       )}
@@ -1582,6 +1599,7 @@ function useSessionRows(source?: SidebarSource) {
     view?: string,
     muted = false,
     extra: {
+      action?: React.ReactNode
       label?: string
       manager?: { drag: RowDrag; move: RowMove }
       trailing?: React.ReactNode
@@ -1589,6 +1607,7 @@ function useSessionRows(source?: SidebarSource) {
   ) => (
     <SessionRow
       key={worker.sessionId}
+      action={extra.action}
       drag={extra.manager?.drag}
       move={extra.manager?.move}
       agent={agentOf(worker)}
