@@ -520,6 +520,7 @@ function RevealField({ id }: { id: string }) {
         </code>
         <Button
           size="sm"
+          type="button"
           variant="outline"
           onClick={() => (value === null ? void reveal(setValue) : setValue(null))}
         >
@@ -532,6 +533,7 @@ function RevealField({ id }: { id: string }) {
         </Button>
         <Button
           size="sm"
+          type="button"
           variant="outline"
           onClick={() => void reveal((got) => copyToClipboard(got, "Copied"))}
         >
