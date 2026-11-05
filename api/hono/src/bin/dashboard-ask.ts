@@ -191,13 +191,18 @@ if (command === "new" || command === "edit") {
     )
   input = fillNow(input, now, zone)
   // a ship decision's PRs link into the factory's repo (factory.repo, else this checkout's origin), so the owner opens each from the card
-  const origin = Bun.spawnSync(["git", "remote", "get-url", "origin"], { stderr: "ignore" })
+  const factory = factorySettings.get(
+    policy.refusal === undefined ? policy.settings : { schemaVersion: 1, values: {} },
+    "factory.repo",
+  )
   input = linkShipPrs(
     input,
-    factorySettings.get(
-      policy.refusal === undefined ? policy.settings : { schemaVersion: 1, values: {} },
-      "factory.repo",
-    ) || repoOfRemote(origin.stdout.toString()),
+    factory ||
+      repoOfRemote(
+        Bun.spawnSync(["git", "remote", "get-url", "origin"], {
+          stderr: "ignore",
+        }).stdout.toString(),
+      ),
   )
   // a delete names its targets by full path, the one playground rm --decision matches, so the owner approves it once
   const main = mainCheckoutOf(process.cwd())

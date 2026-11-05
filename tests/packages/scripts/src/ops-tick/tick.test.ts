@@ -1254,7 +1254,7 @@ describe("relay watch", () => {
       kind: "update",
       preview: {
         outcome: "alert",
-        text: expect.stringContaining("[System page](/dashboard/system)"),
+        text: "- 🔎 The relay's row is runner-plain-relay under AI Runners in the sidebar, and this Mac's state is on the [System page](/dashboard/system).",
       },
       title: `The ops relay is down: no ops line has gone out since ${at(14, 7)
         .toISOString()
@@ -1303,6 +1303,9 @@ describe("relay watch", () => {
       `Ops' sweep is late: no ops line has gone out since ${iso(at(14, 7))}. Ops runs its sweep, whose step 2 runs ops:outbox.`,
     )
     expect(title).not.toContain("runner-plain-relay")
+    expect(JSON.parse(late.asks[0]!.stdin!).preview.text).toBe(
+      "- 🔎 Ops' row is under Orchestrators in the sidebar, since its sweep relays here, and this Mac's state is on the [System page](/dashboard/system).",
+    )
     expect(late.sent).toEqual([])
   })
 

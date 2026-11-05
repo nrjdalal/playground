@@ -509,7 +509,7 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
                     href={pr.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="hover:underline"
+                    className="text-primary font-medium underline"
                   >
                     #{pr.number}
                   </a>

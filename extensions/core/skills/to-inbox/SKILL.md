@@ -58,15 +58,15 @@ On an update, Done types you `done` and Dismiss `dismiss`: post a new card for m
 
    A decision that needs more than one answer asks them as numbered questions, the most important first, one idea each, with a one-line why only where a question could be misread.
 
-4. **Links.** Link each PR, ticket, commit, chat thread, doc and page the item names, in markdown, so the owner opens it from the card; an Inbox ref (`#iN`) stays as written, since the card links it itself. Done when each one the item names is a link.
+4. **Links.** Link each PR, ticket, commit, chat thread, doc and page the item names, in markdown, so the owner opens it from the card; an Inbox ref (`#iN`) stays as written, since the owner finds that item in the same Inbox. Done when each one the item names is a link.
 
-   | It names                  | Its link                                                                                                        |
-   | ------------------------- | --------------------------------------------------------------------------------------------------------------- |
-   | A Playground PR           | `[#N](https://github.com/<factory.repo>/pull/N)`, the repo `playground settings get factory.repo` names         |
-   | Another repo's PR, commit | `[#N](https://github.com/<owner>/<repo>/pull/N)`, ``[`<sha>`](https://github.com/<owner>/<repo>/commit/<sha>)`` |
-   | A ticket or a chat thread | its page in the org's tracker or chat, in the link form the org's extension gives                               |
-   | A dashboard page          | its path alone, `[System page](/dashboard/system)`, which the card opens on the dashboard's own host            |
-   | A file in a repo          | its GitHub page at a commit, `https://github.com/<owner>/<repo>/blob/<sha>/<path>`                              |
+   | It names                  | Its link                                                                                                                                                                                    |
+   | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | A Playground PR           | `[#N](https://github.com/<factory.repo>/pull/N)`, the repo `playground settings get factory.repo` names                                                                                     |
+   | Another repo's PR, commit | `[#N](https://github.com/<owner>/<repo>/pull/N)`, ``[`<sha>`](https://github.com/<owner>/<repo>/commit/<sha>)``                                                                             |
+   | A ticket or a chat thread | its page in the org's tracker or chat, in the link form the org's extension gives                                                                                                           |
+   | A dashboard page          | in an Inbox card or the dashboard's chat, its path alone, `[System page](/dashboard/system)`, which opens on the dashboard's own host; in a Slack or Yard message, the page's name in words |
+   | A file in a repo          | its GitHub page at a commit, `https://github.com/<owner>/<repo>/blob/<sha>/<path>`                                                                                                          |
 
 5. **Plain words.** Write every sentence in ASD-STE100 Simplified Technical English, in the words of `GLOSSARY.md`. Done when each sentence passes all six:
    - It is 20 words or fewer.

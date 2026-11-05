@@ -599,10 +599,13 @@ const neverRanSince = async (ctx: Context, outbox: string): Promise<string | und
   return ctx.now.toISOString()
 }
 
-// Each alert's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
+// The week-usage alert's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
 export const USAGE_LINK = "- 💰 Each account's week shows on the [System page](/dashboard/system)."
-export const RELAY_LINK =
-  "- 🔎 The relay's job shows under Scripts in the sidebar, and this Mac's state on the [System page](/dashboard/system)."
+// Pure: the relay-down alert's link line, naming the row that relays on this machine: the relay runner under AI Runners, else Ops under Orchestrators, whose sweep relays.
+export const relayLink = (relay: boolean): string =>
+  relay
+    ? `- 🔎 The relay's row is ${RELAY} under AI Runners in the sidebar, and this Mac's state is on the [System page](/dashboard/system).`
+    : "- 🔎 Ops' row is under Orchestrators in the sidebar, since its sweep relays here, and this Mac's state is on the [System page](/dashboard/system)."
 
 // The Inbox alert's title: the relay's own on a machine that runs it, else the sweep's, each with the next step and naming only what this machine runs.
 const relayDown = (relay: boolean, moved: number): string => {
@@ -656,7 +659,7 @@ const relayWatch = async (ctx: Context) => {
   }
   const relay = await hasRelay(ctx)
   if (ctx.now.getTime() - since < 2 * (relay ? RELAY_CYCLE_MS : SWEEP_CYCLE_MS)) return
-  const { by, id } = await postAlert(ctx, relayDown(relay, moved), RELAY_LINK)
+  const { by, id } = await postAlert(ctx, relayDown(relay, moved), relayLink(relay))
   await writeAtomic(
     statePath,
     JSON.stringify({ at: ctx.now.toISOString(), by, id, pendingSince: state?.pendingSince }),
