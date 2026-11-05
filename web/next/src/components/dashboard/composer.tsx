@@ -341,14 +341,19 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                           Replying to <span className="font-mono">{itemTag(reply)}</span> ·{" "}
                           {reply.title}
                         </span>
+                        {/* the badge's own size-3 icon in its own tone at both ends, the close a round ghost icon button that fits the badge's line */}
                         {picked && (
-                          <button
-                            type="button"
-                            aria-label={`Stop replying to ${itemTag(reply)}`}
-                            onClick={() => setReply(null)}
-                          >
-                            <RiCloseLine aria-hidden />
-                          </button>
+                          <Hint content={`Stop replying to ${itemTag(reply)}`}>
+                            <InputGroupButton
+                              aria-label={`Stop replying to ${itemTag(reply)}`}
+                              size="icon-xs"
+                              variant="ghost"
+                              className="hover:bg-foreground/10 dark:hover:bg-foreground/10 -mr-1 size-4 rounded-full"
+                              onClick={() => setReply(null)}
+                            >
+                              <RiCloseLine className="size-3" aria-hidden />
+                            </InputGroupButton>
+                          </Hint>
                         )}
                       </Badge>
                     )}
