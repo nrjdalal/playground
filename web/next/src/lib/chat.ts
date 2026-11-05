@@ -2,6 +2,7 @@
 
 import { Chat } from "@ai-sdk/react"
 import type { Entry, EntryAttachment, Worker } from "@api/hono"
+import { markerOf } from "@packages/config/threads"
 import { useQueryClient } from "@tanstack/react-query"
 import type { ChatTransport, DynamicToolUIPart, FileUIPart, UIMessage, UIMessageChunk } from "ai"
 import {
@@ -178,6 +179,14 @@ export const attachmentsOf = (message: DashboardMessage): EntryAttachment[] =>
 // Pure: the words of a message, its text parts joined.
 export const textOf = (message: DashboardMessage): string =>
   message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n\n")
+
+// Pure: the line a folded message's row shows, its first line holding words, trimmed, with a leading thread marker dropped.
+export const firstLineOf = (text: string): string =>
+  (
+    markerOf(text)
+      .text.split(/\r?\n/)
+      .find((line) => line.trim()) ?? ""
+  ).trim()
 
 // Pure: the messages the outbox carries, in the order they were written.
 export const outboxOf = (messages: DashboardMessage[]): OutboxMessage[] =>

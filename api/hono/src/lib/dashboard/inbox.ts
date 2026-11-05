@@ -445,17 +445,19 @@ export type InboxStatus =
 
 export const ACTIONS = [
   "approve",
+  "archive",
   "clear",
   "deny",
   "discard",
+  "dismiss",
   "draft",
   "edit",
   "send",
   "unarchive",
 ] as const
 export type InboxAction = (typeof ACTIONS)[number]
-// What an answer holds: every action but Move to Inbox, which undoes a set-aside and leaves no answer.
-export type InboxChoice = Exclude<InboxAction, "unarchive">
+// What an answer holds: every action but Archive and Move back, which answer nothing, and Dismiss, which a waiting item records as clear.
+export type InboxChoice = Exclude<InboxAction, "archive" | "dismiss" | "unarchive">
 
 // ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, listed and opened: what the dashboard ran on an accept's, an apps change's and a grant's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
 export type InboxAnswer = {
@@ -463,6 +465,7 @@ export type InboxAnswer = {
   ackedAt?: string
   at: string
   choice: InboxChoice
+  dismissed?: true
   dismissedAt?: string
   editedText?: string
   link?: string
@@ -505,20 +508,22 @@ export type InboxSettled = {
   at: string
   by: string
   choice: "settled"
+  dismissed?: true
   dismissedAt?: string
   link?: string
   linkLabel?: string
   note?: string
 }
 
-// An update takes no answer, so its answer holds only when he dismissed it.
-export type InboxDismissed = { dismissedAt: string }
+// An update takes no answer, so its answer holds only when he sent it to Done, with dismissed when that was his Dismiss rather than his Done.
+export type InboxDismissed = { dismissed?: true; dismissedAt: string }
 
 // A reply he sent in chat naming the item (`re #iN`): when, and his words after the tag, so the card says what is being done; its poster's close adds where that landed, and his Dismiss when he cleared it.
 export type InboxReplied = {
   ackedAt?: string
   at: string
   choice: "replied"
+  dismissed?: true
   dismissedAt?: string
   link?: string
   linkLabel?: string
@@ -539,13 +544,21 @@ export const saidOf = (text: string): string | undefined => {
 }
 
 // The poster cleared its own alert update (`bun run ask resolve`), which had resolved itself: read, so nothing was left for him to dismiss.
-export type InboxResolved = { at: string; by: string; choice: "resolved"; note?: string }
+export type InboxResolved = {
+  at: string
+  by: string
+  choice: "resolved"
+  dismissed?: true
+  dismissedAt?: string
+  note?: string
+}
 
 // A secret ask he answered with its value, which went to its sink and is kept nowhere: when, and each environment's exit status (null: stopped by a signal), written once the sink has run; its poster's read closes it.
 export type InboxProvided = {
   ackedAt?: string
   at: string
   choice: "provided"
+  dismissed?: true
   dismissedAt?: string
   link?: string
   linkLabel?: string
@@ -555,8 +568,11 @@ export type InboxProvided = {
 // line: what the card shows in place of the exit status, "saved" or a refusal's first line, never the value
 export type SinkResult = { environment: string; exitCode: number | null; line?: string }
 
-// An open decision or draft he pushed out of his list until a time (Schedule); it asks again once the time passes.
+// An open decision or draft, or an update, he pushed out of his list until a time (Schedule); it asks again once the time passes.
 export type InboxScheduled = { snoozedUntil: string }
+
+// An open decision or draft, or an update, he archived: out of his list and its count, unanswered, its poster told nothing and still waiting, until he moves it back, puts it off until a time or dismisses it.
+export type InboxArchived = { archivedAt: string }
 
 // How the answer reached its poster, or the dispatcher when the poster had ended: typed into a session (to: the session that took it, absent on a row from before it was recorded), or read through bun run ask. queued: Claude Code holds it until the session is free (deliver.ts's QUEUED), under the delivery's id, which the dashboard reads again until it reads delivered, or failed as LOST.
 export type InboxDelivery =
@@ -579,20 +595,32 @@ type Common = {
 }
 
 type Answered = {
-  answer: InboxAnswer | InboxProvided | InboxReplied | InboxScheduled | InboxSettled | null
+  answer:
+    | InboxAnswer
+    | InboxArchived
+    | InboxProvided
+    | InboxReplied
+    | InboxScheduled
+    | InboxSettled
+    | null
 }
 
 export type InboxItem =
   | (Common & Answered & { kind: "decision"; preview: InboxPreview })
   | (Common & Answered & { kind: "draft"; preview: InboxDraft })
   | (Common & {
-      answer: InboxDismissed | InboxResolved | null
+      answer: InboxArchived | InboxDismissed | InboxResolved | InboxScheduled | null
       kind: "update"
       preview: InboxUpdate
     })
 
-// The list the dashboard shows, in the order it shows it, and the count on its Inbox tab; snoozed: the open items put away until a time still ahead, kept out of items, which every reader takes as awake, for the Inbox's Snoozed shelf alone.
-export type InboxList = { items: InboxItem[]; count: number; snoozed: InboxItem[] }
+// The list the dashboard shows, in the order it shows it, and the count on its Inbox tab; snoozed: the open items and updates put away until a time still ahead, and archived: those he archived, each kept out of items, which every reader takes as awake, for the Inbox's Snoozed and Archived shelves alone.
+export type InboxList = {
+  items: InboxItem[]
+  archived: InboxItem[]
+  count: number
+  snoozed: InboxItem[]
+}
 
 // What the dashboard posts for an item: the action, the words that go with Edit or with a draft changed before Send or Draft, and seen, the updatedAt of the card he answered, so an answer never lands on words its poster edited after he read them.
 export const answerInputSchema = z.strictObject({
@@ -659,6 +687,8 @@ function answerOf(
 ): { answer: Omit<InboxAnswer, "at">; status: InboxStatus } | { message: string } {
   if (item.kind === "update") return { message: "An update is read, not answered" }
   if (item.status !== "open") return { message: "This item is already answered" }
+  // Dismiss on what still waits sets it aside as the old `clear` did, its poster told so, and sends it to Done; a secret ask takes it too, since no value travels
+  if (action === "dismiss") return { answer: { choice: "clear" }, status: "cleared" }
   if (item.kind === "decision") {
     if (item.preview.type === "secret") {
       return { message: "A secret ask takes its value through its Submit alone" }
@@ -801,6 +831,75 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
   }
 }
 
+// Pure: what the owner's Dismiss on an answered card, or Done or Dismiss on an update, tells its poster: drop it. A card its poster has not closed names how to close it (a go with why it has no link, a reply by its ack, anything else by reading it), and an update, which the owner closed, takes no more edits.
+export function closedPayload(
+  item: InboxItem,
+  verb: "dismiss" | "done",
+  at: string,
+): AnswerPayload {
+  const tag = itemTag(item.ref)
+  const head = {
+    at,
+    go: false,
+    id: item.id,
+    kind: item.kind,
+    ref: tag,
+    title: item.title,
+    ...(item.kind === "decision" && { type: item.preview.type }),
+    v: 1 as const,
+    verb,
+  }
+  const answer = item.answer
+  if (
+    item.kind === "update" ||
+    !answer ||
+    !("choice" in answer) ||
+    ("ackedAt" in answer && answer.ackedAt)
+  ) {
+    return { ...head, next: "nothing" }
+  }
+  const close = isGo(answer.choice)
+    ? `bun run ask ack ${tag} --no-link "<why>"`
+    : answer.choice === "replied"
+      ? `bun run ask ack ${tag}`
+      : `bun run ask get ${tag} --ack`
+  return { ...head, close, next: "close" }
+}
+
+// Tells a poster the owner closed its card (closedPayload), recording how that went as an answer's delivery is; an update's poster that has ended is told nothing, since nothing waits on it, and a card its poster already closed or the owner already sent to Done types nothing again.
+async function tellClosed(
+  db: Database,
+  item: InboxItem,
+  verb: "dismiss" | "done",
+  before: InboxItem,
+  telling?: Telling,
+): Promise<InboxItem> {
+  if (!telling) return item
+  const answer = before.answer
+  if (answer && "ackedAt" in answer && answer.ackedAt) return item
+  if (before.kind === "update" && answer && "dismissedAt" in answer && answer.dismissedAt)
+    return item
+  if (
+    answer &&
+    "choice" in answer &&
+    (answer.choice === "resolved" || answer.choice === "settled")
+  ) {
+    return item
+  }
+  const payload = closedPayload(item, verb, telling.now.toISOString())
+  return send(
+    db,
+    item,
+    {
+      relay: answerLine({ ...payload, relay: { for: item.from, why: "poster-ended" } }),
+      text: answerLine(payload),
+    },
+    { ...telling, dispatcher: item.kind === "update" ? undefined : telling.dispatcher },
+  )
+}
+
+type Telling = Omit<Sending, "upload">
+
 // Pure: the one line typed into a session for an answer: ANSWER_LEAD, then the payload as JSON, whose escaped line ends keep it one line.
 export const answerLine = (payload: AnswerPayload): string =>
   `${ANSWER_LEAD} ${JSON.stringify(answerPayloadSchema.parse(payload))}`
@@ -889,14 +988,22 @@ export function filesToUpload(
   return place && { files: preview.attachments, place }
 }
 
-// Pure: when an open item is scheduled to ask again, while that time is still ahead; null once it is awake, and on anything not scheduled.
+// Pure: when an open item or an update is scheduled to ask again, while that time is still ahead; null once it is awake, and on anything not scheduled.
 export const snoozedUntil = (item: InboxItem, now: Date): string | null => {
-  if (item.status !== "open" || !item.answer || !("snoozedUntil" in item.answer)) return null
+  if (item.kind !== "update" && item.status !== "open") return null
+  if (!item.answer || !("snoozedUntil" in item.answer)) return null
   return new Date(item.answer.snoozedUntil) > now ? item.answer.snoozedUntil : null
 }
 
-// Pure: whether an item asks of him now rather than at a scheduled later time.
-export const awake = (item: InboxItem, now: Date): boolean => snoozedUntil(item, now) === null
+// Pure: when he archived an item he has not dismissed since; null on anything not archived.
+export const archivedAt = (item: InboxItem): string | null =>
+  item.answer && "archivedAt" in item.answer && !("dismissedAt" in item.answer)
+    ? item.answer.archivedAt
+    : null
+
+// Pure: whether an item asks of him now rather than at a scheduled later time, or once he moves it back from Archived.
+export const awake = (item: InboxItem, now: Date): boolean =>
+  snoozedUntil(item, now) === null && archivedAt(item) === null
 
 // Pure: the item's choice once its answer holds one; null before that, a Schedule put-away included, which is awake or asleep by its time alone.
 const choiceOf = (item: InboxItem): string | null =>
@@ -906,15 +1013,16 @@ const NEEDS_YOU = (item: InboxItem, now: Date): boolean =>
   awake(item, now) &&
   ((item.status === "open" && item.kind !== "update" && choiceOf(item) !== "replied") ||
     deliveryFailed(item))
-const UNREAD = (item: InboxItem): boolean => item.kind === "update" && item.readAt === null
+const UNREAD = (item: InboxItem, now: Date): boolean =>
+  item.kind === "update" && item.readAt === null && awake(item, now)
 
 // Pure: the count on the Inbox tab, the open decisions and drafts and the answers that did not reach their poster, plus the unread updates; a scheduled item counts once its time arrives.
 export const inboxCount = (items: InboxItem[], now = new Date()): number =>
-  items.filter((item) => NEEDS_YOU(item, now) || UNREAD(item)).length
+  items.filter((item) => NEEDS_YOU(item, now) || UNREAD(item, now)).length
 
 // Pure: the list in priority order: what needs him, then unread updates, then everything else, each newest first by when it was posted (#i545); a scheduled item sleeps in with the rest until its time.
 export function inboxOrder(items: InboxItem[], now = new Date()): InboxItem[] {
-  const rank = (item: InboxItem) => (NEEDS_YOU(item, now) ? 0 : UNREAD(item) ? 1 : 2)
+  const rank = (item: InboxItem) => (NEEDS_YOU(item, now) ? 0 : UNREAD(item, now) ? 1 : 2)
   return [...items].sort((a, b) => rank(a) - rank(b) || b.ref - a.ref || a.id.localeCompare(b.id))
 }
 
@@ -925,6 +1033,7 @@ const toItem = (row: Row): InboxItem =>
     answer:
       (row.answer as
         | InboxAnswer
+        | InboxArchived
         | InboxDismissed
         | InboxProvided
         | InboxReplied
@@ -975,7 +1084,16 @@ export async function postItem(
   return { item: toItem(row as Row), ok: true }
 }
 
-// The poster replaces its own open item's title and preview in place (`bun run ask edit`), checked as postItem checks a new one, so one card carries a progress to its end; an item put away with Snooze edits as an open one. Another session's item, a change of kind, an answered or closed item, one he replied to in chat and an update dismissed or resolved are refused.
+// Pure: an item its poster can no longer edit: done or dismissed by the owner, settled, resolved, or closed by its poster's ack.
+const closed = (item: InboxItem): boolean => {
+  const answer = item.answer
+  if (answer === null) return false
+  if ("dismissedAt" in answer && answer.dismissedAt) return true
+  if ("ackedAt" in answer && answer.ackedAt) return true
+  return "choice" in answer && (answer.choice === "resolved" || answer.choice === "settled")
+}
+
+// The poster replaces its own item's title and preview in place (`bun run ask edit`), checked as postItem checks a new one, so one card carries a progress to its end: an update until the owner presses Done or Dismiss or its poster resolves it, and an ask until it closes, answered, archived, put away with Later or replied to in chat alike. Another session's item, a change of kind and a closed item are refused.
 export async function editItem(
   db: Database,
   key: string,
@@ -994,14 +1112,10 @@ export async function editItem(
   if (parsed.data.kind !== item.kind) {
     return { code: "VALIDATION_ERROR", message: `This item is a ${item.kind}`, ok: false }
   }
-  const editable =
-    item.status === (item.kind === "update" ? "done" : "open") &&
-    (item.answer === null ||
-      ("snoozedUntil" in item.answer && Object.keys(item.answer).length === 1))
-  if (!editable) {
+  if (closed(item)) {
     return {
       code: "CONFLICT",
-      message: "This item is already answered, closed or replied to in chat",
+      message: "This item is closed: done, dismissed, settled, resolved or closed by its poster",
       ok: false,
     }
   }
@@ -1048,8 +1162,8 @@ export async function attachmentDownloadName(db: Database, id: string): Promise<
 // Everything still waiting on him or on a verb, and whatever else moved in the last week.
 export async function listItems(db: Database, now = new Date()): Promise<InboxList> {
   const since = new Date(now.getTime() - KEEP_MS)
-  // a scheduled item is out of the list and the count until its time
-  const awakeSql = sql`(${inboxItem.answer} ->> 'snoozedUntil' is null or (${inboxItem.answer} ->> 'snoozedUntil')::timestamptz <= ${now.toISOString()}::timestamptz)`
+  // a scheduled item is out of the list and the count until its time, and an archived one until he moves it back or dismisses it
+  const awakeSql = sql`((${inboxItem.answer} ->> 'snoozedUntil' is null or (${inboxItem.answer} ->> 'snoozedUntil')::timestamptz <= ${now.toISOString()}::timestamptz) and (${inboxItem.answer} ->> 'archivedAt' is null or ${inboxItem.answer} ->> 'dismissedAt' is not null))`
   const needsYou = or(
     and(
       eq(inboxItem.status, "open"),
@@ -1062,7 +1176,7 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
     sql`coalesce(${inboxItem.delivery} ->> 'status', '') = 'failed' and ${inboxItem.answer} ->> 'dismissedAt' is null`,
   )
   const stopped = CLOCKS_STOPPED_AT
-  // since the clocks stopped, a card moves by a verb alone: one answered that its poster has not closed (a go it carries out, a comment it reads) and an update he read and has not dismissed stay at any age, where one from before keeps the week
+  // since the clocks stopped, a card moves by a verb alone: one answered that its poster has not closed (a go it carries out, a comment it reads) and an update he read and has not sent to Done or dismissed, awake, stay at any age, where one from before keeps the week
   const pending = and(
     sql`not (${needsYou})`,
     sql`${inboxItem.status} <> 'cleared'`,
@@ -1076,12 +1190,14 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
       ),
       and(
         eq(inboxItem.kind, "update"),
-        isNull(inboxItem.answer),
+        sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
+        sql`${inboxItem.answer} ->> 'choice' is null`,
+        awakeSql,
         sql`${inboxItem.readAt} >= ${stopped}::timestamptz`,
       ),
     ),
   )
-  // what needs him and what waits on a verb are never capped, so a pile of unread updates cannot push a decision or a card in hand out of the list or the count; the snoozed and every set-aside (cleared) item not dismissed, however old, come too, for the Inbox's shelves
+  // what needs him and what waits on a verb are never capped, so a pile of unread updates cannot push a decision or a card in hand out of the list or the count; the snoozed, the archived and every set-aside (cleared) item not dismissed, however old, come too, for the Inbox's shelves
   const [open, waiting, rest, shelved] = await Promise.all([
     db.select().from(inboxItem).where(needsYou),
     db.select().from(inboxItem).where(pending),
@@ -1102,7 +1218,7 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
       .from(inboxItem)
       .where(
         or(
-          and(eq(inboxItem.status, "open"), sql`not ${awakeSql}`),
+          and(or(eq(inboxItem.status, "open"), eq(inboxItem.kind, "update")), sql`not ${awakeSql}`),
           // a set-aside item he dismissed has gone to Done, which keeps a week as every settled item does
           and(eq(inboxItem.status, "cleared"), sql`${inboxItem.answer} ->> 'dismissedAt' is null`),
         ),
@@ -1115,8 +1231,10 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
   for (const row of recent) seen.add(row.id)
   const cleared = shelved.filter((row) => row.status === "cleared" && !seen.has(row.id))
   const items = inboxOrder([...open, ...waiting, ...recent, ...cleared].map(toItem), now)
-  const snoozed = shelved.filter((row) => row.status === "open").map(toItem)
-  return { items, count: inboxCount(items, now), snoozed }
+  const asleep = shelved.filter((row) => row.status !== "cleared").map(toItem)
+  const archived = asleep.filter((item) => archivedAt(item) !== null)
+  const snoozed = asleep.filter((item) => archivedAt(item) === null)
+  return { items, archived, count: inboxCount(items, now), snoozed }
 }
 
 const NOT_FOUND: Refused = { code: "NOT_FOUND", message: "No inbox item with that id", ok: false }
@@ -1155,7 +1273,11 @@ export async function answerItem(
       ok: false,
     }
   }
+  if (input.action === "archive") return archive(db, current, now)
   if (input.action === "unarchive") return unarchive(db, current, now)
+  if (input.action === "dismiss" && !waits(current)) {
+    return dismissAnswered(db, current, now, deliver && { actor, deliver, dispatcher, now, wait })
+  }
   const checked = checkAnswer(current, input)
   if ("message" in checked) {
     // an answered decision or draft conflicts with this answer; an update never takes one
@@ -1163,7 +1285,11 @@ export async function answerItem(
       current.kind !== "update" && current.status !== "open" ? "CONFLICT" : "VALIDATION_ERROR"
     return { code, message: checked.message, ok: false }
   }
-  const answer: InboxAnswer = { ...checked.answer, at: now.toISOString() }
+  const at = now.toISOString()
+  const answer: InboxAnswer =
+    input.action === "dismiss"
+      ? { ...checked.answer, at, dismissed: true, dismissedAt: at }
+      : { ...checked.answer, at }
   // an accept's, an apps change's or a grant's Approve runs its step, so one with nothing to run it is refused before it is recorded
   const step =
     current.kind === "decision" && answer.choice === "approve"
@@ -1228,6 +1354,50 @@ export async function answerItem(
   }
 }
 
+// Pure: whether an item still waits on his answer: an open decision or draft he has not replied to in chat, archived or put off included.
+const waits = (item: InboxItem): boolean =>
+  item.kind !== "update" && item.status === "open" && choiceOf(item) !== "replied"
+
+// the change a write is made against, so a double click or a second tab cannot write it twice
+const unchanged = (current: InboxItem) =>
+  and(
+    eq(inboxItem.id, current.id),
+    eq(inboxItem.status, current.status),
+    eq(inboxItem.version, current.version),
+  )
+
+const CHANGED: Refused = {
+  code: "CONFLICT",
+  message: "This item changed since you read it",
+  ok: false,
+}
+
+// Archive: what still waits on him, or an update in his list, leaves the list and its count, unanswered, and its poster is told nothing, so it keeps waiting; Move back, Later or Dismiss takes it off the Archived shelf.
+async function archive(
+  db: Database,
+  current: InboxItem,
+  now: Date,
+): Promise<{ item: InboxItem; ok: true } | Refused> {
+  const dismissed = current.answer !== null && "dismissedAt" in current.answer
+  if ((!waits(current) && current.kind !== "update") || dismissed || archivedAt(current)) {
+    return {
+      code: "CONFLICT",
+      message: "Only an item that waits on you, or an update in your list, is archived",
+      ok: false,
+    }
+  }
+  const [row] = await db
+    .update(inboxItem)
+    .set({
+      answer: sql`(coalesce(${inboxItem.answer}, '{}'::jsonb) - 'snoozedUntil') || jsonb_build_object('archivedAt', ${now.toISOString()}::text)`,
+      updatedAt: now,
+      version: sql`${inboxItem.version} + 1`,
+    })
+    .where(unchanged(current))
+    .returning()
+  return row ? { item: toItem(row), ok: true } : CHANGED
+}
+
 // The step an Approve runs, by the decision's kind, and the answer key its result is kept under: an accept's `ext accept`, an apps change's write of the owner's list, a grant's System Settings pane; undefined for a decision whose poster carries it out, and a refusal when this dashboard has nothing to run it with.
 function stepOf(
   preview: InboxPreview,
@@ -1284,18 +1454,30 @@ function stepOf(
   return undefined
 }
 
-// Move to Inbox: an archived item goes back to open with no answer, so it can be answered again; nothing is typed into its poster, since nothing was decided.
+// Move back: an archived item returns to the list as it was; a set-aside one (the old `clear`, or a Dismiss while it waited) goes back to open with no answer, so it can be answered again. Nothing is typed into its poster, since nothing was decided.
 async function unarchive(
   db: Database,
   current: InboxItem,
   now: Date,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
-  // the Archived shelf's own rule: cleared and not yet dismissed to Done
-  if (
-    current.status !== "cleared" ||
-    (current.answer && "dismissedAt" in current.answer && current.answer.dismissedAt)
-  ) {
-    return { code: "CONFLICT", message: "Only an archived item moves back to the Inbox", ok: false }
+  if (archivedAt(current)) {
+    const [row] = await db
+      .update(inboxItem)
+      .set({
+        answer: sql`nullif(${inboxItem.answer} - 'archivedAt', '{}'::jsonb)`,
+        updatedAt: now,
+        version: sql`${inboxItem.version} + 1`,
+      })
+      .where(unchanged(current))
+      .returning()
+    return row ? { item: toItem(row), ok: true } : CHANGED
+  }
+  if (current.status !== "cleared") {
+    return {
+      code: "CONFLICT",
+      message: "Only an archived or set-aside item moves back",
+      ok: false,
+    }
   }
   const [row] = await db
     .update(inboxItem)
@@ -1306,17 +1488,33 @@ async function unarchive(
       updatedAt: now,
       version: sql`${inboxItem.version} + 1`,
     })
-    .where(
-      and(
-        eq(inboxItem.id, current.id),
-        eq(inboxItem.status, "cleared"),
-        sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
-        eq(inboxItem.version, current.version),
-      ),
-    )
+    .where(unchanged(current))
     .returning()
-  if (!row) return { code: "CONFLICT", message: "This item changed since you read it", ok: false }
-  return { item: toItem(row), ok: true }
+  return row ? { item: toItem(row), ok: true } : CHANGED
+}
+
+// Dismiss on what no longer waits on him (an answered item, a chat reply, an update, or one on Done he has not dismissed): it goes to Done marked dismissed, keeping when it first went there, and an update is read.
+async function dismissAnswered(
+  db: Database,
+  current: InboxItem,
+  now: Date,
+  telling?: Telling,
+): Promise<{ item: InboxItem; ok: true } | Refused> {
+  if (current.answer && "dismissed" in current.answer && current.answer.dismissed) {
+    return { code: "CONFLICT", message: "This item is already dismissed", ok: false }
+  }
+  const [row] = await db
+    .update(inboxItem)
+    .set({
+      answer: sql`(coalesce(${inboxItem.answer}, '{}'::jsonb) - 'archivedAt' - 'snoozedUntil') || jsonb_build_object('dismissed', true, 'dismissedAt', coalesce(${inboxItem.answer} ->> 'dismissedAt', ${now.toISOString()}::text))`,
+      readAt: sql`coalesce(${inboxItem.readAt}, ${now})`,
+      updatedAt: now,
+      version: sql`${inboxItem.version} + 1`,
+    })
+    .where(unchanged(current))
+    .returning()
+  if (!row) return CHANGED
+  return { item: await tellClosed(db, toItem(row), "dismiss", current, telling), ok: true }
 }
 
 // How often a queued answer is read again: deliver() types nothing for it, and reads it delivered once its transcript shows it, or lost QUEUED_MS on.
@@ -1634,7 +1832,7 @@ async function recordDelivery(
   return row ? toItem(row) : getItem(db, id)
 }
 
-// Pushes an open decision or draft out of his list until a time, recorded in its answer's snoozedUntil, which answering or a chat reply replaces at once; the poster waits as before. A chat reply its poster has not closed is replaced in turn, since he puts away an item he opened again from its card.
+// Later: pushes an open decision or draft, or an update in his list, out of it until a time, recorded in its answer's snoozedUntil, which answering or a chat reply replaces at once; the poster waits as before, and an archived one leaves the Archived shelf for it. A chat reply its poster has not closed is replaced in turn, since he puts away an item he opened again from its card.
 export async function scheduleItem(
   db: Database,
   id: string,
@@ -1643,16 +1841,19 @@ export async function scheduleItem(
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
-  if (current.kind === "update" || current.status !== "open") {
+  const answer = current.answer
+  if (
+    (current.kind !== "update" && current.status !== "open") ||
+    (answer !== null && "dismissedAt" in answer)
+  ) {
     return {
       code: "CONFLICT",
-      message: "Only an open decision or draft can be scheduled",
+      message: "Only an open decision or draft, or an update in your list, can be scheduled",
       ok: false,
     }
   }
-  const answer = current.answer
-  const replied = answer !== null && "choice" in answer
-  if (replied && (answer.choice !== "replied" || answer.ackedAt)) {
+  const replied = current.kind !== "update" && answer !== null && "choice" in answer
+  if (replied && (answer.choice !== "replied" || ("ackedAt" in answer && answer.ackedAt))) {
     return { code: "CONFLICT", message: "This item already has your answer", ok: false }
   }
   if (new Date(at).getTime() <= now.getTime()) {
@@ -1663,17 +1864,11 @@ export async function scheduleItem(
     .set({
       answer: replied
         ? { snoozedUntil: at }
-        : sql`coalesce(${inboxItem.answer}, '{}'::jsonb) || jsonb_build_object('snoozedUntil', ${at}::text)`,
+        : sql`(coalesce(${inboxItem.answer}, '{}'::jsonb) - 'archivedAt') || jsonb_build_object('snoozedUntil', ${at}::text)`,
       updatedAt: now,
       version: sql`${inboxItem.version} + 1`,
     })
-    .where(
-      and(
-        eq(inboxItem.id, id),
-        eq(inboxItem.status, "open"),
-        eq(inboxItem.version, current.version),
-      ),
-    )
+    .where(unchanged(current))
     .returning()
   if (!row) return { code: "CONFLICT", message: "This item is already answered", ok: false }
   return { item: toItem(row), ok: true }
@@ -1849,13 +2044,24 @@ export async function openItems(db: Database, from?: string): Promise<InboxItem[
   return rows.map(toItem)
 }
 
-// Moves the answered decisions and drafts, those he replied to in chat included, and the updates named to Done at once, recording when inside their answer, so no column is added, and marks an update read, keeping when it was read; an open decision or draft asks something of him and is left.
-export async function dismissItems(db: Database, ids: string[], now = new Date()): Promise<number> {
+// Done: moves the answered decisions and drafts, those he replied to in chat included, and the updates named to Done at once, recording when inside their answer, so no column is added, waking any he put off or archived, and marks an update read, keeping when it was read; an open decision or draft asks something of him and is left.
+export async function dismissItems(
+  db: Database,
+  ids: string[],
+  now = new Date(),
+  telling?: Omit<Telling, "now">,
+): Promise<number> {
   if (ids.length === 0) return 0
+  const before = new Map(
+    (await db.select().from(inboxItem).where(inArray(inboxItem.id, ids))).map((row) => [
+      row.id,
+      toItem(row),
+    ]),
+  )
   const rows = await db
     .update(inboxItem)
     .set({
-      answer: sql`coalesce(${inboxItem.answer}, '{}'::jsonb) || jsonb_build_object('dismissedAt', ${now.toISOString()}::text)`,
+      answer: sql`(coalesce(${inboxItem.answer}, '{}'::jsonb) - 'archivedAt' - 'snoozedUntil') || jsonb_build_object('dismissedAt', ${now.toISOString()}::text)`,
       readAt: sql`coalesce(${inboxItem.readAt}, ${now})`,
       updatedAt: now,
       version: sql`${inboxItem.version} + 1`,
@@ -1871,7 +2077,15 @@ export async function dismissItems(db: Database, ids: string[], now = new Date()
         inArray(inboxItem.id, ids),
       ),
     )
-    .returning({ id: inboxItem.id })
+    .returning()
+  // Done tells an update's poster done, so it posts a new card rather than editing this one; an answered card's poster hears nothing
+  for (const row of rows) {
+    const item = toItem(row)
+    const was = before.get(row.id)
+    if (telling && was && item.kind === "update") {
+      await tellClosed(db, item, "done", was, { ...telling, now })
+    }
+  }
   return rows.length
 }
 

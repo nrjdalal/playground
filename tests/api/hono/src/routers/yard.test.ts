@@ -9,6 +9,7 @@ const API = join(ROOT, "api/hono")
 const HOSTED = join(API, "src/hosted.ts")
 const MIGRATIONS = join(ROOT, "packages/db/drizzle")
 const SCENARIO = join(import.meta.dir, "yard-scenario.ts")
+const RELAY = join(import.meta.dir, "yard-relay-scenario.ts")
 const GITHUB = join(import.meta.dir, "yard-github.ts")
 const WEB = "http://127.0.0.1:3000"
 const PASSWORD = crypto.randomUUID()
@@ -150,6 +151,34 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
         type: "message",
       },
     ])
+  })
+
+  test("the relay carries the owner's reads to a Mac on its socket and back, and refuses a member, a wrong Origin, a write and the first-run routes", async () => {
+    await sql`insert into "user" (id, name, email, login, role) values ('ow', 'ow', ${["ow", "example.com"].join("@")}, 'ow', 'owner')`
+    await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update("yard_ow").digest("hex")}, ${"mac"}, 'ow')`
+    const run = child(await Bun.file(RELAY).text(), {
+      MEMBER_ID: "bo",
+      MEMBER_TOKEN: "yard_bo",
+      OWNER_ID: "ow",
+      OWNER_TOKEN: "yard_ow",
+      POSTGRES_URL: url,
+    })
+    expect(run.err).not.toContain("error:")
+    expect(JSON.parse(last(run.out))).toEqual({
+      afterClose: 503,
+      cookieSocket: 403,
+      macSocket: "open",
+      member: 403,
+      memberSocket: 403,
+      offline: 503,
+      onboard: 403,
+      read: [200, { data: ["w1"] }, "no-store", "inline", "default-src 'none'; sandbox", "nosniff"],
+      requests: [{ login: "ow", method: "GET", path: "/api/v1/workers?x=1" }],
+      status: { online: true, since: null },
+      statusAfter: { online: false, since: "string" },
+      write: 404,
+      wrongOrigin: 403,
+    })
   })
 
   // A member of its own with a token, so a test's posts meet no other test's one-a-second limit.

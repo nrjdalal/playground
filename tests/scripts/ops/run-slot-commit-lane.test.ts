@@ -281,7 +281,7 @@ commit-msg:
     expect(await m.start("worker-x", {}, undefined, ["git", "commit"]).waits()).toBe(true)
   })
 
-  test("and so does one in a repo with no lefthook.yml", async () => {
+  test("but one in a repo with no lefthook.yml takes run-slot-commit at once too", async () => {
     const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"], [], null)
     m.hold("run-slot", 3, "big")
     expect(await m.start("worker-x", {}, undefined, ["git", "commit"]).ran()).toBe(true)
