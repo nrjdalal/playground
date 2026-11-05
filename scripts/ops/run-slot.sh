@@ -381,8 +381,8 @@ if [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" 
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# a `sh -c`, `bash -c` or `zsh -c` chain's steps, one a line, each step's words joined by the unit separator, as python's shlex splits the script on
-# &&, ||, ;, | and & (a newline counts as ;); nothing for any other command, or a script shlex cannot split
+# a `sh -c`, `bash -c` or `zsh -c` chain's steps, one a line, each step's words joined by the unit separator, as python's shlex splits the script at
+# each run of &, |, ;, <, > and parentheses, zsh's |& and &| among them (a newline counts as ;); nothing for any other command, or a script shlex cannot split
 chain_steps() {
   local a first="" script="" next=""
   for a in "$@"; do
@@ -401,7 +401,7 @@ try:
     lex.commenters = ""
     steps = [[]]
     for tok in lex:
-        if tok in ("&&", "||", ";", "|", "&", ";;"):
+        if tok and not tok.strip("&|;<>()"):
             steps.append([])
         else:
             steps[-1].append(tok)
