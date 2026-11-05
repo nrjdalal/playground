@@ -2410,6 +2410,67 @@ function programLines({ args, first }, rooted) {
     return [];
   return (awkPrograms(args) ?? []).filter(({ value }) => rooted || awkRuns(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
+var SEDS = new Set(["gsed", "sed"]);
+var SED_FLAG = /^-[nErsuz]+$|^--(?:null-data|posix|quiet|regexp-extended|separate|silent|unbuffered)$/;
+var SED_RE = String.raw`/(?:[^/\\\n]|\\.)*/`;
+var SED_ADDRESS = String.raw`(?:\d+|\$|${SED_RE})`;
+var SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[pdqQnNlP=]|s${SED_RE.slice(0, -1)}${SED_RE}[gpiImM0-9]*)[ \t]*`;
+var SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`);
+function sedReads(args) {
+  const scripts = [];
+  const operands = [];
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "-e" || value === "--expression") {
+      if (!args[k + 1])
+        return false;
+      scripts.push(args[++k]);
+    } else if (value.startsWith("--expression="))
+      scripts.push({ ...args[k], value: value.slice(13) });
+    else if (value === "--") {
+      operands.push(...args.slice(k + 1));
+      break;
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!SED_FLAG.test(value))
+        return false;
+    } else
+      operands.push(args[k]);
+  }
+  const read = scripts.length ? scripts : operands.slice(0, 1);
+  return read.length > 0 && read.every((w) => !w.glob && !marked(w.value) && SED_SCRIPT.test(w.value));
+}
+var PERL_FLAG = /^-[nplaw]*[eE]?$/;
+var PERL_RE = String.raw`/(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
+var PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|\$[1-9&])*"|\$[1-9&_])`;
+var PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:if|unless|while|for)[ \t]+${PERL_RE}[gimsx]*)?`;
+var PERL_SUB = String.raw`s${PERL_RE.slice(0, -1)}/(?:[^/\\\n@$]|\\.|\$[1-9&])*/[gimsx]*`;
+var PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`;
+var PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`);
+var PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/;
+function perlReads({ args, local }, env) {
+  if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL")))
+    return false;
+  const scripts = [];
+  let k = 0;
+  for (;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "--") {
+      k++;
+      break;
+    }
+    if (!value.startsWith("-") || value === "-")
+      break;
+    if (!PERL_FLAG.test(value))
+      return false;
+    if (/[eE]$/.test(value)) {
+      if (!args[k + 1])
+        return false;
+      scripts.push(args[++k]);
+    }
+  }
+  const files = args.slice(k);
+  return scripts.length > 0 && scripts.every((w) => !w.glob && !marked(w.value) && PERL_SCRIPT.test(w.value)) && files.every((w) => !w.glob && !marked(w.value) && PERL_FILE.test(w.value));
+}
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
 }
@@ -2428,6 +2489,10 @@ function narrow(cmd, env) {
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base))
     return reads(parsed, env);
+  if (SEDS.has(base))
+    return sedReads(args);
+  if (base === "perl")
+    return perlReads(parsed, env);
   if (base === "cut")
     return true;
   if (base === "gh") {
