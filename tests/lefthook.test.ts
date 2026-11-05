@@ -232,7 +232,9 @@ test("the pre-commit type checks fail a staged type error in a test or a package
       join(dir, "package.json"),
       JSON.stringify({
         scripts: {
-          "check-types:tests": (await manifest("package.json")).scripts["check-types:tests"],
+          "check-types:tests": (await manifest("package.json")).scripts[
+            "check-types:tests"
+          ]!.replaceAll("packages/scripts/src/", `${join(ROOT, "packages/scripts/src")}/`),
         },
       }),
     )
