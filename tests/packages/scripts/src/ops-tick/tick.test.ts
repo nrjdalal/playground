@@ -1365,7 +1365,24 @@ describe("relay watch", () => {
     utimesSync(join(ops, "outbox", "cursor.json"), at(14, 45), at(14, 45))
     const resolved = watch(ops, at(14, 50), "timeout")
     await beat("relay-watch").run(resolved.ctx)
-    expect(resolved.asks.map((a) => a.argv[5])).toEqual(["resolve"])
+    expect(resolved.asks.map((a) => a.argv)).toEqual([
+      [
+        "bun",
+        "run",
+        "--silent",
+        "--cwd",
+        "/repo",
+        "ask",
+        "resolve",
+        ID,
+        "--by",
+        OLD.ops,
+        "--note",
+        `The relay moved its cursor again at ${at(14, 45)
+          .toISOString()
+          .replace(/\.\d{3}Z$/, "Z")}`,
+      ],
+    ])
     const caughtUp = watch(ops, at(15, 30), "timeout")
     await beat("relay-watch").run(caughtUp.ctx)
     expect(caughtUp.asks).toEqual([])
@@ -1514,15 +1531,14 @@ describe("the relay's own resume", () => {
       join(ops, "ops-linear-dm.json"),
       JSON.stringify({ lastBeatAt: at(14, 7).toISOString(), lastResult: "ok" }),
     )
-    const refuse = (f: ReturnType<typeof fake>) => {
-      const run = f.ctx.run
-      f.ctx.run = async (argv, timeoutMs) =>
-        argv[1] === "resume"
-          ? { code: 2, out: "spawn.sh: refused: load 40 over 16\n" }
-          : run(argv, timeoutMs)
-      return f
-    }
-    const first = refuse(fake(ops, at(14, 7), { ...QUIET_LOAD, "--sessions": UP }))
+    const first = fake(ops, at(14, 7), {
+      "--brief brief-runner-plain-relay.md": {
+        code: 2,
+        err: "spawn.sh: refused: load 40 over 16\n",
+      },
+      ...QUIET_LOAD,
+      "--sessions": UP,
+    })
     await beat("sweep").run(first.ctx)
     expect(first.sent).toEqual([
       {

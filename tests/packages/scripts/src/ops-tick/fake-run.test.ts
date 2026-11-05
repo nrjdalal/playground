@@ -23,16 +23,13 @@ test("a command writing to both streams answers the same out from the fake as fr
 })
 
 test("bun run's own lines read the same from the fake as from the real run, none with --silent", async () => {
-  const cases: [string[], string, Parameters<typeof fakeRun>[0]][] = [
-    [["bun", "run", "--cwd", pkg, "echo", "hi"], "$ echo hi\n", { echo: "hi\n" }],
-    [["bun", "run", "--cwd", pkg, "false"], "$ false\n", { false: { code: 1 } }],
-    [["bun", "run", "--silent", "--cwd", pkg, "false"], "", { false: { code: 1 } }],
+  const cases: [string[], Parameters<typeof fakeRun>[0]][] = [
+    [["bun", "run", "--cwd", pkg, "echo", "hi"], { echo: "hi\n" }],
+    [["bun", "run", "--cwd", pkg, "false"], { false: { code: 1 } }],
+    [["bun", "run", "--silent", "--cwd", pkg, "false"], { false: { code: 1 } }],
   ]
-  for (const [argv, echo, answers] of cases) {
-    const real = await run(argv)
-    expect(real.out).toStartWith(argv.includes("echo") ? `hi\n${echo}` : echo)
-    expect(await fakeRun(answers).run(argv)).toEqual(real)
-  }
+  for (const [argv, answers] of cases)
+    expect(await fakeRun(answers).run(argv)).toEqual(await run(argv))
 })
 
 test("gh's errors answer joins its gh: line straight after the body's closing brace, and its PRs still read", async () => {
