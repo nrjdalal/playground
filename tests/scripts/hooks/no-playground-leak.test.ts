@@ -1223,3 +1223,153 @@ describe("as Claude Code runs it", () => {
     expect(await proc.exited).toBe(2)
   })
 })
+
+describe("an org whose extension gates its Slack sends", () => {
+  // Acme's extension declares its Slack gate: the servers its workspace posts through, its self-DM and the send path every other post takes
+  const GATE = {
+    path: "the acme extension's post.ts",
+    selfDm: "D0SELF0001",
+    servers: ["slack-acme", "claude_ai_Slack"],
+  }
+  const gated = async (gate: unknown) => {
+    const data = join(scratch, "gated-" + Math.random().toString(36).slice(2), "playground")
+    const links = { "ext.links": { "made-up-org": ["acme-blue"] } }
+    const lists = {
+      "playground-terms.json": await Bun.file(
+        join(config, "playground", "extensions", "hooks", "playground-terms.json"),
+      ).text(),
+      "slack-cleared.json": await Bun.file(
+        join(config, "playground", "extensions", "hooks", "slack-cleared.json"),
+      ).text(),
+    }
+    storeWith(data, lists, links, { "acme-blue": { ...links, "slack.gatedSends": gate } })
+    return { CLAUDE_CONFIG_DIR: config, PLAYGROUND_DATA_DIR: data }
+  }
+
+  test.each([
+    "chat_me_message",
+    "chat_post_ephemeral",
+    "chat_post_message",
+    "chat_schedule_message",
+    "chat_update",
+  ])("refuses %s on its server to any other conversation, naming its send path", async (tool) => {
+    const reason = await mcp(
+      `mcp__slack-acme__${tool}`,
+      { channel: "C0OTHER001", text: "the fix is up" },
+      await gated(GATE),
+    )
+    expect(reason).toContain("gates its Slack sends")
+    expect(reason).toContain("the acme extension's post.ts")
+  })
+
+  test("refuses the claude.ai connector's send, and a cleared channel or DM gets no pass on a gated server", async () => {
+    const env = await gated(GATE)
+    expect(
+      await mcp(
+        "mcp__claude_ai_Slack__slack_send_message",
+        { channel_id: "C0OTHER001", message: "hi" },
+        env,
+      ),
+    ).toContain("gates its Slack sends")
+    expect(
+      await mcp(
+        "mcp__slack-acme__chat_post_message",
+        { channel: "C0EXAMPLE01", text: "hi\n_Sent via Playground_" },
+        env,
+      ),
+    ).toContain("gates its Slack sends")
+    expect(
+      await mcp("mcp__slack-acme__chat_post_message", { channel: "D0EXAMPLE01", text: "hi" }, env),
+    ).toContain("gates its Slack sends")
+  })
+
+  test("passes a post whose only destination is the self-DM, still judged by its text", async () => {
+    const env = await gated(GATE)
+    expect(
+      await mcp(
+        "mcp__slack-acme__chat_post_message",
+        { channel: "D0SELF0001", text: "PLAT-1 \u00B7 triaging" },
+        env,
+      ),
+    ).toBeUndefined()
+    expect(
+      await mcp(
+        "mcp__slack-acme__chat_update",
+        { channel: "D0SELF0001", text: "PLAT-1 \u00B7 done", ts: "1.2" },
+        env,
+      ),
+    ).toBeUndefined()
+    expect(
+      await mcp(
+        "mcp__claude_ai_Slack__slack_send_message",
+        { channel_id: "D0SELF0001", message: "hi" },
+        env,
+      ),
+    ).toBeUndefined()
+    expect(
+      await mcp(
+        "mcp__slack-acme__chat_post_message",
+        { channel: "D0SELF0001", text: `from ${OLD.dispatcher}` },
+        env,
+      ),
+    ).toContain(OLD.dispatcher)
+  })
+
+  test.each([
+    ["a second channel key", { channel: "D0SELF0001", channel_id: "C0OTHER001", text: "hi" }],
+    ["a conversation key", { channel: "D0SELF0001", conversation: "C0OTHER001", text: "hi" }],
+    ["a channel list", { channel: "D0SELF0001", channels: ["C0OTHER001"], text: "hi" }],
+    ["no channel", { text: "hi" }],
+    ["a channel that is not text", { channel: ["D0SELF0001"], text: "hi" }],
+  ])("refuses a self-DM post with %s", async (_, input) => {
+    expect(await mcp("mcp__slack-acme__chat_post_message", input, await gated(GATE))).toContain(
+      "gates its Slack sends",
+    )
+  })
+
+  test("leaves reads, other servers and every org with no declaration as they are", async () => {
+    const env = await gated(GATE)
+    expect(
+      await mcp("mcp__slack-acme__conversations_history", { channel: "C0OTHER001" }, env),
+    ).toBeUndefined()
+    expect(
+      await mcp("mcp__slack-other__chat_post_message", { channel: "C0OTHER001", text: "hi" }, env),
+    ).toBeUndefined()
+    for (const none of [
+      await gated(""),
+      { CLAUDE_CONFIG_DIR: config, PLAYGROUND_DATA_DIR: join(config, "playground") },
+    ])
+      expect(
+        await mcp(
+          "mcp__slack-acme__chat_post_message",
+          { channel: "C0OTHER001", text: "the fix is up" },
+          none,
+        ),
+      ).toBeUndefined()
+  })
+
+  test.each([
+    ["servers as text", { ...GATE, servers: "slack-acme" }],
+    ["no send path", { selfDm: "D0SELF0001", servers: ["slack-acme"] }],
+    ["a self-DM that is a channel", { ...GATE, selfDm: "C0OTHER001" }],
+    ["a key it does not know", { ...GATE, extra: true }],
+  ])(
+    "a declaration with %s refuses a posting call on any server, naming the fix, and lets a read through",
+    async (_, gate) => {
+      const env = await gated(gate)
+      for (const tool of [
+        "mcp__slack-acme__chat_post_message",
+        "mcp__slack-other__chat_post_message",
+      ]) {
+        const reason = await mcp(tool, { channel: "D0SELF0001", text: "hi" }, env)
+        expect(reason).toContain("slack.gatedSends")
+        expect(reason).toContain(
+          '{"path": "<its send path>", "selfDm": "D\u2026", "servers": ["<MCP server>"]}',
+        )
+      }
+      expect(
+        await mcp("mcp__slack-acme__conversations_history", { channel: "C0OTHER001" }, env),
+      ).toBeUndefined()
+    },
+  )
+})
