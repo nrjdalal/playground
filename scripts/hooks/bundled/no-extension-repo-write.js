@@ -7936,7 +7936,7 @@ var movedBefore = false;
 var startCwd;
 var builtins;
 var MCP_TOOL = /^mcp__(.+?)__(.+)$/;
-var READ_TOOL = /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$/;
+var READ_TOOL = /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$|^(?:usergroups_me|users_conversations)$/;
 var INNER = new Set(["curl", "gh", "git"]);
 var MAYBE = /curl|gh|git/i;
 var MAYBE_ANY = /alias|curl|gh|git|repo|send-pack|subtree/i;
