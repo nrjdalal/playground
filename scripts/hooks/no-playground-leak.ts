@@ -404,7 +404,7 @@ let startCwd: string | undefined
 let builtins: Set<string> | undefined
 const MCP_TOOL = /^mcp__(.+?)__(.+)$/
 const READ_TOOL =
-  /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$|^(?:usergroups_me|users_conversations)$/
+  /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$/
 const INNER = new Set(["curl", "gh", "git"])
 // A Bash command naming none of these is left alone before any parsing; $'...' can spell any word, so it always counts.
 const MAYBE = /curl|gh|git/i
@@ -1349,13 +1349,16 @@ async function push(
 }
 
 // The gates' verdict on a Slack MCP tool: why it is refused, or undefined when it reads, when no gate covers its server, or when it is a posting tool whose one destination is the gate's self-DM, which the rest of the check then judges; a declaration that does not read refuses every Slack write, since the hook cannot tell which servers it covers.
+// Two Slack reads READ_TOOL's shape misses, which a gate lets through while the rest of the hook still judges their input's terms.
+const GATED_READS = new Set(["usergroups_me", "users_conversations"])
 function gatedPost(
   tool: string,
   server: string,
   name: string,
   input: Record<string, unknown> | undefined,
 ): string | undefined {
-  if (READ_TOOL.test(name.replace(/^slack_/, ""))) return
+  const read = name.replace(/^slack_/, "")
+  if (READ_TOOL.test(read) || GATED_READS.has(read)) return
   const connector = name === CONNECTOR_TOOL
   const posting = CHAT_TOOL.test(name) || connector
   const what = tool.replace(/^mcp__/, "")

@@ -7914,7 +7914,7 @@ var movedBefore = false;
 var startCwd;
 var builtins;
 var MCP_TOOL = /^mcp__(.+?)__(.+)$/;
-var READ_TOOL = /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$|^(?:usergroups_me|users_conversations)$/;
+var READ_TOOL = /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$/;
 var INNER = new Set(["curl", "gh", "git"]);
 var MAYBE = /curl|gh|git/i;
 var MAYBE_ANY = /alias|curl|gh|git|repo|send-pack|subtree/i;
@@ -8666,8 +8666,10 @@ async function push(rest, env, checkout, takes = PUSH_TAKES) {
   }
   return judge("git push", target, texts, env);
 }
+var GATED_READS = new Set(["usergroups_me", "users_conversations"]);
 function gatedPost(tool, server, name, input) {
-  if (READ_TOOL.test(name.replace(/^slack_/, "")))
+  const read = name.replace(/^slack_/, "");
+  if (READ_TOOL.test(read) || GATED_READS.has(read))
     return;
   const connector = name === CONNECTOR_TOOL;
   const posting = CHAT_TOOL.test(name) || connector;

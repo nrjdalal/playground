@@ -869,6 +869,15 @@ describe("Slack writes to the conversations the owner cleared pass, terms and al
     expect(await mcp("mcp__slack-x__chat_post_message", input)).toContain(`"${OLD.builder}"`)
   })
 
+  test.each(["usergroups_me", "users_conversations"])(
+    "%s, a read only a Slack gate passes, is still judged by the terms its input names with no gate",
+    async (tool) => {
+      expect(await mcp(`mcp__slack-x__${tool}`, { query: OLD.builder })).toContain(
+        `"${OLD.builder}"`,
+      )
+    },
+  )
+
   test.each(["usergroups_create", "usergroups_update"])(
     "an MCP %s naming a cleared channel is judged as before",
     async (tool) => {
