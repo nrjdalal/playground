@@ -1,6 +1,5 @@
 import { statfsSync } from "node:fs"
-import { appendFile, lstat, mkdir, readdir, stat, unlink } from "node:fs/promises"
-import { homedir } from "node:os"
+import { appendFile, mkdir, stat, unlink } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 
 import {
@@ -23,6 +22,7 @@ import { pending } from "../ops-outbox/drain"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
 import { guardProbe } from "./guard-probe"
+import { nightlyClean } from "./nightly-clean"
 
 // ops-tick: runner-steady-tick's timed beats, run as a script with no model call. Each beat runs at its old cron, in machine wall time as CronCreate ran it, runs the same script, and queues what that script prints for the session it went to before, through notify.sh and the ops relay (ADR 0010); a beat whose script prints nothing sends nothing. The Lanes keeper comes in a later change; the 98% move to GLM is retired (Inbox #i827) for the account rotation (`scripts/ops/usage/login-flip.py`).
 export const CYCLE_SECONDS = 60
@@ -476,48 +476,6 @@ const glmCredits = async (ctx: Context) => {
   )
 }
 
-// The shared turbo cache's entries last modified over 7 days ago, removed once a week; a missing or unreadable folder logs and removes nothing.
-const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
-export const turboPrune =
-  (dir = TURBO_CACHE) =>
-  async (ctx: Context) => {
-    const cutoff = ctx.now.getTime() - 7 * 86_400_000
-    let removed = 0
-    let kept = 0
-    let freed = 0
-    let failure = ""
-    const entries = await readdir(dir, { withFileTypes: true }).catch(
-      (err: NodeJS.ErrnoException) => {
-        failure =
-          err.code === "ENOENT"
-            ? `no folder ${dir}`
-            : `unreadable ${dir}: ${err.code ?? err.message}`
-        return null
-      },
-    )
-    for (const entry of entries ?? []) {
-      if (!entry.isFile()) continue
-      const path = join(dir, entry.name)
-      const info = await lstat(path).catch(() => null)
-      if (!info) continue
-      if (info.mtimeMs >= cutoff) {
-        kept++
-        continue
-      }
-      const gone = await unlink(path)
-        .then(() => true)
-        .catch(() => false)
-      if (!gone) continue
-      removed++
-      freed += info.size
-    }
-    const line = entries
-      ? `removed ${removed}, kept ${kept}, freed ${Math.round(freed / 1_048_576)} MB`
-      : failure
-    await mkdir(join(ctx.ops, "log"), { recursive: true })
-    await appendFile(join(ctx.ops, "log", "turbo-prune.log"), `${isoSeconds(ctx.now)} ${line}\n`)
-  }
-
 const freeBytes = (dir: string): number => {
   const fs = statfsSync(dir)
   return fs.bavail * fs.bsize
@@ -676,7 +634,12 @@ export const BEATS: Beat[] = [
   { cron: "43 * * * *", name: "glm-credits", run: glmCredits, to: "ops/log/glm-credits.log" },
   { cron: "7 */2 * * *", name: "optimizer-tick", run: words("optimizer tick"), to: "optimizer" },
   { cron: "13 21 * * *", name: "optimizer-daily", run: words("optimizer daily"), to: "optimizer" },
-  { cron: "29 3 * * 0", name: "turbo-prune", run: turboPrune(), to: "ops/log/turbo-prune.log" },
+  {
+    cron: "0 3 * * *",
+    name: "nightly-clean",
+    run: nightlyClean(),
+    to: "ops/log/nightly-clean.log, and the Inbox",
+  },
   { cron: "17 * * * *", name: "trash-purge", run: trashPurge(), to: "ops/log/trash-purge.log" },
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
   { cron: "*/5 * * * *", name: "relay-watch", run: relayWatch, to: "the Inbox, by bun run ask" },

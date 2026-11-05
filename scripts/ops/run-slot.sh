@@ -1,5 +1,5 @@
 #!/bin/bash
-# run-slot.sh <who> [--model-bound] -- <command> [args...]: run one heavy run (a suite, a type check, Checks, a build) holding one of the machine's run slots.
+# run-slot.sh <who> [--model-bound] [--after <pid>] -- <command> [args...]: run one heavy run (a suite, a type check, Checks, a build) holding one of the machine's run slots.
 # A --model-bound run (one that mostly waits on a model, such as a parity replay) takes run-slot-model-<n> instead, at most slots.modelBound at once (model_cap, below), counted apart from the CPU slots and their queue.
 # It takes ops/run-slot, run-slot-2, run-slot-3 or run-slot-4 by mkdir, as the load rules (lanes_open) open them and its size's load units fit, waiting and
 # retrying while none does; writes "<who> <its own pid> <iso> <units> <size>" to the slot's .holder file beside it
@@ -236,9 +236,19 @@ if [ "${1:-}" = can-take ]; then
   set -- "$3" -- true
 fi
 MODEL_BOUND=
-[ -z "$CAN_TAKE" ] && [ "${2:-}" = --model-bound ] && { MODEL_BOUND=1; set -- "$1" "${@:3}"; }
+AFTER=
+while [ -z "$CAN_TAKE" ]; do
+  case "${2:-}" in
+    --model-bound) MODEL_BOUND=1; set -- "$1" "${@:3}" ;;
+    --after)
+      case "${3:-}" in 0*|1) echo "run-slot.sh: --after $3 names no run (a pid of 0 or 1 is never a run's, and kill -0 0 always succeeds), so this run never waits: give the pid on the first run's ask line" >&2; exit 2 ;; esac
+      case "${3:-}" in ''|*[!0-9]*) echo "run-slot.sh: --after takes the pid on the first run's ask line in run-slot.runs.log (ask <who> <pid>)" >&2; exit 2 ;; esac
+      AFTER=$3; set -- "$1" "${@:4}" ;;
+    *) break ;;
+  esac
+done
 if [ $# -lt 3 ] || [ "$2" != "--" ]; then
-  echo "usage: run-slot.sh <who> [--model-bound] -- <command> [args...]" >&2
+  echo "usage: run-slot.sh <who> [--model-bound] [--after <pid>] -- <command> [args...]" >&2
   exit 2
 fi
 WHO=$1
@@ -270,6 +280,32 @@ if [ -z "$REREAD" ]; then
         ;;
     esac
   done
+fi
+# --after <pid>: a run that needs <who>'s run <pid> to land first waits here, with no ask line, ticket or slot, until that run's end line: rc=0 asks, any other rc exits with it, and a pid gone with no end line exits 2 (4 Nov: a run that polled for another inside its slot held run-slot-2 for 1575 s while that run sat behind it in the queue)
+# the last state of <who>'s run $1 in run-slot.runs.log: pending (asked, no end yet), ended <rc>, or none
+after_state() {
+  tail -n 20000 "$OPS/run-slot.runs.log" 2>/dev/null | W=$WHO P=$1 awk '
+    $3 == ENVIRON["W"] && $4 == ENVIRON["P"] { if ($2 == "ask") s = "pending"; else if ($2 == "end") s = "ended " substr($5, 4) }
+    END { print (s == "" ? "none" : s) }'
+}
+if [ -n "$AFTER" ] && [ -z "$REREAD" ]; then
+  told=
+  while :; do
+    gone=
+    alive "$AFTER" || gone=1
+    st=$(after_state "$AFTER")
+    case "$st" in
+      "ended 0") break ;;
+      ended\ *) echo "run-slot.sh: $WHO's run $AFTER ended rc=${st#ended }, so this run never asks" >&2; exit "${st#ended }" ;;
+    esac
+    if [ -n "$gone" ]; then
+      echo "run-slot.sh: $WHO's run $AFTER has ended with no end line in run-slot.runs.log (a runner-host run, or one stopped hard), so this run never asks: read that run's result, then run this one again" >&2
+      exit 2
+    fi
+    [ -n "$told" ] || { echo "run-slot.sh: waiting for $WHO's run $AFTER to end before this one asks (--after)" >&2; told=1; }
+    sleep "${RUN_SLOT_POLL:-5}"
+  done
+  ASKED=$(date +%s)
 fi
 # dispatcher, 18 Oct: a test, type check (from the checkout's root), lint or format check runs on the runner host, taking no slot here. ci.sh exec
 # sends the working tree, tracked edits and untracked source alike, and gives back the command's output and exit code; anything else (a browser,
