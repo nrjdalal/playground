@@ -261,6 +261,30 @@ export const groups: Group[] = [
         "a script's output piped into perl with a spaced module before stdin's name",
         "bun run ask list | perl -M - x.pl",
       ],
+      [
+        "a script's output piped into bun with a spaced config before a script",
+        "bun run ask list | bun --config - x.js",
+      ],
+      [
+        "a script's output piped into bun with stdin's name as a spaced config",
+        "bun run ask list | bun --config /dev/stdin x.js",
+      ],
+      ["a script's output piped into bun running sh off PATH", "bun run ask list | bun run sh"],
+      [
+        "a script's output piped into bun running python3 off PATH",
+        "bun run ask list | bun run python3",
+      ],
+      [
+        "a script's output piped into bun running a versioned python off PATH",
+        "bun run ask list | bun run python3.12",
+      ],
+      ["a script's output piped into bun x running sh", "bun run ask list | bun x sh"],
+      ["a script's output piped into deno serving stdin", "bun run ask list | deno serve -"],
+      ["a script's output piped into a deno task", "bun run ask list | deno task x"],
+      [
+        "a script's output piped into bun running a bare name after --",
+        "bun run ask list | bun run -- sh",
+      ],
     ],
   },
   // a reader of the root piped into a loop whose body runs each line as code, which runs whatever the reader prints
