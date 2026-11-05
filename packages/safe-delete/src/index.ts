@@ -370,7 +370,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   const branch = git("symbolic-ref", "--quiet", "--short", "HEAD").out
   const folder = basename(at).toLowerCase()
   const where = `${folder} ${branch.toLowerCase()}`
-  // A folder's or branch's slug, the part after its PG-<n>- prefix or the whole name, so a session named ops holds PG-12-ops and PG-12-ops-job but not PG-5-stops.
+  // Each name's slug, after its PG-<n>- prefix: ops holds PG-12-ops-job, not PG-5-stops.
   const slugs = [folder, branch.toLowerCase()].map((n) => n.replace(/^pg-\d+-/, ""))
   for (const agent of agents) {
     if (!agent || !holders.live.includes(String(agent.status)) || typeof agent.name !== "string")

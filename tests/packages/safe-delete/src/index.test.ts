@@ -493,6 +493,7 @@ describe("worktreeRefusal", () => {
     const cases: [string, string, string, boolean][] = [
       ["PG-864-second-dispatcher", "PG-864-second-dispatcher", "dispatcher", false],
       ["PG-5-stops", "PG-5-stops", "ops", false],
+      ["PG-6-opsdesk", "PG-6-opsdesk", "ops", false],
       ["PG-12-ops", "PG-12-ops", "ops", true],
       ["PG-13-ops-job", "PG-13-ops-job", "ops", true],
       ["PG-14-misc", "PG-14-ops-fix", "ops", true],
