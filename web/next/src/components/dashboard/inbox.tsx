@@ -109,7 +109,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
-import { useNow } from "@/lib/dashboard"
+import { dispatcherOf, useNow } from "@/lib/dashboard"
 import {
   answerItem,
   canDraft,
@@ -774,7 +774,7 @@ export function InboxCard({
   updated: boolean
 }) {
   const queryClient = useQueryClient()
-  const { dispatcher, outbox } = useDashboard()
+  const { allowed, dispatcher, outbox, workers } = useDashboard()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Check it for me sends its note once
@@ -860,12 +860,14 @@ export function InboxCard({
     if (sent && noted && action !== "archive" && action !== "unarchive") setNote("")
   }
   const commentId = useId()
-  // Reply with an empty box hands the card's ref to Playground's composer (a secret ask's opens its own box, since a secret never reaches the chat), and with words opens a folded card to them or sends them alone; either box takes focus in the click's own frame, so a paste sent at once lands there
+  // Playground's live session, whose composer, the page's or the aside's, takes a Reply's hand, as the dashboard mounts it
+  const chat = allowed ? dispatcherOf(workers, dispatcher) : null
+  // Reply with an empty box hands the card's ref to Playground's composer (a secret ask's, or any while that session is down, opens its own box), and with words opens a folded card to them or sends them alone; either box takes focus in the click's own frame, so a paste sent at once lands there
   const onReply = () => {
     const text = note.trim()
-    const route = replyRoute({ folded, secret: secretAsk, text })
-    if (route === "composer" && dispatcher) {
-      flushSync(() => outbox.reply(dispatcher, item.ref))
+    const route = replyRoute({ chat: chat !== null, folded, secret: secretAsk, text })
+    if (route === "composer" && chat) {
+      flushSync(() => outbox.reply(chat.name, item.ref))
       document.getElementById(COMPOSER_ID)?.focus()
       return
     }

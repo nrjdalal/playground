@@ -24,19 +24,25 @@ describe("a reply", () => {
 // A card's Reply (#1045): an empty box goes to Playground's composer, words in the box send, and a secret ask keeps its own box.
 describe("a card's Reply", () => {
   test("an empty box goes to the composer, from an open card and a folded one", () => {
-    expect(replyRoute({ folded: false, secret: false, text: "" })).toBe("composer")
-    expect(replyRoute({ folded: true, secret: false, text: "  " })).toBe("composer")
+    expect(replyRoute({ chat: true, folded: false, secret: false, text: "" })).toBe("composer")
+    expect(replyRoute({ chat: true, folded: true, secret: false, text: "  " })).toBe("composer")
   })
 
   test("words in the box send, and open a folded card to them first", () => {
-    expect(replyRoute({ folded: false, secret: false, text: "hold it" })).toBe("send")
-    expect(replyRoute({ folded: true, secret: false, text: "hold it" })).toBe("open")
+    expect(replyRoute({ chat: true, folded: false, secret: false, text: "hold it" })).toBe("send")
+    expect(replyRoute({ chat: true, folded: true, secret: false, text: "hold it" })).toBe("open")
+  })
+
+  test("while Playground's session is down an empty box opens the card's own box, since no composer would take the hand until it is back", () => {
+    expect(replyRoute({ chat: false, folded: false, secret: false, text: "" })).toBe("open")
+    expect(replyRoute({ chat: false, folded: true, secret: false, text: "" })).toBe("open")
+    expect(replyRoute({ chat: false, folded: false, secret: false, text: "hold it" })).toBe("send")
   })
 
   test("a secret ask's Reply never goes to the composer, so a secret never reaches the chat", () => {
-    expect(replyRoute({ folded: false, secret: true, text: "" })).toBe("open")
-    expect(replyRoute({ folded: true, secret: true, text: "" })).toBe("open")
-    expect(replyRoute({ folded: false, secret: true, text: "hold it" })).toBe("send")
+    expect(replyRoute({ chat: true, folded: false, secret: true, text: "" })).toBe("open")
+    expect(replyRoute({ chat: true, folded: true, secret: true, text: "" })).toBe("open")
+    expect(replyRoute({ chat: true, folded: false, secret: true, text: "hold it" })).toBe("send")
   })
 
   test("the composer reads re #iN: before the words it held, an empty one re #iN: alone", () => {

@@ -42,11 +42,16 @@ const LEADING = /^\s*re #i\d{1,9}\b:?[ \t]*/i
 export const withRef = (text: string, ref: number): string =>
   `re #i${ref}: ${text.replace(LEADING, "")}`
 
-// Where a card's Reply takes the owner: words in the box send, or open a folded card to them; an empty box goes to the composer, but a secret ask's opens its own box, since a secret never reaches the chat.
+// Where a card's Reply takes the owner: words in the box send, or open a folded card to them; an empty box goes to the composer, but a secret ask's opens its own box, since a secret never reaches the chat, and so does any card's while Playground's session is down, since no composer would take the hand until it is back.
 export type ReplyRoute = "composer" | "open" | "send"
 
-// Pure: a card's Reply, by its comment box's words, whether it is folded and whether it is a secret ask.
-export function replyRoute(card: { folded: boolean; secret: boolean; text: string }): ReplyRoute {
+// Pure: a card's Reply, by its comment box's words, whether it is folded, whether it is a secret ask and whether Playground's chat, the primary dispatcher's live session, is there.
+export function replyRoute(card: {
+  chat: boolean
+  folded: boolean
+  secret: boolean
+  text: string
+}): ReplyRoute {
   if (card.text.trim() !== "") return card.folded ? "open" : "send"
-  return card.secret ? "open" : "composer"
+  return card.secret || !card.chat ? "open" : "composer"
 }
