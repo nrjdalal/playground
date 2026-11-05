@@ -25,10 +25,12 @@ import {
   notFoundErrorResponses,
   validationErrorResponses,
 } from "@/lib/error"
+import { hub } from "@/lib/relay/hub"
 import { upgradeWebSocket } from "@/lib/server"
 import { type YardVariables, yardCaller } from "@/lib/yard/caller"
 import { join, publish } from "@/lib/yard/socket"
 import * as store from "@/lib/yard/store"
+import { relayRouter } from "@/routers/relay"
 
 // The validation envelope for a body or a query, so a refusal is the API's one 400 VALIDATION_ERROR.
 const valid = <T extends z.ZodType>(target: "json" | "query", schema: T) =>
@@ -95,6 +97,17 @@ const fanOut = async (caller: store.Caller, message: z.infer<typeof messageSchem
 
 // Yard's routes, which only the hosted build mounts (hosted.ts), each on the member rung or the narrower one it names.
 export const yardRouter = new Hono<{ Variables: YardVariables }>()
+  // the relay to the owner's own Mac: its socket, opened with the owner's token, and the owner's browser's dashboard reads
+  .route(
+    "/relay",
+    relayRouter({
+      hub,
+      mac: yardCaller({ rung: "owner" }),
+      owner,
+      upgrade: upgradeWebSocket,
+      webOrigin,
+    }),
+  )
   // who a token or a session belongs to, so the local Playground knows which @login is its owner's
   .get(
     "/me",
