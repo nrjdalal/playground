@@ -112,6 +112,23 @@ async function writeFile(path: string, file: HeldFile): Promise<void> {
   await rename(next, path)
 }
 
+// Read only: the `"*"` line, its `since` (a freeze's) and `until` (focus's), each null when unset, and whether it has lapsed at `now`; null when no `"*"` line is set.
+export async function freezeStatus(
+  path: string,
+  now: number,
+): Promise<{ lapsed: boolean; line: string; since: string | null; until: string | null } | null> {
+  const file = await readFile(path)
+  if (!Object.hasOwn(file.held, "*")) return null
+  const since = file.since?.["*"]
+  const until = file.until?.["*"]
+  return {
+    lapsed: lapsed(file, now),
+    line: String(file.held["*"]),
+    since: typeof since === "string" ? since : null,
+    until: typeof until === "string" ? until : null,
+  }
+}
+
 // The ship flow's freeze: the `"*"` line, naming the version, with the time it was written in `since`, keeping every other line, and the line written: running it again restarts the lapse. A `"*"` line Ops wrote by hand holds every PR already, so it stays as it is, and its line is the one given back.
 export async function startFreeze(
   path: string,
