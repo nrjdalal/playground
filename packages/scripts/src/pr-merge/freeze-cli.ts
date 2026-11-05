@@ -12,8 +12,8 @@ Holds every PR at pr:merge and merge-on-ready while a ship is under way, through
   <version>  a version, vX.Y.Z: writes the "*" line naming it, keeping every other line; run it
              again to restart its lapse, ${FREEZE_LAPSE_MS / 3_600_000} hours, after which the line holds nothing
   --end      removes the "*" line, once the tag lands or the ship stops
-  status     prints the "*" line, its since and whether it has lapsed, or that none is set, and
-             writes nothing
+  status     prints the "*" line, its since (or focus's until) and whether it has lapsed, or that
+             none is set, and writes nothing
 
 A "*" line Ops wrote by hand holds every PR already and never lapses, so <version> and --end leave it.`
 

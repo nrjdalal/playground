@@ -112,7 +112,7 @@ async function writeFile(path: string, file: HeldFile): Promise<void> {
   await rename(next, path)
 }
 
-// The `"*"` line, its times in `since` and `until` (a freeze's and focus's, each null when unset) and whether it has lapsed at `now`, so holds no PR, read only; null when no `"*"` line is set.
+// Read only: the `"*"` line, its `since` (a freeze's) and `until` (focus's), each null when unset, and whether it has lapsed at `now`; null when no `"*"` line is set.
 export async function freezeStatus(
   path: string,
   now: number,
