@@ -54,6 +54,7 @@ import {
 } from "react"
 import { flushSync } from "react-dom"
 
+import { COMPOSER_ID } from "@/components/dashboard/composer"
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { PreviewPane } from "@/components/dashboard/preview-pane"
 import { Attachments } from "@/components/dashboard/viewer/thumbnails"
@@ -108,7 +109,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
-import { useNow } from "@/lib/dashboard"
+import { dispatcherOf, useNow } from "@/lib/dashboard"
 import {
   answerItem,
   canDraft,
@@ -161,7 +162,7 @@ import {
 } from "@/lib/inbox"
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
-import { useTypedReply } from "@/lib/reply"
+import { replyRoute, useTypedReply } from "@/lib/reply"
 import { iconTone, type ShownState, statusIcon } from "@/lib/status-icons"
 import { inboxMark, readMark } from "@/lib/tab-dot"
 import { fullTime, relativeTime } from "@/lib/time"
@@ -773,7 +774,7 @@ export function InboxCard({
   updated: boolean
 }) {
   const queryClient = useQueryClient()
-  const { dispatcher, outbox } = useDashboard()
+  const { allowed, dispatcher, outbox, workers } = useDashboard()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Check it for me sends its note once
@@ -859,10 +860,18 @@ export function InboxCard({
     if (sent && noted && action !== "archive" && action !== "unarchive") setNote("")
   }
   const commentId = useId()
-  // Reply opens a folded card, or an empty box, to its comment box, focused in the click's own frame so a paste sent at once lands there; with words in the box it sends them alone
+  // Playground's live session, whose composer, the page's or the aside's, takes a Reply's hand, as the dashboard mounts it
+  const chat = allowed ? dispatcherOf(workers, dispatcher) : null
+  // Reply with an empty box hands the card's ref to Playground's composer (a secret ask's, or any while that session is down, opens its own box), and with words opens a folded card to them or sends them alone; either box takes focus in the click's own frame, so a paste sent at once lands there
   const onReply = () => {
     const text = note.trim()
-    if (folded || text === "") {
+    const route = replyRoute({ chat: chat !== null, folded, secret: secretAsk, text })
+    if (route === "composer" && chat) {
+      flushSync(() => outbox.reply(chat.name, item.ref))
+      document.getElementById(COMPOSER_ID)?.focus()
+      return
+    }
+    if (route !== "send") {
       // only a folded card is opened, so one open by default still folds once answered
       if (folded) flushSync(() => setToggled(true))
       document.getElementById(commentId)?.focus()
@@ -1172,7 +1181,14 @@ export function InboxCard({
           () => void onAnswer("dismiss"),
         )}
       <Reopen open={open} setOpen={setToggled} />
-      <Hint content={held ?? "Reply: your comment alone, to its poster"}>
+      <Hint
+        content={
+          held ??
+          (secretAsk || !chat
+            ? "Reply: your comment alone, to its poster"
+            : "Reply: your comment alone, to its poster, or with the box empty, in your chat")
+        }
+      >
         <Button
           size="icon-sm"
           variant="outline"
