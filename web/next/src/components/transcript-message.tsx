@@ -64,9 +64,7 @@ export function TranscriptBubble({
           >
             <RiInboxLine data-icon="inline-start" />
             <span className="font-mono">{answer.ref}</span>
-            <span className="truncate" title={answer.label}>
-              · {answer.label}
-            </span>
+            <span className="truncate">· {answer.label}</span>
           </Badge>
         ) : null}
         {words ? (
