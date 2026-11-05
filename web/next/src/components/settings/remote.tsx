@@ -160,13 +160,9 @@ function MacRemote() {
           <ul aria-label="Last writes from Yard" className="text-muted-foreground text-xs">
             {audit.map((line, index) => (
               <li key={`${line.at}-${index}`} className="truncate">
-                {relativeTime(line.at, now)} · <span className="font-mono">{line.path}</span> ·{" "}
-                {line.status} ·{" "}
-                {line.fingerprint ? (
-                  <span className="font-mono">{line.fingerprint}</span>
-                ) : (
-                  "a key not paired"
-                )}
+                {relativeTime(line.at, now)} · {line.status} ·{" "}
+                <span className="font-mono">{line.fingerprint}</span> ·{" "}
+                <span className="font-mono">{line.path}</span>
               </li>
             ))}
           </ul>

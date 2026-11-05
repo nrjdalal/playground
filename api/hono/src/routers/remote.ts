@@ -11,16 +11,10 @@ import {
   notFoundErrorResponses,
   validationErrorResponses,
 } from "@/lib/error"
-import { remoteAudit } from "@/lib/relay/audit"
+import { auditLineSchema, remoteAudit } from "@/lib/relay/audit"
 import { type PairedKey, remoteKeys as keys } from "@/lib/relay/key"
 import { authMiddleware, guardWrites, requireConsoleRole, requireLoopback } from "@/middlewares"
 
-const auditSchema = z.object({
-  at: z.string(),
-  fingerprint: z.string().nullable(),
-  path: z.string(),
-  status: z.number(),
-})
 const pairedSchema = z.object({ fingerprint: z.string(), login: z.string(), pairedAt: z.string() })
 
 // What the Remote section shows of the paired key: never its public key or id.
@@ -58,7 +52,7 @@ export const remoteRouter = new Hono<{ Variables: Session }>()
     doc(
       "The last writes from Yard, newest first, each by its time, route, the paired key that signed it and the status it answered; the paired browser key, by its fingerprint, login and paired time; and the pair request waiting on Approve, each null with none",
       z.object({
-        audit: z.array(auditSchema),
+        audit: z.array(auditLineSchema),
         key: pairedSchema.nullable(),
         pending: pendingSchema.nullable(),
       }),

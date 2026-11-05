@@ -10,6 +10,7 @@ import {
   RELAY_PREFIX,
   RELAY_SILENT_MS,
   relayAllowed,
+  RELAY_ANSWER,
   RELAY_ANSWER_KINDS,
   relayPairSchema,
   RELAY_WRITES,
@@ -44,18 +45,18 @@ const parse = (raw: string): unknown => {
 
 const sameLogin = (one: string, other: string) => one.toLowerCase() === other.toLowerCase()
 
-// Updates seen: the refusal every relayed frame meets first, in this order: an id seen before, then a frame RELAY_MAX_AGE_MS old or from as far ahead, then a login other than this Mac's own token's.
+// Updates seen: the refusal every relayed frame meets first, in this order: a frame RELAY_MAX_AGE_MS old or from as far ahead, then an id seen before, then a login other than this Mac's own token's. The age goes first, so seen holds only ids that expire within RELAY_MAX_AGE_MS.
 export function refuseStale(
   frame: { at: string; id: string; login: string },
   { login, now, seen }: { login: string; now: Date; seen: SeenIds },
 ): RelayResponse | null {
   const at = Date.parse(frame.at)
   for (const [id, until] of seen) if (until <= now.getTime()) seen.delete(id)
+  if (!(Math.abs(now.getTime() - at) < RELAY_MAX_AGE_MS))
+    return json(frame.id, 403, "FORBIDDEN", "This request is too old to answer")
   if (seen.has(frame.id))
     return json(frame.id, 409, "CONFLICT", "This request was answered already")
   seen.set(frame.id, at + RELAY_MAX_AGE_MS)
-  if (Math.abs(now.getTime() - at) >= RELAY_MAX_AGE_MS)
-    return json(frame.id, 403, "FORBIDDEN", "This request is too old to answer")
   if (!sameLogin(frame.login, login))
     return json(frame.id, 403, "FORBIDDEN", "This Mac answers its own owner alone")
   return null
@@ -117,8 +118,8 @@ export async function requireSignedWrite(
   return { write }
 }
 
-// The Inbox card a relayed answer names, read from its path.
-const ANSWER_PATH = /^\/api\/v1\/inbox\/([^/?]+)\/answer(?:\?|$)/
+// The one route whose card's kind a relayed write is checked against.
+const ANSWER_ROUTES = [RELAY_ANSWER] as const
 
 // The answer a route gave, as a frame: its status, the headers on RELAY_HEADERS, and its bytes.
 const framed = async (id: string, response: Response): Promise<RelayResponse> => ({
@@ -139,10 +140,10 @@ type AnswerDeps = {
   cookie: () => Promise<string>
   dispatch: (request: Request) => Promise<Response>
   keys?: Pick<KeyStore, "offer" | "paired">
-  login: string
-  now?: Date
   // the kind of the Inbox card an id names, or null with none; a relayed answer is refused without it
   kindOf?: (id: string) => Promise<string | null>
+  login: string
+  now?: Date
   seen: SeenIds
 }
 
@@ -151,8 +152,8 @@ async function runWrite(
   write: RelayWrite,
   { cookie, dispatch, kindOf }: Pick<AnswerDeps, "cookie" | "dispatch" | "kindOf">,
 ): Promise<RelayResponse> {
-  const card = ANSWER_PATH.exec(write.path)?.[1]
-  if (card !== undefined) {
+  if (pathOn(ANSWER_ROUTES, write.path)) {
+    const card = write.path.split("?")[0]!.split("/")[4]!
     const kind = await (kindOf?.(card) ?? Promise.resolve(null)).catch(() => null)
     if (kind === null || !(RELAY_ANSWER_KINDS as readonly string[]).includes(kind))
       return json(write.id, 403, "FORBIDDEN", "Answer it on the Mac")
@@ -170,7 +171,7 @@ async function runWrite(
   }
 }
 
-// Answers one frame. A pair request, once refuseStale passes it, waits in keys for the owner's Approve on this Mac and is answered with its fingerprint. A write passes requireSignedWrite against the paired key and RELAY_WRITES, then runWrite, and each one checked leaves an audit line, refusals included. A read passes requireRelay first. Both run in this Mac's own API as its local owner's session, so the routes' own owner check and limits still run here.
+// Answers one frame. A pair request, once refuseStale passes it, waits in keys for the owner's Approve on this Mac and is answered with its fingerprint. A write passes requireSignedWrite against the paired key and RELAY_WRITES, then runWrite, and each one whose signature verified leaves an audit line, its kind refusal included, so a hub that sends frames it cannot sign never pushes a write that ran out of the Remote section's list. A read passes requireRelay first. Both run in this Mac's own API as its local owner's session, so the routes' own owner check and limits still run here.
 export async function answerRelay(
   raw: string,
   {
@@ -178,9 +179,9 @@ export async function answerRelay(
     cookie,
     dispatch,
     keys = remoteKeys,
+    kindOf,
     login,
     now = new Date(),
-    kindOf,
     seen,
   }: AnswerDeps,
 ): Promise<RelayResponse | null> {
@@ -206,14 +207,13 @@ export async function answerRelay(
       seen,
       writes: RELAY_WRITES,
     })
-    if (checked === null) return null
-    const write = "write" in checked ? checked.write : relayWriteSchema.parse(parse(raw))
-    const answer =
-      "refused" in checked ? checked.refused : await runWrite(write, { cookie, dispatch, kindOf })
+    if (checked === null || "refused" in checked) return checked?.refused ?? null
+    const { write } = checked
+    const answer = await runWrite(write, { cookie, dispatch, kindOf })
     await audit
       .append({
         at: now.toISOString(),
-        fingerprint: key && write.keyId === key.id ? key.fingerprint : null,
+        fingerprint: key!.fingerprint,
         path: write.path.split("?")[0]!,
         status: answer.status,
       })
@@ -263,10 +263,10 @@ type RelayDeps = {
   cookie: () => Promise<string>
   dispatch: (request: Request) => Promise<Response>
   heartbeatMs?: number
-  // the login the token's /me answers
-  login: (token: string) => Promise<string>
   // the kind of the Inbox card an id names, which a relayed answer is checked against
   kindOf?: (id: string) => Promise<string | null>
+  // the login the token's /me answers
+  login: (token: string) => Promise<string>
   recycleMs?: number
   silentMs?: number
   // the Keychain token, or null with none

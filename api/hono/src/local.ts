@@ -316,13 +316,13 @@ if (env.YARD_API_URL && readsLive()) {
       if (response.status === 401) made = null
       return response
     },
-    login: async (token) => (await yardClient(api, token).me()).login,
     // a card's kind by its id alone, never its #ref, as its answer route reads it: a decision's preview type, else draft or update
     kindOf: async (id) => {
       const item = await getItem(db, id)
       if (item?.id !== id) return null
       return item.kind === "decision" ? item.preview.type : item.kind
     },
+    login: async (token) => (await yardClient(api, token).me()).login,
     token: () => keychain().read(),
   })
 }

@@ -78,14 +78,16 @@ describe("a relayed read refused never reaches a route", () => {
     expect([again?.status, reached]).toEqual([409, ["/api/v1/workers"]])
   })
 
-  test("a request as old as the limit, or as far ahead", async () => {
-    for (const shift of [-RELAY_MAX_AGE_MS, RELAY_MAX_AGE_MS]) {
+  test("a request as old as the limit, or as far ahead, which seen does not keep", async () => {
+    for (const shift of [-RELAY_MAX_AGE_MS, RELAY_MAX_AGE_MS, 365 * 24 * 3_600_000]) {
       const at = new Date(NOW.getTime() + shift).toISOString()
-      const { answer, message, reached } = await refused(frame({ at }))
-      expect([answer?.status, message, reached]).toEqual([
+      const seen = new Map<string, number>()
+      const { answer, message, reached } = await refused(frame({ at }), seen)
+      expect([answer?.status, message, reached, seen.size]).toEqual([
         403,
         "This request is too old to answer",
         [],
+        0,
       ])
     }
   })
@@ -426,7 +428,7 @@ describe("a write from Yard through answerRelay", () => {
     ])
   })
 
-  test("a write refused runs nothing and is audited with its refusal, the key named only when it is the paired one", async () => {
+  test("a write refused before its signature verifies runs nothing and leaves no line", async () => {
     const other = await browserKey()
     const { audited, ran, run } = rig()
     const offList = await answerRelay(
@@ -434,20 +436,45 @@ describe("a write from Yard through answerRelay", () => {
       run,
     )
     const unpaired = await answerRelay(await signed(other.privateKey, other.id), run)
+    const forged = await answerRelay(await signed(other.privateKey, browser.id), run)
     const revoked = rig(null)
     const afterRevoke = await answerRelay(await signed(browser.privateKey, browser.id), revoked.run)
-    expect([offList?.status, unpaired?.status, afterRevoke?.status]).toEqual([403, 403, 403])
-    expect([ran, revoked.ran]).toEqual([[], []])
-    expect([...audited, ...revoked.audited]).toEqual([
-      {
-        at: NOW.toISOString(),
-        fingerprint: browser.fingerprint,
-        path: "/api/v1/remote/revoke",
-        status: 403,
-      },
-      { at: NOW.toISOString(), fingerprint: null, path: "/api/v1/messages", status: 403 },
-      { at: NOW.toISOString(), fingerprint: null, path: "/api/v1/messages", status: 403 },
+    expect([offList?.status, unpaired?.status, forged?.status, afterRevoke?.status]).toEqual([
+      403, 403, 403, 403,
     ])
+    expect([ran, revoked.ran, audited, revoked.audited]).toEqual([[], [], [], []])
+  })
+
+  test("frames a hub sends unsigned, replayed or stale after a write that ran never push that write out of the last 20 the Remote section shows", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "relay-mac-audit-"))
+    try {
+      const audit = auditLog({ dir: () => dir })
+      const other = await browserKey()
+      const { run } = rig()
+      const seen = new Map<string, number>()
+      const raw = await signed(browser.privateKey, browser.id)
+      await answerRelay(raw, { ...run, audit, seen })
+      const stale = new Date(NOW.getTime() - RELAY_MAX_AGE_MS).toISOString()
+      for (let n = 0; n < 10; n++) {
+        await answerRelay(await signed(other.privateKey, browser.id), { ...run, audit, seen })
+        await answerRelay(raw, { ...run, audit, seen })
+        await answerRelay(await signed(browser.privateKey, browser.id, { at: stale }), {
+          ...run,
+          audit,
+          seen,
+        })
+      }
+      expect(await audit.recent()).toEqual([
+        {
+          at: NOW.toISOString(),
+          fingerprint: browser.fingerprint,
+          path: "/api/v1/messages",
+          status: 201,
+        },
+      ])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
   })
 
   test("a test frame's write shows in the audit list the Remote section reads", async () => {
