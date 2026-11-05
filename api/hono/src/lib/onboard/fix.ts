@@ -1,3 +1,4 @@
+import { userInfo } from "node:os"
 import { join } from "node:path"
 
 import { site } from "@packages/config/site"
@@ -5,6 +6,7 @@ import { makeScratch, removeScratch } from "@packages/safe-delete"
 import type { Context } from "hono"
 
 import { readsLive } from "@/lib/dashboard/fixture"
+import { serviceDir } from "@/lib/dev/proxy"
 import { ApiError } from "@/lib/error"
 import { FIX_IDS, type FixId, fixtureFixed } from "@/lib/onboard/fix-ids"
 
@@ -22,6 +24,7 @@ export type FixRead = {
 
 type Step =
   | {
+      admin?: true
       argv: string[]
       detached?: true
       failed?: string
@@ -51,7 +54,7 @@ const HERDR_PIN = join(
   import.meta.dir,
   "../../../../../packages/scripts/src/playground/herdr-pin.ts",
 )
-// portless's own CLI in this checkout, which trusts its certificate as the signed-in user: any password macOS asks for goes to its own dialog.
+// portless's own CLI in this checkout, which the trust fix runs as the signed-in user and the proxy fix as root through macOS's administrator dialog: any password goes to macOS's own window.
 const PORTLESS_CLI = join(import.meta.dir, "../../../../../node_modules/portless/dist/cli.js")
 const FAKE = join(import.meta.dir, "../../fixtures/fix.ts")
 const BREW_PATHS = ["/opt/homebrew/bin", "/usr/local/bin"]
@@ -137,6 +140,18 @@ const PLANS: Record<FixId, ((has: (tool: string) => boolean, dir: string) => Ste
       ? { argv: ["brew", "upgrade", "node"], label: "Updating Node.js", ms: 20 * MINUTE }
       : { argv: ["brew", "install", "node"], label: "Installing Node.js", ms: 20 * MINUTE },
   ],
+  proxy: () => [
+    {
+      admin: true,
+      argv: ["node", PORTLESS_CLI, "service", "install"],
+      detached: true,
+      failed:
+        "Your Mac did not set up the web address. Click Set up the web address again, and enter your Mac's password in its window.",
+      label: "Setting up the web address",
+      ms: 5 * MINUTE,
+      note: "Your Mac asks for your password in its own window",
+    },
+  ],
   python: () => [
     { argv: ["brew", "install", "python"], label: "Installing Python", ms: 20 * MINUTE },
   ],
@@ -155,6 +170,40 @@ const PLANS: Record<FixId, ((has: (tool: string) => boolean, dir: string) => Ste
 }
 
 const NAMES: Record<string, string> = { brew: "Homebrew", docker: "Docker" }
+
+// What macOS's window says the password is for, in place of its default "osascript wants to make changes".
+const PROMPT = `${site.name} sets up its web address on your Mac.`
+
+// Pure: words as an AppleScript string literal, its backslashes and quotes escaped.
+const appleString = (words: string) => `"${words.replace(/[\\"]/g, (c) => `\\${c}`)}"`
+
+const shellWord = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`
+
+// An admin step's line for macOS's administrator dialog, which runs it as root as sudo does in a terminal: osascript's do shell script, built from the step's fixed argv and this user's own home, ids and portless folder alone, each word single-quoted for the shell and the line escaped for AppleScript, so a home or folder holding a quote, a space or `$(...)` stays one literal word.
+export const adminLine = (
+  command: string[],
+  base: Env,
+  user: { gid: number; homedir: string; uid: number; username: string } = userInfo(),
+): string => {
+  const vars = {
+    HOME: user.homedir,
+    PATH: "/usr/bin:/bin:/usr/sbin:/sbin",
+    PORTLESS_PORT: "443",
+    PORTLESS_STATE_DIR: serviceDir(base.PORTLESS_STATE_DIR || join(user.homedir, ".portless")),
+    SUDO_GID: String(user.gid),
+    SUDO_UID: String(user.uid),
+    SUDO_USER: user.username,
+  }
+  const line = [
+    "/usr/bin/env",
+    "-i",
+    ...Object.entries(vars).map(([k, v]) => `${k}=${v}`),
+    ...command,
+  ]
+    .map(shellWord)
+    .join(" ")
+  return `do shell script ${appleString(line)} with prompt ${appleString(PROMPT)} with administrator privileges`
+}
 
 export const isFixId = (id: string): id is FixId => (FIX_IDS as readonly string[]).includes(id)
 
@@ -218,7 +267,9 @@ export const createFixes = ({
       )
     }
     if (step.login) return login(job, command, base, step.ms)
-    const child = Bun.spawn(command, {
+    const osascript = step.admin ? Bun.which("osascript", { PATH: base.PATH ?? "" }) : null
+    if (step.admin && !osascript) throw new Error("osascript is not on this Mac")
+    const child = Bun.spawn(osascript ? [osascript, "-e", adminLine(command, base)] : command, {
       cwd: dir,
       detached: step.detached,
       env: base,

@@ -2,13 +2,6 @@ import { reachesConsole } from "@packages/auth/access"
 import { db, recordActivity, type ActivityActor, type ActivityEvent } from "@packages/db"
 import { env } from "@packages/env/api-hono"
 
-import {
-  reply,
-  runJson,
-  type FeedReply,
-  type PERMISSION_MODES,
-  type PLAN_MODES,
-} from "@/lib/dashboard/cmux"
 import { normalize } from "@/lib/dashboard/deliver"
 import {
   answerKeys,
@@ -21,13 +14,21 @@ import {
   type ScreenPrompt,
 } from "@/lib/dashboard/herdr"
 import { readScreen } from "@/lib/dashboard/terminal"
-import {
-  feedBySession,
-  listLive,
-  type FeedItem,
-  type Live,
-  type Worker,
-} from "@/lib/dashboard/workers"
+import { listLive, type FeedItem, type Live, type Worker } from "@/lib/dashboard/workers"
+
+// An answer to a prompt a session waits on: a picker's selections, a permission once or denied, never always, or a plan started with edits still asking (manual) or sent back, with an optional note.
+export const PERMISSION_MODES = ["deny", "once"] as const
+export const PLAN_MODES = ["deny", "manual"] as const
+
+export type FeedReply =
+  | { kind: "permission"; mode: (typeof PERMISSION_MODES)[number]; requestId: string }
+  | {
+      feedback: string | null
+      kind: "plan"
+      mode: (typeof PLAN_MODES)[number]
+      requestId: string
+    }
+  | { kind: "question"; requestId: string; selections: string[] }
 
 // An answer as the dashboard's card sends it: each question's choices by option label, or its own words in place of a choice; a permission once or denied; a plan started with edits still asking, or sent back with an optional note.
 export type FeedAnswer =
@@ -44,7 +45,7 @@ export type FeedAnswering = {
   sessionId: string
 }
 
-// Why an answer did not go, or did and could not be confirmed: BUSY (that prompt is being answered already), CMUX_FAILED (cmux or herdr could not be read, or the reply may not have gone), DISABLED (permission and plan answers are off), FORBIDDEN (this sign-in may not answer), INTERRUPTED (keys went into a herdr session's pane, yet its prompt still shows or changed partway), INVALID (the answer does not fit the prompt), NOT_FOUND (the session is not live), NOT_PENDING (no such prompt waits on that session, or a herdr session's pane no longer shows it, so nothing was typed), NOT_TAKEN (cmux took the reply, yet the prompt still waits), TERMINAL_ONLY (a herdr session's permission or plan, which its manager answers, not the Dashboard), UNCONFIRMED (the reply went, but the Feed or the pane could not be read to see it land).
+// Why an answer did not go, or did and could not be confirmed: BUSY (that prompt is being answered already), CMUX_FAILED (the sessions or the session's pane could not be read), DISABLED (permission and plan answers are off), FORBIDDEN (this sign-in may not answer), INTERRUPTED (keys went into the session's pane, yet its prompt still shows or changed partway), INVALID (the answer does not fit the prompt), NOT_FOUND (the session is not live), NOT_PENDING (no such prompt waits on that session, or its pane no longer shows it, so nothing was typed), TERMINAL_ONLY (a permission or a plan, which its manager answers, not the Dashboard), UNCONFIRMED (the keys went, but the pane could not be read to see them land).
 export const FEED_FAILURES = [
   "BUSY",
   "CMUX_FAILED",
@@ -54,7 +55,6 @@ export const FEED_FAILURES = [
   "INVALID",
   "NOT_FOUND",
   "NOT_PENDING",
-  "NOT_TAKEN",
   "TERMINAL_ONLY",
   "UNCONFIRMED",
 ] as const
@@ -85,27 +85,21 @@ export type AnswerDeps = {
   herdr?: HerdrPane
   listLive: () => Promise<Live>
   now: () => Date
-  readFeed: () => Promise<unknown>
-  record: (event: ActivityEvent, replying: () => Promise<void>) => Promise<void>
-  reply: (answer: FeedReply) => Promise<void>
-  settle: { attempts: number; delayMs: number }
+  record: (event: ActivityEvent, sending: () => Promise<void>) => Promise<void>
 }
 
-// The record and the reply share a transaction: a reply cmux refuses rolls the record back, and a record that cannot be inserted means nothing is answered.
-const recordWhileReplying: AnswerDeps["record"] = (event, replying) =>
+// The record and the send share a transaction: a send that throws rolls the record back, and a record that cannot be inserted means nothing is sent. The hosted session's answers (sdk.ts) send inside it, and a herdr answer records before its keys, with nothing inside.
+const recordWhileSending: AnswerDeps["record"] = (event, sending) =>
   db.transaction(async (tx) => {
     await recordActivity(tx, event)
-    await replying()
+    await sending()
   })
 
 export const answerDeps: AnswerDeps = {
   approvals: env.PLAYGROUND_APPROVALS_ENABLED,
   listLive,
   now: () => new Date(),
-  readFeed: () => runJson(["rpc", "feed.list", '{"pending_only":true}']),
-  record: recordWhileReplying,
-  reply,
-  settle: { attempts: 6, delayMs: 250 },
+  record: recordWhileSending,
 }
 
 type Refusal = Extract<FeedResult, { ok: false }>
@@ -114,8 +108,6 @@ const refused = (code: FeedFailure, reason: string): Refusal => ({ code, ok: fal
 
 // The longest answer or note a person writes into a prompt.
 export const TEXT_LIMIT = 4000
-
-class ReplyFailed extends Error {}
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
@@ -216,26 +208,11 @@ export function answerSummary(to: string, item: FeedItem, answer: FeedAnswer): s
   return `Sent back ${to}'s plan${note ? ` with a note of ${note.length} characters` : ""}`
 }
 
-// Whether the prompt still waits on that session, or null when the Feed cannot be read.
-const waits = async (
-  sessionId: string,
-  requestId: string,
-  deps: AnswerDeps,
-): Promise<boolean | null> => {
-  try {
-    return (feedBySession(await deps.readFeed()).get(sessionId) ?? []).some(
-      (item) => item.requestId === requestId,
-    )
-  } catch {
-    return null
-  }
-}
-
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 const answering = new Set<string>()
 
-// Answers one prompt a live session left in cmux's Feed. cmux reports any reply as delivered, an unknown id included, so the prompt is read as waiting on that session before the reply and read again after it until it has left the Feed. Who may answer is canApprove(); permission and plan answers approve another session's actions, so they go only when PLAYGROUND_APPROVALS_ENABLED is on, judged by the prompt the Feed holds. Throws only when the activity row cannot be written: almost always before the reply, but a failure at the commit comes after it, so the prompt may be answered with no row, as it may when a reply cmux reported failed landed after all (UNCONFIRMED).
+// Answers one prompt a live session shows, a picker alone, by keys into its pane (answerHerdr()). Who may answer is canApprove(); permission and plan answers approve another session's actions, so they are refused while PLAYGROUND_APPROVALS_ENABLED is off, and as TERMINAL_ONLY while it is on, since the Dashboard answers pickers alone. Throws only when the activity row cannot be written, before any key.
 export async function answerFeed(
   { actor, answer, approver, requestId, sessionId }: FeedAnswering,
   deps: AnswerDeps = answerDeps,
@@ -264,7 +241,7 @@ export async function answerFeed(
         `No such prompt waits on ${worker.name}: it may be answered already.`,
       )
     }
-    if (worker.herdr && item.kind !== "question") {
+    if (item.kind !== "question") {
       return refused(
         "TERMINAL_ONLY",
         worker.role === "dispatcher"
@@ -272,7 +249,6 @@ export async function answerFeed(
           : `The Dashboard answers only a herdr session's pickers: for this ${item.kind}, ask Playground in the chat, and ${worker.name}'s manager answers it.`,
       )
     }
-    if (item.kind !== "question" && !deps.approvals) return off
     const built = replyFor(item, answer)
     if ("ok" in built) return built
     const event: ActivityEvent = {
@@ -280,45 +256,7 @@ export async function answerFeed(
       actor,
       summary: answerSummary(worker.name, item, answer),
     }
-    if (worker.herdr) return await answerHerdr(worker, item, answer, event, deps)
-    try {
-      await deps.record(event, async () => {
-        try {
-          await deps.reply(built)
-        } catch (error) {
-          throw new ReplyFailed(messageOf(error))
-        }
-      })
-    } catch (error) {
-      if (!(error instanceof ReplyFailed)) throw error
-      // cmux ends a reply that runs past its timeout, so one it reports failed may have landed: the Feed says which.
-      const still = await waits(sessionId, requestId, deps)
-      return still === false
-        ? refused(
-            "UNCONFIRMED",
-            `cmux reported ${error.message}, yet ${worker.name}'s prompt has left the Feed, so the answer likely went: its card has left with it.`,
-          )
-        : refused(
-            "CMUX_FAILED",
-            `The answer may not have gone through: ${error.message}. Its card stays here while the prompt waits, to answer again.`,
-          )
-    }
-    let read = false
-    for (let i = 0; i < deps.settle.attempts; i++) {
-      await sleep(deps.settle.delayMs)
-      const still = await waits(sessionId, requestId, deps)
-      if (still === false) return { at: deps.now().toISOString(), ok: true }
-      if (still === true) read = true
-    }
-    return read
-      ? refused(
-          "NOT_TAKEN",
-          `cmux took the answer, but ${worker.name}'s prompt still waits: its card stays here to answer again.`,
-        )
-      : refused(
-          "UNCONFIRMED",
-          `The answer went, but cmux's Feed could not be read to see it land: its card leaves once the prompt is answered.`,
-        )
+    return await answerHerdr(worker, item, answer, event, deps)
   } finally {
     answering.delete(requestId)
   }
@@ -336,7 +274,7 @@ export const asksOf = (item: FeedItem, answer: FeedAnswer): Ask[] =>
       }))
     : []
 
-// Answers a herdr session's picker by keys, since herdr 0.9.5 has no call that answers one, and this is the procedure's one full telling: the same answer a cmux session's Feed takes, from the owner's own Submit on the card, past answerFeed()'s guards (canApprove(), one answer a prompt at a time) and replyFor(); a permission or a plan is refused before it (TERMINAL_ONLY). Before the first key it reads the pane and types nothing unless the pane shows the question the card shows, its words over its options (showsAsk() in herdr.ts), and every row the answer needs (NOT_PENDING); the attempt's dashboard.answer row commits before the first key, since a key once typed cannot be taken back; after each question's keys it reads the pane until that question has gone, the next question read from there, then presses Submit answers when the answer ends on that review, and a question still showing reads INTERRUPTED. Own words go as typed text (typeKeys()), since herdr refuses its prompt call while a session is blocked.
+// Answers a herdr session's picker by keys, since herdr 0.9.5 has no call that answers one, and this is the procedure's one full telling: the owner's own Submit on the card, past answerFeed()'s guards (canApprove(), one answer a prompt at a time) and replyFor(); a permission or a plan is refused before it (TERMINAL_ONLY). Before the first key it reads the pane and types nothing unless the pane shows the question the card shows, its words over its options (showsAsk() in herdr.ts), and every row the answer needs (NOT_PENDING); the attempt's dashboard.answer row commits before the first key, since a key once typed cannot be taken back; after each question's keys it reads the pane until that question has gone, the next question read from there, then presses Submit answers when the answer ends on that review, and a question still showing reads INTERRUPTED. Own words go as typed text (typeKeys()), since herdr refuses its prompt call while a session is blocked.
 async function answerHerdr(
   worker: Worker,
   item: FeedItem,

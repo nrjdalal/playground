@@ -12,7 +12,6 @@ import {
   devEnv,
   envGaps,
   fixtureStackEnv,
-  herdrAloneEnv,
   isDryRun,
   mainCheckoutOf,
   prefixOf,
@@ -20,7 +19,16 @@ import {
   type SettingsRead,
   syncAliases,
 } from "@/lib/dev/launch"
-import { proxyRefusal } from "@/lib/dev/proxy"
+import {
+  FALLBACK_PORT,
+  fallbackDir,
+  portlessDir,
+  proxyDown,
+  proxySetup,
+  serviceDir,
+  shareCa,
+  startFallback,
+} from "@/lib/dev/proxy"
 import {
   claimRecord,
   clearRecord,
@@ -31,7 +39,7 @@ import {
   recordPath,
   startOf,
 } from "@/lib/dev/stop"
-import { trashRoots } from "@/lib/trash"
+import { discard, trashRoots } from "@/lib/trash"
 
 // `bun run dev` runs this with --no-env-file, so it sees the shell's environment as turbo did before it; the apps still read .env themselves. Arguments pass through to `turbo run dev` (`bun run dev --ui stream`). DEV_TURBO_BIN lets a test stand in for turbo's dev run.
 const ROOT = join(import.meta.dir, "../../../..")
@@ -99,7 +107,6 @@ if (pgid && started) {
   if (claim.warning) console.error(`dev: ${claim.warning}`)
 }
 let wrote: string | null = null
-let herdrOnly = false
 let aliasPairs: [string, string][] = []
 let aliasFailed = ""
 let reconcile: ReturnType<typeof setInterval> | null = null
@@ -125,10 +132,31 @@ if (!dry) {
     console.error(`dev: refusing to start: ${checked.refusal}`)
     leave(1)
   }
-  const proxy = await proxyRefusal(env)
-  if (proxy) {
-    console.error(`dev: refusing to start: ${proxy}`)
-    leave(1)
+  const portlessOwn = serviceDir(env.PORTLESS_STATE_DIR || portlessDir())
+  const down = await proxyDown(env, portlessOwn)
+  if (down !== null) {
+    const state = fallbackDir(portlessOwn)
+    const shared = shareCa(portlessOwn, state, (path) =>
+      discard(
+        path,
+        { reason: "the 1355 proxy's leaves of a CA it replaced", session: "dev" },
+        trashRoots(ROOT),
+      ),
+    )
+    const failed = await startFallback(join(ROOT, "node_modules/.bin/portless"), {
+      ...env,
+      PORTLESS_STATE_DIR: state,
+    })
+    if (failed) {
+      console.error(`dev: refusing to start: ${proxySetup(down)} (on ${FALLBACK_PORT}: ${failed})`)
+      leave(1)
+    }
+    env.PORTLESS_PORT = String(FALLBACK_PORT)
+    // process.env too, so this launcher's own route and alias writes reach the 1355 proxy's folder
+    env.PORTLESS_STATE_DIR = process.env.PORTLESS_STATE_DIR = state
+    console.error(
+      `dev: portless's proxy is not running on port ${down}, which needs your Mac's password, so it runs on ${FALLBACK_PORT}, which needs none; Settings' Things to fix sets up the web address on ${down}${shared ? "" : `, and until then your browser warns that the certificate on ${FALLBACK_PORT} is not trusted, once on the web's address and once on the API's`}`,
+    )
   }
   console.error(`dev: database ${checked.proof}`)
   // The live dashboard takes the bare names beside its own: the reconcile tick below points them at the ports its stack bound.
@@ -152,21 +180,13 @@ if (!dry) {
       leave(1)
     }
     console.error(
-      `dev: dashboard reads the fixture written to ${scratch}, test data: no cmux, no ~/.claude; its writes land there and go when the stack stops, Inbox files among them, so a card an earlier start kept in the database shows its file as missing`,
+      `dev: dashboard reads the fixture written to ${scratch}, test data: no ~/.claude; its writes land there and go when the stack stops, Inbox files among them, so a card an earlier start kept in the database shows its file as missing`,
     )
   } else {
     console.error(`dev: dashboard source matched ${DASHBOARD_RULES[checked.dashboard.rule]}`)
     console.error(
-      "dev: dashboard reads this machine's own sessions, every real one included: take no screenshots of this stack",
+      "dev: dashboard reads this machine's own sessions from herdr, every real one included: take no screenshots of this stack",
     )
-    if (!checked.dashboard.cmux) {
-      herdrOnly = true
-      console.error(
-        checked.dashboard.reason === null
-          ? "dev: the dashboard reads herdr alone, the sessions Playground started; PLAYGROUND_ALL_SESSIONS=true adds every other session to Sessions and System"
-          : `dev: cmux would not answer this stack (${checked.dashboard.reason}) and holds no live factory session, so the dashboard reads herdr alone and shows none of your own sessions in cmux`,
-      )
-    }
     // The live dashboard and a person's own clone bring the herdr servers up when they are down, so restarting the app alone brings the factory back; a test stack with PLAYGROUND_LIVE_READS never does. It runs the main checkout's job, never this checkout's: the live dashboard runs the latest head of the branch its main checkout sits on, so there the pin and config change only once they reach that checkout; a person's own clone is its own main checkout, on whatever branch it holds. A failure is named and the stack starts anyway.
     const main = mainCheckoutOf(ROOT)
     if (main && (checked.dashboard.rule === "live-branch" || checked.dashboard.rule === "own")) {
@@ -191,7 +211,7 @@ const turbo = Bun.spawn(
   [process.env.DEV_TURBO_BIN || TURBO, "run", serving ? "serve" : "dev", ...args],
   {
     cwd: ROOT,
-    env: wrote ? fixtureStackEnv(env, wrote) : herdrOnly ? herdrAloneEnv(env) : env,
+    env: wrote ? fixtureStackEnv(env, wrote) : env,
     stdio: ["inherit", "inherit", "inherit"],
   },
 )

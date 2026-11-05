@@ -191,11 +191,11 @@
         "status": "ok"
       },
       {
-        "action": { "id": "trust", "label": "Trust the certificate" },
-        "detail": "not trusted",
+        "action": { "id": "proxy", "label": "Set up the web address" },
+        "detail": "not on 443",
         "name": "portless",
         "need": "the Dashboard's https address",
-        "note": "Your Mac does not trust the local web proxy's certificate yet. Trust it here; your Mac may ask for your password in its own window.",
+        "note": "The Dashboard's web address runs on port 1355 for now. Set it up here, and it drops the port number; your Mac asks for your password in its own window.",
         "status": "optional"
       },
       {

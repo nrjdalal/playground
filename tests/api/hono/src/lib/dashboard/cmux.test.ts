@@ -5,173 +5,15 @@ import { join } from "node:path"
 
 import * as cmux from "../../../../../../api/hono/src/lib/dashboard/cmux"
 import {
-  attachment,
-  CMUX_APP,
   cmuxCommand,
   cmuxFailure,
-  cmuxHeldOf,
   holdsKeystroke,
   isReadCommand,
-  processTableOf,
-  replyCommand,
   stream,
   writeCommand,
 } from "../../../../../../api/hono/src/lib/dashboard/cmux"
-import { startOf } from "../../../../../../api/hono/src/lib/dev/stop"
 
 const SURFACE = "42A9D5E3-E49A-454C-80E6-8884E5ACCC92"
-
-// whether a session is live in cmux, read from ps and Claude's registry once cmux will not answer the launcher
-// Claude Code makes its sessions folder with a session's first registry file, so a Mac where none ever ran has no folder, and with cmux running the launcher's herdr-alone fallback once refused there for an unreadable registry.
-test("cmuxHeld reads a sessions folder that does not exist yet as holding no session, while cmux runs", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "cmux-held-"))
-  try {
-    writeFileSync(
-      join(dir, "ps"),
-      `#!/bin/sh\necho "    1     0 Sat Oct 10 18:52:15 2026     /sbin/launchd"\necho "  500     1 Sat Oct 10 18:53:00 2026     ${CMUX_APP}"\n`,
-    )
-    chmodSync(join(dir, "ps"), 0o755)
-    const proc = Bun.spawn(
-      [
-        "bun",
-        "-e",
-        `const { cmuxHeld } = await import(${JSON.stringify(join(import.meta.dir, "../../../../../../api/hono/src/lib/dashboard/cmux.ts"))}); console.log(JSON.stringify(await cmuxHeld(${JSON.stringify(join(dir, "sessions"))})))`,
-      ],
-      {
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH ?? ""}`, PLAYGROUND_DATA_DIR: dir },
-        stderr: "pipe",
-        stdout: "pipe",
-      },
-    )
-    const [out, err, code] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ])
-    expect([code, err]).toEqual([0, ""])
-    expect(JSON.parse(out)).toEqual([])
-  } finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
-}, 30_000)
-
-describe("cmuxHeldOf", () => {
-  const START = "Mon Oct 19 01:00:00 2026"
-  const ps = [
-    `    1     0 Sat Oct 10 18:52:15 2026     /sbin/launchd`,
-    `  500     1 Sat Oct 10 18:53:00 2026     ${CMUX_APP}`,
-    `  510   500 Sat Oct 10 18:53:01 2026     /bin/zsh`,
-    `  520   510 Mon Oct  5 01:00:00 2026     /Users/me/.bun/bin/claude`,
-    `  530   510 ${START}     /Users/me/.bun/bin/claude`,
-    `  600     1 Sat Oct 10 18:54:00 2026     /Users/me/.local/bin/herdr`,
-    `  610   600 ${START}     /Users/me/.bun/bin/claude`,
-    `  700     1 ${START}     /usr/local/bin/cmux`,
-    `  710   700 ${START}     /Users/me/.bun/bin/claude`,
-  ].join("\n")
-  const file = (pid: number, name: string, procStart = START) => ({
-    pid,
-    text: JSON.stringify({ name, pid, procStart, sessionId: `s-${pid}` }),
-  })
-
-  test("reads ps's pid, parent, start (one-digit days included) and executable, a path with spaces kept whole", () => {
-    const table = processTableOf(
-      `${ps}\n  800     1 ${START}     /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\nnot a row`,
-    )
-    expect(table.get(520)).toEqual({
-      exe: "/Users/me/.bun/bin/claude",
-      ppid: 510,
-      start: "Mon Oct 5 01:00:00 2026",
-    })
-    expect(table.get(800)?.exe).toBe("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-    expect(table.size).toBe(10)
-  })
-
-  test("names the live sessions under the cmux app alone: not herdr's, not one under the cmux CLI's binary, not an ended one whose pid moved on", () => {
-    const files = [
-      file(520, "builder", "Mon Oct  5 01:00:00 2026"),
-      file(530, "ended", "Sun Oct 18 09:00:00 2026"),
-      file(610, "worker-herdr"),
-      file(710, "cli-child"),
-      file(999, "gone"),
-    ]
-    expect(cmuxHeldOf(files, processTableOf(ps), [])).toEqual(["builder"])
-  })
-
-  test("counts a file mid-rewrite under cmux by its pid, so a session cmux holds is never missed", () => {
-    expect(
-      cmuxHeldOf(
-        [
-          { pid: 530, text: "{ half" },
-          { pid: 610, text: null },
-        ],
-        processTableOf(ps),
-        [],
-      ),
-    ).toEqual(["pid 530"])
-  })
-
-  // a session of the owner's own under cmux leaves the launcher on herdr alone, while a factory one, placed as the hooks place it, still holds cmux
-  test("names only the factory's sessions: by the roster's kind for the name, else the name itself", () => {
-    const table = processTableOf(
-      [540, 550, 560, 570, 580].map((pid) => `  ${pid}   510 ${START}     claude`).join("\n") +
-        `\n${ps}`,
-    )
-    const files = [
-      file(540, "fix the sidebar"),
-      {
-        pid: 550,
-        text: JSON.stringify({
-          cwd: "/Users/me/dispatcher",
-          pid: 550,
-          procStart: START,
-          sessionId: "s-550",
-        }),
-      },
-      file(560, "worker-brave-otter"),
-      file(570, "x7mh4d-builder"),
-      file(580, "builder"),
-    ]
-    const roster = [
-      { kind: "builder", name: "x7mh4d-builder" },
-      { kind: "not a kind", name: "fix the sidebar" },
-    ]
-    expect(cmuxHeldOf(files, table, roster)).toEqual([
-      "worker-brave-otter",
-      "x7mh4d-builder",
-      "builder",
-    ])
-    expect(cmuxHeldOf(files.slice(0, 2), table, roster)).toEqual([])
-  })
-
-  test("reads the roster raw, as the hooks do, so a kind-only agent in a roster readRoster() rejects still holds cmux", async () => {
-    const root = mkdtempSync(join(tmpdir(), "cmux-held-"))
-    try {
-      const agents = [{ kind: "builder", name: "x7mh4d-builder" }]
-      const roster = join(root, "roster.json")
-      writeFileSync(roster, JSON.stringify({ agents }))
-      const read = await cmux.rosterAgents(roster)
-      expect(read).toEqual(agents)
-      const table = processTableOf(`  570   510 ${START}     claude\n${ps}`)
-      expect(cmuxHeldOf([file(570, "x7mh4d-builder")], table, read)).toEqual(["x7mh4d-builder"])
-      rmSync(roster)
-      expect(await cmux.rosterAgents(roster)).toEqual([])
-    } finally {
-      rmSync(root, { force: true, recursive: true })
-    }
-  })
-
-  test("holds none when the cmux app runs nowhere, registry or not, and is not known when the registry cannot be read while it runs", () => {
-    const noApp = processTableOf(
-      ps
-        .split("\n")
-        .filter((line) => !line.includes(CMUX_APP))
-        .join("\n"),
-    )
-    expect(cmuxHeldOf([file(520, "builder")], noApp, [])).toEqual([])
-    expect(cmuxHeldOf(null, noApp, [])).toEqual([])
-    expect(cmuxHeldOf(null, processTableOf(ps), [])).toBeNull()
-  })
-})
 
 describe("isReadCommand", () => {
   test("the reads the dashboard makes are allowed", () => {
@@ -344,24 +186,6 @@ test("run() settles when the CLI traps TERM, killed after a short grace", async 
   }
 }, 30_000)
 
-test("attachment() settles when the CLI traps TERM, as unreachable", async () => {
-  const live = process.env.PLAYGROUND_LIVE_READS
-  process.env.PLAYGROUND_LIVE_READS = "1"
-  try {
-    await withFakeCmux("#!/bin/sh\ntrap '' TERM\nsleep 20 &\nwait\n", async () => {
-      const started = Date.now()
-      expect(await attachment(300)).toEqual({
-        detail: "no answer within 0.3s",
-        state: "unreachable",
-      })
-      expect(Date.now() - started).toBeLessThan(15_000)
-    })
-  } finally {
-    if (live === undefined) delete process.env.PLAYGROUND_LIVE_READS
-    else process.env.PLAYGROUND_LIVE_READS = live
-  }
-}, 30_000)
-
 // deliver.ts retries a send that cmux exited with a refusal for, and never one killed at its timeout, whose text may have landed anyway
 describe("write() failures", () => {
   const SURFACE = "77BD77D9-0000-4000-8000-000000000001"
@@ -401,105 +225,6 @@ describe("write() failures", () => {
   })
 })
 
-describe("attachment", () => {
-  test("is missing when no cmux is on PATH", async () => {
-    const path = process.env.PATH
-    process.env.PATH = "/nonexistent"
-    try {
-      expect(await attachment()).toEqual({
-        detail: "cmux is not installed or not on PATH",
-        state: "missing",
-      })
-    } finally {
-      process.env.PATH = path
-    }
-  })
-
-  test("is missing when cmux on PATH will not start, rather than detached", async () => {
-    await withFakeCmux("#!/nonexistent/interpreter\n", async () => {
-      const reach = await attachment()
-      expect(reach.state).toBe("missing")
-    })
-  })
-
-  test("is unreachable, in cmux's own words, when it fails for any other reason", async () => {
-    await withFakeCmux("#!/bin/sh\necho 'Error: socket not found' >&2\nexit 1\n", async () => {
-      expect(await attachment()).toEqual({
-        detail: "Error: socket not found",
-        state: "unreachable",
-      })
-    })
-  })
-
-  test("is unreachable, saying so, when cmux does not answer in time", async () => {
-    await withFakeCmux("#!/bin/sh\nexec sleep 10\n", async () => {
-      expect(await attachment(300)).toEqual({
-        detail: "no answer within 0.3s",
-        state: "unreachable",
-      })
-    })
-  })
-
-  // cmux answers by ancestry, so these run only where a token-free read is answered: inside one of its terminals, as the factory's sessions are; on a CI runner there is no cmux to ask.
-  const inCmux =
-    Bun.which("cmux") !== null &&
-    Bun.spawnSync(["cmux", "list-workspaces"], {
-      env: Object.fromEntries(
-        Object.entries(process.env).filter(([key]) => !key.startsWith("CMUX_")),
-      ),
-      stderr: "ignore",
-      stdin: "ignore",
-      stdout: "ignore",
-    }).exitCode === 0
-
-  test.skipIf(!inCmux)(
-    "is attached in a process that descends from a cmux terminal, with no CMUX_ variable",
-    async () => {
-      expect(await attachment()).toEqual({ state: "attached" })
-    },
-  )
-
-  // A middle process starts the reader and exits at once, so launchd adopts it, as it adopts a stack started with `( … &)`. The reader waits until it is adopted before it reads. It is this test's own grandchild, so this test ends it, should it outlive the wait, by its pid and only while that pid has the start time it had.
-  test.skipIf(!inCmux)(
-    "is detached in a process launchd adopted",
-    async () => {
-      const dir = mkdtempSync(join(tmpdir(), "cmux-attachment-"))
-      const pidFile = join(dir, "pid")
-      const out = join(dir, "out.json")
-      const reader = `await Bun.write(${JSON.stringify(pidFile)}, String(process.pid))
-for (let i = 0; i < 100 && process.ppid !== 1; i++) await Bun.sleep(50)
-const { attachment } = await import(${JSON.stringify(join(import.meta.dir, "../../../../../../api/hono/src/lib/dashboard/cmux.ts"))})
-await Bun.write(${JSON.stringify(out)}, JSON.stringify({ ppid: process.ppid, reach: await attachment() }))`
-      let pid = 0
-      let started: string | null = null
-      try {
-        Bun.spawnSync(
-          [
-            "bun",
-            "-e",
-            `Bun.spawn(["bun", "-e", ${JSON.stringify(reader)}], { stdio: ["ignore", "ignore", "ignore"] }).unref()`,
-          ],
-          { stdin: "ignore" },
-        )
-        for (let i = 0; i < 100 && !(await Bun.file(pidFile).exists()); i++) await Bun.sleep(25)
-        pid = Number(await Bun.file(pidFile).text())
-        started = startOf(pid)
-        for (let i = 0; i < 300 && !(await Bun.file(out).exists()); i++) await Bun.sleep(50)
-        const { ppid, reach } = await Bun.file(out).json()
-        expect(ppid).toBe(1)
-        expect(reach.state).toBe("detached")
-      } finally {
-        if (!(await Bun.file(out).exists()) && pid && started && startOf(pid) === started) {
-          process.kill(pid, "SIGKILL")
-        }
-        rmSync(dir, { force: true, recursive: true })
-      }
-    },
-    30_000,
-  )
-})
-
-// Only cmux.ts spawns cmux: everything else reads and writes through run(), runJson(), stream() and write(), whose argv cmux.ts builds and checks.
 const ROOT = join(import.meta.dir, "../../../../../..")
 const CMUX = "api/hono/src/lib/dashboard/cmux.ts"
 const SOURCE = /\.(?:[cm]?[jt]sx?)$/
@@ -543,26 +268,15 @@ const CMUX_COMMAND = new RegExp(
   "i",
 )
 // cmux.ts's argv builders, named in a file that imports, re-exports or dynamically imports a module ending in /cmux, with or without its extension. Every other export is the API the rest of the repo calls; the export test below makes a new export pick a side.
-const BUILDER_NAMES = ["cmuxCommand", "replyCommand", "writeCommand"]
+const BUILDER_NAMES = ["cmuxCommand", "writeCommand"]
 const CALLABLE = [
-  "CMUX_APP",
   "CmuxTimedOut",
-  "FEED_REQUEST_ID",
-  "PERMISSION_MODES",
-  "PLAN_MODES",
   "READ_COMMANDS",
   "WRITE_KEYS",
-  "attachment",
   "canForce",
   "cmuxFailure",
-  "cmuxHeld",
-  "cmuxHeldOf",
-  "herdrAlone",
   "holdsKeystroke",
   "isReadCommand",
-  "processTableOf",
-  "reply",
-  "rosterAgents",
   "run",
   "runJson",
   "stream",
@@ -694,65 +408,6 @@ describe("the cmux boundary", () => {
   })
 })
 
-describe("replyCommand", () => {
-  const ID = "54FB3383-A4B7-47D1-A6F8-225DF4F9E6A8"
-  const body = (argv: string[]) => JSON.parse(argv.at(-1) ?? "{}")
-
-  test("each kind of answer is its own rpc method, with a body built here", () => {
-    const question = replyCommand({
-      kind: "question",
-      requestId: ID,
-      selections: ["Red", "my own words"],
-    })
-    expect(question.slice(0, 3)).toEqual(["cmux", "rpc", "feed.question.reply"])
-    expect(body(question)).toEqual({ request_id: ID, selections: ["Red", "my own words"] })
-    const permission = replyCommand({ kind: "permission", mode: "deny", requestId: ID })
-    expect(permission.slice(0, 3)).toEqual(["cmux", "rpc", "feed.permission.reply"])
-    expect(body(permission)).toEqual({ mode: "deny", request_id: ID })
-    const plan = replyCommand({
-      feedback: "use a branch",
-      kind: "plan",
-      mode: "deny",
-      requestId: ID,
-    })
-    expect(plan.slice(0, 3)).toEqual(["cmux", "rpc", "feed.exit_plan.reply"])
-    expect(body(plan)).toEqual({ feedback: "use a branch", mode: "deny", request_id: ID })
-    expect(
-      body(replyCommand({ feedback: null, kind: "plan", mode: "manual", requestId: ID })),
-    ).toEqual({
-      mode: "manual",
-      request_id: ID,
-    })
-  })
-
-  // A permission is answered once or denied: always, all or bypass would approve more than the one action on screen.
-  test("only once and deny answer a permission, and only manual and deny a plan", () => {
-    for (const mode of ["always", "all", "bypass"]) {
-      expect(() =>
-        replyCommand({ kind: "permission", mode: mode as "once", requestId: ID }),
-      ).toThrow("not allowed")
-    }
-    for (const mode of ["ultraplan", "bypassPermissions", "autoAccept"]) {
-      expect(() =>
-        replyCommand({ feedback: null, kind: "plan", mode: mode as "manual", requestId: ID }),
-      ).toThrow("not allowed")
-    }
-    expect(() =>
-      replyCommand({ feedback: "note", kind: "plan", mode: "manual", requestId: ID }),
-    ).toThrow("goes with deny")
-  })
-
-  test("a reply names a real request id and a selection for every question", () => {
-    expect(() => replyCommand({ kind: "permission", mode: "deny", requestId: "q0" })).toThrow(
-      "request id",
-    )
-    expect(() => replyCommand({ kind: "question", requestId: ID, selections: [] })).toThrow()
-    expect(() =>
-      replyCommand({ kind: "question", requestId: ID, selections: ["Red", " "] }),
-    ).toThrow()
-  })
-})
-
 describe("a refused source", () => {
   test("answers SOURCE_REFUSED with its reason, never a cmux code, so the web shows no cmux setup line under it", async () => {
     const saved = {
@@ -841,8 +496,8 @@ describe("typing into a pane", () => {
   })
 })
 
-// write() is the dashboard's one way to type into a pane, so it reaches only deliver.ts, which serves the owner's own clicks (deliver.test.ts pins deliver()'s callers in turn).
-const WRITERS = ["api/hono/src/lib/dashboard/deliver.ts"]
+// deliver.ts sends through herdr (below), so no source calls write(), which goes with the rest of cmux.ts.
+const WRITERS: string[] = []
 const CMUX_WHOLE =
   /\*\s*(?:as\s+[\w$]+\s*)?from\s*["'][^"']*\/cmux(?:\.[cm]?[jt]sx?)?["']|\bimport\s*\(\s*["'][^"']*\/cmux(?:\.[cm]?[jt]sx?)?["']\s*\)/
 
@@ -858,7 +513,7 @@ const writers = (files: Record<string, string>): string[] =>
     .map(([path]) => path)
 
 describe("who calls write()", () => {
-  test("only deliver.ts", async () => {
+  test("no source", async () => {
     const listed = Bun.spawnSync(
       ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
       { cwd: ROOT, stdin: "ignore" },
