@@ -402,8 +402,11 @@ const deliveredAt: DeliverDeps["delivered"] = async (id) => {
 }
 
 export const deliverDeps: DeliverDeps = {
-  // The hub's newest board, without waiting on a refresh in flight; hub.ts imports this module through sdk.ts, so it is loaded when first needed
-  board: async () => (await import("@/lib/dashboard/hub")).dashboardHub.snapshot ?? listLive(),
+  // The hub's newest board, without waiting on a refresh in flight, or a fresh read when it has none or it was cut short; hub.ts imports this module through sdk.ts, so it is loaded when first needed
+  board: async () => {
+    const shown = (await import("@/lib/dashboard/hub")).dashboardHub.snapshot
+    return shown && !shown.partial ? shown : listLive()
+  },
   canForce,
   delivered: deliveredAt,
   now: () => new Date(),
@@ -526,13 +529,26 @@ async function recorded(delivery: Delivery, deps: DeliverDeps): Promise<Delivery
 
 type Target = { surface: string; worker: Worker }
 
-// The named session as the read shows it, or why it cannot take a message.
+// The named session as the read shows it, or why it cannot take a message. A read cut short (a herdr server or pane that did not answer in time) that misses the name is read once more, and still missing it is a failed read, never a session gone, so no answer is relayed past a poster that is still live.
 async function target(to: string, read: () => Promise<Live>): Promise<Refusal | Target> {
-  let live: Live
-  try {
-    live = await read()
-  } catch (error) {
-    return refused("CMUX_FAILED", `Could not read the sessions: ${messageOf(error)}`)
+  const readOnce = async (): Promise<Live | Refusal> => {
+    try {
+      return await read()
+    } catch (error) {
+      return refused("CMUX_FAILED", `Could not read the sessions: ${messageOf(error)}`)
+    }
+  }
+  let live = await readOnce()
+  if ("ok" in live) return live
+  if (live.partial && !reached(live.workers, to).count) {
+    live = await readOnce()
+    if ("ok" in live) return live
+    if (live.partial && !reached(live.workers, to).count) {
+      return refused(
+        "CMUX_FAILED",
+        `The sessions read was cut short (herdr did not answer in time), so ${to} was not found; nothing was typed.`,
+      )
+    }
   }
   const { count, worker } = reached(live.workers, to)
   if (!count) return refused("NOT_FOUND", `No live session is named ${to}.`)

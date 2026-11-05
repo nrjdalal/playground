@@ -3155,6 +3155,59 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         expect(kept).not.toContain(VALUE)
     })
 
+    test("a saved secret whose telling failed keeps its saved result, and its Retry tells the poster again without running the sink (#880)", async () => {
+      const posted = await post({
+        ...decision({
+          key: "YARD_TOKEN",
+          sink: { item: "yard", type: "keychain" },
+          type: "secret",
+        }),
+        from: "dispatcher",
+      })
+      const saves: string[] = []
+      const keychainSink = async (_item: string, value: string) => void saves.push(value)
+      const sink = stub()
+      const provided = await store.provideSecret(
+        db,
+        posted.id,
+        { value: `yard_${VALUE}` },
+        {
+          actor,
+          deliver: async () => ({
+            code: "CMUX_FAILED",
+            ok: false,
+            reason:
+              "The sessions read was cut short (herdr did not answer in time), so dispatcher was not found; nothing was typed.",
+          }),
+          keychain: keychainSink,
+          run: sink.run,
+        },
+      )
+      expect(provided.ok && provided.item.delivery).toMatchObject({
+        code: "CMUX_FAILED",
+        status: "failed",
+      })
+      const saved = provided.ok ? provided.item.answer : null
+      expect(saved).toMatchObject({
+        results: [{ environment: "Keychain", exitCode: 0, line: "saved" }],
+      })
+      const sent: Delivery[] = []
+      const retried = await store.retryDelivery(db, posted.id, {
+        actor,
+        deliver: async (delivery) => {
+          sent.push(delivery)
+          return { at: new Date().toISOString(), ok: true, sessionId: "s1" }
+        },
+      })
+      expect(saves).toEqual([`yard_${VALUE}`])
+      expect(sink.calls).toHaveLength(0)
+      expect(sent).toHaveLength(1)
+      expect(sent[0]?.text).toContain("Keychain: saved")
+      expect(sent[0]?.text).not.toContain(VALUE)
+      expect(retried.ok && retried.item.answer).toEqual(saved)
+      expect(retried.ok && retried.item.delivery).toMatchObject({ status: "delivered" })
+    })
+
     test("a keychain save that fails keeps the refusal's first line, with the value cut out", async () => {
       const posted = await post(
         decision({ key: "YARD_TOKEN", sink: { item: "yard", type: "keychain" }, type: "secret" }),

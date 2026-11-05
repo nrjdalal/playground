@@ -274,8 +274,10 @@ const each = <T>(schema: z.ZodType<T>, values: unknown[]): T[] =>
   })
 
 export type Pane = z.infer<typeof paneSchema> & { processes: z.infer<typeof processSchema>[] }
+// partial: a pane's processes, or the whole server, did not answer in time, so a session missing from this read may still be live.
 export type ServerRead = {
   panes: Pane[]
+  partial?: true
   server: string
   workspaces: z.infer<typeof workspaceSchema>[]
 }
@@ -298,6 +300,7 @@ export async function readServer(
   )
   if (!parsed.success) throw new HerdrRefused("session.snapshot", "malformed", "no snapshot")
   const panes: Pane[] = []
+  let partial = false
   for (const pane of each(paneSchema, parsed.data.snapshot.panes)) {
     const info = await request(
       server.socket,
@@ -307,11 +310,13 @@ export async function readServer(
     )
       .then((result) => processInfoSchema.safeParse(result))
       .catch(() => null)
+    if (info === null) partial = true
     const listed = info?.success ? (info.data.process_info.foreground_processes ?? []) : []
     panes.push({ ...pane, processes: each(processSchema, listed) })
   }
   return {
     panes,
+    ...(partial && { partial: true }),
     server: server.name,
     workspaces: each(workspaceSchema, parsed.data.snapshot.workspaces),
   }
@@ -338,7 +343,14 @@ export async function readHerdr(
       ? [`herdr's ${r.server.name} server could not be read: ${(r.error as Error).message}`]
       : [],
   )
-  return reads.flatMap((r) => ("read" in r ? [r.read] : []))
+  // a server that is up but did not answer stays in the list, empty and partial, so a reader can tell its sessions from ended ones
+  return reads.flatMap((r) =>
+    "read" in r
+      ? [r.read]
+      : r.error instanceof HerdrDown
+        ? []
+        : [{ panes: [], partial: true as const, server: r.server.name, workspaces: [] }],
+  )
 }
 
 // herdr's agent status as the lifecycle words lightOf() reads: blocked waits on a person, working runs, idle and done wait for input (the dashboard never tells done from idle, so it never calls focus, the one call that turns done into idle).

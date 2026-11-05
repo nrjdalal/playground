@@ -253,9 +253,20 @@ describe("readServer and herdrRecords", () => {
       "session.snapshot": () => ({ ...SNAPSHOT, snapshot: { ...SNAPSHOT.snapshot, panes } }),
     })
     const start = performance.now()
-    expect(await readHerdr([{ name: "hung", socket: s.path }], 300)).toEqual([])
+    expect(await readHerdr([{ name: "hung", socket: s.path }], 300)).toEqual([
+      { panes: [], partial: true, server: "hung", workspaces: [] },
+    ])
     expect(performance.now() - start).toBeLessThan(1500)
     expect(herdrProblem()).toContain("hung")
+  })
+
+  test("a pane whose processes did not answer marks its server's read partial, so a session missing from it is not taken for ended (#880)", async () => {
+    const s = stub({ "pane.process_info": () => ({ error: { code: "busy", message: "busy" } }) })
+    const [read] = await readHerdr([{ name: "slow", socket: s.path }], 1000)
+    expect(read?.partial).toBe(true)
+    expect(read?.panes.length).toBeGreaterThan(0)
+    const whole = await readHerdr([{ name: "whole", socket: stub().path }], 1000)
+    expect(whole[0]?.partial).toBeUndefined()
   })
 
   test("a pane holds a session when a foreground process has a registry file naming it, and is keyed by server and pane", async () => {

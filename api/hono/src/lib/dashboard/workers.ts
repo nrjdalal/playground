@@ -482,7 +482,9 @@ export function unansweredFeed(feed: unknown, pickersOf: (sessionId: string) => 
   return { ...feed, items: feed.items.filter((item) => !(isRecord(item) && gone.has(item))) }
 }
 
+// partial: a herdr server or pane did not answer in time, so a session missing from workers may still be live.
 export type Live = {
+  partial?: true
   surfaces: Map<string, string>
   transcripts: Map<string, string>
   workers: Worker[]
@@ -843,7 +845,8 @@ export async function listLive(): Promise<Live> {
   }))
   const marked = blockedSessions(blocked, held)
   unstickConflicts = { at: Date.now(), lines: marked.conflicts }
-  return withHosted(withBlocked(live, marked.sessions, usage), hosted())
+  const shown = withHosted(withBlocked(live, marked.sessions, usage), hosted())
+  return servers.some((read) => read.partial) ? { ...shown, partial: true } : shown
 }
 
 // Pure: a session ops-unstick finds stuck on a dialog waits on the owner, as one on a picker does, so it reads Waiting on you wherever its light shows and deliver() types nothing into it. One the usage limit alone holds, with no prompt of its own, also carries usageLimit, so its light reads paused rather than stuck. A probe's dialogs are its spawner's, as its pickers are, so it never does.
