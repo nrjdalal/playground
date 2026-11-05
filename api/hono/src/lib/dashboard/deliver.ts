@@ -478,7 +478,7 @@ async function recorded(delivery: Delivery, deps: DeliverDeps): Promise<Delivery
 
 type Target = { surface: string; worker: Worker }
 
-// The named session as the read shows it, or why it cannot take a message. A read cut short (a herdr server or pane that did not answer in time) that misses the name is read once more, and still missing it is a failed read, never a session gone, so no answer is relayed past a poster that is still live.
+// The named session as the read shows it, or why it cannot take a message. A read cut short (a herdr server or pane that did not answer whole) that misses the name is read once more, and still missing it is a failed read, never a session gone, so no answer is relayed past a poster that is still live.
 async function target(to: string, read: () => Promise<Live>): Promise<Refusal | Target> {
   let live: Live
   let found: ReturnType<typeof reached>

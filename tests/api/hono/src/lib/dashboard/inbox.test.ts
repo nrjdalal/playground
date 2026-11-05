@@ -3488,7 +3488,10 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(saves).toEqual([`yard_${VALUE}`])
       expect(sink.calls).toHaveLength(0)
       expect(sent).toHaveLength(1)
-      expect(sent[0]?.text).toContain("Keychain: saved")
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        results: [{ environment: "Keychain", exitCode: 0, line: "saved" }],
+        verb: "submit",
+      })
       expect(sent[0]?.text).not.toContain(VALUE)
       expect(retried.ok && retried.item.answer).toEqual(saved)
       expect(retried.ok && retried.item.delivery).toMatchObject({ status: "delivered" })

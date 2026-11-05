@@ -485,7 +485,7 @@ export function unansweredFeed(feed: unknown, pickersOf: (sessionId: string) => 
   return { ...feed, items: feed.items.filter((item) => !(isRecord(item) && gone.has(item))) }
 }
 
-// partial: a herdr server or pane did not answer in time, so a session missing from workers may still be live.
+// partial: some herdr server's read was partial (ServerRead.partial).
 export type Live = {
   partial?: true
   surfaces: Map<string, string>

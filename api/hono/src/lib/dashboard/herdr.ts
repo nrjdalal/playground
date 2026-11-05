@@ -270,7 +270,7 @@ const each = <T>(schema: z.ZodType<T>, values: unknown[]): T[] =>
   })
 
 export type Pane = z.infer<typeof paneSchema> & { processes: z.infer<typeof processSchema>[] }
-// partial: a pane's processes, or the whole server, did not answer in time, so a session missing from this read may still be live.
+// partial: a pane's processes, or the whole server, did not answer whole, so a session missing from this read may still be live.
 export type ServerRead = {
   panes: Pane[]
   partial?: true
