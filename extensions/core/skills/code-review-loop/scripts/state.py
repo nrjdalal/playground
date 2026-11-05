@@ -420,14 +420,14 @@ QUOTES = ("\"", "'", "`")
 
 
 def spellings(path):
-    """How a test names or imports a changed file: its path without the extension, as `@/` for web/next/src, and relative to a src root quoted whole, without its extension only when the relative path holds a folder."""
+    """How a test names or imports a changed file: its path without the extension, as `@/` for web/next/src, and relative to a src root or to its package root (`"src/hosted.ts"`) quoted whole, without its extension only when the relative path holds a folder."""
     stem = os.path.splitext(path)[0]
     ext = os.path.splitext(path)[1]
     out = [stem]
-    for root in ("api/hono/src/", "web/next/src/"):
-        if stem.startswith(root):
-            rel = stem[len(root):]
-            out += ([f"{q}{rel}{q}" for q in QUOTES] if "/" in rel else []) + [f"{q}{rel}{ext}{q}" for q in QUOTES]
+    for package in ("api/hono/", "web/next/"):
+        if stem.startswith(f"{package}src/"):
+            for rel in (stem[len(package) + len("src/"):], stem[len(package):]):
+                out += ([f"{q}{rel}{q}" for q in QUOTES] if "/" in rel else []) + [f"{q}{rel}{ext}{q}" for q in QUOTES]
     return out + ([f"@/{stem[len('web/next/src/'):]}"] if stem.startswith("web/next/src/") else [])
 
 
