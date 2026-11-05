@@ -48,6 +48,10 @@ export const groups: Group[] = [
         `node -e 'const o = { shell: true }; require("child_process").spawnSync("rmdir ~/.play*", o)'`,
       ],
       [
+        "an inline node program removing a data-folder glob through spawnSync with a shell value that starts with false",
+        `node -e 'require("child_process").spawnSync("rmdir ~/.play*", { shell: false || "/bin/sh" })'`,
+      ],
+      [
         "an inline node program removing a data-folder glob through execSync beside an unrelated shell variable",
         `node -e 'require("child_process").execSync("rmdir ~/.play* $1")'`,
       ],

@@ -874,13 +874,13 @@ function wholeLine(commands: Command[], env: Env): boolean {
   })
 }
 
-// Calls whose string argument a shell runs: exec and execSync in a program that names child_process, and execFile, execFileSync, spawn and spawnSync in a program that names `shell` other than as a key set to a literal `false` (true, a shell's path or a value read at run time all run one). A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
+// Calls whose string argument a shell runs: exec and execSync in a program that names child_process, and execFile, execFileSync, spawn and spawnSync in a program that names `shell` other than as a key whose whole value is a literal `false` (true, a shell's path, a value read at run time or an expression that starts with `false` all run one). A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
 const IMPLICIT_SHELL = new Set(["exec", "execSync"])
 const SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g
-// `shell`, a quoted key's quotes included, and the `: false` after it when that is its value.
-const SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b)?/g
+// `shell`, a quoted key's quotes included, and the `: false` after it when that is its whole value, ended by a comma or a closing bracket.
+const SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b(?=\s*[,})]))?/g
 
-// Whether a program names a `shell` other than a key set to a literal false: read across the program, since a shorthand property, a spread or an options object passed by name carries the option outside the call's own text.
+// Whether a program names a `shell` other than a key whose whole value is a literal false: read across the program, since a shorthand property, a spread or an options object passed by name carries the option outside the call's own text.
 function namesShell(text: string): boolean {
   return [...text.matchAll(SHELL_WORD)].some((m) => !m[2])
 }
@@ -922,7 +922,7 @@ function commandString(src: string, open: number): string | undefined {
   return value
 }
 
-// Each command string a shell-running call in a program's text is given, so a ~ in one is judged as the shell expands it; exec and execSync count only in a program that names child_process, so a regex's or a query's `.exec` is left alone, and a spawn, spawnSync, execFile or execFileSync counts only in a program that names a `shell` other than a literal `false`.
+// Each command string a shell-running call in a program's text is given, so a ~ in one is judged as the shell expands it; exec and execSync count only in a program that names child_process, so a regex's or a query's `.exec` is left alone, and a spawn, spawnSync, execFile or execFileSync counts only in a program that names a `shell` other than a key whose whole value is a literal `false`.
 function shellRunnerArgs(text: string): string[] {
   const out: string[] = []
   const childProcess = text.includes("child_process")
