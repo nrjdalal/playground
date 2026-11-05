@@ -31,10 +31,10 @@ export const WEB_DEVICE = "web"
 
 // Where the hosted web approves what waits on you, built in one place for every link to it: a pending message's sender sends or denies it, and the owner opens or denies an invite request.
 export const approvePath = (messageId: string) => `/yard/approve/${encodeURIComponent(messageId)}`
+export const invitePath = (inviteId: string) => `/yard/invites/${encodeURIComponent(inviteId)}`
 
 // Where the hosted API's relay to the owner's own Mac sits: the hosted web's dashboard reads go to this prefix plus their own path.
 export const RELAY_PREFIX = "/api/v1/yard/relay"
-export const invitePath = (inviteId: string) => `/yard/invites/${encodeURIComponent(inviteId)}`
 
 // A token's name, which a post made with it carries as from.device, so none may take the browser's name.
 export const tokenNameSchema = device.refine(

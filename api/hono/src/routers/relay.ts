@@ -7,11 +7,7 @@ import type { Hub } from "@/lib/relay/hub"
 import { RELAY_PREFIX, relayAllowed } from "@/lib/relay/protocol"
 import type { YardVariables } from "@/lib/yard/caller"
 
-// Pure: the date words an offline page shows, from the hub's ISO time.
-const offlineWords = (since: string | null) =>
-  since ? `Your Mac is offline since ${since}` : "Your Mac is offline"
-
-// The relay's hosted routes, inside Yard's router: the socket the owner's Mac holds with its own token, the Mac's status, and the owner's browser's reads, each forwarded to the Mac with a fresh id and time, its answer passed back and kept nowhere. Every route takes the owner rung; a read also takes the hosted web's Origin when it names one.
+// The relay's hosted routes, inside Yard's router: the socket the owner's Mac holds with its own token, the Mac's status, and the owner's browser's reads, each forwarded to the Mac with a fresh id and time, its answer passed back and kept nowhere. Every route takes the owner rung; a read also takes the hosted web's Origin when it names one, and its answer comes sandboxed and unsniffed, as the Mac's own files are.
 export function relayRouter({
   hub,
   mac,
@@ -92,14 +88,15 @@ export function relayRouter({
           throw new ApiError(403, "FORBIDDEN", "The relay does not carry this request")
         const caller = c.get("caller")
         const answer = await hub.forward(caller.id, caller.login, target)
-        if (answer.type === "offline")
-          throw new ApiError(503, "MAC_OFFLINE", offlineWords((await hub.status(caller.id)).since))
+        if (answer.type === "offline") throw new ApiError(503, "MAC_OFFLINE", "Your Mac is offline")
         if (answer.type === "timeout")
           throw new ApiError(503, "MAC_OFFLINE", "Your Mac did not answer in time")
         return new Response(Buffer.from(answer.body, "base64"), {
           headers: {
+            ...answer.headers,
             "cache-control": "no-store",
-            ...(answer.contentType ? { "content-type": answer.contentType } : {}),
+            "content-security-policy": "default-src 'none'; sandbox",
+            "x-content-type-options": "nosniff",
           },
           status: answer.status,
         })

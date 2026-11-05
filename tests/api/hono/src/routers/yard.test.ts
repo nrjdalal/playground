@@ -172,7 +172,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       memberSocket: 403,
       offline: 503,
       onboard: 403,
-      read: [200, { data: ["w1"] }, "no-store"],
+      read: [200, { data: ["w1"] }, "no-store", "inline", "default-src 'none'; sandbox", "nosniff"],
       requests: [{ login: "ow", method: "GET", path: "/api/v1/workers?x=1" }],
       status: { online: true, since: null },
       statusAfter: { online: false, since: "string" },

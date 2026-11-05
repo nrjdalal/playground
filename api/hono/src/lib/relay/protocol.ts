@@ -10,6 +10,10 @@ export const RELAY_MAX_AGE_MS = 30_000
 // How long the hub waits for this Mac's answer before it answers the browser itself.
 export const RELAY_TIMEOUT_MS = 25_000
 
+// How often this Mac tells the hub it is there, and how long a silent socket stays online: a sleeping Mac leaves its socket half-open, so the hub counts one silent for RELAY_SILENT_MS as gone.
+export const RELAY_HEARTBEAT_MS = 15_000
+export const RELAY_SILENT_MS = 45_000
+
 // The dashboard's reads the relay carries, A to Z, every one a GET: no first-run or onboarding route (requireThisMachine is the only guard on the passwordless sign-in), no write, and no route on the never-from-Yard list. A write is added here by name, once a paired key signs it.
 export const RELAY_GETS = [
   "/api/health",
@@ -61,15 +65,24 @@ export const relayRequestSchema = z.strictObject({
 })
 export type RelayRequest = z.infer<typeof relayRequestSchema>
 
-// This Mac's answer: the status, the content type, and the body as base64, so a file reads as it is.
+// The answer's headers the relay carries, A to Z: a file's type and name; the hub sets its own no-store, sandbox and nosniff on every answer.
+export const RELAY_HEADERS = ["content-disposition", "content-type"] as const
+
+// This Mac's answer: the status, the headers on RELAY_HEADERS, and the body as base64, so a file reads as it is.
 export const relayResponseSchema = z.strictObject({
   body: z.string(),
-  contentType: z.string().max(256).nullable(),
+  headers: z.strictObject({
+    "content-disposition": z.string().max(1024).optional(),
+    "content-type": z.string().max(256).optional(),
+  }),
   id: z.uuid(),
   status: z.number().int().min(100).max(599),
   type: z.literal("response"),
 })
 export type RelayResponse = z.infer<typeof relayResponseSchema>
+
+// This Mac's frame every RELAY_HEARTBEAT_MS, so the hub knows the socket still answers.
+export const relayHeartbeatSchema = z.strictObject({ type: z.literal("heartbeat") })
 
 // What the hosted web reads before it draws the dashboard: whether this Mac holds its socket, and since when it is offline, when that is known.
 export type RelayStatus = { online: boolean; since: string | null }

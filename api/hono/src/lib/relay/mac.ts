@@ -1,4 +1,6 @@
 import {
+  RELAY_HEADERS,
+  RELAY_HEARTBEAT_MS,
   RELAY_MAX_AGE_MS,
   RELAY_PREFIX,
   relayAllowed,
@@ -14,7 +16,7 @@ export type SeenIds = Map<string, number>
 
 const json = (id: string, status: number, code: string, message: string): RelayResponse => ({
   body: Buffer.from(JSON.stringify({ error: { code, message } })).toString("base64"),
-  contentType: "application/json",
+  headers: { "content-type": "application/json" },
   id,
   status,
   type: "response",
@@ -74,7 +76,12 @@ export async function answerRelay(
     )
     return {
       body: Buffer.from(await response.arrayBuffer()).toString("base64"),
-      contentType: response.headers.get("content-type"),
+      headers: Object.fromEntries(
+        RELAY_HEADERS.flatMap((name) => {
+          const value = response.headers.get(name)
+          return value === null ? [] : [[name, value]]
+        }),
+      ),
       id: request.id,
       status: response.status,
       type: "response",
@@ -85,27 +92,48 @@ export async function answerRelay(
   }
 }
 
-// Vercel closes a socket at the function's 800 s cap, so this Mac opens a fresh one before then, and after a drop waits 1 s, doubling to a minute.
+// Vercel closes a socket at the function's 800 s cap, so this Mac opens a fresh one at RECYCLE_MS and lets the old one go once the new one is open; after a drop it waits 1 s, doubling to a minute.
 export const RECYCLE_MS = 750_000
 const RETRY_MS = 1000
 const RETRY_MAX_MS = 60_000
 
+// The socket startRelay holds: a WebSocket, or a test's fake of one.
+export type RelaySocket = {
+  addEventListener: (
+    type: "close" | "message" | "open",
+    listener: (event: { data?: unknown }) => void,
+  ) => void
+  close: () => void
+  readyState: number
+  send: (data: string) => void
+}
+
 type RelayDeps = {
   // the hosted API's base URL
   api: string
+  // opens the socket; a WebSocket by default
+  connect?: (url: URL, token: string) => RelaySocket
+  // RELAY_HEARTBEAT_MS and RECYCLE_MS by default; a test shortens them
+  heartbeatMs?: number
   // the local owner's session cookie, made once and again after the API refuses it
   cookie: () => Promise<string>
   dispatch: (request: Request) => Promise<Response>
   // the login the token's /me answers
   login: (token: string) => Promise<string>
+  recycleMs?: number
   // the Keychain token, or null with none
   token: () => Promise<string | null>
 }
 
-// Holds the relay while the API runs: one outbound socket to the hub, opened with the owner's token, answering each read, opened again before Vercel's cap and after any drop.
+// Bun's WebSocket takes headers, which the DOM type this package compiles against leaves out
+const webSocket = (url: URL, token: string): RelaySocket =>
+  new WebSocket(url, { headers: { authorization: `Bearer ${token}` } } as never)
+
+// Holds the relay while the API runs: one outbound socket to the hub, opened with the owner's token, answering each read and sending a heartbeat every RELAY_HEARTBEAT_MS, replaced before Vercel's cap and opened again after any drop.
 export function startRelay(deps: RelayDeps): () => void {
+  const { connect = webSocket, heartbeatMs = RELAY_HEARTBEAT_MS, recycleMs = RECYCLE_MS } = deps
   const seen: SeenIds = new Map()
-  let socket: WebSocket | null = null
+  let socket: RelaySocket | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
   let backoff = RETRY_MS
   let stopped = false
@@ -116,20 +144,33 @@ export function startRelay(deps: RelayDeps): () => void {
     timer.unref?.()
   }
 
+  const retry = () => {
+    later(backoff)
+    backoff = Math.min(backoff * 2, RETRY_MAX_MS)
+  }
+
   const open = async () => {
+    const previous = socket
     try {
       const token = await deps.token()
       if (!token) return later(RETRY_MAX_MS)
       const login = await deps.login(token)
+      if (stopped) return
       const url = new URL(`${RELAY_PREFIX}/socket`, deps.api)
       url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
-      // Bun's WebSocket takes headers, which the DOM type this package compiles against leaves out
-      const opened = new WebSocket(url, { headers: { authorization: `Bearer ${token}` } } as never)
+      const opened = connect(url, token)
       socket = opened
+      let beat: ReturnType<typeof setInterval> | null = null
       let recycle: ReturnType<typeof setTimeout> | null = null
       opened.addEventListener("open", () => {
         backoff = RETRY_MS
-        recycle = setTimeout(() => opened.close(), RECYCLE_MS)
+        previous?.close()
+        beat = setInterval(() => {
+          if (opened.readyState === WebSocket.OPEN)
+            opened.send(JSON.stringify({ type: "heartbeat" }))
+        }, heartbeatMs)
+        recycle = setTimeout(() => void open(), recycleMs)
+        beat.unref?.()
         recycle.unref?.()
       })
       opened.addEventListener("message", (event) => {
@@ -138,15 +179,17 @@ export function startRelay(deps: RelayDeps): () => void {
         })
       })
       opened.addEventListener("close", () => {
+        if (beat) clearInterval(beat)
         if (recycle) clearTimeout(recycle)
-        if (socket === opened) socket = null
-        later(backoff)
-        backoff = Math.min(backoff * 2, RETRY_MAX_MS)
+        // a socket a newer one replaced closes with nothing more to do
+        if (socket !== opened) return
+        // a replacement that never opened leaves the old socket holding the relay
+        socket = previous?.readyState === WebSocket.OPEN ? previous : null
+        retry()
       })
     } catch (error) {
       console.error("[relay] could not open", error)
-      later(backoff)
-      backoff = Math.min(backoff * 2, RETRY_MAX_MS)
+      if (socket === previous) retry()
     }
   }
 

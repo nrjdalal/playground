@@ -1,24 +1,25 @@
 import type { AppType, ErrorCode } from "@api/hono"
-import { RELAY_PREFIX } from "@packages/message"
 import { hc } from "hono/client"
 
 import { config } from "@/lib/config"
+import { relayedBase } from "@/lib/relay"
 
 type Client = ReturnType<typeof hc<AppType>>
 
 const hcWithType = (...args: Parameters<typeof hc>): Client => hc<AppType>(...args)
 
-// On the hosted build the dashboard's reads go through the relay to the owner's own Mac, each at the relay's prefix plus its own path.
 const base = config.api.internalUrl ? config.api.internalUrl : config.api.url
-const url = config.hosted ? `${base}${RELAY_PREFIX}` : base
 
-const honoClient = hcWithType(url, {
+const honoClient = hcWithType(relayedBase(base, config.hosted), {
   init: {
     credentials: "include",
   },
 })
 
 export const apiClient = honoClient.api
+
+// The API's own routes on either build, never through the relay: the session read.
+export const ownApiClient = hcWithType(base, { init: { credentials: "include" } }).api
 
 // Standard error shape, matching the jsonError envelope in api/hono/src/lib/error.ts; extras like the validation `issues` array are preserved. `code` is the API's ErrorCode union plus the transport codes unwrap itself produces.
 export type ApiError = {

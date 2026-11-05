@@ -1,11 +1,12 @@
 "use client"
 
+import type { RelayStatus } from "@api/hono"
 import { RELAY_PREFIX } from "@packages/message"
 import { useQuery } from "@tanstack/react-query"
 
 import { unwrap } from "@/lib/api/client"
 import { config } from "@/lib/config"
-import { offlineLine, RELAY_STATUS_KEY, RELAY_STATUS_MS, type RelayStatus } from "@/lib/relay"
+import { offlineLine, RELAY_STATUS_KEY, RELAY_STATUS_MS } from "@/lib/relay"
 
 async function readRelayStatus(): Promise<RelayStatus> {
   const { data, error } = await unwrap(

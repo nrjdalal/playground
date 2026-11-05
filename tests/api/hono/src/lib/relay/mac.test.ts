@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test"
 
 // The router's auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets; any secret serves requests that carry no session. Set before the router loads.
 process.env.BETTER_AUTH_SECRET ||= "relay-mac-test-secret-not-for-use-anywhere"
-const { answerRelay, requireRelay } = await import("../../../../../../api/hono/src/lib/relay/mac")
+const { answerRelay, requireRelay, startRelay } =
+  await import("../../../../../../api/hono/src/lib/relay/mac")
 const { RELAY_MAX_AGE_MS } = await import("../../../../../../api/hono/src/lib/relay/protocol")
 const { dashboardRouter } = await import("../../../../../../api/hono/src/routers/dashboard")
 const { errorHandler } = await import("../../../../../../api/hono/src/lib/error")
@@ -122,19 +123,26 @@ describe("a relayed read that passes", () => {
     expect(words(answer!.body).error.code).toBe("UNAUTHORIZED")
   })
 
-  test("carries the answer's status, content type and bytes back", async () => {
+  // the frame carried the content type alone, so a download lost its file name on the hosted origin
+  test("carries the answer's status, its type and file name, and its bytes back, and no other header", async () => {
     const answer = await answerRelay(frame(), {
       ...deps(
         async () =>
           new Response(new Uint8Array([0, 255, 7]), {
-            headers: { "content-type": "image/png" },
+            headers: {
+              "content-disposition": 'attachment; filename="a.png"',
+              "content-type": "image/png",
+              "set-cookie": "kept=here",
+            },
             status: 200,
           }),
       ),
     })
-    expect([answer?.status, answer?.contentType, [...Buffer.from(answer!.body, "base64")]]).toEqual(
-      [200, "image/png", [0, 255, 7]],
-    )
+    expect([answer?.status, answer?.headers, [...Buffer.from(answer!.body, "base64")]]).toEqual([
+      200,
+      { "content-disposition": 'attachment; filename="a.png"', "content-type": "image/png" },
+      [0, 255, 7],
+    ])
   })
 
   test("carries the local owner's cookie, which never leaves this Mac", async () => {
@@ -146,5 +154,161 @@ describe("a relayed read that passes", () => {
       }),
     })
     expect(cookie).toBe("session=fake")
+  })
+})
+
+// A socket startRelay holds, opened, fed and closed by the test, keeping what the relay sent it.
+type Fake = {
+  addEventListener: (
+    type: "close" | "message" | "open",
+    listener: (event: { data?: unknown }) => void,
+  ) => void
+  close: () => void
+  feed: (data: string) => void
+  open: () => void
+  readyState: number
+  send: (data: string) => void
+  sent: string[]
+  token: string
+  url: string
+}
+
+const sockets = () => {
+  const made: Fake[] = []
+  const connect = (url: URL, token: string) => {
+    const on = { close: [], message: [], open: [] } as Record<
+      string,
+      ((event: { data?: unknown }) => void)[]
+    >
+    const one: Fake = {
+      addEventListener: (type, listener) => void on[type]!.push(listener),
+      close: () => {
+        if (one.readyState === 3) return
+        one.readyState = 3
+        for (const listener of on.close!) listener({})
+      },
+      feed: (data) => {
+        for (const listener of on.message!) listener({ data })
+      },
+      open: () => {
+        one.readyState = 1
+        for (const listener of on.open!) listener({})
+      },
+      readyState: 0,
+      send: (data) => void one.sent.push(data),
+      sent: [],
+      token,
+      url: String(url),
+    }
+    made.push(one)
+    return one
+  }
+  return { connect, made }
+}
+
+const until = async (what: string, done: () => boolean, ms = 5000) => {
+  const end = Date.now() + ms
+  while (!done()) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`)
+    await Bun.sleep(5)
+  }
+}
+
+const relay = (
+  connect: ReturnType<typeof sockets>["connect"],
+  over: Record<string, unknown> = {},
+) =>
+  startRelay({
+    api: "https://yard.example.com",
+    connect,
+    cookie: async () => "session=fake",
+    dispatch: async () =>
+      new Response('{"data":[]}', { headers: { "content-type": "application/json" } }),
+    login: async () => "owner",
+    token: async () => "yard_fake",
+    ...over,
+  })
+
+describe("startRelay, this Mac's socket to the hub", () => {
+  test("connects to the hub's socket over wss with the token, answers a read on it, and sends a heartbeat", async () => {
+    const { connect, made } = sockets()
+    const stop = relay(connect, { heartbeatMs: 20 })
+    try {
+      await until("the socket", () => made.length === 1)
+      expect([made[0]!.url, made[0]!.token]).toEqual([
+        "wss://yard.example.com/api/v1/yard/relay/socket",
+        "yard_fake",
+      ])
+      made[0]!.open()
+      made[0]!.feed(frame({ at: new Date().toISOString(), id: crypto.randomUUID() }))
+      await until("an answer", () => made[0]!.sent.some((one) => one.includes('"response"')))
+      await until("a heartbeat", () => made[0]!.sent.includes('{"type":"heartbeat"}'))
+    } finally {
+      stop()
+    }
+  })
+
+  test("a login that fails, an upgrade the hub refuses and a drop each open again after the backoff", async () => {
+    const { connect, made } = sockets()
+    let logins = 0
+    const stop = relay(connect, {
+      login: async () => {
+        if (++logins === 1) throw new Error("the hub did not answer")
+        return "owner"
+      },
+    })
+    try {
+      await until("the first socket, after the login's retry", () => made.length === 1)
+      made[0]!.close()
+      await until("a socket after the refused upgrade", () => made.length === 2)
+      made[1]!.open()
+      made[1]!.close()
+      await until("a socket after the drop", () => made.length === 3)
+    } finally {
+      stop()
+    }
+  }, 15_000)
+
+  // the recycle closed the socket before it opened the next, so a status read in the gap swapped the dashboard for the offline line
+  test("the recycle opens the next socket before it lets the old one go", async () => {
+    const { connect, made } = sockets()
+    const stop = relay(connect, { recycleMs: 30 })
+    try {
+      await until("the socket", () => made.length === 1)
+      made[0]!.open()
+      await until("the next socket", () => made.length === 2)
+      expect(made[0]!.readyState).toBe(1)
+      made[1]!.open()
+      expect(made[0]!.readyState).toBe(3)
+      expect(made).toHaveLength(2)
+    } finally {
+      stop()
+    }
+  })
+
+  test("a next socket that never opens leaves the old one holding the relay", async () => {
+    const { connect, made } = sockets()
+    const stop = relay(connect, { recycleMs: 30 })
+    try {
+      await until("the socket", () => made.length === 1)
+      made[0]!.open()
+      await until("the next socket", () => made.length === 2)
+      made[1]!.close()
+      expect(made[0]!.readyState).toBe(1)
+      await until("another try", () => made.length === 3)
+    } finally {
+      stop()
+    }
+  })
+
+  test("stop closes the socket and opens no other", async () => {
+    const { connect, made } = sockets()
+    const stop = relay(connect)
+    await until("the socket", () => made.length === 1)
+    made[0]!.open()
+    stop()
+    expect(made[0]!.readyState).toBe(3)
+    await Bun.sleep(1200)
+    expect(made).toHaveLength(1)
   })
 })

@@ -2,7 +2,9 @@ import { env } from "@packages/env/api-hono"
 import { z } from "zod"
 
 import {
+  RELAY_SILENT_MS,
   RELAY_TIMEOUT_MS,
+  relayHeartbeatSchema,
   type RelayRequest,
   relayRequestSchema,
   type RelayResponse,
@@ -11,7 +13,10 @@ import {
 } from "@/lib/relay/protocol"
 import { redisChannel } from "@/lib/yard/channel"
 
-type MacSocket = { send: (data: string) => void }
+type MacSocket = { close?: () => void; send: (data: string) => void }
+
+// A socket the hub holds, and when it last heard from it.
+type Held = { heard: number; socket: MacSocket }
 
 type Waiting = {
   acked: boolean
@@ -41,21 +46,23 @@ type BusMessage = z.infer<typeof busSchema>
 // How a hub reaches the other instances: listen subscribes, publish reaches every instance, this one's included.
 export type Bus = { listen: () => void; publish: (data: string) => Promise<void> }
 
-// The hosted side of the relay: the socket each owner's Mac holds on this instance, and the requests waiting on an answer, all in memory, so nothing a Mac answers is kept once its browser has it; with a bus, a request or a status read on another instance reaches the instance holding the socket.
+// The hosted side of the relay: the socket each owner's Mac holds on this instance, and the requests waiting on an answer, all in memory, so nothing a Mac answers is kept once its browser has it; with a bus, a request or a status read on another instance reaches the instance holding the socket. A socket silent for silentMs, a sleeping Mac's half-open one, counts as gone from the time the hub last heard it.
 export function createHub({
   ackMs = RELAY_ACK_MS,
   bus,
   id = () => crypto.randomUUID(),
   now = () => new Date(),
+  silentMs = RELAY_SILENT_MS,
   timeoutMs = RELAY_TIMEOUT_MS,
 }: {
   ackMs?: number
   bus?: Bus
   id?: () => string
   now?: () => Date
+  silentMs?: number
   timeoutMs?: number
 } = {}) {
-  const macs = new Map<string, MacSocket>()
+  const macs = new Map<string, Held>()
   const offlineSince = new Map<string, string>()
   const waiting = new Map<string, Waiting>()
   const pings = new Map<string, () => void>()
@@ -73,9 +80,37 @@ export function createHub({
       ?.publish(JSON.stringify(message))
       .catch((error) => console.error("[relay] publish failed", String(error)))
 
+  const goneHere = (userId: string, since: string) => {
+    offlineSince.set(userId, since)
+    for (const [key, found] of waiting)
+      if (found.userId === userId) settle(key, { type: "offline" })
+  }
+
+  // Lets a held socket go, as of since, on every instance.
+  const drop = (userId: string, held: Held, since: string) => {
+    if (macs.get(userId) !== held) return
+    macs.delete(userId)
+    goneHere(userId, since)
+    void send({ kind: "gone", since, userId })
+  }
+
+  // The socket this instance holds for the owner while it still answers; one silent past silentMs is dropped and closed here.
+  const live = (userId: string): MacSocket | null => {
+    const held = macs.get(userId)
+    if (!held) return null
+    if (now().getTime() - held.heard < silentMs) return held.socket
+    drop(userId, held, new Date(held.heard).toISOString())
+    try {
+      held.socket.close?.()
+    } catch (error) {
+      console.error("[relay] closing a silent socket failed", String(error))
+    }
+    return null
+  }
+
   // Hands a request to the Mac's socket on this instance, and says whether one took it.
   const deliver = (userId: string, request: RelayRequest) => {
-    const socket = macs.get(userId)
+    const socket = live(userId)
     if (!socket) return false
     try {
       socket.send(JSON.stringify(request))
@@ -83,12 +118,6 @@ export function createHub({
     } catch {
       return false
     }
-  }
-
-  const goneHere = (userId: string, since: string) => {
-    offlineSince.set(userId, since)
-    for (const [key, found] of waiting)
-      if (found.userId === userId) settle(key, { type: "offline" })
   }
 
   // Takes what another instance published.
@@ -108,7 +137,7 @@ export function createHub({
     } else if (data.kind === "gone") {
       if (!macs.has(data.userId)) goneHere(data.userId, data.since)
     } else if (data.kind === "ping") {
-      if (macs.has(data.userId)) void send({ id: data.id, kind: "pong" })
+      if (live(data.userId)) void send({ id: data.id, kind: "pong" })
     } else if (data.kind === "pong") pings.get(data.id)?.()
     else if (data.kind === "request") {
       if (deliver(data.userId, data.request)) void send({ id: data.request.id, kind: "ack" })
@@ -119,26 +148,24 @@ export function createHub({
   return {
     // Holds the owner's Mac socket, a newer one replacing the old, and returns what lets it go; a socket that goes fails what still waits on it, on every instance.
     attach(userId: string, socket: MacSocket): () => void {
-      macs.set(userId, socket)
+      const held: Held = { heard: now().getTime(), socket }
+      macs.set(userId, held)
       offlineSince.delete(userId)
       bus?.listen()
-      return () => {
-        if (macs.get(userId) !== socket) return
-        macs.delete(userId)
-        const since = now().toISOString()
-        goneHere(userId, since)
-        void send({ kind: "gone", since, userId })
-      }
+      return () => drop(userId, held, now().toISOString())
     },
 
-    // Takes a frame the owner's Mac sent: an answer settles its own request, here or on the instance that waits on it, and anything else is dropped.
+    // Takes a frame the owner's Mac sent, which says it is there: a heartbeat says only that, an answer settles its own request, here or on the instance that waits on it, and anything else is dropped.
     answer(userId: string, raw: string): void {
+      const held = macs.get(userId)
+      if (held) held.heard = now().getTime()
       let parsed: unknown
       try {
         parsed = JSON.parse(raw)
       } catch {
         return
       }
+      if (relayHeartbeatSchema.safeParse(parsed).success) return
       const frame = relayResponseSchema.safeParse(parsed)
       if (!frame.success) return
       const found = waiting.get(frame.data.id)
@@ -157,7 +184,7 @@ export function createHub({
         path,
         type: "request",
       }
-      const here = macs.has(userId)
+      const here = live(userId) !== null
       if (!here && !bus) return Promise.resolve({ type: "offline" })
       return new Promise((resolve) => {
         const timers = [setTimeout(() => settle(request.id, { type: "timeout" }), timeoutMs)]
@@ -183,7 +210,7 @@ export function createHub({
 
     // Whether the owner's Mac holds the relay on any instance, and since when it is offline when an instance saw it go.
     async status(userId: string): Promise<RelayStatus> {
-      if (macs.has(userId)) return { online: true, since: null }
+      if (live(userId)) return { online: true, since: null }
       const offline = () => ({ online: false, since: offlineSince.get(userId) ?? null })
       if (!bus) return offline()
       const ping = id()

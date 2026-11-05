@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { attachmentsDir } from "../../../../../../api/hono/src/lib/dashboard/attachments"
 import {
-  boardFrame,
+  boardReader,
   DashboardHub,
   movesTheBoard,
   type DashboardFrame,
@@ -674,7 +674,7 @@ describe("DashboardHub", () => {
   })
 })
 
-describe("boardFrame, the board for a reader with no socket", () => {
+describe("boardReader, the board for a reader with no socket", () => {
   const frame = {
     code: "X",
     dispatcher: "d",
@@ -683,13 +683,17 @@ describe("boardFrame, the board for a reader with no socket", () => {
     names: {},
     type: "error",
   } as unknown as DashboardFrame
+  const entries = { entries: [], sessionId: "s", type: "entries" } as unknown as DashboardFrame
 
-  // A hub that hands a listener a frame now (a board already watching) or later (one it refreshes for this read), and counts who still listens.
+  // A hub that hands a listener a frame now (a board already watching) or later (one it refreshes for this read), and counts its subscribes and who still listens.
   const fake = (now: DashboardFrame | null) => {
     const listeners = new Set<(frame: DashboardFrame) => void>()
+    let subscribes = 0
     return {
       listeners,
+      subscribes: () => subscribes,
       subscribe(listener: (frame: DashboardFrame) => void) {
+        subscribes++
         listeners.add(listener)
         if (now) listener(now)
         return () => void listeners.delete(listener)
@@ -697,18 +701,29 @@ describe("boardFrame, the board for a reader with no socket", () => {
     }
   }
 
-  test("answers the frame a watching board already holds, and stops listening", async () => {
-    const hub = fake(frame)
-    expect(await boardFrame(hub, 1000)).toBe(frame)
-    await Promise.resolve()
-    expect(hub.listeners.size).toBe(0)
+  test("answers the frame a watching board already holds", async () => {
+    expect(await boardReader(fake(frame), { timeoutMs: 1000 })()).toBe(frame)
   })
 
-  test("waits for the frame of a refresh, and gives null when none comes in time", async () => {
+  test("waits for a refresh's board frame, past an entries frame, and gives null when none comes in time", async () => {
     const hub = fake(null)
-    const waiting = boardFrame(hub, 1000)
+    const waiting = boardReader(hub, { timeoutMs: 1000 })()
+    for (const listener of hub.listeners) listener(entries)
     for (const listener of hub.listeners) listener(frame)
     expect(await waiting).toBe(frame)
-    expect(await boardFrame(fake(null), 10)).toBeNull()
+    expect(await boardReader(fake(null), { timeoutMs: 10 })()).toBeNull()
+  })
+
+  // each read every 5 s subscribed and left, so the hub started herdr's feed and a full refresh for every read
+  test("holds one subscription across reads, and lets it go once reads stop", async () => {
+    const hub = fake(frame)
+    const read = boardReader(hub, { holdMs: 50, timeoutMs: 1000 })
+    await read()
+    await read()
+    expect(hub.subscribes()).toBe(1)
+    await Bun.sleep(80)
+    expect(hub.listeners.size).toBe(0)
+    await read()
+    expect(hub.subscribes()).toBe(2)
   })
 })

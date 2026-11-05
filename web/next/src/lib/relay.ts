@@ -1,7 +1,6 @@
-import { fullTime } from "@/lib/time"
+import { RELAY_PREFIX } from "@packages/message"
 
-// What the hosted web reads before it draws the dashboard: whether the owner's Mac holds the relay, and since when it is offline, when the hub saw it go.
-export type RelayStatus = { online: boolean; since: string | null }
+import { fullTime } from "@/lib/time"
 
 export const RELAY_STATUS_KEY = ["relay", "status"] as const
 
@@ -11,3 +10,7 @@ export const RELAY_STATUS_MS = 15_000
 // Pure: the one line the hosted dashboard shows while the Mac is offline.
 export const offlineLine = (since: string | null): string =>
   since ? `Your Mac is offline since ${fullTime(since)}` : "Your Mac is offline"
+
+// Pure: where the dashboard's reads go: on the hosted build through the relay to the owner's Mac, at the relay's prefix plus their own path; the API's own routes, the session read among them, stay on base.
+export const relayedBase = (base: string, hosted: boolean): string =>
+  hosted ? `${base}${RELAY_PREFIX}` : base

@@ -44,7 +44,7 @@ mac.onmessage = (event) => {
     mac.send(
       JSON.stringify({
         body: body({ data }),
-        contentType: "application/json",
+        headers: { "content-disposition": "inline", "content-type": "application/json" },
         id,
         status: 200,
         type: "response",
@@ -59,7 +59,16 @@ out.status = (
   await (await fetch(`${relay}/status`, { headers: { ...owner, origin: web } })).json()
 ).data
 const read = await fetch(`${relay}/api/v1/workers?x=1`, { headers: { ...owner, origin: web } })
-out.read = [read.status, await read.json(), read.headers.get("cache-control")]
+out.read = [
+  read.status,
+  await read.json(),
+  ...[
+    "cache-control",
+    "content-disposition",
+    "content-security-policy",
+    "x-content-type-options",
+  ].map((name) => read.headers.get(name)),
+]
 out.requests = requests.map(({ login, method, path }) => ({ login, method, path }))
 out.member = await status("/api/v1/workers", { ...member, origin: web })
 out.wrongOrigin = await status("/api/v1/workers", { ...owner, origin: "https://elsewhere.example" })

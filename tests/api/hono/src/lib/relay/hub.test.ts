@@ -14,7 +14,7 @@ const mac = () => {
 const answer = (id: string, body = "ok") =>
   JSON.stringify({
     body: Buffer.from(body).toString("base64"),
-    contentType: "text/plain",
+    headers: { "content-type": "text/plain" },
     id,
     status: 200,
     type: "response",
@@ -91,6 +91,27 @@ const instances = (options: { ackMs?: number; now?: () => Date } = {}) => {
   hubs.push(createHub({ ...options, bus, id }), createHub({ ...options, bus, id }))
   return { holder: hubs[0]!, listening: () => listening, other: hubs[1]! }
 }
+
+describe("a Mac that goes silent", () => {
+  // a sleeping Mac's half-open socket read online, so every read waited out its timeout and the page never said offline
+  test("reads offline from when the hub last heard it, closes its socket and fails a read, while a heartbeat keeps it online", async () => {
+    let now = AT
+    const hub = createHub({ id: () => ID, now: () => now, silentMs: 45_000 })
+    let closed = 0
+    hub.attach("u1", { close: () => void closed++, send() {} })
+    now = new Date(AT.getTime() + 30_000)
+    hub.answer("u1", JSON.stringify({ type: "heartbeat" }))
+    now = new Date(AT.getTime() + 70_000)
+    expect(await hub.status("u1")).toEqual({ online: true, since: null })
+    now = new Date(AT.getTime() + 80_000)
+    expect(await hub.status("u1")).toEqual({
+      online: false,
+      since: new Date(AT.getTime() + 30_000).toISOString(),
+    })
+    expect(closed).toBe(1)
+    expect(await hub.forward("u1", "owner", "/api/v1/workers")).toEqual({ type: "offline" })
+  })
+})
 
 describe("the relay's hub across instances", () => {
   test("a read on another instance reaches the Mac's socket and comes back", async () => {

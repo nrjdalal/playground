@@ -250,6 +250,7 @@ export type * from "@/plugins/registry"
 export type { BatchAnswer, BatchOutcome, BatchRefusalCode } from "@/lib/batch"
 export type { AttachmentKind, EntryAttachment } from "@/lib/dashboard/attachments"
 export type { DashboardFrame } from "@/lib/dashboard/hub"
+export type { RelayStatus } from "@/lib/relay/protocol"
 export type {
   InboxAction,
   InboxAnswer,
