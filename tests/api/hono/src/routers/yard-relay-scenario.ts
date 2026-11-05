@@ -30,11 +30,25 @@ out.cookieSocket = await closeCode("/socket", { ...owner, origin: web })
 out.offline = await status("/api/v1/workers", { ...owner, origin: web })
 
 const requests: Record<string, unknown>[] = []
+const pairs: Record<string, unknown>[] = []
 const mac = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/yard/relay/socket`, {
   headers: { authorization: `Bearer ${process.env.OWNER_TOKEN}` },
 } as never)
 mac.onmessage = (event) => {
   const request = JSON.parse(String(event.data))
+  // a pair request waits on the Mac for the owner's Approve, which answers it with the key's fingerprint
+  if (request.type === "pair") {
+    pairs.push(request)
+    return mac.send(
+      JSON.stringify({
+        body: body({ data: { fingerprint: "a0a2 32c2 f194 a535" } }),
+        headers: { "content-type": "application/json" },
+        id: request.id,
+        status: 202,
+        type: "response",
+      }),
+    )
+  }
   requests.push(request)
   // an answer for an id the hub is not waiting on is dropped, and the right one still lands
   const stale = "00000000-0000-4000-8000-000000000000"
@@ -74,6 +88,26 @@ out.requests = requests.map(({ login, method, path }) => ({ login, method, path 
 out.member = await status("/api/v1/workers", { ...member, origin: web })
 out.wrongOrigin = await status("/api/v1/workers", { ...owner, origin: "https://elsewhere.example" })
 out.onboard = await status("/api/v1/onboard/sign-in", { ...owner, origin: web })
+// a made-up public key, the shape the browser's P-256 key exports to
+const key = {
+  crv: "P-256",
+  kty: "EC",
+  x: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+  y: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+}
+const pair = async (headers: Record<string, string>, sent: unknown = { key }) => {
+  const answer = await fetch(`${relay}/pair`, {
+    body: JSON.stringify(sent),
+    headers: { ...headers, "content-type": "application/json" },
+    method: "POST",
+  })
+  return [answer.status, (await answer.json()).data ?? null]
+}
+out.pair = await pair({ ...owner, origin: web })
+out.pairs = pairs.map(({ key, login, type }) => ({ key, login, type }))
+out.pairMember = (await pair({ ...member, origin: web }))[0]
+out.pairNoOrigin = (await pair(owner))[0]
+out.pairNotAKey = (await pair({ ...owner, origin: web }, { key: { ...key, crv: "P-384" } }))[0]
 out.write = (
   await fetch(`${relay}/api/v1/workers`, { headers: { ...owner, origin: web }, method: "POST" })
 ).status

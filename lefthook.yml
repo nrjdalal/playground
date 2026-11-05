@@ -33,6 +33,22 @@ pre-commit:
         - "CLAUDE.md"
         - "tests/AGENTS.test.ts"
       run: bun run test:file tests/AGENTS.test.ts
+    dashboard-map:
+      # the map's drift test, under 60 ms, which turned branches red in CI on 5 Nov while no commit ran it; its glob is what the test reads: the web's pages and the sidebar's imports, the API's routes, the map and its checks
+      priority: 5
+      glob:
+        - "api/hono/src/*"
+        - "packages/scripts/src/verify/*"
+        - "tests/packages/scripts/src/verify/dashboard-map.test.ts"
+        - "web/next/src/*"
+      run: bun run test:file tests/packages/scripts/src/verify/dashboard-map.test.ts
+    native-title:
+      # the no-native-title test, under 60 ms, which turned branches red in CI on 5 Nov while no commit ran it; it scans every file under web/next/src
+      priority: 5
+      glob:
+        - "tests/web/next/src/native-title.test.ts"
+        - "web/next/src/*"
+      run: bun run test:file tests/web/next/src/native-title.test.ts
     docs-wrap:
       # after lint-staged's formatter, so it reads the docs as they are committed: one sentence per line, none over the limit
       priority: 4

@@ -3,6 +3,13 @@ import { describe, expect, test } from "bun:test"
 import { type Bus, createHub, type Hub } from "../../../../../../api/hono/src/lib/relay/hub"
 
 const ID = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+// a made-up public key, the shape the browser's P-256 key exports to
+const KEY = {
+  crv: "P-256" as const,
+  kty: "EC" as const,
+  x: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+  y: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+}
 const AT = new Date("2026-11-05T01:00:00.000Z")
 
 // A Mac's socket that keeps what the hub sends it.
@@ -40,6 +47,19 @@ describe("the relay's hub", () => {
     const got = await forwarded
     expect(got.type).toBe("response")
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
+  })
+
+  test("sends the owner's browser's key to the owner's Mac as a pair request, and passes its answer back", async () => {
+    const hub = createHub({ id: () => ID, now: () => AT })
+    const socket = mac()
+    hub.attach("u1", socket)
+    const paired = hub.pair("u1", "owner", KEY)
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([
+      { at: AT.toISOString(), id: ID, key: KEY, login: "owner", type: "pair" },
+    ])
+    hub.answer("u1", answer(ID, "held"))
+    const got = await paired
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("held")
   })
 
   test("drops an answer for an id it is not waiting on, or from another owner's socket", async () => {
@@ -137,6 +157,21 @@ describe("the relay's hub across instances", () => {
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
     expect(await other.status("u1")).toEqual({ online: true, since: null })
     expect(other.busy()).toBe(false)
+  })
+
+  test("a pair request on another instance reaches the Mac's socket and comes back", async () => {
+    const { holder, other } = instances({ now: () => AT })
+    const frames: unknown[] = []
+    holder.attach("u1", {
+      send: (data: string) => {
+        frames.push(JSON.parse(data))
+        const { id } = JSON.parse(data) as { id: string }
+        setTimeout(() => holder.answer("u1", answer(id, "held")), 5)
+      },
+    })
+    const got = await other.pair("u1", "owner", KEY)
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("held")
+    expect(frames).toMatchObject([{ key: KEY, login: "owner", type: "pair" }])
   })
 
   test("with no instance holding the socket, a read and the status read offline once the ack wait passes", async () => {

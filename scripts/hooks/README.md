@@ -621,6 +621,8 @@ Only the first reading moves the folder, sets variables and records files for th
   Before the dry run or any slot, `commit-slot.ts` runs `unlinked()` (`packages/scripts/src/playground/unlinked.ts`, link-skills.sh's check) on the checkout and, when a workspace package's dependency is unlinked, as a canary merge that adds a package leaves it, exits 1 at once, naming each `<package>: <dependency>` and the run-slot `bun install --ignore-scripts --cwd <checkout>` that links it.
   The pre-commit steps `check-types-scripts` and `check-types-tests` run CI's two type checks the build leaves out, `packages/scripts`' `check-types` when a staged file is under `packages/scripts/` and `check-types:tests` when one is under `tests/`, after the build (priority 7 to its 6) and through the same `commit-slot.ts`, so a type error there stops the commit in place of a CI round.
   `check-types-tests` first writes `web/next`'s data-table metrics, outside the slot, as CI does.
+  The pre-commit steps `native-title` and `dashboard-map` each run a test of under 60 ms when a file it reads is staged, since both tests turned branches red in CI on 5 Nov while no commit ran them.
+  `native-title` runs `tests/web/next/src/native-title.test.ts` for a file under `web/next/src/`, and `dashboard-map` runs `tests/packages/scripts/src/verify/dashboard-map.test.ts` for one under `web/next/src/`, `api/hono/src/` or `packages/scripts/src/verify/`, each also for its own test file.
   Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts tests/lefthook.test.ts tests/scripts/ops/run-slot-quick.test.ts`.
 
 ## rules
