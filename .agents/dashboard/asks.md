@@ -391,7 +391,7 @@
   - ↩️ One commit reverts it.
   ````
 
-  Approve: `Port the fix to staging, then main`; Deny: `Keep it on dev`.
+  Options: `Port the fix to staging, then main`; Deny: `Keep it on dev`.
 
   ````markdown
   ```
@@ -409,7 +409,7 @@
   - ⏱️ It takes about 10 minutes.
   ````
 
-  Approve: `Take the request and run the dry run`; Deny: `Turn the request down`.
+  Options: `Take the request and run the dry run`; Deny: `Turn the request down`.
 
   The UI change leads with its before and after pictures, which join the ask as `attachments` (absolute paths on this Mac, each with its `label` and `group`, which `bun run ask new` copies in), and its card shows them under this text:
 
@@ -419,7 +419,7 @@
   - 📱 The row scrolls sideways on a phone.
   ````
 
-  Approve: `Build the row as the after picture shows`; Deny: `Keep the card as it is`.
+  Options: `Build the row as the after picture shows`; Deny: `Keep the card as it is`.
 
 - Threads group the owner's asks: a thread is one thing they asked about, followed up until it is done, and it is theirs, not a session's ([ADR 0013](../adr/0013-threads-are-the-owners-and-live-in-the-dashboards-database.md)).
   It is one table, `thread` (`packages/db/src/schema/thread.ts`), in the dashboard's local Postgres beside the transcripts: a transcript line joins a thread through `claude_entry.thread_id` and `thread_seq`, its place there, and an Inbox item through `inbox_item.thread_id`.

@@ -58,8 +58,8 @@ export const ASK_EXAMPLES = {
   code: {
     from: "builder",
     preview: {
-      approve: "Port the fix to staging, then main",
       deny: "Keep it on dev",
+      options: [{ label: "Port the fix to staging, then main" }],
       text: [
         "```diff",
         "- const limit = 100",
@@ -77,8 +77,8 @@ export const ASK_EXAMPLES = {
   decision: {
     from: "builder",
     preview: {
-      approve: "Take the request and run the dry run",
       deny: "Turn the request down",
+      options: [{ label: "Take the request and run the dry run" }],
       text: [
         "```",
         "web-api",
@@ -118,12 +118,12 @@ export const ASK_EXAMPLES = {
   ui: {
     from: "builder",
     preview: {
-      approve: "Build the row as the after picture shows",
       attachments: [
         { group: "Inbox card", label: "before", src: "/Users/you/shots/card-before.png" },
         { group: "Inbox card", label: "after", src: "/Users/you/shots/card-after.png" },
       ],
       deny: "Keep the card as it is",
+      options: [{ label: "Build the row as the after picture shows" }],
       text: [
         "- 🖼️ The Inbox card shows its pictures as a row of thumbnails.",
         "- 👆 A click opens the picture in the viewer.",

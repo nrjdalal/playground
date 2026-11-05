@@ -103,7 +103,7 @@ describe("ASK_EXAMPLES", () => {
       for (const source of attachments ?? [])
         expect(attachmentSourceSchema.safeParse(source).success).toBe(true)
       expect(shapeHints(example)).toEqual([])
-      expect(example.preview.approve).toBeTruthy()
+      expect(example.preview.options[0]?.label).toBeTruthy()
       expect(example.preview.deny).toBeTruthy()
     }
     expect(isAskExampleKind("toString")).toBe(false)
@@ -134,6 +134,6 @@ test("asks.md shows each template's text as it is", async () => {
   for (const { preview } of Object.values(ASK_EXAMPLES)) {
     if (preview.type !== "ask") continue
     expect(doc).toContain(preview.text)
-    expect(doc).toContain(`Approve: \`${preview.approve}\`; Deny: \`${preview.deny}\`.`)
+    expect(doc).toContain(`Options: \`${preview.options[0]?.label}\`; Deny: \`${preview.deny}\`.`)
   }
 })
