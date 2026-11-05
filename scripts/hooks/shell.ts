@@ -341,10 +341,7 @@ function startsRootShell(wrapper: string, value: string): boolean {
 // Interpreters of another language, whose script the hook cannot read, each by its family: the options that take the next word as their value when none is attached (`values` short, `takes` long), so its script operand is found past them; `own` names an option whose value is a program of its own (a module, a file), which the line does not hold either; any other option, inline code's among them, reads as code
 type Family = { own?: string; takes: string[]; values: string }
 const FAMILIES: Record<string, Family> = {
-  bun: {
-    takes: ["--config", "--cwd", "--env-file", "--preload", "--tsconfig-override"],
-    values: "r",
-  },
+  bun: { takes: ["--cwd", "--env-file", "--preload", "--tsconfig-override"], values: "r" },
   deno: { takes: ["--config", "--import-map"], values: "c" },
   lua: { takes: [], values: "l" },
   node: {
@@ -380,10 +377,14 @@ function interpreted(family: Family, args: Word[], xargs: Xargs): boolean {
   const filled = (word: Word) =>
     marked(word.value) || (!!xargs?.replace && word.value.includes(xargs.replace))
   const own = (word: Word | undefined) => !!word && !filled(word) && !STDIN_PATHS.has(word.value)
+  // bun and deno run a bare name as a package script, a subcommand or a program on PATH (`bun run sh`, `bun x sh`, `bun repl`, `deno task x`), so there only a JavaScript or TypeScript file's name is a script of its own
+  const runner = family === FAMILIES.bun || family === FAMILIES.deno
+  const script = (word: Word | undefined) =>
+    own(word) && (!runner || /\.[cm]?[jt]sx?$/.test(word?.value ?? ""))
   let sub = false
   for (let k = 0; k < args.length; k++) {
     const { value } = args[k]
-    if (value === "--") return !own(args[k + 1])
+    if (value === "--") return !script(args[k + 1])
     if (value.startsWith("--")) {
       if (!family.takes.includes(value.split("=")[0])) return true
       if (!value.includes("=")) k++
@@ -397,15 +398,11 @@ function interpreted(family: Family, args: Word[], xargs: Xargs): boolean {
       if (!attached) k++
       continue
     }
-    // bun and deno take a subcommand before the script (`bun run x.ts`, `deno run x.ts`), and their eval, exec and repl run code the line does not hold
-    if (!sub && (family === FAMILIES.bun || family === FAMILIES.deno)) {
-      if (["eval", "exec", "repl"].includes(value)) return true
-      if (value === "run") {
-        sub = true
-        continue
-      }
+    if (runner && !sub && value === "run") {
+      sub = true
+      continue
     }
-    return !own(args[k])
+    return !script(args[k])
   }
   return true
 }
