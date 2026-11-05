@@ -1001,7 +1001,7 @@ export function InboxCard({
           item.answer.choice !== "settled" &&
           item.answer.note && (
             <span className="text-muted-foreground mt-1 block whitespace-pre-wrap">
-              Your note: {item.answer.note}
+              You: {item.answer.note}
             </span>
           )}
         {untold && <span className="text-muted-foreground mt-1 block">{untold}</span>}
