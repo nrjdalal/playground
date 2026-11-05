@@ -12,18 +12,22 @@ import {
 import { QUEUED_MS } from "../../../../../../api/hono/src/lib/dashboard/deliver"
 import {
   acceptArgs,
-  acceptResult,
   ACTIONS,
+  appsArgs,
+  appsChange,
   answerInputSchema,
   checkAnswer,
   deliveryText,
   inboxCount,
   inboxInputSchema,
   type Delivery,
+  grantArgv,
+  type InboxApps,
   type InboxItem,
   inboxOrder,
   isGo,
   relayText,
+  runResult,
   savesDraft,
   secretInputSchema,
   type SecretSink,
@@ -848,11 +852,12 @@ describe("a secret ask (PG-59)", () => {
     expect(refused({}, "-e")).toBe(false)
   })
 
-  test("takes a keychain sink naming an allowlisted item, yard alone today, and no other sink", () => {
+  test("takes a keychain sink naming an allowlisted item, slack or yard, and no other sink", () => {
     const sinkOf = (sink: object) =>
       inboxInputSchema.safeParse(decision({ ...SECRET, key: "YARD_TOKEN", sink })).success
     expect(sinkOf({ item: "yard", type: "keychain" })).toBe(true)
-    expect(sinkOf({ item: "slack", type: "keychain" })).toBe(false)
+    expect(sinkOf({ item: "slack", type: "keychain" })).toBe(true)
+    expect(sinkOf({ item: "vault", type: "keychain" })).toBe(false)
     expect(sinkOf({ item: "../x", type: "keychain" })).toBe(false)
     expect(sinkOf({ type: "keychain" })).toBe(false)
     expect(sinkOf({ item: "yard", project: "api-made-up", type: "keychain" })).toBe(false)
@@ -903,6 +908,14 @@ const ACCEPT = {
   why: "Scored 4 by two reviewers; it reads the day's merges",
 }
 
+const APPS = { app: "Notes", change: "add", type: "apps", why: "It holds your own notes" }
+
+const GRANT = {
+  permission: "screen-recording",
+  type: "grant",
+  why: "The release check takes a screenshot of the simulator",
+}
+
 describe("an accept decision (PG-658)", () => {
   test("names a scope, kind, key and rev the store takes, none of which can start as a flag", () => {
     expect(inboxInputSchema.safeParse(decision(ACCEPT)).success).toBe(true)
@@ -950,14 +963,119 @@ describe("an accept decision (PG-658)", () => {
   })
 
   test("its result is the exit code and one line: the CLI's line, else its error, cut to a line", () => {
-    expect(acceptResult({ code: 0, err: "", out: "rev 9b8c7d6 is accepted\n" })).toEqual({
+    expect(runResult({ code: 0, err: "", out: "rev 9b8c7d6 is accepted\n" })).toEqual({
       exitCode: 0,
       line: "rev 9b8c7d6 is accepted",
     })
     expect(
-      acceptResult({ code: 1, err: "409 the proposal is at 0a1b2c3, not 3f9a2c1d\nmore", out: "" }),
+      runResult({ code: 1, err: "409 the proposal is at 0a1b2c3, not 3f9a2c1d\nmore", out: "" }),
     ).toEqual({ exitCode: 1, line: "409 the proposal is at 0a1b2c3, not 3f9a2c1d" })
-    expect(acceptResult({ code: 1, err: "x".repeat(500), out: "" }).line).toHaveLength(200)
+    expect(runResult({ code: 1, err: "x".repeat(500), out: "" }).line).toHaveLength(200)
+  })
+})
+
+describe("a grant decision (PG-658)", () => {
+  test("names one of agent-desktop's two permissions, and nothing else", () => {
+    expect(inboxInputSchema.safeParse(decision(GRANT)).success).toBe(true)
+    expect(
+      inboxInputSchema.safeParse(decision({ ...GRANT, permission: "accessibility" })).success,
+    ).toBe(true)
+    const takes = (change: object) =>
+      inboxInputSchema.safeParse(decision({ ...GRANT, ...change })).success
+    for (const change of [
+      { permission: "automation" },
+      { permission: "--reveal" },
+      { why: "" },
+      { extra: "x" },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+
+  test("its Approve runs one fixed argv: macOS's open at the permission's own pane", () => {
+    const parsed = inboxInputSchema.parse(decision(GRANT))
+    if (parsed.kind !== "decision" || parsed.preview.type !== "grant") throw new Error("no grant")
+    expect(grantArgv(parsed.preview)).toEqual([
+      "/usr/bin/open",
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    ])
+    expect(grantArgv({ ...parsed.preview, permission: "accessibility" })).toEqual([
+      "/usr/bin/open",
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    ])
+  })
+
+  test("is approved, denied or cleared as it reads, never edited", () => {
+    const open = { kind: "decision", preview: GRANT, status: "open" } as never
+    expect(checkAnswer(open, { action: "approve" })).toMatchObject({ status: "approved" })
+    expect(checkAnswer(open, { action: "edit", text: "accessibility too" })).toHaveProperty(
+      "message",
+    )
+  })
+})
+
+describe("an apps decision (PG-658)", () => {
+  const apps = (change: Partial<InboxApps> = {}) => ({ ...APPS, ...change }) as InboxApps
+
+  test("names an app to add or remove, which can start as no flag and name no path", () => {
+    expect(inboxInputSchema.safeParse(decision(APPS)).success).toBe(true)
+    expect(
+      inboxInputSchema.safeParse(decision({ ...APPS, app: "Google Chrome", change: "remove" }))
+        .success,
+    ).toBe(true)
+    const takes = (change: object) =>
+      inboxInputSchema.safeParse(decision({ ...APPS, ...change })).success
+    expect(takes({ app: "Téléphone" })).toBe(true)
+    for (const change of [
+      { app: "--headed" },
+      { app: "-Notes" },
+      { app: "/Applications/Notes.app" },
+      { app: "../Notes" },
+      { app: "" },
+      { change: "replace" },
+      { why: "" },
+      { extra: "x" },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+
+  test("its Approve runs one fixed argv: a put of the login's own list from stdin, with a reason naming the item", () => {
+    expect(appsArgs("owner", 41)).toEqual([
+      "put",
+      "owner",
+      "list",
+      "desktop-owner-apps",
+      "-",
+      "--reason",
+      "the owner approved it in the Inbox (#i41)",
+    ])
+  })
+
+  test("adds or removes the app, matched as the hook matches it, or says why nothing is written", () => {
+    expect(appsChange(["Slack"], apps())).toEqual({ list: ["Slack", "Notes"] })
+    expect(appsChange(["notes.app"], apps())).toEqual({
+      exitCode: 0,
+      line: "Notes is on your apps already",
+    })
+    expect(appsChange(["Slack", "NOTES"], apps({ change: "remove" }))).toEqual({ list: ["Slack"] })
+    expect(appsChange(["Slack"], apps({ change: "remove" }))).toEqual({
+      exitCode: 1,
+      line: "Notes is not on your own apps list, so nothing changed",
+    })
+    for (const entry of ["/Applications/Notes.app", " Notes", "Notes.APP"]) {
+      expect(appsChange(["Slack", entry], apps())).toEqual({
+        exitCode: 0,
+        line: "Notes is on your apps already",
+      })
+      expect(appsChange(["Slack", entry], apps({ change: "remove" }))).toEqual({ list: ["Slack"] })
+    }
+  })
+
+  test("is approved, denied or cleared as it reads, never edited", () => {
+    const open = { kind: "decision", preview: APPS, status: "open" } as never
+    expect(checkAnswer(open, { action: "deny" })).toMatchObject({ status: "denied" })
+    expect(checkAnswer(open, { action: "edit", text: "Slack instead" })).toHaveProperty("message")
   })
 })
 
@@ -3497,6 +3615,228 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(relayed?.text).not.toContain("you carry this out in its place")
       // an approved accept is a go, which get --ack leaves open, so the relay names the one close that closes it
       expect(relayed?.text).not.toContain("--ack")
+    })
+  })
+
+  describe("a grant decision's Approve (PG-658)", () => {
+    const opener = (ran: Partial<{ code: number; err: string; out: string }> = {}) => {
+      const calls: string[][] = []
+      const grant = async (argv: string[]) => {
+        calls.push(argv)
+        return { code: 0, err: "", out: "", ...ran }
+      }
+      return { calls, grant }
+    }
+
+    test("opens the permission's pane once, records it, and tells the poster to recheck the grant", async () => {
+      const posted = await post(decision(GRANT))
+      const run = opener()
+      const sent: Delivery[] = []
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve", seen: posted.updatedAt },
+        {
+          actor,
+          deliver: async (delivery) => {
+            sent.push(delivery)
+            return { at: "2026-11-03T20:00:00.000Z", ok: true, sessionId: "s1" }
+          },
+          grant: run.grant,
+        },
+      )
+      expect(run.calls).toEqual([
+        [
+          "/usr/bin/open",
+          "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+        ],
+      ])
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        choice: "approve",
+        opened: {
+          exitCode: 0,
+          line: "opened System Settings at Privacy & Security > Screen Recording",
+        },
+      })
+      expect(answered.ok && answered.item.status).toBe("approved")
+      expect(sent[0]?.text).toContain("Recheck with agent-desktop permissions")
+      expect(sent[0]?.text).toContain(`bun run ask ack #i${posted.ref} --no-link`)
+    })
+
+    test("an open that fails is recorded, and the poster reads that nothing opened", async () => {
+      const posted = await post(decision(GRANT))
+      const sent: Delivery[] = []
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        {
+          actor,
+          deliver: async (delivery) => {
+            sent.push(delivery)
+            return { at: "2026-11-03T20:00:00.000Z", ok: true, sessionId: "s1" }
+          },
+          grant: opener({ code: 1, err: "LSOpenURLsWithRole() failed with error -10814" }).grant,
+        },
+      )
+      expect(answered.ok && answered.item.answer).toMatchObject({
+        opened: { exitCode: 1, line: "LSOpenURLsWithRole() failed with error -10814" },
+      })
+      expect(sent[0]?.text).toContain("Nothing opened")
+    })
+
+    test("with no opener, as on a stack showing test data, its Approve is refused and the item stays open; Deny opens nothing", async () => {
+      const posted = await post(decision(GRANT))
+      expect(await store.answerItem(db, posted.id, { action: "approve" }, { actor })).toMatchObject(
+        { code: "VALIDATION_ERROR", ok: false },
+      )
+      expect((await store.getItem(db, posted.id))?.status).toBe("open")
+      const run = opener()
+      const denied = await post(decision(GRANT))
+      await store.answerItem(db, denied.id, { action: "deny" }, { actor, grant: run.grant })
+      expect(run.calls).toHaveLength(0)
+    })
+  })
+
+  describe("an apps decision's Approve (PG-658)", () => {
+    const owner = (
+      list: string[] | null,
+      ran: Partial<{ code: number; err: string; out: string }> = {},
+    ) => {
+      const calls: { args: string[]; stdin?: string }[] = []
+      return {
+        apps: {
+          login: "owner",
+          read: () => list,
+          run: async (args: string[], stdin?: string) => {
+            calls.push({ args, stdin })
+            return { code: 0, err: "", out: '{"rev":"9b8c7d6","state":"accepted"}', ...ran }
+          },
+        },
+        calls,
+      }
+    }
+
+    test("writes the login's own list with the app added, through one put, and records the list", async () => {
+      const posted = await post(decision(APPS))
+      const run = owner(["Slack"])
+      const sent: Delivery[] = []
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve" },
+        {
+          actor,
+          apps: run.apps,
+          deliver: async (delivery) => {
+            sent.push(delivery)
+            return { at: "2026-11-03T20:00:00.000Z", ok: true, sessionId: "s1" }
+          },
+        },
+      )
+      expect(run.calls).toEqual([
+        {
+          args: [
+            "put",
+            "owner",
+            "list",
+            "desktop-owner-apps",
+            "-",
+            "--reason",
+            `the owner approved it in the Inbox (#i${posted.ref})`,
+          ],
+          stdin: '["Slack","Notes"]',
+        },
+      ])
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        listed: { exitCode: 0, line: "added Notes; your apps are Slack, Notes" },
+      })
+      expect(answered.ok && answered.item.status).toBe("approved")
+      expect(sent[0]?.text).toContain("the dashboard changed the owner's apps")
+    })
+
+    test("two Approves that overlap change the list one at a time, so neither app is lost", async () => {
+      const notes = await post(decision(APPS))
+      const mail = await post(decision({ ...APPS, app: "Mail" }))
+      let list = ["Slack"]
+      let firstStarted!: () => void
+      const started = new Promise<void>((resolve) => (firstStarted = resolve))
+      let releaseFirst!: () => void
+      const held = new Promise<void>((resolve) => (releaseFirst = resolve))
+      let puts = 0
+      const apps = {
+        login: "owner",
+        read: () => list,
+        run: async (_args: string[], stdin?: string) => {
+          if (++puts === 1) {
+            firstStarted()
+            await held
+          }
+          list = JSON.parse(stdin ?? "[]")
+          return { code: 0, err: "", out: '{"rev":"9b8c7d6","state":"accepted"}' }
+        },
+      }
+      const first = store.answerItem(db, notes.id, { action: "approve" }, { actor, apps })
+      await started
+      const second = store.answerItem(db, mail.id, { action: "approve" }, { actor, apps })
+      while ((await store.getItem(db, mail.id))?.status === "open") await Bun.sleep(5)
+      await Bun.sleep(10)
+      releaseFirst()
+      await Promise.all([first, second])
+      expect(list).toEqual(["Slack", "Notes", "Mail"])
+      expect((await store.getItem(db, mail.id))?.answer).toMatchObject({
+        listed: { exitCode: 0, line: "added Mail; your apps are Slack, Notes, Mail" },
+      })
+    })
+
+    test("removing an app the list does not hold, or a list that is not names, writes nothing and records why", async () => {
+      const absent = await post(decision({ ...APPS, change: "remove" }))
+      const run = owner(["Slack"])
+      expect(
+        await store.answerItem(db, absent.id, { action: "approve" }, { actor, apps: run.apps }),
+      ).toMatchObject({
+        item: {
+          answer: {
+            listed: { exitCode: 1, line: "Notes is not on your own apps list, so nothing changed" },
+          },
+        },
+      })
+      const broken = await post(decision(APPS))
+      const bad = owner(null)
+      expect(
+        await store.answerItem(db, broken.id, { action: "approve" }, { actor, apps: bad.apps }),
+      ).toMatchObject({ item: { answer: { listed: { exitCode: 1 } } } })
+      expect([...run.calls, ...bad.calls]).toEqual([])
+    })
+
+    test("a refused put records the CLI's exit code and its error line", async () => {
+      const posted = await post(decision(APPS))
+      const run = owner([], {
+        code: 1,
+        err: "playground ext: 403 a session writes no list",
+        out: "",
+      })
+      expect(
+        await store.answerItem(db, posted.id, { action: "approve" }, { actor, apps: run.apps }),
+      ).toMatchObject({
+        item: {
+          answer: { listed: { exitCode: 1, line: "playground ext: 403 a session writes no list" } },
+        },
+      })
+    })
+
+    test("with no login its Approve is refused and the item stays open; Deny and Archive write nothing", async () => {
+      const posted = await post(decision(APPS))
+      expect(await store.answerItem(db, posted.id, { action: "approve" }, { actor })).toMatchObject(
+        { code: "VALIDATION_ERROR", ok: false },
+      )
+      expect((await store.getItem(db, posted.id))?.status).toBe("open")
+      const run = owner([])
+      const denied = await post(decision(APPS))
+      const cleared = await post(decision(APPS))
+      await store.answerItem(db, denied.id, { action: "deny" }, { actor, apps: run.apps })
+      await store.answerItem(db, cleared.id, { action: "clear" }, { actor, apps: run.apps })
+      expect(run.calls).toHaveLength(0)
     })
   })
 })

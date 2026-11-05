@@ -5,7 +5,7 @@ import { managerOf } from "@packages/config/kinds"
 
 import type { Run } from "../ops-tick/tick"
 
-// The battery check ops-awake runs each minute: the battery never holds work, so while the Mac discharges the Ops lead posts the owner two Inbox items, each at most once a discharge, and nothing above 10%: an orange ask at 10% or less and a red alert at 5% or less. Back on power it closes both and re-arms. It returns a line for ops only when a post or a close fails, at most every 15 minutes.
+// The battery check ops-awake runs each minute: the battery never holds work, so while the Mac discharges the Ops lead posts the owner two Inbox items, each at most once a discharge, and nothing above 10%: an orange ask at 10% or less and a red alert at 5% or less. Back on power it closes both, the alert by resolving it and an ask already closed (cleared, denied, acked) by its read alone, drops one deleted from the Inbox, and re-arms. It returns a line for ops only when a post or a close fails, at most every 15 minutes.
 
 export const ORANGE = 10
 export const RED = 5
@@ -37,6 +37,27 @@ export const itemsOf = (pct: number, from: string) => ({
     title: `Plug in the Mac: its battery is at ${pct}%`,
   },
 })
+
+type Item = {
+  answer?: { ackedAt?: unknown; choice?: string }
+  from?: string
+  kind?: string
+  status?: string
+}
+
+// The ask call that closes a battery item back on power; null for one already closed, undefined for an item that did not read.
+const closingCall = (id: string, item: Item): string[] | null | undefined => {
+  // the red alert is an update, posted at status done, which only its poster's resolve closes
+  if (item.kind === "update" && item.from)
+    return item.answer?.choice === "resolved"
+      ? null
+      : ["resolve", id, "--by", item.from, "--note", BACK]
+  // an answer its poster acked (a reply stays open once acked) is closed, and settle or ack would be refused
+  if (item.answer?.ackedAt) return null
+  if (item.status === "open") return ["settle", id, "--note", BACK]
+  if (item.status === "approved") return ["ack", id, "--no-link", BACK]
+  return item.status ? null : undefined
+}
 
 export const checkBattery = async (ctx: {
   now: Date
@@ -76,20 +97,13 @@ export const checkBattery = async (ctx: {
     for (const key of ["ask", "alert"] as const) {
       const id = state[key]
       if (!id) continue
-      const got = await ask(["get", id])
-      let item: { answer?: { ackedAt?: unknown }; status?: string } = {}
+      // the read marks any answer read, which closes a clear, a deny or a discard; the JSON runs to its last brace, since run() appends bun's `$ bun ...` echo from stderr
+      const got = await ask(["get", id, "--ack"])
+      let item: Item = {}
       try {
-        item = JSON.parse(got.out.slice(got.out.indexOf("{")))
+        item = JSON.parse(got.out.slice(got.out.indexOf("{"), got.out.lastIndexOf("}") + 1))
       } catch {}
-      const closing = item.answer?.ackedAt
-        ? null
-        : item.status === "open"
-          ? ["settle", id, "--note", BACK]
-          : item.status === "approved"
-            ? ["ack", id, "--no-link", BACK]
-            : item.status
-              ? ["get", id, "--ack"]
-              : undefined
+      const closing = got.out.includes("no inbox item") ? null : closingCall(id, item)
       const closed = closing === null ? { code: 0, out: "" } : closing && (await ask(closing))
       if (closed && closed.code === 0) delete state[key]
       else

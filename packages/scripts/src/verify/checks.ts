@@ -583,10 +583,10 @@ export const cls = async (
   return clsResult(route, load, shifts, { dispatcherLive })
 }
 
-// A chat view with no composer: a live session that is neither a dispatcher nor hosted, whose view is read-only, so its Checkpoint bar stands under the stream alone. Null when the board has none. Read from a page of the dashboard's own origin.
+// A chat view with no composer: a live session that is neither a dispatcher, the assistant nor hosted, whose view is read-only, so its Checkpoint bar stands under the stream alone. Null when the board has none. Read from a page of the dashboard's own origin.
 export const readOnlyChat = (browser: Browser, { api }: Target): Promise<string | null> =>
   browser.eval<string | null>(
-    `fetch(${JSON.stringify(`${api}/api/v1/workers`)}, { credentials: "include" }).then((response) => response.ok ? response.json() : null).then((body) => { const worker = Array.isArray(body?.data) ? body.data.find((worker) => worker.role !== "dispatcher" && !worker.hosted) : null; return worker ? "/dashboard?worker=" + encodeURIComponent(worker.sessionId) : null }).catch(() => null)`,
+    `fetch(${JSON.stringify(`${api}/api/v1/workers`)}, { credentials: "include" }).then((response) => response.ok ? response.json() : null).then((body) => { const worker = Array.isArray(body?.data) ? body.data.find((worker) => worker.role !== "dispatcher" && !worker.hosted && !worker.assistant) : null; return worker ? "/dashboard?worker=" + encodeURIComponent(worker.sessionId) : null }).catch(() => null)`,
   )
 
 // The chat's Checkpoint bar changing, each step a script so no input excuses its shift: a click turns Reading, a scroll up shows Scroll to end, its click hides it, the up arrow jumps, and a click turns Watching again.

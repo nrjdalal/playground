@@ -51,7 +51,7 @@ export const shownValue = <T>(pending: Pending<T> | null, reported: T | null): T
 export const heldPick = (error: object | null): boolean =>
   error !== null && "delivery" in error && error.delivery === "QUEUED"
 
-// Sets a dispatcher's or the hosted session's model or effort through the API, which sets it on the session and records it in the console's activity; the pick's own id lets a dispatcher that holds it while it compacts read QUEUED.
+// Sets a dispatcher's, the assistant's or the hosted session's model or effort through the API, which sets it on the session and records it in the console's activity; the pick's own id lets a dispatcher that holds it while it compacts read QUEUED.
 export async function changeSetting(sessionId: string, setting: SessionSetting) {
   return unwrap(
     apiClient.v1.workers[":sessionId"].setting.$post({
