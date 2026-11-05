@@ -1447,7 +1447,7 @@ async function nested(cmd, env, body) {
 }
 var BUILTIN = new Set(["builtin", "command"]);
 var sureToRun = (cmd, parsed) => !cmd.detached && !cmd.unsure && !cmd.repeated && (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed));
-var onceOrMore = (cmd, parsed) => !!cmd.atLeastOnce && !cmd.detached && !cmd.kept && !cmd.unsure && (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed));
+var onceOrMore = (cmd, parsed) => !!cmd.atLeastOnce && !cmd.chained && !cmd.detached && !cmd.kept && !cmd.unsure && (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed));
 var throughBuiltin = (cmd, { first }) => {
   if (!first)
     return false;
