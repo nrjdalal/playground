@@ -1432,8 +1432,8 @@ export function InboxCard({
             {result}
           </CardHeader>
           {body && <CardContent>{body}</CardContent>}
-          {/* the card's last block before its buttons: his comment, the note with whatever he answers, or alone through Reply */}
-          {!folded && answers && (
+          {/* the card's last block before its buttons: his comment, the note with whatever he answers, or alone through Reply, which stays on the Mac, so the hosted build draws it only where it rides an answer */}
+          {!folded && answers && (noted || !config.hosted) && (
             // the same gap-2 above it as between the choices
             <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
               {/* a box turned disabled drops focus to the page, so words dictated or typed as a card above leaves land nowhere: it stays enabled while the card is paused and turns read-only while its answer is on its way */}

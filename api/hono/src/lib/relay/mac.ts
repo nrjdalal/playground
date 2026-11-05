@@ -3,7 +3,7 @@ import { RELAY_ANSWER_KINDS, signedBytes } from "@packages/message"
 import { type AuditLog, remoteAudit } from "@/lib/relay/audit"
 import { type KeyStore, type PairedKey, remoteKeys } from "@/lib/relay/key"
 import {
-  cardOf,
+  cardsOf,
   pathOn,
   RELAY_HEADERS,
   RELAY_HEARTBEAT_MS,
@@ -146,13 +146,14 @@ type AnswerDeps = {
   writeIds?: Pick<WriteIdStore, "claim">
 }
 
-// A write requireSignedWrite passed, run in this Mac's own API as its local owner's POST, marked in process so the loopback and origin guards take it, unless it answers an Inbox card whose kind is off RELAY_ANSWER_KINDS, or one this Mac cannot read, which it refuses before any route runs.
+// A write requireSignedWrite passed, run in this Mac's own API as its local owner's POST, marked in process so the loopback and origin guards take it, unless it reaches an Inbox card (cardsOf: an answer, a schedule or a dismiss) whose kind is off RELAY_ANSWER_KINDS, or one this Mac cannot read, or is a dismiss that lists no ids, which it refuses before any route runs.
 async function runWrite(
   write: RelayWrite,
   { cookie, dispatch, kindOf }: Pick<AnswerDeps, "cookie" | "dispatch" | "kindOf">,
 ): Promise<RelayResponse> {
-  const card = cardOf(write.path)
-  if (card !== null) {
+  const cards = cardsOf(write)
+  if (cards === null) return json(write.id, 403, "FORBIDDEN", "Answer it on the Mac")
+  for (const card of cards) {
     const kind = await (kindOf?.(card) ?? Promise.resolve(null)).catch(() => null)
     if (kind === null || !(RELAY_ANSWER_KINDS as readonly string[]).includes(kind))
       return json(write.id, 403, "FORBIDDEN", "Answer it on the Mac")

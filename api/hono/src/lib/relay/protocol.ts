@@ -42,20 +42,32 @@ export const RELAY_GETS = [
   "/api/v1/workers/:sessionId/transcript",
 ] as const
 
-// An Inbox card's answer, the one write whose card's kind the Mac checks against RELAY_ANSWER_KINDS (`@packages/message`).
+// The writes that reach an Inbox card, each card's kind checked by the Mac against RELAY_ANSWER_KINDS (`@packages/message`): an answer and Later's schedule name theirs in the path, and Done's dismiss lists its ids in the body.
 export const RELAY_ANSWER = "/api/v1/inbox/:id/answer"
+const RELAY_SCHEDULE = "/api/v1/inbox/:id/schedule"
+const RELAY_DISMISS = "/api/v1/inbox/dismiss"
 
-const ANSWER_ROUTES = [RELAY_ANSWER]
+const CARD_ROUTES = [RELAY_ANSWER, RELAY_SCHEDULE]
+const DISMISS_ROUTES = [RELAY_DISMISS]
+const dismissIds = z.object({ ids: z.array(z.string().min(1)).min(1) })
 
-// Pure: the card id a path on RELAY_ANSWER names, or null for any other path.
-export const cardOf = (path: string): string | null =>
-  pathOn(ANSWER_ROUTES, path) ? (path.split("?")[0]!.split("/")[4] ?? null) : null
+// Pure: the Inbox cards a write reaches: the one an answer's or a schedule's path names, every id a dismiss's body lists, none for any other write, or null for a dismiss whose body lists no ids, which the Mac refuses.
+export function cardsOf({ body, path }: { body: string; path: string }): string[] | null {
+  if (pathOn(CARD_ROUTES, path)) return [path.split("?")[0]!.split("/")[4]!]
+  if (!pathOn(DISMISS_ROUTES, path)) return []
+  try {
+    const parsed = dismissIds.safeParse(JSON.parse(body))
+    return parsed.success ? parsed.data.ids : null
+  } catch {
+    return null
+  }
+}
 
 // The dashboard's writes the relay carries, A to Z, every one a POST the owner's paired key signs: the composer's send, an Inbox card's answer (its Archive among them), and Later's schedule and Done's dismiss. No first-run, onboarding, delete, secret or settings route, and no route on the never-from-Yard list.
 export const RELAY_WRITES = [
   RELAY_ANSWER,
-  "/api/v1/inbox/:id/schedule",
-  "/api/v1/inbox/dismiss",
+  RELAY_SCHEDULE,
+  RELAY_DISMISS,
   "/api/v1/messages",
 ] as const
 

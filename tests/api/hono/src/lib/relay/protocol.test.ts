@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
-  cardOf,
+  cardsOf,
   pathOn,
   RELAY_GETS,
   RELAY_WRITES,
@@ -121,22 +121,37 @@ describe("the Inbox cards a relayed answer may reach", () => {
   })
 })
 
-describe("cardOf, the card a relayed answer names", () => {
-  test("reads the id from an answer's path, its query aside", () => {
-    expect(cardOf("/api/v1/inbox/0b9c6f1e-1111-4111-8111-000000000001/answer?x=1")).toBe(
-      "0b9c6f1e-1111-4111-8111-000000000001",
-    )
+describe("cardsOf, the Inbox cards a relayed write reaches", () => {
+  test("reads the card from an answer's or a schedule's path, its query aside, and every id a dismiss lists", () => {
+    const id = "0b9c6f1e-1111-4111-8111-000000000001"
+    expect(cardsOf({ body: "{}", path: `/api/v1/inbox/${id}/answer?x=1` })).toEqual([id])
+    expect(cardsOf({ body: "{}", path: `/api/v1/inbox/${id}/schedule` })).toEqual([id])
+    expect(
+      cardsOf({
+        body: JSON.stringify({ ids: [id, "c2"], tell: true }),
+        path: "/api/v1/inbox/dismiss",
+      }),
+    ).toEqual([id, "c2"])
   })
 
-  test("names no card for any other write or a path that only looks like an answer", () => {
+  test("names no card for a message or a path that only looks like a card's", () => {
     for (const path of [
-      "/api/v1/inbox/abc/schedule",
-      "/api/v1/inbox/dismiss",
       "/api/v1/messages",
       "/api/v1/inbox/../answer",
       "/api/v1/inbox/a%2Fb/answer",
       "/api/v1/inbox/abc/answer/more",
+      "/api/v1/inbox/abc/schedule/more",
     ])
-      expect([path, cardOf(path)]).toEqual([path, null])
+      expect([path, cardsOf({ body: "{}", path })]).toEqual([path, []])
+  })
+
+  test("reads a dismiss whose body lists no ids as null, which the Mac refuses", () => {
+    for (const body of [
+      "not json",
+      "{}",
+      JSON.stringify({ ids: [] }),
+      JSON.stringify({ ids: [""] }),
+    ])
+      expect([body, cardsOf({ body, path: "/api/v1/inbox/dismiss" })]).toEqual([body, null])
   })
 })

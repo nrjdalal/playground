@@ -19,7 +19,7 @@ export const relayedBase = (base: string, hosted: boolean): string =>
 // The one line the hosted dashboard shows where a composer or a write button would be, and the reason on a message it drops, in a browser that keeps no paired key.
 export const READ_ONLY_LINE = "Read-only on Yard: send from your Mac"
 
-// What a paired hosted page shows on an Inbox card whose answer the relay does not carry, in the Mac's own words for its refusal.
+// What a paired hosted page shows on an Inbox card or a session's prompt whose answer the relay does not carry, in the Mac's own words for its refusal.
 export const ON_THE_MAC_LINE = "Answer it on the Mac"
 
 export type YardWrites = { answers: (card: AnswerCard) => boolean; send: boolean }

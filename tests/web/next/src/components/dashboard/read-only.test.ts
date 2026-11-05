@@ -73,12 +73,22 @@ describe("the hosted dashboard writes only what a paired key signs", () => {
     )
   })
 
+  // Reply stays on the Mac, so on the hosted build a comment box with no answer to ride would take words that go nowhere
+  test("a hosted update card or an answered card draws no comment box, and a card still waiting draws one that rides its answer", async () => {
+    const source = await read("inbox.tsx")
+    expect(source).toContain(
+      'const noted = outcome === null && item.kind !== "update" && !secretAsk',
+    )
+    expect(source).toContain("{!folded && answers && (noted || !config.hosted) && (")
+    expect(source).toContain("answerItem(item, action, text, note.trim() || undefined, option)")
+  })
+
   test("the Inbox shows the line without a key, and a card holds its footer and note box only where its answer goes, never its Reply, read tick, Retry or bulk buttons", async () => {
     const source = await read("inbox.tsx")
     expect(source).toContain("{!writes.send && <ReadOnlyLine />}")
     expect(source).toContain("const answers = writes.answers(item)")
     expect(source).toContain("const footer = !answers ? (")
-    expect(source).toMatch(/!folded && answers && \(/)
+    expect(source).toContain("{!folded && answers && (noted || !config.hosted) && (")
     expect(source).toContain("if (!answers) return false")
     expect(source).toContain("{unread && !config.hosted ? (")
     expect(source).toMatch(/retryable\(item, now\) &&\s+!config\.hosted && \(/)
@@ -113,7 +123,7 @@ describe("the hosted dashboard writes only what a paired key signs", () => {
       ],
       ["dashboard-view.tsx", "{list.start && config.hosted && <ReadOnlyLine />}"],
       ["login-expired.tsx", '<ReadOnlyLine className="mt-2" />'],
-      ["needs-you-card.tsx", "if (config.hosted) return READ_ONLY_LINE"],
+      ["needs-you-card.tsx", "if (config.hosted) return sends ? ON_THE_MAC_LINE : READ_ONLY_LINE"],
       ["pages.tsx", "onDelete={config.hosted ? undefined : setDeleting}"],
       ["preview-pane.tsx", "{shown?.vibe && shown.path && !config.hosted && ("],
       ["preview-pane.tsx", "{!config.hosted && ("],

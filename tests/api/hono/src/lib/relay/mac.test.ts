@@ -562,6 +562,83 @@ describe("a write from Yard through answerRelay", () => {
     expect([ran?.status, plain.ran.length, refused?.status, unread.ran]).toEqual([201, 1, 403, []])
   })
 
+  // Later and Done reach a card as an answer does, and Done on a card still waiting tells its poster it is set aside, so each takes the same kind check
+  test("a schedule or a dismiss reaching a card whose kind stays on the Mac, or one it cannot read, runs nothing and is refused", async () => {
+    const listed = "0b9c6f1e-1111-4111-8111-000000000002"
+    const item = "0b9c6f1e-1111-4111-8111-000000000003"
+    const schedule = `/api/v1/inbox/${item}/schedule`
+    const writes = [
+      { body: JSON.stringify({ at: "2026-11-07T09:00:00.000Z" }), path: schedule },
+      { body: JSON.stringify({ ids: [listed, item], tell: true }), path: "/api/v1/inbox/dismiss" },
+    ]
+    for (const kind of ["accept", "apps", "delete", "grant", "secret", "a-kind-added-later", null])
+      for (const write of writes) {
+        const { audited, ran, run } = rig()
+        const answer = await answerRelay(await signed(browser.privateKey, browser.id, write), {
+          ...run,
+          kindOf: async (id: string) => (id === listed ? "ask" : kind),
+        })
+        expect([
+          kind,
+          write.path,
+          answer?.status,
+          answer && words(answer.body).error.message,
+          ran,
+        ]).toEqual([kind, write.path, 403, "Answer it on the Mac", []])
+        expect(audited).toEqual([
+          {
+            at: NOW.toISOString(),
+            fingerprint: browser.fingerprint,
+            path: write.path,
+            status: 403,
+          },
+        ])
+      }
+  })
+
+  test("a dismiss whose body does not list card ids runs nothing and is refused", async () => {
+    for (const body of [
+      "not json",
+      JSON.stringify({ ids: [] }),
+      JSON.stringify({ text: "hello" }),
+    ]) {
+      const { ran, run } = rig()
+      const answer = await answerRelay(
+        await signed(browser.privateKey, browser.id, { body, path: "/api/v1/inbox/dismiss" }),
+        { ...run, kindOf: async () => "ask" },
+      )
+      expect([body, answer?.status, ran]).toEqual([body, 403, []])
+    }
+  })
+
+  test("a schedule or a dismiss reaching only cards whose kind is on the list runs, and a message reaches no card", async () => {
+    const asked: string[] = []
+    for (const kind of RELAY_ANSWER_KINDS)
+      for (const write of [
+        {
+          body: JSON.stringify({ at: "2026-11-07T09:00:00.000Z" }),
+          path: "/api/v1/inbox/c1/schedule",
+        },
+        { body: JSON.stringify({ ids: ["c1", "c2"] }), path: "/api/v1/inbox/dismiss" },
+      ]) {
+        const { ran, run } = rig()
+        const answer = await answerRelay(await signed(browser.privateKey, browser.id, write), {
+          ...run,
+          kindOf: async () => kind,
+        })
+        expect([kind, write.path, answer?.status, ran.length]).toEqual([kind, write.path, 201, 1])
+      }
+    const { ran, run } = rig()
+    const sent = await answerRelay(await signed(browser.privateKey, browser.id), {
+      ...run,
+      kindOf: async (id: string) => {
+        asked.push(id)
+        return null
+      },
+    })
+    expect([sent?.status, ran.length, asked]).toEqual([201, 1, []])
+  })
+
   test("a write replayed after a fresh start, its id read back from the data folder, never runs", async () => {
     const dir = mkdtempSync(join(tmpdir(), "relay-mac-ids-"))
     try {
