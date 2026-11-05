@@ -1416,6 +1416,39 @@ describe("relay watch", () => {
     expect(existsSync(join(ops, "tick", "relay-watch-start"))).toBe(false)
   })
 
+  test("a relay that has never run counts no line queued before the watch began, and on a relay machine names the relay", async () => {
+    const ops = scratch()
+    mkdirSync(join(ops, "outbox"), { recursive: true })
+    writeFileSync(
+      join(ops, "..", "roster.json"),
+      JSON.stringify({
+        agents: [
+          { kind: "ops", name: OLD.ops, role: "manager" },
+          { kind: "runner", name: "runner-plain-relay", role: "runner" },
+        ],
+      }),
+    )
+    const queue = join(ops, "outbox", "ops-session-resume.jsonl")
+    const line = (date: Date) =>
+      `${JSON.stringify({ at: iso(date), job: "session-resume", text: "carry on", to: "w" })}\n`
+    writeFileSync(queue, line(at(13, 0)))
+    const old: unknown[] = []
+    for (const minute of [0, 10, 20, 30]) {
+      const tick = watch(ops, at(14, minute), "timeout")
+      await beat("relay-watch").run(tick.ctx)
+      old.push(...tick.asks)
+    }
+    expect(old).toEqual([])
+    appendFileSync(queue, line(at(14, 35)))
+    await beat("relay-watch").run(watch(ops, at(14, 40), "timeout").ctx)
+    const due = watch(ops, at(14, 50), "timeout")
+    await beat("relay-watch").run(due.ctx)
+    expect(due.asks).toHaveLength(1)
+    expect(JSON.parse(due.asks[0]!.stdin!).title).toBe(
+      "The ops relay has never run: no ops line has gone out since the watch began. Resume runner-plain-relay.",
+    )
+  })
+
   test("posts nothing while nothing waits, and times the wait itself, not the cursors' age", async () => {
     const ops = scratch()
     outbox(ops, at(14, 7))
