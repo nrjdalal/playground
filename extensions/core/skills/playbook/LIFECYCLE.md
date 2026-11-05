@@ -71,7 +71,9 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   the dashboard watch (every minute: once the live dashboard's `/api/health` has failed 5 minutes in a row, a gap of over 2 minutes with no check starting the count again, one macOS banner and one ops line through `notify.sh` with `NOTIFY_MAC=1`, since the Inbox shows only on the dashboard, and one more when it answers again,
   its state in `ops/tick/dashboard-watch.json`), the relay watch (every 5 minutes:
   a line the relay would send, read by ops-outbox's `pending()`, is timed from the first cycle it reads pending, and once it has waited 10 minutes with no relay cursor moved since, one Inbox alert update is posted straight to the dashboard with `bun run ask new` under the ops manager's name, and resolved with `bun run ask resolve` once a cursor moves or its item is gone;
-  a machine with neither runner-plain-relay's roster row nor its resume record, where the Ops sweep relays (SWEEP.md step 2), gets no alert),
+  the alert says to resume runner-plain-relay on a machine with that session's roster row or resume record;
+  a machine with neither relays through Ops' sweep (SWEEP.md step 2), so there a line may wait 30 minutes, two sweeps, and the alert says Ops' sweep is late and Ops runs it, naming no relay session;
+  with no relay cursor at all, a relay that has never run, the lines queued since the watch first found none (`ops/tick/relay-watch-start`) count as waiting, and the alert says the outbox relay has never run),
   and the guard probe (every 10 minutes: each PreToolUse guard the factory settings register run on `{}` from its bundle, else its source, without its wrapper's tail, and each that exits other than 0 or 2 named to the dispatcher with the fix, once a change of what is broken, [Restoring the main checkout](#restoring-the-main-checkout));
   `--dry` prints each beat's next due time and target, and `--once <beat>` runs one beat now.
   The relay, runner-plain-relay, sends every line `outbox/relay.py` prints to its `to`, since relay.py applies quiet mode before it prints; only the drops the relay's brief names hold a line back.

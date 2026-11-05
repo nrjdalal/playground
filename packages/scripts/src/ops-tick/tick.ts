@@ -608,7 +608,7 @@ const relayMovedAt = async (outbox: string): Promise<number> => {
   return Math.max(...times)
 }
 
-// Whether this machine runs the relay at all, by its roster row or its resume record; with neither, the Ops sweep relays the outbox (playbook SWEEP.md step 2), so no relay is down.
+// Whether this machine runs the relay at all, by its roster row or its resume record; with neither, Ops' sweep relays the outbox (playbook SWEEP.md step 2), so the watch judges the sweep and never names the relay.
 const hasRelay = async (ctx: Context): Promise<boolean> => {
   if (await Bun.file(join(ctx.ops, "..", "resume", `${RELAY}.sh`)).exists()) return true
   const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
@@ -617,14 +617,47 @@ const hasRelay = async (ctx: Context): Promise<boolean> => {
   return Array.isArray(roster?.agents) && roster.agents.some((a: Agent) => a?.name === RELAY)
 }
 
+// Ops' sweep runs every 15 minutes (SESSIONS.md, Keep the sweep running), so on a machine with no relay a line may wait two sweeps before it counts as late.
+const SWEEP_CYCLE_MS = 15 * 60_000
+
+// When the watch first found no relay cursor, kept in tick/relay-watch-start until one exists: a relay that has never run leaves no cursor for pending() to read, so the lines queued since then are what it judges.
+const neverRanSince = async (ctx: Context, moved: number): Promise<string | undefined> => {
+  const path = join(ctx.ops, "tick", "relay-watch-start")
+  if (moved) {
+    await unlink(path).catch(() => {})
+    return undefined
+  }
+  const held = (
+    await Bun.file(path)
+      .text()
+      .catch(() => "")
+  ).trim()
+  if (held) return held
+  await writeAtomic(path, ctx.now.toISOString())
+  return ctx.now.toISOString()
+}
+
+// The Inbox alert's title: the relay's own on a machine that runs it, else the sweep's, each with the next step and naming only what this machine runs.
+const relayDown = (relay: boolean, moved: number): string => {
+  const since = moved ? `since ${isoSeconds(new Date(moved))}` : "since the watch began"
+  if (relay)
+    return moved
+      ? `The ops relay is down: no ops line has gone out ${since}. Resume ${RELAY}.`
+      : `The ops relay has never run: no ops line has gone out ${since}. Resume ${RELAY}.`
+  return moved
+    ? `Ops' sweep is late: no ops line has gone out ${since}. Ops runs its sweep, whose step 2 runs ops:outbox.`
+    : `The outbox relay has never run: no ops line has gone out ${since}, and this machine relays through Ops' sweep. Ops runs its sweep, whose step 2 runs ops:outbox.`
+}
+
 type RelayWatch = { at?: string; by?: string; id?: string; pendingSince?: string }
 
-// The ops relay's watch from outside it: drain.ts's pending peek (which moves nothing) is timed from the first cycle it reads pending, and one Inbox alert update is posted straight to the dashboard with bun run ask, under the ops manager's name, once a line has waited two cycles with no cursor of the relay's moving since, since the relay rewrites its cursors only when a line is pending; the alert is resolved once a cursor moves after it, or when its item is gone; its id is kept in tick/relay-watch.json, so it is posted once a stop; a machine with no relay (hasRelay) posts nothing.
+// The ops relay's watch from outside it: drain.ts's pending peek (which moves nothing) is timed from the first cycle it reads pending, and one Inbox alert update is posted straight to the dashboard with bun run ask, under the ops manager's name, once a line has waited two of the relay's cycles with no cursor of the relay's moving since, since the relay rewrites its cursors only when a line is pending; with no relay on the machine, two of Ops' sweeps, and the alert names the sweep; with no cursor at all, the lines queued since the watch began count as pending; the alert is resolved once a cursor moves after it, or when its item is gone; its id is kept in tick/relay-watch.json, so it is posted once a stop.
 const relayWatch = async (ctx: Context) => {
   const outbox = join(ctx.ops, "outbox")
   const statePath = join(ctx.ops, "tick", "relay-watch.json")
   const state = (await readJson(statePath).catch(() => null)) as RelayWatch | null
   const moved = await relayMovedAt(outbox)
+  const neverRan = await neverRanSince(ctx, moved)
   if (state?.id && state.by) {
     if (moved <= Date.parse(state.at ?? "")) return
     const done = await ctx.run([
@@ -645,7 +678,7 @@ const relayWatch = async (ctx: Context) => {
     await unlink(statePath)
     return
   }
-  if (!(await hasRelay(ctx)) || (await pending(outbox)).length === 0) {
+  if ((await pending(outbox, neverRan)).length === 0) {
     if (state) await unlink(statePath)
     return
   }
@@ -654,11 +687,9 @@ const relayWatch = async (ctx: Context) => {
     await writeAtomic(statePath, JSON.stringify({ pendingSince: ctx.now.toISOString() }))
     return
   }
-  if (ctx.now.getTime() - since < 2 * RELAY_CYCLE_MS) return
-  const { by, id } = await postAlert(
-    ctx,
-    `The ops relay is down: no ops line has gone out ${moved ? `since ${isoSeconds(new Date(moved))}` : "with no run on record"}. Resume ${RELAY}.`,
-  )
+  const relay = await hasRelay(ctx)
+  if (ctx.now.getTime() - since < 2 * (relay ? RELAY_CYCLE_MS : SWEEP_CYCLE_MS)) return
+  const { by, id } = await postAlert(ctx, relayDown(relay, moved))
   await writeAtomic(
     statePath,
     JSON.stringify({ at: ctx.now.toISOString(), by, id, pendingSince: state?.pendingSince }),
