@@ -361,8 +361,11 @@ const deliveredAt: DeliverDeps["delivered"] = async (id) => {
 }
 
 export const deliverDeps: DeliverDeps = {
-  // The hub's newest board, without waiting on a refresh in flight; hub.ts imports this module through sdk.ts, so it is loaded when first needed
-  board: async () => (await import("@/lib/dashboard/hub")).dashboardHub.snapshot ?? listLive(),
+  // The hub's newest board, without waiting on a refresh in flight, or a fresh read when it has none or it was cut short; hub.ts imports this module through sdk.ts, so it is loaded when first needed
+  board: async () => {
+    const shown = (await import("@/lib/dashboard/hub")).dashboardHub.snapshot
+    return shown && !shown.partial ? shown : listLive()
+  },
   delivered: deliveredAt,
   now: () => new Date(),
   pressEnter,
@@ -475,15 +478,26 @@ async function recorded(delivery: Delivery, deps: DeliverDeps): Promise<Delivery
 
 type Target = { surface: string; worker: Worker }
 
-// The named session as the read shows it, or why it cannot take a message.
+// The named session as the read shows it, or why it cannot take a message. A read cut short (a herdr server or pane that did not answer whole) that misses the name is read once more, and still missing it is a failed read, never a session gone, so no answer is relayed past a poster that is still live.
 async function target(to: string, read: () => Promise<Live>): Promise<Refusal | Target> {
   let live: Live
-  try {
-    live = await read()
-  } catch (error) {
-    return refused("CMUX_FAILED", `Could not read the sessions: ${messageOf(error)}`)
+  let found: ReturnType<typeof reached>
+  let tries = 0
+  do {
+    try {
+      live = await read()
+    } catch (error) {
+      return refused("CMUX_FAILED", `Could not read the sessions: ${messageOf(error)}`)
+    }
+    found = reached(live.workers, to)
+  } while (!found.count && live.partial && ++tries < 2)
+  if (!found.count && live.partial) {
+    return refused(
+      "CMUX_FAILED",
+      `The sessions read was cut short (a herdr server or pane did not answer whole), so ${to} was not found; nothing was typed.`,
+    )
   }
-  const { count, worker } = reached(live.workers, to)
+  const { count, worker } = found
   if (!count) return refused("NOT_FOUND", `No live session is named ${to}.`)
   if (!worker) return refused("AMBIGUOUS", `${count} live sessions are named ${to}.`)
   if (worker.light === "needs-you") {
