@@ -70,7 +70,7 @@ API=$(bunx portless get api.playground)
 curl -sf --retry 60 --retry-delay 1 --retry-connrefused "$API/api/health" > /dev/null
 ```
 
-This worktree's apps re-register with the proxy on restart. Done when the previously-NOT_FOUND route responds.
+This worktree's apps re-register with the proxy on restart. In a linked worktree, every start but a `--serve` one renames the web's dev cache, `web/next/.next/dev`, to `dev-aside-<time>` beside it (`setNextDevAside()` in `api/hono/src/lib/dev/launch.ts`, printing `dev: the web's dev cache moved aside to <path>`), since a restart over the kept cache reloaded every page every few seconds and never drew the sidebar's groups; so the first page compiles cold, and `bun run clean` or the worktree's removal takes the asides. The main checkout and a person's own clone keep their cache. Done when the previously-NOT_FOUND route responds.
 
 Stop the stack before you commit: pre-commit's build rebuilds `packages/*` under it and hangs it, so pre-commit refuses while the stack runs. The web's build and check-types clear `web/next/.next/dev/types` first, which `next dev` writes for the pages it served, so a stack stopped mid-write (`TS1128`) or a branch switch away from a page (`TS2307`) leaves no stale type behind; check-types also runs `next typegen` to rewrite `.next/types` for this branch, and turbo runs web's build after it (`@web/next#build` depends on `check-types`), since `next build` deletes and rewrites the `.next/types` its tsc reads.
 
