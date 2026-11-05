@@ -51,7 +51,7 @@ import {
   type FeedFailure,
   type FeedResult,
 } from "@/lib/dashboard/feed"
-import { dashboardHub } from "@/lib/dashboard/hub"
+import { boardFrame, dashboardHub } from "@/lib/dashboard/hub"
 import { recordReply as recordReplyItem, REPLY_RE } from "@/lib/dashboard/inbox"
 import {
   clearManagersOrder,
@@ -735,6 +735,16 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     },
   )
   .get(
+    "/board",
+    describeRoute({
+      tags: ["Dashboard"],
+      description:
+        "The board as the WebSocket's workers or error frame sends it, for a client that reads with no socket (the hosted relay): null when no frame came within 10s",
+      responses: { 200: { description: "OK" }, ...authErrorResponses },
+    }),
+    async (c) => c.json({ data: await boardFrame() }),
+  )
+  .get(
     "/workers",
     describeRoute({
       tags: ["Dashboard"],
@@ -826,7 +836,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     "/messages",
     describeRoute({
       tags: ["Dashboard"],
-      description: `Send a message to a live session as the owner, and record it in the console's activity. Phase 2a sends to each dispatcher (${DISPATCHERS.join(" and ")}) and to the session the roster seats as the assistant, typed into its terminal as if the owner typed it, and to ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, whose message goes on its input rather than into a terminal; a message to any other session is refused as FORBIDDEN before anything is sent. \`attachments\` names up to ${MAX_ATTACHMENTS} uploaded files by id; each one's absolute path follows the words on an "Attached:" line, for the session to Read. \`id\`, the composer's own for the message, makes a retry safe: a message already recorded under it is answered as delivered, not typed again. \`queuedAt\`, with an \`id\`, is the time an earlier try's QUEUED refusal gave under \`queuedAt\` (when the message was pasted), so an API that restarted since reads the message again rather than typing it twice. A refusal names its reason in \`delivery\`: CMUX_FAILED, COMMAND, EMPTY, INPUT_NOT_EMPTY (nothing typed, or, for a message with an \`id\` to a herdr session, its paste left unsent in the box, which its retry presses Enter on and, for a new thread, names under \`threadId\`), INTERRUPTED (typing began and did not finish, or a QUEUED message left the screen with a transcript that cannot be read back to when it was queued, so whether it went is not known and it is never retried unseen), LOST (a QUEUED message that neither the session's screen nor its transcript, read back to when it was queued, shows 10 minutes after it was queued, which a retry sends again), NOT_FOUND, ON_PICKER, QUEUED (Claude Code holds the message, in its box while it compacts or in its queue while it works, and takes it once free: a retry under the same \`id\` types nothing and reads it again, answering it delivered once its transcript shows it) or TOO_LONG; an attachment that is gone is a 404 naming it under \`attachment\` (GONE) and \`id\`. A message naming an inbox item (\`re #iN\`) records the reply on it once sent, which takes it off his count and list until its poster closes it. \`threadId\`, for the primary dispatcher alone, puts that thread's marker (\`[thread:<id>] \`) before the words, which routes the message to the thread once ingest brings it; a thread that does not exist is a 404 before anything is sent. \`newThread: true\`, in place of \`threadId\`, opens a thread titled from the message's first line and sends the message as its first, naming it under \`threadId\`.`,
+      description: `Send a message to a live session as the owner, and record it in the console's activity. Phase 2a sends to each dispatcher (${DISPATCHERS.join(" and ")}) and to the session the roster seats as the assistant, typed into its terminal as if the owner typed it, and to ${SDK_PROBE}, the session the dashboard hosts on the Agent SDK, whose message goes on its input rather than into a terminal; a message to any other session is refused as FORBIDDEN before anything is sent. \`attachments\` names up to ${MAX_ATTACHMENTS} uploaded files by id; each one's absolute path follows the words on an "Attached:" line, for the session to Read. \`id\`, the composer's own for the message, makes a retry safe: a message already recorded under it is answered as delivered, not typed again. \`queuedAt\`, with an \`id\`, is the time an earlier try's QUEUED refusal gave under \`queuedAt\` (when the message was pasted), so an API that restarted since reads the message again rather than typing it twice. A refusal names its reason in \`delivery\`: CMUX_FAILED, COMMAND, EMPTY, INPUT_NOT_EMPTY (nothing typed, or, for a message with an \`id\` to a herdr session, its paste left unsent in the box, which its retry presses Enter on and, for a new thread, names under \`threadId\`), INTERRUPTED (typing began and did not finish, or a QUEUED message left the screen with a transcript that cannot be read back to when it was queued, so whether it went is not known and it is never retried unseen), LOST (a QUEUED message that neither the session's screen nor its transcript, read back to when it was queued, shows 10 minutes after it was queued, which a retry sends again), NOT_FOUND, ON_PICKER, QUEUED (Claude Code holds the message, in its box while it compacts or in its queue while it works, and takes it once free: a retry under the same \`id\` types nothing and reads it again, answering it delivered once its transcript shows it) or TOO_LONG; an attachment that is gone is a 404 naming it under \`attachment\` (GONE) and \`id\`. A message naming an inbox item (\`re #iN\`) records the reply on it once sent, which takes it off the Inbox square's count while it stays in his list until its poster closes it. \`threadId\`, for the primary dispatcher alone, puts that thread's marker (\`[thread:<id>] \`) before the words, which routes the message to the thread once ingest brings it; a thread that does not exist is a 404 before anything is sent. \`newThread: true\`, in place of \`threadId\`, opens a thread titled from the message's first line and sends the message as its first, naming it under \`threadId\`.`,
       responses: {
         200: {
           description: "Sent and recorded",

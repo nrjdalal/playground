@@ -6,7 +6,7 @@ source: https://github.com/nrjdalal/zerostarter
 
 # Codebase Map
 
-One Bun + Turborepo monorepo: two deployable apps over shared packages. Imports use `@api/hono`, `@packages/*`, and the `@/` alias, never deep relative paths.
+One Bun + Turborepo monorepo: two deployable apps over shared packages. Imports use `@api/hono`, `@packages/*`, and the `@/` alias, never deep relative paths. A script under `extensions/` is the exception: the root links no `@packages`, since only `api/*`, `packages/*` and `web/*` are workspaces, so it reaches a package's `src` by a relative path, as the tests do.
 
 ```
 .generated/           # repo-root home for build-time generated assets (gitignored)

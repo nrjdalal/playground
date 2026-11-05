@@ -26,7 +26,8 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
 
 - **Workers** are spawned by the Builder, one per chore, and close with their checkers once their chore is done.
   A worker ends when its chore is done: its PR merged (or dropped with the Builder's ok), its branch pushed (`git push -u origin <branch>`), so its commits show on origin even with no PR,
-  its worktrees, branches, containers and probes cleaned up from the main checkout (`cd` there before `playground rm --worktree <path>`, since the session sits inside its own last worktree: the one `cd` a worker runs), and its final report sent, naming the pushed head.
+  its probes cleaned up, and its final report sent, naming the pushed head.
+  Its worktrees, their containers and its branches go when it ends ([SESSIONS.md](SESSIONS.md#end)'s cleanup), as its reviewer's and tester's do; one the cleanup keeps, named in its lead's line, is removed by hand from the main checkout with `playground rm --worktree <path>`.
   Remove a worktree another session holds only once that session is closed or off the roster and no live session's cwd is inside it: a clean tree is not a free tree, since a reviewer keeps its worktree across PRs (**rounds**).
   The Builder then closes its workspace, which takes any split still open in it, and its slot returns to the pool.
   Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.

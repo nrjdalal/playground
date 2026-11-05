@@ -651,6 +651,46 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["rm of a held folder's glob", "X=build; rm -rf $X/*"],
     ["rm of a held temporary folder", 'D=/tmp/x.1; rm -rf "$D"'],
     ["rm under HOME, which the hook holds", 'rm -rf "$HOME/tmp-x"'],
+    [
+      "rm of a held variable on a line whose print prints it",
+      'X=/tmp/a; print -r -- "$X"; rm -rf "$X"',
+    ],
+    [
+      "rm of a held variable beside a printf -v of another",
+      'X=/tmp/a; printf -v Y "%s" a; rm -rf "$X"',
+    ],
+    ["rm of a held variable beside set -o", 'X=/tmp/a; set -o pipefail; rm -rf "$X"'],
+    ["rm of a held variable zsh ties to nothing", 'P=/tmp/a; rm -rf "$P"'],
+    ["rm of a held variable beside bash's name list", 'X=/tmp/a; echo "${!N*}"; rm -rf "$X"'],
+    ["rm of a held variable beside bash's array keys", 'X=/tmp/a; echo "${!N[@]}"; rm -rf "$X"'],
+    [
+      "rm of a held variable beside the last background job's pid",
+      'X=/tmp/a; echo "${!}"; rm -rf "$X"',
+    ],
+    [
+      "rm of a held variable beside tests that read no name",
+      'X=/tmp/a; test -v Y && [ -n "$X" ] && [ "$X" = /tmp/a ] && rm -rf "$X"',
+    ],
+    [
+      "rm of a held variable beside arithmetic on literals",
+      'X=/tmp/a; echo $((1 + 2)); rm -rf "$X"',
+    ],
+    [
+      "rm of a held variable beside subscripts that name nothing",
+      'X=/tmp/a; echo ${a[1]} $a[-1] ${a[@]} "${a[*]}" ${a[]} ${a[0:9]} $a[1,5] ${a[^V]}; rm -rf "$X"',
+    ],
+    [
+      "rm of a held variable beside a glob qualifier that runs nothing",
+      'X=/tmp/a; : build/*(.N); rm -rf "$X"',
+    ],
+    [
+      "rm of a held variable beside a single-quoted jq filter that reads as a qualifier",
+      `X=/tmp/a; jq '(.items[]|select(.id=="x"))' f; rm -rf "$X"`,
+    ],
+    [
+      "rm of a held variable beside a jq filter after a heredoc whose body holds a lone quote",
+      `X=/tmp/a; cat > f <<'EOF'\nit's\nEOF\njq '(.items[]|select(.id=="x"))' f; rm -rf "$X"`,
+    ],
     ["a quiet commit with -m", `git commit -m "fix(x): y"`],
     ["a quiet commit with -am", `git commit -am "fix(x): y"`],
     ["a quiet commit with --message", `git commit --message "fix(x): y"`],

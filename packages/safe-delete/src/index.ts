@@ -28,12 +28,13 @@ export type Proc = { command: string; cwd: string; pid: number; sockets: string[
 // A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
 export type Clone = { destination: string; pid: number; source: string; who: string }
 
-// What tells a worktree is held: each running clone, the roster's live statuses, every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), and --discard, which lets uncommitted or unlanded work go.
+// What tells a worktree is held: each running clone, the roster's live statuses, every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that.
 export type Holders = {
   clones: Clone[]
   discard: boolean
   live: string[]
   merged: (sha: string, at: string) => boolean | null
+  pr?: string
   procs: Proc[] | null
   roster: string
 }
@@ -366,7 +367,10 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     const tokens = [agent.name, ...(/\d/.test(id) ? [id] : [])].map((t) => t.toLowerCase())
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
-    const pr = typeof agent.pr === "string" ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1] : undefined
+    const pr =
+      typeof agent.pr === "string" && agent.pr !== holders.pr
+        ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1]
+        : undefined
     const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
     if (byBranch || byPr || tokens.some((t) => where.includes(t)))
       return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}`
