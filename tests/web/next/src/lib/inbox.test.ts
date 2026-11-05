@@ -14,13 +14,13 @@ import {
   slackPlace as API_slackPlace,
   STUCK_QUEUED_MS as API_STUCK_QUEUED_MS,
 } from "../../../../../api/hono/src/lib/dashboard/inbox"
+import { CLOCKS_STOPPED_AT } from "../../../../../packages/config/src/inbox"
 import {
   ACKS_STAMPED_FROM,
   canDraft,
   checkAnswerNote,
   cardKey,
   changedAt,
-  CLOCKS_STOPPED_AT,
   dismissable,
   focusAfterTake,
   foldsByDefault,

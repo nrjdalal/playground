@@ -1,4 +1,5 @@
 import type { InboxAction, InboxAnswer, InboxItem } from "@api/hono"
+import { CLOCKS_STOPPED_AT } from "@packages/config/inbox"
 import { useQuery } from "@tanstack/react-query"
 
 import { agentLabel } from "@/lib/agent-label"
@@ -344,9 +345,6 @@ export function lifecycle(item: InboxItem, shelf: Shelf): Lifecycle[] {
 export const inboxWaiting = (items: InboxItem[]): string[] =>
   items.filter(needsYou).map((item) => item.id)
 
-// When the Inbox stopped moving cards by the clock: an update read before then had already left the list for Done, so it stays there, while one read since stays in the list until he dismisses it.
-export const CLOCKS_STOPPED_AT = "2026-11-05T01:00:00.000Z"
-
 // Pure: whether a card is In progress: an answer its poster is carrying out (itemState's sending, the light's working), not dismissed.
 const working = (item: InboxItem): boolean =>
   !answeredDismissedAt(item) && itemState(item) === "sending"
@@ -370,7 +368,7 @@ const doneAt = (item: InboxItem): number => {
   return Date.parse(chosen(item)?.at ?? item.updatedAt)
 }
 
-// Pure: the list as shown, moved by a verb alone, never a clock: the items that ask something of him and the updates he has not dismissed, in the API's order; In progress, the answers their posters are carrying out, newest first; Archived, what he set aside to talk about later (Archive's `cleared`) and has not dismissed, newest first; and Done, the rest, the newest first. Nothing is deleted.
+// Pure: the list as shown, moved by a verb alone, never a clock: the items that ask something of him, the cards he only commented on and the updates he has not dismissed, in the API's order; In progress, the answers their posters are carrying out, newest first; Archived, what he set aside to talk about later (Archive's `cleared`) and has not dismissed, newest first; and Done, the rest, the newest first. Nothing is deleted.
 export function inboxView(items: InboxItem[]): {
   archived: InboxItem[]
   done: InboxItem[]

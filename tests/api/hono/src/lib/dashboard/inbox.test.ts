@@ -36,6 +36,7 @@ import {
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 import { uploadSpec } from "../../../../../../api/hono/src/lib/dashboard/slack-upload"
 import { keychain } from "../../../../../../api/hono/src/lib/yard/keychain"
+import { CLOCKS_STOPPED_AT } from "../../../../../../packages/config/src/inbox"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -2009,16 +2010,52 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect((await store.getItem(db, bare.id))?.answer).toEqual(bareClosed.item.answer)
   })
 
-  test("a replied item leaves the list once its week is up, as an answered one does", async () => {
+  test("a replied item from before the clocks stopped leaves the list once its week is up, as an answered one does", async () => {
     const posted = await post(decision(PREVIEWS.ticket))
-    await store.recordReply(db, posted.ref, new Date(Date.now() - 8 * 24 * 60 * 60 * 1000))
-    expect((await store.listItems(db)).items.map((i) => i.id)).not.toContain(posted.id)
+    const stopped = Date.parse(CLOCKS_STOPPED_AT)
+    await store.recordReply(db, posted.ref, new Date(stopped - 60 * 60_000))
+    const later = new Date(stopped + 8 * 24 * 60 * 60 * 1000)
+    expect((await store.listItems(db, later)).items.map((i) => i.id)).not.toContain(posted.id)
   })
 
-  // The replied-wait guard in listItems's what-needs-him query is visible only through the rest list's cap: without the guard a fresh replied item rides the uncapped needs-him side and never drops off, with it the 200 fresher rows push it out.
-  test("a fresh replied item drops off the list once the rest side's 200 rows are full", async () => {
+  // Since the clocks stopped, a card moves by a verb alone, so the list's week drops none of these: an approved go its poster has not acked, a card he only commented on, and an update he read; each leaves once its poster closes it or he dismisses it.
+  test("an unacked go, a comment-alone card and a read update since the clocks stopped stay listed 8 days on, until a verb closes each", async () => {
+    const stopped = Date.parse(CLOCKS_STOPPED_AT)
+    const at = new Date(stopped + 60 * 60_000)
+    const delivered = async () => ({ at: at.toISOString(), ok: true as const, sessionId: "s1" })
+    const go = await post(decision(PREVIEWS.ship))
+    const approved = await store.answerItem(
+      db,
+      go.id,
+      { action: "approve" },
+      { actor, deliver: delivered, now: at },
+    )
+    if (!approved.ok) throw new Error(approved.message)
+    const replied = await post(decision(PREVIEWS.ticket))
+    await store.recordReply(db, replied.ref, at, "wait for the docs first")
+    const update = await post({
+      from: "builder",
+      kind: "update",
+      preview: { outcome: "merged" },
+      title: "Merged a made-up change",
+    })
+    expect(await store.markRead(db, [update.id], at)).toBe(1)
+    const ids = [go.id, replied.id, update.id]
+    const later = new Date(stopped + 8 * 24 * 60 * 60 * 1000)
+    const listed = (await store.listItems(db, later)).items.map((i) => i.id)
+    expect(ids.filter((id) => listed.includes(id))).toEqual(ids)
+    const closed = new Date(at.getTime() + 60_000)
+    const acked = await store.ackItem(db, go.id, { noLink: "made-up", now: closed })
+    if (!acked.ok) throw new Error(acked.message)
+    expect(await store.dismissItems(db, [replied.id, update.id], closed)).toBe(2)
+    const after = (await store.listItems(db, later)).items.map((i) => i.id)
+    expect(ids.filter((id) => after.includes(id))).toEqual([])
+  })
+
+  // The rest side caps at 200 rows, newest first; a replied item since the clocks stopped waits on its poster's verb, so the cap never pushes it out.
+  test("a replied item since the clocks stopped stays in the list once the rest side's 200 rows are full", async () => {
     const posted = await post(decision(PREVIEWS.ticket))
-    await store.recordReply(db, posted.ref)
+    await store.recordReply(db, posted.ref, new Date(Date.parse(CLOCKS_STOPPED_AT) + 60_000))
     const updates: string[] = []
     for (let i = 0; i < 200; i++) {
       const update = await post({
@@ -2029,9 +2066,12 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       })
       updates.push(update.id)
     }
-    expect((await store.listItems(db)).items.map((i) => i.id)).not.toContain(posted.id)
+    expect((await store.listItems(db)).items.map((i) => i.id)).toContain(posted.id)
     // read the 200 back, so the store's later tests see no unread pile of ours
-    expect(await store.markRead(db, updates)).toBe(200)
+    expect(
+      await store.markRead(db, updates, new Date(Date.parse(CLOCKS_STOPPED_AT) - 60_000)),
+    ).toBe(200)
+    expect(await store.dismissItems(db, [posted.id])).toBe(1)
   })
 
   // An item he opened again from its card after a chat reply: its poster reads one answer, the one that replaced the reply, and is chased for that alone.
