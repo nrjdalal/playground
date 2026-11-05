@@ -1453,7 +1453,7 @@ run.named_kind = lambda name: None
 run.quiet_for = lambda path, now_t: 3600
 run.screen = lambda s: ["You've hit your weekly limit"]
 run.read_block = lambda lines, s: ("usage-limit", "You've hit your weekly limit", None)
-run.session_account = lambda name: "spent@example.com"
+run.session_account = lambda name: "acct-spent"
 run.moving = lambda now_t=None: None
 for fn in ("stall",):
     setattr(run, fn, lambda *a, **k: None)
@@ -1473,7 +1473,7 @@ print(json.dumps(sent))
     const config = scratch()
     writeFileSync(
       join(config, "playground", "usage.json"),
-      JSON.stringify({ account: "spent@example.com", accounts, writtenAt: "2027-01-15T08:00:00Z" }),
+      JSON.stringify({ account: "acct-spent", accounts, writtenAt: "2027-01-15T08:00:00Z" }),
     )
     const proc = Bun.spawn([...PYTHON, "-I", "-c", REPLAY, RUN_PY], {
       env: {
@@ -1499,9 +1499,9 @@ print(json.dumps(sent))
 
   test("alerts each recipient once, then one summary an hour, and the alert names the account with the most room", async () => {
     const sent = await replay({
-      "half@example.com": { week: 60 },
-      "roomy@example.com": { week: 20 },
-      "spent@example.com": { week: 100 },
+      "acct-half": { week: 60 },
+      "acct-roomy": { week: 20 },
+      "acct-spent": { week: 100 },
     })
     for (const to of ["builder", "dispatcher"]) {
       const lines = sent.filter(([who]) => who === to).map(([, text]) => text)
@@ -1510,7 +1510,7 @@ print(json.dumps(sent))
       expect(alerts, to).toHaveLength(1)
       expect(summaries, to).toHaveLength(8)
       expect(lines, to).toHaveLength(9)
-      expect(alerts[0]).toContain("Most room: roomy@example.com (week 20%)")
+      expect(alerts[0]).toContain("Most room: acct-roomy (week 20%)")
       expect(summaries[0]).toBe(
         "1 session blocked on the usage limit. Nothing blocked for another reason. On the limit: worker-a",
       )
@@ -1519,8 +1519,8 @@ print(json.dumps(sent))
 
   test("says so when no account has room", async () => {
     const sent = await replay({
-      "spent@example.com": { week: 100 },
-      "also@example.com": { week: 100 },
+      "acct-spent": { week: 100 },
+      "acct-also": { week: 100 },
     })
     expect(sent.find(([, text]) => text.includes("is at its usage limit"))?.[1]).toContain(
       "No account in usage.json's accounts has room",
