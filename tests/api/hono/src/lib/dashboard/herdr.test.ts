@@ -260,7 +260,7 @@ describe("readServer and herdrRecords", () => {
     expect(herdrProblem()).toContain("hung")
   })
 
-  test("a pane whose processes did not answer marks its server's read partial, so a session missing from it is not taken for ended (#880)", async () => {
+  test("a pane whose processes did not answer marks its server's read partial, so a session missing from it is not taken for ended (PG-880)", async () => {
     const s = stub({ "pane.process_info": () => ({ error: { code: "busy", message: "busy" } }) })
     const [read] = await readHerdr([{ name: "slow", socket: s.path }], 1000)
     expect(read?.partial).toBe(true)
@@ -333,6 +333,18 @@ describe("readServer and herdrRecords", () => {
     // a board whose every server failed reads none, and a failed server's read is left out
     herdrRecords([], registry, "2026-10-18T10:00:06.000Z")
     herdrRecords([at("kept-b", "idle")], registry, "2026-10-18T10:00:06.500Z")
+    // a server read cut short, whole or by a pane, keeps the times of the sessions it did not see (PG-880)
+    herdrRecords(
+      [{ panes: [], partial: true, server: "kept-a", workspaces: [] }],
+      registry,
+      "2026-10-18T10:00:06.700Z",
+    )
+    const cut = at("kept-a", "blocked")
+    herdrRecords(
+      [{ ...cut, panes: cut.panes.map((p) => ({ ...p, processes: [] })), partial: true }],
+      registry,
+      "2026-10-18T10:00:06.800Z",
+    )
     expect(
       herdrRecords([at("kept-a", "blocked")], registry, "2026-10-18T10:00:07.000Z")[0],
     ).toMatchObject({

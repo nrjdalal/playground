@@ -416,10 +416,10 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
       ]
     }),
   )
-  // a board that did not read a server (a failed read) keeps that server's times
-  const servers = new Set(reads.map((read) => read.server))
+  // a board that did not read a server whole (a failed or partial read) keeps that server's times for every session it did not see
+  const whole = new Set(reads.filter((read) => !read.partial).map((read) => read.server))
   for (const [key, change] of state.changed)
-    if (!servers.has(change.server)) changes.set(key, change)
+    if (!whole.has(change.server) && !changes.has(key)) changes.set(key, change)
   state.changed = changes
   return records
 }

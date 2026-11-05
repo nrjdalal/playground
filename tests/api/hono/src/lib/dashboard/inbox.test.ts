@@ -3273,7 +3273,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         expect(kept).not.toContain(VALUE)
     })
 
-    test("a saved secret whose telling failed keeps its saved result, and its Retry tells the poster again without running the sink (#880)", async () => {
+    test("a saved secret whose telling failed keeps its saved result, and its Retry tells the poster again without running the sink (PG-880)", async () => {
       const posted = await post({
         ...decision({
           key: "YARD_TOKEN",

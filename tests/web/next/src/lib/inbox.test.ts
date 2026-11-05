@@ -141,7 +141,7 @@ describe("a secret ask (PG-59)", () => {
     expect(itemState(provided())).toBe("sending")
   })
 
-  test("a saved secret its poster was not told of still reads saved, with the failed telling as a note of its own that offers Retry (#880)", () => {
+  test("a saved secret its poster was not told of still reads saved, with the failed telling as a note of its own that offers Retry (PG-880)", () => {
     const untold = {
       ...provided([{ environment: "Keychain", exitCode: 0, line: "saved" } as never]),
       delivery: {

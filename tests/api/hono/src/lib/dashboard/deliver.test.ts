@@ -611,7 +611,7 @@ describe("deliver", () => {
     }
   })
 
-  test("a read cut short that misses the session is read once more, and still missing it is a failed read, never NOT_FOUND (#880)", async () => {
+  test("a read cut short that misses the session is read once more, and still missing it is a failed read, never NOT_FOUND (PG-880)", async () => {
     const cut: Live = { ...live([], {}), partial: true }
     const { deps, recorded, typed } = fakes(cut)
     let reads = 0
