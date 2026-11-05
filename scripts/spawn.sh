@@ -1508,7 +1508,7 @@ if [ "$MODE" = resume ]; then
       PROMPT=
     fi
   else
-    # Whom it reports to, so the re-sends reach the right session: the roster row's, since it may have moved since the start (a checker's worker, as its lead is its worker's lead; another's reportsTo, else its lead), else the prompt its start recorded (a session started in cmux has none); a value that is not a session name would break the launch's quotes.
+    # Whom it reports to, by scripts/README.md's order, so the re-sends reach the right session; a value that is not a session name would break the launch's quotes.
     if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
       UP=$(roster_field "$NAME" worker)
     else
