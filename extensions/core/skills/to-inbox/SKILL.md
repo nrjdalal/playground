@@ -6,7 +6,7 @@ license: Complete terms in the repository's NOTICE
 
 # to-inbox
 
-Every message to the owner is read in seconds, an Inbox card in the aside's narrow column most of all, and the **talk** rule gives each one this skill's shape. This skill makes each message **glanceable**: the owner sees the point first, then the facts, then what Approve does. The item's shape (its picture, its bullets and its two choices, in that order), its width rule and the `bun run ask` commands live in asks.md's "The ask's shape" ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)); this skill picks the picture and writes the words.
+Every message to the owner is read in seconds, an Inbox card in the aside's narrow column most of all, and the **talk** rule gives each one this skill's shape. This skill makes each message **glanceable**: the owner sees the point first, then the facts, then what Approve does. The item's shape (its picture, its bullets and its options, in that order), its width rule and the `bun run ask` commands live in asks.md's "The ask's shape" ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)); this skill picks the picture and writes the words.
 
 An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 6 and 9. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps, step 1 always first:
 
@@ -71,7 +71,7 @@ Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): y
    | `> [!NOTE]`      | context the choice depends on             |
    | `> [!TIP]`       | a faster way the owner may like           |
 
-6. **Choices.** Write asks.md's `approve` and `deny` labels in the same plain words. Done when each label starts with a verb.
+6. **Choices.** Pick the shape, then label each option in the same plain words (asks.md's `options` and `deny`). A true yes or no takes one `options` row, what Approve does, and `deny`, what Deny means; a choice between real alternatives takes 2 to 5 rows, lettered A to E on the card, each a `label` and an optional `description`, with None of these after them. Done when the shape fits the question and each label starts with a verb.
 
 7. **Fake data.** Read the text and every attachment once more. Done when no part holds a token, a customer detail or a real database row, and a demo's or screenshot's names and rows are made up.
 
@@ -106,7 +106,7 @@ Ops ships 3 PRs
 > I need your yes before 10:00 pm UTC.
 ````
 
-Approve: `Ship canary to main at 10:00 pm UTC`; Deny: `Hold the ship until tomorrow`.
+Options: `Ship canary to main at 10:00 pm UTC`; Deny: `Hold the ship until tomorrow`.
 
 ## Keep the skills learning
 

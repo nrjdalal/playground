@@ -15,6 +15,7 @@ import {
   getItem,
   itemTag,
   openItems,
+  pickOf,
   postItem,
   readAnswer,
   resolveItem,
@@ -26,7 +27,7 @@ import { livePair, othersLiveDashboard } from "@/lib/dev/launch"
 import { checkoutMismatch, locate, prove } from "@/lib/sessions/guard"
 import { dataDir } from "@/lib/sessions/paths"
 
-// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr); `edit <id|#iN> < item.json` replaces the poster's own open item's title and preview in place, checked as new checks it; both fill `{now}` with the time they post at and refuse a measured or now time ahead of the clock; `open [--from <session>]` lists the open items, oldest first, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer included once given, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own alert update once it has resolved itself; `stale` lists the answers no poster has closed, for ops-sweep; `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose or holds a code line too wide for the card. See `.agents/dashboard/asks.md` for the fields.
+// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr); `edit <id|#iN> < item.json` replaces the poster's own open item's title and preview in place, checked as new checks it; both fill `{now}` with the time they post at and refuse a measured or now time ahead of the clock; `open [--from <session>]` lists the open items, oldest first, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer included once given, and the option the owner picked on stderr, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own alert update once it has resolved itself; `stale` lists the answers no poster has closed, for ops-sweep; `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose or holds a code line too wide for the card. See `.agents/dashboard/asks.md` for the fields.
 const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 posts an inbox item from JSON on stdin, prints its id
                                                 options and approve/deny labels go in plain words (ELI5, ASD-STE100)
@@ -55,6 +56,7 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 run it before new, and name an open item on the same thing
                                                 rather than posting it again; --from keeps one sender's
        bun run ask get <id|#iN> [--ack]    prints the item, answer included; --ack marks an answer read
+                                                a picked option's letter and label print on stderr
                                                 (and closes a deny, a clear, a discard or a provided secret, which reading carries out)
        bun run ask ack <id|#iN> [--link <https url> [--label "Filed ABC-123"] | --no-link "<why>"]
                                                 closes the answer once carried out; a go (approve, draft, edit, send)
@@ -188,7 +190,9 @@ if (command === "new" || command === "edit") {
     console.error(
       hint.kind === "prose"
         ? "ask: this ask is one block of prose; lead with a picture of the point (an ASCII flow or a diff in a code block), then short bullets, then what Approve does in its approve and deny labels. bun run ask example code|decision|ui prints a template (.agents/dashboard/asks.md, The ask's shape)"
-        : `ask: a code or ASCII line runs ${hint.longest} characters, past the ${ASK_CODE_COLUMNS} the narrowest Inbox card shows on one line; break or shorten it (.agents/dashboard/asks.md, The ask's shape)`,
+        : hint.kind === "unlabelled"
+          ? 'ask: this ask labels no options, so its card shows a bare Approve and Deny; for a yes or no, label one option, "options": [{"label": "..."}], with "deny"; for real alternatives, label 2 to 5 (.agents/dashboard/asks.md, The ask\'s shape)'
+          : `ask: a code or ASCII line runs ${hint.longest} characters, past the ${ASK_CODE_COLUMNS} the narrowest Inbox card shows on one line; break or shorten it (.agents/dashboard/asks.md, The ask's shape)`,
     )
   }
   // the files an ask names are copied in first, so the item keeps their ids, never a path on this Mac
@@ -220,6 +224,8 @@ if (command === "new" || command === "edit") {
   // An open item is printed as it is, so a poll with --ack only marks the answer once there is one; an update takes none, though a dismissed one records when in its answer.
   if (acking && item) item = await readAnswer(db, item)
   console.log(JSON.stringify(item, null, 2))
+  const picked = item && pickOf(item)
+  if (picked) console.error(`ask: picked ${picked.letter}: ${picked.label}`)
 } else if (command === "open") {
   for (const item of await openItems(db, flags?.from))
     console.log(`${itemTag(item.ref)} ${item.kind} from ${item.from} · ${item.title}`)

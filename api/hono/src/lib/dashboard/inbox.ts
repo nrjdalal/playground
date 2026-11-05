@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs"
 import { extname, join } from "node:path"
 
-import { ANSWER_LEAD, type AnswerPayload, answerPayloadSchema } from "@packages/config/inbox"
+import {
+  ANSWER_LEAD,
+  type AnswerPayload,
+  answerPayloadSchema,
+  choicesOf,
+  MAX_OPTIONS,
+} from "@packages/config/inbox"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
@@ -291,13 +297,25 @@ export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 // Saves the value as one allowlisted Keychain item, throwing on a refusal; secret-sink.ts holds the real one, and a test passes its own.
 export type KeychainSave = (item: KeychainItemName, value: string) => Promise<void>
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change or a grant's System Settings pane, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
+const OPTIONS_MESSAGE = `An ask offers 1 to ${MAX_OPTIONS} options, each with a label: one for a yes or no, two or more for lettered choices`
+
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change or a grant's System Settings pane, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in ELI5 / ASD-STE100, one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
     attachments,
     checked: oneLine(LIMITS.line).optional(),
     deny: oneLine(LIMITS.line).optional(),
+    options: z
+      .array(
+        z.strictObject({
+          description: oneLine(LIMITS.line).optional(),
+          label: oneLine(LIMITS.line),
+        }),
+      )
+      .min(1, OPTIONS_MESSAGE)
+      .max(MAX_OPTIONS, OPTIONS_MESSAGE)
+      .optional(),
     text: words,
     type: z.literal("ask"),
   }),
@@ -390,12 +408,22 @@ export const inboxInputSchema = z
   )
   .refine((input) => {
     if (input.kind !== "decision" || input.preview.type !== "ask") return true
-    const { approve, checked, deny, text } = input.preview
+    const { approve, checked, deny, options = [], text } = input.preview
+    const said = options.flatMap((option) => [option.label, option.description])
     return (
       checked !== undefined ||
-      !TAKES_DOWN.test([input.title, text, approve, deny].join("\n").replace(PASSING_MENTION, ""))
+      !TAKES_DOWN.test(
+        [input.title, text, approve, deny, ...said].join("\n").replace(PASSING_MENTION, ""),
+      )
     )
   }, TAKES_DOWN_MESSAGE)
+  .refine(
+    (input) =>
+      input.kind !== "decision" ||
+      input.preview.type !== "ask" ||
+      !(input.preview.approve && input.preview.options),
+    "An ask labels its go row in options or in approve, not both",
+  )
   .superRefine((input, ctx) => {
     const text =
       input.kind === "draft"
@@ -466,6 +494,7 @@ export type InboxAnswer = {
   noLink?: string
   note?: string
   opened?: RunResult
+  option?: number
   uploaded?: number
 }
 
@@ -593,6 +622,12 @@ export type InboxList = { items: InboxItem[]; count: number; snoozed: InboxItem[
 export const answerInputSchema = z.strictObject({
   action: z.enum(ACTIONS),
   note: z.string().trim().max(LIMITS.text).optional(),
+  option: z
+    .number()
+    .int()
+    .min(0)
+    .max(MAX_OPTIONS - 1)
+    .optional(),
   seen: z.iso.datetime().optional(),
   text: z.string().trim().max(LIMITS.text).optional(),
 })
@@ -650,13 +685,31 @@ export function checkAnswer(
 
 function answerOf(
   item: Shape<"kind" | "preview" | "status">,
-  { action, text }: AnswerInput,
+  { action, option, text }: AnswerInput,
 ): { answer: Omit<InboxAnswer, "at">; status: InboxStatus } | { message: string } {
   if (item.kind === "update") return { message: "An update is read, not answered" }
   if (item.status !== "open") return { message: "This item is already answered" }
+  if (option !== undefined && !(item.kind === "decision" && action === "approve")) {
+    return { message: "Only a decision's go picks an option" }
+  }
   if (item.kind === "decision") {
     if (item.preview.type === "secret") {
       return { message: "A secret ask takes its value through its Submit alone" }
+    }
+    // a lettered decision's go names which of its go rows the owner picked, and takes no Edit, which names none; a yes or no has one
+    const go = choicesOf(item.preview)?.rows.filter((row) => row.go).length ?? 1
+    if (
+      (action === "approve" && (option !== undefined || go > 1)) ||
+      (action === "edit" && go > 1)
+    ) {
+      return action === "approve" && option !== undefined && option < go
+        ? { answer: { choice: action, option }, status: "approved" }
+        : {
+            message:
+              go > 1
+                ? `Pick one of its ${go} options, 0 to ${go - 1}`
+                : "A yes or no has one option, 0",
+          }
     }
     if (item.preview.type === "accept" && action === "edit") {
       return { message: "An accept is approved or denied as its proposal reads" }
@@ -691,18 +744,22 @@ function answerOf(
   return { message: "A draft is sent, saved as a draft, discarded or cleared" }
 }
 
-// A decision's two options with the card's default labels: Approve is A, Deny is B.
-const OLD_OPTIONS = {
-  approve: { index: 0, label: "Approve", letter: "A" },
-  deny: { index: 1, label: "Deny", letter: "B" },
+// The option the owner picked, as the card lettered and labelled it (choicesOf): a go row by the answer's option, the first when it names none, or the no-go row.
+function optionOf(item: InboxItem, answer: { choice: string; option?: number }) {
+  const rows = item.kind === "decision" ? (choicesOf(item.preview)?.rows ?? []) : []
+  const row =
+    answer.choice === "deny"
+      ? rows.find((r) => !r.go)
+      : rows.filter((r) => r.go)[answer.option ?? 0]
+  return row ? { index: row.index, label: row.label, letter: row.letter } : undefined
 }
 
-// The option the owner picked, labelled as the card showed it: an ask carrying both its own labels shows them (labelsOf in the web Inbox), any other decision Approve or Deny.
-function optionOf(item: InboxItem, pick: "approve" | "deny") {
-  if (item.kind !== "decision" || item.preview.type !== "ask") return OLD_OPTIONS[pick]
-  const { approve, deny } = item.preview
-  if (!approve || !deny) return OLD_OPTIONS[pick]
-  return { ...OLD_OPTIONS[pick], label: pick === "approve" ? approve : deny }
+// Pure: the option an approved or denied decision's answer picked, as its letter and label, for bun run ask get; null for any other item or answer.
+export function pickOf(item: InboxItem): { index: number; label: string; letter: string } | null {
+  if (item.kind !== "decision" || !item.answer || !("choice" in item.answer)) return null
+  const { choice } = item.answer
+  if (choice !== "approve" && choice !== "deny") return null
+  return optionOf(item, item.answer) ?? null
 }
 
 // Pure: what an answer tells its poster, as data: the verb, whether to carry it out, the next step and the exact command that closes the item; the owner's comment in his words, a changed draft's text, a step's or a secret sink's results, never a secret's value; an update takes no answer.
@@ -750,7 +807,7 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
           close: `bun run ask ack ${tag} --no-link "<why>"`,
           go: true,
           next: answer.opened?.exitCode === 0 ? "carry-out" : "nothing",
-          option: optionOf(item, "approve"),
+          option: optionOf(item, answer),
           verb: "pick",
         }
       }
@@ -761,7 +818,7 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
         close: "link" in item.preview ? ack : ackOrWhy,
         go: true,
         next: "carry-out",
-        option: optionOf(item, "approve"),
+        option: optionOf(item, answer),
         verb: "pick",
       }
     case "deny":
@@ -771,7 +828,7 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
         close: read,
         go: false,
         next: "close",
-        option: optionOf(item, "deny"),
+        option: optionOf(item, answer),
         verb: "pick",
       }
     case "clear":

@@ -18,7 +18,7 @@ const PROSE =
 
 const ask = (text: string, extra: object = {}) => ({
   from: "builder",
-  preview: { text, type: "ask", ...extra },
+  preview: { approve: "Port it", text, type: "ask", ...extra },
   title: "Port the export fix?",
 })
 
@@ -33,6 +33,20 @@ describe("shapeHints", () => {
     expect(shapeHints(ask(`${PROSE}\n\n1. Port to staging.`))).toEqual([])
     expect(shapeHints(ask(`\`\`\`diff\n- a\n+ b\n\`\`\`\n\n${PROSE}`))).toEqual([])
     expect(shapeHints(ask(PROSE, { attachments: [{ src: "/tmp/after.png" }] }))).toEqual([])
+  })
+
+  test("hints at an ask that labels no options, and stays quiet on one labelled in options or approve (#873)", () => {
+    const short = "Port DUNE-1401's fix to staging and main."
+    expect(shapeHints({ ...ask(short), preview: { text: short, type: "ask" } })).toEqual([
+      { kind: "unlabelled" },
+    ])
+    expect(
+      shapeHints({
+        ...ask(short),
+        preview: { options: [{ label: "Port it" }], text: short, type: "ask" },
+      }),
+    ).toEqual([])
+    expect(shapeHints(ask(short))).toEqual([])
   })
 
   test("stays quiet on short prose and on every kind but an ask", () => {

@@ -1,6 +1,6 @@
 import { ASK_CODE_COLUMNS } from "@packages/config/inbox"
 
-// An Inbox ask reads the way chat talks to the owner: a picture of the point first, then short bullets, then what Approve does, in its `approve` and `deny` labels.
+// An Inbox ask reads the way chat talks to the owner: a picture of the point first, then short bullets, then its options, in its `options` and `deny` labels.
 
 // Past this many characters, an ask's text with no picture and no bullets reads as a wall of prose.
 export const PROSE_LIMIT = 300
@@ -9,7 +9,10 @@ const FENCE = /^\s*```/m
 const LIST = /^\s*(?:[-*+]|\d+[.)])\s/m
 
 // What bun run ask says of an ask's shape: the words live in bin/dashboard-ask.ts, outside the app copy tests/web/next/src/ui-copy.test.ts reads.
-export type ShapeHint = { kind: "prose" } | { kind: "wide"; longest: number }
+export type ShapeHint =
+  | { kind: "prose" }
+  | { kind: "unlabelled" }
+  | { kind: "wide"; longest: number }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -29,7 +32,7 @@ const longestCodeLine = (text: string): number => {
   return longest
 }
 
-// Pure: the hints for an `ask` decision: one when its text runs past PROSE_LIMIT with no list, no code block and no attachments, one when a code block other than a diff holds a line past ASK_CODE_COLUMNS; the wide one alone for a read-only update's text, which renders on the same card; none for any other item, which posts either way.
+// Pure: the hints for an `ask` decision: one when its text runs past PROSE_LIMIT with no list, no code block and no attachments, one when it labels no options, one when a code block other than a diff holds a line past ASK_CODE_COLUMNS; the wide one alone for a read-only update's text, which renders on the same card; none for any other item, which posts either way.
 export function shapeHints(input: unknown): ShapeHint[] {
   const preview = isRecord(input) ? input.preview : undefined
   if (!isRecord(preview) || typeof preview.text !== "string") return []
@@ -40,6 +43,10 @@ export function shapeHints(input: unknown): ShapeHint[] {
   const attached = Array.isArray(preview.attachments) && preview.attachments.length > 0
   if (ask && !attached && text.length > PROSE_LIMIT && !FENCE.test(text) && !LIST.test(text)) {
     hints.push({ kind: "prose" })
+  }
+  // an ask with neither options nor an approve label shows the bare Approve and Deny
+  if (ask && preview.options === undefined && preview.approve === undefined) {
+    hints.push({ kind: "unlabelled" })
   }
   const longest = longestCodeLine(text)
   if (longest > ASK_CODE_COLUMNS) hints.push({ kind: "wide", longest })

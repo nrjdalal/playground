@@ -18,9 +18,9 @@
   so it never covers a card and its coming and going moves nothing,
   sliding in and fading out (none under reduced motion), `1 new update` (`pinnedView` and `newLabel` in `web/next/src/lib/inbox.ts`), whose click puts what waits on top (the order lasts as long as the page, so what arrives while they are on another tab waits behind the pill too), newest first, the rows below gliding down (none under reduced motion);
   a take by the keyboard hands focus to the first card it puts on top (`focusAfterTake`), since the pill leaves; and the action buttons of every card that moved pause for 1 second (`movedRows`, `MOVED_PAUSE_MS`, the guard a short pause so a stray click during the move cannot misfire), still focusable and saying why on hover;
-  Each card is a stock Card holding one question on shadcn's Questionnaire (its title the item's, its description what Approve does or, once it is answered or settled, the result, on its own line above the footer; Cmd/Ctrl+Enter in a draft's box presses Send, and on a labelled ask sends the picked side, once one is),
+  Each card is a stock Card holding one question on shadcn's Questionnaire (its title the item's, its description what Approve does or, once it is answered or settled, the result, on its own line above the footer; Cmd/Ctrl+Enter in a draft's box presses Send, and on a decision sends the picked option, once one is),
   and its footer holds the item's actions on the left and its lifecycle buttons then Reply on the right (`lifecycle` in `web/next/src/lib/inbox.ts`): Archive and Snooze while it asks something, Dismiss for an update or an answered item, Move to Inbox and Done on the Archived shelf, none on Done,
-  then, on a card that folds, its Show actions toggle before Reply (#i510), with Send leading an open labelled ask's footer, and Submit an open secret ask's, which drops Archive and Reply (below);
+  then, on a card that folds, its Show actions toggle before Reply (#i510), with Send leading an open decision's footer, and Submit an open secret ask's, which drops Archive and Reply (below);
   an answered item its poster has not closed (below), or a read update, stays as its result for ten minutes, then moves to Done, newest first, or,
   for an update (read or not) or an answered decision or draft at once when the owner presses its Dismiss (`dismissItems()` records `dismissedAt` inside its answer, so no column was added, and marks an update read, keeping the time it was read; the dismiss buttons exist so the owner can clear any item from the list),
   so nothing is deleted (`inboxView` and `DONE_AFTER_MS` in `web/next/src/lib/inbox.ts`).
@@ -53,7 +53,7 @@
   A stack's link opens in a new tab with the bar's open-out button, where it works as itself on its own sign-in; the sidebar's brand opens the Inbox tab with this row open (`openPreview()` in `web/next/src/lib/previews.ts`).
   Its address field loads only a `.localhost` stack or a Previews page (`loadable()` in `web/next/src/lib/previews.ts`), and the last address is kept in localStorage.
   An empty row is always shut and gray with the default cursor, and the open list keeps the owner's open or shut while it is empty.
-  The open cards stay mounted while folded, so a fold keeps an edited draft or a picked side, and taking what waits behind the pill, or a link to a card in the folded list, opens the list first.
+  The open cards stay mounted while folded, so a fold keeps an edited draft or a picked option, and taking what waits behind the pill, or a link to a card in the folded list, opens the list first.
   Each item sits flat, led by one muted band the pane's full width (`KindBand`, `bg-muted` with square corners bleeding over the pane's `--pane-x` padding, which `dashboard-aside.tsx` sets on each scroll pane, its words lined up with the card's),
   which gives its kind as an icon and a word,
   its id `#i<ref>` (`ref` is an identity column, so an id is stable and never reused) and who posted it (Alpha's name `text-info`, Bravo's `text-bravo`, the theme's purple), then at its right end one time and a tick: `posted <time>`,
@@ -74,9 +74,12 @@
   `ASK_CODE_COLUMNS` (`@packages/config/inbox`) is the widest drawing line the narrowest card shows whole, so a session fits the card by drawing up to it.
   Every other preview's words, a Slack message's included, stay plain text, since they go out exactly as written, marked as quoted by a `border-l-2` rule rather than a background, and no card's body, a Done one's included, sits on gray, the band alone muted, but the card a reply is about (Chat about it, below).
   The card's header is one `minmax(0,1fr)` column and a card's table cells wrap, so a wide table or drawing stays inside the card.
-  A decision previews exactly what Approve does, then Approve and Deny, except a secret ask (below), and no card offers Edit: a change goes in the comment box, while the API still reads `edit` on an older row; an `ask` whose poster labelled both sides is shadcn's questionnaire card instead:
-  its text as the quoted block, then its sides as numbered choices, the keys 1 and 2 picking one, and the card's footer inside its form, Send first, the form's Submit, which sends the picked side,
-  off until one is picked and saying `Pick Approve or Deny first` on hover and to a screen reader (`sendWhy` in `web/next/src/lib/inbox.ts`, the submit disabled while no option stands and placed on the left), then its lifecycle buttons (`lifecycle()`) and Reply;
+  A decision previews exactly what Approve does, then its options as shadcn's questionnaire choices, except a secret ask (below), and no card offers Edit: a change goes in the comment box, while the API still reads `edit` on an older row.
+  Its options are `choicesOf` in `@packages/config/inbox`, in one of two shapes.
+  A yes or no is two rows, Approve and Deny, each over its own label: an ask's one `options` row (or its older `approve`) and its `deny`, a typed decision's default labels from the one map there, or an unlabelled ask's bare Approve and Deny under its On Approve line.
+  Real alternatives are lettered rows, A to E, each its label over its `description`, then None of these, or the ask's `deny`.
+  The number keys pick a row, 1 for the first, and the card's footer sits inside its form, Send first, the form's Submit, which sends the picked option,
+  off until one is picked and saying `Pick an option first` on hover and to a screen reader (`sendWhy` in `web/next/src/lib/inbox.ts`, the submit disabled while no option stands and placed on the left), then its lifecycle buttons (`lifecycle()`) and Reply;
   a draft is its Slack message or Linear comment, named so from its `link`'s host (`linear.app` is a Linear comment, anything else a Slack draft) with an Open thread link to it in its place line, editable in place, then Send, Draft for a Slack draft alone and Discard (for the apps whose drafts a person sends themselves):
   Draft saves it in Slack's Drafts & Sent for the owner to finish and send, which its poster does with Slack's MCP tool `slack_send_message_draft` and acks with the `channel_link` it returns,
   rewritten to the app form by the command `slack.linkConverter` names (the archives refusal, below) since `ack` refuses its archives form,
@@ -94,7 +97,7 @@
   what the owner types there goes with whatever he answers, as `answer.note` (at most 4000 characters), its poster reading it as the answer line's `comment`,
   and the answered card reading `Your note: ...` under its result.
   A card's words, its preview (an ask's callouts, tables and inline code included), a draft's box and the Note, read at `text-xs` (`BOX` in `inbox.tsx`, whose `md:text-xs` beats the Textarea's own `md:text-sm`).
-  Approve, Send and a labelled ask's Send once Approve is picked take a muted green, Deny and Discard a muted red and Draft amber (`SIDE_TONES` and `DRAFT_TONE` in `inbox.tsx`), on the choices and the footer buttons alike.
+  A go row and Send take a muted green, the no-go row, Send once it is picked, and Discard a muted red, and Draft amber (`SIDE_TONES` and `DRAFT_TONE` in `inbox.tsx`), on the choices and the footer buttons alike.
   Snooze (the zzz icon, `Schedule` in the code) puts an open decision or draft away until a time, sitting just before Reply while its answer holds no choice yet, one put away already included, or holds a chat reply its poster has not closed:
   its fixed times in the owner's zone (the `clock.ownerZone` setting, its label naming it), soonest first, each beside its day and time (`scheduleChoices` in `web/next/src/lib/inbox.ts`, with more than one default to pick from):
   In 30 minutes, In 1 hour, In 3 hours, This evening 18:00 while it is ahead, the next 09:00 (Today or Tomorrow), Monday 09:00 (the coming Monday) and Next <weekday> 09:00 (today's weekday a week out), a moment two of them share kept once; or Pick a time…, shadcn's date and time picker (the Calendar in a popover beside a time field, in the browser's time zone) with a Set button;
@@ -125,7 +128,8 @@
   The answer is recorded in one write that holds only while the item is open at the version read, then typed into the posting session through `deliver()` as one line, `[inbox-answer] {json}` (`answerPayload` and `answerLine` in `inbox.ts`), and the item records how that delivery went.
   The JSON is `answerPayloadSchema` in `@packages/config/inbox` (`payloadOf` parses a line): the item's `ref`, `id`, `title`, `kind` and a decision's preview `type`; the `verb` (`ANSWER_VERBS`: `pick` an option, `send`, `draft`, `discard`, `set-aside`, `submit`); `go`, whether to carry it out; `next`, `carry-out`, `close` or `nothing`;
   and `close`, the exact command that closes the item, naming `--no-link "<why>"` beside `--link` for a go that may leave no page (a decision whose preview names no `link`, a Save as draft).
-  A pick names its `option` (Approve is A and Deny is B, its `label` the one the card showed: an ask's own `approve` or `deny` when it carries both), his comment rides as `comment`, a changed draft's words as `text`, a Slack draft's link command as `linkConverter`, what the dashboard ran on Approve as `accepted` (an accept),
+  A pick names its `option`, the row the card showed, by `index`, `letter` and `label` (`choicesOf`): a yes or no's Approve is A and its Deny B, and a lettered ask's None of these takes the letter after its last option.
+  His comment rides as `comment`, a changed draft's words as `text`, a Slack draft's link command as `linkConverter`, what the dashboard ran on Approve as `accepted` (an accept),
   `listed` (an apps change) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
   A comment alone (a chat reply, `re #iN`) stays his own words, typed as he wrote them.
   A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `textsOf`).
@@ -178,7 +182,7 @@
   EOF
   bun run ask new --thread <id> < item.json   # routes the item to that thread (bun run thread), refused when no thread has the id
   bun run ask open --from builder   # each open item, oldest first, one line each: its #iN, kind, sender and title; --from keeps one sender's
-  bun run ask get <id|#i41> --ack   # the item, with answer {at, choice, editedText?, link?, linkLabel?, noLink?, ackedAt?} once the owner answers, marked read (which closes a deny, a clear, a discard or a provided secret, not a go)
+  bun run ask get <id|#i41> --ack   # the item, with answer {at, choice, option?, editedText?, link?, linkLabel?, noLink?, ackedAt?} once the owner answers (the picked option's letter and label on stderr, `ask: picked B: Hotfix main`), marked read (which closes a deny, a clear, a discard or a provided secret, not a go)
   bun run ask ack <id|#i41> --link https://app.slack.com/client/<team>/<channel>/thread/<channel>-1700000000.000100   # once carried out, a go closes with where (a Slack link in its app.slack.com/client form, which reads Open thread, so no --label), which its card links to by the label, or --no-link "<why>" when it has no page or Slack refused a Draft
   bun run ask edit <id|#i41> < item.json   # the poster replaces its own open item's title and preview in place, checked and its files copied as new does; the card redraws on the next 5s poll
   bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open decision or draft, decided another way; an update asks nothing, so settle refuses it
@@ -190,7 +194,8 @@
   A decision's `preview` is one of eleven, each what Approve does except the `secret` ask (below), written in ELI5 / ASD-STE100 plain words: `accept` (`scope`, `kind`, `key`, `rev`, `why`, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
   a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
-  with optional `approve` and `deny` labels, one line each, which the owner's card shows as two choices under its text, the quoted block, when both are there, and optional `attachments`, below), `slack` (`to`, `text`, optional `attachments`),
+  with its options labelled one line each, `options`, 1 to 5 rows of `{label, description?}`, one row for a yes or no and 2 or more for lettered choices, or the older `approve` alone, never both, and an optional `deny` naming the no-go row (Deny, or None of these past one option),
+  and optional `attachments`, below), `slack` (`to`, `text`, optional `attachments`),
   `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below) or `secret` (`key`, `sink`); a decision with none is refused.
   An `ask`'s `attachments`, a draft's, a `slack` decision's and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
@@ -263,7 +268,7 @@
   A raw Slack mention token anywhere in an item (`<@U...>`, `<!subteam^...>`, `<!here>`, `<!channel>`, `<!everyone>`, `<#C...>`) is refused too, since a raw token shows the reader an ID, not who is tagged: mentions read as names (@teammate), and the poster resolves each ID by name when it posts.
   A draft, or a `slack` decision, speaking as we, us, our, ours or ourselves is refused too: it speaks in the owner's voice, first person singular, code, quoted words and links aside, and the all-caps `US` and a hyphenated name (`us-east-1`) passing, a bare URL or Slack's `<url|label>` form being an address, not a voice.
   `status` reads `open` until the owner answers or its poster settles it (`done`, answer `{at, by, choice: "settled", link?, linkLabel?, note?}`, its card reading Answered by the poster with no buttons, nothing delivered, and one the owner answered refused,
-  a chat reply included once its poster acked it, since a settle replaces the whole answer; a reply not yet acked still settles), then `approved` (Approve, or Edit with `answer.editedText`), `denied`,
+  a chat reply included once its poster acked it, since a settle replaces the whole answer; a reply not yet acked still settles), then `approved` (Approve, with `answer.option`, the go row's index from 0, which a lettered decision's Approve requires and its Edit has none of, or Edit with `answer.editedText`), `denied`,
   `sent` or `drafted` (Draft; each with `editedText` when the owner changed the draft), `discarded`, `cleared` (a decision's or draft's Archive, neither yes nor no), or `provided` (a secret ask's Submit, below); an update is `done` from the start, read once `readAt` is set, and its answer is `{dismissedAt}` once the owner dismisses it.
   Delivery is `pending`, then `delivered` (`via: "session"` with `to`, the session that took it), `queued` (Claude Code holds it, above) or `failed` with the adapter's code; when it fails, or to collect the answer without waiting, the poster polls `bun run ask get <id> --ack` until `status` is not `open`, and `--ack` records `{at, status: "delivered", via: "cli"}` (`readAnswer`),
   the first delivery recorded standing.
@@ -347,13 +352,14 @@
      Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
      Fit the card: draw up to that width, since the card grows a narrower drawing's font to fill it, and a wider one still posts and shrinks to 7px, then scrolls, so the limit is a writing guide.
   2. Short bullets, one fact each, an emoji as each one's marker.
-  3. What Approve does, in the `approve` label, with `deny` beside it: the card shows the two as its choices under the text, in place of its On Approve line.
+  3. The options: for a true yes or no, one `options` row saying what Approve does, with `deny` beside it; for real alternatives, 2 to 5 rows, A to E, each a `label` and an optional `description`.
+     The card shows them as its choices under the text, in place of its On Approve line.
 
   A factory session writes each item's words and pictures by the `to-inbox` skill (`extensions/core/skills/to-inbox/SKILL.md`), loaded before `bun run ask new`.
   A job of several steps leads with to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`).
 
   `bun run ask example code|decision|slack|ui` prints each worked example as an item to fill in, the three asks below and the slack decision above.
-  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
+  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options, or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
   The three, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown

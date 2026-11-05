@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import type { InboxItem } from "../../../../../../api/hono/src/lib/dashboard/inbox"
+import { type Choices, choicesOf } from "../../../../../../packages/config/src/inbox"
 import { DashboardContext } from "../../../../../../web/next/src/components/dashboard/dashboard"
 import {
   AskChoices,
@@ -128,9 +129,10 @@ describe("a delivered answer's poster", () => {
 })
 
 describe("a card that just moved under him", () => {
-  test("pauses Approve, Deny and Archive, still focusable and saying why", () => {
+  test("pauses Send and Archive, still focusable and saying why, and dims its options", () => {
     const html = render(true)
-    for (const label of ["Approve", "Deny", "Archive"]) {
+    expect(html).toContain('aria-busy="true"')
+    for (const label of ["Send", "Archive"]) {
       const tag = named(html, label)
       expect(tag).toContain('aria-disabled="true"')
       expect(tag).not.toContain("title=")
@@ -144,9 +146,8 @@ describe("a card that just moved under him", () => {
 
   test("offers them as usual when it has not moved", () => {
     const html = render(false)
-    for (const label of ["Approve", "Deny", "Archive"]) {
-      expect(named(html, label)).not.toContain("aria-disabled")
-    }
+    expect(html).not.toContain('aria-busy="true"')
+    expect(named(html, "Archive")).not.toContain("aria-disabled")
   })
 })
 
@@ -398,7 +399,7 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
   test("an open decision shows whole, with no Show actions", () => {
     const html = render(false)
     expect(named(html, "Show actions")).toBe("")
-    expect(named(html, "Approve")).not.toBe("")
+    expect(html).toContain(">Approve</span>")
   })
 
   test("a read update folds to its title, Show actions opening it to its words and Dismiss", () => {
@@ -414,7 +415,7 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
   })
 
   test("a snoozed ask folds until its time, its Snooze back once opened", () => {
-    expect(named(render(false, snoozed, false, { shelf: "snoozed" }), "Approve")).toBe("")
+    expect(render(false, snoozed, false, { shelf: "snoozed" })).not.toContain(">Approve</span>")
     expect(named(opened(snoozed, "snoozed"), "Snooze")).not.toBe("")
   })
 
@@ -460,11 +461,40 @@ describe("a decision's labelled Approve and Deny options", () => {
     )
   })
 
-  test("an ask with no labels renders as it does today", () => {
+  test("an ask with no labels keeps its On Approve line, above a bare Approve and Deny", () => {
     const html = render(false, unlabelled)
     expect(html).toContain("On Approve,")
     expect(html).toContain("does this:")
-    expect(html).not.toContain('data-slot="questionnaire-choice"')
+    expect(html).toContain('data-slot="questionnaire-choice"')
+    expect(html).toContain(">Approve</span>")
+    expect(html).toContain(">Deny</span>")
+  })
+
+  test("a lettered ask shows A to E with their descriptions and number badges, then None of these (#873)", () => {
+    const html = render(false, {
+      ...unlabelled,
+      preview: {
+        options: [
+          { description: "Staging first, a day of soak", label: "Port to staging, then main" },
+          { label: "Hotfix main" },
+        ],
+        text: "Which way does the fix go?",
+        type: "ask",
+      },
+    } as InboxItem)
+    for (const word of ["A. Port to staging, then main", "B. Hotfix main", "C. None of these"])
+      expect(html).toContain(`>${word}</span>`)
+    expect(html).toContain("Staging first, a day of soak")
+    expect(html).not.toContain(">Approve</span>")
+    expect(html).not.toContain("On Approve,")
+    expect(html.match(/data-slot="questionnaire-choice"/g)).toHaveLength(3)
+  })
+
+  test("every decision but a secret shows its rows, a typed one by its default labels (#873)", () => {
+    const html = render(false)
+    expect(html).toContain("Ship 3f9a2c1 to main")
+    expect(html).toContain("Hold the ship")
+    expect(html.match(/data-slot="questionnaire-choice"/g)).toHaveLength(2)
   })
 
   test("its Archive button says why on hover while the card is paused, as its siblings do", () => {
@@ -477,8 +507,8 @@ describe("a decision's labelled Approve and Deny options", () => {
 })
 
 // Questionnaire counts a disabled choice as no answer, so disabling the picked side on a busy card (its answer on its way, or just moved under him) read as unanswered after Send's own check, and both choices drew red with aria-invalid until the card settled.
-describe("a labelled ask's choices while the card is busy", () => {
-  const labels = { approve: "Ship it", deny: "Hold it" }
+describe("a decision's choices while the card is busy", () => {
+  const labeled: Choices = choicesOf({ approve: "Ship it", deny: "Hold it", type: "ask" })!
   const choices = (state: { busy: boolean; paused: boolean }) =>
     renderToStaticMarkup(
       createElement(
@@ -489,8 +519,8 @@ describe("a labelled ask's choices while the card is busy", () => {
           { name: "question" },
           createElement(AskChoices, {
             ...state,
-            labels,
-            pick: "approve",
+            choices: labeled,
+            pick: 0,
             setPick: () => undefined,
           }),
         ),
@@ -502,13 +532,13 @@ describe("a labelled ask's choices while the card is busy", () => {
   // AskChoices holds no hooks, so it is called as a function and each choice's change fired as a click or a key would fire it
   type Choice = { props: { children: { props: { onChange: () => void } } } }
   const picked = (busy: boolean) => {
-    const picks: string[] = []
+    const picks: number[] = []
     const element = AskChoices({
       busy,
-      labels,
+      choices: labeled,
       paused: false,
-      pick: "approve",
-      setPick: (side) => picks.push(side),
+      pick: 0,
+      setPick: (row) => picks.push(row),
     })
     for (const choice of element.props.children as Choice[]) choice.props.children.props.onChange()
     return picks
@@ -529,7 +559,7 @@ describe("a labelled ask's choices while the card is busy", () => {
 
   test("a click or a key on a busy card leaves the pick as it was, and takes either side on an idle one", () => {
     expect(picked(true)).toEqual([])
-    expect(picked(false)).toEqual(["approve", "deny"])
+    expect(picked(false)).toEqual([0, 1])
   })
 
   test("an idle card's group reads neither busy nor dimmed", () => {
@@ -589,8 +619,8 @@ describe("Schedule's row", () => {
     const seen = render(false, { ...decision, readAt: "2026-10-12T10:05:00.000Z" } as InboxItem)
     expect(named(seen, "Mark as read")).toBe("")
     expect(seen).toContain('aria-label="Read"')
-    for (const label of ["Approve", "Deny", "Archive", "Snooze"])
-      expect(named(seen, label)).not.toBe("")
+    for (const label of ["Send", "Archive", "Snooze"]) expect(named(seen, label)).not.toBe("")
+    for (const side of ["Approve", "Deny"]) expect(seen).toContain(`>${side}</span>`)
   })
 
   test("the comment box reads Add an optional comment, named Comment, the same gap-2 below the choices as between them", () => {
@@ -1125,8 +1155,8 @@ describe("every kind of card on the Questionnaire", () => {
     const send = named(html, "Send")
     expect(send).toContain('aria-disabled="true"')
     expect(send).not.toMatch(/\sdisabled=""/)
-    expect(send).toContain('aria-description="Pick Approve or Deny first"')
-    expect(tipsOf(html.split(send)[1] ?? "")[0]).toBe("Pick Approve or Deny first")
+    expect(send).toContain('aria-description="Pick an option first"')
+    expect(tipsOf(html.split(send)[1] ?? "")[0]).toBe("Pick an option first")
     expect(html).not.toContain('data-slot="questionnaire-error"')
     for (const [choice] of html.matchAll(/<input [^>]*type="radio"[^>]*>/g)) {
       expect(choice).not.toMatch(/\srequired=""/)

@@ -70,6 +70,12 @@ const PREVIEWS = {
 
 const decision = (preview: object) => ({ from: "ops", preview, title: "Ship canary to main?" })
 
+const OPTIONS = [
+  { description: "Staging first, a day of soak", label: "Port to staging, then main" },
+  { label: "Hotfix main" },
+  { label: "Wait for the next ship" },
+]
+
 describe("what bun run ask takes", () => {
   test("a decision for each kind of approval, a decision being the kind when none is named", () => {
     for (const [type, preview] of Object.entries(PREVIEWS)) {
@@ -101,6 +107,30 @@ describe("what bun run ask takes", () => {
     expect(
       inboxInputSchema.safeParse(decision({ ...PREVIEWS.ask, deny: "x".repeat(201) })).success,
     ).toBe(false)
+  })
+
+  test("an ask offers 1 to 5 labelled options, and labels its go row in options or approve alone (#873)", () => {
+    const ask = (over: object) => inboxInputSchema.safeParse(decision({ ...PREVIEWS.ask, ...over }))
+    expect(ask({ options: OPTIONS }).success).toBe(true)
+    expect(ask({ deny: "Leave it", options: [{ label: "Port it" }] }).success).toBe(true)
+    const five = Array.from({ length: 5 }, (_, at) => ({ label: `Way ${at + 1}` }))
+    expect(ask({ options: five }).success).toBe(true)
+    // none, six or an unlabelled row is refused, naming the shape
+    for (const options of [
+      [],
+      [...five, { label: "Way 6" }],
+      [{ label: " " }],
+      [{ description: "no label" }],
+    ]) {
+      const parsed = ask({ options })
+      expect(parsed.success).toBe(false)
+    }
+    expect(JSON.stringify(ask({ options: [] }).error?.issues)).toContain(
+      "An ask offers 1 to 5 options",
+    )
+    expect(ask({ approve: "Port it", options: OPTIONS }).error?.issues[0]?.message).toBe(
+      "An ask labels its go row in options or in approve, not both",
+    )
   })
 
   test("a draft is a recipient and the words, and an update an outcome with an optional link", () => {
@@ -570,6 +600,43 @@ describe("an answer", () => {
     expect(checkAnswer(open, { action: "send" })).toHaveProperty("message")
   })
 
+  test("a lettered decision's go picks one of its options, and a yes or no takes none or its one (#873)", () => {
+    const lettered = item({
+      kind: "decision",
+      preview: { ...PREVIEWS.ask, options: OPTIONS } as never,
+    })
+    expect(checkAnswer(lettered, { action: "approve", option: 2 })).toEqual({
+      answer: { choice: "approve", option: 2 },
+      status: "approved",
+    })
+    expect(checkAnswer(lettered, { action: "deny" })).toEqual({
+      answer: { choice: "deny" },
+      status: "denied",
+    })
+    for (const input of [
+      { action: "approve" },
+      { action: "approve", option: 3 },
+      { action: "edit", text: "B, but tomorrow" },
+    ] as const) {
+      expect(checkAnswer(lettered, input)).toEqual({ message: "Pick one of its 3 options, 0 to 2" })
+    }
+    const open = item({ kind: "decision" })
+    expect(checkAnswer(open, { action: "approve", option: 0 })).toEqual({
+      answer: { choice: "approve", option: 0 },
+      status: "approved",
+    })
+    expect(checkAnswer(open, { action: "approve", option: 1 })).toEqual({
+      message: "A yes or no has one option, 0",
+    })
+    expect(checkAnswer(open, { action: "deny", option: 0 })).toEqual({
+      message: "Only a decision's go picks an option",
+    })
+    expect(checkAnswer(item({ kind: "draft" }), { action: "send", option: 0 })).toEqual({
+      message: "Only a decision's go picks an option",
+    })
+    expect(answerInputSchema.safeParse({ action: "approve", option: 5 }).success).toBe(false)
+  })
+
   test("sends a draft as written or as changed, or discards it", () => {
     const draft = item({ kind: "draft" })
     expect(checkAnswer(draft, { action: "send", text: "hi" })).toEqual({
@@ -748,6 +815,13 @@ describe("an answer", () => {
       ref: 46,
       title: "Port it?",
     })
+    const lettered = item({
+      id: "stu",
+      kind: "decision",
+      preview: { ...PREVIEWS.ask, options: OPTIONS } as never,
+      ref: 47,
+      title: "Which way?",
+    })
     const cases: [InboxItem, Parameters<typeof answerPayload>[1], Record<string, unknown>][] = [
       [
         decided,
@@ -756,7 +830,7 @@ describe("an answer", () => {
           close: ack(41),
           go: true,
           next: "carry-out",
-          option: { index: 0, label: "Approve", letter: "A" },
+          option: { index: 0, label: "Send it to @Merritt", letter: "A" },
           type: "slack",
           verb: "pick",
         },
@@ -781,6 +855,17 @@ describe("an answer", () => {
         { at: AT, choice: "deny" },
         { option: { index: 1, label: "Keep it on main", letter: "B" }, verb: "pick" },
       ],
+      // a lettered ask's pick names the go row its option points at, and its deny the None of these after the last
+      [
+        lettered,
+        { at: AT, choice: "approve", option: 1 },
+        { go: true, option: { index: 1, label: "Hotfix main", letter: "B" }, verb: "pick" },
+      ],
+      [
+        lettered,
+        { at: AT, choice: "deny" },
+        { go: false, option: { index: 3, label: "None of these", letter: "D" }, verb: "pick" },
+      ],
       [
         decided,
         { at: AT, choice: "edit", editedText: "Wait for #299" },
@@ -794,7 +879,7 @@ describe("an answer", () => {
           comment: "ask again next week",
           go: false,
           next: "close",
-          option: { index: 1, label: "Deny", letter: "B" },
+          option: { index: 1, label: "Do not send it", letter: "B" },
           verb: "pick",
         },
       ],
