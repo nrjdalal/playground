@@ -345,7 +345,7 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
 - Then it cleans each worktree the session used, one at a time (`cleanWorktree`), and the lead's line names what went and what stayed, with why.
   A worktree with uncommitted work or unpushed commits stays.
   A Playground worktree in `.claude/worktrees/` has its dev stack stopped (`bun run dev:stop` there), goes to the 7-day trash through `playground rm --worktree`, which keeps one a live session or a process holds, and then loses its `playground-<worktree>-db` and `-redis` containers (`docker rm -fv`, each name matched whole, never the live dashboard's database) and its local branch.
-  Another repo's worktree goes through `git -C <repo> worktree remove <path>` with no `--force`, then `git worktree prune` and `git branch -D`; the main checkout is never one.
+  Another repo's worktree goes through `git -C <repo> worktree remove <path>` with no force flag, then `git worktree prune` and `git branch -D`; the main checkout is never one.
 - Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one); otherwise its lead gets a `Not ended` line saying why, and the session waits.
   A cmux session's close is refused the same way, so its lead closes it by hand below.
 - A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir>`; its `Ended` line goes to its worker too.

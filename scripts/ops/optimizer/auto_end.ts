@@ -241,7 +241,7 @@ export const containersFor = (
   return [`playground-${name}-db`, `playground-${name}-redis`].filter((c) => !live(c))
 }
 
-// One worktree a closed session used, cleaned once its work is saved: a Playground worktree's dev stack stopped, the worktree moved to the trash by playground rm (which refuses one a live session or a process holds), then its containers removed by exact name; another repo's worktree removed by git with no --force, then pruned; then its branch deleted. The line saying what went, or why it stayed.
+// One worktree a closed session used, cleaned once its work is saved: a Playground worktree's dev stack stopped, the worktree moved to the trash by playground rm (which refuses one a live session or a process holds), then its containers removed by exact name; another repo's worktree removed by git with no force flag, then pruned; then its branch deleted. The line saying what went, or why it stayed.
 export async function cleanWorktree(
   path: string,
   reason: string,

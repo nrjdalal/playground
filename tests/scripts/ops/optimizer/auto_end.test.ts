@@ -672,7 +672,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(existsSync(outside.wt)).toBe(true)
   })
 
-  test("another repo's clean worktree goes through git worktree remove with no --force, then prune and its branch; a dirty one is kept", async () => {
+  test("another repo's clean worktree goes through git worktree remove with no force flag, then prune and its branch; a dirty one is kept", async () => {
     const ours = machine()
     const theirs = machine("zs-1", (m) => join(m, "..", "zerostarter-wt"))
     const { calls, deps } = fakes(ours.main, ["playground-zs-1-db"])
