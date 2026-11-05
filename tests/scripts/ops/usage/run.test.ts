@@ -12,13 +12,14 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const script = join(import.meta.dir, "..", "..", "..", "..", "scripts", "ops", "usage", "run.py")
+const repo = join(import.meta.dir, "..", "..", "..", "..")
 const scratch = mkdtempSync(join(tmpdir(), "ops-usage-run-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
 // run.py's functions, loaded without its loop, with beat and the Keychain probe stubbed, under a scratch HOME as tests/test_ops_merge_train.py does
 const harness = `
 import json, os, sys, time, types
-sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
 src = open(sys.argv[1]).read()
 ns = {"__name__": "run_under_test"}
 exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
@@ -135,7 +136,7 @@ test("PLAYGROUND_USAGE_API moves the stored login's reads to its own answers, as
   )
   const read = `
 import json, sys, types
-sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: "made-up")
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: "made-up")
 src = open(sys.argv[1]).read()
 ns = {"__name__": "run_under_test"}
 exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
@@ -174,6 +175,8 @@ def urlopen(req, timeout=None):
         return io.BytesIO(json.dumps({"seven_day": {"utilization": 70, "resets_at": "2026-11-07T00:00:00+00:00"}}).encode())
     raise OSError("no made-up answer for " + url)
 urllib.request.urlopen = urlopen
+def checkout():
+    return ${JSON.stringify(repo)}
 def setting(key):
     return ${JSON.stringify(settings)}[key]
 def beat(job, pid, started, cycle, result, extra=None):
@@ -313,7 +316,7 @@ test("week alerts name each factory account past a mark, a spare's included, and
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
   const read = `
 import json, sys, types
-sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: "made-up")
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: "made-up")
 src = open(sys.argv[1]).read()
 ns = {"__name__": "run_under_test"}
 exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
@@ -336,7 +339,7 @@ test("two factory accounts past a week mark give two alerts with their own kind 
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
   const read = `
 import json, sys, types
-sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: "made-up")
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: "made-up")
 src = open(sys.argv[1]).read()
 ns = {"__name__": "run_under_test"}
 exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
@@ -380,7 +383,7 @@ test("a cycle writes the status line's two $ figures from Claude Code's transcri
 // statusline_cost() alone, its CLI swapped for one that fails or outlasts the timeout, beside cache files from an earlier run
 const costHarness = `
 import json, os, sys, types
-sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: {"models.probe": "m", "usage.keychainService": "s"}[key])
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "m", "usage.keychainService": "s"}[key])
 src = open(sys.argv[1]).read()
 ns = {"__name__": "run_under_test"}
 exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)

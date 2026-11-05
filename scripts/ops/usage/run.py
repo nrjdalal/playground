@@ -38,7 +38,7 @@ API = os.environ.get("PLAYGROUND_USAGE_API") or "https://api.anthropic.com/api/o
 PROBE_URL = os.environ.get("PLAYGROUND_PROBE_URL") or "https://api.anthropic.com/v1/messages"  # the new-user gate points it at a closed loopback port, so its made-up token never leaves the Mac
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 sys.path.insert(0, OPS)
-from beat import beat, setting  # noqa: E402
+from beat import beat, checkout, setting  # noqa: E402
 
 PROBE_MODEL, SERVICE = setting("models.probe"), setting("usage.keychainService")
 
@@ -223,7 +223,7 @@ def added_reading(stored, flip, added):
 
 def statusline_cost(cli=None, timeout=120):
     """Runs the status line's $ reader once; None when it wrote its figures, else the problem. The CLI writes each file whole by a rename, so a failure leaves the last ones."""
-    cli = cli or os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "..", "packages", "scripts", "src", "statusline-cost", "cli.ts")
+    cli = cli or os.path.join(checkout(), "packages", "scripts", "src", "statusline-cost", "cli.ts")
     bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
     try:
         r = subprocess.run([bun, "--no-env-file", cli, "--state", os.path.join(OPS, "statusline-cost.json")], capture_output=True, text=True, timeout=timeout, cwd="/")
