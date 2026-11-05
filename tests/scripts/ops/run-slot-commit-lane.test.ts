@@ -168,6 +168,20 @@ describe("a commit whose pre-commit runs next build", () => {
     expect(await m.start("worker-x", {}, undefined, argv).waits()).toBe(true)
   })
 
+  // builder, 5 Nov: the commit lane fails closed, so a flag run-slot does not read counts as a build, even beside Markdown alone
+  for (const flags of [
+    ["commit", "--no-such-flag", "-m", "x"],
+    ["commit", "-Zm", "x"],
+    ["-c", "core.hooksPath=/x", "commit", "-m", "x"],
+  ])
+    test(`git ${flags.join(" ")} counts as a build`, async () => {
+      const m = repo({ idle: 30 }, ["docs/notes.md"])
+      m.hold("run-slot", 3, "big")
+      expect(
+        await m.start("worker-x", {}, undefined, ["git", "-C", m.root, ...flags]).waits(),
+      ).toBe(true)
+    })
+
   test("git commit -- <path> counts the web/next path it commits", async () => {
     const m = repo({ idle: 30 }, ["docs/notes.md"], ["web/next/src/app/page.tsx"])
     m.hold("run-slot", 3, "big")
@@ -377,6 +391,8 @@ describe("a sh -c chain of git steps", () => {
     // zsh runs the command after |& or &|
     "cd ROOT && git commit -m x |& bun run build",
     "cd ROOT && git commit -m x &| bun run build",
+    // builder, 5 Nov: a git add flag outside the list, such as -f, which stages ignored files
+    "cd ROOT && git add -f docs/notes.md && git commit -m x",
     // review round 7: a cd beside |, &, || or in a subshell does not carry to the next step
     "cd ROOT | git commit -m x",
     "cd ROOT & git commit -m x",

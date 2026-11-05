@@ -434,6 +434,8 @@ git_verb() {
 # a word sh would leave as written: no $, backquote, ~, glob, brace, # (a comment to sh, which shlex here keeps as a word) or ( (a <( ) process
 # substitution runs its command), so the word run-slot reads is the word the command gets
 plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['* | *'{'* | *'#'* | *'('*) return 1 ;; esac; done; }
+# a chain's git add words, failing closed (builder, 5 Nov): paths, and only the flags whose staging chain_add reads, never -f, which stages ignored files
+add_flags() { local w; for w in "$@"; do case "$w" in -A | --all | -u | --update | -- | --pathspec-from-file=*) ;; -*) return 1 ;; esac; done; }
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
 # Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form
@@ -462,7 +464,7 @@ chain_safe() {
     else
       folder=${cdir:-$PWD} verb=${words[1]:-} rest=("${words[@]:2}")
     fi
-    case "$verb" in add|commit|push) ;; *) return 1 ;; esac
+    case "$verb" in add) add_flags ${rest[@]+"${rest[@]}"} || return 1 ;; commit|push) ;; *) return 1 ;; esac
     CHAIN_SAFE+=$(printf '%s\x1f' git -C "$folder" "$verb" ${rest[@]+"${rest[@]}"})$'\n'
   done < <(chain_steps "$@")
   CHAIN_BAD=""
@@ -575,7 +577,7 @@ chain_add() {
 }
 # a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
-  local a c f files dir="" commit="" all="" state=lead paths=() line words first=""
+  local a c f files dir="" commit="" all="" odd="" state=lead paths=() line words first=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with the
   # files the chain's git add steps before it stage (the first word is found outside a $( ), since bash 3.2 misparses a case inside one)
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
@@ -605,9 +607,8 @@ heavy_build() {
   for a in "$@"; do
     case "$state" in
       lead) case "$a" in env|*=*) continue ;; esac; [ "$(basename -- "$a")" = git ] || break; state=git ;;
-      git) case "$a" in -C) state=dir ;; -c) state=gitvalue ;; -*) ;; commit) commit=1; state=commit ;; *) break ;; esac ;;
+      git) case "$a" in -C) state=dir ;; -*) odd=1 ;; commit) commit=1; state=commit ;; *) break ;; esac ;;
       dir) case "$a" in /*) dir=$a ;; *) dir=${dir:+$dir/}$a ;; esac; state=git ;;
-      gitvalue) state=git ;;
       value) state=commit ;;
       paths) paths+=("$a") ;;
       commit) case "$a" in
@@ -616,16 +617,21 @@ heavy_build() {
           --all | --pathspec-from-file=*) all=1 ;;
           --pathspec-from-file) all=1; state=value ;;
           --author|--cleanup|--date|--file|--fixup|--message|--reedit-message|--reuse-message|--squash|--template|--trailer) state=value ;;
-          --*) ;;
+          --allow-empty | --allow-empty-message | --amend | --edit | --gpg-sign | --gpg-sign=* | --include | --no-edit | --no-gpg-sign | --no-signoff \
+            | --only | --pathspec-file-nul | --quiet | --reset-author | --signoff | --untracked-files | --untracked-files=* | --verbose | --author=* \
+            | --cleanup=* | --date=* | --file=* | --fixup=* | --message=* | --reedit-message=* | --reuse-message=* | --squash=* | --template=* | --trailer=*) ;;
+          --*) odd=1 ;;
           -?*) f=${a#-}
             while [ -n "$f" ]; do c=${f:0:1}; f=${f:1}
-              case "$c" in a) all=1 ;; n) return 1 ;; [CFcmt]) [ -z "$f" ] && state=value; break ;; [uS]) break ;; esac
+              case "$c" in a) all=1 ;; n) return 1 ;; [CFcmt]) [ -z "$f" ] && state=value; break ;; [uS]) break ;; [eioqsv]) ;; *) odd=1 ;; esac
             done ;;
           *) paths+=("$a") ;;
         esac ;;
     esac
   done
   [ -n "$commit" ] || return 1
+  # fail closed (builder, 5 Nov): a flag outside the lists above, git's own or the commit's, counts as a build
+  [ -z "$odd" ] || return 0
   # only a repo whose own lefthook.yml pre-commit runs a build builds on commit (the dispatcher, 4 Nov: another repo's lint-staged commit sat 65 min in the big-run queue for a 1 s job)
   awk '/^[^ #]/ { pre = ($0 ~ /^pre-commit:/) } pre && /^ +(- )?run:.* run build([ "'"'"']|$)/ { found = 1 } END { exit !found }' \
     "$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)/lefthook.yml" 2>/dev/null || return 1
