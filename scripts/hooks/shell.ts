@@ -260,17 +260,17 @@ export function stdinShell(cmd: Command): "root" | "shell" | undefined {
   return kinds.includes("root") ? "root" : kinds.find(Boolean)
 }
 
-// The command with the words env runs from each split string (`env -S 'sudo -s'`) spread in its place, an env among them read again, in one pass over a stack of the words still to read, so a long run of them costs a linear time; env's own grammar read as far as a root shell needs: a `\_` or a whitespace escape splits, a quote or another backslash is dropped, and a `${…}` is a word the hook cannot read
+// The command with each env's split string (`env -S 'sudo -s'`) spread into the words env runs, every env read, quoted or behind another wrapper, in one linear pass over a stack of the words still to read; the grammar is the stdin-shell lines of scripts/hooks/README.md
 function spreadSplit(cmd: Command): Command {
-  const e = cmd.words.findIndex((w) => !w.quoted && program(w.value) === "env")
-  if (e === -1) return cmd
+  if (!cmd.words.some((w) => program(w.value) === "env")) return cmd
   const options = WRAPPERS.get("env") as Options
-  const out = cmd.words.slice(0, e + 1)
-  const rest = cmd.words.slice(e + 1).reverse()
+  const out: Word[] = []
+  const rest = [...cmd.words].reverse()
+  let env = false
   let spread = false
   for (let w = rest.pop(); w; w = rest.pop()) {
     const v = w.value
-    const split = SPLIT.exec(v)
+    const split = env ? SPLIT.exec(v) : null
     if (split) {
       const text = (split[1] || rest.pop()?.value || "")
         .replace(/\$\{[^}]*\}/g, UNKNOWN)
@@ -282,14 +282,15 @@ function spreadSplit(cmd: Command): Command {
       continue
     }
     out.push(w)
-    if (ASSIGN.test(v) || (!w.quoted && program(v) === "env")) continue
-    if (!v.startsWith("-") || v === "-" || v === "--") break
-    if (v === "-C" || v === "--chdir" || optionValue(v, options) === "next") {
+    if (program(v) === "env") env = true
+    else if (!env || ASSIGN.test(v)) continue
+    else if (!v.startsWith("-") || v === "-" || v === "--") env = false
+    else if (v === "-C" || v === "--chdir" || optionValue(v, options) === "next") {
       const value = rest.pop()
       if (value) out.push(value)
     }
   }
-  return spread ? { ...cmd, words: [...out, ...rest.reverse()] } : cmd
+  return spread ? { ...cmd, words: out } : cmd
 }
 
 function stdinShellOf(

@@ -375,16 +375,16 @@ function stdinShell(cmd) {
   return kinds.includes("root") ? "root" : kinds.find(Boolean);
 }
 function spreadSplit(cmd) {
-  const e = cmd.words.findIndex((w) => !w.quoted && program(w.value) === "env");
-  if (e === -1)
+  if (!cmd.words.some((w) => program(w.value) === "env"))
     return cmd;
   const options = WRAPPERS.get("env");
-  const out = cmd.words.slice(0, e + 1);
-  const rest = cmd.words.slice(e + 1).reverse();
+  const out = [];
+  const rest = [...cmd.words].reverse();
+  let env = false;
   let spread = false;
   for (let w = rest.pop();w; w = rest.pop()) {
     const v = w.value;
-    const split = SPLIT.exec(v);
+    const split = env ? SPLIT.exec(v) : null;
     if (split) {
       const text = (split[1] || rest.pop()?.value || "").replace(/\$\{[^}]*\}/g, UNKNOWN).replace(/\\[_fnrtv]/g, " ").replace(/['"\\]/g, "");
       const words = text.split(/\s+/).filter(Boolean);
@@ -394,17 +394,19 @@ function spreadSplit(cmd) {
       continue;
     }
     out.push(w);
-    if (ASSIGN.test(v) || !w.quoted && program(v) === "env")
+    if (program(v) === "env")
+      env = true;
+    else if (!env || ASSIGN.test(v))
       continue;
-    if (!v.startsWith("-") || v === "-" || v === "--")
-      break;
-    if (v === "-C" || v === "--chdir" || optionValue(v, options) === "next") {
+    else if (!v.startsWith("-") || v === "-" || v === "--")
+      env = false;
+    else if (v === "-C" || v === "--chdir" || optionValue(v, options) === "next") {
       const value = rest.pop();
       if (value)
         out.push(value);
     }
   }
-  return spread ? { ...cmd, words: [...out, ...rest.reverse()] } : cmd;
+  return spread ? { ...cmd, words: out } : cmd;
 }
 function stdinShellOf(cmd, { args, first, name, xargs }) {
   if (first && !marked(first.value)) {
