@@ -574,7 +574,7 @@ describe("worktreeRefusal", () => {
     })
     expect(existsSync(wt)).toBe(true)
     const moved = quarantine(wt, { ...opts, worktree: holders }, roots, { dev: () => 1, now: NOW })
-    expect(moved).toMatchObject({ files: expect.any(Number), size: expect.any(Number) })
+    expect("refused" in moved ? moved.refused : "moved").toBe("moved")
     const { files, size } = moved as Quarantined
     expect(files).toBeGreaterThan(1)
     expect(size).toBeGreaterThan(0)
