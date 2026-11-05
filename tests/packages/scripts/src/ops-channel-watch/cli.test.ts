@@ -15,14 +15,14 @@ const vault = join(data, "extensions", "acme", "skills", "vault")
 mkdirSync(vault, { recursive: true })
 writeFileSync(join(vault, "SKILL.md"), "# vault\n")
 writeFileSync(join(data, "extensions", "login"), "someone\n")
-writeFileSync(
-  join(data, "extensions", "policy.json"),
-  JSON.stringify({
-    orgs: {},
-    schemaVersion: 1,
-    values: { "ext.links": { acme: ["*"] }, "ext.order": ["acme"] },
-  }),
-)
+// The settings the beat reads: vault's scope linked, and the shared channel set unless a test empties it.
+const LINKED = { "ext.links": { acme: ["*"] }, "ext.order": ["acme"] }
+const policy = (values: Record<string, unknown>) =>
+  writeFileSync(
+    join(data, "extensions", "policy.json"),
+    JSON.stringify({ orgs: {}, schemaVersion: 1, values }),
+  )
+policy({ ...LINKED, "channel.slackId": "C0FIXTURE1" })
 process.env.PLAYGROUND_DATA_DIR = data
 
 const fake = (minute: number, result: { code: number; out: string }) => {
@@ -65,26 +65,30 @@ describe("the channel watch beat", () => {
     }
   })
 
-  test("with no scope holding vault, it tells ops and throws, running nothing", async () => {
-    rmSync(join(data, "extensions", "policy.json"))
-    writeFileSync(
-      join(data, "extensions", "policy.json"),
-      JSON.stringify({ orgs: {}, schemaVersion: 1, values: {} }),
-    )
+  test("with no vault this Mac reads, it tells ops the vault is not installed and throws, running nothing", async () => {
+    policy({ "channel.slackId": "C0FIXTURE1" })
     const none = fake(21, { code: 0, out: "" })
-    await expect(beat.run(none.ctx)).rejects.toThrow("no scope holds the skill vault")
+    await expect(beat.run(none.ctx)).rejects.toThrow("exit 2: the vault is not installed")
     expect(none.ran).toEqual([])
     expect(none.sent).toEqual([
-      { text: "channel watch quick failed (exit 2): no scope holds the skill vault", to: "ops" },
+      {
+        text: "channel watch quick failed (exit 2): the vault is not installed: install an extension that holds the vault skill and link it to * (playground ext link <name> '*')",
+        to: "ops",
+      },
     ])
-    writeFileSync(
-      join(data, "extensions", "policy.json"),
-      JSON.stringify({
-        orgs: {},
-        schemaVersion: 1,
-        values: { "ext.links": { acme: ["*"] }, "ext.order": ["acme"] },
-      }),
-    )
+    policy({ ...LINKED, "channel.slackId": "C0FIXTURE1" })
+  })
+
+  // A Mac with no shared channel set has nothing to watch, so the beat asks no vault, as the DM watch reads slack.mode first (#846).
+  test("with channel.slackId empty, it returns before the vault lookup, running and sending nothing", async () => {
+    for (const values of [LINKED, { "channel.slackId": "" }]) {
+      policy(values)
+      const idle = fake(9, { code: 1, out: "error: should not run" })
+      await beat.run(idle.ctx)
+      expect(idle.ran).toEqual([])
+      expect(idle.sent).toEqual([])
+    }
+    policy({ ...LINKED, "channel.slackId": "C0FIXTURE1" })
   })
 
   test("tells ops once per kind of failure, again after a success, and throws each time", async () => {

@@ -47,10 +47,12 @@ Your sessions run in herdr, which `playground` starts, and `playground view` ope
 - **`Port <number> is already in use`** in the log: another program holds the port every local Playground address goes through.
   Run `lsof -ti tcp:<number>`, with the number from that line, to see which process holds it.
   If it is an older Playground proxy, stop it with `bunx portless proxy stop`; that stops every Playground stack on this Mac until it starts again.
-- **`portless's proxy is not running, and starting it on port 443 needs sudo`** when you run `bun run dev`: this Mac has no Playground proxy yet.
+- **`portless's proxy is not running on port 443, which needs your Mac's password, so it runs on 1355`** when you run `bun run dev`: this Mac has no Playground proxy on 443 yet, so the Dashboard's address carries `:1355` for now.
+  In Settings' **Things to fix**, **Set up the web address** sets it up on 443 and asks for your Mac's password in its own window; the Dashboard keeps running on 1355 and moves to 443 the next time it starts.
+  When the line goes on to say your browser warns that the certificate is not trusted, portless has no certificate authority of its own on this Mac yet, so the 1355 address uses one of its own: accept the warning once on the Dashboard's address and once on its API's (`api.` in front), then click **Set up the web address**; the next start on 443 shows no warning.
+- **`portless's proxy is not running, and starting it on port 443 needs sudo`** when you run `bun run dev`: the proxy would not start on 1355 either, and the line ends with portless's reason.
   Run the installer again in a terminal (`bash ~/playground/install.sh`), which sets it up with your Mac's password, or in the main folder run `sudo node_modules/.bin/portless service install`, which asks for your password, then `node_modules/.bin/portless trust`, and run `bun run dev` again.
   Or run `PORTLESS=0 bun run dev`, which serves the app on fixed ports instead.
-  Once the Dashboard runs, Settings' **Things to fix** trusts the proxy's certificate with **Trust the certificate**.
 - **`a stack already runs in this checkout`** when you run `bun run dev` yourself: the Dashboard already runs from this folder.
   Use the one that runs, or stop it with `bun run dev:stop` first.
 
