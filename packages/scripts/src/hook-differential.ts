@@ -12,7 +12,9 @@ import {
 import { homedir, tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 
-// Measures a head's hooks against a canary sha, each form or call reaching each hook's check() as data alone and never run: `sweep --forms <module>` passes the forms a module exports from the home, the data folder and a worktree, `replay` the last day's Bash calls from this machine's transcripts; started bare it queues itself through run-slot, as commit-slot.ts queues a commit's build.
+import { dataDirOf } from "@packages/env/data-dir"
+
+// Measures a head's hooks against a canary sha, each form or call reaching each hook's check() as data alone and never run: `sweep --forms <module>` passes the forms a module exports from the home, the data folder and a worktree, `replay` the last day's Bash calls from this machine's transcripts; a clean head's result is stored under its key and printed again for a day without a run; started bare it queues itself through run-slot, as commit-slot.ts queues a commit's build.
 
 export type Check = (
   raw: string,
@@ -23,7 +25,9 @@ type Call = { command: string; cwd: string }
 type Tally = { inClass: number; outClass: number }
 
 const USAGE =
-  "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>]> --canary <sha> --hook <name> [--hook <name> ...]"
+  "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>]> --canary <sha> --hook <name> [--hook <name> ...] [--fresh]"
+
+const DAY = 24 * 3600 * 1000
 
 // The run-slot call a bare start becomes, or the argv itself inside a ticket (whose child carries the RUN_SLOT_NICE run-slot exports) or with no executable run-slot.sh
 export const routed = ({
@@ -182,7 +186,16 @@ const option = (args: string[], name: string) => {
   return at === -1 ? undefined : args[at + 1]
 }
 
-async function main(args: string[]): Promise<number> {
+type Options = {
+  formsAt?: string
+  fresh: boolean
+  hooks: string[]
+  hours: number
+  mode: "replay" | "sweep"
+  ref: string
+}
+
+export function parse(args: string[]): Options | undefined {
   const [mode] = args
   const ref = option(args, "--canary")
   const hooks = args.flatMap((a, i) => (args[i - 1] === "--hook" ? [a] : []))
@@ -194,10 +207,127 @@ async function main(args: string[]): Promise<number> {
     hooks.length === 0 ||
     (mode === "sweep" && !formsAt) ||
     !(hours > 0)
-  ) {
+  )
+    return undefined
+  return { formsAt, fresh: args.includes("--fresh"), hooks, hours, mode, ref }
+}
+
+// The newest mtime of the transcripts under `projects`, so a replay's key moves with each new call
+const newest = (projects: string) =>
+  existsSync(projects)
+    ? Math.max(
+        0,
+        ...readdirSync(projects, { recursive: true })
+          .map(String)
+          .filter((f) => f.endsWith(".jsonl"))
+          .map((f) => statSync(join(projects, f)).mtimeMs),
+      )
+    : 0
+
+type Key = { canary: string; head: string; input: string; key: string }
+
+// The head's tree when the worktree has no modified or untracked file
+const cleanTree = (root: string) =>
+  git(root, ["status", "--porcelain", "--untracked-files=all"]) === ""
+    ? git(root, ["rev-parse", "HEAD^{tree}"])
+    : undefined
+
+const formsBlob = (root: string, options: Options) =>
+  git(root, ["hash-object", resolve(options.formsAt!)])
+
+// A run's key: the head's tree at a clean worktree, the canary sha, the mode with its inputs (the forms module's blob, or the hours and the newest transcript) and the sorted hooks; a worktree with any modified or untracked file has none
+export function keyOf({
+  canary,
+  options,
+  projects,
+  root,
+}: {
+  canary: string
+  options: Options
+  projects: string
+  root: string
+}): Key | undefined {
+  const head = cleanTree(root)
+  if (!head) return undefined
+  const input =
+    options.mode === "sweep" ? formsBlob(root, options) : `${options.hours}:${newest(projects)}`
+  const key = new Bun.CryptoHasher("sha256")
+    .update(JSON.stringify([head, canary, options.mode, input, options.hooks.toSorted()]))
+    .digest("hex")
+    .slice(0, 16)
+  return { canary, head, input, key }
+}
+
+// Whether the worktree is still clean at the key's tree, and a sweep's forms module still the key's blob, so a run whose inputs moved under it stores nothing
+export const unmoved = (root: string, found: Key, options: Options) =>
+  cleanTree(root) === found.head &&
+  (options.mode !== "sweep" || formsBlob(root, options) === found.input)
+
+type Result = { at: string; canary: string; changed: string[]; counts: string[]; head: string }
+
+export const resultPath = (data: string, key: string) =>
+  join(data, "hook-differential", "results", `${key}.json`)
+
+// The result stored under the key, while it is under a day old
+export async function stored(
+  data: string,
+  key: string,
+  now = Date.now(),
+): Promise<Result | undefined> {
+  const file = Bun.file(resultPath(data, key))
+  if (!(await file.exists())) return undefined
+  const result: Result = await file.json()
+  return now - Date.parse(result.at) < DAY ? result : undefined
+}
+
+export async function store(
+  data: string,
+  { canary, head, key }: Key,
+  result: Pick<Result, "changed" | "counts">,
+) {
+  await Bun.write(
+    resultPath(data, key),
+    JSON.stringify({ at: new Date().toISOString(), canary, head, ...result }),
+  )
+}
+
+const projectsOf = (env: Record<string, string | undefined>, home: string) =>
+  join(env.CLAUDE_CONFIG_DIR || join(home, ".claude"), "projects")
+
+const commitOf = (root: string, ref: string) =>
+  git(root, ["rev-parse", "--verify", `${ref}^{commit}`])
+
+// The stored result a run with these options would reproduce, printed under its `reused:` line; false when it runs fresh
+export async function reuse(args: string[], cwd: string, env: Record<string, string | undefined>) {
+  const options = parse(args)
+  if (!options || options.fresh) return false
+  const home = env.HOME || homedir()
+  let found: Key | undefined
+  let result: Result | undefined
+  try {
+    const root = git(cwd, ["rev-parse", "--show-toplevel"])
+    const canary = commitOf(root, options.ref)
+    found = keyOf({ canary, options, projects: projectsOf(env, home), root })
+    result = found && (await stored(dataDirOf(env, home), found.key))
+  } catch {
+    return false
+  }
+  if (!found || !result) return false
+  console.log(
+    `reused: ${found.key} from ${result.at}, head ${result.head}, canary ${result.canary}`,
+  )
+  for (const line of result.counts) console.log(line)
+  for (const line of result.changed) console.error(line)
+  return true
+}
+
+async function main(args: string[]): Promise<number> {
+  const options = parse(args)
+  if (!options) {
     console.error(USAGE)
     return 2
   }
+  const { formsAt, hooks, hours, mode, ref } = options
   const root = git(process.cwd(), ["rev-parse", "--show-toplevel"])
   const missing = hooks.filter((h) => !existsSync(join(root, "scripts/hooks", `${h}.ts`)))
   if (missing.length > 0) {
@@ -205,6 +335,9 @@ async function main(args: string[]): Promise<number> {
     return 2
   }
   const home = process.env.HOME || homedir()
+  const sha = commitOf(root, ref)
+  const projects = projectsOf(process.env, home)
+  const found = keyOf({ canary: sha, options, projects, root })
   const forms: Form[] = formsAt ? (await import(resolve(formsAt))).forms : []
   if (mode === "sweep" && !Array.isArray(forms)) {
     console.error(`hook-differential: the --forms module exports no forms array\n${USAGE}`)
@@ -215,15 +348,15 @@ async function main(args: string[]): Promise<number> {
     root,
     run: (argv, cwd, stdin) =>
       Bun.spawnSync(argv, { cwd, stderr: "inherit", stdin, stdout: "pipe" }),
-    sha: git(root, ["rev-parse", "--verify", `${ref}^{commit}`]),
+    sha,
   })
   const absent = hooks.filter((h) => !existsSync(join(before, "scripts/hooks", `${h}.ts`)))
   if (absent.length > 0) {
     console.error(`hook-differential: canary has no hook named ${absent.join(", ")} to compare`)
     return 2
   }
-  const projects = join(process.env.CLAUDE_CONFIG_DIR || join(home, ".claude"), "projects")
   const list = mode === "replay" ? await calls(projects, Date.now() - hours * 3600 * 1000) : []
+  const result = { changed: [] as string[], counts: [] as string[] }
   for (const hook of hooks) {
     const canary: Check = (await import(join(before, "scripts/hooks", `${hook}.ts`))).check
     const head: Check = (await import(join(root, "scripts/hooks", `${hook}.ts`))).check
@@ -231,13 +364,20 @@ async function main(args: string[]): Promise<number> {
       mode === "sweep"
         ? await sweep(canary, head, forms, home)
         : await replay(canary, head, list, home)
-    console.log(JSON.stringify({ hook, ...counts }))
-    for (const line of changed.slice(0, 20)) console.error(`${hook}: ${line}`)
+    result.counts.push(JSON.stringify({ hook, ...counts }))
+    console.log(result.counts.at(-1))
+    for (const line of changed.slice(0, 20)) {
+      result.changed.push(`${hook}: ${line}`)
+      console.error(result.changed.at(-1))
+    }
   }
+  if (found && unmoved(root, found, options))
+    await store(dataDirOf(process.env, home), found, result)
   return 0
 }
 
 if (import.meta.main) {
+  if (await reuse(process.argv.slice(2), process.cwd(), process.env)) process.exit(0)
   const home = process.env.HOME || homedir()
   const argv = routed({
     argv: ["bun", import.meta.path, ...process.argv.slice(2)],
