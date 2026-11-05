@@ -160,6 +160,7 @@ import {
   waiting,
 } from "@/lib/inbox"
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
+import { insertPaste } from "@/lib/paste"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
 import { useTypedReply } from "@/lib/reply"
 import { iconTone, type ShownState, statusIcon } from "@/lib/status-icons"
@@ -1433,7 +1434,16 @@ function NoteBox(
     observer.observe(choice)
     return () => observer.disconnect()
   }, [])
-  return <Textarea ref={box} aria-label="Comment" className={cn("min-h-14 py-2", BOX)} {...props} />
+  return (
+    <Textarea
+      ref={box}
+      aria-label="Comment"
+      className={cn("min-h-14 py-2", BOX)}
+      // a paste lands as the text its event carried, as the composer's does, since the browser's own insert reads the clipboard again, which a dictation app may have put back by then
+      onPaste={(event) => void insertPaste(event)}
+      {...props}
+    />
+  )
 }
 
 // Taking what waits behind the pill glides the rows already in view down from the top while the taken ones fade in above them, this long; nothing moves under reduced motion.

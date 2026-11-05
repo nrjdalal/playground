@@ -713,6 +713,16 @@ describe("Schedule's row", () => {
     expect(source).toMatch(/placeholder="Paste the value"\s+readOnly=\{pending\}/)
   })
 
+  // the browser's own paste reads the clipboard again at the insert, which a dictation app may have put back by then, so the box inserts the text its paste event carried, as the composer does
+  test("the comment box lands a paste as the text its event carried, through insertPaste", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const box = source.slice(
+      source.indexOf("function NoteBox("),
+      source.indexOf("// Taking what waits behind the pill"),
+    )
+    expect(box).toContain("onPaste={(event) => void insertPaste(event)}")
+  })
+
   test("an unread ask keeps its light and draws no unread dot, which stays an update's", () => {
     expect(render(false)).not.toContain("bg-primary size-2 rounded-full")
     expect(
@@ -857,7 +867,7 @@ describe("the comment box and Reply on every card", () => {
       html.match(/<input[^>]*placeholder="Paste the value"[^>]*>/)?.[0] ?? ""
     const paused = render(true, secret, false, { defaultOpen: true })
     expect(field(paused)).not.toBe("")
-    expect(field(paused)).not.toMatch(/\sdisabled=""/)
+    expect(field(paused)).not.toMatch(/\sdisabled=""|\sreadonly=""/i)
     expect(field(paused)).toContain('type="password"')
   })
 
