@@ -7,12 +7,18 @@ That sandbox (`packages/scripts/src/sandbox.ts`) also sets `TZ=UTC`, so a test's
 It keeps uv's Pythons and cache the real home's (`UV_PYTHON_INSTALL_DIR` and `UV_CACHE_DIR`, read before it swaps HOME), so a child's `uv run --python 3.13` finds its Python in place of downloading one.
 It also puts a fake `claude` and a fake `gh` first on PATH, each exiting 99 with a line naming the sandbox, so no test starts a session or reaches GitHub; a test that needs `gh`'s output puts its own fake ahead of the sandbox's on PATH.
 `test-sandbox.ts` hands its tests no `GIT_` variable, since a git hook exports `GIT_DIR` and `GIT_INDEX_FILE` and pre-commit runs tests, so a test's scratch `git init` or commit stays in its own folder; a test that needs a `GIT_` variable sets it on its own git call.
+It hands its tests `NEXT_PUBLIC_PLAYGROUND_HOSTED` and `PLAYGROUND_HOSTED` empty, since `bun test` fills from the env files only a key its env leaves unset, so a worktree `.env` or a caller set for a hosted stack leaves every test on the local build's gates; a test of the hosted build sets the flag itself (`tests/api/hono/src/hosted.test.ts`).
 Run from a folder with none of the env files `bun test` loads (`.env`, `.env.test` and `.env.test.local`, never `.env.local`), such as a skill-only worktree, `test-sandbox.ts` sets `SKIP_ENV_VALIDATION=true` for its tests unless the caller set it, so one whose import validates the env still runs there.
+It does the same when those files leave a key the apps' schemas require unset or empty (`requiredKeys()` in `packages/env/src/gaps.ts`), as a fresh copy of `.env.example` leaves `POSTGRES_URL`, while a key set to a value its schema refuses stays validated.
 
 ## The run
 
 `bun run test` builds `packages/*` first, because a test reaches a shared package through its `exports`, which point at `dist`, so on a fresh checkout an unbuilt package resolves to nothing.
 Only the shared packages are built, not the apps: a test imports app code by source path and never through `dist`.
+`bun run test:file <paths>` first builds only the packages its files import whose `dist` is missing or lacks a name they import, those reached through relative and `@/` imports included, and writes the data table's metrics when missing (`prebuildTests` in `packages/scripts/src/verify/prebuild.ts`, under `NODE_ENV=production SKIP_ENV_VALIDATION=true`), so a fresh clone runs it directly.
+It also builds a package whose dist file a test names by path (`packages/env/dist/gaps.mjs`), when that package's `dist` folder is missing.
+`bun run check-types:tests` does the same for the packages its files import, type-only imports included, and builds `@api/hono`'s declarations, which the web's types import.
+In the factory's main checkout each stops instead, naming your own worktree.
 It runs the files in parallel (`packages/scripts/src/test-sandbox.ts`: `bun test --parallel`, the cores less one and at most 4, the slowest first by `tests/timings.json`, on GitHub the merged one below, which `bun run test:timings` rewrites after a run), then its `SERIAL` files one at a time.
 `bun run test:file <paths>` stops before any test runs when an argument ending in `.test.ts` or `.test.tsx` names no file, naming each one, since bun reads a path it cannot find as a filter that matches nothing and the run would pass on the rest; an argument without that suffix stays a filter.
 A test runs beside the others when it shares nothing with them: it binds port 0, starts its containers unnamed or named per process, and takes its scratch folders from `mkdtemp`; one that cannot joins `SERIAL`.
@@ -61,6 +67,7 @@ For a native step no tick counts (a regex, a string built whole), it bounds the 
 A timer or backstop case asserts the refusal under a test timeout tied to the constant it guards (the hung Docker case in `tests/scripts/hooks/no-mac-web-build.test.ts`).
 GitHub's ubuntu-26.04 runner runs uutils 0.10.0 as `mkdir`, which reports success when another process made the folder between its check and its own mkdir, so a shell lock taken with `mkdir` can have two holders there: 8 racing `mkdir`s gave more than one winner in 38 of 200 rounds, and GNU's, which the image keeps as `gnumkdir`, in none (measured).
 A test that races such a lock puts `gnumkdir` first on its child's PATH as `mkdir` (`GNU_MKDIR` in `tests/scripts/ops/run-slot-fake.ts`), so it checks the lock as the Mac's atomic `mkdir` runs it.
+A test that lists items keeps to the items it made, filtering the list by their ids (the "an update starts unread" test in `tests/api/hono/src/lib/dashboard/inbox.test.ts`), since a file's tests share one database and another test's items can land in its list: with the clock 30 days ahead, one test's list took four older updates another test had left.
 `Bun.which(name)` reads the PATH the process started with, so code under test that looks a tool up that way runs the real tool wherever one is installed and misses a stub the test prepends to `process.env.PATH`: look it up with `Bun.which(name, { PATH: process.env.PATH ?? "" })` (`packages/scripts/src/ops-ext-sync/sync.ts`), or take the lookup as a dependency the test passes in.
 
 ## End-to-end tests

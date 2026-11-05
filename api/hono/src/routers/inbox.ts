@@ -8,6 +8,7 @@ import { z } from "zod"
 import { readAttachment } from "@/lib/dashboard/attachments"
 import { deliver } from "@/lib/dashboard/deliver"
 import { readsLive } from "@/lib/dashboard/fixture"
+import { standingFocus } from "@/lib/dashboard/focus"
 import {
   answerInputSchema,
   answerItem,
@@ -16,6 +17,8 @@ import {
   listItems,
   markRead,
   provideSecret,
+  replyInputSchema,
+  replyItem,
   retryDelivery,
   scheduleItem,
   secretInputSchema,
@@ -28,10 +31,12 @@ import {
   ApiError,
   authErrorResponses,
   conflictErrorResponses,
+  errorResponse,
   forbiddenErrorResponses,
   notFoundErrorResponses,
   validationErrorResponses,
 } from "@/lib/error"
+import { dataDir } from "@/lib/sessions/paths"
 import { ownerApps, runCli } from "@/lib/store/extensions"
 import {
   authMiddleware,
@@ -75,10 +80,13 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Playground's Inbox in priority order: open decisions and drafts, then unread updates, then the rest of the last week, each newest first, with the count of what needs the owner",
+        "Playground's Inbox in priority order: open decisions and drafts, then unread updates, then the rest of the last week, each newest first, with the count of what needs the owner; while `playground focus` stands, `quiet` names each item that came in since it began, an alert update aside, and the count leaves those out until it ends",
       responses: { 200: { description: "OK" }, ...authErrorResponses, ...forbiddenErrorResponses },
     }),
-    async (c) => c.json({ data: await listItems(db) }),
+    async (c) => {
+      const now = new Date()
+      return c.json({ data: await listItems(db, now, await standingFocus(dataDir(), now)) })
+    },
   )
   .get(
     "/attachments/:id",
@@ -175,6 +183,39 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     },
   )
   .post(
+    "/:id/reply",
+    describeRoute({
+      tags: ["Inbox"],
+      description:
+        "Reply on a card: his comment alone, typed into the posting session as re #iN: <words> through the delivery adapter, or into the dispatcher once the poster has ended; an open decision or draft with no answer yet records it as his reply and waits on its poster's edit, which returns it to him, or its close, while any other card keeps its answer as it was. A comment that reached no session is refused with why, recording nothing",
+      responses: {
+        200: { description: "OK" },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+        502: errorResponse(
+          "CMUX_FAILED",
+          "The comment reached no session: neither its poster nor, once the poster has ended, the dispatcher took it, with why; nothing is recorded",
+        ),
+      },
+    }),
+    sValidator("json", replyInputSchema, invalid),
+    async (c) => {
+      const user = c.get("user")
+      const result = await replyItem(db, c.req.param("id"), c.req.valid("json"), {
+        actor: { email: user.email, id: user.id },
+        deliver,
+        dispatcher: DISPATCHER,
+      })
+      if (!result.ok) {
+        if (result.code === "UNDELIVERED") throw new ApiError(502, "CMUX_FAILED", result.message)
+        throw new ApiError(STATUS[result.code], result.code, result.message)
+      }
+      return c.json({ data: result.item })
+    },
+  )
+  .post(
     "/:id/retry",
     describeRoute({
       tags: ["Inbox"],
@@ -205,7 +246,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Later: push an open decision or draft, or an update, out of the inbox and its count until a time, when it asks again, taking an archived one off the Archived shelf; answering it or replying to it in chat wakes it at once",
+        "Later: push an open decision or draft, or an update, out of the inbox and its count until a time, when it asks again, taking an archived one off the Archive shelf; answering it or replying to it in chat wakes it at once",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,

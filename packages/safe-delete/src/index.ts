@@ -28,9 +28,9 @@ export type Proc = { command: string; cwd: string; pid: number; sockets: string[
 // A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
 export type Clone = { destination: string; pid: number; source: string; who: string }
 
-// What tells a worktree is held: each running clone, the roster's live statuses, every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that.
+// What tells a worktree is held: the running clones, a reader quarantine calls again right before its move, the roster's live statuses, every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that.
 export type Holders = {
-  clones: Clone[]
+  clones: () => Clone[]
   discard: boolean
   live: string[]
   merged: (sha: string, at: string) => boolean | null
@@ -237,7 +237,7 @@ const refused = (text: string, kind: Refusal["kind"] = "refused"): Refusal => ({
   refused: text,
 })
 
-// Renames a path into <trash>/<UTC-ts>-<session>/<n>/ with a manifest line, after the protected list, worktreeRefusal for a worktree (which only the worktree option's holders move), the tripwire and the volume check.
+// Renames a path into <trash>/<UTC-ts>-<session>/<n>/ with a manifest line, after the protected list, worktreeRefusal for a worktree (which only the worktree option's holders move), the tripwire, the volume check and, for a worktree, the running clones read again, since the walk that counts its files takes seconds and a clone can start inside it.
 export function quarantine(
   path: string,
   opts: { carveOut?: string; reason: string; session: string; worktree?: Holders },
@@ -277,6 +277,8 @@ export function quarantine(
   mkdirSync(trash, { recursive: true })
   const dev = io.dev ?? ((p: string) => lstatSync(p).dev)
   if (dev(abs) !== dev(trash)) return refused(otherVolume(abs, trash))
+  const cloned = opts.worktree && cloneHolder(real(abs), opts.worktree.clones())
+  if (cloned) return refused(cloned)
   const batch = `${stamp(now)}-${opts.session}`
   mkdirSync(join(trash, batch), { recursive: true })
   let n = 1
@@ -340,6 +342,14 @@ export function restore(
   return { path: entry.path }
 }
 
+// The running clone that reads from or copies into a worktree, as its refusal, or null; a clone's cp only reads its source and works in whatever folder run-slot was called from, so no working folder need name either end (PG-699).
+const cloneHolder = (at: string, clones: Clone[]): string | null => {
+  const clone = clones.find((c) => inside(real(c.source), at) || inside(real(c.destination), at))
+  return clone
+    ? `${at} is held by ${clone.who}'s node_modules clone (pid ${clone.pid}) from ${clone.source} into ${clone.destination}`
+    : null
+}
+
 // Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session, running clone or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
@@ -360,11 +370,15 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   const branch = git("symbolic-ref", "--quiet", "--short", "HEAD").out
   const folder = basename(at).toLowerCase()
   const where = `${folder} ${branch.toLowerCase()}`
+  // Each name's slug, after its PG-<n>- prefix: ops holds PG-12-ops-job, not PG-5-stops.
+  const slugs = [folder, branch.toLowerCase()].map((n) => n.replace(/^pg-\d+-/, ""))
   for (const agent of agents) {
     if (!agent || !holders.live.includes(String(agent.status)) || typeof agent.name !== "string")
       continue
-    const id = agent.name.split("-")[0]!
-    const tokens = [agent.name, ...(/\d/.test(id) ? [id] : [])].map((t) => t.toLowerCase())
+    const name = agent.name.toLowerCase()
+    const byName = slugs.some((s) => s === name || s.startsWith(`${name}-`))
+    const id = name.split("-")[0]!
+    const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
     const pr =
@@ -372,15 +386,11 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
         ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1]
         : undefined
     const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
-    if (byBranch || byPr || tokens.some((t) => where.includes(t)))
+    if (byBranch || byPr || byName || byId)
       return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}`
   }
-  // a clone's cp only reads its source and works in whatever folder run-slot was called from, so no working folder need name either end (PG-699)
-  const clone = holders.clones.find(
-    (c) => inside(real(c.source), at) || inside(real(c.destination), at),
-  )
-  if (clone)
-    return `${at} is held by ${clone.who}'s node_modules clone (pid ${clone.pid}) from ${clone.source} into ${clone.destination}`
+  const cloned = cloneHolder(at, holders.clones())
+  if (cloned) return cloned
   if (holders.procs === null) return `the processes' folders cannot be listed, so ${at} stays`
   const held = holders.procs.filter((p) => inside(real(p.cwd), at))
   const holder = held.find((p) => isAgentBrowser(p.command)) ?? held[0]
