@@ -415,24 +415,35 @@ if [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" 
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# a `sh -c`, `bash -c` or `zsh -c` chain's steps, one a line, each step's words joined by the unit separator, as python's shlex splits the script at
-# each run of &, |, ;, <, > and parentheses, zsh's |& and &| among them (a newline counts as ;); a cd beside any other separator than && or ; keeps
-# it as a word, since that cd does not carry to the next step, and env words before the shell (a BASH_ENV or PATH changes what it runs) are a step
-# of their own; nothing for any other command, or a script shlex cannot split
+# a `sh -c`, `bash -c` or `zsh -c` chain's steps, or those of a `bash <script file>`, whose arguments only a $ word reads (5 Nov: a script that only commits waited
+# in the general queue), one a line, each step's words joined by the unit separator, as python's shlex splits the script at each run of &, |, ;, <, >
+# and parentheses, zsh's |& and &| among them (a `\` line break is joined first, as sh does, a newline then counts as ;, and a line whose first word
+# starts with # is a comment, dropped); a cd beside any other separator than && or ; keeps it as a word, since that cd does not carry to the next
+# step, and env words before the shell (a BASH_ENV or PATH changes what it runs) are a step of their own; nothing for any other command, a file after
+# an option word (`--rcfile a.sh b.sh` runs b.sh), or a script shlex cannot split or a file over 64 KB
 chain_steps() {
-  local a first="" script="" next="" lead=""
+  local a first="" script="" next="" file="" opt="" lead=""
   for a in "$@"; do
     [ -n "$next" ] && { script=$a; break; }
+    [ -n "$file" ] && break
     case "$a" in env|*=*) [ -z "$first" ] && { lead+=$a$'\x1f'; continue; } ;; esac
     if [ -z "$first" ]; then first=$(basename -- "$a"); case "$first" in sh|bash|zsh) continue ;; *) return ;; esac; fi
-    case "$a" in -c | -[!-]*c) next=1 ;; -*) ;; *) return ;; esac
+    case "$a" in -c | -[!-]*c) next=1 ;; -*) opt=1 ;; *) [ -z "$opt" ] || return; file=$a ;; esac
   done
-  [ -n "$script" ] || return
-  python3 -I - "$script" "${lead%$'\x1f'}" <<'PY'
+  if [ -n "$file" ]; then plain "$file" && [ -f "$file" ] && [ -r "$file" ] || return; fi
+  [ -n "$script$file" ] || return
+  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" <<'PY'
 import shlex, sys
 
 try:
-    lex = shlex.shlex(sys.argv[1].replace("\n", ";"), posix=True, punctuation_chars=True)
+    text = sys.argv[2]
+    if sys.argv[1] == "-f":
+        with open(text, encoding="utf-8") as f:
+            text = f.read(65537)
+        if len(text) > 65536:
+            sys.exit(1)
+    text = "\n".join(line for line in text.replace("\\\n", "").split("\n") if not line.lstrip().startswith("#"))
+    lex = shlex.shlex(text.replace("\n", "\n;"), posix=True, punctuation_chars=True)
     lex.whitespace_split = True
     lex.commenters = ""
     steps, seps = [[]], [""]
@@ -442,11 +453,11 @@ try:
             seps.append(tok)
         else:
             steps[-1].append(tok)
-except ValueError:
+except (OSError, ValueError):
     sys.exit(1)
 seps.append("")
-if sys.argv[2]:
-    print(sys.argv[2])
+if sys.argv[3]:
+    print(sys.argv[3])
 for i, step in enumerate(steps):
     if step[:1] == ["cd"]:
         step += [s for s in (seps[i], seps[i + 1]) if s not in ("", "&&", ";")]
@@ -470,12 +481,14 @@ git_verb() {
 plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['* | *'{'* | *'#'*) return 1 ;; esac; done; }
 # a chain's git add words, failing closed (builder, 5 Nov): paths, and only the flags whose staging chain_add reads, never -f, which stages ignored files
 add_flags() { local w; for w in "$@"; do case "$w" in -A | --all | -u | --update | -- | --pathspec-from-file=*) ;; -*) return 1 ;; esac; done; }
+# a script's `set` words that only switch shell options, as a chain script's `set -euo pipefail` does
+set_flags() { local w; for w in "$@"; do case "$w" in pipefail) ;; [-+] | [-+]*[!a-z]*) return 1 ;; [-+]*) ;; *) return 1 ;; esac; done; }
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
 # Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form
 # a reading of cd, ~ or env let through): a git add, commit or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add,
-# commit or push after it or as `git -C <that kind of folder>`, and `bun run precommit:light`, each word plain. CHAIN_SAFE then holds each git step
-# as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env
+# commit or push after it or as `git -C <that kind of folder>`, `bun run precommit:light`, and a script's `set` of shell options, each word plain.
+# CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env
 # prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
 CHAIN_SAFE="" CHAIN_BAD=""
 chain_safe() {
@@ -488,6 +501,7 @@ chain_safe() {
     case "${words[0]}" in
       cd) [ ${#words[@]} -eq 2 ] && abs_in_repo "${words[1]}" || return 1; cdir=${words[1]}; continue ;;
       bun) [ "${words[1]:-}" = run ] && [ "${words[2]:-}" = precommit:light ] && plain "${words[@]}" || return 1; continue ;;
+      set) set_flags "${words[@]:1}" || return 1; continue ;;
       git) ;;
       *) return 1 ;;
     esac
@@ -579,10 +593,14 @@ quick_kind() {
 types_cached() {
   local a vars=()
   for a in "$@"; do case "$a" in env) continue ;; *=*) vars+=("$a") ;; *) break ;; esac; done
-  (cd "$(box_dir "$@")" 2>/dev/null && python3 -I - ${vars[@]+"${vars[@]}"} 2>/dev/null <<'PY'
+  turbo_cached check-types "$(box_dir "$@")" ${vars[@]+"${vars[@]}"}
+}
+# whether turbo's dry run of task $1, in folder $2 with the VAR=x words after them, finds every task it runs cached
+turbo_cached() {
+  (cd "$2" 2>/dev/null && python3 -I - "$1" "${@:3}" 2>/dev/null <<'PY'
 import json, os, signal, subprocess, sys
-env = dict(os.environ, **dict(v.split("=", 1) for v in sys.argv[1:]))
-p = subprocess.Popen(["bun", "run", "turbo", "run", "check-types", "--dry=json"], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+env = dict(os.environ, **dict(v.split("=", 1) for v in sys.argv[2:]))
+p = subprocess.Popen(["bun", "run", "turbo", "run", sys.argv[1], "--dry=json"], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
 try:
     out, _ = p.communicate(timeout=10)
 except subprocess.TimeoutExpired:
@@ -611,7 +629,7 @@ chain_add() {
 }
 # a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
-  local a c f files dir="" commit="" all="" nv="" odd="" state=lead paths=() line words first="" adir=""
+  local a c f files top dir="" commit="" all="" nv="" odd="" state=lead paths=() vars=() line words first="" adir=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with the
   # files the chain's git add steps before it stage, and counts as a build when an add runs in another folder than a commit, whose paths it would
   # misread (the first word is found outside a $( ), since bash 3.2 misparses a case inside one)
@@ -641,7 +659,7 @@ heavy_build() {
   case "$WHO" in commit-*) for a in "$@"; do [ "$a" = build ] && commit=1; done ;; esac
   for a in "$@"; do
     case "$state" in
-      lead) case "$a" in env | NODE_ENV=* | RUN_SLOT_HERE=*) continue ;; *=*) odd=1; continue ;; esac; [ "$(basename -- "$a")" = git ] || break; state=git ;;
+      lead) case "$a" in env) continue ;; NODE_ENV=* | RUN_SLOT_HERE=*) vars+=("$a"); continue ;; *=*) odd=1; continue ;; esac; [ "$(basename -- "$a")" = git ] || break; state=git ;;
       git) case "$a" in -C) state=dir ;; -c) odd=1; state=gitvalue ;; -*) odd=1 ;; commit) commit=1; state=commit ;; *) [ -n "$odd" ] || break ;; esac ;;
       gitvalue) state=git ;;
       dir) case "$a" in /*) dir=$a ;; *) dir=${dir:+$dir/}$a ;; esac; state=git ;;
@@ -670,14 +688,18 @@ heavy_build() {
   [ -z "$odd" ] || return 0
   [ -z "$nv" ] || return 1
   # only a repo whose own lefthook.yml pre-commit runs a build builds on commit (the dispatcher, 4 Nov: another repo's lint-staged commit sat 65 min in the big-run queue for a 1 s job)
+  top=$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)
   awk '/^[^ #]/ { pre = ($0 ~ /^pre-commit:/) } pre && /^ +(- )?run:.* run build([ "'"'"']|$)/ { found = 1 } END { exit !found }' \
-    "$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)/lefthook.yml" 2>/dev/null || return 1
+    "$top/lefthook.yml" 2>/dev/null || return 1
   files=$({ git ${dir:+-C "$dir"} diff --cached --name-only; [ -z "$all" ] || git ${dir:+-C "$dir"} diff --name-only
     [ ${#paths[@]} -eq 0 ] || git ${dir:+-C "$dir"} diff --name-only HEAD -- "${paths[@]}"
     [ -z "$CHAIN_ADD_ALL" ] || { git ${dir:+-C "$dir"} diff --name-only; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name :/; }
     [ ${#CHAIN_ADD[@]} -eq 0 ] || { git ${dir:+-C "$dir"} diff --name-only -- "${CHAIN_ADD[@]}"; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name -- "${CHAIN_ADD[@]}"; }; } 2>/dev/null)
   grep -Evq '^$|\.md$|^tests/.*\.py$' <<<"$files" || return 1
-  grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$' <<<"$files"
+  grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$' <<<"$files" || return 1
+  # a build turbo replays whole from its cache runs in seconds, so only one with a task to run counts big (5 Nov: under run-slot, commit-slot.ts
+  # runs the build bare inside the commit's own slot, so a big one stays in the queue); the cache folder is lefthook.yml's pre-commit default
+  ! turbo_cached build "$top" "TURBO_CACHE_DIR=${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" ${vars[@]+"${vars[@]}"}
 }
 # a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
 light_run() {
