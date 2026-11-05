@@ -85,13 +85,13 @@
   Clear (`RiArchive2Line`, named Archive, the Archived shelf's icon; the action `clear`) sets an open decision or draft aside for later: status `cleared`, neither a deny nor a discard and never a go, read as `Archived <time>`; a draft keeps its red Discard beside it.
   Move to Inbox (`RiInboxUnarchiveLine`; the action `unarchive`) takes an archived item back to `open` with no answer, so it is answered again, and types nothing into its poster, since nothing was decided; the card takes the list's top as it arrives rather than waiting behind the pill, since the click was the owner's own (`back` in `Inbox`);
   the API refuses it on any item not `cleared`, or one already dismissed to Done, as the Archived shelf leaves it out.
-  Its poster reads "Cleared for now": whatever is already in motion stays in motion, only the new step the item asks for waits, and the owner picks the talk up again; its read (`bun run ask get --ack`) closes it, as a deny's does.
+  Its poster gets the `set-aside` verb: whatever is already in motion stays in motion, only the new step the item asks for waits, and the owner picks the talk up again; its read (`bun run ask get --ack`) closes it, as a deny's does.
   The band's tick sits after its time:
   while an update, or an open decision or draft, is unread (`readAt` null) the tick is a single ✓ button, Mark as read, which only marks it seen through `POST /api/v1/inbox/read`, taking any kind, so an ask stays open and answerable, its card as it was ("once mark as read, keep the message as is"); once read it is a muted ✓✓ named Read, its Hint the full time it was read.
   The unread dot stands in for an update's light alone; an ask keeps its light ("what is this dot before the icon?").
   Dismiss is an icon button too, named in its `aria-label` and `Hint` ("should be just icon in this case also").
   An open decision or draft ends in a comment box above its buttons, reading Add an optional comment and named Comment ("rename to just Add a comment"), the same gap above it as between the card's other parts, at least as tall as its first choice (`NoteBox`);
-  what the owner types there goes with whatever he answers, as `answer.note` (at most 4000 characters), its poster reading it on a line of its own after the answer, `The owner's note: ...`,
+  what the owner types there goes with whatever he answers, as `answer.note` (at most 4000 characters), its poster reading it as the answer line's `comment`,
   and the answered card reading `Your note: ...` under its result.
   A card's words, its preview (an ask's callouts, tables and inline code included), a draft's box and the Note, read at `text-xs` (`BOX` in `inbox.tsx`, whose `md:text-xs` beats the Textarea's own `md:text-sm`).
   Approve, Send and a labelled ask's Send once Approve is picked take a muted green, Deny and Discard a muted red and Draft amber (`SIDE_TONES` and `DRAFT_TONE` in `inbox.tsx`), on the choices and the footer buttons alike.
@@ -122,14 +122,16 @@
   A session that posted an open decision or draft depends on it, so until the owner acts on it, by a button, a Snooze or a chat reply, it reads Waiting on your inbox, with the orange eye, linked to that item, in the sidebar and the System page's table (`inboxWaitOf` in `web/next/src/lib/inbox.ts`, through `statusOf` and `rowLines`),
   and ranks with the sessions at a prompt;
   with nothing open or running it reads Idle (playbook's **ask** rule).
-  The answer is recorded in one write that holds only while the item is open at the version read, then typed into the posting session through `deliver()` (`Inbox #i41 (<id>) "<title>": Approved. Carry it out.`), and the item records how that delivery went.
-  A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `relayText`).
+  The answer is recorded in one write that holds only while the item is open at the version read, then typed into the posting session through `deliver()` as one line, `[inbox-answer] {json}` (`answerPayload` and `answerLine` in `inbox.ts`), and the item records how that delivery went.
+  The JSON is `answerPayloadSchema` in `@packages/config/inbox` (`payloadOf` parses a line): the item's `ref`, `id`, `title`, `kind` and a decision's preview `type`; the `verb` (`ANSWER_VERBS`: `pick` an option, `send`, `draft`, `discard`, `set-aside`, `submit`); `go`, whether to carry it out; `next`, `carry-out`, `close` or `nothing`;
+  and `close`, the exact command that closes the item, naming `--no-link "<why>"` beside `--link` for a go that may leave no page (a decision whose preview names no `link`, a Save as draft).
+  A pick names its `option` (Approve is A and Deny is B, its `label` the one the card showed: an ask's own `approve` or `deny` when it carries both), his comment rides as `comment`, a changed draft's words as `text`, a Slack draft's link command as `linkConverter`, what the dashboard ran on Approve as `accepted` (an accept),
+  `listed` (an apps change) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
+  A comment alone (a chat reply, `re #iN`) stays his own words, typed as he wrote them.
+  A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `textsOf`).
   Any other `NOT_FOUND` (`now names another session`, `has no terminal to type into`) comes from a live session and stays failed, so the go is never carried out twice.
   A sessions read that was cut short (`Live.partial`, cmux.md) that misses the poster is read once more, fresh rather than the hub's board, and still missing it reads `CMUX_FAILED`, never `NOT_FOUND`, so a live poster's answer is never relayed (`target()` in `deliver.ts`).
-  The dispatcher is typed the same text, led by a line saying the poster has ended: for a go, that it posts a sent message through the MCP server `slack.sendServer` names, else its Slack tool, or saves a draft as the text says and then acks the item; for a deny, a clear, a discard or a provided secret, that nothing is carried out and the item closes with `bun run ask get --ack`;
-  for an accept the Dashboard ran (below), that nothing is carried out and the item closes with `bun run ask ack --no-link`;
-  for an apps change or a grant it ran, that the dispatcher finishes it in the poster's place by the poster's text, which follows, a grant's recheck included.
-  The item's kind and exact preview text follow.
+  The dispatcher is typed the same line with `relay: {for: <poster>, why: "poster-ended"}`, and reads the preview with `bun run ask get`: a `next` of `carry-out` it carries out in the poster's place, a sent message through the MCP server `slack.sendServer` names (else its Slack tool), then runs `close`; `close` or `nothing` has nothing to carry out, only the `close` to run.
   That delivery records `delivered` with `to`, the session that took it: the dispatcher here, the poster otherwise.
   A row from before `to` was recorded has none and reads as its poster (`takenBy` in `web/next/src/lib/inbox.ts`).
   The card and `bun run ask ack`'s line name that session: `Being carried out by <dispatcher>…`, then `Delivered to <dispatcher>` once it acks.
@@ -238,7 +240,7 @@
   the refusal naming the checks; `checked` stays in the stored payload and the owner's card does not show it.
   A draft's is `{to, text, thread?, attachments?}`: `to` a short name ("a teammate's thread", "a teammate's DM").
   Its `attachments`, such as an issue's before and after shots, show under its words as an ask's do, and while it is open its card reads `2 files · uploads on Send` under them when its `link` names a Slack conversation (`uploadsOn` in `web/next/src/lib/inbox.ts`).
-  On Send, the dashboard shares those files into that link's channel and thread before the words reach the poster (`filesToUpload` in `inbox.ts`, through `playground dm upload <item id>`, messages.md), and the card's result line counts them (`You sent it · 2 files shared`); the poster still gets the words alone (`deliveryText`).
+  On Send, the dashboard shares those files into that link's channel and thread before the words reach the poster (`filesToUpload` in `inbox.ts`, through `playground dm upload <item id>`, messages.md), and the card's result line counts them (`You sent it · 2 files shared`); the poster still gets the words alone (`answerPayload`).
   A Linear draft's files, a draft's with no Slack link, and one whose link's thread part does not parse (`slackPlace`) stay on the card; a link that names no thread shares them at its conversation's top level.
   A `slack` decision's `attachments` show under its message the same way, its card reading `uploads on Approve`, and Approve or Edit shares them the same way.
   A share Slack refuses, or a file gone from the attachments folder, fails the send before anything is typed (`UPLOAD_FAILED`, `Send failed: The files did not upload to Slack: <why>`), which Retry shares again;
@@ -283,9 +285,9 @@
   from the temp folder with its output dropped and only `HOME`, `PATH`, the proxy and CA variables and `VERCEL_*` in its environment (`spawnSink` in `api/hono/src/lib/dashboard/secret-sink.ts`, stopped after 60 seconds).
   A keychain sink instead hands the value to `keychainItem(<item>).write` (`api/hono/src/lib/keychain.ts`), which checks it against the item's shape and writes it through `security -i` on stdin, so no argv holds it; its one result is `{environment: "Keychain", exitCode, line}`, `line` reading `saved` or the refusal's first line with the value cut out.
   Only a stack that reads the live machine runs the sink; a fixture or test stack runs nothing and records exit 0 (`runSink`, `saveToKeychain`).
-  The item turns `provided`, its answer `{at, choice: "provided", results: [{environment, exitCode, line?}]}` (`exitCode` null once stopped by a signal, 127 when `vercel` could not start), and its poster is typed `Provided at <at>`, each environment's exit status and the `bun run ask get --ack` that closes it, which `bun run ask stale` chases until it does.
+  The item turns `provided`, its answer `{at, choice: "provided", results: [{environment, exitCode, line?}]}` (`exitCode` null once stopped by a signal, 127 when `vercel` could not start), and its poster gets the `submit` verb with each environment's result and the `bun run ask get --ack` that closes it, which `bun run ask stale` chases until it does.
   The card reads `Provided at <time>` with each exit status (a result's `line` in its place), green once every environment took it, red while any did not, whether or not its poster was told; a value the sink refused takes a new ask, and so does one whose card still reads sending after the sink's minute an environment, since the API restarted mid-run and no exit status came back.
-  A telling that failed leaves that colour as it is and draws `Not told to <taker> yet: <reason>` muted under the result (`deliveryNote`), with a Retry that types the same lines again and runs no sink (`retryDelivery`).
+  A telling that failed leaves that colour as it is and draws `Not told to <taker> yet: <reason>` muted under the result (`deliveryNote`), with a Retry that types the same line again and runs no sink (`retryDelivery`).
   Until it is told or dismissed it still counts as failed to send and shows open (`needsYou`, `inboxSummary`), so its Retry stays in view.
 
   ```bash
@@ -318,7 +320,7 @@
   It reads the login scope's own list as accepted, adds or removes the app matched as the hook matches it (`appsChange`),
   and runs `ext put <login> list desktop-owner-apps - --reason "the owner approved it in the Inbox (#iN)"` with the new list on its stdin (`appsArgs`, `ownerApps` in `api/hono/src/lib/store/extensions.ts`), no shell, no `PLAYGROUND_ROLE`.
   An app already on the list, one to remove that the login's list lacks, or a list that is not names writes nothing.
-  The answer keeps `listed: {exitCode, line}`, and the card reads `Your apps: <line>` green or `Apps change failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`.
+  The answer keeps `listed: {exitCode, line}`, and the card reads `Your apps: <line>` green or `Apps change failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`, and after a failed one, whose list stays as it was, tells its lead.
 
   ```bash
   bun run ask new <<'EOF'
@@ -329,7 +331,8 @@
 
 - A `grant` decision asks the owner to grant agent-desktop a macOS permission, `permission` `accessibility` or `screen-recording`, and `why` (`grantSchema`); Edit is refused.
   Its Approve runs `/usr/bin/open x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility` (or `?Privacy_ScreenCapture`), one fixed argv (`grantArgv`, run by `api/hono/src/lib/dashboard/run-argv.ts`), which opens System Settings at that pane on this Mac for the owner to turn it on; a stack showing test data refuses it, opening nothing.
-  The answer keeps `opened: {exitCode, line}`, and the poster rechecks the grant with `agent-desktop permissions`, closes the item with what it reads and tells the session that stopped for it, since macOS grants the app that launches agent-desktop, which only the poster's own run reads; until then the card reads that it is being carried out.
+  The answer keeps `opened: {exitCode, line}`, and the poster rechecks the grant with `agent-desktop permissions` every 30 seconds for up to 5 minutes (after a pane that failed to open, it tells its lead instead), closes the item with what it reads and tells the session that stopped for it, since macOS grants the app that launches agent-desktop, which only the poster's own run reads;
+  until then the card reads that it is being carried out.
 
   ```bash
   bun run ask new <<'EOF'
