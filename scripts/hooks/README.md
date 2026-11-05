@@ -540,6 +540,7 @@ Only the first reading moves the folder, sets variables and records files for th
 - A factory session merges `canary` plainly: `scripts/hooks/no-ours-merge.ts`, registered beside no-stash, refuses a `git merge` or `git pull` with the ours strategy or the ours option (`-s ours`, `-sours`, `--strategy=ours`, `--strategy ours`, `-X ours`, `-Xours`, `--strategy-option=ours`, `--strategy-option ours`, an abbreviation of `--strategy-option`, `-s` in a cluster of short options,
   and an alias for one), through `git -C`, a wrapper, `bash -c` or run-slot.sh, and a value it cannot read beside one, naming the fix: `git merge origin/canary`, resolving each conflict with both sides' meaning.
   It fails closed only on a call that reads as a merge with ours, and its tests are in `bun run test:file tests/scripts/hooks` too.
+- A merge resolved by hand can still drop a line `canary` added in a file git merged clean, which no-ours-merge cannot see: lefthook's pre-push command `keeps-canary` refuses that push, naming each file and merge in the words of pr:merge's keeps canary gate (`packages/scripts/src/pr-merge/README.md`), and its tests are `bun run test:file tests/packages/scripts/src/pr-merge/prepush.test.ts`.
 
 ## no-prompt-stop
 
