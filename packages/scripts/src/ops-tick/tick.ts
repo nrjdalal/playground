@@ -620,7 +620,7 @@ export const USAGE_LINK = "- 💰 Each account's week shows on the [System page]
 // Pure: the relay-down alert's link line, naming the row that relays on this machine: the relay runner under AI Runners, else Ops under Orchestrators, whose sweep relays.
 export const relayLink = (relay: boolean): string =>
   relay
-    ? `- 🔎 The relay's row is ${RELAY} under AI Runners in the sidebar, and this Mac's state is on the [System page](/dashboard/system).`
+    ? `- 🔎 The relay's row is under AI Runners in the sidebar (${RELAY} on hover), and this Mac's state is on the [System page](/dashboard/system).`
     : "- 🔎 Ops' row is under Orchestrators in the sidebar, since its sweep relays here, and this Mac's state is on the [System page](/dashboard/system)."
 
 // The Inbox alert's title: the relay's own on a machine that runs it, else the sweep's, each with the next step and naming only what this machine runs.

@@ -1254,7 +1254,7 @@ describe("relay watch", () => {
       kind: "update",
       preview: {
         outcome: "alert",
-        text: "- 🔎 The relay's row is runner-plain-relay under AI Runners in the sidebar, and this Mac's state is on the [System page](/dashboard/system).",
+        text: "- 🔎 The relay's row is under AI Runners in the sidebar (runner-plain-relay on hover), and this Mac's state is on the [System page](/dashboard/system).",
       },
       title: `The ops relay is down: no ops line has gone out since ${at(14, 7)
         .toISOString()
