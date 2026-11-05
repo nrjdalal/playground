@@ -1449,8 +1449,7 @@ if until <= datetime.datetime.now(datetime.timezone.utc):
 print(f"{f.get('session')} until {f['until']}")
 PY
 ); then
-  # the focused session's own reviewer and tester start, so an urgent fix is still checked
-  # and a --firefighting start goes on while its trigger file stands
+  # the focused session's own reviewer and tester start, so an urgent fix is still checked, and a --firefighting start goes on while its trigger file stands
   [ -n "$FF_TRIGGER" ] || case "$ROLE" in reviewer | tester) [ "$TO" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
     refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
 fi

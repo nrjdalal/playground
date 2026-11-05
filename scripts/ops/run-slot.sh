@@ -171,10 +171,7 @@ if [ "${1:-}" = clear-stale ]; then
   done
   exit 0
 fi
-# run-slot.sh preempt: while run-slot.focus stands, send TERM to the process group of each slot holder's child that focus does not spare (focus_spares), as the
-# owner asked for an urgent ticket: everything else stops so its fix goes first. Each child is the one
-# run-slot started and recorded in <slot>.child, and is signalled only while it is still that holder's child leading its own group, so nothing is picked by name,
-# pattern or port; the holder then exits with the child's code and says focus preempted it. Ops runs it when it raises focus for an urgent ticket.
+# run-slot.sh preempt: while run-slot.focus stands, TERM the process group of each <slot>.child that focus does not spare, only while it is still its holder's child leading its own group, so an urgent ticket's fix goes first (scripts/ops/README.md)
 if [ "${1:-}" = preempt ]; then
   [ $# -eq 1 ] || { echo "usage: run-slot.sh preempt" >&2; exit 2; }
   switch_on run-slot.focus || { echo "run-slot.sh: no focus stands (run-slot.focus), so preempt stops nothing" >&2; exit 2; }
