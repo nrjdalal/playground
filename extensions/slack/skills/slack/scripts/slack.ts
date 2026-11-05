@@ -1,16 +1,17 @@
 import { mkdir, rename, stat } from "node:fs/promises"
 import { join } from "node:path"
 
-import { makeScratch, removeScratch } from "@packages/safe-delete"
-
-import { writeAtomic } from "../write-atomic"
+import { keychainItem, type Run } from "../../../../../api/hono/src/lib/keychain"
+import { makeScratch, removeScratch } from "../../../../../packages/safe-delete/src"
+import { writeAtomic } from "../../../../../packages/scripts/src/write-atomic"
 
 // The owner's DM, read and written as the owner: every reply is framed by these two lines, byte for byte, so a reader tells our posts from the owner's.
 export const PLAYGROUND = "━━━━━━  PLAYGROUND  ━━━━━━"
 export const USER = "━━━━━━━━  USER   ━━━━━━━━"
 
-// The vault key whose token posts and reads as the owner.
-export const TOKEN_KEY = "local.slack.channel_token"
+// What a script says when the Keychain holds no Slack token, the one the Inbox's secret ask saves.
+export const NO_TOKEN =
+  "the Slack token is not in the Keychain: save it through the Inbox's secret ask for slack"
 
 export type Message = { subtype?: string; text?: string; ts: string; user?: string }
 type Reply = {
@@ -124,18 +125,9 @@ export const ownerMessages = (messages: Message[], owner: string, sent: Set<stri
       m.user === owner && !m.subtype && !sent.has(m.ts) && m.text !== PLAYGROUND && m.text !== USER,
   )
 
-// The vault skill's run of a script with the token in its environment alone, as channel-watch runs its own.
-export const underVault = (vault: string, script: string, args: string[]): string[] => [
-  Bun.which("uv") ?? "uv",
-  "run",
-  "--python",
-  "3.13",
-  join(vault, "scripts", "vault.py"),
-  "run",
-  "-e",
-  `SLACK_TOKEN=${TOKEN_KEY}`,
-  "--",
-  process.execPath,
-  script,
-  ...args,
-]
+// The token that posts and reads as the owner, from the Keychain's slack item, read in the script's own process, so no env var or argv holds it.
+export const tokenOf = async (run?: Run): Promise<string> => {
+  const token = await keychainItem("slack", { run }).read()
+  if (!token) throw new Error(NO_TOKEN)
+  return token
+}

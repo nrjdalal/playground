@@ -1,9 +1,9 @@
 import { join } from "node:path"
 
-import { check as publicLeak } from "../../../../scripts/hooks/no-public-leak"
-import { REPO } from "../ops-job/job"
+import { REPO } from "../../../../../packages/scripts/src/ops-job/job"
+import { check as publicLeak } from "../../../../../scripts/hooks/no-public-leak"
 import { leakOf } from "./send"
-import { call, type Slack, slackOf } from "./slack"
+import { call, type Slack, slackOf, tokenOf } from "./slack"
 
 // The byte post to the URL Slack hands back, which takes no token.
 export type Put = (
@@ -84,10 +84,8 @@ export type Spec = {
 
 // The spec of one item, read by this checkout's dashboard-upload.ts from its own database, in a process that never holds the token.
 export const specOf = async (id: string): Promise<Spec> => {
-  const { SLACK_TOKEN: _token, ...rest } = process.env
   const child = Bun.spawn(["bun", join(REPO, "api/hono/src/bin/dashboard-upload.ts"), id], {
     cwd: REPO,
-    env: rest,
     stderr: "pipe",
     stdin: "ignore",
     stdout: "pipe",
@@ -126,14 +124,11 @@ export async function share(
 
 // its errors as one plain line, which the dashboard shows as the send's reason
 if (import.meta.main) {
-  const token = process.env.SLACK_TOKEN
   const [id, ...extra] = process.argv.slice(2)
   try {
-    if (!token || !id || extra.length)
-      throw new Error(
-        "usage: SLACK_TOKEN=<token> upload.ts <inbox item id>, run by playground dm upload",
-      )
-    const count = await share(id, { put: putOf(), slack: slackOf(token) })
+    if (!id || extra.length)
+      throw new Error("usage: upload.ts <inbox item id>, run by playground dm upload")
+    const count = await share(id, { put: putOf(), slack: slackOf(await tokenOf()) })
     console.log(`dm upload: shared ${count} files`)
   } catch (error) {
     console.error(`error: ${(error as Error).message}`)
