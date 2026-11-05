@@ -28,7 +28,7 @@ type Waiting = {
 // What a forward gives the route: this Mac's answer, or why there is none.
 export type Forwarded = RelayResponse | { type: "offline" } | { type: "timeout" }
 
-// How long an instance waits for the one holding the Mac's socket to say it took a request or a ping, before it reads the Mac as offline.
+// How long an instance waits, from when its message reaches the bus, for the one holding the Mac's socket to say it took a request or a ping, before it reads the Mac as offline.
 export const RELAY_ACK_MS = 2000
 
 // What the instances tell each other over Redis, in transit alone: a request for the instance holding the Mac's socket, its ack, the Mac's answer, a status ping and its pong, and a socket gone.
@@ -75,10 +75,17 @@ export function createHub({
     found.resolve(answer)
   }
 
-  const send = (message: BusMessage) =>
+  // Publishes one message, and says whether it reached the bus: a cold instance's first publish waits for its subscriber and sender to connect.
+  const send = (message: BusMessage): Promise<boolean> =>
     bus
-      ?.publish(JSON.stringify(message))
-      .catch((error) => console.error("[relay] publish failed", String(error)))
+      ? bus.publish(JSON.stringify(message)).then(
+          () => true,
+          (error) => {
+            console.error("[relay] publish failed", String(error))
+            return false
+          },
+        )
+      : Promise.resolve(false)
 
   const goneHere = (userId: string, since: string) => {
     offlineSince.set(userId, since)
@@ -86,17 +93,24 @@ export function createHub({
       if (found.userId === userId) settle(key, { type: "offline" })
   }
 
-  // Whether another instance holds the owner's Mac, which answers a ping within ackMs.
+  // Whether another instance holds the owner's Mac, which answers a ping within ackMs of the ping reaching the bus, so a cold instance's connect spends none of the wait.
   const heldElsewhere = async (userId: string): Promise<boolean> => {
     if (!bus) return false
     const ping = id()
     const there = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => resolve(false), ackMs)
-      pings.set(ping, () => {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      let done = false
+      const end = (answer: boolean) => {
+        done = true
         clearTimeout(timer)
-        resolve(true)
+        resolve(answer)
+      }
+      pings.set(ping, () => end(true))
+      void send({ id: ping, kind: "ping", userId }).then((sent) => {
+        if (done) return
+        if (!sent) return end(false)
+        timer = setTimeout(() => end(false), ackMs)
       })
-      void send({ id: ping, kind: "ping", userId })
     })
     pings.delete(ping)
     return there
@@ -224,12 +238,16 @@ export function createHub({
           if (!deliver(userId, request)) settle(request.id, { type: "offline" })
           return
         }
-        timers.push(
-          setTimeout(() => {
-            if (!found.acked) settle(request.id, { type: "offline" })
-          }, ackMs),
-        )
-        void send({ kind: "request", request, userId })
+        // the ack wait starts once the request is on the bus, so a cold instance's connect spends none of it
+        void send({ kind: "request", request, userId }).then((sent) => {
+          if (!waiting.has(request.id)) return
+          if (!sent) return settle(request.id, { type: "offline" })
+          timers.push(
+            setTimeout(() => {
+              if (!found.acked) settle(request.id, { type: "offline" })
+            }, ackMs),
+          )
+        })
       })
     },
 
