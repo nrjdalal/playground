@@ -1,6 +1,7 @@
 "use client"
 
 import type { InboxAction, InboxItem, InboxPreview, InboxUpdate } from "@api/hono"
+import type { Choices } from "@packages/config/inbox"
 import type { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 import {
   RiAlarmWarningLine,
@@ -116,6 +117,7 @@ import {
   type CardKey,
   changedAt,
   checkAnswerNote,
+  decisionChoices,
   deliveryNote,
   dismissable,
   dismissEach,
