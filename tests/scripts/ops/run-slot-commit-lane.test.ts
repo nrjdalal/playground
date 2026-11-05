@@ -399,6 +399,9 @@ describe("a sh -c chain of git steps", () => {
       "cd ROOT && git add . && git commit -m x && git push origin",
       "git -C ROOT add . && git -C ROOT commit -m x && git -C ROOT push origin",
       "bun run precommit:light && cd ROOT && git commit -m x",
+      // review round 13: a quoted ( in a conventional commit message stays a word
+      'cd ROOT && git commit -m "docs(PG-899): x"',
+      "cd ROOT && git commit -m 'fix(PG-899): x'",
     ]) {
       const m = repo({ idle: 30 }, ["docs/notes.md"])
       m.hold("run-slot", 3, "big")
@@ -430,6 +433,9 @@ describe("a sh -c chain of git steps", () => {
     "cd ROOT && git add web/next/src/app/{a,b}.tsx && git commit -m x",
     // review round 5: a process substitution runs its command
     "cd ROOT && git add <(bun run build) && git commit -m x",
+    "cd ROOT && git commit -m x <(bun run build)",
+    "cd ROOT && git commit -m x>(bun run build)",
+    "(bun run build) && cd ROOT && git commit -m x",
     // zsh runs the command after |& or &|
     "cd ROOT && git commit -m x |& bun run build",
     "cd ROOT && git commit -m x &| bun run build",

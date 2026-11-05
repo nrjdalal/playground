@@ -431,9 +431,9 @@ git_verb() {
     esac
   done
 }
-# a word sh would leave as written: no $, backquote, ~, glob, brace, # (a comment to sh, which shlex here keeps as a word) or ( (a <( ) process
-# substitution runs its command), so the word run-slot reads is the word the command gets
-plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['* | *'{'* | *'#'* | *'('*) return 1 ;; esac; done; }
+# a word sh would leave as written: no $, backquote, ~, glob, brace or # (a comment to sh, which shlex here keeps as a word), so the word run-slot
+# reads is the word the command gets; a ( is left alone, since chain_steps splits at each unquoted one, so a word that keeps one was quoted or escaped (a type(scope): commit message)
+plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['* | *'{'* | *'#'*) return 1 ;; esac; done; }
 # a chain's git add words, failing closed (builder, 5 Nov): paths, and only the flags whose staging chain_add reads, never -f, which stages ignored files
 add_flags() { local w; for w in "$@"; do case "$w" in -A | --all | -u | --update | -- | --pathspec-from-file=*) ;; -*) return 1 ;; esac; done; }
 # an absolute folder in a git repo, written plain
