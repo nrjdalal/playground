@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdtempSync, readdirSync, rmSync } from "node:fs"
+import { mkdtempSync, readdirSync, rmdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, relative } from "node:path"
 
 import { SQL } from "bun"
 
@@ -220,6 +220,32 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
         status: "open",
         title: DECISION.title,
       })
+    }
+  })
+
+  // playground rm --decision matches a delete's what against the full path alone, so a short name there would take the owner a second approval
+  test("refuses a delete decision that names its target by a short name, naming the full path, and posts one that names the full path", async () => {
+    const target = mkdtempSync(join(tmpdir(), "ask-delete-"))
+    try {
+      const remove = (what: string) => ({
+        from: "worker-envy",
+        kind: "decision",
+        preview: { type: "delete", what, why: "a made-up scratch folder" },
+        title: "Delete the scratch folder?",
+      })
+      const short = relative(process.cwd(), target)
+      const refused = await cli(["new"], JSON.stringify(remove(`the folder ${short}`)))
+      expect(refused.code).toBe(1)
+      expect(refused.stderr).toContain(`write ${target} for ${short}`)
+      expect(refused.stdout).toBe("")
+      const { id } = await post(remove(`the folder ${target}`))
+      const got = await cli(["get", id])
+      expect(JSON.parse(got.stdout)).toMatchObject({
+        preview: { type: "delete", what: `the folder ${target}` },
+        status: "open",
+      })
+    } finally {
+      rmdirSync(target)
     }
   })
 
@@ -478,11 +504,11 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
   })
 
   // a chat-replied item the owner had moved to Done kept its open status, so it still listed as open
-  test("open lists a snoozed item and one replied to in chat until it moves to Done, and never an update", async () => {
+  test("open lists an item put away with Later and one replied to in chat until it moves to Done, and never an update", async () => {
     const snoozed = await post({
       ...DECISION,
       from: "worker-open-c",
-      title: "Ship the snoozed one?",
+      title: "Ship the one put away?",
     })
     const replied = await post({
       ...DECISION,

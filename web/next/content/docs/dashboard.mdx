@@ -15,7 +15,7 @@ A stack that shows test data instead, a made-up machine for tests and screenshot
 ## Your chat
 
 `/dashboard` opens your chat with the dispatcher, the session you talk to (`sessions.names`' dispatcher, `dispatcher` by default, unless `PLAYGROUND_DISPATCHER` names another), with the box to message it.
-A second dispatcher runs only when you start one (`playground add --dispatcher`), beside the first on another model (the first's name plus `-2`, unless `PLAYGROUND_DISPATCHER_SECONDARY` names another), with a chat and a box of its own, opened from its row in the sidebar.
+A second dispatcher runs only when you start one (`playground add --dispatcher`, or the plus on Alpha's row), beside the first on another model (the first's name plus `-2`, unless `PLAYGROUND_DISPATCHER_SECONDARY` names another), with a chat and a box of its own, opened from its row in the sidebar.
 The Assistant has a chat and a box of its own too, opened from its **Assistant** row under Orchestrators, whatever its session is named.
 Each dispatcher's chat and its box are named by its label, such as Message Alpha; the model its newest reply ran shows in its sidebar row's tooltip.
 A menu directly left of the box's send button, such as **Opus · High**, shows the model and effort the dispatcher's newest reply ran with, and a pick types `/model` or `/effort` into it for you; the row shows the new one from its next reply.
@@ -124,22 +124,25 @@ Under the top line, with no title, sits a row for each dispatcher, Alpha, and th
 The first opens your chat at `/dashboard`, the second its own chat.
 While the first is not running its row reads Alpha, Not running, so the rows below never move.
 The second's row shows only while its session runs or the roster lists it as not yet done or ended.
+Hover or focus Alpha's row for a plus in its effort's place, always shown on a phone: it lists the templates you can start, a second dispatcher on Claude or GLM, an Assistant or an orchestrator, each with its model and effort.
+A template that cannot start yet shows greyed out with the reason, such as a second Claude account to add in Settings, and Edit templates at the list's foot opens Settings.
 
 The name, GitHub and the system icons are hidden when the sidebar is collapsed, where each session row, the dispatchers' included, shows its icon alone.
 Click the sidebar's right edge, or press Cmd+B (Ctrl+B), to collapse or expand it.
 
 ### Groups
 
-Below the header are the live sessions in groups:
+Below the header are your threads, then the live sessions in groups.
+Click a group's label to close or open it: the sidebar keeps each group as you left it across reloads, and a closed group still shows a session waiting on you or open in the view.
 
-- **Orchestrators**: the sessions that lead the others, each by its role (Builder, Ops, Planner, Optimizer, Assistant), A to Z by title until you drag them into an order of your own.
+- **Channels** and **Direct messages**: your Yard channels and DMs, above Orchestrators, each with its unread count, shown while this Mac reaches Yard (`YARD_API_URL` set and a token from `playground yard login`, in [the playground command](/docs/cli#yard-playground-yard)) and the group has a row.
+- **Orchestrators**: the sessions that lead the others, each by its role (Builder, Ops, Planner, Optimizer, Assistant, Orchestrator), A to Z by title until you drag them into an order of your own.
   Drag a row, or focus it and press Space, the arrows and Space, or use Move up and Move down in its menu (a right click, a long press, or Shift+F10).
   Reset order to A to Z, in the Orchestrators label's own menu, brings the default back.
 - **Subagents**: the `worker-` sessions, with each reviewer and tester under the worker it checks.
 - **AI Runners**: the `runner-` sessions.
 - **Scripts**: the background jobs that run with no Claude session, collapsed until you click its label.
 - **Other**: test sessions and sessions outside these groups, shown only while one is live, collapsed until you click its label.
-- **Channels** and **Direct messages**: your Yard channels and DMs, after Other, each with its unread count, shown while this Mac reaches Yard (`YARD_API_URL` set and a token from `playground yard login`, in [the playground command](/docs/cli#yard-playground-yard)) and the group has a row.
 
 Before the model's logo at the end of the Claude dispatcher's row, the week and the 5-hour window of your Claude usage each show as an icon and a number, in the system icons' green, orange and red.
 An account with no 5-hour window shows `none` for it, and is left out of the combined 5-hour figure.
@@ -211,6 +214,7 @@ This Mac dials out to Yard, so nothing here listens beyond this machine: it hold
 Yard keeps nothing this Mac sends, and only the owner reaches the page; anyone else gets the 404.
 For now it reads alone: sending a message, answering the Inbox and every other change wait for the Mac, the board refreshes every 5 seconds, and the Inbox's Preview row shows no preview there.
 While this Mac sleeps or is offline, the page says "Your Mac is offline since" and the time.
+After a drop, or a try Yard leaves unanswered for 30 seconds, this Mac connects again on its own, and the API's log says each connect and each drop in a `[relay]` line.
 
 ## The System page
 

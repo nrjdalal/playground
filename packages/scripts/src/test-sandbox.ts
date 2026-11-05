@@ -7,6 +7,7 @@ import { removeScratch } from "@packages/safe-delete"
 
 import { CLOCK_EXEMPT, clockExempt } from "./clock-exempt"
 import { sandbox } from "./sandbox"
+import { prebuildTests } from "./verify/prebuild"
 
 const TIMINGS = "tests/timings.json"
 
@@ -17,13 +18,6 @@ const SERIAL = [
   "tests/api/hono/src/lib/dev/launch.test.ts",
 ]
 
-// test:file skips the build, and a test importing an unbuilt package fails on a missing module, which hides the failure it reproduces; named only after a failed run, since lefthook's agents-rules runs test:file on a commit that builds nothing
-const unbuilt = existsSync("packages")
-  ? readdirSync("packages")
-      .map((name) => join("packages", name))
-      .filter((dir) => existsSync(join(dir, "tsdown.config.ts")) && !existsSync(join(dir, "dist")))
-  : []
-
 const { env, scratch } = sandbox()
 // a git hook (pre-commit runs tests) exports GIT_DIR and GIT_INDEX_FILE, which turn a test's scratch git init or commit onto the real repository: one set its core.bare (3 Nov); a test that needs a GIT_ variable sets it on its own git call
 for (const name of Object.keys(env)) if (name.startsWith("GIT_")) delete env[name]
@@ -31,9 +25,6 @@ const dropScratch = () => {
   const refused = removeScratch(scratch)
   if (refused) console.error(`test-sandbox: ${refused}`)
 }
-// a worktree with none of the env files bun test loads (a skill-only chore; it skips .env.local) has no values for the apps' env schemas, so a test that imports one would fail its validation, unless the caller set the flag
-if (![".env", ".env.test", ".env.test.local"].some((file) => existsSync(file)))
-  Object.assign(env, { SKIP_ENV_VALIDATION: process.env.SKIP_ENV_VALIDATION ?? "true" })
 // CI's clock-ahead pass: with CLOCK_AHEAD_DAYS set, every test file reads a clock that many days on, so a test that mixes a fixed clock with the real one fails on its own PR rather than on the day the real clock reaches it
 const ahead = Boolean(process.env.CLOCK_AHEAD_DAYS)
 const clock = ahead ? [`--preload=${join(import.meta.dir, "../../../tests/clock-ahead.ts")}`] : []
@@ -120,6 +111,24 @@ if (missing.length > 0) {
   dropScratch()
   process.exit(1)
 }
+// a worktree whose node_modules came from a clone has no dist, and a test importing an unbuilt package fails on a missing module, which hides the failure it reproduces, so the packages these files import are built first
+const built = await prebuildTests(paths.filter((path) => !path.startsWith("-")))
+if (built !== 0) {
+  dropScratch()
+  process.exit(built)
+}
+// a worktree with none of the env files bun test loads (a skill-only chore; it skips .env.local), or whose files leave a key the apps' schemas require empty (a fresh copy of .env.example leaves POSTGRES_URL so), has no values for those schemas, so a test that imports one would fail its validation, unless the caller set the flag; a key set to a value the schema refuses stays validated
+const skipValidation = async (): Promise<boolean> => {
+  if (![".env", ".env.test", ".env.test.local"].some((file) => existsSync(file))) return true
+  try {
+    const { requiredKeys } = await import("@packages/env/gaps")
+    return [...requiredKeys().keys()].some((key) => !process.env[key])
+  } catch {
+    return false
+  }
+}
+if (await skipValidation())
+  Object.assign(env, { SKIP_ENV_VALIDATION: process.env.SKIP_ENV_VALIDATION ?? "true" })
 const serial = SERIAL.filter((file) =>
   paths.map(bare).some((path) => path === "." || file === path || file.startsWith(`${path}/`)),
 )
@@ -153,9 +162,5 @@ const alone = serial.length > 0 ? run(serial) : 0
 console.error(
   `test-sandbox: parallel pass ${parallel === 0 ? "passed" : `failed (exit ${parallel})`}, serial pass ${alone === 0 ? "passed" : `failed (exit ${alone})`}`,
 )
-if ((parallel || alone) && unbuilt.length > 0)
-  console.error(
-    `test-sandbox: ${unbuilt.join(", ")} lacks a dist: build the packages with env NODE_ENV=production SKIP_ENV_VALIDATION=true bunx turbo run build --filter='./packages/*' (the dev skill's Start) and run again`,
-  )
 dropScratch()
 process.exit(parallel || alone)

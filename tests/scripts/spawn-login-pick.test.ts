@@ -362,6 +362,58 @@ describe("the capacity gate refuses and spawns nothing", () => {
     expect(launchOf(r)).toContain("-a quilla@example.net -w")
   })
 
+  // On 4 Nov an --account start on a full account passed: the gate read a usage file only when its top-level account was the one named, so usage.json's accounts map, which held it at 100%, went unread.
+  const accounts = (map: Record<string, object>) => ({
+    USAGE_JSON: JSON.stringify(usage({ accounts: map })),
+  })
+  const resetIn = (seconds: number) => Math.floor(Date.now() / 1000) + seconds
+  const full = { readAt: minutesAgo(4), week: 100, weekReset: resetIn(86_400) }
+
+  test("an --account usage.json's accounts map holds at 100% is refused, naming the account with the lowest week under 100", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md", "--account", "full@example.net"],
+      [],
+      accounts({
+        "busy@example.net": { week: 60, weekReset: resetIn(86_400) },
+        "full@example.net": full,
+        "renewed@example.net": { week: 100, weekReset: resetIn(-60) },
+      }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.cmux).toBeUndefined()
+    expect(r.err).toContain(
+      "the usage gate holds it: --account full@example.net: its week reads 100% (usage.json accounts) until",
+    )
+    expect(r.err).toContain(
+      "Name renewed@example.net, the account with the most room (its week reads 0%)",
+    )
+  })
+
+  test("an --account the accounts map holds at 100% while no other account has room is refused, saying so", async () => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md", "--account", "full@example.net"],
+      [],
+      accounts({ "full@example.net": full, "other@example.net": full }),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(
+      "No account in usage.json's accounts has room; wait for a week to reset",
+    )
+  })
+
+  test.each([
+    ["under 100%", { week: 99, weekReset: resetIn(86_400) }],
+    ["at 100% past its weekReset", { week: 100, weekReset: resetIn(-60) }],
+  ])("an --account the accounts map holds %s still starts", async (_, entry) => {
+    const r = await spawn(
+      ["worker", "worker-brave-otter", "b.md", "--account", "full@example.net"],
+      [],
+      accounts({ "full@example.net": entry }),
+    )
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain("-a full@example.net -w")
+  })
+
   test("a usage-<name>.json naming this machine's own login is not another login", async () => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md"],
