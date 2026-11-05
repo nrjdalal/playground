@@ -1,4 +1,6 @@
 import "@/bin/ask-from-clone"
+import { existsSync } from "node:fs"
+import { homedir } from "node:os"
 import { join } from "node:path"
 
 import { ASK_CODE_COLUMNS } from "@packages/config/inbox"
@@ -8,6 +10,7 @@ import { readPolicyOrDefaults, ruleSettings } from "@packages/settings"
 
 import { fillNow, futureNowTimes, NOW, ownerTime } from "@/lib/dashboard/ask-clock"
 import { ASK_EXAMPLES, isAskExampleKind, shapeHints } from "@/lib/dashboard/ask-shape"
+import { deleteRefusal } from "@/lib/dashboard/delete-targets"
 import { branchOf, checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
 import {
   ackItem,
@@ -22,7 +25,7 @@ import {
   staleItems,
 } from "@/lib/dashboard/inbox"
 import { keepAttachments } from "@/lib/dashboard/inbox-attachments"
-import { livePair, othersLiveDashboard } from "@/lib/dev/launch"
+import { livePair, mainCheckoutOf, othersLiveDashboard } from "@/lib/dev/launch"
 import { checkoutMismatch, locate, prove } from "@/lib/sessions/guard"
 import { dataDir } from "@/lib/sessions/paths"
 
@@ -184,6 +187,15 @@ if (command === "new" || command === "edit") {
       `a "measured" or "now" time runs ahead of the clock, ${ownerTime(now, zone)}: ${ahead.join("; ")}; write ${NOW}, which ask fills with the time it posts at`,
     )
   input = fillNow(input, now, zone)
+  // a delete names its targets by full path, the one playground rm --decision matches, so the owner approves it once
+  const main = mainCheckoutOf(process.cwd())
+  const shortDelete = deleteRefusal(input, {
+    cwd: process.cwd(),
+    exists: existsSync,
+    home: homedir(),
+    worktrees: main === null ? null : join(main, ".claude", "worktrees"),
+  })
+  if (shortDelete) fail(shortDelete)
   for (const hint of shapeHints(input)) {
     console.error(
       hint.kind === "prose"

@@ -28,7 +28,7 @@ stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
-SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
+SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
   local f="$OPS/$1" line ends now m
@@ -171,7 +171,7 @@ if [ "${1:-}" = size ]; then
   size_of "$2"
   exit
 fi
-# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, load5-cap, single,
+# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, focus, load5-cap, single,
 # or the runner host's off or slot-off, for 4 hours unless --for says; a value (load5-cap's cap) goes on the line below. A set with no reason is refused
 if [ "${1:-}" = set ]; then
   usage='usage: run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]'
@@ -188,14 +188,16 @@ if [ "${1:-}" = set ]; then
   case "$who" in *[!A-Za-z0-9._#-]*|"") echo "run-slot.sh: <who> is a session name (letters, digits, . _ - #)" >&2; exit 2 ;; esac
   case "$name" in
     off|slot-off) path=runner-host/$name ;;
-    3-off|4-off|clone-off|load5-cap|single) path=run-slot.$name ;;
-    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
+    3-off|4-off|clone-off|focus|load5-cap|single) path=run-slot.$name ;;
+    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, focus, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
   esac
   [ -n "$reason" ] || { echo "run-slot.sh: a set takes --reason \"<why>\", so whoever finds the switch on knows why it stands" >&2; exit 2; }
   case "$span" in [0-9]*m) unit=60 ;; [0-9]*h) unit=3600 ;; *) unit= ;; esac
   n=${span%[mh]}
   case "$n" in ""|*[!0-9]*|0*) unit= ;; esac
   [ -n "$unit" ] || { echo "run-slot.sh: --for takes a count of minutes or hours above 0, such as 30m or 4h" >&2; exit 2; }
+  # focus stands 180 minutes at most (dispatcher, 5 Nov: run-slot.focus is approved on that cap)
+  [ "$name" != focus ] || [ $((n * unit)) -le 10800 ] || { echo "run-slot.sh: focus stands 180 minutes at most" >&2; exit 2; }
   iso() { date -u -d "@$1" +%FT%TZ 2>/dev/null || date -u -r "$1" +%FT%TZ; }
   at=$(date +%s)
   ends=$(iso $((at + n * unit)))
@@ -659,10 +661,28 @@ reread() {
 # the named session may take a slot whatever its place, and the reservation holds only while that session is itself waiting in the queue
 prio_holder() {
   local m
+  # while run-slot.focus stands its session is the pick, whatever run-slot.priority says or its age, so focus never loses its slot to a lapse
+  focus_holder && return
   m=$(mtime "$OPS/run-slot.priority") || return
   # an mtime that reads back empty counts as no pick, rather than as a shell error, as in stale
   case "$m" in '' | *[!0-9]*) return 1 ;; esac
   [ $(( $(date +%s) - m )) -lt 3600 ] && cut -d' ' -f1 "$OPS/run-slot.priority"
+}
+# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not
+focus_holder() {
+  switch_on run-slot.focus || return 1
+  cut -d' ' -f1 "$OPS/run-slot.focus"
+}
+# true while focus holds this run: a heavy lane waits for every session but the focus one and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov)
+focus_holds() {
+  local h
+  h=$(focus_holder) || return 1
+  case "$WHO" in "$h" | ops-tick | ops-dashboard) return 1 ;; esac
+}
+focus_wait() {
+  [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
+  sleep "$POLL"
+  waited=$((waited + 15))
 }
 prio_waiting() {
   # true while the priority holder has a ticket whose waiter still runs
@@ -827,8 +847,8 @@ slot_open() {
   fi
   return 0
 }
-# whether the gauges open slots 2 to 4: mem_ok passing and the CPU 40% idle or more under load1 30, or 50% idle or more from load1 30 up to 45
-# (dispatcher, 3 Nov: the resting sessions held load1 at 14 to 20 on 15 cores while the CPU sat 53 to 67% idle, so the old load1 lines of 12
+# whether the gauges open slots 2 to 4: mem_ok passing and the CPU 40% idle or more under load1 45 (5 Nov, 06:19 to 07:45Z: a 50% bar from load1 30
+# to 45 left the CPU at a median 48% idle, and 14 of its 30 CPU shuts read 40 to 49% idle) (dispatcher, 3 Nov: the resting sessions held load1 at 14 to 20 on 15 cores while the CPU sat 53 to 67% idle, so the old load1 lines of 12
 # and the cores left one lane open with 24 to 33 runs waiting; retro 36, 4 Nov: at a load1 30 stop the lanes were shut 109 of 120 minutes
 # with the CPU about half idle, and heavy runs waited up to 122 minutes); load1 45 stays a hard stop for the spikes, load1 64 after a burst
 # of starts and 73 after a clone; a run's verdict that differs from the last, run-slot.lanes, is a lanes line in run-slot.runs.log with the
@@ -836,13 +856,13 @@ slot_open() {
 # counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither
 lanes_open() {
   local idle swap tps mbs load need="" verdict=shut why="" seen free level
-  read -r idle swap tps mbs <<< "$(gauges)"
+  read -r idle swap tps mbs _ <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
   case "$idle" in
     -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
     busy) told busy "$BUSY_TOLD" ;;
   esac
-  if [ "${load%.*}" -lt 30 ] 2>/dev/null; then need=40; elif [ "${load%.*}" -lt 45 ] 2>/dev/null; then need=50; fi
+  if [ "${load%.*}" -lt 45 ] 2>/dev/null; then need=40; fi
   if [ -z "$need" ]; then
     why=load1
   elif [ "$idle" = - ] || [ "$idle" = busy ] || ! [ "${idle%.*}" -ge "$need" ] 2>/dev/null; then
@@ -955,29 +975,30 @@ disk_rate() {
 SWAPINS_MAX=100
 # what a look says once a run while another takes the first reading of the gauges
 BUSY_TOLD="run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands"
-# `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s>`: the CPU's idle share in top's second sample (top -l 2 -n 0, as spawn.sh's load gate reads it), the swap-ins a second in
+# `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s> <the last reading's swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0, as spawn.sh's load gate reads it), the swap-ins a second in
 # vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them) and disk_rate's two figures, which lanes lines log and no verdict reads (a bound on disk load waits on a day of them), each - when unread; every look shares one reading through run-slot.gauges
-# (`<epoch> <idle> <swapins> <tps> <MB/s>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and some 27 waiters each look every 15 s;
+# (`<epoch> <idle> <swapins> <tps> <MB/s> <last swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and some 27 waiters each look every 15 s;
 # one look refreshes it, under gauges_lock, while the rest keep the reading they have, or `busy busy` when there is none yet, since without the
 # lock every look that found it stale ran its own top (3 Nov, 10:53Z: 16 to 23 tops at once from 26 waiters, and load1 56.8); the refresher
 # removes the lock only while it still carries the mtime it took, so a refresher that ran past a takeover leaves the new holder's lock
 gauges() {
-  local now cached= idle= swap= tps= mbs= took lock="$OPS/run-slot.gauges.lock"
+  local now cached= idle= swap= tps= mbs= last= took lock="$OPS/run-slot.gauges.lock"
   now=$(date +%s)
-  { read -r cached idle swap tps mbs < "$OPS/run-slot.gauges"; } 2>/dev/null
+  { read -r cached idle swap tps mbs last < "$OPS/run-slot.gauges"; } 2>/dev/null
   case "$cached" in ''|*[!0-9]*) cached=0 ;; esac
   if [ $((now - cached)) -ge 10 ]; then
     if took=$(gauges_lock "$now"); then
       idle=$(top -l 2 -n 0 2>/dev/null | sed -nE 's/^CPU usage:.* ([0-9.]+)% idle.*/\1/p' | awk 'END { if (NR == 2) print }')
+      last=$swap
       swap=$(swapin_rate)
       read -r tps mbs <<< "$(disk_rate)"
-      printf '%s %s %s %s %s\n' "$now" "${idle:--}" "${swap:--}" "${tps:--}" "${mbs:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
+      printf '%s %s %s %s %s %s\n' "$now" "${idle:--}" "${swap:--}" "${tps:--}" "${mbs:--}" "${last:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
       [ "$(mtime "$lock")" = "$took" ] && rmdir "$lock" 2>/dev/null
     elif [ "$cached" -eq 0 ]; then
       idle=busy swap=busy
     fi
   fi
-  echo "${idle:--} ${swap:--} ${tps:--} ${mbs:--}"
+  echo "${idle:--} ${swap:--} ${tps:--} ${mbs:--} ${last:--}"
 }
 # takes the gauges' refresh lock at epoch $1, or one aged 30 s or more by its mtime, which a refresher killed mid-refresh left (a refresh
 # takes about 2 s), and prints the mtime it took the lock at (scripts/ops/README.md says why two takeovers together are harmless)
@@ -992,24 +1013,25 @@ gauges_lock() {
 # macOS's memory reading $1: level (the free share) or vm_pressure_level (1 normal, 2 warn, 4 critical)
 memstat() { sysctl -n "kern.memorystatus_$1" 2>/dev/null | tr -cd 0-9; }
 # memory room for a second suite: macOS's free share at 40% or more, its pressure level normal (1; 2 is warn, 4 critical) and swap-ins under SWAPINS_MAX a
-# second; an unread reading (Claude Code's sandbox refuses the first two) leaves no room, said once a run on stderr
+# second in this reading or the last, since a one-second sample spikes and falls back (5 Nov, 06:19 to 07:45Z: 17 of the 24 memory shuts came at pressure 1
+# with 70 to 80% free, from readings such as 128, 242 and 1116 between 0, 8, 20 and 44); an unread reading (Claude Code's sandbox refuses the first two) leaves no room, said once a run on stderr
 MEM_TOLD="${TMPDIR:-/tmp}/run-slot-mem-told.$$"
 # says line $2 once a run on stderr, a file per kind ($1) marking it, since a look reads the gauges in a subshell
 told() { [ -e "$MEM_TOLD-$1" ] || { echo "$2" >&2; : > "$MEM_TOLD-$1"; }; }
 mem_unread() { told "$1" "run-slot.sh: cannot read the memory (sysctl kern.memorystatus_*), so $2"; }
 mem_ok() {
-  local free level swap
+  local free level swap last
   free=$(memstat level); level=$(memstat vm_pressure_level)
   if [ -z "$free" ] || [ -z "$level" ]; then
     mem_unread suite "no second suite runs beside this one"
     return 1
   fi
-  swap=$(gauges | cut -d' ' -f2)
+  read -r _ swap _ _ last <<< "$(gauges)"
   case "$swap" in
     -) told swap "run-slot.sh: cannot read the swap-ins (vm_stat -c 2 1), so no second suite runs beside this one"; return 1 ;;
     busy) told busy "$BUSY_TOLD"; return 1 ;;
   esac
-  [ "$free" -ge 40 ] && [ "$level" -eq 1 ] && [ "$swap" -lt "$SWAPINS_MAX" ]
+  [ "$free" -ge 40 ] && [ "$level" -eq 1 ] && { [ "$swap" -lt "$SWAPINS_MAX" ] || ! [ "$last" -ge "$SWAPINS_MAX" ] 2>/dev/null; }
 }
 
 # Dictation misses come from input delay under load, so every command runs under nice 10, and the
@@ -1061,6 +1083,8 @@ if [ -n "$KIND" ]; then
     ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
   while clone_held; do reread; sleep "$CLONE_POLL"; done
+  # a commit's build, a merge or a clone is heavy, so it waits under focus; the quick slot's short runs go on
+  while [ "$KIND" != quick ] && focus_holds; do reread; focus_wait; done
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
   # the waiter ran its command with no slot), so each wait checks it ended as it should, and the waiter stops when it did not
   clone_held && { echo "run-slot.sh: run-slot.clone-off holds this clone, so $WHO stops" >&2; exit 143; }
@@ -1126,6 +1150,11 @@ while :; do
     fi
     sleep "$POLL"
     waited=$((waited + 15))
+    continue
+  fi
+  # under focus a run keeps its place in the queue and takes no slot
+  if focus_holds; then
+    focus_wait
     continue
   fi
   # this run's own units must fit beside what the slots hold now (the queue's order checked them for a waiter at its head)

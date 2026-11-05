@@ -1,6 +1,5 @@
 import { statfsSync } from "node:fs"
-import { appendFile, lstat, mkdir, readdir, stat, unlink } from "node:fs/promises"
-import { homedir } from "node:os"
+import { appendFile, mkdir, stat, unlink } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 
 import {
@@ -23,6 +22,7 @@ import { pending } from "../ops-outbox/drain"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
 import { guardProbe } from "./guard-probe"
+import { nightlyClean } from "./nightly-clean"
 
 // ops-tick: runner-steady-tick's timed beats, run as a script with no model call. Each beat runs at its old cron, in machine wall time as CronCreate ran it, runs the same script, and queues what that script prints for the session it went to before, through notify.sh and the ops relay (ADR 0010); a beat whose script prints nothing sends nothing. The Lanes keeper comes in a later change; the 98% move to GLM is retired (Inbox #i827) for the account rotation (`scripts/ops/usage/login-flip.py`).
 export const CYCLE_SECONDS = 60
@@ -476,48 +476,6 @@ const glmCredits = async (ctx: Context) => {
   )
 }
 
-// The shared turbo cache's entries last modified over 7 days ago, removed once a week; a missing or unreadable folder logs and removes nothing.
-const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
-export const turboPrune =
-  (dir = TURBO_CACHE) =>
-  async (ctx: Context) => {
-    const cutoff = ctx.now.getTime() - 7 * 86_400_000
-    let removed = 0
-    let kept = 0
-    let freed = 0
-    let failure = ""
-    const entries = await readdir(dir, { withFileTypes: true }).catch(
-      (err: NodeJS.ErrnoException) => {
-        failure =
-          err.code === "ENOENT"
-            ? `no folder ${dir}`
-            : `unreadable ${dir}: ${err.code ?? err.message}`
-        return null
-      },
-    )
-    for (const entry of entries ?? []) {
-      if (!entry.isFile()) continue
-      const path = join(dir, entry.name)
-      const info = await lstat(path).catch(() => null)
-      if (!info) continue
-      if (info.mtimeMs >= cutoff) {
-        kept++
-        continue
-      }
-      const gone = await unlink(path)
-        .then(() => true)
-        .catch(() => false)
-      if (!gone) continue
-      removed++
-      freed += info.size
-    }
-    const line = entries
-      ? `removed ${removed}, kept ${kept}, freed ${Math.round(freed / 1_048_576)} MB`
-      : failure
-    await mkdir(join(ctx.ops, "log"), { recursive: true })
-    await appendFile(join(ctx.ops, "log", "turbo-prune.log"), `${isoSeconds(ctx.now)} ${line}\n`)
-  }
-
 const freeBytes = (dir: string): number => {
   const fs = statfsSync(dir)
   return fs.bavail * fs.bsize
@@ -608,7 +566,7 @@ const relayMovedAt = async (outbox: string): Promise<number> => {
   return Math.max(...times)
 }
 
-// Whether this machine runs the relay at all, by its roster row or its resume record; with neither, the Ops sweep relays the outbox (playbook SWEEP.md step 2), so no relay is down.
+// Whether this machine runs the relay at all, by its roster row or its resume record; with neither, Ops' sweep relays the outbox (playbook SWEEP.md step 2), so the watch judges the sweep and never names the relay.
 const hasRelay = async (ctx: Context): Promise<boolean> => {
   if (await Bun.file(join(ctx.ops, "..", "resume", `${RELAY}.sh`)).exists()) return true
   const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
@@ -617,14 +575,47 @@ const hasRelay = async (ctx: Context): Promise<boolean> => {
   return Array.isArray(roster?.agents) && roster.agents.some((a: Agent) => a?.name === RELAY)
 }
 
+// Ops' sweep runs every 15 minutes (SESSIONS.md, Keep the sweep running), so on a machine with no relay a line may wait two sweeps before it counts as late.
+const SWEEP_CYCLE_MS = 15 * 60_000
+
+// When the watch first found no cursor.json, kept in tick/relay-watch-start until one exists: a relay that has never run leaves no cursor for pending() to read, so the lines queued since then are what it judges.
+const neverRanSince = async (ctx: Context, outbox: string): Promise<string | undefined> => {
+  const path = join(ctx.ops, "tick", "relay-watch-start")
+  if (await Bun.file(join(outbox, "cursor.json")).exists()) {
+    await unlink(path).catch(() => {})
+    return undefined
+  }
+  const held = (
+    await Bun.file(path)
+      .text()
+      .catch(() => "")
+  ).trim()
+  if (held) return held
+  await writeAtomic(path, ctx.now.toISOString())
+  return ctx.now.toISOString()
+}
+
+// The Inbox alert's title: the relay's own on a machine that runs it, else the sweep's, each with the next step and naming only what this machine runs.
+const relayDown = (relay: boolean, moved: number): string => {
+  const since = moved ? `since ${isoSeconds(new Date(moved))}` : "since the watch began"
+  if (relay)
+    return moved
+      ? `The ops relay is down: no ops line has gone out ${since}. Resume ${RELAY}.`
+      : `The ops relay has never run: no ops line has gone out ${since}. Resume ${RELAY}.`
+  return moved
+    ? `Ops' sweep is late: no ops line has gone out ${since}. Ops runs its sweep, whose step 2 runs ops:outbox.`
+    : `The outbox relay has never run: no ops line has gone out ${since}, and this machine relays through Ops' sweep. Ops runs its sweep, whose step 2 runs ops:outbox.`
+}
+
 type RelayWatch = { at?: string; by?: string; id?: string; pendingSince?: string }
 
-// The ops relay's watch from outside it: drain.ts's pending peek (which moves nothing) is timed from the first cycle it reads pending, and one Inbox alert update is posted straight to the dashboard with bun run ask, under the ops manager's name, once a line has waited two cycles with no cursor of the relay's moving since, since the relay rewrites its cursors only when a line is pending; the alert is resolved once a cursor moves after it, or when its item is gone; its id is kept in tick/relay-watch.json, so it is posted once a stop; a machine with no relay (hasRelay) posts nothing.
+// The ops relay's watch: a line pending() reads is timed from the first cycle that reads it, and once it has waited two cycles of whoever relays (relayDown) with no cursor moved since, one Inbox alert goes up under the ops manager's name, its id kept in tick/relay-watch.json so it posts once a stop, resolved once a cursor moves after it or its item is gone.
 const relayWatch = async (ctx: Context) => {
   const outbox = join(ctx.ops, "outbox")
   const statePath = join(ctx.ops, "tick", "relay-watch.json")
   const state = (await readJson(statePath).catch(() => null)) as RelayWatch | null
   const moved = await relayMovedAt(outbox)
+  const start = await neverRanSince(ctx, outbox)
   if (state?.id && state.by) {
     if (moved <= Date.parse(state.at ?? "")) return
     const done = await ctx.run([
@@ -645,7 +636,7 @@ const relayWatch = async (ctx: Context) => {
     await unlink(statePath)
     return
   }
-  if (!(await hasRelay(ctx)) || (await pending(outbox)).length === 0) {
+  if ((await pending(outbox, start)).length === 0) {
     if (state) await unlink(statePath)
     return
   }
@@ -654,11 +645,9 @@ const relayWatch = async (ctx: Context) => {
     await writeAtomic(statePath, JSON.stringify({ pendingSince: ctx.now.toISOString() }))
     return
   }
-  if (ctx.now.getTime() - since < 2 * RELAY_CYCLE_MS) return
-  const { by, id } = await postAlert(
-    ctx,
-    `The ops relay is down: no ops line has gone out ${moved ? `since ${isoSeconds(new Date(moved))}` : "with no run on record"}. Resume ${RELAY}.`,
-  )
+  const relay = await hasRelay(ctx)
+  if (ctx.now.getTime() - since < 2 * (relay ? RELAY_CYCLE_MS : SWEEP_CYCLE_MS)) return
+  const { by, id } = await postAlert(ctx, relayDown(relay, moved))
   await writeAtomic(
     statePath,
     JSON.stringify({ at: ctx.now.toISOString(), by, id, pendingSince: state?.pendingSince }),
@@ -676,7 +665,12 @@ export const BEATS: Beat[] = [
   { cron: "43 * * * *", name: "glm-credits", run: glmCredits, to: "ops/log/glm-credits.log" },
   { cron: "7 */2 * * *", name: "optimizer-tick", run: words("optimizer tick"), to: "optimizer" },
   { cron: "13 21 * * *", name: "optimizer-daily", run: words("optimizer daily"), to: "optimizer" },
-  { cron: "29 3 * * 0", name: "turbo-prune", run: turboPrune(), to: "ops/log/turbo-prune.log" },
+  {
+    cron: "0 3 * * *",
+    name: "nightly-clean",
+    run: nightlyClean(),
+    to: "ops/log/nightly-clean.log, and the Inbox",
+  },
   { cron: "17 * * * *", name: "trash-purge", run: trashPurge(), to: "ops/log/trash-purge.log" },
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
   { cron: "*/5 * * * *", name: "relay-watch", run: relayWatch, to: "the Inbox, by bun run ask" },

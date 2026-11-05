@@ -1,9 +1,10 @@
 "use client"
 
-import { RiFullscreenLine } from "@remixicon/react"
+import { RiFullscreenLine, RiWindowLine } from "@remixicon/react"
 import { cn } from "cn"
 import { type KeyboardEvent, useState } from "react"
 
+import { useAsideDocs } from "@/components/dashboard/aside-docs"
 import { HTML_VIEWER } from "@/components/dashboard/viewer/documents"
 import { FileIcon } from "@/components/dashboard/viewer/file-icons"
 import { type ViewerItem, VIEWERS } from "@/components/dashboard/viewer/registry"
@@ -11,6 +12,7 @@ import { useAttachment } from "@/components/dashboard/viewer/use-attachment-url"
 import { Download, Missing, Viewer } from "@/components/dashboard/viewer/viewer"
 import { Hint } from "@/components/hint"
 import { Button } from "@/components/ui/button"
+import { fileDoc, opensInAside } from "@/lib/aside-docs"
 import { BAR_ITEM, FLOATING_BAR } from "@/lib/floating-bar"
 import { foldPairs } from "@/lib/pictures"
 
@@ -135,9 +137,10 @@ function WideSide({
 // a card has no slide before or after to hand the arrows to
 const stay = () => {}
 
-// A lone HTML page live in the card at its full width, through the viewer's own HTML view (its sandboxed frame, links opened in a tab, a page that leaves put back, Spinner and Unreadable), never taking the focus, with a floating bar in its corner that saves it (Download) and opens it full screen.
+// A lone HTML page live in the card at its full width, through the viewer's own HTML view (its sandboxed frame, links opened in a tab, a page that leaves put back, Spinner and Unreadable), never taking the focus, with a floating bar in its corner that saves it (Download) and opens it in an aside tab, or full screen outside the aside.
 function LivePage({ item, onOpen }: { item: ViewerItem; onOpen: () => void }) {
   const { missing, url } = useAttachment(item.id, true)
+  const inTab = useAsideDocs() !== null
   return (
     <div className="relative flex h-80 items-center justify-center overflow-hidden rounded-md border">
       {url ? (
@@ -148,13 +151,13 @@ function LivePage({ item, onOpen }: { item: ViewerItem; onOpen: () => void }) {
       <div className={cn(FLOATING_BAR, "absolute top-2 right-2")}>
         <Download className={cn("size-8", BAR_ITEM)} item={item} />
         <Button
-          aria-label={`Open ${item.name} full screen`}
+          aria-label={`Open ${item.name} ${inTab ? "in a tab" : "full screen"}`}
           className={cn("size-8", BAR_ITEM)}
           onClick={onOpen}
           size="icon-sm"
           variant="ghost"
         >
-          <RiFullscreenLine />
+          {inTab ? <RiWindowLine /> : <RiFullscreenLine />}
         </Button>
       </div>
     </div>
@@ -220,16 +223,20 @@ export function AttachmentThumbs({
   )
 }
 
-// The one component a surface drops in for a set of files: the thumbnails, and the viewer they open (the Inbox's ask today).
+// The one component a surface drops in for a set of files: the thumbnails, and what they open: in the aside, a page, a markdown document or a PDF in an aside tab of its own, and anything else the viewer, at its place.
 export function Attachments({ items: files }: { items: ViewerItem[] }) {
   const items = foldPairs(files)
   const [open, setOpen] = useState(false)
   const [index, setIndex] = useState(0)
+  const openInAside = useAsideDocs()
   return (
     <>
       <AttachmentThumbs
         items={items}
         onOpen={(at) => {
+          const item = items[at]
+          if (openInAside && item && !item.pair && opensInAside(item.kind))
+            return openInAside(fileDoc(item))
           setIndex(at)
           setOpen(true)
         }}
