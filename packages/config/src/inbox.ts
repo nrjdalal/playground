@@ -6,7 +6,7 @@ export const ASK_CODE_COLUMNS = 37
 // What an Inbox answer tells its poster: one JSON line after this lead, typed through deliver(), so the poster parses it rather than reading prose.
 export const ANSWER_LEAD = "[inbox-answer]"
 
-// The verbs that reach a poster: a pick of an option, a draft sent, saved as a draft or discarded, an item set aside, a card dismissed, an update done, a secret submitted; a verb that changes only the owner's view (Seen, Snooze, Archive) sends nothing.
+// The verbs that reach a poster: a pick of an option, a draft sent, saved as a draft or discarded, an item set aside, a card dismissed, an update done, a secret submitted; a verb that changes only the owner's view (Seen, Later, Archive) sends nothing.
 export const ANSWER_VERBS = [
   "discard",
   "dismiss",

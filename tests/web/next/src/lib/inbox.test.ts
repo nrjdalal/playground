@@ -447,7 +447,7 @@ describe("inboxView", () => {
     expect(done.map((i) => i.ref)).toEqual([32, 30])
   })
 
-  test("a read update woken from Snooze stays in the list until he presses Done or Dismiss, as one never put off does", () => {
+  test("a read update woken from Later stays in the list until he presses Done or Dismiss, as one never put off does", () => {
     const after = (ms: number) => new Date(Date.parse(CLOCKS_STOPPED_AT) + ms).toISOString()
     const woken = item({
       answer: { snoozedUntil: after(2 * 60_000) },
@@ -481,7 +481,7 @@ describe("inboxView", () => {
     expect(shown.map((i) => i.ref)).toEqual([8, 9])
   })
 
-  test("a set-aside item goes to Archived at once, newest first, never to the list or Done", () => {
+  test("a set-aside item goes to Archive at once, newest first, never to the list or Done", () => {
     const cleared = (ref: number) =>
       item({
         answer: { at: ago(60_000), choice: "clear" },
@@ -505,7 +505,7 @@ describe("inboxView", () => {
     expect(done.map((i) => i.ref)).toEqual([11])
   })
 
-  test("a set-aside item he dismissed leaves Archived for Done", () => {
+  test("a set-aside item he dismissed leaves Archive for Done", () => {
     const dismissed = item({
       answer: { at: ago(120_000), choice: "clear", dismissedAt: ago(60_000) },
       kind: "decision",
@@ -1700,7 +1700,7 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
     for (const card of [read, answered, replied]) expect(foldsByDefault(card, NOW)).toBe(true)
   })
 
-  test("every card on the In progress, Archived and Done shelves folds", () => {
+  test("every card on the In progress, Archive and Done shelves folds", () => {
     const working = item({
       answer: { at: ago(60_000), choice: "approve" },
       kind: "decision",
@@ -1724,7 +1724,7 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
     for (const card of [working, archived, settled]) expect(foldsByDefault(card, NOW)).toBe(true)
   })
 
-  test("a snoozed ask folds until its time, then shows open", () => {
+  test("an ask put away with Later folds until its time, then shows open", () => {
     const snoozed = item({
       answer: { snoozedUntil: new Date(NOW + 60_000).toISOString() },
       kind: "decision",
@@ -1779,7 +1779,7 @@ describe("a card's verbs on each state (#882)", () => {
     }
   })
 
-  test("a waiting one put off until a time keeps the same verbs on Snoozed", () => {
+  test("a waiting one put off until a time keeps the same verbs on Later", () => {
     const snoozed = item({ answer: { snoozedUntil: "2026-11-04T10:00:00.000Z" }, kind: "draft" })
     expect(verbs(snoozed, "snoozed")).toEqual(["seen", "later", "archive", "dismiss"])
   })

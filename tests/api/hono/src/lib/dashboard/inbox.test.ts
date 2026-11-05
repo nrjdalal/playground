@@ -2018,7 +2018,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(answered).toMatchObject({ item: { status: "approved" }, ok: true })
   })
 
-  test("an item put away with Snooze edits as an open one, and so does one replied to in chat (PG-2547, #903)", async () => {
+  test("an item put away with Later edits as an open one, and so does one replied to in chat (PG-2547, #903)", async () => {
     const snoozed = await post(decision(SLACK))
     const scheduled = await store.scheduleItem(
       db,
@@ -2202,7 +2202,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(dismissed(await store.getItem(db, read.id))).toBeUndefined()
     const waiting = await answered(PREVIEWS.ask, "approve")
     expect(dismissed(await store.getItem(db, waiting.id))).toBeUndefined()
-    // one he set aside stays on the Archived shelf, its read closing it without a Dismiss
+    // one he set aside stays on the Archive shelf, its read closing it without a Dismiss
     const aside = await post(decision(PREVIEWS.ship))
     await store.answerItem(db, aside.id, { action: "clear" }, { actor })
     await store.readAnswer(db, (await store.getItem(db, aside.id))!, at)
@@ -2323,7 +2323,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       )
     })
 
-    test("Move back returns an archived item to the list as it was, and Later takes it off Archived until its time", async () => {
+    test("Move back returns an archived item to the list as it was, and Later takes it off Archive until its time", async () => {
       const posted = await post(decision(PREVIEWS.ship))
       await store.answerItem(db, posted.id, { action: "archive" }, { actor })
       const back = await store.answerItem(db, posted.id, { action: "unarchive" }, { actor })
@@ -3149,7 +3149,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect((await store.listItems(db, later)).items.map((i) => i.id)).not.toContain(posted.id)
   })
 
-  test("a set-aside item stays in the list past a week, for the Archived shelf, and never counts", async () => {
+  test("a set-aside item stays in the list past a week, for the Archive shelf, and never counts", async () => {
     const posted = await post(decision(PREVIEWS.ship))
     const delivered = async () => ({
       at: new Date().toISOString(),
@@ -3609,7 +3609,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       old.items.every(
         (i) =>
           i.status === "open" ||
-          // a set-aside item stays, however old, for the Archived shelf
+          // a set-aside item stays, however old, for the Archive shelf
           i.status === "cleared" ||
           (i.kind === "update" && i.readAt === null) ||
           store.deliveryFailed(i) ||
@@ -3631,7 +3631,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const held = await store.listItems(db, now)
     expect(held.items.map((i) => i.id)).not.toContain(posted.id)
     expect(held.count).toBe(base.count - 1)
-    // asleep, it comes apart from items, for the Snoozed shelf alone, so no reader of items takes it as waiting
+    // asleep, it comes apart from items, for the Later shelf alone, so no reader of items takes it as waiting
     expect(held.snoozed.map((i) => i.id)).toContain(posted.id)
     const awake = await store.listItems(db, new Date("2026-10-08T09:00:00.000Z"))
     expect(awake.items.map((i) => i.id)).toContain(posted.id)

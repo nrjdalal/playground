@@ -53,7 +53,7 @@ export function sendsOnEnter(event: EnterKey, enterAddsLine = false) {
   return !enterAddsLine || event.metaKey || event.ctrlKey
 }
 
-// The box's id, so a pending bubble's Unsend, Dismiss or Retry can hand focus back to it once the button is gone. Playground's own box keeps the bare id, which an Inbox card's Chat about it focuses; any other box takes its session's name and thread after it, so two boxes on one page never share an id.
+// The box's id, so a pending bubble's Unsend, Dismiss or Retry can hand focus back to it once the button is gone. Playground's own box keeps the bare id, which an Inbox card's Reply focuses; any other box takes its session's name and thread after it, so two boxes on one page never share an id.
 export const COMPOSER_ID = "composer"
 export const composerId = (
   worker: Pick<Worker, "name" | "role">,
@@ -110,7 +110,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
   const hint = touch
     ? "Enter adds a line, the button sends"
     : "Enter sends, Shift+Enter adds a line"
-  // An inbox item this message answers: picked by its Chat about it button, or named in the words as re #iN; Playground's own box alone answers one, as the Inbox is his.
+  // An inbox item this message answers: picked by its Reply button, or named in the words as re #iN; Playground's own box alone answers one, as the Inbox is his.
   const id = composerId(worker, dispatcher, threadId)
   const main = id === COMPOSER_ID
   const chosen = useReply()

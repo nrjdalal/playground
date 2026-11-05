@@ -239,7 +239,7 @@ export function DashboardAside({ children }: { children: ReactNode }) {
     setTab(home ? "page" : "chat")
     if (!home) setSide("chat")
   }
-  // Chat about it in the Inbox brings Playground's chat forward as it renders, so the click's own focus finds his box shown (its flushSync); words handed to the composer (Edit) do so after, and either focuses his box once it shows
+  // Reply in the Inbox brings Playground's chat forward as it renders, so the click's own focus finds his box shown (its flushSync); words handed to the composer (Edit) do so after, and either focuses his box once it shows
   const reply = useReply()
   const [replied, setReplied] = useState(reply)
   if (replied !== reply) {

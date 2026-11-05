@@ -640,7 +640,7 @@ export type InboxItem =
       preview: InboxUpdate
     })
 
-// The list the dashboard shows, in the order it shows it, and the count on its Inbox tab; snoozed: the open items and updates put away until a time still ahead, and archived: those he archived, each kept out of items, which every reader takes as awake, for the Inbox's Snoozed and Archived shelves alone.
+// The list the dashboard shows, in the order it shows it, and the count on its Inbox tab; snoozed: the open items and updates put away until a time still ahead, and archived: those he archived, each kept out of items, which every reader takes as awake, for the Inbox's Later and Archive shelves alone.
 export type InboxList = {
   items: InboxItem[]
   archived: InboxItem[]
@@ -692,7 +692,7 @@ export const itemTag = (ref: number): string => `#i${ref}`
 
 const REF_RE = /^#?i(\d{1,9})$/
 
-// A chat reply names the item it is about (`re #iN`), typed by a picked Chat about it or his own words; the web's TYPED holds the same pattern, and a test holds the two equal.
+// A chat reply names the item it is about (`re #iN`), typed by a picked Reply or his own words; the web's TYPED holds the same pattern, and a test holds the two equal.
 export const REPLY_RE = /\bre #i(\d{1,9})\b/i
 
 // An item's fields, kept apart by kind, so a preview reads as its own kind's.
@@ -1051,7 +1051,7 @@ export const archivedAt = (item: InboxItem): string | null =>
     ? item.answer.archivedAt
     : null
 
-// Pure: whether an item asks of him now rather than at a scheduled later time, or once he moves it back from Archived.
+// Pure: whether an item asks of him now rather than at a scheduled later time, or once he moves it back from Archive.
 export const awake = (item: InboxItem, now: Date): boolean =>
   snoozedUntil(item, now) === null && archivedAt(item) === null
 
@@ -1247,7 +1247,7 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
       ),
     ),
   )
-  // what needs him and what waits on a verb are never capped, so a pile of unread updates cannot push a decision or a card in hand out of the list or the count; the snoozed, the archived and every set-aside (cleared) item not dismissed, however old, come too, for the Inbox's shelves
+  // what needs him and what waits on a verb are never capped, so a pile of unread updates cannot push a decision or a card in hand out of the list or the count; what is put away with Later, the archived and every set-aside (cleared) item not dismissed, however old, come too, for the Inbox's shelves
   const [open, waiting, rest, shelved] = await Promise.all([
     db.select().from(inboxItem).where(needsYou),
     db.select().from(inboxItem).where(pending),
@@ -1422,7 +1422,7 @@ const CHANGED: Refused = {
   ok: false,
 }
 
-// Archive: what still waits on him, or an update in his list, leaves the list and its count, unanswered, and its poster is told nothing, so it keeps waiting; Move back, Later or Dismiss takes it off the Archived shelf.
+// Archive: what still waits on him, or an update in his list, leaves the list and its count, unanswered, and its poster is told nothing, so it keeps waiting; Move back, Later or Dismiss takes it off the Archive shelf.
 async function archive(
   db: Database,
   current: InboxItem,
@@ -1882,7 +1882,7 @@ async function recordDelivery(
   return row ? toItem(row) : getItem(db, id)
 }
 
-// Later: pushes an open decision or draft, or an update in his list, out of it until a time, recorded in its answer's snoozedUntil, which answering or a chat reply replaces at once; the poster waits as before, and an archived one leaves the Archived shelf for it. A chat reply its poster has not closed is replaced in turn, since he puts away an item he opened again from its card.
+// Later: pushes an open decision or draft, or an update in his list, out of it until a time, recorded in its answer's snoozedUntil, which answering or a chat reply replaces at once; the poster waits as before, and an archived one leaves the Archive shelf for it. A chat reply its poster has not closed is replaced in turn, since he puts away an item he opened again from its card.
 export async function scheduleItem(
   db: Database,
   id: string,
@@ -2037,7 +2037,7 @@ async function recordAck(
   return linked ?? acked ?? item
 }
 
-// The ack's stamp, the first close's time, and with it why a go has no link, in one write; a closed answer moves to Done at once, as his Dismiss moves it, keeping an earlier Dismiss's time, but for one he set aside, which stays on the Archived shelf until he dismisses it.
+// The ack's stamp, the first close's time, and with it why a go has no link, in one write; a closed answer moves to Done at once, as his Dismiss moves it, keeping an earlier Dismiss's time, but for one he set aside, which stays on the Archive shelf until he dismisses it.
 async function stamp(db: Database, id: string, now: Date, noLink?: string): Promise<void> {
   const at = sql`${now.toISOString()}::text`
   const dismissal = sql`case when ${inboxItem.answer} ->> 'choice' = 'clear' then '{}'::jsonb else jsonb_build_object('dismissedAt', coalesce(${inboxItem.answer} ->> 'dismissedAt', ${at})) end`
@@ -2078,7 +2078,7 @@ export async function staleItems(
   return rows.map(toItem)
 }
 
-// Every item still open (a decision or draft not yet answered, a snoozed one and one answered in chat included, until it moves to Done), oldest first, one sender's alone when from is given: what a session reads before it posts, so it names an open item on the same thing rather than posting it twice (`bun run ask open`).
+// Every item still open (a decision or draft not yet answered, one put away with Later and one answered in chat included, until it moves to Done), oldest first, one sender's alone when from is given: what a session reads before it posts, so it names an open item on the same thing rather than posting it twice (`bun run ask open`).
 export async function openItems(db: Database, from?: string): Promise<InboxItem[]> {
   const rows = await db
     .select()
