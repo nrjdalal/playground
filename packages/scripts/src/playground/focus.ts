@@ -4,11 +4,11 @@ import { parseArgs } from "node:util"
 
 import { endFocus, startFocus } from "../pr-merge/held"
 
-// playground focus: one session gets the Mac for a stretch, while every merge, every other session's heavy run and every new session waits, and the Inbox holds what comes in quiet; focus.json in the data folder is the one record each part reads, every part ends at its `until` by itself, and ops-tick's focus-card beat posts the Inbox card once it has.
+// playground focus: one session gets the Mac for a stretch, while every merge, every other session's heavy run and every new session but its own reviewer and tester waits, and the Inbox holds what comes in quiet; focus.json in the data folder is the one record each part reads, every part ends at its `until` by itself, and ops-tick's focus-card beat posts the Inbox card once it has.
 
 export const MAX_MINUTES = 180
 const DEFAULT_MINUTES = 120
-// ops' upkeep, which focus never holds (run-slot.sh's focus_holds names the same two)
+// ops' upkeep, which focus never holds (run-slot.sh's focus_spares names the same two)
 export const UPKEEP = ["ops-dashboard", "ops-tick"]
 
 export type Focus = { reason: string; session: string; since: string; until: string }
