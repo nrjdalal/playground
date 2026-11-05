@@ -232,6 +232,7 @@
   See the glossary's Dispatcher, Manager, Worker and Runner.
 - Every group's label opens and closes it, the label one button with its chevron after its word (`labelToggle` and `LabelChevron` in `app-sidebar.tsx`; Threads' word and chevron alone, beside its pager), and this browser keeps each group's state across reloads in localStorage's `dashboard.sidebar.groups.v1` (`useGroupOpen` in `web/next/src/lib/sidebar-groups.ts`).
   Scripts and Other start closed and every other group open.
+  A browser whose storage throws (site data blocked) shows each group at that default and keeps its toggles for the tab alone (`readGroups`, `saveGroup`), so the dashboard never fails on it.
   A closed group still shows a session waiting on you or open in the view (`keepsOther`, as Other keeps its rows; an Orchestrators or Subagents row while its lead or a checker under it does, `keepsNested`), so closing a group hides nothing that waits on you.
   A closed Orchestrators shows those rows unsorted, so no drag reorders part of the list; a closed Threads hides its pager with its rows, and a closed Yard group shows no row.
   On the collapsed rail, where no label shows, a closed group shows those kept rows alone, as Other does there.

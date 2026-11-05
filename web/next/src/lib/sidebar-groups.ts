@@ -16,8 +16,6 @@ export const GROUPS_KEY = "dashboard.sidebar.groups.v1"
 
 export type GroupsOpen = Partial<Record<NavGroup, boolean>>
 
-type Store = Pick<Storage, "getItem" | "setItem">
-
 // Pure: the stored states, keeping only true or false values, and none from a missing or malformed value.
 export const parseGroups = (raw: string | null): GroupsOpen => {
   try {
@@ -35,15 +33,38 @@ export const parseGroups = (raw: string | null): GroupsOpen => {
 export const groupOpen = (stored: GroupsOpen, group: NavGroup, initial: boolean): boolean =>
   stored[group] ?? initial
 
-// Writes one group's state beside the others'.
-export const saveGroup = (store: Store, group: NavGroup, open: boolean) =>
-  store.setItem(
-    GROUPS_KEY,
-    JSON.stringify({ ...parseGroups(store.getItem(GROUPS_KEY)), [group]: open }),
-  )
+// The stored value, or null when the browser's storage throws (site data blocked), which reads as no stored state, every group at its default.
+export const readGroups = (store: () => Pick<Storage, "getItem">): string | null => {
+  try {
+    return store().getItem(GROUPS_KEY)
+  } catch {
+    return null
+  }
+}
+
+// Writes one group's state beside the others' (current) and returns the new value; a store that throws leaves it unwritten, and the page keeps working on this tab's copy.
+export const saveGroup = (
+  store: () => Pick<Storage, "setItem">,
+  current: string | null,
+  group: NavGroup,
+  open: boolean,
+): string => {
+  const next = JSON.stringify({ ...parseGroups(current), [group]: open })
+  try {
+    store().setItem(GROUPS_KEY, next)
+  } catch {
+    // blocked storage keeps the state in this tab alone (kept)
+  }
+  return next
+}
 
 // Fired on a change in this tab, since the storage event reaches only other tabs.
 const CHANGED = "dashboard-sidebar-groups"
+
+// This tab's last write, which a group reads while the browser's storage throws, so a group still opens and closes while the tab lives.
+let kept: string | null = null
+
+const snapshot = () => readGroups(() => localStorage) ?? kept
 
 const subscribe = (notify: () => void) => {
   window.addEventListener("storage", notify)
@@ -59,14 +80,10 @@ export function useGroupOpen(
   group: NavGroup,
   initial: boolean,
 ): [boolean, (open: boolean) => void] {
-  const raw = useSyncExternalStore(
-    subscribe,
-    () => localStorage.getItem(GROUPS_KEY),
-    () => null,
-  )
+  const raw = useSyncExternalStore(subscribe, snapshot, () => null)
   const setOpen = useCallback(
     (open: boolean) => {
-      saveGroup(localStorage, group, open)
+      kept = saveGroup(() => localStorage, snapshot(), group, open)
       window.dispatchEvent(new Event(CHANGED))
     },
     [group],

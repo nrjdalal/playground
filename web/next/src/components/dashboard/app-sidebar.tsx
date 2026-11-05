@@ -1340,11 +1340,11 @@ function SortableManager({
   })
 }
 
-// The Orchestrators group, each row by its role word (Builder, Planner): A to Z by roster title until a row is dragged, Move up and Move down in each row's menu, and Space then the arrows then Space on a focused row; a drop is its own confirmation and saves the whole order, and Reset order in the label's menu forgets it. A stored sidebar, muted until the live one is read, drags nothing.
 // Pure: whether a closed group keeps a nested row: its lead or any member under it keeps (keepsOther), so a checker waiting under an idle manager still shows.
 export const keepsNested = <T,>(lead: T, members: T[], keep: (item: T) => boolean): boolean =>
   [lead, ...members].some(keep)
 
+// The Orchestrators group, each row by its role word (Builder, Planner): A to Z by roster title until a row is dragged, Move up and Move down in each row's menu, and Space then the arrows then Space on a focused row; a drop is its own confirmation and saves the whole order, and Reset order in the label's menu forgets it. A stored sidebar, muted until the live one is read, drags nothing.
 function ManagersGroup({
   count,
   keep,
