@@ -973,8 +973,8 @@ export function InboxCard({
       </QuestionnaireDescription>
     )
 
-  // a folded row keeps the answers that need nothing its body holds: Approve and Deny, an update's Approve link, Retry and Check it for me, but not a labelled ask's pick, a secret's value or a draft's words
-  const needsBody = outcome === null && (labels !== null || secretAsk || item.kind === "draft")
+  // a folded row keeps the answers that need nothing its body holds: an update's Approve link, Retry and Check it for me, but not a decision's pick, a secret's value or a draft's words
+  const needsBody = outcome === null && (choices !== null || secretAsk || item.kind === "draft")
   const left =
     folded && needsBody ? null : outcome !== null ? (
       sendUnconfirmed(item) && dispatcher ? (
