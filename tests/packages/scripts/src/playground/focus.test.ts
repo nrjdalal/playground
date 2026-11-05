@@ -263,6 +263,11 @@ describe("playground focus", () => {
     expect(printed.at(-1)).toBe(
       "focus ended for worker-f: 3 runs queued while it stood, 12m0s in all (measured from run-slot.runs.log)",
     )
+    const cards: FocusCard[] = []
+    expect(await focusCard(m.data, end, async (card) => void cards.push(card))).toBe("posted")
+    expect(cards.map((card) => card.title)).toEqual([
+      "Focus for worker-f ended: 3 runs queued while it stood, 12m0s in all",
+    ])
   })
 })
 
