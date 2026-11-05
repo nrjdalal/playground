@@ -77,10 +77,10 @@ Each decision shows its options as choices: press a number key, or click one, th
 - A yes or no shows **Approve**, which tells the session to carry it out, and **Deny**, which tells it not to, each over one line saying what it does.
 - A choice between real alternatives shows lettered options, A to E, each over what it does, then **None of these**.
 
-Once you answer, the card names the option you picked, such as `You picked B: Hotfix main`.
+Once you answer, the card names the option you picked, such as `B · Hotfix main` or `Approve · Ship 3f9a2c1 to main`.
 
 Every open card ends in a comment box above its buttons.
-On a decision or draft waiting for you it reads **Add an optional comment**: what you type goes to the session with whatever you answer, and the answered card shows it as Your note.
+On a decision or draft waiting for you it reads **Add an optional comment**: what you type goes to the session with whatever you answer, and the answered card shows it under its result as `You: <your words>`.
 
 A decision can carry pictures, shown as square previews in a grid of four by four under its words: up to sixteen, or fifteen and a tile saying how many more.
 Click one to see it full screen over the page, blurred and dimmed behind it, one at a time, with nothing else on screen.
@@ -137,7 +137,7 @@ The Dashboard itself sends no message.
 The one thing it sends itself is a Slack message's files: on Send of a Slack draft, or Approve of a Slack message, it puts them in the same thread first, and the card counts them, such as 2 files shared.
 Until then, the card reads 2 files · uploads on Send under them.
 
-Until the session confirms it, the card reads what is happening, such as Sending in Slack…, Saving a Slack draft… or Being carried out.
+Until the session confirms it, the card's light spins blue; its line adds a word only when the answer waits or fails, such as Queued for Ops or Send failed.
 Once confirmed, the card links to where it landed, such as Open thread for a Slack message.
 A Draft that Slack refused, because that conversation already holds one, reads in gray Draft not saved, with the reason.
 
@@ -205,7 +205,7 @@ On a decision or draft, a comment with no answer asks for changes: the session c
 Typing `re #i41` anywhere in a message to Alpha marks the card the same way: your chat shows Replying to #i41 above the box, and the card's top line reads Replying until you send.
 
 A reply counts as acting on the item.
-It leaves the Inbox square's count at once and stays in the list, its card reading You replied, with your words, and that the session is on it, until the session closes it.
+It leaves the Inbox square's count at once and stays in the list, its card reading `You: "<your words>"` under a blue light until the session closes it.
 
 ## While you look
 
