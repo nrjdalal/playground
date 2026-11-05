@@ -4,7 +4,7 @@ import { parseArgs } from "node:util"
 
 import { endFocus, startFocus } from "../pr-merge/held"
 
-// playground focus: one session gets the Mac for a stretch, while every merge, every other session's heavy run and every new session waits; focus.json in the data folder is the one record each part reads, and every part ends at its `until` by itself.
+// playground focus: one session gets the Mac for a stretch, while every merge, every other session's heavy run and every new session waits, and the Inbox holds what comes in quiet; focus.json in the data folder is the one record each part reads, every part ends at its `until` by itself, and ops-tick's focus-card beat posts the Inbox card once it has.
 
 export const MAX_MINUTES = 180
 const DEFAULT_MINUTES = 120
@@ -129,11 +129,23 @@ const lift = async (data: string, now: Date) => {
   if (await Bun.file(path).exists()) await rename(path, `${path}.lifted-${stamp(now)}`)
 }
 
+// The measured line for a focus that ended at end, from run-slot.runs.log
+const summary = async (data: string, focus: Focus, end: Date) => {
+  const log = Bun.file(join(data, "ops", "run-slot.runs.log"))
+  const { runs, seconds } = waits((await log.exists()) ? await log.text() : "", focus, end)
+  return `${runs} runs queued while it stood, ${Math.floor(seconds / 60)}m${seconds % 60}s in all`
+}
+
+// off ends a standing focus at now, so its record lapses and the focus-card beat posts its card
 const off = async (deps: FocusDeps): Promise<number> => {
   const now = deps.now()
   const focus = await readFocus(deps.data)
   await lift(deps.data, now)
-  if (focus) await rename(focusPath(deps.data), `${focusPath(deps.data)}.ended-${stamp(now)}`)
+  if (focus && now.getTime() < Date.parse(focus.until))
+    await Bun.write(
+      focusPath(deps.data),
+      `${JSON.stringify({ ...focus, until: now.toISOString() }, null, 2)}\n`,
+    )
   let merges: "kept" | "none" | "removed"
   try {
     merges = await endFocus(deps.heldPath)
@@ -146,12 +158,37 @@ const off = async (deps: FocusDeps): Promise<number> => {
     console.log("focus: none stands")
     return 0
   }
-  const log = Bun.file(join(deps.data, "ops", "run-slot.runs.log"))
-  const { runs, seconds } = waits((await log.exists()) ? await log.text() : "", focus, now)
   console.log(
-    `focus ended for ${focus.session}: ${runs} runs queued while it stood, ${Math.floor(seconds / 60)}m${seconds % 60}s in all (measured from run-slot.runs.log)`,
+    `focus ended for ${focus.session}: ${await summary(deps.data, focus, now)} (measured from run-slot.runs.log)`,
   )
   return 0
+}
+
+export type FocusCard = {
+  kind: "update"
+  preview: { outcome: "finding"; text: string }
+  title: string
+}
+
+// The focus-card beat: once focus.json has lapsed, by off or at its end, the Inbox gets one update naming what queued while it stood, and focus.json is set aside so the card posts once; post throws when the card did not post, which leaves focus.json for the next beat.
+export async function focusCard(
+  data: string,
+  now: Date,
+  post: (card: FocusCard) => Promise<void>,
+): Promise<"none" | "posted" | "standing"> {
+  const focus = await readFocus(data)
+  if (!focus) return "none"
+  if (now.getTime() < Date.parse(focus.until)) return "standing"
+  await post({
+    kind: "update",
+    preview: {
+      outcome: "finding",
+      text: `Focus was for: ${focus.reason}\nMeasured from run-slot.runs.log.\nWhat came into the Inbox while it stood counts again.`,
+    },
+    title: `Focus for ${focus.session} ended: ${await summary(data, focus, new Date(focus.until))}`,
+  })
+  await rename(focusPath(data), `${focusPath(data)}.ended-${stamp(now)}`)
+  return "posted"
 }
 
 const fail = (why: string, code = 2) => {

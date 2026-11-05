@@ -160,7 +160,7 @@ import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
 import { setReply, useReply, useTypedReply } from "@/lib/reply"
 import { iconTone, type ShownState, statusIcon } from "@/lib/status-icons"
-import { inboxMark, readMark } from "@/lib/tab-dot"
+import { inboxMark, loudItems, readMark } from "@/lib/tab-dot"
 import { fullTime, relativeTime } from "@/lib/time"
 
 const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
@@ -235,6 +235,7 @@ const posterTone = (from: string): string | undefined => {
 // The item's kind as an icon and a word, its id, who posted it, and Updated when it changed since his last look, in one muted band across the pane at the card's start, ending in one time and a tick: the only place an item says what it is.
 function KindBand({
   busy,
+  focusHeld,
   item,
   now,
   onRead,
@@ -242,6 +243,7 @@ function KindBand({
   updated,
 }: {
   busy: boolean
+  focusHeld: boolean
   item: InboxItem
   now: number
   onRead: () => void
@@ -270,6 +272,14 @@ function KindBand({
           <>
             <span aria-hidden>·</span>
             <span className="text-info">Updated</span>
+          </>
+        )}
+        {focusHeld && (
+          <>
+            <span aria-hidden>·</span>
+            <Hint content="It came in while focus stands, so it counts once focus ends">
+              <span className="text-muted-foreground">Quiet</span>
+            </Hint>
           </>
         )}
         {/* at the right end one time, the last change, then a tick: one to mark it read, two once read, muted */}
@@ -742,6 +752,7 @@ const keyOf = (event: KeyboardEvent): CardKey => {
 // One item as a card: its band, place line and title, then what Approve does or a draft's words, then, once answered or settled, the result on its own line above the footer, wrapping freely, then one footer row with an open card's actions on the left and, on the right, its verbs (verbs()), its chevron, then Reply. The same card sits on every shelf; one that folds by default (foldsByDefault()) shows its band, place line, title, result line and row of choices until opened.
 export function InboxCard({
   defaultOpen = false,
+  focusHeld = false,
   item,
   marked,
   now,
@@ -752,6 +763,8 @@ export function InboxCard({
 }: {
   // a card that folds by default starts opened, as a click on it opens it
   defaultOpen?: boolean
+  // it came in while focus stands, so it waits uncounted until focus ends
+  focusHeld?: boolean
   item: InboxItem
   marked: boolean
   now: number
@@ -1305,6 +1318,7 @@ export function InboxCard({
     >
       <KindBand
         busy={busy}
+        focusHeld={focusHeld}
         item={item}
         now={now}
         onRead={() => read()}
@@ -1639,9 +1653,10 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     upto: string | null
   } | null>(null)
   if (viewing && data && look === null)
-    setLook({ since: readMark("inbox"), upto: inboxMark(items) })
+    setLook({ since: readMark("inbox"), upto: inboxMark(loudItems(data)) })
   if (!viewing && look !== null) setLook(null)
   const updated = (item: InboxItem) => look !== null && updatedSince(item, look.since, look.upto)
+  const quiet = new Set(data?.quiet ?? [])
   const rowIds = rows.map((item) => item.id)
   if (data && order?.join(" ") !== rowIds.join(" ")) setOrder(rowIds)
   // a card he moved back from Archived takes the list's top once it arrives, his own click, never behind the pill
@@ -1810,6 +1825,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
               {rows.map((item) => (
                 <InboxCard
                   key={item.id}
+                  focusHeld={quiet.has(item.id)}
                   item={item}
                   marked={item.ref === reply?.ref}
                   now={now}

@@ -8,6 +8,7 @@ import { z } from "zod"
 import { readAttachment } from "@/lib/dashboard/attachments"
 import { deliver } from "@/lib/dashboard/deliver"
 import { readsLive } from "@/lib/dashboard/fixture"
+import { standingFocus } from "@/lib/dashboard/focus"
 import {
   answerInputSchema,
   answerItem,
@@ -32,6 +33,7 @@ import {
   notFoundErrorResponses,
   validationErrorResponses,
 } from "@/lib/error"
+import { dataDir } from "@/lib/sessions/paths"
 import { ownerApps, runCli } from "@/lib/store/extensions"
 import {
   authMiddleware,
@@ -75,10 +77,13 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Playground's Inbox in priority order: open decisions and drafts, then unread updates, then the rest of the last week, each newest first, with the count of what needs the owner",
+        "Playground's Inbox in priority order: open decisions and drafts, then unread updates, then the rest of the last week, each newest first, with the count of what needs the owner; while `playground focus` stands, `quiet` names each item that came in since it began, an alert update aside, and the count leaves those out until it ends",
       responses: { 200: { description: "OK" }, ...authErrorResponses, ...forbiddenErrorResponses },
     }),
-    async (c) => c.json({ data: await listItems(db) }),
+    async (c) => {
+      const now = new Date()
+      return c.json({ data: await listItems(db, now, await standingFocus(dataDir(), now)) })
+    },
   )
   .get(
     "/attachments/:id",

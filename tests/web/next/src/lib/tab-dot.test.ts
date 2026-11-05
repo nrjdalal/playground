@@ -4,6 +4,7 @@ import { INBOX_REFRESH_MS, inboxPolling } from "../../../../../web/next/src/lib/
 import {
   DOT,
   inboxMark,
+  loudItems,
   newInInbox,
   newInInboxCount,
   readMark,
@@ -29,6 +30,21 @@ const item = (createdAt: string, fields: Record<string, unknown> = {}): Item =>
 const T0 = "2026-10-08T12:00:00.000Z"
 const T1 = "2026-10-08T12:05:00.000Z"
 const T2 = "2026-10-08T12:10:00.000Z"
+
+// What came in while focus stands lights nothing until it ends (#974).
+describe("loudItems", () => {
+  test("leaves out what the list holds quiet, so the count, the dot and a look skip it, and every item once quiet is empty", () => {
+    const old = item(T0)
+    const held = item(T2, { id: "held" })
+    const quiet = { items: [old, held], quiet: ["held"] }
+    expect(loudItems(quiet)).toEqual([old])
+    expect(newInInboxCount(loudItems(quiet), T1)).toBe(0)
+    expect(inboxMark(loudItems(quiet))).toBe(T0)
+    const ended = { items: [old, held], quiet: [] }
+    expect(newInInboxCount(loudItems(ended), T1)).toBe(1)
+    expect(newInInbox(loudItems(ended), T1)).toBe(true)
+  })
+})
 
 // The dot shows only for a Changelog update or something new in the Inbox.
 describe("showsDot", () => {
