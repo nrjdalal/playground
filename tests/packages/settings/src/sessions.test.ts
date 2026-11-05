@@ -1,9 +1,15 @@
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { readSessionNames } from "../../../../packages/settings/src"
+import { ROSTER_KINDS, ROSTER_ROLE_OF_KIND } from "../../../../packages/config/src/kinds"
+import {
+  readSessionNames,
+  readSessionTemplates,
+  sessionTemplates,
+  TEMPLATE_KINDS,
+} from "../../../../packages/settings/src"
 
 const scratch = mkdtempSync(join(tmpdir(), "session-names-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -36,4 +42,51 @@ test("a policy.json's names are the machine's", () => {
     JSON.stringify({ values: { "sessions.names": names } }),
   )
   expect(readSessionNames(data)).toEqual({ aliases: {}, names })
+})
+
+describe("sessions.templates", () => {
+  const defaults = () => readSessionTemplates(mkdtempSync(join(scratch, "templates-")))
+
+  test("the defaults are Assistant, Orchestrator and a second dispatcher on Claude and on GLM, with no email in any", () => {
+    expect(defaults().map((t) => t.label)).toEqual([
+      "Assistant",
+      "Orchestrator",
+      "Second dispatcher on Claude",
+      "Second dispatcher on GLM",
+    ])
+    expect(defaults().some((t) => t.account)).toBe(false)
+  })
+
+  test.each(["../secrets.md", "briefs/builder.md", "/etc/passwd", "a..md"])(
+    "the schema refuses the brief %s, so no path leaves the brief folders",
+    (brief) => {
+      const orchestrator = defaults().find((t) => t.id === "orchestrator")!
+      expect(sessionTemplates.safeParse([{ ...orchestrator, brief }]).success).toBe(false)
+    },
+  )
+
+  test("its kinds are the roster's manager kinds, written out so settings imports no other package at run time", () => {
+    expect<string[]>([...TEMPLATE_KINDS]).toEqual(
+      ROSTER_KINDS.filter((kind) => ROSTER_ROLE_OF_KIND[kind] === "manager"),
+    )
+  })
+
+  test("the schema refuses an id listed twice, and a GLM template with an account or an effort", () => {
+    const [assistant, , , glm] = defaults()
+    expect(sessionTemplates.safeParse([assistant, assistant]).success).toBe(false)
+    expect(sessionTemplates.safeParse([{ ...glm!, account: "someone@example.com" }]).success).toBe(
+      false,
+    )
+    expect(sessionTemplates.safeParse([{ ...glm!, effort: "low" }]).success).toBe(false)
+  })
+
+  test("the Orchestrator is the seatless orchestrator kind, and the second dispatchers take their own brief", () => {
+    const byId = new Map(defaults().map((t) => [t.id, t]))
+    expect(byId.get("orchestrator")).toMatchObject({
+      brief: "orchestrator.md",
+      kind: "orchestrator",
+    })
+    expect(byId.get("second-dispatcher-claude")?.brief).toBe("dispatcher-2.md")
+    expect(byId.get("second-dispatcher-glm")?.brief).toBe("dispatcher-2.md")
+  })
 })
