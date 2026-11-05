@@ -2,8 +2,10 @@ import { describe, expect, spyOn, test } from "bun:test"
 
 // The router's auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets; any secret serves requests that carry no session. Set before the router loads.
 process.env.BETTER_AUTH_SECRET ||= "relay-mac-test-secret-not-for-use-anywhere"
-const { answerRelay, CONNECT_MS, RECYCLE_MS, requireRelay, startRelay } =
+const { answerRelay, CONNECT_MS, RECYCLE_MS, requireRelay, requireSignedWrite, startRelay } =
   await import("../../../../../../api/hono/src/lib/relay/mac")
+const { keyIdOf, pairKeySchema, signedBytes } =
+  await import("../../../../../../packages/message/src/index")
 const { RELAY_MAX_AGE_MS } = await import("../../../../../../api/hono/src/lib/relay/protocol")
 const { dashboardRouter } = await import("../../../../../../api/hono/src/routers/dashboard")
 const { errorHandler } = await import("../../../../../../api/hono/src/lib/error")
@@ -154,6 +156,199 @@ describe("a relayed read that passes", () => {
       }),
     })
     expect(cookie).toBe("session=fake")
+  })
+})
+
+// A browser's key made for the test alone, as the hosted web makes one: P-256, its private half never exported.
+const browserKey = async () => {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
+    "sign",
+    "verify",
+  ])
+  const key = pairKeySchema.parse(await crypto.subtle.exportKey("jwk", pair.publicKey))
+  const { fingerprint, id } = await keyIdOf(key)
+  return { fingerprint, id, key, privateKey: pair.privateKey }
+}
+
+const WRITES = ["/api/v1/messages", "/api/v1/inbox/:id/answer"] as const
+
+// A write frame signed by signer over signedBytes, with over in place before it signs and after it signs.
+const signed = async (
+  signer: CryptoKey,
+  keyId: string,
+  over: Record<string, unknown> = {},
+  after: Record<string, unknown> = {},
+) => {
+  const write = {
+    at: NOW.toISOString(),
+    body: JSON.stringify({ text: "hello" }),
+    id: crypto.randomUUID(),
+    keyId,
+    login: "owner",
+    method: "POST",
+    path: "/api/v1/messages",
+    type: "write",
+    ...over,
+  }
+  const sig = await crypto.subtle.sign(
+    { hash: "SHA-256", name: "ECDSA" },
+    signer,
+    await signedBytes(write),
+  )
+  return JSON.stringify({ ...write, sig: Buffer.from(sig).toString("base64url"), ...after })
+}
+
+const browser = await browserKey()
+
+describe("requireSignedWrite, a write from Yard signed by the paired key", () => {
+  const paired = {
+    fingerprint: browser.fingerprint,
+    id: browser.id,
+    key: browser.key,
+    login: "Owner",
+    pairedAt: NOW.toISOString(),
+  }
+  const check = (raw: string, over: Record<string, unknown> = {}) =>
+    requireSignedWrite(raw, {
+      key: paired,
+      login: "owner",
+      now: NOW,
+      seen: new Map(),
+      writes: WRITES,
+      ...over,
+    })
+  const refusal = async (raw: string, over: Record<string, unknown> = {}) => {
+    const checked = await check(raw, over)
+    if (!checked || !("refused" in checked)) return checked
+    const { error } = JSON.parse(Buffer.from(checked.refused.body, "base64").toString())
+    return [checked.refused.status, error.message]
+  }
+
+  test("passes a fresh write the paired key signed, for this Mac's owner, on the write list", async () => {
+    const checked = await check(await signed(browser.privateKey, browser.id))
+    expect(checked && "write" in checked && checked.write.path).toBe("/api/v1/messages")
+  })
+
+  test("gives no answer to a frame with no readable write", async () => {
+    for (const raw of ["not json", "{}", frame()]) expect(await check(raw)).toBeNull()
+  })
+
+  test("refuses an id seen before, a read's included, since the two share seen", async () => {
+    const seen = new Map<string, number>()
+    const raw = await signed(browser.privateKey, browser.id)
+    await check(raw, { seen })
+    expect(await refusal(raw, { seen })).toEqual([409, "This request was answered already"])
+  })
+
+  test("refuses a write as old as the limit, or as far ahead", async () => {
+    for (const shift of [-RELAY_MAX_AGE_MS, RELAY_MAX_AGE_MS]) {
+      const at = new Date(NOW.getTime() + shift).toISOString()
+      expect(await refusal(await signed(browser.privateKey, browser.id, { at }))).toEqual([
+        403,
+        "This request is too old to answer",
+      ])
+    }
+  })
+
+  test("refuses a login other than this Mac's token's, or other than the paired key's", async () => {
+    const raw = await signed(browser.privateKey, browser.id, { login: "someone" })
+    expect(await refusal(raw)).toEqual([403, "This Mac answers its own owner alone"])
+    const theirs = await signed(browser.privateKey, browser.id, { login: "someone" })
+    expect(await refusal(theirs, { login: "someone" })).toEqual([
+      403,
+      "This Mac answers its own owner alone",
+    ])
+  })
+
+  test("refuses a path off the write list, a read's and a dot segment's included", async () => {
+    for (const path of ["/api/v1/accounts", "/api/v1/workers", "/api/v1/messages/../accounts"])
+      expect(await refusal(await signed(browser.privateKey, browser.id, { path }))).toEqual([
+        403,
+        "Send it on the Mac",
+      ])
+  })
+
+  test("refuses a key other than the paired one, and any key once none is paired", async () => {
+    const other = await browserKey()
+    expect(await refusal(await signed(other.privateKey, other.id))).toEqual([
+      403,
+      "This browser's key is not paired with this Mac",
+    ])
+    expect(await refusal(await signed(browser.privateKey, browser.id), { key: null })).toEqual([
+      403,
+      "This browser's key is not paired with this Mac",
+    ])
+  })
+
+  test("refuses a signature that does not verify: another key's under the paired id, or a body changed after signing", async () => {
+    const other = await browserKey()
+    for (const raw of [
+      await signed(other.privateKey, browser.id),
+      await signed(browser.privateKey, browser.id, {}, { body: JSON.stringify({ text: "rm" }) }),
+      await signed(browser.privateKey, browser.id, {}, { sig: "AAAA" }),
+    ])
+      expect(await refusal(raw)).toEqual([403, "This write's signature does not verify"])
+  })
+})
+
+describe("a pair request from the relay", () => {
+  test("waits for the owner's Approve with its key and login, and is answered with the key's fingerprint", async () => {
+    const offered: unknown[] = []
+    const { dispatch, reached } = spy()
+    const answer = await answerRelay(
+      JSON.stringify({
+        at: NOW.toISOString(),
+        id: ID,
+        key: browser.key,
+        login: "owner",
+        type: "pair",
+      }),
+      {
+        ...deps(dispatch),
+        keys: {
+          offer: async (pair) => {
+            offered.push(pair)
+            return {
+              at: NOW.toISOString(),
+              fingerprint: browser.fingerprint,
+              id: pair.id,
+              key: pair.key,
+              login: pair.login,
+            }
+          },
+        },
+      },
+    )
+    expect([answer?.status, answer && words(answer.body), offered, reached]).toEqual([
+      202,
+      { data: { fingerprint: browser.fingerprint } },
+      [{ at: NOW.toISOString(), id: ID, key: browser.key, login: "owner", type: "pair" }],
+      [],
+    ])
+  })
+
+  test("is refused, and held nowhere, for a login other than this Mac's token's or once it is stale", async () => {
+    const offered: unknown[] = []
+    const keys = {
+      offer: async (pair: never) => {
+        offered.push(pair)
+        return null as never
+      },
+    }
+    const old = new Date(NOW.getTime() - RELAY_MAX_AGE_MS).toISOString()
+    for (const over of [{ login: "someone" }, { at: old }]) {
+      const pair = {
+        at: NOW.toISOString(),
+        id: crypto.randomUUID(),
+        key: browser.key,
+        login: "owner",
+        type: "pair",
+        ...over,
+      }
+      const answer = await answerRelay(JSON.stringify(pair), { ...deps(spy().dispatch), keys })
+      expect(answer?.status).toBe(403)
+    }
+    expect(offered).toEqual([])
   })
 })
 
