@@ -2226,7 +2226,7 @@ export function DashboardNav() {
   const { close, memberOf, now, placed, row, still, waitingOf } = useSessionRows(source)
   const threads = useThreadRows(allowed)
   const yard = useYardChannels(allowed)
-  const yardLate = useYardLate()
+  const yardLate = useYardLate(allowed)
 
   // held for the threads' and Yard's first tries too, so neither pushes the rows below it down as it arrives; Yard's only up to YARD_HOLD_MS
   if (!allowed || source.kind === "pending" || threads.holds || holdsForYard(yard, yardLate))

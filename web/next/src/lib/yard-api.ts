@@ -121,13 +121,14 @@ export const holdsForYard = (
   late: boolean,
 ): boolean => !late && holdsForFirstTry(read)
 
-// Whether YARD_HOLD_MS has passed since the caller mounted.
-export function useYardLate(): boolean {
+// Whether YARD_HOLD_MS has passed since Yard's read was let start (started, the owner rung read), so a session that answers late still gives the read its full second.
+export function useYardLate(started: boolean): boolean {
   const [late, setLate] = useState(false)
   useEffect(() => {
+    if (!started) return
     const timer = setTimeout(() => setLate(true), YARD_HOLD_MS)
     return () => clearTimeout(timer)
-  }, [])
+  }, [started])
   return late
 }
 
