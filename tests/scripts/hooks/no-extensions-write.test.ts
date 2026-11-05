@@ -767,6 +767,10 @@ describe("a quoted argument is read as a command line only where a program runs 
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sh -- -",
     ],
     [
+      "a shell given `-c` and a lone dash with no command after it, which every shell rejects",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sh -c -",
+    ],
+    [
       "a shell given a script named after a lone dash",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sh - script.sh",
     ],
