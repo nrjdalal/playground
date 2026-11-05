@@ -38,6 +38,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/ui/toast"
 import { agentLabel } from "@/lib/agent-label"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
+import { config } from "@/lib/config"
 import {
   isAnswered,
   needsYouAnchor,
@@ -50,6 +51,7 @@ import {
   type OnAnswer,
   submitWhy,
 } from "@/lib/needs-you"
+import { READ_ONLY_LINE } from "@/lib/relay"
 import { relativeTime } from "@/lib/time"
 
 // An answered card, collapsed to one line: what the owner chose and what became of it.
@@ -115,6 +117,7 @@ function Body({ body, label }: { body: NeedsYouBody; label: string }) {
 function readOnlyFooter(item: NeedsYou): string {
   const label = agentLabel(item.from)
   const approving = item.kind === "permission" || item.kind === "plan"
+  if (config.hosted) return READ_ONLY_LINE
   if (item.hosted)
     return `Approving a ${item.kind} here is off for now, so it is refused after 10 minutes.`
   if (item.dispatcher) {

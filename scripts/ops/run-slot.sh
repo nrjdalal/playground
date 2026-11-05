@@ -415,24 +415,46 @@ if [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" 
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# a `sh -c`, `bash -c` or `zsh -c` chain's steps, one a line, each step's words joined by the unit separator, as python's shlex splits the script at
-# each run of &, |, ;, <, > and parentheses, zsh's |& and &| among them (a newline counts as ;); a cd beside any other separator than && or ; keeps
-# it as a word, since that cd does not carry to the next step, and env words before the shell (a BASH_ENV or PATH changes what it runs) are a step
-# of their own; nothing for any other command, or a script shlex cannot split
+# a `sh -c`, `bash -c` or `zsh -c` chain's steps, or those of a `bash <script file>`, whose arguments only a $ word reads (5 Nov: a script that only
+# commits waited in the general queue), one a line, each step's words joined by the unit separator, as python's shlex splits the script at each run of
+# &, |, ;, <, > and parentheses, zsh's |& and &| among them (a line whose first word starts with # is a comment, dropped whatever it ends with, a line
+# ending in an odd run of `\` is joined to the next, as sh does, and a newline then counts as ;); a cd beside any other separator than && or ; keeps
+# it as a word, since that cd does not carry to the next step, and env words before the shell (a BASH_ENV or PATH changes what it runs) are a step of
+# their own; nothing for any other command, a file after an option word (`--rcfile a.sh b.sh` runs b.sh), or a script shlex cannot split or a file
+# over 64 KB
 chain_steps() {
-  local a first="" script="" next="" lead=""
+  local a first="" script="" next="" file="" opt="" lead=""
   for a in "$@"; do
     [ -n "$next" ] && { script=$a; break; }
+    [ -n "$file" ] && break
     case "$a" in env|*=*) [ -z "$first" ] && { lead+=$a$'\x1f'; continue; } ;; esac
     if [ -z "$first" ]; then first=$(basename -- "$a"); case "$first" in sh|bash|zsh) continue ;; *) return ;; esac; fi
-    case "$a" in -c | -[!-]*c) next=1 ;; -*) ;; *) return ;; esac
+    case "$a" in -c | -[!-]*c) next=1 ;; -*) opt=1 ;; *) [ -z "$opt" ] || return; file=$a ;; esac
   done
-  [ -n "$script" ] || return
-  python3 -I - "$script" "${lead%$'\x1f'}" <<'PY'
+  if [ -n "$file" ]; then plain "$file" && [ -f "$file" ] && [ -r "$file" ] || return; fi
+  [ -n "$script$file" ] || return
+  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" <<'PY'
 import shlex, sys
 
 try:
-    lex = shlex.shlex(sys.argv[1].replace("\n", ";"), posix=True, punctuation_chars=True)
+    text = sys.argv[2]
+    if sys.argv[1] == "-f":
+        with open(text, encoding="utf-8") as f:
+            text = f.read(65537)
+        if len(text) > 65536:
+            sys.exit(1)
+    lines, buf = [], None
+    for line in text.split("\n"):
+        if buf is None and line.lstrip().startswith("#"):
+            continue
+        buf = line if buf is None else buf + line
+        if (len(buf) - len(buf.rstrip("\\"))) % 2:
+            buf = buf[:-1]
+            continue
+        lines.append(buf)
+        buf = None
+    text = "\n".join(lines + ([buf] if buf is not None else []))
+    lex = shlex.shlex(text.replace("\n", "\n;"), posix=True, punctuation_chars=True)
     lex.whitespace_split = True
     lex.commenters = ""
     steps, seps = [[]], [""]
@@ -442,11 +464,11 @@ try:
             seps.append(tok)
         else:
             steps[-1].append(tok)
-except ValueError:
+except (OSError, ValueError):
     sys.exit(1)
 seps.append("")
-if sys.argv[2]:
-    print(sys.argv[2])
+if sys.argv[3]:
+    print(sys.argv[3])
 for i, step in enumerate(steps):
     if step[:1] == ["cd"]:
         step += [s for s in (seps[i], seps[i + 1]) if s not in ("", "&&", ";")]
@@ -470,12 +492,14 @@ git_verb() {
 plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['* | *'{'* | *'#'*) return 1 ;; esac; done; }
 # a chain's git add words, failing closed (builder, 5 Nov): paths, and only the flags whose staging chain_add reads, never -f, which stages ignored files
 add_flags() { local w; for w in "$@"; do case "$w" in -A | --all | -u | --update | -- | --pathspec-from-file=*) ;; -*) return 1 ;; esac; done; }
+# a script's `set` words that only switch -e, -o pipefail, -u or -x, as a chain script's `set -euo pipefail` does (set -k reads a later VAR=x as env)
+set_flags() { local w; for w in "$@"; do case "$w" in pipefail) ;; [-+] | [-+]*[!eoux]*) return 1 ;; [-+]*) ;; *) return 1 ;; esac; done; }
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
 # Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form
 # a reading of cd, ~ or env let through): a git add, commit or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add,
-# commit or push after it or as `git -C <that kind of folder>`, and `bun run precommit:light`, each word plain. CHAIN_SAFE then holds each git step
-# as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env
+# commit or push after it or as `git -C <that kind of folder>`, `bun run precommit:light`, and a script's `set` of shell options, each word plain.
+# CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env
 # prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
 CHAIN_SAFE="" CHAIN_BAD=""
 chain_safe() {
@@ -488,6 +512,7 @@ chain_safe() {
     case "${words[0]}" in
       cd) [ ${#words[@]} -eq 2 ] && abs_in_repo "${words[1]}" || return 1; cdir=${words[1]}; continue ;;
       bun) [ "${words[1]:-}" = run ] && [ "${words[2]:-}" = precommit:light ] && plain "${words[@]}" || return 1; continue ;;
+      set) set_flags "${words[@]:1}" || return 1; continue ;;
       git) ;;
       *) return 1 ;;
     esac
@@ -579,10 +604,14 @@ quick_kind() {
 types_cached() {
   local a vars=()
   for a in "$@"; do case "$a" in env) continue ;; *=*) vars+=("$a") ;; *) break ;; esac; done
-  (cd "$(box_dir "$@")" 2>/dev/null && python3 -I - ${vars[@]+"${vars[@]}"} 2>/dev/null <<'PY'
+  turbo_cached check-types "$(box_dir "$@")" ${vars[@]+"${vars[@]}"}
+}
+# whether turbo's dry run of task $1, in folder $2 with the VAR=x words after them, finds every task it runs cached
+turbo_cached() {
+  (cd "$2" 2>/dev/null && python3 -I - "$1" "${@:3}" 2>/dev/null <<'PY'
 import json, os, signal, subprocess, sys
-env = dict(os.environ, **dict(v.split("=", 1) for v in sys.argv[1:]))
-p = subprocess.Popen(["bun", "run", "turbo", "run", "check-types", "--dry=json"], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+env = dict(os.environ, **dict(v.split("=", 1) for v in sys.argv[2:]))
+p = subprocess.Popen(["bun", "run", "turbo", "run", sys.argv[1], "--dry=json"], env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
 try:
     out, _ = p.communicate(timeout=10)
 except subprocess.TimeoutExpired:
@@ -611,7 +640,7 @@ chain_add() {
 }
 # a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
-  local a c f files dir="" commit="" all="" nv="" odd="" state=lead paths=() line words first="" adir=""
+  local a c f files top dir="" commit="" all="" nv="" odd="" state=lead paths=() vars=() line words first="" adir=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with the
   # files the chain's git add steps before it stage, and counts as a build when an add runs in another folder than a commit, whose paths it would
   # misread (the first word is found outside a $( ), since bash 3.2 misparses a case inside one)
@@ -641,7 +670,7 @@ heavy_build() {
   case "$WHO" in commit-*) for a in "$@"; do [ "$a" = build ] && commit=1; done ;; esac
   for a in "$@"; do
     case "$state" in
-      lead) case "$a" in env | NODE_ENV=* | RUN_SLOT_HERE=*) continue ;; *=*) odd=1; continue ;; esac; [ "$(basename -- "$a")" = git ] || break; state=git ;;
+      lead) case "$a" in env) continue ;; NODE_ENV=* | RUN_SLOT_HERE=*) vars+=("$a"); continue ;; *=*) odd=1; continue ;; esac; [ "$(basename -- "$a")" = git ] || break; state=git ;;
       git) case "$a" in -C) state=dir ;; -c) odd=1; state=gitvalue ;; -*) odd=1 ;; commit) commit=1; state=commit ;; *) [ -n "$odd" ] || break ;; esac ;;
       gitvalue) state=git ;;
       dir) case "$a" in /*) dir=$a ;; *) dir=${dir:+$dir/}$a ;; esac; state=git ;;
@@ -670,14 +699,18 @@ heavy_build() {
   [ -z "$odd" ] || return 0
   [ -z "$nv" ] || return 1
   # only a repo whose own lefthook.yml pre-commit runs a build builds on commit (the dispatcher, 4 Nov: another repo's lint-staged commit sat 65 min in the big-run queue for a 1 s job)
+  top=$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)
   awk '/^[^ #]/ { pre = ($0 ~ /^pre-commit:/) } pre && /^ +(- )?run:.* run build([ "'"'"']|$)/ { found = 1 } END { exit !found }' \
-    "$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)/lefthook.yml" 2>/dev/null || return 1
+    "$top/lefthook.yml" 2>/dev/null || return 1
   files=$({ git ${dir:+-C "$dir"} diff --cached --name-only; [ -z "$all" ] || git ${dir:+-C "$dir"} diff --name-only
     [ ${#paths[@]} -eq 0 ] || git ${dir:+-C "$dir"} diff --name-only HEAD -- "${paths[@]}"
     [ -z "$CHAIN_ADD_ALL" ] || { git ${dir:+-C "$dir"} diff --name-only; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name :/; }
     [ ${#CHAIN_ADD[@]} -eq 0 ] || { git ${dir:+-C "$dir"} diff --name-only -- "${CHAIN_ADD[@]}"; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name -- "${CHAIN_ADD[@]}"; }; } 2>/dev/null)
   grep -Evq '^$|\.md$|^tests/.*\.py$' <<<"$files" || return 1
-  grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$' <<<"$files"
+  grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$' <<<"$files" || return 1
+  # a build turbo replays whole from its cache runs in seconds, so only one with a task to run counts big (5 Nov: under run-slot, commit-slot.ts
+  # runs the build bare inside the commit's own slot, so a big one stays in the queue); the cache folder is lefthook.yml's pre-commit default
+  ! turbo_cached build "$top" "TURBO_CACHE_DIR=${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" ${vars[@]+"${vars[@]}"}
 }
 # a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
 light_run() {
@@ -727,9 +760,16 @@ light_run "$@" && SIZE=small UNITS=1
 # rest and may use the small reserve, as may an org's run (below) and the run-slot.priority pick. A checker's run is ranked by its worker's size (size_of), and
 # the rest keep class 2 so an older copy's ticket still ranks.
 case "$WHO" in ops-checks-*|ops-localci|ops-merge-train|ops-dashboard) CLASS=0 ;; *) CLASS=2 ;; esac
+# the session a run counts as for the priority pick and its class: a commit-<worktree> pre-commit step counts as the last named session that ran run-slot from
+# that worktree (run-slot.owner/<worktree>), since the hook's waiter carries no session's name (4 Nov: a commit's build waited from 20:45Z
+# while the priority named its session, until a lead named its commit-<worktree> by hand)
+owner_of() { case "$1" in commit-*) cat "$OPS/run-slot.owner/${1#commit-}" 2>/dev/null ;; *) echo "$1" ;; esac; }
 # A company's runs go ahead of every other waiter (the owner's priority): class 1, for a session whose roster
-# entry, or its worker's (a checker's), has a pr or repo under a GitHub org ext.links guards
-[ "$CLASS" = 2 ] && python3 -I - "$WHO" "$SELF" <<'PY' && CLASS=1
+# entry, or its worker's (a checker's), has a pr or repo under a GitHub org ext.links guards. Else a session whose entry, or its worker's, has an
+# owner (the owner's own ask, which its lead set) marks its ticket ask, which ordered_waiters ranks after the merge gates; a commit-<worktree>
+# pre-commit step reads as its worktree's session (owner_of)
+ASK=""
+[ "$CLASS" = 2 ] && { python3 -I - "$(owner_of "$WHO")" "$SELF" <<'PY'
 import json, os, re, shutil, subprocess, sys
 
 data = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
@@ -740,9 +780,11 @@ except (OSError, ValueError, KeyError, TypeError):
     sys.exit(1)
 entry = by.get(sys.argv[1]) or {}
 chain = [entry, by.get(str(entry.get("worker"))) or {}]
+# exit 0 for an org's run, 3 for the owner's ask, 1 for neither
+other = 3 if any(str(e.get("owner") or "").strip() for e in chain) else 1
 values = [str(e.get(k, "")).lower() for e in chain for k in ("pr", "repo") if e.get(k)]
 if not values:
-    sys.exit(1)
+    sys.exit(other)
 # the guarded orgs as the settings reader in this script's checkout prints them, read only for a session with a pr or repo
 root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[2]))))
 bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
@@ -750,9 +792,10 @@ try:
     r = subprocess.run([bun, os.path.join(root, "packages", "scripts", "src", "playground", "setting.ts"), "--guarded-orgs"], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
     orgs = json.loads(r.stdout) if r.returncode == 0 else []
 except (OSError, ValueError, TypeError, subprocess.SubprocessError):
-    sys.exit(1)
-sys.exit(0 if any(re.search(rf"(?:^|/){re.escape(o)}/", v) for o in orgs for v in values) else 1)
+    sys.exit(other)
+sys.exit(0 if any(re.search(rf"(?:^|/){re.escape(o)}/", v) for o in orgs for v in values) else other)
 PY
+  case $? in 0) CLASS=1 ;; 3) ASK=ask ;; esac; }
 # Caps pytest-xdist's `-n auto` at 4 workers (a 15-worker round pushed load5 to 26).
 export PYTEST_XDIST_AUTO_NUM_WORKERS=4
 SLOT=""
@@ -770,8 +813,8 @@ if [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ -z "$CAN_TA
   mkdir -p "$QUEUE"
   TICKET="$QUEUE/$(python3 -I -c 'import time; print(time.time_ns())')-$$-$WHO"
   # "s2" marks a waiter that can take run-slot-2 in single-slot mode (#i162); an empty ticket is an older copy that takes run-slot only.
-  # Then its rank (class and units, 01 to 23), units and size, which order the queue
-  echo "s2 $CLASS$UNITS $UNITS $SIZE" > "$TICKET"
+  # Then its rank (class and units, 01 to 23), units and size, which order the queue, and ask for the owner's own ask, which an older copy ignores
+  echo "s2 $CLASS$UNITS $UNITS $SIZE${ASK:+ $ASK}" > "$TICKET"
 fi
 # A pinned ticket keeps its place by age: one with no rank, from an older copy or local CI (plain "s2", or empty), which no newer ticket
 # passes, since those take a slot only while theirs is the oldest live ticket and any other order deadlocks them (a review's round 1), and
@@ -804,23 +847,25 @@ ready_place() {
   echo "$best"
 }
 ordered_waiters() {
-  # the live tickets in the order they take slots, one "<pinned 0|1> <ticket>" a line. A ticket with no rank (local CI's, an older copy's) is
-  # a wall no newer ticket passes. Between walls go first the runs that go ahead, past AGED or not, class by class: an org's, then Checks for
-  # a PR in the ready line by its place there, then those that gate a merge, then a reviewer's (<id>-reviewer, -reviewer-spec), so a drafted
-  # review is never held behind workers' long runs (Ops, 2 Nov: 9 of 17 waiters were reviewers). Then the rest. Within each class one past
-  # AGED is pinned, so no newer ticket of its class passes it; each small before medium before big, oldest first. A dead waiter's goes on the way
-  local t pid rank m p aged k sub seg=0 now ready
-  local -a subs=(1 1 1 1 1)
+  # the live tickets in the order they take slots, one "<pinned 0|1> <ticket>" a line. A ticket with no rank (local CI's, an older copy's) is a wall
+  # no newer ticket passes. Between walls go first the runs that go ahead, past AGED or not, class by class: an org's, then Checks for a PR in the
+  # ready line by its place there, then those that gate a merge, then one for the owner's own ask (a ticket marked ask), then a reviewer's
+  # (<id>-reviewer, -reviewer-spec), so a drafted review is never held behind workers' long runs (Ops, 2 Nov: 9 of 17 waiters were reviewers). Then
+  # the rest. Within each class one past AGED is pinned, so no newer ticket of its class passes it; each small before medium before big, oldest first.
+  # A dead waiter's goes on the way
+  local t pid rank ask m p aged k sub seg=0 now ready
+  local -a subs=(1 1 1 1 1 1)
   now=$(date +%s)
   ready=$(ready_line)
   for t in $(ls "$QUEUE" 2>/dev/null | sort -t- -k1,1n); do
     pid=$(printf '%s' "$t" | cut -d- -f2)
     if ! alive "$pid"; then rm -f "${QUEUE:?}/${t:?}"; continue; fi
     m=$(mtime "$QUEUE/$t") || continue
-    rank=$(cut -d' ' -f2 "$QUEUE/$t" 2>/dev/null)
+    rank="" ask=""
+    read -r _ rank _ _ ask _ 2>/dev/null < "$QUEUE/$t"
     case "$rank" in
       [0-2][1-3]) ;;
-      *) echo "$((seg + 1)) 0 0 00 1 $t"; seg=$((seg + 2)); subs=(1 1 1 1 1); continue ;;
+      *) echo "$((seg + 1)) 0 0 00 1 $t"; seg=$((seg + 2)); subs=(1 1 1 1 1 1); continue ;;
     esac
     aged=0
     [ $((now - m)) -lt "$AGED" ] || aged=1
@@ -829,8 +874,10 @@ ordered_waiters() {
       2?) case "${t#*-*-}" in *-reviewer|*-reviewer-spec) rank=21${rank#2} ;; *) rank=2$rank ;; esac ;;
       *) p=$(ready_place "${t#*-*-}" "$ready"); if [ -n "$p" ]; then rank=1$(printf '%04d' "$p"); else rank=2$rank; fi ;;
     esac
-    # the class: 0 an org's, 1 the ready line, 2 the merge gates, 3 a reviewer's, 4 the rest
-    case "$rank" in 0*) k=0 ;; 1*) k=1 ;; 20?) k=2 ;; 21?) k=3 ;; *) k=4 ;; esac
+    # the class: 0 an org's, 1 the ready line, 2 the merge gates, 3 the owner's ask, 4 a reviewer's, 5 the rest
+    case "$rank" in 0*) k=0 ;; 1*) k=1 ;; 20?) k=2 ;; 21?) k=4 ;; *) k=5 ;; esac
+    # an ask ticket ranks as 23<units>, so a checker's and a worker's sort by units alone within the class
+    [ "$k" -lt 4 ] || [ "$ask" != ask ] || { k=3; rank=23${rank: -1}; }
     sub=${subs[$k]}
     if [ "$aged" = 0 ]; then echo "$seg $k $sub $rank 0 $t"; else echo "$seg $k $((sub + 1)) 00 1 $t"; subs[$k]=$((sub + 2)); fi
   done | sort -s -k1,1n -k2,2n -k3,3n -k4,4 | cut -d' ' -f5,6
@@ -888,10 +935,6 @@ focus_wait() {
   sleep "$POLL"
   waited=$((waited + 15))
 }
-# the session a run counts as for the priority pick: a commit-<worktree> pre-commit step counts as the last named session that ran run-slot from
-# that worktree (run-slot.owner/<worktree>), since the hook's waiter carries no session's name (4 Nov: a commit's build waited from 20:45Z
-# while the priority named its session, until a lead named its commit-<worktree> by hand)
-owner_of() { case "$1" in commit-*) cat "$OPS/run-slot.owner/${1#commit-}" 2>/dev/null ;; *) echo "$1" ;; esac; }
 prio_for() { local h; h=$(prio_holder) && [ -n "$h" ] && [ "$(owner_of "$1")" = "$h" ]; }
 # the oldest live ticket the priority holder owns, its worktree's commit steps' included: the one of its tickets that skips the queue, so its
 # runs go in the order it asked for them (4 Nov: a merge asked later took a slot before the same session's older merge)
