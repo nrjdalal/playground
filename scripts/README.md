@@ -23,7 +23,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   naming it, and refuses only when every login is over, naming each one's reading;
   a bare start runs on the login in Claude Code's config (`.claude.json`'s `oauthAccount.emailAddress`), so while `usage.json` reads another account, the factory's, that login is judged by `ops/usage/stored-login.json` (ops-usage's full reading of it, written in the last 15 minutes and naming that login, else it fails)
   and the factory account counts as another login, reached by `--account`;
-  `--account` skips it, since the other login's usage is not this machine's, but refuses a week a reading names at 100% until its `resets_at`, `usage.json`'s `accounts` map among those readings (its `week` until its `weekReset`), naming the account with the most room as login-flip picks it)
+  `--account` skips it, since the other login's usage is not this machine's, but refuses a week a reading names at 100% until its `resets_at`, `usage.json`'s `accounts` map among those readings (its `week` until its `weekReset`), naming the account with the most room, the lowest `week` under 100, as ops-unstick's limit alert names it)
   or GLM's from `zai-usage.json` (the 5-hour window under 95% of its credits, with no week check, since its credits run on the 5-hour window alone, and no empty `balance`, which an hour after the failure that set it lets GLM starts try again),
   only while the ops-zai-usage job's last beat is ok and within 3 cycles,
   so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once).

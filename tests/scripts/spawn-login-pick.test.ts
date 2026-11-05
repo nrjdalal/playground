@@ -369,7 +369,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
   const resetIn = (seconds: number) => Math.floor(Date.now() / 1000) + seconds
   const full = { readAt: minutesAgo(4), week: 100, weekReset: resetIn(86_400) }
 
-  test("an --account usage.json's accounts map holds at 100% is refused, naming the account with the most room as login-flip picks it", async () => {
+  test("an --account usage.json's accounts map holds at 100% is refused, naming the account with the lowest week under 100", async () => {
     const r = await spawn(
       ["worker", "worker-brave-otter", "b.md", "--account", "full@example.net"],
       [],
