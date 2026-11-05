@@ -799,7 +799,9 @@ export function InboxCard({
     item.kind === "decision" && item.preview.type === "secret" ? item.preview.key : null
   const secretAsk = secretKey !== null
   const titleId = useId()
+  // every write the card makes goes through here, and the hosted build's relay carries none, so there it sends nothing
   const settle = async (write: () => Promise<unknown>) => {
+    if (config.hosted) return false
     setPending(true)
     setError(null)
     try {
@@ -934,7 +936,7 @@ export function InboxCard({
     sentWords
   ) : choices ? (
     <AskChoices busy={busy} choices={choices} paused={paused} pick={pick} setPick={setPick} />
-  ) : secretAsk ? (
+  ) : secretAsk && !config.hosted ? (
     // masked, never saved by the browser, and a key here stays in the field; Enter submits; enabled while the card is paused, as the comment box is, so a paste in that second lands
     <Input
       aria-label={`Value for ${secretKey}`}
@@ -962,12 +964,16 @@ export function InboxCard({
         {item.preview.thread && (
           <p className="text-muted-foreground text-xs font-medium">Your reply</p>
         )}
-        <Textarea
-          aria-label={`Message to ${item.preview.to}`}
-          className={BOX}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-        />
+        {config.hosted ? (
+          <p className="whitespace-pre-wrap">{draft}</p>
+        ) : (
+          <Textarea
+            aria-label={`Message to ${item.preview.to}`}
+            className={BOX}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+        )}
       </div>
       {item.preview.attachments ? <Attachments items={item.preview.attachments} /> : null}
       <UploadMark item={item} />

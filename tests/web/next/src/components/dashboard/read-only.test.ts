@@ -38,6 +38,12 @@ describe("the hosted dashboard is read-only", () => {
       ["inbox.tsx", "unread && !paused && !config.hosted ? void settle(() => markRead([item.id]))"],
       [
         "inbox.tsx",
+        "const settle = async (write: () => Promise<unknown>) => {\n    if (config.hosted) return false",
+      ],
+      ["inbox.tsx", ") : secretAsk && !config.hosted ? ("],
+      ["inbox.tsx", '{config.hosted ? (\n          <p className="whitespace-pre-wrap">{draft}</p>'],
+      [
+        "inbox.tsx",
         ') : unread && !config.hosted ? (\n      <button type="button" className="text-left" onClick={read}>',
       ],
       [

@@ -1408,14 +1408,19 @@ function ManagersGroup({
   )
   const names = sessions.map((worker) => worker.name)
   const moveTo = (from: number, to: number) => managers.move(arrayMove(names, from, to))
+  const label = (
+    <>
+      Orchestrators
+      <LabelChevron open={open} />
+      <GroupCount count={count} />
+    </>
+  )
   return (
     <SidebarGroup>
       {/* the order is a write, so the hosted build keeps A to Z with no Reset, no menu and no drag */}
       {config.hosted ? (
         <SidebarGroupLabel className="w-full pl-2.5" render={labelToggle(open, setOpen)}>
-          Orchestrators
-          <LabelChevron open={open} />
-          <GroupCount count={count} />
+          {label}
         </SidebarGroupLabel>
       ) : (
         <ContextMenu>
@@ -1429,9 +1434,7 @@ function ManagersGroup({
               />
             }
           >
-            Orchestrators
-            <LabelChevron open={open} />
-            <GroupCount count={count} />
+            {label}
           </ContextMenuTrigger>
           <ContextMenuContent>
             <ContextMenuGroup>
