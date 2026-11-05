@@ -116,6 +116,7 @@ import {
   type CardKey,
   changedAt,
   checkAnswerNote,
+  deliveryNote,
   dismissable,
   dismissItems,
   filesCount,
@@ -824,7 +825,8 @@ export function InboxCard({
   const who = agentLabel(takenBy(item))
   const at = outcome === null ? -1 : outcome.indexOf(who)
   const linked = resultLink(item)
-  const failed = sendFailed(item)
+  const untold = deliveryNote(item)
+  const failed = sendFailed(item) && !untold
   const light = inboxLight(item)
   // a folded row keeps its verbs, and the answers that need nothing its body holds; Seen is the band's tick, on a card in his list he has not marked read, and reading answers nothing
   const buttons = verbs(item, shelf)
@@ -946,6 +948,7 @@ export function InboxCard({
               Your note: {item.answer.note}
             </span>
           )}
+        {untold && <span className="text-muted-foreground mt-1 block">{untold}</span>}
         {linked && (
           <>
             {" · "}

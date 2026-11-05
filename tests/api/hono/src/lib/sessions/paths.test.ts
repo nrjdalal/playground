@@ -9,7 +9,6 @@ import { orderPath } from "../../../../../../api/hono/src/lib/apps/plan-order"
 import { previewsDir } from "../../../../../../api/hono/src/lib/apps/previews"
 import { mergedPullsPath } from "../../../../../../api/hono/src/lib/dashboard/agents"
 import { attachmentsDir } from "../../../../../../api/hono/src/lib/dashboard/attachments"
-import { rosterAgents } from "../../../../../../api/hono/src/lib/dashboard/cmux"
 import { debugReportsDir } from "../../../../../../api/hono/src/lib/dashboard/debug-report"
 import { heldPath } from "../../../../../../api/hono/src/lib/dashboard/held"
 import { herdrServers, readStates } from "../../../../../../api/hono/src/lib/dashboard/herdr"
@@ -105,18 +104,16 @@ describe("dataDir and every path under it", () => {
     expect(under(join(config, "data"))).toEqual([])
   })
 
-  test("a scratch PLAYGROUND_DATA_DIR holds the roster cmux reads raw and each herdr session's state, never the config folder's", async () => {
+  test("a scratch PLAYGROUND_DATA_DIR holds each herdr session's state, never the config folder's", async () => {
     const state = (state: string) =>
       JSON.stringify({ at: "2026-10-29T11:00:00.000Z", event: "Stop", sessionId: "s-1", state })
-    const write = (folder: string, agent: string, sessionState: string) => {
+    const write = (folder: string, sessionState: string) => {
       mkdirSync(join(folder, "session-state"), { recursive: true })
-      writeFileSync(join(folder, "roster.json"), JSON.stringify({ agents: [{ name: agent }] }))
       writeFileSync(join(folder, "session-state", "s-1.json"), state(sessionState))
     }
-    write(join(config, "playground"), "from-config", "working")
-    write(join(config, "data"), "from-scratch", "idle")
+    write(join(config, "playground"), "working")
+    write(join(config, "data"), "idle")
     process.env.PLAYGROUND_DATA_DIR = join(config, "data")
-    expect(await rosterAgents()).toEqual([{ name: "from-scratch" }])
     expect((await readStates(["s-1"])).get("s-1")?.state).toBe("idle")
   })
 

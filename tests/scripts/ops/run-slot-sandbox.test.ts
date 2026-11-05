@@ -26,7 +26,7 @@ describe("run-slot.sh under Claude Code's sandbox", () => {
     expect(slots(m)).toBe("1\n")
     expect(await m.runs("worker-x")).toBe(true)
     expect(readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")).toMatch(
-      / lanes worker-x \d+ shut idle=80% load1=12\.00 swapins=0\n/,
+      / lanes worker-x \d+ shut idle=80% load1=12\.00 swapins=0 disk0_tps=120 disk0_mbs=3\.50\n/,
     )
   })
 

@@ -8,12 +8,14 @@ license: Complete terms in the repository's NOTICE
 
 Every message to the owner is read in seconds, an Inbox card in the aside's narrow column most of all, and the **talk** rule gives each one this skill's shape. This skill makes each message **glanceable**: the owner sees the point first, then the facts, then what Approve does. The item's shape (its picture, its bullets and its two choices, in that order), its width rule and the `bun run ask` commands live in asks.md's "The ask's shape" ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)); this skill picks the picture and writes the words.
 
-An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 6. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps, step 1 always first:
+An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 6 and 9. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps, step 1 always first:
 
 - An update with no `text`, or a `ship` or `schema` decision, carries only its fields, which the card lays out itself: its title takes step 4, then steps 7 and 8.
 - An `accept`, `apps`, `budget`, `delete` or `grant` decision's `why` is free text, shown as written: it takes steps 3 and 4 as plain lines, one fact each, then steps 7 and 8.
 - A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 4, 7 and 8. A draft or a `slack` decision may carry `attachments`, such as an issue's before and after shots, which its card shows under the words and Send leaves out of Slack.
 - A `secret` ask carries only its key and sink, which the card words itself: its title takes step 4, then step 8; the value itself is the owner's to type into the card, so it appears nowhere in the item.
+
+Every decision and draft then takes step 9 once the owner answers; an update gets no answer, so it ends at step 8.
 
 A message outside the Inbox, a dispatcher's reply in chat or a Slack or Yard DM, takes steps 2 to 5 and 7, since Choices and Post belong to a card alone; a relay in chat, the dispatcher passing a session's message on to the owner, is one such message, its picture and bullets the session's point in the owner's words.
 In chat, step 2's picture is a fenced block (an ASCII flow or a diff; a work status block lives in its card, which chat names by its `#iN`), since no-chat-question sends a table, or three or more numbered steps, to one Inbox card instead (`scripts/hooks/README.md`).
@@ -78,10 +80,12 @@ Beside its choices, every card offers the owner five verbs (asks.md's footer lin
 
 8. **Post.** Post it with `bun run ask new`, as asks.md says, and read stderr. Done when `bun run ask` prints the item's id and no shape hint; on a hint, the item has already posted, so fix what the hint names and replace it in place with `bun run ask edit <id> < item.json`, until edit prints no hint.
 
+9. **Answer.** The owner's answer comes back as one line, `[inbox-answer] {json}` (asks.md): do what its `next` says, the way its `verb` names, then run its `close`. The line names its item by `ref` and carries none of its text, so when you no longer hold what you asked, as after a compaction, read the item with `bun run ask get <ref>` first. A `send` sends the message (its `text` when he changed it), a `draft` saves it with `slack_send_message_draft` and leaves it unsent, and a `pick` carrying `opened` rechecks the grant; a step the dashboard ran (`accepted`, `listed`, `opened`) whose `exitCode` is not 0 takes the follow-up asks.md names for it before the close. A reply in his own words (`re #iN`) asks for changes to the item. Done when `bun run ask get <id>` shows the item closed, or edited for his reply.
+
 ## Fit the card
 
-Draw each code or ASCII line up to `ASK_CODE_COLUMNS` (`packages/config/src/inbox.ts`), 60 columns, an emoji counted as two.
-The card sizes a drawing's font so its widest line fills the block, from 16px on a wide card down to 7px on the narrowest one, so a line of that width shows whole on every card and a short drawing grows to fill a wide one.
+Draw each code or ASCII line up to `ASK_CODE_COLUMNS` (`packages/config/src/inbox.ts`), 37 columns, an emoji counted as two.
+The card shows a drawing at its 12px code size, and shrinks a wider one's font to fit, down to 10px, before it scrolls sideways, so a line of that width shows whole at 12px on the narrowest card.
 A picture that runs past it becomes a table of three columns or fewer, or bullets.
 
 ## Example
