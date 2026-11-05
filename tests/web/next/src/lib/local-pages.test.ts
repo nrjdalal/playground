@@ -55,18 +55,44 @@ const filesUnder = (dir: string): string[] =>
   )
 
 describe("the dashboard's local pages on the hosted build", () => {
-  test("a hosted build answers them with the app's 404", () => {
-    expect(notFoundOf(() => localPagesOnly(true))).toStartWith("NEXT_HTTP_ERROR_FALLBACK;404")
+  test("a hosted build answers every visit below the owner rung with the app's 404, a banned owner and a signed-out one included", () => {
+    for (const user of [
+      null,
+      { role: "member" },
+      { role: "admin" },
+      { banned: true, role: "owner" },
+    ])
+      expect(notFoundOf(() => localPagesOnly(true, user))).toStartWith(
+        "NEXT_HTTP_ERROR_FALLBACK;404",
+      )
+  })
+
+  test("a hosted build serves them to the owner, through the relay", () => {
+    expect(notFoundOf(() => localPagesOnly(true, { role: "owner" }))).toBeNull()
   })
 
   test("a local stack serves them", () => {
-    expect(() => localPagesOnly(false)).not.toThrow()
+    expect(() => localPagesOnly(false, null)).not.toThrow()
   })
 
-  test("their layout refuses before it reads anything", async () => {
+  test("their layout refuses before it reads anything but the hosted session", async () => {
     const source = await Bun.file(layout).text()
     const body = source.slice(source.indexOf("export default async function Layout"))
-    expect(body.split("\n")[1]?.trim()).toBe("localPagesOnly(config.hosted)")
+    expect(
+      body
+        .split("\n")
+        .slice(2, 5)
+        .map((line) => line.trim()),
+    ).toEqual([
+      "const hosted = config.hosted ? await readSession() : null",
+      "if (hosted === UNAVAILABLE) return <ApiRetry />",
+      "localPagesOnly(config.hosted, hosted?.user ?? null)",
+    ])
+  })
+
+  test("the hosted build draws the dashboard only while the Mac holds the relay", async () => {
+    const source = await Bun.file(layout).text()
+    expect(source).toContain("return config.hosted ? <RelayGate>{shell}</RelayGate> : shell")
   })
 })
 
