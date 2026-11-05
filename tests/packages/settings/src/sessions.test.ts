@@ -3,10 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { ROSTER_KINDS, ROSTER_ROLE_OF_KIND } from "../../../../packages/config/src/kinds"
 import {
   readSessionNames,
   readSessionTemplates,
   sessionTemplates,
+  TEMPLATE_KINDS,
 } from "../../../../packages/settings/src"
 
 const scratch = mkdtempSync(join(tmpdir(), "session-names-"))
@@ -62,6 +64,12 @@ describe("sessions.templates", () => {
       expect(sessionTemplates.safeParse([{ ...orchestrator, brief }]).success).toBe(false)
     },
   )
+
+  test("its kinds are the roster's manager kinds, written out so settings imports no other package at run time", () => {
+    expect<string[]>([...TEMPLATE_KINDS]).toEqual(
+      ROSTER_KINDS.filter((kind) => ROSTER_ROLE_OF_KIND[kind] === "manager"),
+    )
+  })
 
   test("the schema refuses an id listed twice, and a GLM template with an account", () => {
     const [assistant, , , glm] = defaults()

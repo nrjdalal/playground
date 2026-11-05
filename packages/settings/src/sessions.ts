@@ -1,4 +1,4 @@
-import { ROSTER_KINDS, ROSTER_ROLE_OF_KIND } from "@packages/config/kinds"
+import type { RosterKind } from "@packages/config/kinds"
 import { z } from "zod"
 
 import { readPolicyOrDefaults } from "@/rendered"
@@ -9,8 +9,15 @@ const name = z
   .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "a session name, lowercase words joined by hyphens")
 const manager = z.enum(["builder", "dispatcher", "ops", "planner"])
 
-// The manager kinds a template starts, each a lead in a workspace of its own through spawn.sh's manager mode.
-export const TEMPLATE_KINDS = ROSTER_KINDS.filter((kind) => ROSTER_ROLE_OF_KIND[kind] === "manager")
+// The manager kinds a template starts, each a lead in a workspace of its own through spawn.sh's manager mode: ROSTER_ROLE_OF_KIND's managers, written out since settings reads no package at run time but its own deps.
+export const TEMPLATE_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "planner",
+] as const satisfies readonly RosterKind[]
 
 // The efforts spawn.sh takes, Claude Code's levels.
 export const EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
@@ -29,7 +36,7 @@ export const sessionTemplate = z
       .refine((brief) => !brief.includes(".."), "a brief is a file name, with no .."),
     effort: z.enum(EFFORTS).optional(),
     id: name,
-    kind: z.enum(TEMPLATE_KINDS as [string, ...string[]]),
+    kind: z.enum(TEMPLATE_KINDS),
     label: z.string().min(1).max(40),
     model: z
       .string()
