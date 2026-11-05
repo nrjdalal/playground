@@ -142,8 +142,9 @@ describe("a node_modules clone waits while clone-off stands", () => {
 describe("a quick run takes its own slot past a full queue", () => {
   // Runs argv through run-slot past a full queue and says whether it ran: once it ends, or once it prints the queue's waiting line, when it is stopped (an event, never a clock, so a loaded runner only makes it slower)
   // ran: the seconds each earlier run of the same command took, oldest first, as run-slot.runs.log records them
-  // the slot the last quick() run took, from its runs log's start line
+  // the slot the last quick() run took, from its runs log's start line, and what it printed on stderr
   let took = ""
+  let said = ""
   // as: the run's session name and env words, and whether a CPU-queue waiter's ticket stands ahead of it
   const quick = async (
     argv: string[],
@@ -184,6 +185,7 @@ describe("a quick run takes its own slot past a full queue", () => {
     })()
     while (!ended && !err.match(WAITING)) await Bun.sleep(20)
     if (!ended) await stop(p)
+    said = err
     took =
       readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
         .split("\n")
@@ -301,6 +303,34 @@ describe("a quick run takes its own slot past a full queue", () => {
 
   test("nor does the mark under a session's own name", async () => {
     expect(await quick(["bun", "run", "build"], [], { ...STEP, who: "worker-q" })).toBe(false)
+  })
+
+  // 4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue, while a bare git commit takes the commit lane within a minute; the marker is the script's $0, which the last git step touches, and the fake git touches each step's last word, so the add stages `.`
+  test("a sh -c chain of git add, commit and push takes run-slot-commit", async () => {
+    expect(
+      await quick(["sh", "-c", 'git add . && git commit -m "a b" && git push "$0"'], [], {
+        waiter: true,
+      }),
+    ).toBe(true)
+    expect(took).toBe("run-slot-commit")
+  })
+
+  // a login shell's profile puts the system's git ahead of the fake one, so this reads the slot it took, not the marker
+  test("and so does a bash -lc chain that starts with cd", async () => {
+    await quick(["bash", "-lc", 'cd . && git commit -m x; git push "$0"'])
+    expect(took).toBe("run-slot-commit")
+  })
+
+  test("but a chain that commits beside a test goes through the queue and says why", async () => {
+    expect(await quick(["bash", "-c", 'bun run test && git commit -m x "$0"'])).toBe(false)
+    expect(said).toContain(
+      "run-slot.sh: this chain goes through the general queue, not the commit lane, since it holds `bun run test` beside its git commit",
+    )
+  })
+
+  test("while a chain with no git commit or push says nothing of the commit lane", async () => {
+    expect(await quick(["bash", "-c", 'bun run test && git add "$0"'])).toBe(false)
+    expect(said).not.toContain("commit lane")
   })
 
   // ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites

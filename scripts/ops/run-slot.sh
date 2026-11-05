@@ -340,6 +340,64 @@ if [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" 
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
+# a `sh -c`, `bash -c` or `zsh -c` chain's steps, one a line, each step's words joined by the unit separator, as python's shlex splits the script on
+# &&, ||, ;, | and & (a newline counts as ;); nothing for any other command, or a script shlex cannot split
+chain_steps() {
+  local a first="" script="" next=""
+  for a in "$@"; do
+    [ -n "$next" ] && { script=$a; break; }
+    case "$a" in env|*=*) [ -z "$first" ] && continue ;; esac
+    if [ -z "$first" ]; then first=$(basename -- "$a"); case "$first" in sh|bash|zsh) continue ;; *) return ;; esac; fi
+    case "$a" in -c | -[!-]*c) next=1 ;; -*) ;; *) return ;; esac
+  done
+  [ -n "$script" ] || return
+  python3 -I - "$script" <<'PY'
+import shlex, sys
+
+try:
+    lex = shlex.shlex(sys.argv[1].replace("\n", ";"), posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    steps = [[]]
+    for tok in lex:
+        if tok in ("&&", "||", ";", "|", "&", ";;"):
+            steps.append([])
+        else:
+            steps[-1].append(tok)
+except ValueError:
+    sys.exit(1)
+for step in steps:
+    if step:
+        print("\x1f".join(step))
+PY
+}
+# a chain step's git subcommand, past env, VAR=x and git's -C <dir> or -c <value>; nothing for a step that runs no git
+git_verb() {
+  local a state=lead
+  for a in "$@"; do
+    case "$state" in
+      lead) case "$a" in env|*=*) continue ;; esac; [ "$(basename -- "$a")" = git ] || return; state=git ;;
+      git) case "$a" in -C|-c) state=value ;; -*) ;; *) echo "$a"; return ;; esac ;;
+      value) state=git ;;
+    esac
+  done
+}
+# a chain's lane: `commit` when every step is a cd or a git commit, push or add and one commits or pushes, so it ends in seconds as a bare commit does
+# (4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue); else, for a chain that commits beside a
+# heavier step, `general <that step>`, which run-slot says, so its worker can run the commit on its own; else nothing
+chain_lane() {
+  local line verb words commits="" heavier=""
+  while IFS= read -r line; do
+    IFS=$'\x1f' read -ra words <<< "$line"
+    verb=$(git_verb "${words[@]}")
+    case "$verb" in
+      commit|push) commits=1 ;;
+      add) ;;
+      *) [ "${words[0]}" = cd ] || { [ -z "$heavier" ] && heavier=${line//$'\x1f'/ }; } ;;
+    esac
+  done < <(chain_steps "$@")
+  [ -n "$commits" ] || return
+  if [ -z "$heavier" ]; then echo commit; else echo "general $heavier"; fi
+}
 # Quick slots, outside the queue, one holder each: a plain git commit (its pre-commit build, about 17s) takes run-slot-commit (builder,
 # 13 Oct: five commits waited in a fifteen-deep queue; a commit with a longer hook goes through the queue as <who> -- bash -c '...'), and a
 # node_modules clone (cp -cR <sibling>/node_modules <worktree>/) takes run-slot-clone (dispatcher, 13 Oct: three load spikes, 77 and 43
@@ -351,6 +409,7 @@ quick_rule() {
   case "$WHO" in commit-*) [ "${RUN_SLOT_COMMIT_STEP:-}" = 1 ] && { echo commit; return; } ;; esac
   # the command's first word past env and VAR=x, as box_fits finds it (optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue)
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
+  case "$(basename -- "$first")" in sh|bash|zsh) [ "$(chain_lane "$@")" = commit ] && echo commit; return ;; esac
   if [ "$(basename -- "$first")" = git ]; then
     # a merge or pull runs no pre-commit build (lefthook.yml has no merge hook), so it ends in seconds (optimizer, 20 Oct: a 1s git merge waited 26.6 min behind suites)
     # a push runs only the pre-push hook's seconds (retro 2, 31 Oct: git push queued 205 min in a day)
@@ -419,7 +478,16 @@ PY
 }
 # a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a one it will stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
-  local a c f files dir="" commit="" all="" state=lead paths=()
+  local a c f files dir="" commit="" all="" state=lead paths=() line words first=""
+  # a chain builds when one of its git commit steps would, read as that commit alone (the first word found outside a $( ), since bash 3.2 misparses a case inside one)
+  for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
+  case "$(basename -- "$first")" in
+    sh|bash|zsh)
+      while IFS= read -r line; do
+        IFS=$'\x1f' read -ra words <<< "$line"
+        [ "$(git_verb "${words[@]}")" = commit ] && heavy_build "${words[@]}" && return 0
+      done < <(chain_steps "$@") ;;
+  esac
   # commit-slot.ts's build step (`bun run build`) alone, never its type checks, which build nothing
   case "$WHO" in commit-*) for a in "$@"; do [ "$a" = build ] && commit=1; done ;; esac
   for a in "$@"; do
@@ -469,6 +537,25 @@ light_run() {
 # one line when a Mac run asks, takes its slot and ends, so a run's wait sits beside its run time (optimizer, 19 Oct)
 rlog() { echo "$(date -u +%FT%TZ) $1 $WHO $$ $2" >> "$OPS/run-slot.runs.log" 2>/dev/null; }
 [ -n "$CAN_TAKE" ] || [ -n "$REREAD" ] || rlog ask "$*"
+# a named run from a worktree under .claude/worktrees/ records its session as that worktree's owner, named as commit-slot.ts names the folder
+case "$WHO:$PWD" in
+  commit-*) ;;
+  */.claude/worktrees/*)
+    if [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
+      OWNED=${PWD##*/.claude/worktrees/}
+      OWNED=$(printf '%s' "${OWNED%%/*}" | tr -c 'A-Za-z0-9._#-' '-')
+      mkdir -p "$OPS/run-slot.owner" && printf '%s\n' "$WHO" > "$OPS/run-slot.owner/$OWNED"
+    fi ;;
+esac
+# a chain that commits beside a heavier step says the lane it takes and why, on stderr and as a `why` line after its ask (the ask line stays the command alone, which ran_last3 matches)
+if [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
+  WHY=$(chain_lane "$@")
+  case "$WHY" in
+    "general "*)
+      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since it holds \`${WHY#general }\` beside its git commit; run the commit on its own to take the commit lane" >&2
+      rlog why "general: holds \`${WHY#general }\`" ;;
+  esac
+fi
 read -r SIZE UNITS <<EOF
 $(size_of "$WHO")
 EOF
@@ -621,17 +708,25 @@ reread() {
 prio_holder() {
   [ -f "$OPS/run-slot.priority" ] && [ $(( $(date +%s) - $(mtime "$OPS/run-slot.priority") )) -lt 3600 ] && cut -d' ' -f1 "$OPS/run-slot.priority"
 }
-prio_waiting() {
-  # true while the priority holder has a ticket whose waiter still runs
+# the session a run counts as for the priority pick: a commit-<worktree> pre-commit step counts as the last named session that ran run-slot from
+# that worktree (run-slot.owner/<worktree>), since the hook's waiter carries no session's name (4 Nov: a commit's build waited from 20:45Z
+# while the priority named its session, until a lead named its commit-<worktree> by hand)
+owner_of() { case "$1" in commit-*) cat "$OPS/run-slot.owner/${1#commit-}" 2>/dev/null ;; *) echo "$1" ;; esac; }
+prio_for() { local h; h=$(prio_holder) && [ -n "$h" ] && [ "$(owner_of "$1")" = "$h" ]; }
+# the oldest live ticket the priority holder owns, its worktree's commit steps' included: the one of its tickets that skips the queue, so its
+# runs go in the order it asked for them (4 Nov: a merge asked later took a slot before the same session's older merge)
+prio_first() {
   local h t pid
-  h=$(prio_holder) || return 1
-  [ -n "$h" ] || return 1
-  for t in $(ls "$QUEUE" 2>/dev/null | grep -- "-$h\$"); do
+  h=$(prio_holder) || return
+  [ -n "$h" ] || return
+  for t in $(ls "$QUEUE" 2>/dev/null | sort -t- -k1,1n); do
+    [ "$(owner_of "${t#*-*-}")" = "$h" ] || continue
     pid=$(printf '%s' "$t" | cut -d- -f2)
-    alive "$pid" && return 0
+    alive "$pid" && { echo "$t"; return; }
   done
-  return 1
 }
+# true while the priority holder has a ticket whose waiter still runs
+prio_waiting() { [ -n "$(prio_first)" ]; }
 
 free() {
   # give the slot back only while its holder line is still ours
@@ -879,7 +974,7 @@ reserve() { local r=$(($1 / 4)); [ "$r" -ge 1 ] && echo "$r" || echo 1; }
 may_reserve() {
   case "$2" in small) echo 0; return ;; esac
   case "$1" in 0?|1?) echo 0; return ;; esac
-  [ -n "$3" ] && [ "$(prio_holder)" = "$3" ] && { echo 0; return; }
+  [ -n "$3" ] && prio_for "$3" && { echo 0; return; }
   echo "$4"
 }
 
@@ -1054,7 +1149,9 @@ while :; do
   reread
   # HEAD: first in the queue (any slot); S2: first among waiters that can take run-slot-2, so an older copy at the head cannot idle it
   HEAD=1; S2=1
-  if [ -n "$TICKET" ] && [ "$(prio_holder)" != "$WHO" ]; then
+  if [ -n "$TICKET" ] && prio_for "$WHO"; then
+    [ "$(prio_first)" = "$(basename "$TICKET")" ] || { HEAD=0; S2=0; }
+  elif [ -n "$TICKET" ]; then
     [ "$(first_waiter)" = "$(basename "$TICKET")" ] || HEAD=0
     [ "$(first_waiter s2)" = "$(basename "$TICKET")" ] || S2=0
   fi
@@ -1089,7 +1186,7 @@ while :; do
     slot_open "$s" || continue
     # run-slot.priority names the one session that takes run-slot next (a lead sets it, as for the owner's SDK demo); everyone else leaves
     # run-slot to it while the file is under an hour old
-    if [ "$s" = run-slot ] && [ -n "$(prio_holder)" ] && [ "$(prio_holder)" != "$WHO" ] && prio_waiting; then
+    if [ "$s" = run-slot ] && [ -n "$(prio_holder)" ] && ! prio_for "$WHO" && prio_waiting; then
       continue
     fi
     if mkdir "$OPS/$s" 2>/dev/null; then

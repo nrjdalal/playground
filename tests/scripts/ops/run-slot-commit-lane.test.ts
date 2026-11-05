@@ -288,3 +288,23 @@ commit-msg:
     expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
   })
 })
+
+// 4 Nov: a commit inside a sh -c chain counts as the bare commit would, so one that runs next build still waits as a big run
+describe("a sh -c chain of git steps", () => {
+  // the chain's last git step touches the marker, its script's $0
+  const chain = ["sh", "-c", 'git add . && git commit -m x && git push "$0"']
+
+  test("staging a web/next file waits as a big run, off run-slot-commit", async () => {
+    const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"])
+    m.hold("run-slot", 3, "big")
+    expect(await m.start("worker-x", {}, undefined, chain).waits()).toBe(true)
+    expect(log(m)).not.toContain("run-slot-commit")
+  })
+
+  test("staging only Markdown takes run-slot-commit at once, beside a big run", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    expect(await m.start("worker-x", {}, undefined, chain).ran()).toBe(true)
+    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
+  })
+})
