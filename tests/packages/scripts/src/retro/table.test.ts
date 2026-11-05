@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, spyOn, test } from "bun:test"
 import { chmodSync, mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -6,6 +6,7 @@ import { join } from "node:path"
 import {
   type Page,
   type Pr,
+  pageOf,
   QUERY,
   readAll,
   rowsOf,
@@ -161,3 +162,17 @@ test("a page that fails three times, cut off and then 502s, exits 1 naming its c
   expect(run.err).toContain("3 times")
   expect(await Bun.file(join(dir, "args.3")).text()).toContain("after=Y3Vyc29yOjI1")
 }, 30_000)
+
+test("a page that answers with data and errors returns its data and prints the errors", async () => {
+  const page = { nodes: [pr()], pageInfo: { endCursor: null, hasNextPage: false } }
+  const errors = [{ message: "Something went wrong while resolving a comment" }]
+  const printed = spyOn(console, "error").mockImplementation(() => {})
+  const read = await pageOf(
+    () => ({ exitCode: 0, stderr: "", stdout: JSON.stringify({ data: { search: page }, errors }) }),
+    null,
+    async () => {},
+  )
+  expect(read).toEqual(page)
+  expect(printed).toHaveBeenCalledWith(JSON.stringify(errors))
+  printed.mockRestore()
+})

@@ -64,6 +64,7 @@ export const pageOf = async (
       why = `a body that does not parse: ${gh.stdout.slice(0, 80)}`
       continue
     }
+    if (answer?.errors) console.error(JSON.stringify(answer.errors))
     if (answer?.data?.search) return answer.data.search
     why = gh.stderr.trim() || JSON.stringify(answer?.errors ?? answer)
   }
