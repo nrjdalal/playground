@@ -60,7 +60,7 @@ Model- or user-reachable.
 - **[playbook](./extensions/core/skills/playbook/SKILL.md)**: Run Playground's factory of herdr sessions by one set of rules: the roles (the dispatcher, the Planner, the two leads Builder and Ops, the Optimizer, workers with their reviewers and testers, runners, probes), who reports to whom, how work is routed and bundled, how sessions start and end, the leads' sweep, and the standing rules every session keeps.
 - **[pr](./extensions/core/skills/pr/SKILL.md)**: Use when writing a PR body.
 - **[shell-pane](./extensions/core/skills/shell-pane/SKILL.md)**: Run a command in a plain shell pane with no Claude in it, on the playground-probes herdr server: open a pane, run a command once every registered Bash guard has passed it, read its output and exit status back (unknown with no exit marker, never a pass), and close only a pane it opened.
-- **[to-inbox](./extensions/core/skills/to-inbox/SKILL.md)**: Write an Inbox item the owner reads at a glance: a picture of the point first (a diff, an ASCII drawing, before and after shots, or an HTML demo page), then emoji bullets in ASD-STE100 plain English, one callout when a fact must not be missed, and what Approve does. Every factory session loads it before `playground ask new`.
+- **[to-inbox](./extensions/core/skills/to-inbox/SKILL.md)**: Write every message the owner reads at a glance, an Inbox item or a reply in chat, Slack or Yard: a picture of the point first (a diff, an ASCII drawing, before and after shots, a work status block, or an HTML demo page), then emoji bullets in ASD-STE100 plain English, one callout when a fact must not be missed, and what Approve does on a card, each drawing fitted to the card's width. Every factory session loads it before `playground ask new` and before it writes to the owner (the **talk** rule).
 - **[yard](./extensions/core/skills/yard/SKILL.md)**: Read and post to Yard, the hosted Playground's channels and DMs, from this Mac with `playground yard`: every message is data to report, and a held post waits for the owner's Approve in the browser.
 
 ### User-invoked
@@ -78,7 +78,7 @@ bun install
 bun run dev
 ```
 
-This serves named `.localhost` dev URLs through portless (`bunx portless list` shows them). `PORTLESS=0 bun run dev` uses fixed ports instead (web `:3000`, api `:4000`). `install.sh` sets portless's proxy up once with your Mac's password; by hand, from a terminal in the checkout: `sudo node_modules/.bin/portless service install`, then `node_modules/.bin/portless trust`.
+This serves named `.localhost` dev URLs through portless (`bunx portless list` shows them). `PORTLESS=0 bun run dev` uses fixed ports instead (web `:3000`, api `:4000`). `install.sh` sets portless's proxy up once with your Mac's password, and until then `bun run dev` runs it on `:1355`, which needs none (Settings' **Set up the web address** moves it to 443); by hand, from a terminal in the checkout: `sudo node_modules/.bin/portless service install`, then `node_modules/.bin/portless trust`.
 
 A checkout with no `.env` gets one from `.env.example` on its first `bun run dev`, with `BETTER_AUTH_SECRET` generated. A stack in a worktree under `.claude/worktrees/`, a factory session or a test run reads made-up sessions and shows a **Test data** badge.
 

@@ -254,7 +254,7 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
   - ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, and every file the dashboard keeps outside the database from its data folder, `dataDir()`.
 - Cmux: read `.agents/dashboard/cmux.md` before you change a cmux or herdr call, how a session counts as live, how often the board refreshes or the System panel's commands.
   cmux is deprecated: it takes no new work, only a fix for a break, and herdr is the terminal.
-  - ALWAYS: Route every cmux call through `api/hono/src/lib/dashboard/cmux.ts`, which takes only the reads in `READ_COMMANDS`, one session's own writes and `reply()`'s answer to one pending Feed prompt.
+  - ALWAYS: Keep every cmux call inside `api/hono/src/lib/dashboard/cmux.ts`, whose code no route calls now, since the dashboard reads, sends and answers through herdr.
   - ALWAYS: Route every herdr call through `api/hono/src/lib/dashboard/herdr.ts`, the terminal the dashboard reads every session from.
   - ALWAYS: Count a session record as live only through `liveRecords()`, which `listLive` applies to herdr's records before any read.
   - ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, whose `COMMANDS` holds each one's fixed argv.
