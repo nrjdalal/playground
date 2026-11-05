@@ -16,6 +16,7 @@ const { errorHandler } = await import("../../../../../../api/hono/src/lib/error"
 const { Hono } = await import("../../../../../../api/hono/node_modules/hono")
 const { isRelayed } = await import("../../../../../../api/hono/src/lib/relay/relayed")
 const { auditLog } = await import("../../../../../../api/hono/src/lib/relay/audit")
+const { writeIdStore } = await import("../../../../../../api/hono/src/lib/relay/write-ids")
 
 const NOW = new Date("2026-11-05T01:00:00.000Z")
 const ID = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
@@ -399,6 +400,7 @@ describe("a write from Yard through answerRelay", () => {
       }),
       audit: { append: async (line: unknown) => void audited.push(line) },
       keys: { offer: async () => null as never, paired: async () => key },
+      writeIds: { claim: async () => true },
     }
     return { audited, ran, run }
   }
@@ -559,6 +561,40 @@ describe("a write from Yard through answerRelay", () => {
       },
     })
     expect([ran?.status, plain.ran.length, refused?.status, unread.ran]).toEqual([201, 1, 403, []])
+  })
+
+  test("a write replayed after a fresh start, its id read back from the data folder, never runs", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "relay-mac-ids-"))
+    try {
+      const { ran, run } = rig()
+      const raw = await signed(browser.privateKey, browser.id)
+      const first = await answerRelay(raw, {
+        ...run,
+        seen: new Map(),
+        writeIds: writeIdStore({ dir: () => dir }),
+      })
+      const afterRestart = await answerRelay(raw, {
+        ...run,
+        seen: new Map(),
+        writeIds: writeIdStore({ dir: () => dir }),
+      })
+      expect([first?.status, afterRestart?.status, ran.length]).toEqual([201, 409, 1])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("a write whose id this Mac cannot keep runs nothing", async () => {
+    const { audited, ran, run } = rig()
+    const answer = await answerRelay(await signed(browser.privateKey, browser.id), {
+      ...run,
+      writeIds: {
+        claim: async () => {
+          throw new Error("the disk is full")
+        },
+      },
+    })
+    expect([answer?.status, ran, audited]).toEqual([500, [], []])
   })
 
   test("a frame that reads as no write runs nothing and leaves no line", async () => {

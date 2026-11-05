@@ -21,6 +21,7 @@ import {
   relayWriteSchema,
 } from "@/lib/relay/protocol"
 import { markRelayed } from "@/lib/relay/relayed"
+import { remoteWriteIds, type WriteIdStore } from "@/lib/relay/write-ids"
 
 // This Mac's side of the relay: it dials out to the hosted hub and answers the owner's reads, and the writes the paired key signed, from its own dashboard, in process, so no port opens here.
 
@@ -77,7 +78,7 @@ export function requireRelay(
   return { request }
 }
 
-// Pure but for seen, which it shares with requireRelay: the write a frame holds once the paired key's signature checks out, or the answer that refuses it, before any route runs. It refuses, in this order: an id seen before, a frame RELAY_MAX_AGE_MS old or ahead, a login other than this Mac's token's or the paired key's, a path off writes, a keyId other than the paired key's (none, once revoked), and a signature that does not verify over signedBytes.
+// Pure but for seen, which it shares with requireRelay: the write a frame holds once the paired key's signature checks out, or the answer that refuses it, before any route runs. It refuses, in this order: a frame RELAY_MAX_AGE_MS old or ahead, an id seen before, a login other than this Mac's token's or the paired key's, a path off writes, a keyId other than the paired key's (none, once revoked), and a signature that does not verify over signedBytes.
 export async function requireSignedWrite(
   raw: string,
   {
@@ -145,6 +146,8 @@ type AnswerDeps = {
   login: string
   now?: Date
   seen: SeenIds
+  // the ids of the writes this Mac took, kept on disk across a restart
+  writeIds?: Pick<WriteIdStore, "claim">
 }
 
 // A write requireSignedWrite passed, run in this Mac's own API as its local owner's POST, marked in process so the loopback and origin guards take it, unless it answers an Inbox card whose kind is off RELAY_ANSWER_KINDS, or one this Mac cannot read, which it refuses before any route runs.
@@ -171,7 +174,7 @@ async function runWrite(
   }
 }
 
-// Answers one frame. A pair request, once refuseStale passes it, waits in keys for the owner's Approve on this Mac and is answered with its fingerprint. A write passes requireSignedWrite against the paired key and RELAY_WRITES, then runWrite, and each one whose signature verified leaves an audit line, its kind refusal included, so a hub that sends frames it cannot sign never pushes a write that ran out of the Remote section's list. A read passes requireRelay first. Both run in this Mac's own API as its local owner's session, so the routes' own owner check and limits still run here.
+// Answers one frame. A pair request, once refuseStale passes it, waits in keys for the owner's Approve on this Mac and is answered with its fingerprint. A write passes requireSignedWrite against the paired key and RELAY_WRITES, then its id is kept on disk until it expires, so a replay after a restart is refused, then runWrite, and each one that ran or met the kind check leaves an audit line, its kind refusal included, so a hub that sends frames it cannot sign never pushes a write that ran out of the Remote section's list. A read passes requireRelay first. Both run in this Mac's own API as its local owner's session, so the routes' own owner check and limits still run here.
 export async function answerRelay(
   raw: string,
   {
@@ -183,6 +186,7 @@ export async function answerRelay(
     login,
     now = new Date(),
     seen,
+    writeIds = remoteWriteIds,
   }: AnswerDeps,
 ): Promise<RelayResponse | null> {
   const pair = relayPairSchema.safeParse(parse(raw))
@@ -209,6 +213,15 @@ export async function answerRelay(
     })
     if (checked === null || "refused" in checked) return checked?.refused ?? null
     const { write } = checked
+    const claimed = await writeIds
+      .claim(write.id, Date.parse(write.at) + RELAY_MAX_AGE_MS, now.getTime())
+      .catch((error: unknown) => {
+        console.error("[relay] the write ids could not be kept", error)
+        return null
+      })
+    if (claimed === null)
+      return json(write.id, 500, "INTERNAL_SERVER_ERROR", "This Mac could not run it")
+    if (!claimed) return json(write.id, 409, "CONFLICT", "This request was answered already")
     const answer = await runWrite(write, { cookie, dispatch, kindOf })
     await audit
       .append({
