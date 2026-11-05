@@ -183,17 +183,24 @@ describe("the relay's hub across instances", () => {
   })
 
   // a cold instance spent its whole ack wait connecting to Redis, so a read and the status read offline while the Mac held its socket on another instance
-  test("on a cold instance, the status and a read wait for the bus before the ack wait starts", async () => {
+  // each path meets its own cold first publish, so neither rides a bus the other warmed
+  const coldPair = () => {
     const { holder, other } = coldInstances(60, { ackMs: 20 })
-    const socket = {
+    holder.attach("u1", {
       send: (data: string) => {
         const { id } = JSON.parse(data) as { id: string }
         setTimeout(() => holder.answer("u1", answer(id, "workers")), 5)
       },
-    }
-    holder.attach("u1", socket)
-    expect(await other.status("u1")).toEqual({ online: true, since: null })
-    const got = await other.forward("u1", "owner", "/api/v1/workers")
+    })
+    return other
+  }
+
+  test("on a cold instance, the status waits for the bus before the ack wait starts", async () => {
+    expect(await coldPair().status("u1")).toEqual({ online: true, since: null })
+  })
+
+  test("on a cold instance, a read waits for the bus before the ack wait starts", async () => {
+    const got = await coldPair().forward("u1", "owner", "/api/v1/workers")
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
   })
 
