@@ -87,6 +87,13 @@ describe("the aside window on every dashboard page", () => {
     expect(asideTabs("agent", ["plan"])).toEqual(["inbox", "chat", "plan", "pages", "apps"])
   })
 
+  test("puts each open page or document's tab after the session's tabs and before Apps, the Inbox first as ever", () => {
+    const docs = ["doc:file-a1", "doc:page-report-2.html"] as const
+    expect(asideTabs("page", APPS, docs)).toEqual(["inbox", "chat", ...APPS, ...docs, "apps"])
+    expect(asideTabs("agent", [], docs)).toEqual(["inbox", "chat", "pages", ...docs, "apps"])
+    expect(asideTabs("home", [], docs)[0]).toBe("inbox")
+  })
+
   test("opens an app's square in the aside, beside the page, rather than going to its page", async () => {
     const aside = await source("components/dashboard/dashboard-aside.tsx")
     expect(aside).toContain("<AppPane")
