@@ -65,6 +65,18 @@ describe("the relay's allowlist", () => {
   })
 })
 
+describe("the relay and a secret's routes", () => {
+  // a secret moves only between the Keychain and the owner's click on this Mac, so neither secret route rides the relay, whatever its method
+  test("carries neither the secret ask's Submit nor a reveal card's Show, and its signed writes name neither", () => {
+    for (const route of ["/api/v1/inbox/i1/secret", "/api/v1/inbox/i1/reveal"])
+      for (const method of ["GET", "POST"]) expect(relayAllowed(method, route)).toBe(false)
+    expect(RELAY_GETS.filter((path) => /secret|reveal/.test(path))).toEqual([])
+    for (const route of ["/api/v1/inbox/i1/secret", "/api/v1/inbox/i1/reveal"])
+      expect(pathOn(RELAY_WRITES, route)).toBe(false)
+    expect(RELAY_WRITES.filter((path) => /secret|reveal/.test(path))).toEqual([])
+  })
+})
+
 describe("the relay's write list", () => {
   test("lists only the composer's send, an Inbox card's answer, and the Later, Archive and Done its shelves call, A to Z", () => {
     expect([...RELAY_WRITES]).toEqual([
