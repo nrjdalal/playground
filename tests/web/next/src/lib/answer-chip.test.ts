@@ -28,7 +28,6 @@ describe("answerChipOf", () => {
       label: "Add all 4 lines",
       note: null,
       ref: "#i343",
-      verb: "pick",
     })
   })
 

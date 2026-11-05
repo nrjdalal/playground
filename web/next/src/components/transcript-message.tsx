@@ -37,6 +37,7 @@ export function TranscriptBubble({
   const marker = plain ? { id: null, text } : markerOf(text)
   // an Inbox answer line reads as one chip, your note after it, rather than its JSON
   const answer = plain ? null : answerChipOf(marker.text)
+  const words = answer ? answer.note : marker.text
   return (
     <Bubble
       align={mine ? "end" : "start"}
@@ -63,14 +64,14 @@ export function TranscriptBubble({
           >
             <RiInboxLine data-icon="inline-start" />
             <span className="font-mono">{answer.ref}</span>
-            <span className="truncate">· {answer.label}</span>
+            <span className="truncate" title={answer.label}>
+              · {answer.label}
+            </span>
           </Badge>
         ) : null}
-        {answer?.note ? (
-          <TranscriptMarkdown on={mine ? "muted" : "none"}>{answer.note}</TranscriptMarkdown>
-        ) : answer ? null : (
-          <TranscriptMarkdown on={mine ? "muted" : "none"}>{marker.text}</TranscriptMarkdown>
-        )}
+        {words ? (
+          <TranscriptMarkdown on={mine ? "muted" : "none"}>{words}</TranscriptMarkdown>
+        ) : null}
       </BubbleContent>
     </Bubble>
   )
