@@ -292,7 +292,7 @@ describe("the inbox's counts", () => {
     )
   })
 
-  test("a go taken by the session that stood in for an ended poster names that session", () => {
+  test("a go taken by the session that stood in for an ended poster reads its pick alone, its taker named only while the answer is queued", () => {
     const taken = {
       ...items[4]!,
       delivery: { at: "x", status: "delivered", to: "dispatcher", via: "session" },
