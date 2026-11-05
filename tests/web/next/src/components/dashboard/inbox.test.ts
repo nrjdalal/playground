@@ -709,7 +709,8 @@ describe("Schedule's row", () => {
     expect(box(render(true))).not.toMatch(/\sdisabled=""/)
     expect(box(render(false))).not.toMatch(/\sdisabled=""|\sreadonly=""/i)
     const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
-    expect(source).toContain("readOnly={pending}")
+    expect(source).toMatch(/<NoteBox[^>]*readOnly=\{pending\}/)
+    expect(source).toMatch(/placeholder="Paste the value"\s+readOnly=\{pending\}/)
   })
 
   test("an unread ask keeps its light and draws no unread dot, which stays an update's", () => {

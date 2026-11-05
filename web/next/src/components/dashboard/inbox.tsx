@@ -1385,9 +1385,9 @@ export function InboxCard({
             <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
               {/* a box turned disabled drops focus to the page, so words dictated or typed as a card above leaves land nowhere: it stays enabled while the card is paused and turns read-only while its answer is on its way */}
               <NoteBox
-                readOnly={pending}
                 id={commentId}
                 placeholder={noted ? "Add an optional comment" : "Add a comment"}
+                readOnly={pending}
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
               />
