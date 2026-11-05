@@ -1,8 +1,8 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 
 // The router's auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets; any secret serves requests that carry no session. Set before the router loads.
 process.env.BETTER_AUTH_SECRET ||= "relay-mac-test-secret-not-for-use-anywhere"
-const { answerRelay, requireRelay, startRelay } =
+const { answerRelay, CONNECT_MS, RECYCLE_MS, requireRelay, startRelay } =
   await import("../../../../../../api/hono/src/lib/relay/mac")
 const { RELAY_MAX_AGE_MS } = await import("../../../../../../api/hono/src/lib/relay/protocol")
 const { dashboardRouter } = await import("../../../../../../api/hono/src/routers/dashboard")
@@ -381,6 +381,46 @@ describe("startRelay, this Mac's socket to the hub", () => {
       await until("a new socket", () => made.length === 2)
     } finally {
       stop()
+    }
+  })
+
+  // Vercel ended each hosted socket at its 300 s default duration, so a recycle planned for its 800 s cap never came and the relay dropped every 5 min
+  test("the recycle and its connect timeout both fall inside the hosted function's 300 s", () => {
+    expect(RECYCLE_MS + CONNECT_MS).toBeLessThan(300_000)
+  })
+
+  // after a live roll the hub never answered the upgrade, so the socket sat in CONNECTING with no close event, no retry and no log line
+  test("a socket that never opens is closed at the connect timeout, says so, and opens again after the backoff", async () => {
+    const said = spyOn(console, "error").mockImplementation(() => {})
+    const { connect, made } = sockets()
+    const stop = relay(connect, { connectMs: 30 })
+    try {
+      await until("the socket", () => made.length === 1)
+      await until("the stalled socket closing", () => made[0]!.readyState === 3)
+      expect(said.mock.calls.flat().join(" ")).toContain("[relay] the hub did not answer")
+      await until("a new socket", () => made.length === 2)
+    } finally {
+      stop()
+      said.mockRestore()
+    }
+  })
+
+  test("a socket that opens and then closes says each, and opens again after the backoff", async () => {
+    const told = spyOn(console, "log").mockImplementation(() => {})
+    const said = spyOn(console, "error").mockImplementation(() => {})
+    const { connect, made } = sockets()
+    const stop = relay(connect)
+    try {
+      await until("the socket", () => made.length === 1)
+      made[0]!.open()
+      expect(told.mock.calls.flat().join(" ")).toContain("[relay] connected")
+      made[0]!.close()
+      expect(said.mock.calls.flat().join(" ")).toContain("[relay] the socket closed")
+      await until("a new socket", () => made.length === 2)
+    } finally {
+      stop()
+      told.mockRestore()
+      said.mockRestore()
     }
   })
 
