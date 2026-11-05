@@ -175,7 +175,7 @@ describe("the gauges", () => {
     expect(await m.runs("worker-x")).toBe(true)
     expect(lanes(m)).toEqual([
       expect.stringMatching(
-        /^\S+Z lanes worker-x \d+ open idle=52\.9% load1=18\.60 swapins=0 disk0_tps=120 disk0_mbs=3\.50$/,
+        /^\S+Z lanes worker-x \d+ open idle=52\.9% load1=18\.60 free=80% pressure=1 swapins=0 disk0_tps=120 disk0_mbs=3\.50$/,
       ),
     ])
     writeFileSync(
@@ -187,7 +187,7 @@ describe("the gauges", () => {
     expect(await m.runs("worker-x")).toBe(true)
     expect(lanes(m)).toHaveLength(2)
     expect(lanes(m)[1]).toMatch(
-      / lanes worker-x \d+ shut idle=30\.00% load1=18\.60 swapins=0 disk0_tps=120 disk0_mbs=3\.50$/,
+      / lanes worker-x \d+ shut why=cpu idle=30\.00% load1=18\.60 free=80% pressure=1 swapins=0 disk0_tps=120 disk0_mbs=3\.50$/,
     )
   })
 
@@ -197,7 +197,7 @@ describe("the gauges", () => {
     expect(await m.runs("worker-x")).toBe(true)
     expect(lanes(m)).toEqual([
       expect.stringMatching(
-        /^\S+Z lanes worker-x \d+ open idle=52\.9% load1=18\.60 swapins=0 disk0_tps=9000 disk0_mbs=400\.00$/,
+        /^\S+Z lanes worker-x \d+ open idle=52\.9% load1=18\.60 free=80% pressure=1 swapins=0 disk0_tps=9000 disk0_mbs=400\.00$/,
       ),
     ])
     expect(slots({ disk: [9000, 400], idle: 52.9, load1: 18.6 })).toBe("4\n")
@@ -208,9 +208,34 @@ describe("the gauges", () => {
     writeFileSync(join(m.bin, "iostat"), "#!/bin/bash\nexit 1\n")
     expect(await m.runs("worker-x")).toBe(true)
     expect(lanes(m)).toEqual([
-      expect.stringMatching(/ open idle=52\.9% load1=18\.60 swapins=0 disk0_tps=- disk0_mbs=-$/),
+      expect.stringMatching(
+        / open idle=52\.9% load1=18\.60 free=80% pressure=1 swapins=0 disk0_tps=- disk0_mbs=-$/,
+      ),
     ])
   })
+
+  // dispatcher, 5 Nov: retro 39 counted 19 shuts by the CPU, 12 by memory and 6 by load1, read from the gauges alone, so a shut line names its cause
+  test.each([
+    ["load1", { idle: 80, load1: 50 }, /shut why=load1 idle=80% load1=50\.00 free=80% pressure=1 /],
+    ["cpu", { idle: 45, load1: 31 }, /shut why=cpu idle=45% load1=31\.00 free=80% pressure=1 /],
+    [
+      "mem",
+      { free: 20, idle: 80, load1: 18 },
+      /shut why=mem idle=80% load1=18\.00 free=20% pressure=1 /,
+    ],
+    [
+      "mem",
+      { idle: 80, load1: 18, pressure: 2 },
+      /shut why=mem idle=80% load1=18\.00 free=80% pressure=2 /,
+    ],
+  ] as const)(
+    "a shut lanes line names why=%s, the first gauge that shut it",
+    async (_why, setup, line) => {
+      const m = machine(setup)
+      expect(await m.runs("worker-x")).toBe(true)
+      expect(lanes(m)).toEqual([expect.stringMatching(line)])
+    },
+  )
 
   test("a read subcommand records no lanes line", () => {
     const m = machine()
