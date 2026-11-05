@@ -277,11 +277,29 @@ describe("code-review-loop checks its own fixes and a repo scanner's landing (PG
   test("step 5 runs the checks a patch's files call for before posting it with the results (R11-1: #61, #186, #212, #246)", async () => {
     const step = (await skill()).match(/^5\. \*\*Hand small fixes over\.\*\*.*$/m)?.[0] ?? ""
     expect(step).toContain(
-      "a wording you suggest in a finding included, and run the checks its files call for (`bun run docs:wrap --check` on a wrapped doc, the test that pins the wording, `bun run test:file` on the file's mirrored test)",
+      "a wording you suggest in a finding included, and run the checks its files call for (`bun run docs:wrap --check` on a wrapped doc, `bun run test:file tests/packages/scripts/src/trace-count/count.test.ts` and `scripts/check-em-dashes.sh` on any doc, the test that pins the wording, `bun run test:file` on the file's mirrored test)",
     )
     expect(step).toContain("post the patch or wording with those results")
     expect(step.split("**Done when**")[1] ?? "").toContain("its checks' results posted with it")
     expect(await page()).toContain("runs the checks its files call for before it posts")
+  })
+
+  test("step 5 greps a promoted skill's docs page and READMEs for a patch to its SKILL.md (a missed docs page cost a round)", async () => {
+    const step = (await skill()).match(/^5\. \*\*Hand small fixes over\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "When the patch edits a promoted skill's `SKILL.md`, grep each changed term over the skill's docs page (`docs/playground/<name>.md`) and every README that lists it",
+    )
+    expect(await page()).toContain(
+      "A patch to a promoted skill's `SKILL.md` also greps each changed term over that skill's docs page and every README that lists it",
+    )
+  })
+
+  test("step 8 asks for a canary merge in the push before the 5/5 candidate (three rounds lost to a moved head)", async () => {
+    const step = (await skill()).match(/^8\. \*\*Report and wait\.\*\*.*$/m)?.[0] ?? ""
+    expect(step).toContain(
+      "When the round leaves only fixes that the next push can close, ask your worker to merge `canary` into the branch in that push",
+    )
+    expect(await page()).toContain("the reviewer asks the worker to merge canary in with that push")
   })
 
   test("step 8 runs the touched tests on a local merge when canary adds or changes a repo-scanning test (#223's conventions test against #75 and #106)", async () => {

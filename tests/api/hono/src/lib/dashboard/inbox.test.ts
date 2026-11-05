@@ -16,8 +16,9 @@ import {
   appsArgs,
   appsChange,
   answerInputSchema,
+  answerLine,
+  answerPayload,
   checkAnswer,
-  deliveryText,
   inboxCount,
   inboxInputSchema,
   type Delivery,
@@ -26,7 +27,6 @@ import {
   type InboxItem,
   inboxOrder,
   isGo,
-  relayText,
   runResult,
   savesDraft,
   secretInputSchema,
@@ -35,7 +35,13 @@ import {
   slackPlace,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 import { uploadSpec } from "../../../../../../api/hono/src/lib/dashboard/slack-upload"
+import { KEYCHAIN_ITEM_NAMES } from "../../../../../../api/hono/src/lib/keychain-items"
 import { keychain } from "../../../../../../api/hono/src/lib/yard/keychain"
+import {
+  ANSWER_LEAD,
+  CLOCKS_STOPPED_AT,
+  payloadOf,
+} from "../../../../../../packages/config/src/inbox"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -524,6 +530,9 @@ describe("an ask to quit, restart, close or stop something (#1274)", () => {
   })
 })
 
+// an answer's time, as the store writes it
+const AT = "2026-11-04T18:00:00.000Z"
+
 const item = (over: Partial<InboxItem> & Pick<InboxItem, "kind">): InboxItem =>
   ({
     answer: null,
@@ -676,10 +685,9 @@ describe("an answer", () => {
     const was = process.env.PLAYGROUND_DATA_DIR
     process.env.PLAYGROUND_DATA_DIR = data
     try {
-      const it = { id: "abc", ref: 41, title: "T" }
-      expect(deliveryText(it, { choice: "draft" })).toContain(
-        "rewritten to the app form by piping it to made-up-convert (ack refuses",
-      )
+      expect(
+        answerPayload(item({ kind: "draft" }), { at: AT, choice: "draft" }).linkConverter,
+      ).toBe("made-up-convert")
       const parsed = inboxInputSchema.safeParse({
         from: "builder",
         kind: "update",
@@ -696,35 +704,175 @@ describe("an answer", () => {
     }
   })
 
-  test("reaches its poster as a line naming the item, its tag and what to do", () => {
-    const it = { id: "abc", ref: 41, title: "Ship canary 3f9a2c1 to main?" }
-    expect(deliveryText(it, { choice: "approve" })).toBe(
-      'Inbox #i41 (abc) "Ship canary 3f9a2c1 to main?": Approved. Carry it out.',
-    )
-    expect(deliveryText(it, { choice: "edit", editedText: "Wait for #299" })).toContain(
-      "Carry it out with these: Wait for #299",
-    )
-    expect(deliveryText(it, { choice: "deny" })).toContain("Do not carry it out")
-    expect(deliveryText(it, { choice: "send" })).toContain("Send it as written")
-    expect(deliveryText(it, { choice: "send", editedText: "hey" })).toContain("as: hey")
-    expect(deliveryText(it, { choice: "discard" })).toContain("Do not send it")
-    // a clear keeps what is moving and holds only the item's new step, so it reads as neither a deny nor a discard
-    const cleared = deliveryText(it, { choice: "clear" })
-    expect(cleared).toContain("Cleared for now: the owner will talk more about it later.")
-    expect(cleared).toContain("Whatever is already in motion stays in motion")
-    expect(cleared).not.toMatch(/Denied|Discarded|Do not carry it out/)
-    // his note follows the answer on a line of its own, and only when there is one
-    expect(deliveryText(it, { choice: "deny", note: "ask again next week" })).toBe(
-      'Inbox #i41 (abc) "Ship canary 3f9a2c1 to main?": Denied. Do not carry it out.\nThe owner\'s note: ask again next week',
-    )
-    expect(deliveryText(it, { choice: "deny" })).not.toContain("note")
-    // the poster reads only this line, so it names the tool and how to close the item
-    expect(deliveryText(it, { choice: "draft" })).toBe(
-      'Inbox #i41 (abc) "Ship canary 3f9a2c1 to main?": Save it as a Slack draft as written, with slack_send_message_draft, then bun run ask ack it with the channel_link that returns, in its app form (ack refuses the archives form), or with --no-link and why when Slack refuses (draft_already_exists: that conversation holds a draft already). Do not send it.',
-    )
-    expect(deliveryText(it, { choice: "draft", editedText: "hey" })).toMatch(
-      /Save it as a Slack draft with slack_send_message_draft, .* Do not send it\. Save it with changes, as: hey$/,
-    )
+  // every click that reaches a poster types one line of data, which answerPayloadSchema parses, never prose
+  test("every answer click types one [inbox-answer] line that answerPayloadSchema parses", () => {
+    const decided = item({
+      id: "abc",
+      kind: "decision",
+      ref: 41,
+      title: "Ship canary 3f9a2c1 to main?",
+    })
+    const drafted = item({ id: "def", kind: "draft", ref: 42, title: "Tell Merritt" })
+    const secret = item({
+      id: "ghi",
+      kind: "decision",
+      preview: {
+        key: "API_KEY",
+        sink: { item: KEYCHAIN_ITEM_NAMES[0], type: "keychain" },
+        type: "secret",
+      } as never,
+      ref: 43,
+      title: "The API key",
+    })
+    const accepting = item({
+      id: "jkl",
+      kind: "decision",
+      preview: ACCEPT as never,
+      ref: 44,
+      title: "Accept",
+    })
+    const read = (ref: number) => `bun run ask get #i${ref} --ack`
+    const ack = (ref: number) => `bun run ask ack #i${ref} --link <https url>`
+    const ackOrWhy = (ref: number) => `${ack(ref)}, or --no-link "<why>" when it leaves no page`
+    const asked = item({
+      id: "mno",
+      kind: "decision",
+      preview: PREVIEWS.ask as never,
+      ref: 45,
+      title: "Port it?",
+    })
+    const labelled = item({
+      id: "pqr",
+      kind: "decision",
+      preview: {
+        ...PREVIEWS.ask,
+        approve: "Port the fix to staging, then main",
+        deny: "Keep it on main",
+      } as never,
+      ref: 46,
+      title: "Port it?",
+    })
+    const cases: [InboxItem, Parameters<typeof answerPayload>[1], Record<string, unknown>][] = [
+      [
+        decided,
+        { at: AT, choice: "approve" },
+        {
+          close: ack(41),
+          go: true,
+          next: "carry-out",
+          option: { index: 0, label: "Approve", letter: "A" },
+          type: "slack",
+          verb: "pick",
+        },
+      ],
+      // a go whose preview names no link may leave no page, so its close names --no-link too
+      [
+        asked,
+        { at: AT, choice: "approve" },
+        { close: ackOrWhy(45), next: "carry-out", type: "ask" },
+      ],
+      // a pick of an ask carrying its own labels names the label its card showed
+      [
+        labelled,
+        { at: AT, choice: "approve" },
+        {
+          option: { index: 0, label: "Port the fix to staging, then main", letter: "A" },
+          verb: "pick",
+        },
+      ],
+      [
+        labelled,
+        { at: AT, choice: "deny" },
+        { option: { index: 1, label: "Keep it on main", letter: "B" }, verb: "pick" },
+      ],
+      [
+        decided,
+        { at: AT, choice: "edit", editedText: "Wait for #299" },
+        { go: true, next: "carry-out", text: "Wait for #299", verb: "pick" },
+      ],
+      [
+        decided,
+        { at: AT, choice: "deny", note: "ask again next week" },
+        {
+          close: read(41),
+          comment: "ask again next week",
+          go: false,
+          next: "close",
+          option: { index: 1, label: "Deny", letter: "B" },
+          verb: "pick",
+        },
+      ],
+      [
+        decided,
+        { at: AT, choice: "clear" },
+        { close: read(41), go: false, next: "close", verb: "set-aside" },
+      ],
+      [
+        drafted,
+        { at: AT, choice: "send" },
+        { close: ack(42), go: true, kind: "draft", next: "carry-out", verb: "send" },
+      ],
+      [drafted, { at: AT, choice: "send", editedText: "hey" }, { text: "hey", verb: "send" }],
+      [
+        drafted,
+        { at: AT, choice: "draft" },
+        { close: ackOrWhy(42), go: true, next: "carry-out", verb: "draft" },
+      ],
+      [
+        drafted,
+        { at: AT, choice: "discard" },
+        { close: read(42), go: false, next: "close", verb: "discard" },
+      ],
+      [
+        secret,
+        {
+          at: AT,
+          choice: "provided",
+          results: [{ environment: "keychain", exitCode: 0, line: "saved" }],
+        },
+        {
+          close: read(43),
+          go: true,
+          next: "close",
+          results: [{ environment: "keychain", exitCode: 0, line: "saved" }],
+          verb: "submit",
+        },
+      ],
+      [
+        accepting,
+        { accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" }, at: AT, choice: "approve" },
+        {
+          accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
+          close: 'bun run ask ack #i44 --no-link "<why>"',
+          next: "nothing",
+          verb: "pick",
+        },
+      ],
+    ]
+    for (const [it, answer, expected] of cases) {
+      const line = answerLine(answerPayload(it, answer))
+      expect(line).toStartWith(`${ANSWER_LEAD} {`)
+      expect(line).not.toContain("\n")
+      // answerLine has parsed the payload strictly, so payloadOf reading it back is the schema check
+      const payload = payloadOf(line)
+      expect(payload).not.toBeNull()
+      // only a pick names an option
+      if (payload?.verb !== "pick") expect(payload).not.toHaveProperty("option")
+      expect(payload).toMatchObject({
+        at: AT,
+        id: it.id,
+        ref: `#i${it.ref}`,
+        title: it.title,
+        v: 1,
+        ...expected,
+      })
+    }
+    // a comment's line ends stay inside the one line, escaped by JSON
+    const noted = answerLine(answerPayload(decided, { at: AT, choice: "deny", note: "one\ntwo" }))
+    expect(noted.split("\n")).toHaveLength(1)
+    expect(payloadOf(noted)?.comment).toBe("one\ntwo")
+    // no comment, no key
+    expect(answerPayload(decided, { at: AT, choice: "deny" })).not.toHaveProperty("comment")
   })
 
   // Send types the words alone into the poster: a draft's files are shared into Slack by the dashboard itself (PG-649), never handed to the session
@@ -745,11 +893,10 @@ describe("an answer", () => {
       { choice: "send", editedText: "hey" },
       { choice: "draft" },
     ] as const) {
-      expect(deliveryText(shown, answer)).toBe(deliveryText(plain, answer))
-      const relay = relayText(shown, answer)
-      expect(relay).toBe(relayText(plain, answer))
-      expect(relay).not.toContain("before.png")
-      expect(relay).not.toContain("3f0e7a52-1c4b-4d2a-9e6f-0000000000a1")
+      const line = answerLine(answerPayload(shown, { ...answer, at: AT }))
+      expect(line).toBe(answerLine(answerPayload(plain, { ...answer, at: AT })))
+      expect(line).not.toContain("before.png")
+      expect(line).not.toContain("3f0e7a52-1c4b-4d2a-9e6f-0000000000a1")
     }
   })
 })
@@ -882,9 +1029,10 @@ describe("a secret ask (PG-59)", () => {
     ])
   })
 
-  test("takes no Approve, Deny, Archive or Edit: its value comes through Submit alone", () => {
+  test("takes no Approve, Deny or Edit as an answer: its value comes through Submit alone, Dismiss setting it aside", () => {
     const open = { kind: "decision", preview: SECRET, status: "open" } as const
-    for (const action of ACTIONS) {
+    expect(checkAnswer(open as never, { action: "dismiss" })).toMatchObject({ status: "cleared" })
+    for (const action of ACTIONS.filter((action) => action !== "dismiss")) {
       expect(checkAnswer(open as never, { action, text: "made-up-value" }), action).toHaveProperty(
         "message",
       )
@@ -1157,7 +1305,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       .at(-1)
     url = `postgres://postgres:${PASSWORD}@127.0.0.1:${port}/postgres`
     let admin: SQL | null = null
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 240; i++) {
       try {
         admin = new SQL(url, { max: 1 })
         await admin`select 1`
@@ -1177,7 +1325,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     await admin!.close()
     store = await import("../../../../../../api/hono/src/lib/dashboard/inbox")
     db = (await import("../../../../../../packages/db/dist/index.mjs")).createDatabase(url)
-  }, 60_000)
+  }, 180_000)
 
   afterAll(() => {
     if (container)
@@ -1685,7 +1833,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
   })
 
-  test("the poster edits its own open item in place, bumping updatedAt and version; another session's, an answered or closed item and a bad shape are refused (PG-2547)", async () => {
+  test("the poster edits its own item in place, bumping updatedAt and version; another session's, a closed item and a bad shape are refused (PG-2547)", async () => {
     const posted = await post(decision(SLACK))
     const at = new Date(Date.parse(posted.updatedAt) + 60_000)
     const edited = await store.editItem(
@@ -1726,12 +1874,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       code: "NOT_FOUND",
       ok: false,
     })
-    // an answered decision and a settled one are refused
-    await store.answerItem(db, posted.id, { action: "approve" }, { actor })
-    expect(await store.editItem(db, posted.id, decision(SLACK))).toMatchObject({
-      code: "CONFLICT",
-      ok: false,
-    })
+    // a settled decision is refused
     const settled = await post(decision(SLACK))
     await store.settleItem(db, settled.id)
     expect(await store.editItem(db, settled.id, decision(SLACK))).toMatchObject({
@@ -1790,7 +1933,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(answered).toMatchObject({ item: { status: "approved" }, ok: true })
   })
 
-  test("an item put away with Snooze edits as an open one, while one he replied to in chat is refused (PG-2547)", async () => {
+  test("an item put away with Snooze edits as an open one, and so does one replied to in chat (PG-2547, #903)", async () => {
     const snoozed = await post(decision(SLACK))
     const scheduled = await store.scheduleItem(
       db,
@@ -1806,10 +1949,76 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(await store.settleItem(db, snoozed.id)).toMatchObject({ ok: true })
     const replied = await post(decision(SLACK))
     await store.recordReply(db, replied.ref)
-    expect(await store.editItem(db, replied.id, decision(SLACK))).toMatchObject({
-      code: "CONFLICT",
-      message: expect.stringContaining("replied to in chat"),
-      ok: false,
+    expect(await store.editItem(db, replied.id, decision(SLACK))).toMatchObject({ ok: true })
+  })
+
+  describe("an item stays editable until it closes (#903)", () => {
+    const progress = {
+      from: "builder",
+      kind: "update",
+      preview: { outcome: "finding", text: "40%" },
+      title: "Round 2",
+    }
+    const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
+
+    test("an update edits while archived and put away with Later, and is refused once Done or dismissed", async () => {
+      const update = await post(progress)
+      await store.markRead(db, [update.id])
+      expect(await store.answerItem(db, update.id, { action: "archive" }, { actor })).toMatchObject(
+        { ok: true },
+      )
+      expect(await store.editItem(db, update.id, progress)).toMatchObject({ ok: true })
+      expect((await store.scheduleItem(db, update.id, at(60))).ok).toBe(true)
+      expect(await store.editItem(db, update.id, progress)).toMatchObject({
+        item: { answer: { snoozedUntil: expect.any(String) } },
+        ok: true,
+      })
+      await store.dismissItems(db, [update.id])
+      expect(await store.editItem(db, update.id, progress)).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+      const other = await post(progress)
+      expect(await store.answerItem(db, other.id, { action: "dismiss" }, { actor })).toMatchObject({
+        ok: true,
+      })
+      expect(await store.editItem(db, other.id, progress)).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+    })
+
+    test("an answered ask edits while it is being carried out, and is refused once its poster closes it or the owner dismisses it", async () => {
+      const denied = await post(decision(SLACK))
+      expect(await store.answerItem(db, denied.id, { action: "deny" }, { actor })).toMatchObject({
+        ok: true,
+      })
+      const moved = await store.editItem(
+        db,
+        denied.id,
+        decision({ ...SLACK, text: "hi, 2 of 3 done." }),
+      )
+      expect(moved).toMatchObject({
+        item: { preview: { text: "hi, 2 of 3 done." }, status: "denied" },
+        ok: true,
+      })
+      expect((await store.ackItem(db, denied.id)).ok).toBe(true)
+      expect(await store.editItem(db, denied.id, decision(SLACK))).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+      const approved = await post(decision(SLACK))
+      expect(
+        await store.answerItem(db, approved.id, { action: "approve" }, { actor }),
+      ).toMatchObject({ ok: true })
+      expect(await store.editItem(db, approved.id, decision(SLACK))).toMatchObject({ ok: true })
+      expect(
+        await store.answerItem(db, approved.id, { action: "dismiss" }, { actor }),
+      ).toMatchObject({ ok: true })
+      expect(await store.editItem(db, approved.id, decision(SLACK))).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
     })
   })
 
@@ -1970,13 +2179,231 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(archived.ok && archived.item.status).toBe("cleared")
     const reopened = await store.answerItem(db, draft.id, { action: "unarchive" }, { actor })
     expect(reopened.ok && reopened.item.status).toBe("open")
-    // an archived item already sent to Done stays there, as the Archived shelf leaves it out
+    // one set aside and sent to Done moves back too, as Done's Move back offers it (#882)
     const done = await post(decision(PREVIEWS.ship))
     await store.answerItem(db, done.id, { action: "clear" }, { actor })
     await store.dismissItems(db, [done.id])
-    expect(await store.answerItem(db, done.id, { action: "unarchive" }, { actor })).toMatchObject({
-      code: "CONFLICT",
-      ok: false,
+    const fromDone = await store.answerItem(db, done.id, { action: "unarchive" }, { actor })
+    expect(fromDone.ok && fromDone.item).toMatchObject({ answer: null, status: "open" })
+  })
+
+  describe("Archive, Later, Move back, Done and Dismiss on every state (#882)", () => {
+    const typed = () => {
+      const sent: Delivery[] = []
+      const deliver = async (delivery: Delivery) => {
+        sent.push(delivery)
+        return { at: "2026-10-07T12:00:00.000Z", ok: true as const, sessionId: "s1" }
+      }
+      return { deliver, sent }
+    }
+    const update = () =>
+      post({
+        from: "ops",
+        kind: "update",
+        preview: { outcome: "merged" },
+        title: "Merged: the fix",
+      })
+    const listed = async (id: string) => {
+      const list = await store.listItems(db)
+      return {
+        archived: list.archived.some((item) => item.id === id),
+        items: list.items.some((item) => item.id === id),
+        snoozed: list.snoozed.some((item) => item.id === id),
+      }
+    }
+    const later = new Date(Date.now() + 3_600_000).toISOString()
+
+    test("Archive keeps a waiting decision open and unanswered, types nothing, and lists it as archived alone, out of items and the count", async () => {
+      const { deliver, sent } = typed()
+      const posted = await post(decision(PREVIEWS.ship))
+      const before = (await store.listItems(db)).count
+      const archived = await store.answerItem(
+        db,
+        posted.id,
+        { action: "archive" },
+        { actor, deliver },
+      )
+      if (!archived.ok) throw new Error(archived.message)
+      expect(archived.item.status).toBe("open")
+      expect(archived.item.answer).toMatchObject({ archivedAt: expect.any(String) })
+      expect(sent).toHaveLength(0)
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+      expect((await store.listItems(db)).count).toBe(before - 1)
+      // archived twice is refused
+      expect(await store.answerItem(db, posted.id, { action: "archive" }, { actor })).toMatchObject(
+        {
+          code: "CONFLICT",
+          ok: false,
+        },
+      )
+    })
+
+    test("Move back returns an archived item to the list as it was, and Later takes it off Archived until its time", async () => {
+      const posted = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      const back = await store.answerItem(db, posted.id, { action: "unarchive" }, { actor })
+      expect(back.ok && back.item).toMatchObject({ answer: null, status: "open" })
+      expect(await listed(posted.id)).toEqual({ archived: false, items: true, snoozed: false })
+      await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      const put = await store.scheduleItem(db, posted.id, later)
+      if (!put.ok) throw new Error(put.message)
+      expect(put.item.answer).toEqual({ snoozedUntil: later })
+      expect(await listed(posted.id)).toEqual({ archived: false, items: false, snoozed: true })
+      // settled, so no open item sleeps past the other tests' clocks
+      expect(await store.settleItem(db, posted.id)).toMatchObject({ ok: true })
+    })
+
+    test("an update archives, comes back, and is put off until a time, Later's shelf holding it", async () => {
+      const posted = await update()
+      const archived = await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      expect(archived.ok).toBe(true)
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+      await store.answerItem(db, posted.id, { action: "unarchive" }, { actor })
+      expect(await listed(posted.id)).toEqual({ archived: false, items: true, snoozed: false })
+      const put = await store.scheduleItem(db, posted.id, later)
+      expect(put.ok).toBe(true)
+      expect(await listed(posted.id)).toEqual({ archived: false, items: false, snoozed: true })
+      // Done wakes it and sends it to Done
+      await store.dismissItems(db, [posted.id])
+      const done = await store.getItem(db, posted.id)
+      expect(done?.answer).toEqual({ dismissedAt: expect.any(String) })
+      expect(await listed(posted.id)).toMatchObject({ archived: false, snoozed: false })
+    })
+
+    test("Dismiss on a waiting decision, draft or secret sets it aside as clear did, telling its poster so, and sends it to Done marked dismissed", async () => {
+      const draft = await post({
+        from: "dispatcher",
+        kind: "draft",
+        preview: { link: CHANNEL, text: "hi Merritt", to: "@Merritt" },
+        title: "Ask Merritt",
+      })
+      for (const posted of [
+        await post(decision(PREVIEWS.ship)),
+        draft,
+        await post(decision(SECRET)),
+      ]) {
+        const { deliver, sent } = typed()
+        const dismissed = await store.answerItem(
+          db,
+          posted.id,
+          { action: "dismiss" },
+          { actor, deliver },
+        )
+        if (!dismissed.ok) throw new Error(dismissed.message)
+        expect(dismissed.item.status).toBe("cleared")
+        expect(dismissed.item.answer).toMatchObject({
+          choice: "clear",
+          dismissed: true,
+          dismissedAt: expect.any(String),
+        })
+        expect(sent).toHaveLength(1)
+        expect(payloadOf(sent[0]!.text)).toMatchObject({
+          go: false,
+          id: posted.id,
+          next: "close",
+          verb: "set-aside",
+        })
+        expect(await listed(posted.id)).toMatchObject({ archived: false })
+      }
+      // an archived one dismissed is set aside the same way
+      const archived = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, archived.id, { action: "archive" }, { actor })
+      const aside = await store.answerItem(db, archived.id, { action: "dismiss" }, { actor })
+      expect(aside.ok && aside.item.status).toBe("cleared")
+    })
+
+    test("Dismiss on an answered item or an update marks it dismissed, keeping when it first went to Done, and a second is refused", async () => {
+      const posted = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, posted.id, { action: "approve" }, { actor })
+      const at = new Date("2026-10-07T12:00:00.000Z")
+      await store.dismissItems(db, [posted.id], at)
+      const dismissed = await store.answerItem(db, posted.id, { action: "dismiss" }, { actor })
+      if (!dismissed.ok) throw new Error(dismissed.message)
+      expect(dismissed.item.status).toBe("approved")
+      expect(dismissed.item.answer).toMatchObject({
+        choice: "approve",
+        dismissed: true,
+        dismissedAt: at.toISOString(),
+      })
+      expect(await store.answerItem(db, posted.id, { action: "dismiss" }, { actor })).toMatchObject(
+        {
+          code: "CONFLICT",
+          ok: false,
+        },
+      )
+      const read = await update()
+      const gone = await store.answerItem(db, read.id, { action: "dismiss" }, { actor })
+      expect(gone.ok && gone.item).toMatchObject({
+        answer: { dismissed: true, dismissedAt: expect.any(String) },
+        readAt: expect.any(String),
+      })
+    })
+
+    test("Dismiss tells an answered card's poster dismiss with how to close it, and an update's poster dismiss or, on Done, done; an answered card on Done, and one its poster closed, type nothing", async () => {
+      const go = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, go.id, { action: "approve" }, { actor })
+      const told = typed()
+      const dropped = await store.answerItem(db, go.id, { action: "dismiss" }, { actor, ...told })
+      if (!dropped.ok) throw new Error(dropped.message)
+      expect(told.sent).toHaveLength(1)
+      expect(told.sent[0]!.to).toBe(go.from)
+      expect(payloadOf(told.sent[0]!.text)).toMatchObject({
+        close: `bun run ask ack #i${go.ref} --no-link "<why>"`,
+        go: false,
+        id: go.id,
+        kind: "decision",
+        next: "close",
+        verb: "dismiss",
+      })
+      expect(dropped.item.delivery).toMatchObject({ status: "delivered" })
+
+      const denied = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, denied.id, { action: "deny" }, { actor })
+      const deniedTold = typed()
+      await store.answerItem(db, denied.id, { action: "dismiss" }, { actor, ...deniedTold })
+      expect(payloadOf(deniedTold.sent[0]!.text)).toMatchObject({
+        close: `bun run ask get #i${denied.ref} --ack`,
+        verb: "dismiss",
+      })
+
+      const closed = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, closed.id, { action: "deny" }, { actor })
+      await store.ackItem(db, closed.id)
+      const quiet = typed()
+      const done = await store.answerItem(db, closed.id, { action: "dismiss" }, { actor, ...quiet })
+      expect(done.ok).toBe(true)
+      expect(quiet.sent).toHaveLength(0)
+
+      const finished = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, finished.id, { action: "deny" }, { actor })
+      const doneQuiet = typed()
+      expect(await store.dismissItems(db, [finished.id], new Date(), { actor, ...doneQuiet })).toBe(
+        1,
+      )
+      expect(doneQuiet.sent).toHaveLength(0)
+
+      const progress = await update()
+      const doneTold = typed()
+      expect(await store.dismissItems(db, [progress.id], new Date(), { actor, ...doneTold })).toBe(
+        1,
+      )
+      expect(doneTold.sent).toHaveLength(1)
+      const line = payloadOf(doneTold.sent[0]!.text)
+      expect(line).toMatchObject({ go: false, kind: "update", next: "nothing", verb: "done" })
+      expect(line).not.toHaveProperty("close")
+      // Done already told it, so its Dismiss on Done types nothing again
+      const again = typed()
+      await store.answerItem(db, progress.id, { action: "dismiss" }, { actor, ...again })
+      expect(again.sent).toHaveLength(0)
+
+      const listedUpdate = await update()
+      const dismissTold = typed()
+      await store.answerItem(db, listedUpdate.id, { action: "dismiss" }, { actor, ...dismissTold })
+      expect(payloadOf(dismissTold.sent[0]!.text)).toMatchObject({
+        kind: "update",
+        next: "nothing",
+        verb: "dismiss",
+      })
     })
   })
 
@@ -2009,16 +2436,69 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect((await store.getItem(db, bare.id))?.answer).toEqual(bareClosed.item.answer)
   })
 
-  test("a replied item leaves the list once its week is up, as an answered one does", async () => {
+  test("a replied item from before the clocks stopped leaves the list once its week is up, as an answered one does", async () => {
     const posted = await post(decision(PREVIEWS.ticket))
-    await store.recordReply(db, posted.ref, new Date(Date.now() - 8 * 24 * 60 * 60 * 1000))
-    expect((await store.listItems(db)).items.map((i) => i.id)).not.toContain(posted.id)
+    const stopped = Date.parse(CLOCKS_STOPPED_AT)
+    await store.recordReply(db, posted.ref, new Date(stopped - 60 * 60_000))
+    const later = new Date(stopped + 8 * 24 * 60 * 60 * 1000)
+    expect((await store.listItems(db, later)).items.map((i) => i.id)).not.toContain(posted.id)
   })
 
-  // The replied-wait guard in listItems's what-needs-him query is visible only through the rest list's cap: without the guard a fresh replied item rides the uncapped needs-him side and never drops off, with it the 200 fresher rows push it out.
-  test("a fresh replied item drops off the list once the rest side's 200 rows are full", async () => {
+  // Since the clocks stopped, a card moves by a verb alone, so the list's week drops none of these: an approved go its poster has not acked, a card he only commented on, and an update he read; each leaves once its poster closes it or he dismisses it.
+  test("an unacked go, a comment-alone card, a read update and one woken from Later since the clocks stopped stay listed 8 days on, until a verb closes each", async () => {
+    const stopped = Date.parse(CLOCKS_STOPPED_AT)
+    const at = new Date(stopped + 60 * 60_000)
+    const delivered = async () => ({ at: at.toISOString(), ok: true as const, sessionId: "s1" })
+    const go = await post(decision(PREVIEWS.ship))
+    const approved = await store.answerItem(
+      db,
+      go.id,
+      { action: "approve" },
+      { actor, deliver: delivered, now: at },
+    )
+    if (!approved.ok) throw new Error(approved.message)
+    const replied = await post(decision(PREVIEWS.ticket))
+    await store.recordReply(db, replied.ref, at, "wait for the docs first")
+    const update = await post({
+      from: "builder",
+      kind: "update",
+      preview: { outcome: "merged" },
+      title: "Merged a made-up change",
+    })
+    expect(await store.markRead(db, [update.id], at)).toBe(1)
+    // put off with Later and woken: its answer holds the past snoozedUntil, yet it waits on his Done as a read update does
+    const woken = await post({
+      from: "builder",
+      kind: "update",
+      preview: { outcome: "merged" },
+      title: "Merged a made-up change put off",
+    })
+    expect(await store.markRead(db, [woken.id], at)).toBe(1)
+    const put = await store.scheduleItem(
+      db,
+      woken.id,
+      new Date(at.getTime() + 60 * 60_000).toISOString(),
+      {
+        now: at,
+      },
+    )
+    if (!put.ok) throw new Error(put.message)
+    const ids = [go.id, replied.id, update.id, woken.id]
+    const later = new Date(stopped + 8 * 24 * 60 * 60 * 1000)
+    const listed = (await store.listItems(db, later)).items.map((i) => i.id)
+    expect(ids.filter((id) => listed.includes(id))).toEqual(ids)
+    const closed = new Date(at.getTime() + 60_000)
+    const acked = await store.ackItem(db, go.id, { noLink: "made-up", now: closed })
+    if (!acked.ok) throw new Error(acked.message)
+    expect(await store.dismissItems(db, [replied.id, update.id, woken.id], closed)).toBe(3)
+    const after = (await store.listItems(db, later)).items.map((i) => i.id)
+    expect(ids.filter((id) => after.includes(id))).toEqual([])
+  })
+
+  // The rest side caps at 200 rows, newest first; a replied item since the clocks stopped waits on its poster's verb, so the cap never pushes it out.
+  test("a replied item since the clocks stopped stays in the list once the rest side's 200 rows are full", async () => {
     const posted = await post(decision(PREVIEWS.ticket))
-    await store.recordReply(db, posted.ref)
+    await store.recordReply(db, posted.ref, new Date(Date.parse(CLOCKS_STOPPED_AT) + 60_000))
     const updates: string[] = []
     for (let i = 0; i < 200; i++) {
       const update = await post({
@@ -2029,9 +2509,12 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       })
       updates.push(update.id)
     }
-    expect((await store.listItems(db)).items.map((i) => i.id)).not.toContain(posted.id)
+    expect((await store.listItems(db)).items.map((i) => i.id)).toContain(posted.id)
     // read the 200 back, so the store's later tests see no unread pile of ours
-    expect(await store.markRead(db, updates)).toBe(200)
+    expect(
+      await store.markRead(db, updates, new Date(Date.parse(CLOCKS_STOPPED_AT) - 60_000)),
+    ).toBe(200)
+    expect(await store.dismissItems(db, [posted.id])).toBe(1)
   })
 
   // An item he opened again from its card after a chat reply: its poster reads one answer, the one that replaced the reply, and is chased for that alone.
@@ -2082,7 +2565,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const at = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
       expect(await store.scheduleItem(db, posted.id, at)).toMatchObject({
         code: "CONFLICT",
-        message: "This item already has your answer",
+        message: "Only an open decision or draft, or an update in your list, can be scheduled",
       })
     })
   })
@@ -2326,14 +2809,19 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     )
     if (!answered.ok) throw new Error(answered.message)
     expect(sent.map((d) => d.to)).toEqual(["worker-eod", "dispatcher"])
+    // the dispatcher gets the poster's line with relay set, and reads the preview with bun run ask get
     const relay = sent[1]?.text ?? ""
-    expect(relay).toContain(`#i${posted.ref}`)
-    expect(relay).toContain("draft")
-    expect(relay).toContain("worker-eod has ended")
-    expect(relay).toContain("goes out through your Slack tool")
-    expect(relay).toContain("bun run ask ack")
-    expect(relay).toContain("hi Merritt, it is live.")
-    expect(relay).toContain("hi Merritt, the fix is on staging.")
+    expect(payloadOf(relay)).toMatchObject({
+      close: `bun run ask ack #i${posted.ref} --link <https url>`,
+      kind: "draft",
+      next: "carry-out",
+      ref: `#i${posted.ref}`,
+      relay: { for: "worker-eod", why: "poster-ended" },
+      text: "hi Merritt, it is live.",
+      verb: "send",
+    })
+    expect(relay).not.toContain("hi Merritt, the fix is on staging.")
+    expect(payloadOf(sent[0]?.text ?? "")).not.toHaveProperty("relay")
     expect(answered.item.delivery).toEqual({
       at: "2026-10-26T06:00:00.000Z",
       status: "delivered",
@@ -2366,7 +2854,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     )
     expect(answered.ok).toBe(true)
     expect(sent.map((d) => d.to)).toEqual(["worker-eod"])
-    expect(sent[0]?.text).not.toContain("has ended")
+    expect(payloadOf(sent[0]?.text ?? "")).not.toHaveProperty("relay")
     expect(answered.ok && answered.item.delivery).toMatchObject({ to: "worker-eod" })
   })
 
@@ -2454,8 +2942,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       },
     )
     expect(sent.map((d) => d.to)).toEqual(["worker-eod", "dispatcher"])
-    expect(sent[1]?.text).toContain("nothing is carried out")
-    expect(sent[1]?.text).not.toContain("you carry this out")
+    expect(payloadOf(sent[1]?.text ?? "")).toMatchObject({
+      close: `bun run ask get #i${posted.ref} --ack`,
+      go: false,
+      next: "close",
+      relay: { for: "worker-eod", why: "poster-ended" },
+      verb: "pick",
+    })
   })
 
   test("a clear reaches its poster as set aside, not denied, and its poster's read closes it as a non-go", async () => {
@@ -2475,8 +2968,11 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     )
     if (!answered.ok) throw new Error(answered.message)
     expect(answered.item.status).toBe("cleared")
-    expect(sent[0]?.text).toContain("Cleared for now")
-    expect(sent[0]?.text).not.toContain("Denied")
+    expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+      go: false,
+      next: "close",
+      verb: "set-aside",
+    })
     // a go would wait on bun run ask ack with a link; a clear closes on the poster's read, as a deny does
     const read = await store.readAnswer(db, answered.item, new Date("2026-10-07T12:01:00.000Z"))
     expect(read.answer).toMatchObject({ ackedAt: "2026-10-07T12:01:00.000Z", choice: "clear" })
@@ -2609,7 +3105,11 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     ])
     expect([first.ok, second.ok].sort()).toEqual([false, true])
     expect(sent).toHaveLength(1)
-    expect(sent[0]?.text).toContain("Approved. Carry it out.")
+    expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+      go: true,
+      next: "carry-out",
+      verb: "pick",
+    })
     expect(sent[0]?.to).toBe("ops")
     const item = await store.getItem(db, posted.id)
     expect(item?.delivery).toMatchObject({ status: "delivered", via: "session" })
@@ -2950,7 +3450,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(await store.markRead(db, [one.id])).toBe(0)
     const list = await store.listItems(db)
     const unread = list.items
-      .filter((i) => i.kind === "update" && i.readAt === null)
+      // its own three alone: an unread update stays listed at any age, so another test's can show here too
+      .filter((i) => [one.id, two.id, three.id].includes(i.id) && i.readAt === null)
       .map((i) => i.id)
     expect(unread).toEqual([three.id, two.id])
     // only the updates named are marked, so one that arrived since stays unread
@@ -3004,11 +3505,21 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     await store.markRead(db, pile.map((i) => i.id).slice(200))
   }, 60_000)
 
-  test("the list counts what needs him and keeps answered items a week", async () => {
+  test("the list counts what needs him and keeps answered items a week, but for each card that waits on a verb since the clocks stopped", async () => {
     const list = await store.listItems(db)
     expect(list.count).toBe(store.inboxCount(list.items))
     const later = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000)
     const old = await store.listItems(db, later)
+    const stopped = Date.parse(CLOCKS_STOPPED_AT)
+    // since the clocks stopped, an answer its poster has not closed and an update he read and has not dismissed stay at any age
+    const waitsOnVerb = (i: InboxItem) => {
+      const answer = i.answer as { ackedAt?: string; at?: string; dismissedAt?: string } | null
+      if (i.kind === "update")
+        return answer === null && i.readAt !== null && Date.parse(i.readAt) >= stopped
+      return (
+        !!answer?.at && Date.parse(answer.at) >= stopped && !answer.ackedAt && !answer.dismissedAt
+      )
+    }
     expect(
       old.items.every(
         (i) =>
@@ -3016,7 +3527,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           // a set-aside item stays, however old, for the Archived shelf
           i.status === "cleared" ||
           (i.kind === "update" && i.readAt === null) ||
-          store.deliveryFailed(i),
+          store.deliveryFailed(i) ||
+          waitsOnVerb(i),
       ),
     ).toBe(true)
   })
@@ -3046,7 +3558,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(store.snoozedUntil(moved.item, now)).toBe("2026-10-09T09:00:00.000Z")
   })
 
-  test("Schedule refuses an update, an answered item and a time that has passed", async () => {
+  test("Schedule refuses an update already done, an answered item and a time that has passed", async () => {
     const at = "2026-10-08T09:00:00.000Z"
     const update = await post({
       from: "builder",
@@ -3054,6 +3566,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       preview: { outcome: "merged" },
       title: "Merged",
     })
+    await store.dismissItems(db, [update.id])
     expect((await store.scheduleItem(db, update.id, at)).ok).toBe(false)
     const posted = await post(decision(PREVIEWS.ask))
     const answered = await store.answerItem(db, posted.id, { action: "approve" }, { actor })
@@ -3200,8 +3713,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       // the poster is told when and each status, and never the value
       expect(sent).toHaveLength(1)
       expect(sent[0]?.to).toBe("dispatcher")
-      expect(sent[0]?.text).toContain("production: exit 0")
-      expect(sent[0]?.text).toContain("preview: exit 1")
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        next: "close",
+        results: [
+          { environment: "production", exitCode: 0 },
+          { environment: "preview", exitCode: 1 },
+        ],
+        verb: "submit",
+      })
       expect(sent[0]?.text).not.toContain(VALUE)
       expect(JSON.stringify(provided.item)).not.toContain(VALUE)
       expect(logged.join("\n")).not.toContain(VALUE)
@@ -3263,7 +3782,9 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         choice: "provided",
         results: [{ environment: "Keychain", exitCode: 0, line: "saved" }],
       })
-      expect(sent[0]?.text).toContain("Keychain: saved")
+      expect(payloadOf(sent[0]?.text ?? "")?.results).toEqual([
+        { environment: "Keychain", exitCode: 0, line: "saved" },
+      ])
       for (const kept of [
         JSON.stringify(provided),
         JSON.stringify(sent),
@@ -3271,6 +3792,62 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         await everyRow(),
       ])
         expect(kept).not.toContain(VALUE)
+    })
+
+    test("a saved secret whose telling failed keeps its saved result, and its Retry tells the poster again without running the sink (PG-880)", async () => {
+      const posted = await post({
+        ...decision({
+          key: "YARD_TOKEN",
+          sink: { item: "yard", type: "keychain" },
+          type: "secret",
+        }),
+        from: "dispatcher",
+      })
+      const saves: string[] = []
+      const keychainSink = async (_item: string, value: string) => void saves.push(value)
+      const sink = stub()
+      const provided = await store.provideSecret(
+        db,
+        posted.id,
+        { value: `yard_${VALUE}` },
+        {
+          actor,
+          deliver: async () => ({
+            code: "CMUX_FAILED",
+            ok: false,
+            reason:
+              "The sessions read was cut short (a herdr server or pane did not answer whole), so dispatcher was not found; nothing was typed.",
+          }),
+          keychain: keychainSink,
+          run: sink.run,
+        },
+      )
+      expect(provided.ok && provided.item.delivery).toMatchObject({
+        code: "CMUX_FAILED",
+        status: "failed",
+      })
+      const saved = provided.ok ? provided.item.answer : null
+      expect(saved).toMatchObject({
+        results: [{ environment: "Keychain", exitCode: 0, line: "saved" }],
+      })
+      const sent: Delivery[] = []
+      const retried = await store.retryDelivery(db, posted.id, {
+        actor,
+        deliver: async (delivery) => {
+          sent.push(delivery)
+          return { at: new Date().toISOString(), ok: true, sessionId: "s1" }
+        },
+      })
+      expect(saves).toEqual([`yard_${VALUE}`])
+      expect(sink.calls).toHaveLength(0)
+      expect(sent).toHaveLength(1)
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        results: [{ environment: "Keychain", exitCode: 0, line: "saved" }],
+        verb: "submit",
+      })
+      expect(sent[0]?.text).not.toContain(VALUE)
+      expect(retried.ok && retried.item.answer).toEqual(saved)
+      expect(retried.ok && retried.item.delivery).toMatchObject({ status: "delivered" })
     })
 
     test("a keychain save that fails keeps the refusal's first line, with the value cut out", async () => {
@@ -3427,9 +4004,11 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
       })
       expect(sent).toHaveLength(1)
-      expect(sent[0]?.text).toContain("the dashboard ran the accept: rev 9b8c7d6 is accepted")
-      expect(sent[0]?.text).toContain(`bun run ask ack #i${posted.ref} --no-link`)
-      expect(sent[0]?.text).not.toContain("Carry it out")
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        accepted: { exitCode: 0, line: "rev 9b8c7d6 is accepted" },
+        close: `bun run ask ack #i${posted.ref} --no-link "<why>"`,
+        next: "nothing",
+      })
     })
 
     test("a refused accept records the CLI's exit code and its error line, and the poster reads that nothing was accepted", async () => {
@@ -3459,8 +4038,10 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           line: "playground ext: 409 the proposal is at 0a1b2c3d4e5f, not 3f9a2c1d; read it again",
         },
       })
-      expect(sent[0]?.text).toContain("failed (exit 1)")
-      expect(sent[0]?.text).toContain("Nothing was accepted")
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        accepted: { exitCode: 1 },
+        next: "nothing",
+      })
     })
 
     test("a runner that throws is recorded as a failed accept, never an approve with no result", async () => {
@@ -3555,11 +4136,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         },
       )
       const relayed = sent.find((delivery) => delivery.to === "dispatcher")
-      expect(relayed?.text).toStartWith(
-        `worker-eod has ended, and the dashboard already ran this accept, so nothing is carried out: close the item with bun run ask ack #i${posted.ref} --no-link`,
-      )
-      expect(relayed?.text).toContain("the dashboard ran the accept")
-      expect(relayed?.text).not.toContain("you carry this out in its place")
+      const relayedPayload = payloadOf(relayed?.text ?? "")
+      expect(relayedPayload).toMatchObject({
+        close: `bun run ask ack #i${posted.ref} --no-link "<why>"`,
+        next: "nothing",
+        relay: { for: "worker-eod", why: "poster-ended" },
+      })
+      expect(relayedPayload?.accepted).toEqual({ exitCode: 0, line: "rev 9b8c7d6 is accepted" })
       // an approved accept is a go, which get --ack leaves open, so the relay names the one close that closes it
       expect(relayed?.text).not.toContain("--ack")
     })
@@ -3606,8 +4189,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         },
       })
       expect(answered.ok && answered.item.status).toBe("approved")
-      expect(sent[0]?.text).toContain("Recheck with agent-desktop permissions")
-      expect(sent[0]?.text).toContain(`bun run ask ack #i${posted.ref} --no-link`)
+      // the pane opened, so the poster carries out the recheck asks.md names, then closes it
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        close: `bun run ask ack #i${posted.ref} --no-link "<why>"`,
+        next: "carry-out",
+        opened: { exitCode: 0 },
+        type: "grant",
+        verb: "pick",
+      })
     })
 
     test("an open that fails is recorded, and the poster reads that nothing opened", async () => {
@@ -3629,7 +4218,10 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(answered.ok && answered.item.answer).toMatchObject({
         opened: { exitCode: 1, line: "LSOpenURLsWithRole() failed with error -10814" },
       })
-      expect(sent[0]?.text).toContain("Nothing opened")
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        next: "nothing",
+        opened: { exitCode: 1, line: "LSOpenURLsWithRole() failed with error -10814" },
+      })
     })
 
     test("with no opener, as on a stack showing test data, its Approve is refused and the item stays open; Deny opens nothing", async () => {
@@ -3699,7 +4291,11 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         listed: { exitCode: 0, line: "added Notes; your apps are Slack, Notes" },
       })
       expect(answered.ok && answered.item.status).toBe("approved")
-      expect(sent[0]?.text).toContain("the dashboard changed the owner's apps")
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        listed: { exitCode: 0, line: "added Notes; your apps are Slack, Notes" },
+        next: "nothing",
+        type: "apps",
+      })
     })
 
     test("two Approves that overlap change the list one at a time, so neither app is lost", async () => {
