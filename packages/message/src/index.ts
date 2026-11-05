@@ -33,6 +33,9 @@ export const WEB_DEVICE = "web"
 export const approvePath = (messageId: string) => `/yard/approve/${encodeURIComponent(messageId)}`
 export const invitePath = (inviteId: string) => `/yard/invites/${encodeURIComponent(inviteId)}`
 
+// Where the hosted API's relay to the owner's own Mac sits: the hosted web's dashboard reads go to this prefix plus their own path.
+export const RELAY_PREFIX = "/api/v1/yard/relay"
+
 // A token's name, which a post made with it carries as from.device, so none may take the browser's name.
 export const tokenNameSchema = device.refine(
   (name) => name !== WEB_DEVICE,
