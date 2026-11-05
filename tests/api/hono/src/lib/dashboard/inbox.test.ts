@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, utimesSync } from "node:fs"
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -10,6 +10,7 @@ import {
   storeAttachment,
 } from "../../../../../../api/hono/src/lib/dashboard/attachments"
 import { QUEUED_MS } from "../../../../../../api/hono/src/lib/dashboard/deliver"
+import { standingFocus } from "../../../../../../api/hono/src/lib/dashboard/focus"
 import {
   acceptArgs,
   ACTIONS,
@@ -27,6 +28,7 @@ import {
   type InboxItem,
   inboxOrder,
   isGo,
+  quietIds,
   runResult,
   savesDraft,
   secretInputSchema,
@@ -987,6 +989,24 @@ describe("an answer", () => {
 })
 
 describe("the list", () => {
+  // the owner gets the Mac for a stretch: what comes in waits quiet, but an alert cannot wait (#974)
+  test("while focus stands, what came in since it began is quiet, an alert update aside, and nothing is with no focus", () => {
+    const since = "2026-10-07T10:00:00.000Z"
+    const items = [
+      item({ createdAt: "2026-10-07T09:59:59.000Z", kind: "decision", ref: 1 }),
+      item({ createdAt: since, kind: "decision", ref: 2 }),
+      item({ createdAt: "2026-10-07T10:05:00.000Z", kind: "update", ref: 3 }),
+      item({
+        createdAt: "2026-10-07T10:06:00.000Z",
+        kind: "update",
+        preview: { outcome: "alert" },
+        ref: 4,
+      }),
+    ]
+    expect(quietIds(items, { since })).toEqual(["id-2", "id-3"])
+    expect(quietIds(items, null)).toEqual([])
+  })
+
   test("puts what needs him first, then unread updates, then the rest, each newest first (#i545)", () => {
     const items = [
       item({ kind: "update", readAt: "2026-10-07T11:00:00.000Z", ref: 1 }),
@@ -1422,6 +1442,54 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     if (!posted.ok) throw new Error(posted.message)
     return posted.item
   }
+
+  // the Done when of #974, end to end: post during focus, end it, read the card
+  test("an item posted while focus stands is stored and left out of the count, an alert counts, and once focus ends its card comes and the item counts (#974)", async () => {
+    const { focusCard } = await import("../../../../../../packages/scripts/src/playground/focus")
+    const data = mkdtempSync(join(tmpdir(), "inbox-focus-"))
+    const during = await post(decision(PREVIEWS.ask))
+    // focus began as that item came in, by the database's own clock, so no older item reads as quiet
+    const since = Date.parse(during.createdAt)
+    const until = new Date(since + 30 * 60_000)
+    writeFileSync(
+      join(data, "focus.json"),
+      JSON.stringify({
+        reason: "a timed demo",
+        session: "worker-f",
+        since: during.createdAt,
+        until: until.toISOString(),
+      }),
+    )
+    const alert = await post({
+      from: "ops",
+      kind: "update",
+      preview: { outcome: "alert" },
+      title: "The Mac's battery is at 5%: plug it in now or it shuts down",
+    })
+    const at = new Date(since + 60_000)
+    const focus = await standingFocus(data, at)
+    expect(focus?.session).toBe("worker-f")
+    const quiet = await store.listItems(db, at, focus)
+    const loud = await store.listItems(db, at)
+    expect(quiet.items.map((item) => item.id)).toContain(during.id)
+    expect(quiet.quiet).toEqual([during.id])
+    expect(quiet.count).toBe(loud.count - 1)
+    expect(loud.items.map((item) => item.id)).toContain(alert.id)
+
+    const posted = await focusCard(data, until, async (card) => {
+      await post({ from: "ops", ...card })
+    })
+    expect(posted).toBe("posted")
+    expect(await standingFocus(data, until)).toBeNull()
+    const after = await store.listItems(db, until, await standingFocus(data, until))
+    expect(after.quiet).toEqual([])
+    expect(after.items.map((item) => item.title)).toContain(
+      "Focus for worker-f ended: 0 runs queued while it stood, 0m0s in all",
+    )
+    expect(after.items.map((item) => item.id)).toContain(during.id)
+    expect(after.count).toBe((await store.listItems(db, until)).count)
+    rmSync(data, { force: true, recursive: true })
+  })
 
   test("a kept file downloads under its item's title, the file's own name after it when the item carries several, and as attachment when no item carries it (#783)", async () => {
     const lone = "3f0e7a52-1c4b-4d2a-9e6f-00000000d001.html"

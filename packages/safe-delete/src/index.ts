@@ -370,11 +370,15 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   const branch = git("symbolic-ref", "--quiet", "--short", "HEAD").out
   const folder = basename(at).toLowerCase()
   const where = `${folder} ${branch.toLowerCase()}`
+  // Each name's slug, after its PG-<n>- prefix: ops holds PG-12-ops-job, not PG-5-stops.
+  const slugs = [folder, branch.toLowerCase()].map((n) => n.replace(/^pg-\d+-/, ""))
   for (const agent of agents) {
     if (!agent || !holders.live.includes(String(agent.status)) || typeof agent.name !== "string")
       continue
-    const id = agent.name.split("-")[0]!
-    const tokens = [agent.name, ...(/\d/.test(id) ? [id] : [])].map((t) => t.toLowerCase())
+    const name = agent.name.toLowerCase()
+    const byName = slugs.some((s) => s === name || s.startsWith(`${name}-`))
+    const id = name.split("-")[0]!
+    const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
     const pr =
@@ -382,7 +386,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
         ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1]
         : undefined
     const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
-    if (byBranch || byPr || tokens.some((t) => where.includes(t)))
+    if (byBranch || byPr || byName || byId)
       return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}`
   }
   const cloned = cloneHolder(at, holders.clones())
