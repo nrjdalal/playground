@@ -14,7 +14,8 @@ set -euo pipefail
 #      for a reviewer or tester, else what `ops/run-slot.sh size <name>` reads),
 #      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
 #      a small worker keeping an eighth in its place for the reviewers and testers; a load at or over
-#      that line refuses whatever the CPU's idle share, so the load stays under the cores
+#      that line refuses whatever the CPU's idle share, so the load stays under the cores, but for a
+#      --firefighting start while its trigger file stands (FF_TRIGGER), logged as readings.firefighting
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
@@ -53,7 +54,7 @@ set -euo pipefail
 #   spawn.sh move      <name>                           takes the live cmux session holding <name> to herdr: every check and the usage gate run but the load and memory gates, since the copy it closes frees what the new one takes; only then it closes the session's cmux surface (its workspace when that was the last surface), waits up to 30s (PLAYGROUND_MOVE_WAIT seconds) for its process to exit, and resumes it in herdr by its session id. It takes --model, --effort, --account and --brief as a resume does, --backend for a session with no pin, and --runtime herdr alone; a session cmux holds no record of at its pid is left alone, and a session cannot move itself: its lead moves it
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" ("can move" for a move) and start or close nothing
-#   --firefighting     with any mode but restore or close, anywhere among its words: the start passes focus's refusal while a firefighting trigger file stands in the data folder (firefighting-stop.json or firefighting-headstart.json), and is refused while none does
+#   --firefighting     with any mode but restore or close, anywhere among its words: the start passes focus's refusal and the load gate (the memory gate still reads it) while a firefighting trigger file stands in the data folder (firefighting-stop.json or firefighting-headstart.json), and is refused while none does
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
@@ -269,7 +270,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${FF_TRIGGER:-}" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -279,7 +280,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role, room, first = sys.argv[1:14]
+data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role, room, first, firefighting = sys.argv[1:15]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -447,8 +448,10 @@ else:
         share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
         keep = cap * share
         readings["reserve"] = keep
-        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share
-        if readings["load5"] + starts >= cap - keep:
+        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --firefighting start passes while its trigger file stands (FF_TRIGGER), since firefighting comes first, and the memory gate still reads it
+        if firefighting:
+            readings["firefighting"] = firefighting
+        elif readings["load5"] + starts >= cap - keep:
             at = (
                 f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
                 if mult != 1
