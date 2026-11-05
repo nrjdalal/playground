@@ -83,8 +83,10 @@ Only the first reading moves the folder, sets variables and records files for th
   A script a command reads (`sh -c`, `eval`, `source`) reads with no run of the line's, since every command in it runs because that command ran; what the script's own trailing run leaves joins the line's on the way out, under the reading command's run,
   since a `cd` an `&&` made sure at the end of an `eval` or a `source` may not have run either (`eval 'true && cd <path>'; git commit -m x`, refused in both folders).
 - Every other `cd` leaves `Env.cwdSure` unnamed and keeps each folder the shell may be in: the folder before it, and each folder its target names, read against every folder the shell may already be in (`Env.cwdMaybe`).
-  A relative target that climbs adds every folder above it wherever the shell may run that `cd` more than once: under a count (`repeat`, `timeout`), in a loop's body or a `while`'s or `until`'s condition, in a function's body, and in the script an `eval` or a `source` reads in such a place.
-  A function's body runs once when the line names the function just twice, by its definition and one call outside every loop and body, a redirect's target being a file rather than a call.
+  A relative target that climbs adds every folder above it wherever the shell may run that `cd` more than once: under a count (`repeat`, `timeout`), in a loop's body, between a loop's head and its `do` (a `while`'s or `until`'s condition, the body of zsh's short `for`, `select` and `foreach`), in a function's body, and in the script an `eval` or a `source` reads in such a place.
+  A function's body, a brace group or any compound (`f() if …; fi`), runs once when the line names the function just twice, by its definition and one call outside every loop and body, a redirect's target being a file rather than a call.
+  A name past a plain word (`f+`, `a/b`), a call through a word the reader cannot read (`$n`, `${b:1}`), a call it reads only once decoded (`$'\x66'`), and any `eval` or `source` on the line each read the body as one that may run again.
+  A zsh head whose body is a brace group in its own words (`repeat 3 { cd ..; }`, `while true { … }`, `if true { … }`: `Command.opaque`) sets `Env.cwdAnywhere`, since the reader does not read that body.
   A `while`'s or `until`'s condition outside every other loop runs at least once (`Command.atLeastOnce`, the script an `eval` or a `source` there reads included), so its `cd` into folders that are there drops the folder before it, as a sure `cd` does, and keeps each folder its passes reach.
   A `cd` through a steady variable reads the folder the variable names, in a hook that holds them (`Env.hold`, which no-main-checkout sets from `steady.ts`), so its climb is read from that folder; the start-folder reading the `cd` had stays beside it.
   A `cd` that opens a function's, a brace group's or a coprocess's body adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point, and a relative `cd` after it resolves from those folders too, since the body may already have run.
@@ -106,6 +108,9 @@ Only the first reading moves the folder, sets variables and records files for th
   A line on which the reader can name no folder keeps canary's reading, since nothing on it says where the shell goes (a bare `cd -` with no earlier `cd` to return to).
   A command that names its own folder (`git -C <path>`, `bun --cwd <path>`, turbo's `--cwd`, `env -C <path>`) is judged by that path, whatever the shell's folder.
   Its tests are in `bun run test:file tests/scripts/hooks`.
+- Text the shell stores and runs later is the open class, which canary shares: the reader reads neither a `trap`'s text nor an `alias`'s value, so a `cd` there (`trap 'cd ..' DEBUG`) moves the shell where the reader keeps its folder.
+  The follow-up is filed as the shell reader reading the text a trap or an alias stores as a script the shell may run again at any point, which is the wording to search the tracker for.
+  Name the folder in the command itself (`git -C <path>`, `bun --cwd <path>`) on a line that sets a trap or an alias holding a `cd`.
 
 ## after-compact
 
