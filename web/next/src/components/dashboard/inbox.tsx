@@ -347,8 +347,6 @@ const ASK_QUOTE =
 // The card's own boxes (a note, a reply) write small, under the ask they answer; md: beats Textarea's own md:text-sm
 const BOX = "text-xs md:text-xs"
 
-// A decision's options, picked as a row of the card, then Send, so the answer names the option the owner chose (choicesOf): Approve and Deny with their labels for a yes or no, or lettered rows for real alternatives.
-
 // Approve reads green and Deny red, on a muted wash that deepens when picked, the same on a choice and on a footer button, dark theme included, where the outline Button's own border and hover would win.
 const SIDE_TONES: Record<"approve" | "deny", string> = {
   approve:
@@ -464,7 +462,7 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
   const preview = item.preview
   switch (preview.type) {
     case "ask":
-      // a labelled ask's choices say what each one does, so its text stands alone above them
+      // an ask with options says what each one does in its choices, so its text stands alone above them
       return (
         <>
           {!preview.options && !preview.approve && (

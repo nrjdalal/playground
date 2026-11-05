@@ -6,8 +6,8 @@ import {
   type AnswerPayload,
   answerPayloadSchema,
   choicesOf,
-  MAX_OPTIONS,
   CLOCKS_STOPPED_AT,
+  MAX_OPTIONS,
 } from "@packages/config/inbox"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
