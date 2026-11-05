@@ -87,6 +87,8 @@ A link in the chat opens when you click it: a link to another site in a new tab,
 Only `http` and `https` links open; any other link shows as plain text.
 An image loads only when it is a file you attached or a preview; any other image shows as text.
 A long line in a code block wraps, so nothing is cut at the box's edge.
+A message another session sent shows folded, like a tool call: **Received from** its sender and its first line.
+Click the row to read the whole message and its files.
 
 Each chat is either Watching or Reading, and the toggle in the bar under it shows which; click it to switch.
 While Watching, the chat scrolls through new messages at reading speed, and its toggle says how far behind it runs, such as "Watching · 15s behind".
@@ -199,6 +201,14 @@ Minimize (the music note), at the video's top-right corner, or Esc puts it back 
 Drag the timeline, under the controls and along the video's bottom, to move through the song, or hover a time to skip 10 seconds back or ahead.
 After a reload, Play resumes the last song where it stopped, Previous plays it from its start, and Next moves on into its mix.
 Click the volume button to mute, or hover it a moment to drag the volume up or down, which the player keeps.
+
+## From the hosted Yard
+
+Signed in to the hosted Yard as its owner, open `/dashboard` there to read this Mac's own Dashboard from anywhere, the same pages with the same data.
+This Mac dials out to Yard, so nothing here listens beyond this machine: it holds the connection while its Dashboard reads your own machine, `YARD_API_URL` is set and `playground yard login` has put a token in the Keychain ([the playground command](/docs/cli#yard-playground-yard)).
+Yard keeps nothing this Mac sends, and only the owner reaches the page; anyone else gets the 404.
+For now it reads alone: sending a message, answering the Inbox and every other change wait for the Mac, the board refreshes every 5 seconds, and the Inbox's Preview row shows no preview there.
+While this Mac sleeps or is offline, the page says "Your Mac is offline since" and the time.
 
 ## The System page
 
