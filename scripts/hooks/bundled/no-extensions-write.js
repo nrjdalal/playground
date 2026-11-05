@@ -2442,6 +2442,7 @@ var GUARD_KEYS = new Set([
   "paths.codeRoot",
   "sessions.aliases",
   "sessions.names",
+  "slack.gatedSends",
   "usage.keychainService"
 ]);
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
