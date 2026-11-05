@@ -1399,6 +1399,21 @@ case "$SIZE" in
   *) ITEM=$(bash "$REPO/scripts/ops/run-slot.sh" size "$NAME" 2>/dev/null) || ITEM= ;;
 esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
+# While focus stands (playground focus), one session has the Mac, so a start waits for its end; a move closes the copy it replaces, so it goes on.
+if [ -z "$MOVE_PID" ] && FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
+import datetime, json, sys
+try:
+    f = json.load(open(sys.argv[1]))
+    until = datetime.datetime.fromisoformat(f["until"].replace("Z", "+00:00"))
+except Exception:
+    sys.exit(1)
+if until <= datetime.datetime.now(datetime.timezone.utc):
+    sys.exit(1)
+print(f"{f.get('session')} until {f['until']}")
+PY
+); then
+  refuse "focus stands for $FOCUS, so no new session starts until it ends (playground focus off ends it)"
+fi
 gate_capacity
 if [ "$RUNTIME" = herdr ]; then
   # herdr names an agent by [a-z][a-z0-9_-]{0,31}, so a longer name could never name the session's agent there.
@@ -1508,8 +1523,14 @@ if [ "$MODE" = resume ]; then
       PROMPT=
     fi
   else
-    # Whom it reports to, from the prompt its start recorded, so the re-sends reach the right session; a session started in cmux has no record.
-    UP=$(sed -n 's/.*; you report to \([A-Za-z0-9-]*\)\..*/\1/p' "$RESUME_DIR/$NAME.prompt" 2>/dev/null | head -1) || UP=
+    # Whom it reports to, by scripts/README.md's order, so the re-sends reach the right session; a value that is not a session name would break the launch's quotes.
+    if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
+      UP=$(roster_field "$NAME" worker)
+    else
+      UP=$(roster_field "$NAME" reportsTo)
+      word "$UP" || UP=$(roster_field "$NAME" lead)
+    fi
+    word "$UP" || UP=$(sed -n 's/.*; you report to \([A-Za-z0-9-]*\)\..*/\1/p' "$RESUME_DIR/$NAME.prompt" 2>/dev/null | head -1) || UP=
     # A session idle at the restart takes no turn, so it would never act on after-resume's context.
     PROMPT="You are $NAME, resumed after a restart${UP:+; you report to $UP}. Act on the after-resume instruction in your context first, then carry on."
   fi

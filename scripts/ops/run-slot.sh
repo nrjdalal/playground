@@ -1,5 +1,5 @@
 #!/bin/bash
-# run-slot.sh <who> [--model-bound] -- <command> [args...]: run one heavy run (a suite, a type check, Checks, a build) holding one of the machine's run slots.
+# run-slot.sh <who> [--model-bound] [--after <pid>] -- <command> [args...]: run one heavy run (a suite, a type check, Checks, a build) holding one of the machine's run slots.
 # A --model-bound run (one that mostly waits on a model, such as a parity replay) takes run-slot-model-<n> instead, at most slots.modelBound at once (model_cap, below), counted apart from the CPU slots and their queue.
 # It takes ops/run-slot, run-slot-2, run-slot-3 or run-slot-4 by mkdir, as the load rules (lanes_open) open them and its size's load units fit, waiting and
 # retrying while none does; writes "<who> <its own pid> <iso> <units> <size>" to the slot's .holder file beside it
@@ -28,7 +28,7 @@ stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
-SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
+SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
   local f="$OPS/$1" line ends now m
@@ -171,7 +171,7 @@ if [ "${1:-}" = size ]; then
   size_of "$2"
   exit
 fi
-# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, load5-cap, single,
+# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, focus, load5-cap, single,
 # or the runner host's off or slot-off, for 4 hours unless --for says; a value (load5-cap's cap) goes on the line below. A set with no reason is refused
 if [ "${1:-}" = set ]; then
   usage='usage: run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]'
@@ -188,14 +188,16 @@ if [ "${1:-}" = set ]; then
   case "$who" in *[!A-Za-z0-9._#-]*|"") echo "run-slot.sh: <who> is a session name (letters, digits, . _ - #)" >&2; exit 2 ;; esac
   case "$name" in
     off|slot-off) path=runner-host/$name ;;
-    3-off|4-off|clone-off|load5-cap|single) path=run-slot.$name ;;
-    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
+    3-off|4-off|clone-off|focus|load5-cap|single) path=run-slot.$name ;;
+    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, focus, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
   esac
   [ -n "$reason" ] || { echo "run-slot.sh: a set takes --reason \"<why>\", so whoever finds the switch on knows why it stands" >&2; exit 2; }
   case "$span" in [0-9]*m) unit=60 ;; [0-9]*h) unit=3600 ;; *) unit= ;; esac
   n=${span%[mh]}
   case "$n" in ""|*[!0-9]*|0*) unit= ;; esac
   [ -n "$unit" ] || { echo "run-slot.sh: --for takes a count of minutes or hours above 0, such as 30m or 4h" >&2; exit 2; }
+  # focus stands 180 minutes at most (dispatcher, 5 Nov: run-slot.focus is approved on that cap)
+  [ "$name" != focus ] || [ $((n * unit)) -le 10800 ] || { echo "run-slot.sh: focus stands 180 minutes at most" >&2; exit 2; }
   iso() { date -u -d "@$1" +%FT%TZ 2>/dev/null || date -u -r "$1" +%FT%TZ; }
   at=$(date +%s)
   ends=$(iso $((at + n * unit)))
@@ -236,9 +238,19 @@ if [ "${1:-}" = can-take ]; then
   set -- "$3" -- true
 fi
 MODEL_BOUND=
-[ -z "$CAN_TAKE" ] && [ "${2:-}" = --model-bound ] && { MODEL_BOUND=1; set -- "$1" "${@:3}"; }
+AFTER=
+while [ -z "$CAN_TAKE" ]; do
+  case "${2:-}" in
+    --model-bound) MODEL_BOUND=1; set -- "$1" "${@:3}" ;;
+    --after)
+      case "${3:-}" in 0*|1) echo "run-slot.sh: --after $3 names no run (a pid of 0 or 1 is never a run's, and kill -0 0 always succeeds), so this run never waits: give the pid on the first run's ask line" >&2; exit 2 ;; esac
+      case "${3:-}" in ''|*[!0-9]*) echo "run-slot.sh: --after takes the pid on the first run's ask line in run-slot.runs.log (ask <who> <pid>)" >&2; exit 2 ;; esac
+      AFTER=$3; set -- "$1" "${@:4}" ;;
+    *) break ;;
+  esac
+done
 if [ $# -lt 3 ] || [ "$2" != "--" ]; then
-  echo "usage: run-slot.sh <who> [--model-bound] -- <command> [args...]" >&2
+  echo "usage: run-slot.sh <who> [--model-bound] [--after <pid>] -- <command> [args...]" >&2
   exit 2
 fi
 WHO=$1
@@ -270,6 +282,32 @@ if [ -z "$REREAD" ]; then
         ;;
     esac
   done
+fi
+# --after <pid>: a run that needs <who>'s run <pid> to land first waits here, with no ask line, ticket or slot, until that run's end line: rc=0 asks, any other rc exits with it, and a pid gone with no end line exits 2 (4 Nov: a run that polled for another inside its slot held run-slot-2 for 1575 s while that run sat behind it in the queue)
+# the last state of <who>'s run $1 in run-slot.runs.log: pending (asked, no end yet), ended <rc>, or none
+after_state() {
+  tail -n 20000 "$OPS/run-slot.runs.log" 2>/dev/null | W=$WHO P=$1 awk '
+    $3 == ENVIRON["W"] && $4 == ENVIRON["P"] { if ($2 == "ask") s = "pending"; else if ($2 == "end") s = "ended " substr($5, 4) }
+    END { print (s == "" ? "none" : s) }'
+}
+if [ -n "$AFTER" ] && [ -z "$REREAD" ]; then
+  told=
+  while :; do
+    gone=
+    alive "$AFTER" || gone=1
+    st=$(after_state "$AFTER")
+    case "$st" in
+      "ended 0") break ;;
+      ended\ *) echo "run-slot.sh: $WHO's run $AFTER ended rc=${st#ended }, so this run never asks" >&2; exit "${st#ended }" ;;
+    esac
+    if [ -n "$gone" ]; then
+      echo "run-slot.sh: $WHO's run $AFTER has ended with no end line in run-slot.runs.log (a runner-host run, or one stopped hard), so this run never asks: read that run's result, then run this one again" >&2
+      exit 2
+    fi
+    [ -n "$told" ] || { echo "run-slot.sh: waiting for $WHO's run $AFTER to end before this one asks (--after)" >&2; told=1; }
+    sleep "${RUN_SLOT_POLL:-5}"
+  done
+  ASKED=$(date +%s)
 fi
 # dispatcher, 18 Oct: a test, type check (from the checkout's root), lint or format check runs on the runner host, taking no slot here. ci.sh exec
 # sends the working tree, tracked edits and untracked source alike, and gives back the command's output and exit code; anything else (a browser,
@@ -623,10 +661,28 @@ reread() {
 # the named session may take a slot whatever its place, and the reservation holds only while that session is itself waiting in the queue
 prio_holder() {
   local m
+  # while run-slot.focus stands its session is the pick, whatever run-slot.priority says or its age, so focus never loses its slot to a lapse
+  focus_holder && return
   m=$(mtime "$OPS/run-slot.priority") || return
   # an mtime that reads back empty counts as no pick, rather than as a shell error, as in stale
   case "$m" in '' | *[!0-9]*) return 1 ;; esac
   [ $(( $(date +%s) - m )) -lt 3600 ] && cut -d' ' -f1 "$OPS/run-slot.priority"
+}
+# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not
+focus_holder() {
+  switch_on run-slot.focus || return 1
+  cut -d' ' -f1 "$OPS/run-slot.focus"
+}
+# true while focus holds this run: a heavy lane waits for every session but the focus one and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov)
+focus_holds() {
+  local h
+  h=$(focus_holder) || return 1
+  case "$WHO" in "$h" | ops-tick | ops-dashboard) return 1 ;; esac
+}
+focus_wait() {
+  [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
+  sleep "$POLL"
+  waited=$((waited + 15))
 }
 prio_waiting() {
   # true while the priority holder has a ticket whose waiter still runs
@@ -1025,6 +1081,8 @@ if [ -n "$KIND" ]; then
     ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
   while clone_held; do reread; sleep "$CLONE_POLL"; done
+  # a commit's build, a merge or a clone is heavy, so it waits under focus; the quick slot's short runs go on
+  while [ "$KIND" != quick ] && focus_holds; do reread; focus_wait; done
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
   # the waiter ran its command with no slot), so each wait checks it ended as it should, and the waiter stops when it did not
   clone_held && { echo "run-slot.sh: run-slot.clone-off holds this clone, so $WHO stops" >&2; exit 143; }
@@ -1090,6 +1148,11 @@ while :; do
     fi
     sleep "$POLL"
     waited=$((waited + 15))
+    continue
+  fi
+  # under focus a run keeps its place in the queue and takes no slot
+  if focus_holds; then
+    focus_wait
     continue
   fi
   # this run's own units must fit beside what the slots hold now (the queue's order checked them for a waiter at its head)
