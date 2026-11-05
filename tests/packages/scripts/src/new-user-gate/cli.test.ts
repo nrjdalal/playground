@@ -78,7 +78,7 @@ describe("a step failed on spawn.sh's capacity gate", () => {
     JSON.stringify({
       at: "2026-10-31T01:31:05Z",
       detail:
-        "max(load1, load5) is 26.90 and 0 started in the last 5 minutes, at or over 11.25: 15, the 15 cores at PLAYGROUND_LOAD_MULT 1, less the 3.75 kept for small items (this start is medium); the CPU is 80% busy (top), 12 of the 15 cores, which with the starts is at or over 11.25 too. Wait for it to fall, or close a session that is done, and run it again.",
+        "max(load1, load5) is 26.90 and 0 started in the last 5 minutes, at or over 11.25: 15, the 15 cores at PLAYGROUND_LOAD_MULT 1, less the 3.75 kept for small items (this start is medium). Wait for it to fall, or close a session that is done, and run it again.",
       gate: "load",
       readings: { load5: 26.9 },
       verdict: "refused",
