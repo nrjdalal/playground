@@ -12,7 +12,7 @@ export type NavGroup =
   | "Threads"
 
 // Where this browser keeps each group's open or closed state, so a group you closed is still closed after a reload.
-export const GROUPS_KEY = "dashboard.sidebar.groups.v1"
+const GROUPS_KEY = "dashboard.sidebar.groups.v1"
 
 export type GroupsOpen = Partial<Record<NavGroup, boolean>>
 
@@ -33,46 +33,38 @@ export const parseGroups = (raw: string | null): GroupsOpen => {
 export const groupOpen = (stored: GroupsOpen, group: NavGroup, initial: boolean): boolean =>
   stored[group] ?? initial
 
-// The stored value, or null when the browser's storage throws (site data blocked), which reads as no stored state, every group at its default.
-export const readGroups = (store: () => Pick<Storage, "getItem">): string | null => {
-  try {
-    return store().getItem(GROUPS_KEY)
-  } catch {
-    return null
+// A tab's group states: read from the store once, on first use, then held in the tab, which every group reads from then on, so a store that throws, refuses a write or is full never leaves a toggle dead or the page down; each toggle writes the whole state through, any error ignored.
+export function groupsState(store: () => Pick<Storage, "getItem" | "setItem">) {
+  let raw: string | null | undefined
+  const read = (): string | null => {
+    if (raw === undefined) {
+      try {
+        raw = store().getItem(GROUPS_KEY)
+      } catch {
+        raw = null
+      }
+    }
+    return raw
   }
+  const set = (group: NavGroup, open: boolean) => {
+    raw = JSON.stringify({ ...parseGroups(read()), [group]: open })
+    try {
+      store().setItem(GROUPS_KEY, raw)
+    } catch {
+      // the tab keeps the state alone
+    }
+  }
+  return { read, set }
 }
 
-// Writes one group's state beside the others' (current) and returns the new value; a store that throws leaves it unwritten, and the page keeps working on this tab's copy.
-export const saveGroup = (
-  store: () => Pick<Storage, "setItem">,
-  current: string | null,
-  group: NavGroup,
-  open: boolean,
-): string => {
-  const next = JSON.stringify({ ...parseGroups(current), [group]: open })
-  try {
-    store().setItem(GROUPS_KEY, next)
-  } catch {
-    // blocked storage keeps the state in this tab alone (kept)
-  }
-  return next
-}
+const tab = groupsState(() => localStorage)
 
-// Fired on a change in this tab, since the storage event reaches only other tabs.
+// Fired on a toggle, so every place that draws the group reads the tab's new state.
 const CHANGED = "dashboard-sidebar-groups"
 
-// This tab's last write, which a group reads while the browser's storage throws, so a group still opens and closes while the tab lives.
-let kept: string | null = null
-
-const snapshot = () => readGroups(() => localStorage) ?? kept
-
 const subscribe = (notify: () => void) => {
-  window.addEventListener("storage", notify)
   window.addEventListener(CHANGED, notify)
-  return () => {
-    window.removeEventListener("storage", notify)
-    window.removeEventListener(CHANGED, notify)
-  }
+  return () => window.removeEventListener(CHANGED, notify)
 }
 
 // A group's open state and its setter, kept in this browser across reloads and shared by every place that draws the group; the server renders its default.
@@ -80,10 +72,10 @@ export function useGroupOpen(
   group: NavGroup,
   initial: boolean,
 ): [boolean, (open: boolean) => void] {
-  const raw = useSyncExternalStore(subscribe, snapshot, () => null)
+  const raw = useSyncExternalStore(subscribe, tab.read, () => null)
   const setOpen = useCallback(
     (open: boolean) => {
-      kept = saveGroup(() => localStorage, snapshot(), group, open)
+      tab.set(group, open)
       window.dispatchEvent(new Event(CHANGED))
     },
     [group],
