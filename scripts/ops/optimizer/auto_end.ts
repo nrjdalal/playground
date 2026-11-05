@@ -247,12 +247,6 @@ export async function cleanWorktree(
   reason: string,
   deps: CleanupDeps,
 ): Promise<string> {
-  const status = await deps.git(path, ["status", "--porcelain"])
-  if (status === null) return `kept ${path}: could not read its git status`
-  if (status) return `kept ${path}: uncommitted work`
-  const ahead = await deps.git(path, ["rev-list", "--count", "HEAD", "--not", "--remotes"])
-  if (ahead === null) return `kept ${path}: could not count its unpushed commits`
-  if (Number(ahead) > 0) return `kept ${path}: unpushed commits`
   const [gitDir, commonDir] = (
     (await deps.git(path, [
       "rev-parse",
@@ -262,6 +256,12 @@ export async function cleanWorktree(
     ])) ?? ""
   ).split("\n")
   if (!gitDir || !commonDir || gitDir === commonDir) return `kept ${path}: not a linked worktree`
+  const status = await deps.git(path, ["status", "--porcelain"])
+  if (status === null) return `kept ${path}: could not read its git status`
+  if (status) return `kept ${path}: uncommitted work`
+  const ahead = await deps.git(path, ["rev-list", "--count", "HEAD", "--not", "--remotes"])
+  if (ahead === null) return `kept ${path}: could not count its unpushed commits`
+  if (Number(ahead) > 0) return `kept ${path}: unpushed commits`
   const repo = dirname(commonDir)
   const branch = await deps.git(path, ["symbolic-ref", "--short", "-q", "HEAD"])
   const gone: string[] = []
