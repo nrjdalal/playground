@@ -577,7 +577,7 @@ chain_add() {
 }
 # a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
-  local a c f files dir="" commit="" all="" odd="" state=lead paths=() line words first="" adir=""
+  local a c f files dir="" commit="" all="" nv="" odd="" state=lead paths=() line words first="" adir=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with the
   # files the chain's git add steps before it stage, and counts as a build when an add runs in another folder than a commit, whose paths it would
   # misread (the first word is found outside a $( ), since bash 3.2 misparses a case inside one)
@@ -608,13 +608,14 @@ heavy_build() {
   for a in "$@"; do
     case "$state" in
       lead) case "$a" in env|*=*) continue ;; esac; [ "$(basename -- "$a")" = git ] || break; state=git ;;
-      git) case "$a" in -C) state=dir ;; -*) odd=1 ;; commit) commit=1; state=commit ;; *) break ;; esac ;;
+      git) case "$a" in -C) state=dir ;; -c) odd=1; state=gitvalue ;; -*) odd=1 ;; commit) commit=1; state=commit ;; *) [ -n "$odd" ] || break ;; esac ;;
+      gitvalue) state=git ;;
       dir) case "$a" in /*) dir=$a ;; *) dir=${dir:+$dir/}$a ;; esac; state=git ;;
       value) state=commit ;;
       paths) paths+=("$a") ;;
       commit) case "$a" in
           --) state=paths ;;
-          -n|--no-verify) return 1 ;;
+          -n|--no-verify) nv=1 ;;
           --all | --pathspec-from-file=*) all=1 ;;
           --pathspec-from-file) all=1; state=value ;;
           --author|--cleanup|--date|--file|--fixup|--message|--reedit-message|--reuse-message|--squash|--template|--trailer) state=value ;;
@@ -624,7 +625,7 @@ heavy_build() {
           --*) odd=1 ;;
           -?*) f=${a#-}
             while [ -n "$f" ]; do c=${f:0:1}; f=${f:1}
-              case "$c" in a) all=1 ;; n) return 1 ;; [CFcmt]) [ -z "$f" ] && state=value; break ;; [uS]) break ;; [ioqsv]) ;; *) odd=1 ;; esac
+              case "$c" in a) all=1 ;; n) nv=1 ;; [CFcmt]) [ -z "$f" ] && state=value; break ;; [uS]) break ;; [ioqsv]) ;; *) odd=1 ;; esac
             done ;;
           *) paths+=("$a") ;;
         esac ;;
@@ -633,6 +634,7 @@ heavy_build() {
   [ -n "$commit" ] || return 1
   # fail closed (builder, 5 Nov): a flag outside the lists above, git's own or the commit's, counts as a build
   [ -z "$odd" ] || return 0
+  [ -z "$nv" ] || return 1
   # only a repo whose own lefthook.yml pre-commit runs a build builds on commit (the dispatcher, 4 Nov: another repo's lint-staged commit sat 65 min in the big-run queue for a 1 s job)
   awk '/^[^ #]/ { pre = ($0 ~ /^pre-commit:/) } pre && /^ +(- )?run:.* run build([ "'"'"']|$)/ { found = 1 } END { exit !found }' \
     "$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)/lefthook.yml" 2>/dev/null || return 1

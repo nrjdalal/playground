@@ -176,6 +176,8 @@ describe("a commit whose pre-commit runs next build", () => {
     ["commit", "-e", "-m", "x"],
     ["commit", "-m", "x", "--pathspec-fr=list.txt"],
     ["-c", "core.hooksPath=/x", "commit", "-m", "x"],
+    ["--git-dir", "/x/.git", "commit", "-m", "x"],
+    ["commit", "-n", "--verify", "-m", "x"],
   ])
     test(`git ${flags.join(" ")} counts as a build`, async () => {
       const m = repo({ idle: 30 }, ["docs/notes.md"])
@@ -184,6 +186,14 @@ describe("a commit whose pre-commit runs next build", () => {
         await m.start("worker-x", {}, undefined, ["git", "-C", m.root, ...flags]).waits(),
       ).toBe(true)
     })
+
+  // review round 11: --work-tree's value is not the verb, so the commit after it is still read
+  test("git --work-tree <dir> commit -am counts the web/next file it stages", async () => {
+    const m = repo({ idle: 30 }, [], ["web/next/src/app/page.tsx"])
+    m.hold("run-slot", 3, "big")
+    const argv = ["git", "--work-tree", m.root, "commit", "-am", "x"]
+    expect(await m.start("worker-x", {}, undefined, argv).waits()).toBe(true)
+  })
 
   test("git commit -- <path> counts the web/next path it commits", async () => {
     const m = repo({ idle: 30 }, ["docs/notes.md"], ["web/next/src/app/page.tsx"])
