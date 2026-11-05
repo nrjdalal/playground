@@ -27,7 +27,7 @@ export const slackSettings = defineSettings({
   "slack.gatedSends": {
     default: "",
     description:
-      "An org's Slack gate, set in that org's extension: the MCP servers its workspace posts through, its self-DM and the send path every other post takes, as {path, selfDm, servers}; no-playground-leak then refuses every Slack MCP post on those servers but one to the self-DM. None when empty.",
+      "An org's Slack gate, set in that org's extension: the MCP servers its workspace posts through, its self-DM and the send path every other post takes, as {path, selfDm, servers}; no-playground-leak then refuses every Slack MCP write on those servers but a post to the self-DM, and any curl write to Slack's API. None when empty.",
     schema: z.union([z.literal(""), gatedSendsSchema]),
   },
   "slack.linkConverter": {
