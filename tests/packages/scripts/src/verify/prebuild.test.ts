@@ -414,6 +414,10 @@ const clone = (): {
     join(ROOT, "packages/scripts/node_modules"),
     join(dir, "packages/scripts/node_modules"),
   )
+  mkdirSync(join(dir, "api/hono/src/lib/dev"), { recursive: true })
+  cpSync(join(ROOT, "api/hono/src/lib/dev/stop.ts"), join(dir, "api/hono/src/lib/dev/stop.ts"))
+  mkdirSync(join(dir, "node_modules/@packages"), { recursive: true })
+  symlinkSync(join(ROOT, "packages/safe-delete"), join(dir, "node_modules/@packages/safe-delete"))
   writeFileSync(
     join(dir, "packages/scripts/src/data-table-metrics.ts"),
     `import { appendFileSync, mkdirSync, writeFileSync } from "node:fs"\nmkdirSync(${JSON.stringify(join(dir, ".generated"))}, { recursive: true })\nwriteFileSync(${JSON.stringify(join(dir, ".generated/data-table-metrics.json"))}, "{}")\nappendFileSync(${JSON.stringify(log)}, "metrics\\n")\n`,
