@@ -1432,7 +1432,9 @@ if until <= datetime.datetime.now(datetime.timezone.utc):
 print(f"{f.get('session')} until {f['until']}")
 PY
 ); then
-  refuse "focus stands for $FOCUS, so no new session starts until it ends (playground focus off ends it)"
+  # the focused session's own reviewer and tester start, so an urgent fix is still checked
+  case "$ROLE" in reviewer | tester) [ "$TO" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
+    refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
 fi
 gate_capacity
 if [ "$RUNTIME" = herdr ]; then

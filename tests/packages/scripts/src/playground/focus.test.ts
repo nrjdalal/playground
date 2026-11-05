@@ -180,7 +180,7 @@ describe("playground focus", () => {
 })
 
 test("the upkeep sessions focus leaves out of its count are the ones run-slot.sh never holds", () => {
-  const holds = readFileSync(SCRIPT, "utf8").match(/case "\$WHO" in "\$h" \| (.*)\) return 1/)?.[1]
+  const holds = readFileSync(SCRIPT, "utf8").match(/case "\$2" in "\$1" \| (.*)\) return 0/)?.[1]
   expect(holds?.split(" | ").toSorted()).toEqual(UPKEEP)
 })
 

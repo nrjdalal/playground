@@ -29,6 +29,33 @@ describe("focus holds every new session", () => {
     expect(r.err).toContain(`focus stands for owner-desk until ${until.toISOString()}`)
   })
 
+  // for an urgent ticket the focused session still gets its checkers, so its fix is reviewed
+  test("on, the focused session's own reviewer and tester start, and a checker of another session is refused", async () => {
+    const until = new Date(Date.now() + 3_600_000)
+    for (const role of ["reviewer", "tester"]) {
+      const own = await spawn(
+        ["column", role, `owner-${role}`, "owner-desk", "w1:p2", "r.md"],
+        [],
+        {},
+        script,
+        undefined,
+        focus(until),
+      )
+      expect(own.code).toBe(0)
+    }
+    const other = await spawn(
+      ["column", "reviewer", "reviewer-x", "worker-x", "w1:p2", "r.md"],
+      [],
+      {},
+      script,
+      undefined,
+      focus(until),
+    )
+    expect(other.code).not.toBe(0)
+    expect(placing(other)).toEqual([])
+    expect(other.err).toContain(`focus stands for owner-desk until ${until.toISOString()}`)
+  })
+
   test("lapsed, past its end, the start goes on", async () => {
     const r = await spawn(lead, [], {}, script, undefined, focus(new Date(Date.now() - 60_000)))
     expect(r.code).toBe(0)
