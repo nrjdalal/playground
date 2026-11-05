@@ -17,9 +17,11 @@
   A thread view's opening (asks.md's Threads) and a sidebar thread's menu's Mark as read or unread, Pin or Unpin, Archive and Rename's Save are the confirmation for the thread's change.
   Behind portless the API's peer is always the proxy on loopback, so in portless LAN mode a LAN client passes `requireLoopback` and only the owner session stops it; keep LAN mode off while the dashboard runs.
   Under `PLAYGROUND_HOSTED=1` Yard's writes take the `member` rung, or the one their route names, with no `requireLoopback`, and a browser's write `requireTrustedOrigin`, while a `yard_` token's write takes none, since a token carries no cookie a page could send (stack.md's hosted rule).
-  The relay (stack.md's relay rule) carries no write: the hub forwards a GET and the browser's pair request alone, and this Mac's `requireRelay` refuses any method but GET and any path off `RELAY_GETS` before a route runs, so every write above still comes from this machine's own browser.
-  A write from Yard will count only once the paired key signs it and `requireSignedWrite` passes it ([ADR 0017](../adr/0017-a-write-from-yard-counts-only-when-the-paired-key-signs-it.md)); the key is paired only by the owner's Approve in Settings' Remote section, `POST /api/v1/remote/approve`, and revoked by `POST /api/v1/remote/revoke`, both dashboard writes behind `guardWrites`,
-  `requireLoopback` and the owner rung.
+  The relay (stack.md's relay rule) carries a write only when it is a POST on `RELAY_WRITES` (`api/hono/src/lib/relay/protocol.ts`) and the paired key signed it.
+  This Mac's `requireRelay` refuses any read but a GET on `RELAY_GETS`, and `requireSignedWrite` any write off that list or not signed by the key, before a route runs ([ADR 0017](../adr/0017-a-write-from-yard-counts-only-when-the-paired-key-signs-it.md)).
+  A write that passes reaches `requireTrustedOrigin` and `requireLoopback` with no Origin and no peer, as `answerRelay` hands it to the API in process, and they take it by the mark `answerRelay` alone sets in memory (`markRelayed`), never by anything a request carries.
+  The owner rung and the route's own limits still run, and an answer, Later, Done or a message's reply (`re #iN`) reaching an Inbox card whose kind is off `RELAY_ANSWER_KINDS` is refused first, so every other write above still comes from this machine's own browser.
+  The key is paired only by the owner's Approve in Settings' Remote section, `POST /api/v1/remote/approve`, and revoked by `POST /api/v1/remote/revoke`, both dashboard writes behind `guardWrites`, `requireLoopback` and the owner rung.
   On a local stack Yard's two writes, `POST /api/v1/yard/channels/:id/messages` and `POST /api/v1/yard/channels/:id/read`, take `guardWrites`, `requireLoopback` and the owner rung as every dashboard write does, then reach the hosted Yard with the Keychain's token (stack.md).
 - ALWAYS: Test a dashboard write on a fixture stack, where it lands in the fixture's scratch copy.
   Only a test that must reach a real session uses a live-reads stack (`PLAYGROUND_LIVE_READS=true` in the worktree's `.env`), never for a screenshot, and against a throwaway session, never a real one:
@@ -34,7 +36,8 @@
   With no check it runs `all`.
   With no URLs it checks this worktree's stack; for the live dashboard, read-only, run it from the dashboard's checkout (on branch `live.branch`, so portless names its stack `dashboard.playground` and `dashboard.api.playground`) with no URLs and `--expect <live.branch>` (its checkout runs `origin/canary`'s latest head, `.agents/dashboard/live.md`).
   A check it lacks goes into `packages/scripts/src/verify/`, so the next agent has it too.
-  It builds the workspace packages it imports only when their `dist` is missing (a fresh worktree), so it never rebuilds under a running stack, and in the factory's main checkout (`$PLAYGROUND_REPO`) it stops instead and says to run from your own worktree.
+  It builds the workspace packages it imports when their `dist` is missing (a fresh worktree) or lacks a name its sources import, and in the factory's main checkout (`$PLAYGROUND_REPO`) it stops instead and says to run from your own worktree.
+  It also builds one whose `src` holds a file newer than its `dist`, but only while no stack runs in this worktree, since a rebuild under a running stack hangs it.
   It signs in as the dashboard's one user, so every page it opens first runs a script setting `VERIFY_VISIT` (`web/next/src/lib/verify-visit.ts`), and a page that writes on load skips that write on verify's visit (the Changelog's read mark).
 - ALWAYS: Keep the dashboard map current.
   `packages/scripts/src/verify/dashboard-map.json` lists every page under `(protected)` with what it shows, how to reach it and the API routes behind it, the sidebar's groups, and any owner-rung API route no page calls: read it first to place a vague report (a cropped screenshot, a page's name).

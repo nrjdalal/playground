@@ -188,7 +188,7 @@ function Changelog({ entries, seenAt }: { entries: ChangelogEntry[]; seenAt: str
   const { mutate: markSeen } = useMarkSeen()
   const newest = newestArrival(entries)
   React.useEffect(() => {
-    // the hosted build's relay carries no write, so it leaves the seen mark to this Mac
+    // the hosted build's relay carries no seen mark, so it leaves it to this Mac
     const mark = config.hosted ? null : seenMark(newest, seenAt)
     if (mark) markSeen(mark)
   }, [markSeen, newest, seenAt])
