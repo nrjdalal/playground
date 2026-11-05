@@ -78,7 +78,7 @@ bun install
 bun run dev
 ```
 
-This serves named `.localhost` dev URLs through portless (`bunx portless list` shows them). `PORTLESS=0 bun run dev` uses fixed ports instead (web `:3000`, api `:4000`). `install.sh` sets portless's proxy up once with your Mac's password; by hand, from a terminal in the checkout: `sudo node_modules/.bin/portless service install`, then `node_modules/.bin/portless trust`.
+This serves named `.localhost` dev URLs through portless (`bunx portless list` shows them). `PORTLESS=0 bun run dev` uses fixed ports instead (web `:3000`, api `:4000`). `install.sh` sets portless's proxy up once with your Mac's password, and until then `bun run dev` runs it on `:1355`, which needs none (Settings' **Set up the web address** moves it to 443); by hand, from a terminal in the checkout: `sudo node_modules/.bin/portless service install`, then `node_modules/.bin/portless trust`.
 
 A checkout with no `.env` gets one from `.env.example` on its first `bun run dev`, with `BETTER_AUTH_SECRET` generated. A stack in a worktree under `.claude/worktrees/`, a factory session or a test run reads made-up sessions and shows a **Test data** badge.
 
