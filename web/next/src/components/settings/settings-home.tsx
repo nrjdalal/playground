@@ -5,6 +5,7 @@ import { OwnerOnly } from "@/components/dashboard/owner-only"
 import { Accounts } from "@/components/settings/accounts"
 import { Extensions } from "@/components/settings/extensions"
 import { MacChecks } from "@/components/settings/mac-checks"
+import { Remote } from "@/components/settings/remote"
 import { PageHeader } from "@/components/shell/page-header"
 
 // The Settings page the user menu opens, on the owner rung, its sections one under the other.
@@ -21,6 +22,7 @@ export function SettingsHome() {
           <MacChecks />
           <Accounts />
           <Extensions />
+          <Remote />
         </div>
       ) : (
         <OwnerOnly title="Settings are for the owner" why="They read this Mac's accounts" />

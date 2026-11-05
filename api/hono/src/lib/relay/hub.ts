@@ -1,10 +1,13 @@
 import { env } from "@packages/env/api-hono"
+import type { PairKey } from "@packages/message"
 import { z } from "zod"
 
 import {
   RELAY_SILENT_MS,
   RELAY_TIMEOUT_MS,
   relayHeartbeatSchema,
+  type RelayPair,
+  relayPairSchema,
   type RelayRequest,
   relayRequestSchema,
   type RelayResponse,
@@ -37,7 +40,11 @@ const busSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("gone"), since: z.string(), userId: z.string() }),
   z.object({ id: z.string(), kind: z.literal("ping"), userId: z.string() }),
   z.object({ id: z.string(), kind: z.literal("pong") }),
-  z.object({ kind: z.literal("request"), request: relayRequestSchema, userId: z.string() }),
+  z.object({
+    kind: z.literal("request"),
+    request: z.union([relayRequestSchema, relayPairSchema]),
+    userId: z.string(),
+  }),
   z.object({ kind: z.literal("response"), response: relayResponseSchema, userId: z.string() }),
 ])
 
@@ -132,7 +139,7 @@ export function createHub({
   }
 
   // Hands a request to the Mac's socket on this instance, and says whether one took it.
-  const deliver = (userId: string, request: RelayRequest) => {
+  const deliver = (userId: string, request: RelayPair | RelayRequest) => {
     const socket = live(userId)
     if (!socket) return false
     try {
@@ -166,6 +173,27 @@ export function createHub({
       if (deliver(data.userId, data.request)) void send({ id: data.request.id, kind: "ack" })
     } else if (waiting.get(data.response.id)?.userId === data.userId)
       settle(data.response.id, data.response)
+  }
+
+  // Sends one frame to the owner's Mac, through the instance holding its socket, and waits for its answer.
+  const carry = (userId: string, request: RelayPair | RelayRequest): Promise<Forwarded> => {
+    const here = live(userId) !== null
+    if (!here && !bus) return Promise.resolve({ type: "offline" })
+    return new Promise((resolve) => {
+      const timers = [setTimeout(() => settle(request.id, { type: "timeout" }), timeoutMs)]
+      const found: Waiting = { acked: here, resolve, timers, userId }
+      waiting.set(request.id, found)
+      if (here) {
+        if (!deliver(userId, request)) settle(request.id, { type: "offline" })
+        return
+      }
+      timers.push(
+        setTimeout(() => {
+          if (!found.acked) settle(request.id, { type: "offline" })
+        }, ackMs),
+      )
+      void send({ kind: "request", request, userId })
+    })
   }
 
   return {
@@ -206,31 +234,19 @@ export function createHub({
 
     // Sends one GET to the owner's Mac with a fresh id and time, through the instance holding its socket, and waits for its answer.
     forward(userId: string, login: string, path: string): Promise<Forwarded> {
-      const request: RelayRequest = {
+      return carry(userId, {
         at: now().toISOString(),
         id: id(),
         login,
         method: "GET",
         path,
         type: "request",
-      }
-      const here = live(userId) !== null
-      if (!here && !bus) return Promise.resolve({ type: "offline" })
-      return new Promise((resolve) => {
-        const timers = [setTimeout(() => settle(request.id, { type: "timeout" }), timeoutMs)]
-        const found: Waiting = { acked: here, resolve, timers, userId }
-        waiting.set(request.id, found)
-        if (here) {
-          if (!deliver(userId, request)) settle(request.id, { type: "offline" })
-          return
-        }
-        timers.push(
-          setTimeout(() => {
-            if (!found.acked) settle(request.id, { type: "offline" })
-          }, ackMs),
-        )
-        void send({ kind: "request", request, userId })
       })
+    },
+
+    // Sends the owner's browser's public key to the owner's Mac as a pair request, which waits there for the owner's Approve, and waits for the Mac's answer.
+    pair(userId: string, login: string, key: PairKey): Promise<Forwarded> {
+      return carry(userId, { at: now().toISOString(), id: id(), key, login, type: "pair" })
     },
 
     // Whether this instance still needs the bus: a socket held, or a request or a ping waiting.
