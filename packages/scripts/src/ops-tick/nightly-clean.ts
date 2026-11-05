@@ -447,12 +447,14 @@ export const nightlyClean =
     )
   }
 
-// Pure: one gh api graphql answer read into prs, its b<i> aliases by branch and n<i> by number, a null alias (a number that is no PR) skipped; false when it holds no repository. Its stdout's one JSON line alone, since that answer exits 1 with its data and errors there and a "gh: ..." line on stderr, which ctx.run joins after it.
+// Pure: one gh api graphql answer read into prs, its b<i> aliases by branch and n<i> by number, a null alias (a number that is no PR) skipped; false when it holds no repository. Its stdout's JSON alone, read up to the "gh: ..." lines of stderr, which ctx.run joins straight after it, since gh ends the body with no newline and an answer with errors exits 1 with its data and errors there.
 export const readPrs = (out: string, branches: string[], numbers: number[], prs: Prs): boolean => {
   let found: Record<string, unknown> | undefined
   try {
     found = (
-      JSON.parse(out.split("\n")[0] ?? "") as { data?: { repository?: Record<string, unknown> } }
+      JSON.parse(out.split(/(?<=^|[}\n])gh: /)[0] ?? "") as {
+        data?: { repository?: Record<string, unknown> }
+      }
     ).data?.repository
   } catch {
     return false
