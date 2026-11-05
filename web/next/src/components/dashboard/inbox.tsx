@@ -1,6 +1,7 @@
 "use client"
 
 import type { InboxAction, InboxItem, InboxPreview, InboxUpdate } from "@api/hono"
+import type { Choices } from "@packages/config/inbox"
 import type { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 import {
   RiAlarmWarningLine,
@@ -116,6 +117,7 @@ import {
   type CardKey,
   changedAt,
   checkAnswerNote,
+  decisionChoices,
   deliveryNote,
   dismissable,
   dismissEach,
@@ -238,6 +240,7 @@ function KindBand({
   item,
   now,
   onRead,
+  replying,
   unread,
   updated,
 }: {
@@ -245,6 +248,7 @@ function KindBand({
   item: InboxItem
   now: number
   onRead: () => void
+  replying: boolean
   unread: boolean
   updated: boolean
 }) {
@@ -270,6 +274,15 @@ function KindBand({
           <>
             <span aria-hidden>·</span>
             <span className="text-info">Updated</span>
+          </>
+        )}
+        {/* the item the composer is replying to, until the reply is sent */}
+        {replying && (
+          <>
+            <span aria-hidden>·</span>
+            <Badge variant="outline" className="text-2xs h-4 px-1.5">
+              Replying
+            </Badge>
           </>
         )}
         {/* at the right end one time, the last change, then a tick: one to mark it read, two once read, muted */}
@@ -345,13 +358,8 @@ const ASK_QUOTE =
 // The card's own boxes (a note, a reply) write small, under the ask they answer; md: beats Textarea's own md:text-sm
 const BOX = "text-xs md:text-xs"
 
-// The two labelled options of an ask whose poster labelled both: pick the side whose words he reads, then Send, so the answer is the option he chose.
-type Side = "approve" | "deny"
-type Labels = Record<Side, string>
-const SIDE_WORDS: Labels = { approve: "Approve", deny: "Deny" }
-
 // Approve reads green and Deny red, on a muted wash that deepens when picked, the same on a choice and on a footer button, dark theme included, where the outline Button's own border and hover would win.
-const SIDE_TONES: Labels = {
+const SIDE_TONES: Record<"approve" | "deny", string> = {
   approve:
     "border-success/30 bg-success/10 hover:bg-success/15 dark:border-success/30 dark:bg-success/10 dark:hover:bg-success/15 data-checked:border-success data-checked:bg-success/20 dark:data-checked:bg-success/20",
   deny: "border-destructive/30 bg-destructive/10 hover:bg-destructive/15 dark:border-destructive/30 dark:bg-destructive/10 dark:hover:bg-destructive/15 data-checked:border-destructive data-checked:bg-destructive/20 dark:data-checked:bg-destructive/20",
@@ -361,52 +369,55 @@ const SIDE_TONES: Labels = {
 const DRAFT_TONE =
   "border-warning/30 bg-warning/10 hover:bg-warning/15 dark:border-warning/30 dark:bg-warning/10 dark:hover:bg-warning/15"
 
-const labelsOf = (item: InboxItem): Labels | null =>
-  item.kind === "decision" &&
-  item.preview.type === "ask" &&
-  item.preview.approve &&
-  item.preview.deny
-    ? { approve: item.preview.approve, deny: item.preview.deny }
-    : null
-
-// The two options as the card's choices, numbered for the keys 1 and 2. While the card is busy (its answer on its way, or it has just moved under him) they stay enabled, dimmed and busy, and take no click or key: Questionnaire counts a disabled choice as no answer, so disabling them would mark a card Send already checked invalid.
+// The rows as the card's choices, numbered for the keys 1 on. While the card is busy (its answer on its way, or it has just moved under the owner) they stay enabled, dimmed and busy, and take no click or key: Questionnaire counts a disabled choice as no answer, so disabling them would mark a card Send already checked invalid.
 export function AskChoices({
   busy,
-  labels,
+  choices,
   paused,
   pick,
   setPick,
 }: {
   busy: boolean
-  labels: Labels
+  choices: Choices
   paused: boolean
-  pick: Side | null
-  setPick: (pick: Side) => void
+  pick: number | null
+  setPick: (pick: number) => void
 }) {
+  const yesNo = choices.shape === "yes-no"
   return (
     <QuestionnaireChoices
       aria-busy={busy || undefined}
       className={cn(busy && "pointer-events-none opacity-50")}
     >
-      {(["approve", "deny"] as const).map((side) => (
-        <Hint key={side} content={paused ? PAUSED_WHY : undefined}>
-          <QuestionnaireChoice
-            checked={pick === side}
-            // keys 1 and 2 still pick a side, with no number badge drawn
-            className={cn(
-              "text-xs [&_[data-slot=questionnaire-choice-shortcut]]:hidden!",
-              SIDE_TONES[side],
-            )}
-            value={SIDE_WORDS[side]}
-            onChange={() => {
-              if (!busy) setPick(side)
-            }}
-          >
-            <span className="font-medium">{SIDE_WORDS[side]}</span>
-            <QuestionnaireChoiceDescription>{labels[side]}</QuestionnaireChoiceDescription>
-          </QuestionnaireChoice>
-        </Hint>
-      ))}
+      {choices.rows.map((row) => {
+        // a yes or no reads Approve or Deny over its own label; a lettered row reads its letter and label over its description
+        const word = yesNo ? (row.go ? "Approve" : "Deny") : `${row.letter}. ${row.label}`
+        const said = yesNo && row.label !== word ? [row.label, row.description] : [row.description]
+        return (
+          <Hint key={row.index} content={paused ? PAUSED_WHY : undefined}>
+            <QuestionnaireChoice
+              checked={pick === row.index}
+              // a yes or no's keys 1 and 2 still pick a side, with no number badge drawn
+              className={cn(
+                "text-xs",
+                yesNo && "[&_[data-slot=questionnaire-choice-shortcut]]:hidden!",
+                SIDE_TONES[row.go ? "approve" : "deny"],
+              )}
+              value={`${row.letter}: ${row.label}`}
+              onChange={() => {
+                if (!busy) setPick(row.index)
+              }}
+            >
+              <span className="font-medium">{word}</span>
+              {said.map((line, at) =>
+                line ? (
+                  <QuestionnaireChoiceDescription key={at}>{line}</QuestionnaireChoiceDescription>
+                ) : null,
+              )}
+            </QuestionnaireChoice>
+          </Hint>
+        )
+      })}
     </QuestionnaireChoices>
   )
 }
@@ -462,10 +473,12 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
   const preview = item.preview
   switch (preview.type) {
     case "ask":
-      // a labelled ask's choices say what each side does, so its text stands alone above them
+      // an ask with options says what each one does in its choices, so its text stands alone above them
       return (
         <>
-          {!labelsOf(item) && <p>On Approve, {agentLabel(item.from)} does this:</p>}
+          {!preview.options && !preview.approve && (
+            <p>On Approve, {agentLabel(item.from)} does this:</p>
+          )}
           <Shown preview={preview} />
         </>
       )
@@ -595,16 +608,16 @@ const PICKED_TIME = "09:00"
 // The one question each card's Questionnaire holds, shown from the first render.
 const QUESTION = "item"
 
-type Answer = (action: InboxAction, text?: string) => Promise<void>
+type Answer = (action: InboxAction, text?: string, option?: number) => Promise<void>
 
-// Opens Playground's chat replying to this item: the composer's chip names it, and the message carries its id, so the owner can talk about an item with the dispatcher as with a reply.
-function ChatAbout({ item }: { item: InboxItem }) {
+// Reply: opens Playground's chat replying to this item; the composer's chip names it, the card's band reads Replying, and the message carries its id.
+function ReplyButton({ item }: { item: InboxItem }) {
   return (
-    <Hint content="Chat about it">
+    <Hint content="Reply">
       <Button
         size="icon-sm"
         variant="outline"
-        aria-label={`Chat about ${itemTag(item)}`}
+        aria-label={`Reply to ${itemTag(item)}`}
         className="ml-auto shrink-0"
         onClick={() => {
           // rendered at once, so the aside shows Playground's chat before the focus below
@@ -619,7 +632,7 @@ function ChatAbout({ item }: { item: InboxItem }) {
   )
 }
 
-// Opens a folded card to its full self, a chat reply's its answers and Snooze back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
+// Opens a folded card to its full self, a chat reply's its answers and Later back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
 function Reopen({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
   const label = open ? "Collapse" : "Expand"
   return (
@@ -649,7 +662,7 @@ function Reopen({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => 
   )
 }
 
-// Snooze (put an ask away until a time, and it asks again then, which is not a schedule), an icon beside Reply: the fixed times, each with its day and time, or Pick a time, whose row the card draws as its own footer line, since this right group never wraps; the item leaves the list and the count until then.
+// Later (put an ask away until a time, and it asks again then, which is not a schedule), an icon beside Reply: the fixed times, each with its day and time, or Pick a time, whose row the card draws as its own footer line, since this right group never wraps; the item leaves the list and the count until then.
 // The owner's zone, the clock.ownerZone setting, which Schedule's fixed times read in.
 const readOwnerZone = async (): Promise<string> => {
   const { data, error } = await unwrap(
@@ -681,22 +694,16 @@ function Schedule({
   const zone = isError ? "UTC" : data
   return (
     <DropdownMenu>
-      <Hint content={held ?? "Snooze: put it away until a time, then it asks again"}>
+      <Hint content={held ?? "Later: put it away until a time, then it asks again"}>
         <DropdownMenuTrigger
           render={
-            <Button
-              aria-label="Snooze"
-              size="icon-sm"
-              variant="outline"
-              disabled={busy}
-              {...hold}
-            />
+            <Button aria-label="Later" size="icon-sm" variant="outline" disabled={busy} {...hold} />
           }
         >
           <RiZzzLine />
         </DropdownMenuTrigger>
       </Hint>
-      {/* a key in the menu stays in the menu, since a labelled ask's form would read a digit as its shortcut */}
+      {/* a key in the menu stays in the menu, since a decision's form would read a digit as its shortcut */}
       <DropdownMenuContent
         align="start"
         className="w-auto"
@@ -776,7 +783,7 @@ export function InboxCard({
     setSynced(posted)
     if (draft === synced) setDraft(posted)
   }
-  const [pick, setPick] = useState<Side | null>(null)
+  const [pick, setPick] = useState<number | null>(null)
   const [note, setNote] = useState("")
   // a secret ask's value, held only until Submit hands it on, then cleared
   const [secret, setSecret] = useState("")
@@ -796,8 +803,8 @@ export function InboxCard({
       setPending(false)
     }
   }
-  const onAnswer: Answer = (action, text) =>
-    settle(() => answerItem(item, action, text, note.trim() || undefined))
+  const onAnswer: Answer = (action, text, option) =>
+    settle(() => answerItem(item, action, text, note.trim() || undefined, option))
   const onProvide = () => {
     const value = secret
     setSecret("")
@@ -858,9 +865,10 @@ export function InboxCard({
       item.title
     )
 
-  const labels = labelsOf(item)
-  // a labelled ask's footer sits in the form beside its Submit while it is open; every other card's answers from outside it
-  const footerInForm = labels !== null && outcome === null && !folded
+  // a decision's rows, but a secret's, which takes a value; its footer sits in the form beside its Send while it is open, and every other card's answers from outside it
+  const choices = decisionChoices(item)
+  const picked = pick === null ? null : (choices?.rows[pick] ?? null)
+  const footerInForm = choices !== null && outcome === null && !folded
   const draftReady = item.kind === "draft" && outcome === null && !busy && draft.trim() !== ""
   const secretReady = secretAsk && outcome === null && !busy && secret.trim() !== ""
   // what Approve does, the card's description, kept once answered or archived, or what a read-only update shows; a folded card hides it
@@ -883,8 +891,8 @@ export function InboxCard({
     ) : null
   const body = folded ? null : outcome !== null ? (
     sentWords
-  ) : labels ? (
-    <AskChoices busy={busy} labels={labels} paused={paused} pick={pick} setPick={setPick} />
+  ) : choices ? (
+    <AskChoices busy={busy} choices={choices} paused={paused} pick={pick} setPick={setPick} />
   ) : secretAsk ? (
     // masked, never saved by the browser, and a key here stays in the field; Enter submits
     <Input
@@ -970,8 +978,8 @@ export function InboxCard({
       </QuestionnaireDescription>
     )
 
-  // a folded row keeps the answers that need nothing its body holds: Approve and Deny, an update's Approve link, Retry and Check it for me, but not a labelled ask's pick, a secret's value or a draft's words
-  const needsBody = outcome === null && (labels !== null || secretAsk || item.kind === "draft")
+  // a folded row keeps the answers that need nothing its body holds: an update's Approve link, Retry and Check it for me, but not a decision's pick, a secret's value or a draft's words
+  const needsBody = outcome === null && (choices !== null || secretAsk || item.kind === "draft")
   const left =
     folded && needsBody ? null : outcome !== null ? (
       sendUnconfirmed(item) && dispatcher ? (
@@ -1019,39 +1027,7 @@ export function InboxCard({
           Submit
         </Button>
       </Hint>
-    ) : item.kind === "decision" ? (
-      labels ? null : (
-        // a labelled ask's Send is the form's own Submit; no card takes Edit, since the note carries any change
-        <>
-          <Hint content={held}>
-            <Button
-              size="sm"
-              variant="outline"
-              className={SIDE_TONES.approve}
-              disabled={busy}
-              {...hold}
-              onClick={() => void onAnswer("approve")}
-            >
-              <RiCheckLine data-icon="inline-start" />
-              Approve
-            </Button>
-          </Hint>
-          <Hint content={held}>
-            <Button
-              size="sm"
-              variant="outline"
-              className={SIDE_TONES.deny}
-              disabled={busy}
-              {...hold}
-              onClick={() => void onAnswer("deny")}
-            >
-              <RiCloseLine data-icon="inline-start" />
-              Deny
-            </Button>
-          </Hint>
-        </>
-      )
-    ) : item.kind === "draft" ? (
+    ) : item.kind === "decision" ? null : item.kind === "draft" ? (
       <>
         <Hint content={held}>
           <Button
@@ -1170,19 +1146,19 @@ export function InboxCard({
         )}
       <Reopen open={open} setOpen={setToggled} />
       {/* an open secret ask offers no chat, so its value is never typed where a transcript keeps it; a folded card shows its toggle alone */}
-      {!folded && !(secretAsk && outcome === null) && <ChatAbout item={item} />}
+      {!folded && !(secretAsk && outcome === null) && <ReplyButton item={item} />}
     </div>
   )
 
   const footer = (
     <CardFooter className="flex-wrap gap-2">
       {footerInForm ? (
-        // shadcn's questionnaire actions in a row that wraps on a narrow card: Submit first, off until a side is picked and saying why on hover and focus, then the card's own buttons
+        // shadcn's questionnaire actions in a row that wraps on a narrow card: Submit first, off until an option is picked and saying why on hover and focus, then the card's own buttons
         <QuestionnaireActions className="flex flex-wrap">
-          <Hint content={held ?? sendWhy(pick) ?? undefined}>
+          <Hint content={held ?? sendWhy(picked) ?? undefined}>
             <QuestionnaireSubmit
-              // green as Approve, or red once Deny is the pick it sends
-              className={SIDE_TONES[pick ?? "approve"]}
+              // green as a go row, or red once the no-go row is the pick it sends
+              className={SIDE_TONES[picked && !picked.go ? "deny" : "approve"]}
               disabled={busy || pick === null}
               render={<Button size="sm" variant="outline" {...OFF_FOCUSABLE} />}
               size="sm"
@@ -1224,7 +1200,7 @@ export function InboxCard({
                 : "Pick a day"}
               <RiArrowDownSLine data-icon="inline-end" />
             </PopoverTrigger>
-            {/* a key in the calendar stays in the calendar, since a labelled ask's form would read a digit as its shortcut */}
+            {/* a key in the calendar stays in the calendar, since a decision's form would read a digit as its shortcut */}
             <PopoverContent
               align="start"
               className="w-auto overflow-hidden p-0"
@@ -1282,11 +1258,9 @@ export function InboxCard({
       // focusable from script alone, so taking the pill can hand focus to the card it put on top
       tabIndex={-1}
       size="sm"
-      // the item a reply is being written about takes a muted fill, until it is sent
       className={cn(
         // no outer card: the item sits flat on the Inbox, edge to edge, under its KindBand
         "wrap-anywhere overflow-visible rounded-none bg-transparent px-0 pt-0 ring-0 outline-none [&_[data-slot=card-content]]:px-0 [&_[data-slot=card-footer]]:rounded-none [&_[data-slot=card-footer]]:border-t-0 [&_[data-slot=card-footer]]:bg-transparent [&_[data-slot=card-footer]]:px-0 [&_[data-slot=card-header]]:px-0",
-        marked && "bg-muted/50",
         folded && "cursor-pointer",
       )}
       // a click on a folded card opens it, and E opens or folds it, with focus anywhere in the card but its box
@@ -1308,10 +1282,11 @@ export function InboxCard({
         item={item}
         now={now}
         onRead={() => read()}
+        replying={marked}
         unread={unread}
         updated={updated}
       />
-      {/* the card is one question on shadcn's Questionnaire, composed with the Card's slots as shadcn's own card example does: its title and description are the question's; a labelled ask's footer sits in the form beside its Submit, while every other card's footer answers from outside it, so a key pressed on one of its buttons never submits it */}
+      {/* the card is one question on shadcn's Questionnaire, composed with the Card's slots as shadcn's own card example does: its title and description are the question's; a decision's footer sits in the form beside its Submit, while every other card's footer answers from outside it, so a key pressed on one of its buttons never submits it */}
       <Questionnaire
         // a contents box, so the card's slots lay out as they would with no form between them
         className="contents"
@@ -1321,9 +1296,10 @@ export function InboxCard({
         defaultItem={QUESTION}
         onSubmit={(event) => {
           event.preventDefault()
-          if (pick && !busy) void onAnswer(pick)
+          if (picked && !busy)
+            void (picked.go ? onAnswer("approve", undefined, picked.index) : onAnswer("deny"))
         }}
-        // Cmd or Ctrl+Enter submits the question: a labelled ask's picked side through the Questionnaire's submit, nothing before a pick, and in any other card's box what the box holds, through the button it feeds; read as the key comes down, before the Questionnaire's own handler, so a key on a link or a button reaches the browser alone
+        // Cmd or Ctrl+Enter submits the question: a decision's picked row through the Questionnaire's submit, nothing before a pick, and in any other card's box what the box holds, through the button it feeds; read as the key comes down, before the Questionnaire's own handler, so a key on a link or a button reaches the browser alone
         onKeyDownCapture={(event) => {
           const action = cardKey(keyOf(event), {
             choosing: footerInForm,
@@ -1615,7 +1591,7 @@ function InboxLoading() {
   )
 }
 
-// Playground's Inbox: one list of cards, each keeping its place while he looks, what arrived since waiting behind a pill until he takes it, then In progress, Snoozed, Archived and Done as rows that open and shut.
+// Playground's Inbox: one list of cards, each keeping its place while he looks, what arrived since waiting behind a pill until he takes it, then In progress, Later, Archive and Done as rows that open and shut.
 export function Inbox({ viewing }: { viewing: boolean }) {
   const { allowed } = useDashboard()
   const { data, error, isPending } = useInbox(allowed)
@@ -1628,7 +1604,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   const items = data?.items ?? []
   // a card moves by a verb alone: an answer its poster carries out goes to In progress, and one he dismissed or its poster closed to Done
   const { archived: setAside, done, progress, shown } = inboxView(items)
-  // Archived holds what he archived, kept out of items, and what was set aside before Archive kept items open
+  // Archive holds what he archived, kept out of items, and what was set aside before Archive kept items open
   const archived = [...(data?.archived ?? []), ...setAside].sort((a, b) => b.ref - a.ref)
   const snoozed = data?.snoozed ?? []
   const { held, rows } = pinnedView(shown, order)
@@ -1644,7 +1620,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   const updated = (item: InboxItem) => look !== null && updatedSince(item, look.since, look.upto)
   const rowIds = rows.map((item) => item.id)
   if (data && order?.join(" ") !== rowIds.join(" ")) setOrder(rowIds)
-  // a card he moved back from Archived takes the list's top once it arrives, his own click, never behind the pill
+  // a card he moved back from Archive takes the list's top once it arrives, his own click, never behind the pill
   const [back, setBack] = useState<string | null>(null)
   if (back !== null && held.some((item) => item.id === back)) {
     setBack(null)
@@ -1711,10 +1687,10 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     .map((item) => item.id)
   const clearing = unreadIds.length
   const shelfSizes: Record<string, number> = {
-    Archived: archived.length,
+    Archive: archived.length,
     Done: done.length,
     "In progress": progress.length,
-    Snoozed: snoozed.length,
+    Later: snoozed.length,
   }
   const actions = (pill || rows.length > 0) && (
     <div className="absolute top-1.5 right-[calc(var(--pane-x,0px)+1.75rem)] flex items-center gap-2">
@@ -1803,7 +1779,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
             </span>
             <ShelfMark empty={shown.length === 0} />
           </AccordionTrigger>
-          {/* kept mounted while folded, so a fold keeps what a card holds: a draft typed, a picked side, a half-set Snooze, a reopened card */}
+          {/* kept mounted while folded, so a fold keeps what a card holds: a draft typed, a picked option, a half-set Later, a reopened card */}
           <AccordionContent keepMounted className={SHELF_PANEL}>
             {bulkError && <p className="text-destructive pt-4 text-xs">{bulkError}</p>}
             <div ref={list} role="list" className="flex flex-col gap-6 pt-8 pb-3">
@@ -1824,8 +1800,8 @@ export function Inbox({ viewing }: { viewing: boolean }) {
           {(
             [
               ["In progress", RiProgress4Line, progress, "progress"],
-              ["Snoozed", RiZzzLine, snoozed, "snoozed"],
-              ["Archived", RiArchive2Line, archived, "archived"],
+              ["Later", RiZzzLine, snoozed, "snoozed"],
+              ["Archive", RiArchive2Line, archived, "archived"],
               ["Done", RiCheckDoubleLine, done, "done"],
             ] as const
           ).map(([label, Icon, shelf, place]) => (
@@ -1846,19 +1822,21 @@ export function Inbox({ viewing }: { viewing: boolean }) {
                 header={(props) => (
                   <h3 {...props} className={cn(props.className, STICKY_HEADER)}>
                     {props.children}
-                    {/* the Archived shelf empties in one click, each card's own Dismiss in turn; Done marks what settled on its own read, typing nothing into any session, greyed once all are */}
-                    {label !== "Snoozed" && label !== "In progress" && shelf.length > 0 && (
+                    {/* the Archive shelf empties in one click, each card's own Dismiss in turn; Done marks what settled on its own read, typing nothing into any session, greyed once all are */}
+                    {label !== "Later" && label !== "In progress" && shelf.length > 0 && (
                       <ShelfDismiss
                         disabled={bulkPending}
-                        ids={(label === "Archived" ? shelf : shelf.filter(dismissable)).map(
+                        ids={(label === "Archive" ? shelf : shelf.filter(dismissable)).map(
                           (item) => item.id,
                         )}
                         label={
-                          label === "Archived" ? "Dismiss all archived" : "Mark all done as read"
+                          label === "Archive"
+                            ? "Dismiss all in Archive"
+                            : "Mark all in Done as read"
                         }
                         onDismiss={(ids) =>
                           void bulk(() =>
-                            label === "Archived"
+                            label === "Archive"
                               ? dismissEach(shelf.filter((item) => ids.includes(item.id)))
                               : dismissItems(ids),
                           )

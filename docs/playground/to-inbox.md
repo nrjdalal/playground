@@ -38,7 +38,8 @@ Any other update stays editable until you dismiss it, so a card the session will
 picture   diff, ASCII, shots, page
 bullets   🐛 ✅ ⚠️ ↩️ 📨 🕐 ⏱️ 💰, one fact each
 callout   one, only for what must not be missed
-choices   Approve: <verb ...>  Deny: <verb ...>
+choices   yes or no: Approve: <verb ...>  Deny: <verb ...>
+          or A to E: A. <verb ...>  B. <verb ...>  None of these
 ```
 
 Mermaid is to join the pictures; until then a flow is drawn in ASCII.
