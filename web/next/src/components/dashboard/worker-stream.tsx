@@ -404,8 +404,6 @@ export function PeerStep({
   from: string | null
   text: string
 }) {
-  const sockets = useAgentsBoard().data?.sockets
-  const sender = from ? agentLabel(sockets?.[from] ?? withoutRef(from)) : "a session"
   return (
     <Trace>
       <TraceCollapsible defaultOpen={defaultOpen}>
@@ -415,7 +413,9 @@ export function PeerStep({
               <RiInboxArchiveLine />
             </TraceIcon>
             <TraceTitle>
-              <span className="text-foreground font-medium">Received from {sender}</span>
+              <span className="text-foreground font-medium">
+                Received from {from ? <Recipient to={from} /> : "a session"}
+              </span>
               {` ${firstLineOf(text)}`}
             </TraceTitle>
           </TraceLine>
