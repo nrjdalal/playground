@@ -607,7 +607,7 @@ heavy_build() {
   case "$WHO" in commit-*) for a in "$@"; do [ "$a" = build ] && commit=1; done ;; esac
   for a in "$@"; do
     case "$state" in
-      lead) case "$a" in env|*=*) continue ;; esac; [ "$(basename -- "$a")" = git ] || break; state=git ;;
+      lead) case "$a" in env | NODE_ENV=* | RUN_SLOT_HERE=*) continue ;; *=*) odd=1; continue ;; esac; [ "$(basename -- "$a")" = git ] || break; state=git ;;
       git) case "$a" in -C) state=dir ;; -c) odd=1; state=gitvalue ;; -*) odd=1 ;; commit) commit=1; state=commit ;; *) [ -n "$odd" ] || break ;; esac ;;
       gitvalue) state=git ;;
       dir) case "$a" in /*) dir=$a ;; *) dir=${dir:+$dir/}$a ;; esac; state=git ;;
@@ -631,7 +631,7 @@ heavy_build() {
         esac ;;
     esac
   done
-  [ -n "$commit" ] || return 1
+  [ -n "$commit" ] || { [ "$state" = git ] && [ -n "$odd" ]; } || return 1
   # fail closed (builder, 5 Nov): a flag outside the lists above, git's own or the commit's, counts as a build
   [ -z "$odd" ] || return 0
   [ -z "$nv" ] || return 1

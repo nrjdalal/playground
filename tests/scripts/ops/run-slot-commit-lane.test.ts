@@ -195,6 +195,35 @@ describe("a commit whose pre-commit runs next build", () => {
     expect(await m.start("worker-x", {}, undefined, argv).waits()).toBe(true)
   })
 
+  // review round 12: an env word other than NODE_ENV or RUN_SLOT_HERE, such as GIT_DIR, can point git at another repo
+  test("env GIT_DIR=<repo> git -C <docs> commit counts as a build", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    mkdirSync(join(m.root, "docs"), { recursive: true })
+    m.hold("run-slot", 3, "big")
+    const argv = [
+      "env",
+      `GIT_DIR=${m.root}/.git`,
+      "git",
+      "-C",
+      `${m.root}/docs`,
+      "commit",
+      "-m",
+      "x",
+    ]
+    expect(await m.start("worker-x", {}, undefined, argv).waits()).toBe(true)
+  })
+
+  // review round 12: a git option before a verb run-slot does not know, such as an alias of commit, counts as a build, so it waits beside the held lanes where a medium run starts
+  test("git -c alias.ci=commit ci counts as a build", async () => {
+    const m = repo({}, ["docs/notes.md"])
+    holdLane(m, "run-slot-commit", "commit-wt")
+    holdLane(m, "run-slot-clone", "worker-c")
+    const argv = ["git", "-C", m.root, "-c", "alias.ci=commit", "ci", "-m", "x"]
+    expect(await m.start("worker-m", { RUN_SLOT_SIZE: "medium" }, undefined, argv).waits()).toBe(
+      true,
+    )
+  })
+
   test("git commit -- <path> counts the web/next path it commits", async () => {
     const m = repo({ idle: 30 }, ["docs/notes.md"], ["web/next/src/app/page.tsx"])
     m.hold("run-slot", 3, "big")
