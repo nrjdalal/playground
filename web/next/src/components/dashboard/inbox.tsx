@@ -161,6 +161,7 @@ import {
   waiting,
 } from "@/lib/inbox"
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
+import { insertPaste } from "@/lib/paste"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
 import { replyRoute, useTypedReply } from "@/lib/reply"
 import { iconTone, type ShownState, statusIcon } from "@/lib/status-icons"
@@ -930,15 +931,15 @@ export function InboxCard({
   ) : choices ? (
     <AskChoices busy={busy} choices={choices} paused={paused} pick={pick} setPick={setPick} />
   ) : secretAsk ? (
-    // masked, never saved by the browser, and a key here stays in the field; Enter submits
+    // masked, never saved by the browser, and a key here stays in the field; Enter submits; enabled while the card is paused, as the comment box is, so a paste in that second lands
     <Input
       aria-label={`Value for ${secretKey}`}
       autoComplete="new-password"
       className={BOX}
       data-1p-ignore
       data-lpignore="true"
-      disabled={busy}
       placeholder="Paste the value"
+      readOnly={pending}
       spellCheck={false}
       type="password"
       value={secret}
@@ -1411,10 +1412,11 @@ export function InboxCard({
           {!folded && (
             // the same gap-2 above it as between the choices
             <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
+              {/* a box turned disabled drops focus to the page, so words dictated or typed as a card above leaves land nowhere: it stays enabled while the card is paused and turns read-only while its answer is on its way */}
               <NoteBox
-                disabled={busy}
                 id={commentId}
                 placeholder={noted ? "Add an optional comment" : "Add a comment"}
+                readOnly={pending}
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
               />
@@ -1432,7 +1434,7 @@ export function InboxCard({
 function NoteBox(
   props: Pick<
     ComponentProps<typeof Textarea>,
-    "disabled" | "id" | "onChange" | "placeholder" | "value"
+    "id" | "onChange" | "placeholder" | "readOnly" | "value"
   >,
 ) {
   const box = useRef<HTMLTextAreaElement>(null)
@@ -1448,7 +1450,16 @@ function NoteBox(
     observer.observe(choice)
     return () => observer.disconnect()
   }, [])
-  return <Textarea ref={box} aria-label="Comment" className={cn("min-h-14 py-2", BOX)} {...props} />
+  return (
+    <Textarea
+      ref={box}
+      aria-label="Comment"
+      className={cn("min-h-14 py-2", BOX)}
+      // a paste lands as the text its event carried, as the composer's does, since the browser's own insert reads the clipboard again, which a dictation app may have put back by then
+      onPaste={(event) => void insertPaste(event)}
+      {...props}
+    />
+  )
 }
 
 // Taking what waits behind the pill glides the rows already in view down from the top while the taken ones fade in above them, this long; nothing moves under reduced motion.

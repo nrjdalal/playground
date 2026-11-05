@@ -702,6 +702,27 @@ describe("Schedule's row", () => {
     expect(html).toContain('aria-label="Comment"')
   })
 
+  // a focused box that turns disabled drops focus to the page, so words dictated or typed while a card above it leaves land nowhere
+  test("the comment box stays enabled on a card that just moved under him, and only reads read-only while its answer is on its way", () => {
+    const box = (html: string) => html.match(/<textarea[^>]*aria-label="Comment"[^>]*>/)?.[0] ?? ""
+    expect(box(render(true))).not.toBe("")
+    expect(box(render(true))).not.toMatch(/\sdisabled=""/)
+    expect(box(render(false))).not.toMatch(/\sdisabled=""|\sreadonly=""/i)
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    expect(source).toMatch(/<NoteBox[^>]*readOnly=\{pending\}/)
+    expect(source).toMatch(/placeholder="Paste the value"\s+readOnly=\{pending\}/)
+  })
+
+  // the browser's own paste reads the clipboard again at the insert, which a dictation app may have put back by then, so the box inserts the text its paste event carried, as the composer does
+  test("the comment box lands a paste as the text its event carried, through insertPaste", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const box = source.slice(
+      source.indexOf("function NoteBox("),
+      source.indexOf("// Taking what waits behind the pill"),
+    )
+    expect(box).toContain("onPaste={(event) => void insertPaste(event)}")
+  })
+
   test("an unread ask keeps its light and draws no unread dot, which stays an update's", () => {
     expect(render(false)).not.toContain("bg-primary size-2 rounded-full")
     expect(
@@ -839,6 +860,15 @@ describe("the comment box and Reply on every card", () => {
     for (const [name, item] of Object.entries(cards)) {
       expect(opened(item), name).toContain('aria-label="Comment"')
     }
+  })
+
+  test("a secret ask's value field stays enabled on a card that just moved under him, so a paste in that second lands", () => {
+    const field = (html: string) =>
+      html.match(/<input[^>]*placeholder="Paste the value"[^>]*>/)?.[0] ?? ""
+    const paused = render(true, secret, false, { defaultOpen: true })
+    expect(field(paused)).not.toBe("")
+    expect(field(paused)).not.toMatch(/\sdisabled=""|\sreadonly=""/i)
+    expect(field(paused)).toContain('type="password"')
   })
 
   test("the box reads optional where it rides an answer as its note, and plain where Reply alone sends it", () => {
