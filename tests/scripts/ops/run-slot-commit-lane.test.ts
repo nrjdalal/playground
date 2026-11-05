@@ -9,7 +9,7 @@ setDefaultTimeout(60_000)
 
 // Playground's own lefthook.yml, whose pre-commit runs the build
 const LEFTHOOK = readFileSync(join(import.meta.dir, "../../../lefthook.yml"), "utf8")
-// A machine whose fake git fails on a `-C` folder that is not one, answers `git rev-parse --show-toplevel` with its folder (the root, from a folder under `web/`), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths, `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, as git prints them), and touches its last argument for anything else, as a commit's marker
+// A machine whose fake git fails on a `-C` folder that is not one, answers `git rev-parse --show-toplevel` with its folder (the root, from `docs` or a folder under `web/`), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths (each pathspec read from the `-C` folder, `.` included), `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, every one for `:/`, as git prints them), and touches its last argument for anything else, as a commit's marker
 const repo = (
   setup: Setup,
   staged: string[],
@@ -24,12 +24,15 @@ const repo = (
     `#!/bin/bash
 [ "$1" = -C ] && { [ -d "$2" ] || exit 128; }
 d=$PWD; [ "$1" = -C ] && d=$2
-case " $* " in *" rev-parse --show-toplevel "*) case "$d" in ${m.root}/web/*) echo ${m.root} ;; *) cd "$d"; pwd ;; esac; exit 0 ;; esac
+case " $* " in *" rev-parse --show-toplevel "*) case "$d" in ${m.root}/web/* | ${m.root}/docs) echo ${m.root} ;; *) cd "$d"; pwd ;; esac; exit 0 ;; esac
 pre=""; case "$d" in ${m.root}/*) pre=\${d#${m.root}/}/ ;; esac
 full=""; case " $* " in *" --full-name "*) full=1 ;; esac
+case " $* " in *" :/ "*) pre="" ;; esac
+# whether path $2 is under pathspec $1, read from the folder, as git reads one
+under() { local q=$pre$1; [ "$1" = . ] && q=\${pre%/}; [ -z "$q" ] || case "$2" in "$q" | "$q"/*) ;; *) return 1 ;; esac; }
 case " $* " in
   *" ls-files "*" -- "*) while [ "$1" != -- ]; do shift; done; shift
-    for f in ${untracked.join(" ")}; do for p in "$@"; do case "$f" in "$pre$p"|"$pre$p"/*) [ -n "$full" ] && echo "$f" || echo "\${f#"$pre"}" ;; esac; done; done; exit 0 ;;
+    for f in ${untracked.join(" ")}; do for p in "$@"; do under "$p" "$f" && { [ -n "$full" ] && echo "$f" || echo "\${f#"$pre"}"; }; done; done; exit 0 ;;
   *" ls-files "*) for f in ${untracked.join(" ")}; do case "$f" in "$pre"*) [ -n "$full" ] && echo "$f" || echo "\${f#"$pre"}" ;; esac; done; exit 0 ;;
 esac
 for a in "$@"; do
@@ -37,7 +40,7 @@ for a in "$@"; do
   case " $* " in
     *" --cached "*) printf '%s\\n' ${staged.join(" ")} ;;
     *" -- "*) while [ "$1" != -- ]; do shift; done; shift
-      for f in ${[...staged, ...unstaged].join(" ")}; do for p in "$@"; do case "$f" in "$p"|"$p"/*) echo "$f" ;; esac; done; done ;;
+      for f in ${[...staged, ...unstaged].join(" ")}; do for p in "$@"; do under "$p" "$f" && echo "$f"; done; done ;;
     *) printf '%s\\n' ${unstaged.join(" ")} ;;
   esac
   exit 0
@@ -148,6 +151,21 @@ describe("a commit whose pre-commit runs next build", () => {
         .start("worker-x", {}, undefined, ["git", "-C", m.root, "commit", "-C", "HEAD"])
         .waits(),
     ).toBe(true)
+  })
+
+  test("git commit --pathspec-from-file counts a web/next file it may commit", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"], ["web/next/src/app/page.tsx"])
+    m.hold("run-slot", 3, "big")
+    const argv = [
+      "git",
+      "-C",
+      m.root,
+      "commit",
+      "-m",
+      "x",
+      `--pathspec-from-file=${m.root}/list.txt`,
+    ]
+    expect(await m.start("worker-x", {}, undefined, argv).waits()).toBe(true)
   })
 
   test("git commit -- <path> counts the web/next path it commits", async () => {
@@ -428,6 +446,15 @@ describe("a sh -c chain of git steps", () => {
     mkdirSync(join(m.root, "web/next/src/app"), { recursive: true })
     m.hold("run-slot", 3, "big")
     expect(await start(m, "cd ROOT/web/next && git add . && git commit -m x").waits()).toBe(true)
+    expect(log(m)).not.toContain("run-slot-commit")
+  })
+
+  // review round 9: git add -A, --all and :/ stage the whole tree from any folder, untracked files outside it included
+  test("a chain on the list that adds the whole tree from docs, with an untracked web/next file, waits as a big run", async () => {
+    const m = repo({ idle: 30 }, [], [], LEFTHOOK, ["web/next/src/app/new.tsx"])
+    mkdirSync(join(m.root, "docs"), { recursive: true })
+    m.hold("run-slot", 3, "big")
+    expect(await start(m, "cd ROOT/docs && git add -A && git commit -m x").waits()).toBe(true)
     expect(log(m)).not.toContain("run-slot-commit")
   })
 

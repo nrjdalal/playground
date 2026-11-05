@@ -558,8 +558,8 @@ sys.exit(0 if p.returncode == 0 and tasks and all(t["cache"]["status"] == "HIT" 
 PY
   )
 }
-# what a chain's git add step stages, for the chain's later commit step: the whole tree, untracked files included, for ., :/, -A, --all, -u or a
-# pathspec file, else the paths it names (4 Nov: read against the index alone, a chain whose own add staged a next file took the commit lane)
+# what a chain's git add step stages, for the chain's later commit step: the whole tree, untracked files included, for :/, -A, --all, -u or a
+# pathspec file, else the paths it names, . among them, each read from the step's own folder (4 Nov: read against the index alone, a chain whose own add staged a next file took the commit lane)
 CHAIN_ADD_ALL="" CHAIN_ADD=()
 chain_add() {
   local a past=""
@@ -567,13 +567,13 @@ chain_add() {
     [ -n "$past" ] || { [ "$a" = add ] && past=1; continue; }
     case "$a" in
       --) ;;
-      . | ./ | :/ | -A | --all | -u | --update | --pathspec-from-file* | -[!-]*[Au]*) CHAIN_ADD_ALL=1 ;;
+      :/ | -A | --all | -u | --update | --pathspec-from-file* | -[!-]*[Au]*) CHAIN_ADD_ALL=1 ;;
       -*) ;;
       *) CHAIN_ADD+=("$a") ;;
     esac
   done
 }
-# a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a one it will stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
+# a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
   local a c f files dir="" commit="" all="" state=lead paths=() line words first=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with the
@@ -613,7 +613,8 @@ heavy_build() {
       commit) case "$a" in
           --) state=paths ;;
           -n|--no-verify) return 1 ;;
-          --all) all=1 ;;
+          --all | --pathspec-from-file=*) all=1 ;;
+          --pathspec-from-file) all=1; state=value ;;
           --author|--cleanup|--date|--file|--fixup|--message|--reedit-message|--reuse-message|--squash|--template|--trailer) state=value ;;
           --*) ;;
           -?*) f=${a#-}
@@ -630,7 +631,7 @@ heavy_build() {
     "$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)/lefthook.yml" 2>/dev/null || return 1
   files=$({ git ${dir:+-C "$dir"} diff --cached --name-only; [ -z "$all" ] || git ${dir:+-C "$dir"} diff --name-only
     [ ${#paths[@]} -eq 0 ] || git ${dir:+-C "$dir"} diff --name-only HEAD -- "${paths[@]}"
-    [ -z "$CHAIN_ADD_ALL" ] || { git ${dir:+-C "$dir"} diff --name-only; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name; }
+    [ -z "$CHAIN_ADD_ALL" ] || { git ${dir:+-C "$dir"} diff --name-only; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name :/; }
     [ ${#CHAIN_ADD[@]} -eq 0 ] || { git ${dir:+-C "$dir"} diff --name-only -- "${CHAIN_ADD[@]}"; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name -- "${CHAIN_ADD[@]}"; }; } 2>/dev/null)
   grep -Evq '^$|\.md$|^tests/.*\.py$' <<<"$files" || return 1
   grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$' <<<"$files"
