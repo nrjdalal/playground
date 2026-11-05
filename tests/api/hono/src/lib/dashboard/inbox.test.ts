@@ -2445,7 +2445,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
   })
 
   // Since the clocks stopped, a card moves by a verb alone, so the list's week drops none of these: an approved go its poster has not acked, a card he only commented on, and an update he read; each leaves once its poster closes it or he dismisses it.
-  test("an unacked go, a comment-alone card and a read update since the clocks stopped stay listed 8 days on, until a verb closes each", async () => {
+  test("an unacked go, a comment-alone card, a read update and one woken from Later since the clocks stopped stay listed 8 days on, until a verb closes each", async () => {
     const stopped = Date.parse(CLOCKS_STOPPED_AT)
     const at = new Date(stopped + 60 * 60_000)
     const delivered = async () => ({ at: at.toISOString(), ok: true as const, sessionId: "s1" })
@@ -2466,14 +2466,31 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       title: "Merged a made-up change",
     })
     expect(await store.markRead(db, [update.id], at)).toBe(1)
-    const ids = [go.id, replied.id, update.id]
+    // put off with Later and woken: its answer holds the past snoozedUntil, yet it waits on his Done as a read update does
+    const woken = await post({
+      from: "builder",
+      kind: "update",
+      preview: { outcome: "merged" },
+      title: "Merged a made-up change put off",
+    })
+    expect(await store.markRead(db, [woken.id], at)).toBe(1)
+    const put = await store.scheduleItem(
+      db,
+      woken.id,
+      new Date(at.getTime() + 60 * 60_000).toISOString(),
+      {
+        now: at,
+      },
+    )
+    if (!put.ok) throw new Error(put.message)
+    const ids = [go.id, replied.id, update.id, woken.id]
     const later = new Date(stopped + 8 * 24 * 60 * 60 * 1000)
     const listed = (await store.listItems(db, later)).items.map((i) => i.id)
     expect(ids.filter((id) => listed.includes(id))).toEqual(ids)
     const closed = new Date(at.getTime() + 60_000)
     const acked = await store.ackItem(db, go.id, { noLink: "made-up", now: closed })
     if (!acked.ok) throw new Error(acked.message)
-    expect(await store.dismissItems(db, [replied.id, update.id], closed)).toBe(2)
+    expect(await store.dismissItems(db, [replied.id, update.id, woken.id], closed)).toBe(3)
     const after = (await store.listItems(db, later)).items.map((i) => i.id)
     expect(ids.filter((id) => after.includes(id))).toEqual([])
   })
