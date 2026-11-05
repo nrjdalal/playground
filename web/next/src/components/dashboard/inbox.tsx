@@ -4,6 +4,7 @@ import type { InboxAction, InboxItem, InboxPreview, InboxUpdate } from "@api/hon
 import type { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 import {
   RiAlarmWarningLine,
+  RiAppsLine,
   RiArchive2Line,
   RiArrowDownSLine,
   RiArrowUpLine,
@@ -27,6 +28,7 @@ import {
   RiReplyLine,
   RiSearchEyeLine,
   RiSendPlaneLine,
+  RiShieldKeyholeLine,
   RiShipLine,
   RiSlackLine,
   RiTableLine,
@@ -98,7 +100,7 @@ import {
   QuestionnaireSubmit,
   QuestionnaireTitle,
 } from "@/components/ui/questionnaire"
-import { CenterSpinner } from "@/components/ui/spinner"
+import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { agentLabel, roleLabel } from "@/lib/agent-label"
@@ -158,9 +160,11 @@ import { fullTime, relativeTime } from "@/lib/time"
 
 const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   accept: RiPuzzleLine,
+  apps: RiAppsLine,
   ask: RiQuestionAnswerLine,
   budget: RiMoneyDollarCircleLine,
   delete: RiDeleteBinLine,
+  grant: RiShieldKeyholeLine,
   schema: RiTableLine,
   secret: RiKey2Line,
   ship: RiShipLine,
@@ -527,6 +531,13 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
         </>
       )
     case "secret":
+      if (preview.sink.type === "keychain")
+        return (
+          <p>
+            On Submit, the value is saved in this Mac's Keychain as its{" "}
+            <code className="font-mono">{preview.sink.item}</code> item. It is kept nowhere else.
+          </p>
+        )
       return (
         <p>
           On Submit, the value goes to <code className="font-mono">{preview.key}</code> in Vercel
@@ -541,6 +552,29 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
             On Approve, the dashboard accepts the proposed {preview.kind}{" "}
             <code className="font-mono">{preview.key}</code> in {preview.scope}, as it reads at{" "}
             <code className="font-mono">{preview.rev.slice(0, 7)}</code>.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "apps":
+      return (
+        <>
+          <p>
+            On Approve, the dashboard {preview.change === "add" ? "adds" : "removes"}{" "}
+            <code className="font-mono">{preview.app}</code>{" "}
+            {preview.change === "add" ? "to" : "from"} your apps, which no session may drive.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "grant":
+      return (
+        <>
+          <p>
+            On Approve, System Settings opens at Privacy &amp; Security &gt;{" "}
+            {preview.permission === "accessibility" ? "Accessibility" : "Screen Recording"}, where
+            you turn it on for the app that runs {agentLabel(item.from)}, and{" "}
+            {agentLabel(item.from)} checks it again.
           </p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
@@ -1554,6 +1588,38 @@ export function NewPill({
 }
 
 // Playground's Inbox: one list of cards, each keeping its place while he looks, what arrived since waiting behind a pill until he takes it, then In progress, Snoozed, Archived and Done as rows that open and shut.
+// The Inbox's first load: its open row where it will sit, a blank count and the Mark all as read room kept, the Spinner under it, so the data lands below without moving the row
+function InboxLoading() {
+  return (
+    <section aria-busy aria-label="Inbox" className="@container flex flex-col gap-3">
+      <Accordion className={SHELVES}>
+        <AccordionItem value="open" disabled className={SHELF_ITEM}>
+          <AccordionTrigger
+            className={SHELF_ROW}
+            header={(props) => (
+              <h3 {...props} className={cn(props.className, STICKY_HEADER, OPEN_HEADER)} />
+            )}
+          >
+            <span className="flex min-w-0 flex-1 items-center gap-2 pr-10">
+              <RiInboxLine className="size-3.5 shrink-0" aria-hidden />
+              <span className="text-muted-foreground truncate">Inbox</span>
+              <Badge
+                aria-hidden
+                variant="outline"
+                className="text-2xs h-4 w-5 px-1.5 font-mono tabular-nums"
+              />
+            </span>
+            <ShelfMark empty />
+          </AccordionTrigger>
+        </AccordionItem>
+      </Accordion>
+      <div className="text-muted-foreground grid place-items-center pt-8">
+        <Spinner />
+      </div>
+    </section>
+  )
+}
+
 export function Inbox({ viewing }: { viewing: boolean }) {
   const { allowed } = useDashboard()
   const { data, error, isPending } = useInbox(allowed)
@@ -1638,7 +1704,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   const picked = useReply()
   const typed = useTypedReply()
   const reply = picked ?? typed
-  if (isPending) return <CenterSpinner />
+  if (isPending) return <InboxLoading />
   if (error) return <p className="text-destructive text-sm">{error.message}</p>
   const summary = inboxSummary(shown)
   // what Mark all as read marks: every unread update, ask and draft on screen, each staying in the list as it is until done

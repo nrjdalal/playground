@@ -7,6 +7,7 @@ import { z } from "zod"
 
 import { readAttachment } from "@/lib/dashboard/attachments"
 import { deliver } from "@/lib/dashboard/deliver"
+import { readsLive } from "@/lib/dashboard/fixture"
 import {
   answerInputSchema,
   answerItem,
@@ -19,7 +20,8 @@ import {
   scheduleItem,
   secretInputSchema,
 } from "@/lib/dashboard/inbox"
-import { runSink } from "@/lib/dashboard/secret-sink"
+import { runArgv } from "@/lib/dashboard/run-argv"
+import { runSink, saveToKeychain } from "@/lib/dashboard/secret-sink"
 import { slackUpload } from "@/lib/dashboard/slack-upload"
 import { DISPATCHER } from "@/lib/dashboard/workers"
 import {
@@ -30,7 +32,7 @@ import {
   notFoundErrorResponses,
   validationErrorResponses,
 } from "@/lib/error"
-import { runCli } from "@/lib/store/extensions"
+import { ownerApps, runCli } from "@/lib/store/extensions"
 import {
   authMiddleware,
   guardWrites,
@@ -132,7 +134,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Answer an open decision (approve, deny, clear to set it aside as Archive, or edit with words) or draft (send, or for a Slack draft save it as a draft in Slack, each as written or changed, discard, or clear to archive it), with his optional note, or move an archived item back to the Inbox open and unanswered (unarchive), which tells its poster nothing. With seen, the updatedAt of the card he answered, it is refused when the item has changed since. The answer is kept, then typed into the posting session through the delivery adapter, and that session carries it out; the Dashboard itself sends no message, and only shares a Slack send's files into its channel and thread first (dm upload), a failed share failing the send before anything is typed. An accept decision's Approve is the one the Dashboard carries out itself: once the answer is kept, it runs the extensions store's accept of <scope> <kind> <key> <rev> from the preview's words, with no role, records its exit code and line under accepted, and tells the poster",
+        "Answer an open decision (approve, deny, clear to set it aside as Archive, or edit with words) or draft (send, or for a Slack draft save it as a draft in Slack, each as written or changed, discard, or clear to archive it), with his optional note, or move an archived item back to the Inbox open and unanswered (unarchive), which tells its poster nothing. With seen, the updatedAt of the card he answered, it is refused when the item has changed since. The answer is kept, then typed into the posting session through the delivery adapter, and that session carries it out; the Dashboard itself sends no message, and only shares a Slack send's files into its channel and thread first (dm upload), a failed share failing the send before anything is typed. An accept, an apps change and a grant are the decisions whose Approve the Dashboard carries out itself. An accept's Approve: once the answer is kept, it runs the extensions store's accept of <scope> <kind> <key> <rev> from the preview's words, with no role, records its exit code and line under accepted, and tells the poster. An apps change's Approve writes the owner's own desktop-owner-apps list, the login scope's, with the app added or removed, through the store's put with no role, and records its line under listed. A grant's Approve opens System Settings at the pane for its permission (Accessibility or Screen Recording) on this Mac, a stack reading the live machine alone, records its line under opened, and tells the poster to recheck the grant",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
@@ -148,8 +150,11 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
       const result = await answerItem(db, c.req.param("id"), c.req.valid("json"), {
         accept: runCli(),
         actor: { email: user.email, id: user.id },
+        apps: ownerApps(),
         deliver,
         dispatcher: DISPATCHER,
+        // a stack showing test data opens nothing on this Mac's screen
+        grant: readsLive() ? runArgv : undefined,
         upload: slackUpload(),
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
@@ -209,7 +214,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Answer an open secret ask with its value, which goes straight to the ask's sink on stdin, once an environment, and is kept nowhere: the item records only when it was provided and each exit status, and its poster is told that alone",
+        "Answer an open secret ask with its value, which goes straight to the ask's sink on stdin, once a Vercel environment or once to a Keychain item, and is kept nowhere: the item records only when it was provided and each exit status or saved, and its poster is told that alone",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
@@ -226,6 +231,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         actor: { email: user.email, id: user.id },
         deliver,
         dispatcher: DISPATCHER,
+        keychain: saveToKeychain,
         run: runSink,
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)

@@ -1,8 +1,27 @@
-import type { ExtensionRow } from "@api/hono"
+import type { BundledRow, ExtensionRow } from "@api/hono"
 
-export type { ExtensionRow }
+export type { BundledRow, ExtensionRow }
+
+// An answer's data, or its error thrown with the API's own words.
+export const answer = async <R extends { data: unknown; error: { message: string } | null }>(
+  call: Promise<R>,
+): Promise<NonNullable<R["data"]>> => {
+  const { data, error } = await call
+  if (error) throw new Error(error.message)
+  return data as NonNullable<R["data"]>
+}
 
 export const EXTENSIONS_QUERY_KEY = ["extensions"] as const
+
+export const BUNDLED_QUERY_KEY = ["extensions", "bundled"] as const
+
+// What each bundled extension's card says, by its name under extensions/.
+export const BUNDLED_WORDS: Record<string, { description: string; title: string }> = {
+  slack: {
+    description: "Your Slack DM with the factory: sessions post replies there and read yours back.",
+    title: "Slack",
+  },
+}
 
 export const EXTENSION_NAME = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/
 export const ORG = /^(?:\*|[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38})$/

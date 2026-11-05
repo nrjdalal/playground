@@ -14,6 +14,14 @@ Each item lives in the narrowest scope whose users need it, and its work is trac
 
 An item moves down to the narrower scope as soon as only that scope uses it.
 
+> Extended on 4 Nov 2026 with a fourth scope, after the owner asked that core stay generic since not every owner uses Slack or the vault: a bundled extension ships in this repo like core, but only the owners who turn it on load it.
+>
+> | Scope | Holds | Its work is tracked in |
+> | --- | --- | --- |
+> | A bundled extension (`extensions/<name>` in this repo) | a service many owners use and many do not, off until the owner turns it on | this repo's issues |
+>
+> An item that only some owners use, and no one org or person, moves to a bundled extension.
+
 ## Consequences
 
 - An owner who installs Playground gets a core with no other org's or person's items in it, so core's rules and skills read true for that owner.

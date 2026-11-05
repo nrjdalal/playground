@@ -7,8 +7,10 @@ import {
   check,
   type Deps,
   DASHBOARD_DEADLINE_MS,
+  DRAFT_REASON,
   readStatus,
   REASON,
+  STEPS_REASON,
 } from "../../../scripts/hooks/no-chat-question"
 import { capital, OLD, OLD_NAMES } from "../../session-names"
 import { storeWith } from "./render-set"
@@ -29,6 +31,7 @@ writeFileSync(
   JSON.stringify({
     agents: [
       { kind: "builder", name: "x7mh4d-builder", role: "manager", status: "working", task: "t" },
+      { kind: "dispatcher", name: "seat-k8w2rd", role: "manager", status: "working", task: "t" },
       { kind: "worker", name: "k3v9q2-worker", role: "worker", status: "working", task: "t" },
       { name: "k3m9px-worker", role: "worker", status: "working", task: "t" },
       { name: "worker-plain-fern", role: "worker", status: "working", task: "t" },
@@ -299,10 +302,7 @@ describe("what passes", () => {
   })
 
   test.each([
-    [
-      "a numbered agent plan",
-      "1. Add the column.\n2. Paste the shot on the PR.\n3. Switch the flag.",
-    ],
+    ["a numbered agent plan", "1. Paste the shot on the PR.\n2. Switch the flag."],
     ["a heading with a bare verb", "## Approve flow\n- the card shows Approve and Deny"],
     ["waiting on your inbox", `${capital(LEAD)} · Waiting on your inbox`],
     ["past tense: you approved", "You approved #i41, so it shipped."],
@@ -397,6 +397,119 @@ describe("what passes", () => {
     expect(await stop(undefined)).toBeUndefined()
     expect(await stop(42)).toBeUndefined()
     expect(await check("not json", { PLAYGROUND_ROLE: "dispatcher" })).toBeUndefined()
+  })
+})
+
+describe("a manager's reply that keeps steps or a table for Quilla goes in one Inbox card", () => {
+  const STEPS = "Next:\n1. Rotate the key.\n2. Restart the API.\n3. Check /api/health."
+  const TABLE = "| PR | State |\n|---|---|\n| #500 | merged |"
+
+  test.each([
+    ["3 numbered steps", STEPS],
+    ["3 steps numbered with a paren", "1) Pull canary\n2) Build it\n3) Restart it"],
+    ["a table", TABLE],
+    ["a table with aligned columns", "| PR | State |\n| :--- | ---: |\n| #500 | merged |"],
+  ])("refused with no #iN: %s", async (_name, last) => {
+    expect(await stop(last)).toBe(STEPS_REASON)
+  })
+
+  test("the reason sends the steps to one card whose progress is edited in place", () => {
+    expect(STEPS_REASON).toBe(
+      "put these steps in one Inbox card (bun run ask new; the open #iN on the same thing if one exists, bun run ask open lists them), edit each step's progress into that card, then name it in chat as #iN in one line",
+    )
+  })
+
+  test("a reply that also asks a decision gets the ask's reason", async () => {
+    expect(await stop(`${STEPS}\nShould I start?`)).toBe(REASON)
+  })
+
+  test("a named item that is not open fails closed with why", async () => {
+    expect(await stop(`${STEPS}\nTracked in #i40.`, { statuses: { "#i40": "approved" } })).toBe(
+      `${STEPS_REASON} (#i40 is approved, not open)`,
+    )
+  })
+
+  test.each([
+    ["2 numbered lines", "1. Rotated the key.\n2. Restarted the API."],
+    ["numbered lines inside a fence", "Ran:\n```\n1. pull\n2. build\n3. restart\n```"],
+    ["numbered lines in a blockquote", "> 1. pull\n> 2. build\n> 3. restart"],
+    ["a table inside a fence", "```\n| PR | State |\n|---|---|\n```"],
+    ["a bulleted list", "- Rotated the key.\n- Restarted the API.\n- Health reads ok."],
+  ])("passed: %s", async (_name, last) => {
+    expect(await stop(last)).toBeUndefined()
+  })
+
+  test("passed: 3 numbered steps that name an open #iN", async () => {
+    expect(
+      await stop(`${STEPS}\nIt's in the inbox as #i42.`, { statuses: { "#i42": "open" } }),
+    ).toBeUndefined()
+  })
+
+  test("a lead's steps go to the dispatcher as a draft, so the card is posted once", async () => {
+    expect(DRAFT_REASON).toBe(
+      "send these steps to the dispatcher as a draft for one Inbox card rather than posting it, so the card is posted once, send each step's progress to the dispatcher as an edit to that draft, then say in chat in one line that the dispatcher has the draft",
+    )
+    expect(await stop(STEPS, { role: "lead" })).toBe(DRAFT_REASON)
+    expect(await stop(STEPS, { role: "manager" })).toBe(DRAFT_REASON)
+    expect(await stop(STEPS, { name: "x7mh4d-builder", role: "" })).toBe(DRAFT_REASON)
+  })
+
+  test("the dispatcher's own steps keep the Inbox reason, a draft line included", async () => {
+    expect(await stop(STEPS, { name: "dispatcher", role: "" })).toBe(STEPS_REASON)
+    expect(await stop(STEPS, { name: "seat-k8w2rd", role: "" })).toBe(STEPS_REASON)
+    expect(await stop(`${STEPS}\nSent these steps to the dispatcher as a draft.`)).toBe(
+      STEPS_REASON,
+    )
+  })
+
+  test.each([
+    ["sent", "Sent these steps to the dispatcher as a draft."],
+    ["handed", "I handed the card to the dispatcher as a draft."],
+    ["went", "They went to the dispatcher as a draft for one card."],
+    ["says the reason's own words for", "The dispatcher has the draft."],
+    ["says it has been sent", "These have been sent to the dispatcher as a draft."],
+    ["says it has sent", "I've sent these to the dispatcher as a draft."],
+    ["says it passed", "These were passed to the dispatcher as a draft."],
+  ])("passed: a lead's steps it %s to the dispatcher as a draft", async (_name, line) => {
+    expect(await stop(`${STEPS}\n${line}`, { role: "lead" })).toBeUndefined()
+  })
+
+  test.each([
+    ["a hand-off not made yet", "I haven't sent the dispatcher the draft yet."],
+    ["a hand-off denied", "I have not sent these to the dispatcher as a draft."],
+    [
+      "a hand-off denied with a word between",
+      "I haven't yet sent these to the dispatcher as a draft.",
+    ],
+    ["a draft line inside a fence", "```\nsent dispatcher draft\n```"],
+    ["a draft line in a blockquote", "> Sent these steps to the dispatcher as a draft."],
+    ["a draft PR in a status line", "All checks passed; the dispatcher reviews the draft PR next."],
+    ["a draft PR beside the dispatcher", "PR #859 went up as a draft; the dispatcher has it."],
+    ["a note on a draft PR", "Sent the dispatcher a note on the draft PR."],
+    [
+      "a hand-off once a PR lands",
+      "These will be sent to the dispatcher as a draft once #500 lands.",
+    ],
+    [
+      "a hand-off after the merge",
+      "They're to be sent to the dispatcher as a draft after the merge.",
+    ],
+    ["a hand-off it will get done", "I'll get these sent to the dispatcher as a draft next."],
+    ["a hand-off still to come", "Will be sent to the dispatcher as a draft."],
+  ])("refused: a lead's steps beside %s", async (_name, line) => {
+    expect(await stop(`${STEPS}\n${line}`, { role: "lead" })).toBe(DRAFT_REASON)
+  })
+
+  test("a lead's draft line passes its steps, never a decision it asks", async () => {
+    expect(
+      await stop(`${STEPS}\nSent these steps to the dispatcher as a draft. Should I start?`, {
+        role: "lead",
+      }),
+    ).toBe(REASON)
+  })
+
+  test("passed: a worker's steps, which go to its lead", async () => {
+    expect(await stop(STEPS, { name: "worker-brave-otter", role: "worker" })).toBeUndefined()
   })
 })
 

@@ -389,7 +389,7 @@ describe("cycle", () => {
 
   test("restores again each cycle until restore passes, naming what failed", async () => {
     const { restores, value } = deps({ sha256: PIN.sha256, version: "0.9.5" }, false)
-    const answers = ["restore: not restored: spawn.sh refuses worker-a: load 31.0", null]
+    const answers = ["restore: not restored worker-a: the load gate holds it: load 31.0", null]
     let up = false
     const job = {
       ...value,
@@ -404,7 +404,7 @@ describe("cycle", () => {
       },
     }
     expect(await cycle({ ...job, sessions: ["factory"] })).toBe(
-      "factory: restore: not restored: spawn.sh refuses worker-a: load 31.0",
+      "factory: restore: not restored worker-a: the load gate holds it: load 31.0",
     )
     expect(await cycle({ ...job, sessions: ["factory"] })).toBe("ok")
     expect(await cycle({ ...job, sessions: ["factory"] })).toBe("ok")
@@ -531,7 +531,7 @@ describe("cycle", () => {
       expect(ok).toBe(false)
       expect(lines).toEqual([
         "started factory",
-        `factory: restore: 1 restored · 2 already running · 3 waiting for load to drop · 1 waiting on the usage gate · 1 not restored (the waiting ones come back on their own); each session's line: ${log}`,
+        `factory: restore: 1 restored · 2 already running · 2 down in the roster · 1 passed over · 3 waiting for load to drop · 1 waiting on the usage gate · 1 not restored (the waiting ones come back on their own); each session's line: ${log}`,
       ])
     })
 
@@ -604,23 +604,26 @@ describe("owedFile", () => {
   })
 })
 
-// spawn.sh restore's lines for a server after a reboot: one back, two running, one the usage gate held, three the load gate held, one that failed.
+// spawn.sh restore's lines for a server after a reboot: one back, two running, two the roster keeps down, one passed over, one the usage gate held, three the load gate held, one that failed.
 const AFTER_BOOT = [
   "restored a-worker",
   "skipped b-worker: live",
   "skipped c-worker: live",
-  "not restored: spawn.sh refuses g-worker: the usage gate holds it: it cannot read zai-usage.json",
+  "skipped i-worker: its roster row reads ended",
+  "skipped j-worker: its roster row reads parked",
+  "skipped k-worker: it has no runtime pin",
+  "not restored g-worker: the usage gate holds it: it cannot read zai-usage.json",
   ...["d", "e", "f"].map(
     (id) =>
-      `not restored: spawn.sh refuses ${id}-worker: the load gate holds it: max(load1, load5) is 17.23 and 10 started in the last 5 minutes. Wait for it to fall, or close a session that is done, and run it again.`,
+      `not restored ${id}-worker: the load gate holds it: max(load1, load5) is 17.23 and 10 started in the last 5 minutes. Wait for it to fall, or close a session that is done, and run it again.`,
   ),
-  "not restored: spawn.sh refuses h-worker: its brief is gone",
+  "not restored h-worker: its brief is gone",
 ].join("\n")
 
 describe("restoreSummary", () => {
   test("counts each kind of line, the gates' waits apart from the failures and in A to Z order", () => {
     expect(restoreSummary(`${AFTER_BOOT}\n`)).toBe(
-      "1 restored · 2 already running · 3 waiting for load to drop · 1 waiting on the usage gate · 1 not restored (the waiting ones come back on their own)",
+      "1 restored · 2 already running · 2 down in the roster · 1 passed over · 3 waiting for load to drop · 1 waiting on the usage gate · 1 not restored (the waiting ones come back on their own)",
     )
   })
 
@@ -656,7 +659,7 @@ describe("restoreProblem", () => {
   })
 
   test("names counts and the log, never the joined lines", () => {
-    const output = "restored worker-a\nnot restored: x\nnot restored: y\n"
+    const output = "restored worker-a\nnot restored worker-b: x\nnot restored worker-c: y\n"
     expect(restoreProblem(1, output, "/h/p.log")).toBe(
       "restore: 1 restored · 2 not restored; each session's line: /h/p.log",
     )

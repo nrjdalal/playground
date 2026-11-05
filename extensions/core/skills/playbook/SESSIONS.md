@@ -133,9 +133,11 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    With no `--runtime`, every start and resume opens in herdr, from any terminal; spawn.sh starts nothing in cmux, so it refuses `--runtime cmux` and a column anchored on a cmux `surface:N`.
    After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
    each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with and an `--effort` other than high,
-   in the pane holding its label, printing `restored <name>`, `skipped <name>: live` or `not restored:` with the refusal; it is safe to run again, one at a time: while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
+   in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, no runtime pin, a runtime other than herdr, or an exec line that does not parse or that it does not run) or `not restored <name>: <reason>`, a gate's refusal included; it is safe to run again, one at a time:
+   while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
+   A readable record on another server gets no line, since that server's own restore reads it.
    A session that never took its first turn has no transcript, so its resume starts it afresh under its own id and name, with the prompt its start recorded in `resume/<name>.prompt`.
-   Done when every session it names reads `restored` or `skipped`, or its refusal is one you act on (a full gate: run it again once a session closes).
+   Done when each line reads `restored`, `skipped <name>: live` or a roster row's down status, or you have acted on it (a full gate: run it again once a session closes; a broken record or a missing pin: resume the session by hand).
 
    `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" move <name>` takes a live cmux session to herdr, so every session moves to herdr.
    A close followed by `resume --runtime herdr` leaves the session down while the capacity gate refuses (memory pressure with under 8% free, or load over the cores), and a move swaps one copy for another, so it adds neither: it runs every check a resume runs and the usage gate, with the load and memory gates set aside and its capacity row naming the pid it moves.
