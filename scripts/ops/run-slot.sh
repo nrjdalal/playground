@@ -423,9 +423,9 @@ git_verb() {
     esac
   done
 }
-# a word sh would leave as written: no $, backquote, ~, glob, brace or # (a comment to sh, which shlex here keeps as a word), so the word run-slot
-# reads is the word the command gets
-plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['* | *'{'* | *'#'*) return 1 ;; esac; done; }
+# a word sh would leave as written: no $, backquote, ~, glob, brace, # (a comment to sh, which shlex here keeps as a word) or ( (a <( ) process
+# substitution runs its command), so the word run-slot reads is the word the command gets
+plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['* | *'{'* | *'#'* | *'('*) return 1 ;; esac; done; }
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
 # Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form

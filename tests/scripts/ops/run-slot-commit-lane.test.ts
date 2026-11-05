@@ -351,6 +351,8 @@ describe("a sh -c chain of git steps", () => {
     "cd ROOT && git commit -m z#1 && bun run build",
     "cd ROOT && git add . && git commit -m x\n# c\nbun run build",
     "cd ROOT && git add web/next/src/app/{a,b}.tsx && git commit -m x",
+    // review round 6: a process substitution runs its command
+    "cd ROOT && git add <(bun run build) && git commit -m x",
   ])
     test(`a chain that commits with a step off the list counts as a build: ${steps}`, async () => {
       const m = repo({ idle: 30 }, ["docs/notes.md"])
