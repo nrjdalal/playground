@@ -523,6 +523,65 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
     })
     expect(await check(raw, real)).toBeUndefined()
   })
+
+  // A folder below the home that is neither the root nor above it, so canary's whole-program-glob fallback resolves there and runs, which is what makes the extraction the only thing that can refuse these rows.
+  const worktree = join(homedir(), "worktree")
+
+  // PG-840: the command string a shell-running call is given runs through a shell, which expands its leading ~ to the home, so a data-folder glob in it is judged against the home from any folder, a worktree included; canary read only the program's own call parens as a glob in the worktree, so it ran this from a worktree.
+  test.each([
+    [
+      "a data-folder glob removed through execSync",
+      `node -e 'require("child_process").execSync("rmdir ~/.play*")'`,
+    ],
+    [
+      "a data-folder glob removed through execSync joined from two strings",
+      `node -e 'require("child_process").execSync("rmdir " + "~/.play*")'`,
+    ],
+    [
+      "a data-folder glob removed through spawnSync with shell true",
+      `node -e 'require("child_process").spawnSync("rmdir ~/.play*", { shell: true })'`,
+    ],
+    [
+      "a data-folder glob removed through execSync beside an unrelated shell variable",
+      `node -e 'require("child_process").execSync("rmdir ~/.play* $1")'`,
+    ],
+    [
+      "a data-folder glob removed through execSync before an echo of a variable",
+      `node -e 'require("child_process").execSync("rmdir ~/.play*; echo $HOME")'`,
+    ],
+  ])("%s is refused from a worktree", async (_, command) => {
+    const reason = await check(
+      JSON.stringify({ cwd: worktree, tool_input: { command }, tool_name: "Bash" }),
+      real,
+    )
+    expect(reason).toContain("no-extensions-write hook refuses")
+  })
+
+  // PG-840 residual, named in the hook's README as the guard's known limit: a command string the hook cannot read as literals (a variable, a template with a substitution), an argument list no shell runs its ~, and a regex's .exec whose string no shell runs, each stays as canary judged them, so none is newly refused from a worktree. The README names the rest of the residual, whose working forms are kept out of this file.
+  test.each([
+    [
+      "a removal built from a variable through execSync",
+      `node -e 'const d=process.argv[1]; require("child_process").execSync("rmdir " + d)' ~/.play`,
+    ],
+    [
+      "an argument list no shell runs, its ~ left literal",
+      `bun -e 'Bun.spawnSync(["rmdir", "~/.play*"])'`,
+    ],
+    [
+      "a benign home path removed through execSync",
+      `node -e 'require("child_process").execSync("rmdir ~/.no-such-benign-dir")'`,
+    ],
+    [
+      "a regex exec whose string no shell runs",
+      `node -e 'const re = /a b/; re.exec("rmdir ~/.play*")'`,
+    ],
+  ])("%s runs from a worktree", async (_, command) => {
+    const reason = await check(
+      JSON.stringify({ cwd: worktree, tool_input: { command }, tool_name: "Bash" }),
+      real,
+    )
+    expect(reason).toBeUndefined()
+  })
 })
 
 // A quoted argument with a space is read as a command line unless every command on the line is on a closed list of readers (awk with a program that runs nothing, cat, grep, head, tail, wc, sort, uniq, cut), with no redirect that writes a file; an awk program that runs a command has its literals read wherever it stands, and sed keeps canary's reading.
