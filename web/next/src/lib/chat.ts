@@ -15,6 +15,7 @@ import {
 } from "react"
 
 import { attachmentUrl } from "@/lib/attachments"
+import { config } from "@/lib/config"
 import { sendMessage, toolLabel } from "@/lib/dashboard"
 import { INBOX_QUERY_KEY } from "@/lib/inbox"
 import {
@@ -32,6 +33,7 @@ import {
   type OutboxAttachment,
   type OutboxMessage,
 } from "@/lib/outbox"
+import { READ_ONLY_LINE } from "@/lib/relay"
 import { TYPED } from "@/lib/reply"
 
 // What a session's step says beyond its parts: when it was written, who wrote it (a peer's name), and for a message sent from here, where the outbox has it.
@@ -281,6 +283,8 @@ export class DashboardChats {
   private readonly chats = new Map<string, Chat<DashboardMessage>>()
   private readonly listeners = new Set<() => void>()
   private readonly label: (name: string) => string
+  // the hosted build, whose relay carries reads alone: a message it holds fails at once with READ_ONLY_LINE, and nothing sends or retries it
+  private readonly readOnly: boolean
   private resumed = false
   private readonly send: Send
   private readonly storage: OutboxStorage | null
@@ -289,14 +293,17 @@ export class DashboardChats {
 
   constructor({
     label,
+    readOnly = false,
     send = sendMessage,
     storage = null,
   }: {
     label: (name: string) => string
+    readOnly?: boolean
     send?: Send
     storage?: OutboxStorage | null
   }) {
     this.label = label
+    this.readOnly = readOnly
     this.send = send
     this.storage = storage
     // sendMessages answers when deliver() has typed the message, or the message has settled without it (failed for good, cancelled); the reply is no stream, since it reaches the transcript and the socket on its own time.
@@ -417,6 +424,18 @@ export class DashboardChats {
   }
 
   private enqueue(record: OutboxMessage) {
+    if (this.readOnly) {
+      const chat = this.chat(record.to)
+      const dropped = {
+        ...record,
+        code: "READ_ONLY",
+        reason: READ_ONLY_LINE,
+        state: "failed" as const,
+      }
+      chat.messages = [...chat.messages, outboxMessage(dropped)]
+      this.changed()
+      return
+    }
     const last = this.posted.get(record.to)
     if (!isUnsentMarker(record.text) && (!last || record.at > last)) {
       this.posted.set(record.to, record.at)
@@ -440,6 +459,7 @@ export class DashboardChats {
 
   // A failed message queued again in its place, sent by the same loop a new one is.
   retry(to: string, id: string) {
+    if (this.readOnly) return
     this.dispatch(to, { id, type: "retry" })
     void this.run(to, id)
   }
@@ -561,6 +581,7 @@ export function useDashboardChats(
     () =>
       new DashboardChats({
         label: labelOf,
+        readOnly: config.hosted,
         send: refreshingReplies(
           sendMessage,
           () => void queryClient.invalidateQueries({ queryKey: INBOX_QUERY_KEY }),

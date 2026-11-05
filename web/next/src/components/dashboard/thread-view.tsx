@@ -19,6 +19,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { Spinner } from "@/components/ui/spinner"
 import { withoutRef, withoutSenderName } from "@/lib/agent-label"
+import { config } from "@/lib/config"
 import type { OutboxMessage } from "@/lib/outbox"
 import {
   patchThread,
@@ -108,7 +109,8 @@ function Thread({ id }: { id: string }) {
     setOpened({ at: Date.now(), since: read.data.thread.lastReadAt })
   const unread = read.data?.thread.unread ?? 0
   useEffect(() => {
-    if (unread === 0) return
+    // the hosted build's relay carries no write, so it leaves the read mark to this Mac
+    if (unread === 0 || config.hosted) return
     void patchThread(id, { read: true })
       .catch(() => undefined)
       .then(() => queryClient.invalidateQueries({ queryKey: THREADS_QUERY_KEY }))
