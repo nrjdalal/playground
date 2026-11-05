@@ -46,7 +46,7 @@ export function AsideDocsPane({ doc, onClose }: { doc: AsideDoc; onClose: () => 
           referrerPolicy="no-referrer"
           sandbox="allow-scripts"
           src={doc.url}
-          title={doc.name}
+          aria-label={doc.name}
         />
       )}
       <div className={cn(FLOATING_BAR, "absolute top-2 right-2")}>
