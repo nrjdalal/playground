@@ -1593,14 +1593,6 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
       "ext put past a word it cannot read",
       'playground ext put "$(printf -- --dry-run)" login list x /tmp/x.json --reason r',
     ],
-    [
-      "settings set past --yes, which settings takes as an option",
-      `playground settings set --yes ui.theme owner.names '["x"]' --reason r`,
-    ],
-    [
-      "settings reset past --yes",
-      "playground settings reset --yes ui.theme owner.names --reason r",
-    ],
     ["settings set of live.branch", "playground settings set live.branch x --reason r"],
     ["settings set of paths.codeRoot", "playground settings set paths.codeRoot / --reason r"],
     ["settings set of sessions.names", "playground settings set sessions.names '{}' --reason r"],
@@ -1620,11 +1612,6 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
     ["ext order", "playground ext order acme login"],
     ["ext remove with a --dry-run it ignores", "playground ext remove acme --dry-run"],
     ["settings set of ext.links", "playground settings set ext.links '{}' --reason x"],
-    ["settings set of owner.names", "playground settings set owner.names '[]' --reason x"],
-    [
-      "settings set of factory.archiveRepo",
-      "playground settings set factory.archiveRepo a/b --reason x",
-    ],
     [
       "settings set of factory.publicRepo",
       "playground settings set factory.publicRepo a/b --reason x",
@@ -1652,6 +1639,37 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
     const reason = await bash(command)
     expect(reason).toContain("no-extensions-write hook refuses")
     expect(reason).toContain("!")
+  })
+
+  test.each([
+    ["settings set of owner.names", "playground settings set owner.names '[]' --reason x"],
+    [
+      "settings set of factory.archiveRepo",
+      "playground settings set factory.archiveRepo a/b --reason x",
+    ],
+    [
+      "settings set past --yes, which settings takes as an option",
+      `playground settings set --yes ui.theme owner.names '["x"]' --reason r`,
+    ],
+    [
+      "settings reset past --yes",
+      "playground settings reset --yes ui.theme owner.names --reason r",
+    ],
+  ])(
+    "%s at your login's scope routes the owner to Privacy on the Settings page",
+    async (_, command) => {
+      const reason = await bash(command)
+      expect(reason).toContain("no-extensions-write hook refuses")
+      expect(reason).toContain(
+        "tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page.",
+      )
+      expect(reason).not.toContain("terminal window")
+    },
+  )
+
+  test("a Privacy key at an org's scope, which Privacy does not save, keeps the ! route", async () => {
+    const reason = await bash("playground settings set --scope acme owner.names '[]' --reason x")
+    expect(reason).toContain("in the dispatcher's terminal window")
   })
 
   test.each([
