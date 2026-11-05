@@ -59,6 +59,9 @@ const invalidSecret = (result: { success: boolean }) => {
   }
 }
 
+// a card's own Done sets tell, so its update's poster is told done; a shelf's bulk leaves it out and types nothing
+const dismissInputSchema = idsInputSchema.extend({ tell: z.literal(true).optional() })
+
 const scheduleInputSchema = z.strictObject({ at: z.iso.datetime() })
 
 // Playground's Inbox (see lib/dashboard/inbox.ts), on the dashboard's owner rung since an answer is typed into a session. Its writes must come from the dashboard's own page on this machine before anything else is read.
@@ -102,7 +105,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Move the updates and answered decisions and drafts named to Done at once, where no clock would move them, recording when in their answer and marking an update read; an open decision or draft is left as it is",
+        "Done: move the updates and answered decisions and drafts named to Done at once, where no clock would move them, recording when in their answer, waking any put off or archived, and marking an update read; with tell, a card's own Done, each update's poster is told done through the delivery adapter, so it posts a new card rather than editing this one, while a shelf's bulk types nothing; an open decision or draft is left as it is",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
@@ -110,8 +113,18 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         ...forbiddenErrorResponses,
       },
     }),
-    sValidator("json", idsInputSchema, invalid),
-    async (c) => c.json({ data: { dismissed: await dismissItems(db, c.req.valid("json").ids) } }),
+    sValidator("json", dismissInputSchema, invalid),
+    async (c) => {
+      const user = c.get("user")
+      const { ids, tell } = c.req.valid("json")
+      const dismissed = await dismissItems(
+        db,
+        ids,
+        new Date(),
+        tell && { actor: { email: user.email, id: user.id }, deliver, dispatcher: DISPATCHER },
+      )
+      return c.json({ data: { dismissed } })
+    },
   )
   .post(
     "/read",
@@ -134,7 +147,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Answer an open decision (approve, deny, clear to set it aside as Archive, or edit with words) or draft (send, or for a Slack draft save it as a draft in Slack, each as written or changed, discard, or clear to archive it), with his optional note, or move an archived item back to the Inbox open and unanswered (unarchive), which tells its poster nothing. With seen, the updatedAt of the card he answered, it is refused when the item has changed since. The answer is kept, then typed into the posting session through the delivery adapter, and that session carries it out; the Dashboard itself sends no message, and only shares a Slack send's files into its channel and thread first (dm upload), a failed share failing the send before anything is typed. An accept, an apps change and a grant are the decisions whose Approve the Dashboard carries out itself. An accept's Approve: once the answer is kept, it runs the extensions store's accept of <scope> <kind> <key> <rev> from the preview's words, with no role, records its exit code and line under accepted, and tells the poster. An apps change's Approve writes the owner's own desktop-owner-apps list, the login scope's, with the app added or removed, through the store's put with no role, and records its line under listed. A grant's Approve opens System Settings at the pane for its permission (Accessibility or Screen Recording) on this Mac, a stack reading the live machine alone, records its line under opened, and tells the poster to recheck the grant",
+        "Answer an open decision (approve, deny, clear to set it aside, or edit with words) or draft (send, or for a Slack draft save it as a draft in Slack, each as written or changed, discard, or clear to set it aside), with his optional note; archive what waits, or an update, out of the list unanswered, or move it back (unarchive), a set-aside one included, each telling its poster nothing; or dismiss it to Done, which sets aside what still waits as clear does, telling its poster set-aside, and marks anything else dismissed, telling its poster dismiss: drop it, with how to close it. With seen, the updatedAt of the card he answered, it is refused when the item has changed since. The answer is kept, then typed into the posting session through the delivery adapter, and that session carries it out; the Dashboard itself sends no message, and only shares a Slack send's files into its channel and thread first (dm upload), a failed share failing the send before anything is typed. An accept, an apps change and a grant are the decisions whose Approve the Dashboard carries out itself. An accept's Approve: once the answer is kept, it runs the extensions store's accept of <scope> <kind> <key> <rev> from the preview's words, with no role, records its exit code and line under accepted, and tells the poster. An apps change's Approve writes the owner's own desktop-owner-apps list, the login scope's, with the app added or removed, through the store's put with no role, and records its line under listed. A grant's Approve opens System Settings at the pane for its permission (Accessibility or Screen Recording) on this Mac, a stack reading the live machine alone, records its line under opened, and tells the poster to recheck the grant",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
@@ -192,7 +205,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Push an open decision or draft out of the inbox and its count until a time, when it asks again; answering it or replying to it in chat wakes it at once",
+        "Later: push an open decision or draft, or an update, out of the inbox and its count until a time, when it asks again, taking an archived one off the Archived shelf; answering it or replying to it in chat wakes it at once",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
