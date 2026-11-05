@@ -37,12 +37,15 @@ describe("updateSteps", () => {
         "skills/zerostarter/ui-verify/SKILL.md",
         "skills/playground/README.md",
         "skills/playground/inbox/SKILL.md",
+        "extensions/slack/skills/slack/scripts/send.ts",
+        "extensions/slack/README.md",
         "extensions/core/rules/ci.md",
       ]).skills,
     ).toEqual([
       "extensions/core/skills/code-review-loop",
       "skills/playground/inbox",
       "extensions/core/skills/pr",
+      "extensions/slack/skills/slack",
       "skills/zerostarter/ui-verify",
     ])
     expect(updateSteps(["README.md"]).skills).toEqual([])
