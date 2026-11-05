@@ -1508,10 +1508,14 @@ if [ "$MODE" = resume ]; then
       PROMPT=
     fi
   else
-    # Whom it reports to, so the re-sends reach the right session: the roster's reportsTo, else its lead, since either may have moved since the start, else the prompt its start recorded (a session started in cmux has none); a value that is not a session name would break the launch's quotes.
-    UP=$(roster_field "$NAME" reportsTo)
-    [[ $UP =~ ^[A-Za-z0-9-]+$ ]] || UP=$(roster_field "$NAME" lead)
-    [[ $UP =~ ^[A-Za-z0-9-]+$ ]] || UP=$(sed -n 's/.*; you report to \([A-Za-z0-9-]*\)\..*/\1/p' "$RESUME_DIR/$NAME.prompt" 2>/dev/null | head -1) || UP=
+    # Whom it reports to, so the re-sends reach the right session: the roster row's, since it may have moved since the start (a checker's worker, as its lead is its worker's lead; another's reportsTo, else its lead), else the prompt its start recorded (a session started in cmux has none); a value that is not a session name would break the launch's quotes.
+    if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
+      UP=$(roster_field "$NAME" worker)
+    else
+      UP=$(roster_field "$NAME" reportsTo)
+      word "$UP" || UP=$(roster_field "$NAME" lead)
+    fi
+    word "$UP" || UP=$(sed -n 's/.*; you report to \([A-Za-z0-9-]*\)\..*/\1/p' "$RESUME_DIR/$NAME.prompt" 2>/dev/null | head -1) || UP=
     # A session idle at the restart takes no turn, so it would never act on after-resume's context.
     PROMPT="You are $NAME, resumed after a restart${UP:+; you report to $UP}. Act on the after-resume instruction in your context first, then carry on."
   fi

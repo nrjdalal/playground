@@ -9,15 +9,33 @@ setDefaultTimeout(40_000)
 
 describe("a resume names the manager the roster holds, else the one its start recorded", () => {
   const id = "a7e37f18-1fa1-4cb2-a26e-4ff414fd4b27"
-  const recorded = (home: string) => {
+  // Each start recorded a manager the roster has since moved off: builder for the worker, oldold-worker for the reviewer.
+  const recorded = (name: string, manager: string) => (home: string) => {
     mkdirSync(join(home, ".playground", "resume"), { recursive: true })
     writeFileSync(
-      join(home, ".playground", "resume", "worker-x.prompt"),
-      "You are worker-x, a worker in the Playground factory; you report to builder. Load the playbook skill first.",
+      join(home, ".playground", "resume", `${name}.prompt`),
+      `You are ${name}, a session in the Playground factory; you report to ${manager}. Load the playbook skill first.`,
     )
   }
-  const roster = (row: object) =>
-    JSON.stringify({ agents: [{ name: "worker-x", role: "worker", status: "working", ...row }] })
+  const resume = async (name: string, kind: string, was: string, row: object) => {
+    const agents = [
+      { name, role: "worker", kind, status: "working", ...row },
+      { name: "newnew-worker", role: "worker", kind: "worker", status: "working" },
+      { name: "oldold-worker", role: "worker", kind: "worker", status: "working" },
+    ]
+    const r = await spawn(
+      ["resume", name, root, id],
+      [],
+      { ROSTER_JSON: JSON.stringify({ agents }) },
+      undefined,
+      { name, backend: "claude" },
+      recorded(name, was),
+    )
+    expect(r.code).toBe(0)
+    return launchAfterRm(r)
+  }
+  const told = (name: string, manager: string) =>
+    `"You are ${name}, resumed after a restart; you report to ${manager}. Act on the after-resume instruction in your context first, then carry on."`
 
   test.each([
     [
@@ -32,18 +50,25 @@ describe("a resume names the manager the roster holds, else the one its start re
       { reportsTo: "Bad Name" },
       "builder",
     ],
-  ])("%s", async (_, row, manager) => {
-    const r = await spawn(
-      ["resume", "worker-x", root, id],
-      [],
-      { ROSTER_JSON: roster(row) },
-      undefined,
-      { name: "worker-x", backend: "claude" },
-      recorded,
-    )
-    expect(r.code).toBe(0)
-    expect(launchAfterRm(r)).toContain(
-      `"You are worker-x, resumed after a restart; you report to ${manager}. Act on the after-resume instruction in your context first, then carry on."`,
+  ])("a worker: %s", async (_, row, manager) => {
+    expect(await resume("worker-x", "worker", "builder", row)).toContain(told("worker-x", manager))
+  })
+
+  test.each([
+    [
+      "the roster's worker, over the prompt's old one",
+      { worker: "newnew-worker" },
+      "newnew-worker",
+    ],
+    [
+      "the roster's worker, over its lead, the lead above that worker",
+      { worker: "newnew-worker", lead: "ops" },
+      "newnew-worker",
+    ],
+    ["the recorded prompt's worker, with no worker on the row", { lead: "ops" }, "oldold-worker"],
+  ])("a reviewer: %s", async (_, row, manager) => {
+    expect(await resume("abcdef-reviewer", "reviewer", "oldold-worker", row)).toContain(
+      told("abcdef-reviewer", manager),
     )
   })
 })
