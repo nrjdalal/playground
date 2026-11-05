@@ -110,6 +110,23 @@ describe("pending", () => {
     expect(await drain(dir)).toEqual([])
   })
 
+  test("no cursor and a since: each queue holding a line stamped at or after it, so a relay that never ran shows its backlog", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, Q), rec("2026-10-19T05:33:19Z", "dashboard", "old"))
+    writeFileSync(join(dir, "ops-unstick.jsonl"), rec("2026-10-19T06:00:00Z", "unstick", "new"))
+    writeFileSync(join(dir, "ops-sweep.jsonl"), '{"at": "2026-10-19T07:00')
+    expect(await pending(dir, "2026-10-19T06:00:00.000Z")).toEqual(["ops-unstick.jsonl"])
+    expect(await pending(dir, "2026-10-19T06:00:01.000Z")).toEqual([])
+    expect(existsSync(join(dir, "cursor.json"))).toBe(false)
+  })
+
+  test("a caught-up relay, its cursor at every queue's end, reads none whatever the since", async () => {
+    const dir = scratch()
+    writeFileSync(join(dir, Q), rec("2026-10-19T06:00:00Z", "dashboard", "sent"))
+    await drain(dir)
+    expect(await pending(dir, "2026-10-19T05:00:00.000Z")).toEqual([])
+  })
+
   test("a cursor at the end: none", async () => {
     const dir = scratch()
     writeFileSync(join(dir, Q), rec("2026-10-19T05:33:19Z", "dashboard", "old"))
