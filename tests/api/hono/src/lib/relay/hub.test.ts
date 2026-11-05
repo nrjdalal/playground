@@ -202,8 +202,11 @@ describe("the relay's hub across instances", () => {
       ackMs: 10_000,
       bus: { listen() {}, publish: () => Promise.reject(new Error("down")) },
     })
+    const started = performance.now()
     expect(await hub.status("u1")).toEqual({ online: false, since: null })
     expect(await hub.forward("u1", "owner", "/api/v1/workers")).toEqual({ type: "offline" })
+    // long before the 10 s ack wait, which a failed publish never starts
+    expect(performance.now() - started).toBeLessThan(1000)
   })
 
   test("a pair request on another instance reaches the Mac's socket and comes back", async () => {
