@@ -93,6 +93,13 @@ An ops job reminds the poster of every answer of the owner's in the Inbox that i
 An agent confirms a go only with a link to where it landed (the Slack message, the pull request, the Linear ticket) or a reason there is none, and every draft or decision that will post somewhere names that place before he answers.
 No factory session blocks on him: one that posted a decision carries on or ends its turn, and reads Waiting on your inbox, in orange, until he answers; Playground itself is always free, running nothing long and waiting on nothing.
 
+## Focus
+
+For a focused stretch, such as a timed test, a demo or an hour of deep work, `playground focus on --session <name> --reason "<why>"` gives one session the Mac for up to 180 minutes.
+While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep keeps running.
+Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
+`playground focus off` ends it early and says how many runs waited and for how long.
+
 ## Tickets
 
 A new Linear ticket waits for the owner's yes, and Playground's own work stays out of Linear, tracked in the roster (the Dashboard's status table and Next up), the login's `doc plan-<slug>` items and GitHub.

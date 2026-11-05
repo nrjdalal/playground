@@ -127,6 +127,9 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   `playground view` runs ops-herdr's `attach factory`, opening the server the sessions run on, and takes no other word; probes stay on their own server.
   `playground update` touches ops-dashboard's `roll-now`, and `playground status` only reads, ops-herdr's `status` lines among its own.
   `playground sweep <lead>` reads what changed since that lead's last sweep and prints it, or `quiet`, writing only its cursor, `sweep/<lead>.json` in the data folder ([SWEEP.md](SWEEP.md)).
+  `playground focus on --session <name> --reason "<why>" [--for <minutes>]` gives one session the Mac for up to 180 minutes (120 by default), recorded in the data folder's `focus.json`.
+  While it stands, held-prs.json's `"*"` line holds every merge, `run-slot.focus` holds every other session's heavy run while ops-tick's and the dashboard's go on ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)), and spawn.sh refuses every new session but a move.
+  Each part ends at the focus end by itself; `playground focus off` ends them early and prints how many runs waited and for how long, measured from `run-slot.runs.log`, and a bare `playground focus` prints the focus standing.
 - **Probes** need the ok of their spawner's lead, open as a column in their spawner's workspace, and their spawner closes them by their surface the moment the test is done.
 - **The Optimizer** is started by the dispatcher at its own start, with `playground optimizer`, and runs a retro after each ship to `main` and once a day, by the steps in its brief, `scripts/briefs/optimizer.md`.
   On ops-tick's `optimizer tick` (every 2 hours) it runs one once a ship has landed since the last, and on `optimizer daily` once no retro has run for 20 hours, so no day passes without one.
