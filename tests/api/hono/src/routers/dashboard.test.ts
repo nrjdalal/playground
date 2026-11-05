@@ -351,6 +351,51 @@ describe("sendMessage", () => {
     })
   })
 
+  // #780: the Assistant's own chat sends through deliver() too, to the session the roster seats as the assistant and to no other manager
+  test("a message to the session in the assistant seat goes through deliver(), and one to another manager is FORBIDDEN before anything is sent", async () => {
+    const sent: Delivery[] = []
+    const send = async (delivery: Delivery) => {
+      sent.push(delivery)
+      return { at: "2026-11-03T21:00:00.000Z", ok: true as const, sessionId: "s-a" }
+    }
+    const seat = async () => "errands"
+    const message = (to: string) =>
+      sendMessage({ text: "hi", to }, actor, send, undefined, undefined, undefined, undefined, seat)
+    expect(await message("errands")).toEqual({ at: "2026-11-03T21:00:00.000Z", sessionId: "s-a" })
+    expect(sent).toEqual([expect.objectContaining({ actor, text: "hi", to: "errands" })])
+    expect(await message("builder").catch((error: unknown) => error)).toMatchObject({
+      code: "FORBIDDEN",
+      status: 403,
+    })
+    const none = await sendMessage(
+      { text: "hi", to: "errands" },
+      actor,
+      send,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => undefined,
+    ).catch((error: unknown) => error)
+    expect(none).toMatchObject({ code: "FORBIDDEN", status: 403 })
+    expect(sent).toHaveLength(1)
+  })
+
+  test("a thread is the dispatcher's alone, so the assistant's chat opens none", async () => {
+    const send = async () => ({ at: "now", ok: true as const, sessionId: "s-a" })
+    const refused = await sendMessage(
+      { newThread: true, text: "hi", to: "errands" },
+      actor,
+      send,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => "errands",
+    ).catch((error: unknown) => error)
+    expect(refused).toMatchObject({ code: "VALIDATION_ERROR", status: 400 })
+  })
+
   test("a message naming an inbox item records the reply once it is out, never on a failed send and never for words that name none", async () => {
     const replies: number[] = []
     const recordReply = async (ref: number) => {
@@ -1061,8 +1106,9 @@ describe("the setting route", () => {
       .filter((r) => r.method === method && r.path === path)
       .map((r) => r.handler)
   const actor = { email: "owner@local.host", id: "u-1" }
-  const board = (workers: { hosted?: true; name: string; sessionId: string }[]) => async () =>
-    ({ workers }) as never
+  const board =
+    (workers: { assistant?: true; hosted?: true; name: string; sessionId: string }[]) => async () =>
+      ({ workers }) as never
   const ok = (sessionId: string) => async () => ({
     at: "2026-11-03T06:00:00.000Z",
     ok: true as const,
@@ -1121,6 +1167,20 @@ describe("the setting route", () => {
       },
       { delivery: { actor, sessionId: "s-h", setting: { effort: "max" } }, via: "hosted" },
     ])
+  })
+
+  test("the assistant's setting goes through deliver() as the setting alone, as a dispatcher's does", async () => {
+    const sent: unknown[] = []
+    await changeSetting(
+      { sessionId: "s-a", setting: { model: "sonnet" } },
+      actor,
+      board([{ assistant: true, name: "errands", sessionId: "s-a" }]),
+      async (delivery) => {
+        sent.push(delivery)
+        return ok("s-a")()
+      },
+    )
+    expect(sent).toEqual([{ actor, setting: { model: "sonnet" }, text: "", to: "errands" }])
   })
 
   test("a dispatcher's setting carries the composer's id to deliver(), and one Claude Code holds reads QUEUED under delivery", async () => {

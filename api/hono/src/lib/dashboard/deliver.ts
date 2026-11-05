@@ -34,7 +34,7 @@ export type Delivery = {
   id?: string
   // When an earlier try of this id read QUEUED, as the outbox recorded it, so an API that restarted since, and lost its own record, reads the message again rather than typing it twice.
   queuedAt?: string
-  // A model or effort the composer's pickers set for a dispatcher: its one slash command is typed in place of `text`, and recorded as a dashboard.setting row.
+  // A model or effort the composer's pickers set for a dispatcher or the assistant: its one slash command is typed in place of `text`, and recorded as a dashboard.setting row.
   setting?: SessionSetting
   text: string
   to: string
