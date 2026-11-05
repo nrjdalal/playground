@@ -23,6 +23,8 @@ export type Word = Text & {
 }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
+  // Set on a while's or an until's condition outside every other loop, and on the script an eval or a source there reads, which the shell runs at least once: a cd there leaves the folder before it behind, as a sure cd does, while `repeated` reads each later pass
+  atLeastOnce?: boolean
   // Set on the bare copy run() hands a hook's visit for a followed command with a redirect: the command it stands for
   bareOf?: Command
   // The token of the run of commands this one belongs to: it changes at each operator that runs a command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and carries into every group, body and pipeline the run reaches, so a cd is read as having moved the shell only for the commands whose token is its own
@@ -656,7 +658,12 @@ function calledAgain(commands: Command[], src: string): void {
       (c, at) => (at < k - 1 || at > end) && !c.words[0]?.quoted && c.words[0]?.value === name,
     )
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    const mentions = src.match(new RegExp(`(?<![\\w.:-])${escaped}(?![\\w.:-])`, "g"))?.length ?? 0
+    // a redirect's target names a file, never a call, so a file of the function's name is no mention of it
+    const files = commands
+      .flatMap((c) => c.redirects)
+      .filter((r) => r.target?.value === name).length
+    const mentions =
+      (src.match(new RegExp(`(?<![\\w.:-])${escaped}(?![\\w.:-])`, "g"))?.length ?? 0) - files
     const once = mentions === 2 && calls.length === 1 && !calls[0].repeated && !calls[0].kept
     if (!once) for (const c of body) c.repeated = true
   }
@@ -730,6 +737,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
         condition ||= heads.includes(true)
       }
       if (loops > 0 || loop || condition) done.repeated = true
+      if (condition && loops === 0 && !loop) done.atLeastOnce = true
       depth = Math.max(0, depth + opened - closed)
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0))
       // a run ends only at an operator that runs the next command whatever this one did, and only outside every body: a `|` keeps the pipeline in the run, and entering a group, a body or a script keeps the run it was reached through
@@ -1468,7 +1476,12 @@ async function examineReading(
 
 // A script an eval or a source reads in the line's own shell runs again each time a count or a loop runs that command, so each of its commands is marked repeated, as the line's own would be
 function again(lexed: Lexed, cmd: Command, parsed: Parsed): Lexed {
-  if (manyTimes(cmd, parsed)) for (const c of lexed.commands) c.repeated = true
+  if (!manyTimes(cmd, parsed)) return lexed
+  const more = onceOrMore(cmd, parsed)
+  for (const c of lexed.commands) {
+    if (more && !c.repeated) c.atLeastOnce = true
+    c.repeated = true
+  }
   return lexed
 }
 
@@ -1494,6 +1507,13 @@ const sureToRun = (cmd: Command, parsed: Parsed): boolean =>
   !cmd.detached &&
   !cmd.unsure &&
   !cmd.repeated &&
+  (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
+
+// Whether the shell runs a command at least once and may run it again: a while's or an until's condition, sure to run as `sureToRun` reads it but for `repeated`, so a count in front of it (`repeat 0`) keeps it out
+const onceOrMore = (cmd: Command, parsed: Parsed): boolean =>
+  !!cmd.atLeastOnce &&
+  !cmd.detached &&
+  !cmd.unsure &&
   (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
 
 // Whether `builtin` or `command` runs the command's program, with nothing but their own options, reserved words and assignments in front of it.
@@ -1683,8 +1703,15 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     return
   }
   env.cwdSure = undefined
+  // a while's or an until's condition runs at least once, so a cd there into folders that are there leaves the ones before it behind, and the shell is in one its passes reach
+  const behind =
+    onceOrMore(cmd, parsed) &&
+    !unread &&
+    !move.back &&
+    paths.length > 0 &&
+    (chained || (await Promise.all(paths.map(isFolder))).every(Boolean))
   // a form that returns to a folder the line named before takes every one of them, since the reader cannot tell which the shell goes back to
-  env.cwdMaybe = keep([...new Set([...(move.back ? back : from), ...paths])], env)
+  env.cwdMaybe = keep([...new Set([...(move.back ? back : behind ? [] : from), ...paths])], env)
   env.cwdUnread = env.cwdUnread || unread || (from.length === 0 && paths.length === 0)
 }
 
