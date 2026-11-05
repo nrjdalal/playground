@@ -758,7 +758,7 @@ describe("a settled card's footer", () => {
     const resultAt = html.indexOf("Answered by")
     const footerAt = html.indexOf('data-slot="card-footer"')
     const dismissAt = html.indexOf(named(html, "Dismiss"))
-    const replyAt = html.indexOf('aria-description="Reply"')
+    const replyAt = html.indexOf('aria-label="Reply to #i41"')
     expect(resultAt).toBeGreaterThan(-1)
     expect(footerAt).toBeGreaterThan(-1)
     expect(dismissAt).toBeGreaterThan(-1)
@@ -810,6 +810,62 @@ describe("a settled card's right-hand group", () => {
     const between = html.slice(dismissAt, replyAt)
     expect(between.split("<button").length - 1, "Collapse, then Reply's own").toBe(2)
     expect(between).toContain('aria-label="Collapse"')
+  })
+})
+
+// ib-7: one comment box on every open card, and Reply on every card, folded rows included, in place of Chat about it.
+describe("the comment box and Reply on every card", () => {
+  const answered = {
+    ...decision,
+    answer: { at: "2026-10-12T10:05:00.000Z", choice: "approve" },
+    delivery: { at: "2026-10-12T10:05:01.000Z", status: "delivered", to: "ops", via: "session" },
+    status: "approved",
+  } as InboxItem
+  const update = {
+    ...decision,
+    kind: "update",
+    preview: { outcome: "merged" },
+    readAt: "2026-10-12T10:01:00.000Z",
+    title: "Merged #270",
+  } as InboxItem
+  const secret = {
+    ...decision,
+    preview: { key: "API_KEY", sink: { item: "slack", type: "keychain" }, type: "secret" },
+    title: "Paste the Slack token",
+  } as InboxItem
+  const cards = { answered, open: decision, secret, update }
+
+  test("every open card shows the box: an open ask, an answered one, an update and a secret ask", () => {
+    for (const [name, item] of Object.entries(cards)) {
+      expect(opened(item), name).toContain('aria-label="Comment"')
+    }
+  })
+
+  test("the box reads optional where it rides an answer as its note, and plain where Reply alone sends it", () => {
+    expect(opened(decision)).toContain('placeholder="Add an optional comment"')
+    for (const item of [answered, update, secret]) {
+      expect(opened(item)).toContain('placeholder="Add a comment"')
+    }
+  })
+
+  test("every card offers Reply, folded or open, and none offers Chat about it", () => {
+    for (const [name, item] of Object.entries(cards)) {
+      for (const html of [render(false, item), opened(item)]) {
+        expect(named(html, "Reply to #i41"), name).not.toBe("")
+        expect(html).not.toContain("Chat about")
+      }
+    }
+    expect(render(false, update)).not.toContain('aria-label="Comment"')
+  })
+
+  test("Reply opens a folded card to its box, focused in the click's frame, and sends the words alone, a secret's guarded by its value", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const reply = source.slice(source.indexOf("const onReply = () => {"))
+    expect(reply).toContain("flushSync(() => setToggled(true))")
+    expect(reply).toContain("document.getElementById(commentId)?.focus()")
+    expect(reply).toContain("secretAsk ? commentRefused(note, secret) : null")
+    expect(reply).toContain("replyItem(item.id, text)")
+    expect(source).not.toContain("setReply")
   })
 })
 
@@ -1512,7 +1568,7 @@ describe("one word a meaning: Later, Archive, Reply and Replying (PG-900)", () =
     expect(tipsOf(html)).toContain("Later: put it away until a time, then it asks again")
   })
 
-  test("the chat button is Reply, and the card it is replying to reads Replying in its band, with no fill", () => {
+  test("the card's button is Reply, and the card the chat's words name as re #iN reads Replying in its band, with no fill", () => {
     const html = opened(answered)
     expect(html).toContain('aria-label="Reply to #i41"')
     expect(html).not.toContain("Chat about")
