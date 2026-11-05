@@ -1,4 +1,5 @@
 import type { Session } from "@packages/auth"
+import { site } from "@packages/config/site"
 import { env } from "@packages/env/api-hono"
 import { getConnInfo } from "hono/bun"
 import { createMiddleware } from "hono/factory"
@@ -38,6 +39,14 @@ export const requireThisMachine = createMiddleware(async (c, next) => {
     .filter(Boolean)
   if (c.req.header("tailscale-user-login") || hops.some((hop) => !LOOPBACK_RE.test(hop))) {
     throw new ApiError(403, "FORBIDDEN", "Writes are taken from this machine only")
+  }
+  await next()
+})
+
+// The agent sign-in (routers/agents.ts) holds the owner rung, so a route that moves a secret refuses its account after the rung, and a session's curl reads or writes no Keychain item: only the owner's own click does.
+export const refuseAgent = createMiddleware<{ Variables: Session }>(async (c, next) => {
+  if (c.get("user")?.email === site.agent.email) {
+    throw new ApiError(403, "FORBIDDEN", "A secret moves on the owner's own click alone")
   }
   await next()
 })

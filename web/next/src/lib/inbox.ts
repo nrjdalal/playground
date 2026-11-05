@@ -76,6 +76,13 @@ export async function provideSecret(
   return data
 }
 
+// A reveal card's Keychain value, fetched on the owner's Show or Copy alone and held by the caller only as long as it shows.
+export async function revealSecret(id: string): Promise<string> {
+  const { data, error } = await unwrap(apiClient.v1.inbox[":id"].reveal.$post({ param: { id } }))
+  if (error) throw new Error(error.message)
+  return data.value
+}
+
 // The update named: one he clicked.
 export async function markRead(ids: string[]) {
   const { data, error } = await unwrap(apiClient.v1.inbox.read.$post({ json: { ids } }))
@@ -336,7 +343,7 @@ export function pickedAt(day: Date | undefined, time: string, now: Date): Date |
 }
 
 // Pure: whether he archived an item and has not dismissed it since.
-const isArchived = (item: InboxItem): boolean =>
+export const isArchived = (item: InboxItem): boolean =>
   item.answer !== null && "archivedAt" in item.answer && !("dismissedAt" in item.answer)
 
 // Pure: whether an item asks something of the owner now: an open decision or draft, an answer that failed to send, or an update not read yet. A reply took an item off his hands, so it waits on its poster alone, and one he archived waits on him moving it back.
@@ -547,6 +554,7 @@ export function kindWord(item: InboxItem): string {
     budget: "Budget",
     delete: "Delete",
     grant: "Permission",
+    reveal: "Show a secret",
     schema: "Schema",
     secret: "Secret",
     ship: "Ship",

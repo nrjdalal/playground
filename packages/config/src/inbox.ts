@@ -101,6 +101,7 @@ export type ChoicePreview =
   | { amount: string; type: "budget" }
   | { type: "delete" }
   | { permission: string; type: "grant" }
+  | { type: "reveal" }
   | { type: "schema" }
   | { type: "secret" }
   | { sha: string; type: "ship" }
@@ -125,6 +126,8 @@ const defaultLabels = (
       return ["Delete it", "Keep it"]
     case "grant":
       return [`Open the ${preview.permission} settings`, "Not now"]
+    case "reveal":
+      return ["Done, I have it", "I do not need it"]
     case "schema":
       return ["Apply this schema", "Do not apply it"]
     case "ship":

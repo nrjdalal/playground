@@ -55,3 +55,12 @@ describe("the relay's allowlist", () => {
     expect([...RELAY_GETS]).toEqual([...RELAY_GETS].sort())
   })
 })
+
+describe("the relay and a secret's routes", () => {
+  // a secret moves only between the Keychain and the owner's click on this Mac, so neither secret route rides the relay, whatever its method
+  test("carries neither the secret ask's Submit nor a reveal card's Show", () => {
+    for (const route of ["/api/v1/inbox/i1/secret", "/api/v1/inbox/i1/reveal"])
+      for (const method of ["GET", "POST"]) expect(relayAllowed(method, route)).toBe(false)
+    expect(RELAY_GETS.filter((path) => /secret|reveal/.test(path))).toEqual([])
+  })
+})

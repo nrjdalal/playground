@@ -26,6 +26,7 @@ In chat the picture is a fenced block, since a table or a list of three or more 
 | A draft or a Slack decision                       | the message, with any files under its words                             |
 | A ticket decision                                 | the ticket itself, in its own shape                                     |
 | A secret ask                                      | its key and sink alone, under a plain title                             |
+| A reveal card                                     | the item's full service and one plain why line, under a plain title     |
 
 The kind also decides how the card closes.
 A decision or a draft the session decided another way is settled.

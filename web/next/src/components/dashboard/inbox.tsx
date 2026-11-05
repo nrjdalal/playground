@@ -17,6 +17,9 @@ import {
   RiDeleteBinLine,
   RiDraftLine,
   RiExternalLinkLine,
+  RiEyeLine,
+  RiEyeOffLine,
+  RiFileCopyLine,
   RiGitMergeLine,
   RiInboxLine,
   RiInboxUnarchiveLine,
@@ -109,6 +112,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
+import { copyToClipboard } from "@/lib/clipboard"
 import { dispatcherOf, useNow } from "@/lib/dashboard"
 import {
   answerItem,
@@ -127,6 +131,7 @@ import {
   focusAfterTake,
   foldsByDefault,
   INBOX_QUERY_KEY,
+  isArchived,
   inboxLight,
   inboxSummary,
   inboxView,
@@ -146,6 +151,7 @@ import {
   resultLink,
   retryable,
   retryItem,
+  revealSecret,
   scheduleChoices,
   scheduleItem,
   sendFailed,
@@ -175,6 +181,7 @@ const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   budget: RiMoneyDollarCircleLine,
   delete: RiDeleteBinLine,
   grant: RiShieldKeyholeLine,
+  reveal: RiKey2Line,
   schema: RiTableLine,
   secret: RiKey2Line,
   ship: RiShipLine,
@@ -482,6 +489,61 @@ function Shown({ preview }: { preview: Pick<InboxUpdate, "attachments" | "text">
 }
 
 // Exactly what Approve does, the card's description: our own words around the session's, a Slack message's plain text that hides nothing and an ask's rendered as its chat would show them.
+// How long a shown value stays on screen before it hides itself.
+export const REVEAL_SHOWN_MS = 30_000
+
+// A reveal card's value: masked until Show, which fetches it and hides it again after REVEAL_SHOWN_MS, on Hide or when the card folds; Copy fetches it straight to the clipboard and never draws it. It lives in this state alone.
+function RevealField({ id }: { id: string }) {
+  const [value, setValue] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (value === null) return
+    const hide = setTimeout(() => setValue(null), REVEAL_SHOWN_MS)
+    return () => clearTimeout(hide)
+  }, [value])
+  const reveal = async (use: (value: string) => unknown) => {
+    setError(null)
+    try {
+      await use(await revealSecret(id))
+    } catch (failure) {
+      setError((failure as Error).message)
+    }
+  }
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <code
+          aria-label="Value"
+          className="border-input min-w-0 flex-1 truncate rounded-md border px-2.5 py-1.5 font-mono text-xs"
+        >
+          {value ?? "\u25CF".repeat(12)}
+        </code>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => (value === null ? void reveal(setValue) : setValue(null))}
+        >
+          {value === null ? (
+            <RiEyeLine data-icon="inline-start" />
+          ) : (
+            <RiEyeOffLine data-icon="inline-start" />
+          )}
+          {value === null ? "Show" : "Hide"}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => void reveal((got) => copyToClipboard(got, "Copied"))}
+        >
+          <RiFileCopyLine data-icon="inline-start" />
+          Copy
+        </Button>
+      </div>
+      {error ? <p className="text-destructive text-xs">{error}</p> : null}
+    </div>
+  )
+}
+
 function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
   const preview = item.preview
   switch (preview.type) {
@@ -608,6 +670,18 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
             {preview.change === "add" ? "to" : "from"} your apps, which no session may drive.
           </p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "reveal":
+      return (
+        <>
+          <p>
+            Shows this Mac&apos;s Keychain item{" "}
+            <code className="font-mono break-all">{preview.service}</code> here when you click Show
+            or Copy. It is kept nowhere else.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+          {item.status === "open" && !isArchived(item) && <RevealField id={item.id} />}
         </>
       )
     case "grant":

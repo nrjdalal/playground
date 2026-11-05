@@ -18,7 +18,7 @@ import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-
 import { z } from "zod"
 
 import { fileNameOf } from "../download"
-import { KEYCHAIN_ITEM_NAMES, KEYCHAIN_ITEMS, type KeychainItemName } from "../keychain-items"
+import { KEYCHAIN_ITEM_NAMES, keychainSpec, PLAYGROUND_SERVICE } from "../keychain-items"
 import { ID_PATTERN } from "./attachments"
 
 // Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, an apps change's or a grant's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
@@ -156,10 +156,14 @@ const vercelSinkSchema = z.strictObject({
   type: z.literal("vercel"),
 })
 
-// Where a secret ask's value goes, the allowlist in code: Vercel, `vercel env add` once an environment for one project, or keychain, one of this Mac's Keychain items keychain-items.ts allows.
+// A Keychain item a card names: a typed one by name (slack, yard), or any of Playground's own by its full service (keychainSpec), always as this Mac's signed-in user.
+const playgroundService = z.string().regex(PLAYGROUND_SERVICE, "Must be a playground- service")
+const keychainItemField = z.union([z.enum(KEYCHAIN_ITEM_NAMES), playgroundService])
+
+// Where a secret ask's value goes, the allowlist in code: Vercel, `vercel env add` once an environment for one project, or keychain, one of this Mac's Keychain items keychainItemField allows.
 export const secretSinkSchema = z.discriminatedUnion("type", [
   vercelSinkSchema,
-  z.strictObject({ item: z.enum(KEYCHAIN_ITEM_NAMES), type: z.literal("keychain") }),
+  z.strictObject({ item: keychainItemField, type: z.literal("keychain") }),
 ])
 
 export type SecretSink = z.infer<typeof secretSinkSchema>
@@ -297,7 +301,10 @@ export type OwnerApps = { login: string; read: () => string[] | null; run: ExtRu
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 
 // Saves the value as one allowlisted Keychain item, throwing on a refusal; secret-sink.ts holds the real one, and a test passes its own.
-export type KeychainSave = (item: KeychainItemName, value: string) => Promise<void>
+export type KeychainSave = (item: string, value: string) => Promise<void>
+
+// Reads one allowlisted Keychain item's value, null when it holds none of its shape; secret-sink.ts holds the real one, and a test passes its own.
+export type KeychainRead = (item: string) => Promise<string | null>
 
 const OPTIONS_MESSAGE = `An ask offers 1 to ${MAX_OPTIONS} options, each with a label: one for a yes or no, two or more for lettered choices`
 
@@ -365,6 +372,8 @@ export const previewSchema = z.discriminatedUnion("type", [
     sink: secretSinkSchema,
     type: z.literal("secret"),
   }),
+  // shows a Keychain item's value on the owner's click, in that one response alone (revealSecret); it names the item by its full service, so the card shows which one
+  z.strictObject({ service: playgroundService, type: z.literal("reveal"), why: words }),
   acceptSchema,
   appsSchema,
   grantSchema,
@@ -1815,8 +1824,9 @@ export async function provideSecret(
   }
   const { key, sink } = current.preview
   // a paste off the item's shape is refused before the claim, so the card stays open for the right one
-  if (sink.type === "keychain" && !KEYCHAIN_ITEMS[sink.item].valid.test(value))
-    return { code: "VALIDATION_ERROR", message: KEYCHAIN_ITEMS[sink.item].invalid, ok: false }
+  const spec = sink.type === "keychain" ? keychainSpec(sink.item) : null
+  if (spec && !spec.valid.test(value))
+    return { code: "VALIDATION_ERROR", message: spec.invalid, ok: false }
   if (seen !== undefined && seen !== current.updatedAt) {
     return {
       code: "CONFLICT",
@@ -1870,7 +1880,7 @@ export async function provideSecret(
 
 // A keychain sink's one result: saved, or the writer's first line, which names the refusal and never the value.
 async function saveKeychain(
-  item: KeychainItemName,
+  item: string,
   value: string,
   keychain: KeychainSave | undefined,
 ): Promise<SinkResult> {
@@ -1883,6 +1893,27 @@ async function saveKeychain(
     const line = (error instanceof Error ? error.message : "the save failed").split("\n")[0] ?? ""
     return { environment: "Keychain", exitCode: 1, line: line.split(value).join("…") }
   }
+}
+
+// Reads a reveal card's Keychain item for the owner's Show or Copy, and only while the card is open and not archived, so an old card is no standing read handle. It writes nothing: the value is in no row, delivery, log or refusal, only in what it returns.
+export async function revealSecret(
+  db: Database,
+  id: string,
+  read: KeychainRead,
+): Promise<{ ok: true; value: string } | Refused> {
+  const item = await getItem(db, id)
+  if (!item || item.id !== id) return NOT_FOUND
+  if (item.kind !== "decision" || item.preview.type !== "reveal") {
+    return { code: "VALIDATION_ERROR", message: "Only a reveal card shows a value", ok: false }
+  }
+  if (item.status !== "open" || archivedAt(item) !== null) {
+    return { code: "CONFLICT", message: "This card is closed, so it shows nothing", ok: false }
+  }
+  const value = await read(item.preview.service)
+  if (value === null) {
+    return { code: "NOT_FOUND", message: "That Keychain item holds no value", ok: false }
+  }
+  return { ok: true, value }
 }
 
 // Keeps how many files a send shared in its answer, 0 on a stack that shares none, so a Retry after the words failed to type shares none twice.
