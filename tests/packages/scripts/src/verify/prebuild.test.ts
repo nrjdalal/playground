@@ -186,7 +186,7 @@ test("unbuilt names a package whose dist lacks a name the sources import, and pa
 })
 
 // check-types:tests once failed after a canary merge on types a dist built before it lacked, every name the sources import still there; a rebuild under a running stack hangs it, so a stack up keeps the dist.
-test("unbuilt names a package whose src holds a file newer than its dist while no stack runs, by a dist folder's newest file, and passes a file served from src", () => {
+test("unbuilt names a package whose src holds a file newer than its dist while no stack runs, by a dist folder's newest file, and passes a file outside its dist", () => {
   const dir = mkdtempSync(join(tmpdir(), "prebuild-mtime-"))
   try {
     const at = (path: string, seconds: number) => utimesSync(path, seconds, seconds)
@@ -196,6 +196,7 @@ test("unbuilt names a package whose src holds a file newer than its dist while n
       ["fresh", 1000, 2000, "dist/index.mjs"],
       ["folder", 1500, 2000, "dist"],
       ["source", 2000, 1000, "src/index.ts"],
+      ["root", 2000, 1000, "tsconfig.json"],
     ] as const) {
       const pkg = join(dir, name)
       mkdirSync(join(pkg, "dist"), { recursive: true })
@@ -204,6 +205,8 @@ test("unbuilt names a package whose src holds a file newer than its dist while n
       writeFileSync(join(pkg, "src/index.ts"), "export const a = 1\n")
       writeFileSync(join(pkg, "src/other.ts"), "export const b = 2\n")
       writeFileSync(join(pkg, "dist/index.mjs"), "export const a = 1\n")
+      writeFileSync(join(pkg, "tsconfig.json"), "{}\n")
+      at(join(pkg, "tsconfig.json"), 1000)
       at(join(pkg, "src/index.ts"), 1000)
       at(join(pkg, "src/other.ts"), srcAt)
       at(join(pkg, "dist/index.mjs"), distAt)

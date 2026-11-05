@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path"
 import { stackIn } from "../../../../api/hono/src/lib/dev/stop"
 import { withoutShebang } from "../shebang"
 
-// verify, pr:merge, the dev launcher, test:file and check-types:tests reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists counts as unbuilt when a file under its package's `src` is newer than it while no stack runs in this checkout (`bun run verify` checks a running one, and a rebuild under it hangs it), or when it lacks a name the target's sources import from it, those it reaches through relative and `@/` imports included.
+// verify, pr:merge, the dev launcher, test:file and check-types:tests reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists counts as unbuilt when a file under its package's `src` is newer than it while no stack runs in this checkout (since `bun run verify` runs beside this worktree's stack, and a rebuild under it hangs it), or when it lacks a name the target's sources import from it, those it reaches through relative and `@/` imports included.
 const VERIFY = import.meta.dir
 const SRC = join(VERIFY, "..")
 const ROOT = join(VERIFY, "../../../..")
@@ -115,7 +115,7 @@ const newestUnder = (dir: string): number => {
   return newest
 }
 
-// A built file older than a file under its package's src, as a pull leaves it; a dist folder reads by its newest file, since its own mtime moves only when an entry is added or removed, and a file its package serves from src, or a package with no src, reads as current.
+// A file of a package's dist older than a file under its src, as a pull leaves it; the dist folder reads by its newest file, since its own mtime moves only when an entry is added or removed, and any other file (one its package serves from src, a config at its root) or a package with no src reads as current, since no build rewrites it.
 const outgrown = (file: string): boolean => {
   const real = realpathSync(file)
   let pkg = dirname(real)
@@ -124,7 +124,8 @@ const outgrown = (file: string): boolean => {
     pkg = dirname(pkg)
   }
   const src = join(pkg, "src")
-  if (!existsSync(src) || real.startsWith(`${src}/`)) return false
+  const dist = join(pkg, "dist")
+  if (!existsSync(src) || (real !== dist && !real.startsWith(`${dist}/`))) return false
   const built = statSync(real).isDirectory() ? newestUnder(real) : statSync(real).mtimeMs
   return newestUnder(src) > built
 }
