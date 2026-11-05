@@ -416,7 +416,7 @@ const clone = (): {
   )
   writeFileSync(
     join(dir, "tests/path.test.ts"),
-    'const three = "../packages/three/dist/index.mjs"\nconst plain = "../packages/plain/dist/x.mjs"\nexport const paths = [three, plain]\n',
+    'const three = "../packages/three/dist/index.mjs"\nconst stale = "../packages/three/dist/nope.mjs"\nconst plain = "../packages/plain/dist/x.mjs"\nexport const paths = [three, stale, plain]\n',
   )
   writeFileSync(
     join(dir, "tests/table.test.ts"),
@@ -494,12 +494,12 @@ test("check-types:tests in a cloned worktree builds @api/hono, whose declaration
   }
 })
 
-// round 1 of review: with packages/env/dist moved aside, test-sandbox.test.ts alone gave 4 fails, since it, gaps.test.ts, keys.test.ts and redis's index.test.ts reach a dist file by its path
-test("test:file builds a package whose dist file a test names by path, and builds nothing for a workspace with no build", () => {
+// round 2 of review: a path naming a file no build makes would rebuild its package on every run; round 1: with packages/env/dist moved aside, test-sandbox.test.ts alone gave 4 fails, since it, gaps.test.ts, keys.test.ts and redis's index.test.ts reach a dist file by its path
+test("test:file builds a package whose dist a test names by path once, a file no build makes included, and builds nothing for a workspace with no build", () => {
   const { dir, log, run } = clone()
   try {
     const first = run(["tests/path.test.ts"])
-    expect(first.stderr).toContain("test:file: building what packages/three/dist/index.mjs needs")
+    expect(first.stderr).toContain("test:file: building what packages/three/dist/index.mjs")
     expect(first.exitCode).toBe(0)
     expect(log()).toBe(
       "run build --filter=@packages/three --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",

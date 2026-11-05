@@ -211,9 +211,10 @@ export const builtFile = (specifier: string, root: string, conditions: string[])
     specifier.startsWith("generated/") ||
     /^(?:packages|api)\/[\w-]+\/dist(?:\/|$)/.test(specifier)
   ) {
+    // a path counts as built once its dist folder is, so a file no build makes rebuilds nothing on the next run
     const file = specifier.startsWith("generated/")
       ? join(root, ".generated", specifier.slice("generated/".length))
-      : join(root, specifier)
+      : join(root, specifier.match(/^(?:packages|api)\/[\w-]+\/dist/)![0])
     if (existsSync(file)) return file
     throw new Error(`${specifier} is not built`)
   }
