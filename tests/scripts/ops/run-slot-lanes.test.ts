@@ -85,7 +85,7 @@ describe("from load1 30 up to 45 the CPU must be half idle", () => {
     expect(slots({ idle: 32.89, load1: 31.53, swapins: 335 })).toBe("1\n")
   })
 
-  test("tonight's 19:29:23Z reading opens them: load1 33.75, 60.94% idle, no swap-ins", () => {
+  test("4 Nov's 19:29:23Z reading opens them: load1 33.75, 60.94% idle, no swap-ins", () => {
     expect(slots({ idle: 60.94, load1: 33.75, swapins: 0 })).toBe("4\n")
   })
 })
@@ -93,6 +93,10 @@ describe("from load1 30 up to 45 the CPU must be half idle", () => {
 describe("under load1 30 the CPU must be 40% idle", () => {
   test("load1 at 29 leaves them open", () => {
     expect(slots({ idle: 80, load1: 29.9 })).toBe("4\n")
+  })
+
+  test("idle 45% at load1 29.9 opens them, where load1 30 asks for half", () => {
+    expect(slots({ idle: 45, load1: 29.9 })).toBe("4\n")
   })
 })
 
@@ -227,6 +231,11 @@ describe("the gauges", () => {
       "mem",
       { idle: 80, load1: 18, pressure: 2 },
       /shut why=mem idle=80% load1=18\.00 free=80% pressure=2 /,
+    ],
+    [
+      "cpu",
+      { free: 20, idle: 45, load1: 31 },
+      /shut why=cpu idle=45% load1=31\.00 free=20% pressure=1 /,
     ],
   ] as const)(
     "a shut lanes line names why=%s, the first gauge that shut it",
