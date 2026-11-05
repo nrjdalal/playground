@@ -8,7 +8,7 @@ The commands for each start and end are in [SESSIONS.md](SESSIONS.md), and every
 The dashboard lists the dispatcher, and dispatcher-2 while one is started, in the sidebar's header, above the session groups, lists the Planner, both leads, the Optimizer and any other orchestrator, such as the Assistant, under Orchestrators, A to Z by roster title or in the order the owner dragged them into,
 nests each checker under the worker whose PR it checks (by the `worker` key on the checker's roster entry, set at spawn, else its `pr`, else its name: `reviewer-sloth-2-sendtop` under `worker-sloth-2`),
 and puts probes in Other, where they never wait on the owner.
-Each row reads by a plain name with no @: a manager by its role word alone (Builder, Ops, Planner, Optimizer, Assistant), a worker by its ticket and pull request with no role word (`ENG-1591#1598`), else its title, and a reviewer,
+Each row reads by a plain name with no @: a manager by its role word alone (Builder, Ops, Planner, Optimizer, Assistant, and an orchestrator's with its id, Orchestrator C8m3nr), a worker by its ticket and pull request with no role word (`ENG-1591#1598`), else its title, and a reviewer,
 tester or runner the same way with its role word after (`ENG-1591#1598 Reviewer`, `Keep the dashboard up · runner`).
 A new session is named `<id>-<kind>` by `bun run name <kind>`, a checker with an id of its own ([SESSIONS.md](SESSIONS.md#spawn)); one started before keeps the name it has.
 A worker's dev stack runs only while it tests: it stops the stack through its own background task once a round of testing ends, and starts it again for the next; anything that must outlive a chore gets a runner.
