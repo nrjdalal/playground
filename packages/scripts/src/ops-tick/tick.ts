@@ -3,7 +3,13 @@ import { appendFile, lstat, mkdir, readdir, stat, unlink } from "node:fs/promise
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
-import { dispatcherOf, kindOf, managerKindOfName, managerOf } from "@packages/config/kinds"
+import {
+  dispatcherOf,
+  dispatcherSeatOf,
+  kindOf,
+  managerKindOfName,
+  managerOf,
+} from "@packages/config/kinds"
 import { purgeTrash } from "@packages/safe-delete"
 import { accountSettings, readPolicy } from "@packages/settings"
 
@@ -170,7 +176,7 @@ export const switchAccount = async (ops: string): Promise<string> => {
   return read.refusal === undefined ? accountSettings.get(read.settings, "usage.switchAccount") : ""
 }
 
-// While usage.json reads that account: its week at 98% told to ops, and at 100% ops-unstick's move file written for 4 hours with its text sent to both dispatchers and both leads, each once a week, marked in usage/switch-watch.json once sent (told100 once all four are), so a failed send goes again on the next tick. The move itself is the account rotation's.
+// While usage.json reads that account: its week at 98% told to ops, and at 100% ops-unstick's move file written for 4 hours with its text sent to both dispatchers and both leads, each once a week, marked in usage/switch-watch.json once sent (told100 once all are); with no second dispatcher seated, which the move hands the factory to, no move file is written and the first and both leads are told so, so a failed send goes again on the next tick. The move itself is the account rotation's.
 const switchWatch = async (ctx: Context) => {
   const usage = (await readJson(join(ctx.ops, "..", "usage.json")).catch(() => null)) as {
     account?: string
@@ -207,8 +213,8 @@ const switchWatch = async (ctx: Context) => {
     const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
       agents?: unknown
     } | null
-    const [first, second] = [dispatcherOf(roster?.agents, 1), dispatcherOf(roster?.agents, 2)]
-    if (!told("moved100")) {
+    const [first, second] = [dispatcherOf(roster?.agents, 1), dispatcherSeatOf(roster?.agents, 2)]
+    if (second && !told("moved100")) {
       const text = JSON.stringify({
         to: second,
         until: isoSeconds(new Date(ctx.now.getTime() + 4 * 3_600_000)),
@@ -216,12 +222,13 @@ const switchWatch = async (ctx: Context) => {
       await writeAtomic(move, `${text}\n`)
       await mark("moved100")
     }
-    const text = (await Bun.file(move).text()).trim()
+    const line = second
+      ? `${handle} week at 100%: wrote ${move}: ${(await Bun.file(move).text()).trim()}`
+      : `${handle} week at 100%: no second dispatcher is seated, so no move`
     let all = true
-    for (const to of [second, first, "builder", "ops"]) {
+    for (const to of [...(second ? [second] : []), first, "builder", "ops"]) {
       if (told(`told100 ${to}`)) continue
-      if (await ctx.send(to, `${handle} week at 100%: wrote ${move}: ${text}`, true))
-        await mark(`told100 ${to}`)
+      if (await ctx.send(to, line, true)) await mark(`told100 ${to}`)
       else all = false
     }
     if (all) await mark("told100")
@@ -601,9 +608,18 @@ const relayMovedAt = async (outbox: string): Promise<number> => {
   return Math.max(...times)
 }
 
+// Whether this machine runs the relay at all, by its roster row or its resume record; with neither, the Ops sweep relays the outbox (playbook SWEEP.md step 2), so no relay is down.
+const hasRelay = async (ctx: Context): Promise<boolean> => {
+  if (await Bun.file(join(ctx.ops, "..", "resume", `${RELAY}.sh`)).exists()) return true
+  const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+    agents?: unknown
+  } | null
+  return Array.isArray(roster?.agents) && roster.agents.some((a: Agent) => a?.name === RELAY)
+}
+
 type RelayWatch = { at?: string; by?: string; id?: string; pendingSince?: string }
 
-// The ops relay's watch from outside it: drain.ts's pending peek (which moves nothing) is timed from the first cycle it reads pending, and one Inbox alert update is posted straight to the dashboard with bun run ask, under the ops manager's name, once a line has waited two cycles with no cursor of the relay's moving since, since the relay rewrites its cursors only when a line is pending; the alert is resolved once a cursor moves after it, or when its item is gone; its id is kept in tick/relay-watch.json, so it is posted once a stop.
+// The ops relay's watch from outside it: drain.ts's pending peek (which moves nothing) is timed from the first cycle it reads pending, and one Inbox alert update is posted straight to the dashboard with bun run ask, under the ops manager's name, once a line has waited two cycles with no cursor of the relay's moving since, since the relay rewrites its cursors only when a line is pending; the alert is resolved once a cursor moves after it, or when its item is gone; its id is kept in tick/relay-watch.json, so it is posted once a stop; a machine with no relay (hasRelay) posts nothing.
 const relayWatch = async (ctx: Context) => {
   const outbox = join(ctx.ops, "outbox")
   const statePath = join(ctx.ops, "tick", "relay-watch.json")
@@ -629,7 +645,7 @@ const relayWatch = async (ctx: Context) => {
     await unlink(statePath)
     return
   }
-  if ((await pending(outbox)).length === 0) {
+  if (!(await hasRelay(ctx)) || (await pending(outbox)).length === 0) {
     if (state) await unlink(statePath)
     return
   }

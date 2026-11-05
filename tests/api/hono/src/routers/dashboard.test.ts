@@ -232,7 +232,6 @@ describe("answerPrompt", () => {
       INVALID: [400, "VALIDATION_ERROR"],
       NOT_FOUND: [404, "NOT_FOUND"],
       NOT_PENDING: [409, "CONFLICT"],
-      NOT_TAKEN: [502, "CMUX_FAILED"],
       UNCONFIRMED: [502, "CMUX_FAILED"],
     }
     for (const [code, [status, apiCode]] of Object.entries(expected)) {
@@ -251,7 +250,7 @@ describe("answerPrompt", () => {
     }
   })
 
-  // The route's own schema turns away a mode that would approve more than the one action, before anything reads cmux.
+  // The route's own schema turns away a mode that would approve more than the one action, before anything reads a session.
   test("the route's body takes only once or deny for a permission, manual or deny for a plan, and named choices", () => {
     for (const mode of ["always", "all", "bypass"]) {
       expect(feedAnswerSchema.safeParse({ kind: "permission", mode }).success).toBe(false)
@@ -270,7 +269,7 @@ describe("answerPrompt", () => {
   })
 
   // a herdr card's id is its tool call's, so the route takes one, and answerFeed answers it by keys into its pane
-  test("the route's params take a cmux Feed id and a herdr card's tool call id, and nothing a path could carry", () => {
+  test("the route's params take a herdr card's tool call id, and nothing a path could carry", () => {
     const params = (requestId: string) =>
       feedParamsSchema.safeParse({ requestId, sessionId: "s" }).success
     expect(params("3F2504E0-4F89-11D3-9A0C-0305E82C3301")).toBe(true)
@@ -350,6 +349,51 @@ describe("sendMessage", () => {
       at: "2026-10-06T12:00:00.000Z",
       sessionId: "s-1",
     })
+  })
+
+  // #780: the Assistant's own chat sends through deliver() too, to the session the roster seats as the assistant and to no other manager
+  test("a message to the session in the assistant seat goes through deliver(), and one to another manager is FORBIDDEN before anything is sent", async () => {
+    const sent: Delivery[] = []
+    const send = async (delivery: Delivery) => {
+      sent.push(delivery)
+      return { at: "2026-11-03T21:00:00.000Z", ok: true as const, sessionId: "s-a" }
+    }
+    const seat = async () => "errands"
+    const message = (to: string) =>
+      sendMessage({ text: "hi", to }, actor, send, undefined, undefined, undefined, undefined, seat)
+    expect(await message("errands")).toEqual({ at: "2026-11-03T21:00:00.000Z", sessionId: "s-a" })
+    expect(sent).toEqual([expect.objectContaining({ actor, text: "hi", to: "errands" })])
+    expect(await message("builder").catch((error: unknown) => error)).toMatchObject({
+      code: "FORBIDDEN",
+      status: 403,
+    })
+    const none = await sendMessage(
+      { text: "hi", to: "errands" },
+      actor,
+      send,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => undefined,
+    ).catch((error: unknown) => error)
+    expect(none).toMatchObject({ code: "FORBIDDEN", status: 403 })
+    expect(sent).toHaveLength(1)
+  })
+
+  test("a thread is the dispatcher's alone, so the assistant's chat opens none", async () => {
+    const send = async () => ({ at: "now", ok: true as const, sessionId: "s-a" })
+    const refused = await sendMessage(
+      { newThread: true, text: "hi", to: "errands" },
+      actor,
+      send,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      async () => "errands",
+    ).catch((error: unknown) => error)
+    expect(refused).toMatchObject({ code: "VALIDATION_ERROR", status: 400 })
   })
 
   test("a message naming an inbox item records the reply once it is out, never on a failed send and never for words that name none", async () => {
@@ -1062,8 +1106,9 @@ describe("the setting route", () => {
       .filter((r) => r.method === method && r.path === path)
       .map((r) => r.handler)
   const actor = { email: "owner@local.host", id: "u-1" }
-  const board = (workers: { hosted?: true; name: string; sessionId: string }[]) => async () =>
-    ({ workers }) as never
+  const board =
+    (workers: { assistant?: true; hosted?: true; name: string; sessionId: string }[]) => async () =>
+      ({ workers }) as never
   const ok = (sessionId: string) => async () => ({
     at: "2026-11-03T06:00:00.000Z",
     ok: true as const,
@@ -1122,6 +1167,20 @@ describe("the setting route", () => {
       },
       { delivery: { actor, sessionId: "s-h", setting: { effort: "max" } }, via: "hosted" },
     ])
+  })
+
+  test("the assistant's setting goes through deliver() as the setting alone, as a dispatcher's does", async () => {
+    const sent: unknown[] = []
+    await changeSetting(
+      { sessionId: "s-a", setting: { model: "sonnet" } },
+      actor,
+      board([{ assistant: true, name: "errands", sessionId: "s-a" }]),
+      async (delivery) => {
+        sent.push(delivery)
+        return ok("s-a")()
+      },
+    )
+    expect(sent).toEqual([{ actor, setting: { model: "sonnet" }, text: "", to: "errands" }])
   })
 
   test("a dispatcher's setting carries the composer's id to deliver(), and one Claude Code holds reads QUEUED under delivery", async () => {

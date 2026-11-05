@@ -158,7 +158,9 @@ describe("a quick run takes its own slot past a full queue", () => {
       writeFileSync(join(m.bin, bin), '#!/bin/bash\ntouch "${@: -1}"\n')
       chmodSync(join(m.bin, bin), 0o755)
     }
-    const marker = join(m.root, "a.test.ts")
+    // the marker is the line's last word, a test file under the repo's tests/ folder, since only such a word counts toward the quick rule's files
+    mkdirSync(join(m.root, "tests"))
+    const marker = "tests/a.test.ts"
     writeFileSync(
       join(m.ops, "run-slot.runs.log"),
       ran
@@ -187,7 +189,7 @@ describe("a quick run takes its own slot past a full queue", () => {
         .split("\n")
         .find((l) => l.split(" ")[1] === "start" && l.split(" ")[2] === who)
         ?.split(" ")[4] ?? ""
-    return existsSync(marker)
+    return existsSync(join(m.root, marker))
   }
 
   // optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue
@@ -255,18 +257,20 @@ describe("a quick run takes its own slot past a full queue", () => {
 
   // 1 Nov: a two-file test:file line ran 37, 36, 33, 39, 421 and 226 s back to back in the one quick slot, and the quick lane's waiters waited 63 min in the hour from 12:00Z
   test("a quick-rule line whose last 3 runs each took over 60 s goes to the queue", async () => {
-    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [39, 421, 226, 61])).toBe(false)
+    expect(await quick(["bun", "run", "test:file", "tests/b.test.ts"], [39, 421, 226, 61])).toBe(
+      false,
+    )
   })
 
   test("but one whose last 3 runs each took exactly 60 s still takes quick", async () => {
-    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [60, 60, 60])).toBe(true)
+    expect(await quick(["bun", "run", "test:file", "tests/b.test.ts"], [60, 60, 60])).toBe(true)
     expect(took).toBe("run-slot-quick")
   })
 
   test("but one with a short run among its last 3 still takes quick", async () => {
-    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [37, 36, 33, 39, 421, 226])).toBe(
-      true,
-    )
+    expect(
+      await quick(["bun", "run", "test:file", "tests/b.test.ts"], [37, 36, 33, 39, 421, 226]),
+    ).toBe(true)
     expect(took).toBe("run-slot-quick")
   })
 
@@ -305,15 +309,38 @@ describe("a quick run takes its own slot past a full queue", () => {
   })
 
   test("bun --cwd=<dir> test naming three test files", async () => {
-    expect(await quick(["bun", "--cwd=x", "test", "b.test.ts", "c.test.tsx"])).toBe(true)
+    expect(await quick(["bun", "--cwd=x", "test", "tests/b.test.ts", "tests/c.test.tsx"])).toBe(
+      true,
+    )
   })
 
   test("but not a bun test naming four", async () => {
-    expect(await quick(["bun", "test", "b.test.ts", "c.test.ts", "d.test.ts"])).toBe(false)
+    expect(
+      await quick(["bun", "test", "tests/b.test.ts", "tests/c.test.ts", "tests/d.test.ts"]),
+    ).toBe(false)
   })
 
   test("nor an end-to-end test", async () => {
-    expect(await quick(["bun", "test", "b.e2e.test.ts"])).toBe(false)
+    expect(await quick(["bun", "test", "tests/b.e2e.test.ts"])).toBe(false)
+  })
+
+  // retro 35: a sharded replay of scratch test files held the one quick slot for 30 minutes, and its waiters waited 87 minutes in all
+  test("nor a bun run test:file naming a test file outside the repo's tests/ folder", async () => {
+    expect(await quick(["bun", "run", "test:file", "/private/tmp/scratchpad/replay.test.ts"])).toBe(
+      false,
+    )
+  })
+
+  test("nor a bun test naming a test file in another folder", async () => {
+    expect(await quick(["bun", "test", "replay/b.test.ts"])).toBe(false)
+  })
+
+  test("nor one whose tests/ path climbs out of the folder", async () => {
+    expect(await quick(["bun", "test", "tests/../replay.test.ts"])).toBe(false)
+  })
+
+  test("but a bun test naming a ./tests/ file", async () => {
+    expect(await quick(["bun", "test", "./tests/b.test.ts"])).toBe(true)
   })
 
   test("nor a bun test with a word that is no test file", async () => {
@@ -334,7 +361,7 @@ describe("a quick run takes its own slot past a full queue", () => {
   })
 
   test("bun test --cwd <dir> naming two test files", async () => {
-    expect(await quick(["bun", "test", "--cwd", "x", "b.test.ts"])).toBe(true)
+    expect(await quick(["bun", "test", "--cwd", "x", "tests/b.test.ts"])).toBe(true)
   })
 
   test("bun run --cwd <dir> test:file naming one test file", async () => {
@@ -347,7 +374,7 @@ describe("a quick run takes its own slot past a full queue", () => {
 
   // a bare --cwd before the subcommand stays off the quick slot: bun misreads that shape and runs package.json's script instead (no-false-green)
   test("but not a bun --cwd <dir> test, which bun runs as package.json's test script", async () => {
-    expect(await quick(["bun", "--cwd", "x", "test", "b.test.ts"])).toBe(false)
+    expect(await quick(["bun", "--cwd", "x", "test", "tests/b.test.ts"])).toBe(false)
   })
 
   test("nor a bun --cwd <dir> run", async () => {
@@ -355,13 +382,21 @@ describe("a quick run takes its own slot past a full queue", () => {
   })
 
   test("but not a bun test --cwd <dir> naming four", async () => {
-    expect(await quick(["bun", "test", "--cwd", "x", "b.test.ts", "c.test.ts", "d.test.ts"])).toBe(
-      false,
-    )
+    expect(
+      await quick([
+        "bun",
+        "test",
+        "--cwd",
+        "x",
+        "tests/b.test.ts",
+        "tests/c.test.ts",
+        "tests/d.test.ts",
+      ]),
+    ).toBe(false)
   })
 
   test("nor a bun test --cwd <dir> end-to-end test", async () => {
-    expect(await quick(["bun", "test", "--cwd", "x", "b.e2e.test.ts"])).toBe(false)
+    expect(await quick(["bun", "test", "--cwd", "x", "tests/b.e2e.test.ts"])).toBe(false)
   })
 })
 

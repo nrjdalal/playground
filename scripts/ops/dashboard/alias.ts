@@ -1,4 +1,8 @@
-// alias.ts <routes.json> <url>...: whether each bare alias holds the port of the live stack's own route in portless's route file, read only; a url's host less its first label is its bare alias (desk.playground.localhost's is playground.localhost). Prints one line, and exits 0 when every alias holds its port, 1 when one points at another port, and 2 for a missing file, unreadable JSON or a missing route.
+// alias.ts <url>...: whether each bare alias holds the port of the live stack's own route in portless's route file, the routes.json in portlessDir()'s folder (the 1355 proxy's while it serves), read only; a url's host less its first label is its bare alias (desk.playground.localhost's is playground.localhost). Prints one line, and exits 0 when every alias holds its port, 1 when one points at another port, and 2 for a missing file, unreadable JSON or a missing route.
+import { join } from "node:path"
+
+import { portlessDir } from "../../../api/hono/src/lib/dev/proxy"
+
 type Route = { hostname?: unknown; port?: unknown }
 
 export const checkAliases = (file: string, text: string | null, urls: string[]) => {
@@ -33,7 +37,8 @@ export const checkAliases = (file: string, text: string | null, urls: string[]) 
 }
 
 if (import.meta.main) {
-  const [file = "", ...urls] = process.argv.slice(2)
+  const file = join(portlessDir(), "routes.json")
+  const urls = process.argv.slice(2)
   const text = await Bun.file(file)
     .text()
     .catch(() => null)

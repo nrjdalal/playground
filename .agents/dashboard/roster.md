@@ -1,6 +1,5 @@
 - The roster is the file the dispatcher keeps of the agents it dispatched, at `~/.playground/roster.json` (in `$PLAYGROUND_DATA_DIR` when it is set).
   `api/hono/src/lib/dashboard/roster.ts` is its one reader, which any dashboard code that needs the roster imports: `rosterSchema` (zod), and `readRoster()`, cached by the file's mtime, which returns `{ problem, roster }`.
-  The one exception is `rosterAgents()` in `cmux.ts`, which reads the file raw for `cmuxHeld()`, as the hooks read it, since a factory session the hooks place must still hold cmux when `readRoster()` would drop its agent (a kind-only one) or the whole roster (one with no `updatedAt`).
   Each agent is checked on its own and every fault is named in `problem`, an ended row's excepted: an optional key off its schema (a title over 40 characters, a malformed time) is ignored and the agent kept, a bad required key drops that agent alone, a missing file is no roster and no problem, and one that cannot be read (a directory, no permission) is a problem rather than an error.
   The dispatcher and its leads write it, only through `scripts/roster.ts` in the main checkout; the dashboard only reads it.
   Its shape, keys A to Z, unknown keys ignored, times ISO 8601 with an offset (`date -u +%FT%TZ`), optional keys omitted when unknown:

@@ -289,17 +289,26 @@ ext_init() {
   fi
 }
 
-# Whether a stack starts on portless's proxy, by the stack's own rule (proxyRefusal in api/hono/src/lib/dev/proxy.ts): the port portless saved, else PORTLESS_PORT, else 443; a port of 1024 or above needs no sudo, and a lower one is ready once something answers on it.
+# Whether something answers on a loopback port ($1); a test names a file that stands for the answer
+proxy_answers() {
+  if [ -n "$PROXY_UP" ]; then
+    [ -f "$PROXY_UP" ]
+  else
+    (: </dev/tcp/127.0.0.1/"$1") 2>/dev/null
+  fi
+}
+
+# Whether a stack starts on portless's proxy, by the stack's own rule (proxyDown in api/hono/src/lib/dev/proxy.ts): the port portless saved, else PORTLESS_PORT, else 443; a saved 1355 is ready while it answers and otherwise reads as 443, any other port of 1024 or above needs no sudo, and a lower one is ready once something answers on it.
 proxy_ready() {
   [ "${PORTLESS:-}" = 0 ] && return 0
   local saved="${PORTLESS_STATE_DIR:-$HOME/.portless}/proxy.port" port="${PORTLESS_PORT:-443}"
   [ -f "$saved" ] && port=$(tr -d '[:space:]' <"$saved")
-  [ "$port" -ge 1024 ] 2>/dev/null && return 0
-  if [ -n "$PROXY_UP" ]; then
-    [ -f "$PROXY_UP" ]
-  else
-    (: </dev/tcp/127.0.0.1/"$port") 2>/dev/null
+  if [ "$port" = 1355 ]; then
+    proxy_answers 1355 && return 0
+    port=443
   fi
+  [ "$port" -ge 1024 ] 2>/dev/null && return 0
+  proxy_answers "$port"
 }
 
 # portless's proxy serves the Dashboard at https://playground.localhost: a root service on port 443 that starts with the Mac and, as it installs, adds its own certificate to the Mac's trusted list. Installing it takes the Mac's password, so only with a terminal and never in --check; 0 once the proxy is ready, so a service whose start failed is installed again.
