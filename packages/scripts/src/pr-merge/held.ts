@@ -98,12 +98,19 @@ async function writeFile(path: string, file: HeldFile): Promise<void> {
   await rename(next, path)
 }
 
-// The `"*"` line and the time in `since` beside it, read only, or null when none is set.
-export async function freezeStatus(path: string): Promise<{ line: string; since: string } | null> {
+// The `"*"` line, the time in `since` beside it (null when unset) and whether it has lapsed at `now`, so holds no PR, read only; null when no `"*"` line is set.
+export async function freezeStatus(
+  path: string,
+  now: number,
+): Promise<{ lapsed: boolean; line: string; since: string | null } | null> {
   const file = await readFile(path)
   if (!Object.hasOwn(file.held, "*")) return null
-  const since = typeof file.since === "object" && file.since !== null ? file.since["*"] : undefined
-  return { line: String(file.held["*"]), since: typeof since === "string" ? since : "none" }
+  const since = file.since?.["*"]
+  return {
+    lapsed: lapsed(file, now),
+    line: String(file.held["*"]),
+    since: typeof since === "string" ? since : null,
+  }
 }
 
 // The ship flow's freeze: the `"*"` line, naming the version, with the time it was written in `since`, keeping every other line, and the line written: running it again restarts the lapse. A `"*"` line Ops wrote by hand holds every PR already, so it stays as it is, and its line is the one given back.

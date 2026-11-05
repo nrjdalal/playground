@@ -62,14 +62,21 @@ test("ship:freeze status and a word that is not a version write nothing, and the
   expect(readFileSync(path, "utf8")).toBe(before)
 })
 
-test('ship:freeze status prints the "*" line and its since when one is set', async () => {
-  const path = join(mkdtempSync(join(tmpdir(), "freeze-")), "held-prs.json")
+test('ship:freeze status prints the "*" line and its since, and says when it has lapsed', async () => {
   const line = "v0.0.38 ships: canary is frozen until its tag lands"
-  const before = JSON.stringify({ held: { "*": line }, since: { "*": "2026-11-05T07:00:00.000Z" } })
-  writeFileSync(path, before)
-  const status = await run(path, "status")
-  expect(status.code).toBe(0)
-  expect(status.out).toContain(line)
-  expect(status.out).toContain("2026-11-05T07:00:00.000Z")
-  expect(readFileSync(path, "utf8")).toBe(before)
+  // an hour old holds every PR, and five hours old is past the 4-hour lapse, so it holds none
+  for (const [hours, lapsed] of [
+    [1, false],
+    [5, true],
+  ] as const) {
+    const path = join(mkdtempSync(join(tmpdir(), "freeze-")), "held-prs.json")
+    const since = new Date(Date.now() - hours * 3_600_000).toISOString()
+    const before = JSON.stringify({ held: { "*": line }, since: { "*": since } })
+    writeFileSync(path, before)
+    const status = await run(path, "status")
+    expect(status.code).toBe(0)
+    expect(status.out).toContain(`${line} (since ${since})`)
+    expect(status.out.includes("lapsed: it holds no PR")).toBe(lapsed)
+    expect(readFileSync(path, "utf8")).toBe(before)
+  }
 })
