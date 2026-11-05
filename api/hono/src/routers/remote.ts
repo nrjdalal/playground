@@ -11,10 +11,20 @@ import {
   notFoundErrorResponses,
   validationErrorResponses,
 } from "@/lib/error"
-import { remoteKeys as keys } from "@/lib/relay/key"
+import { remoteAudit } from "@/lib/relay/audit"
+import { type PairedKey, remoteKeys as keys } from "@/lib/relay/key"
 import { authMiddleware, guardWrites, requireConsoleRole, requireLoopback } from "@/middlewares"
 
+const auditSchema = z.object({
+  at: z.string(),
+  fingerprint: z.string().nullable(),
+  path: z.string(),
+  status: z.number(),
+})
 const pairedSchema = z.object({ fingerprint: z.string(), login: z.string(), pairedAt: z.string() })
+
+// What the Remote section shows of the paired key: never its public key or id.
+const shown = ({ fingerprint, login, pairedAt }: PairedKey) => ({ fingerprint, login, pairedAt })
 const pendingSchema = z.object({
   at: z.string(),
   fingerprint: z.string(),
@@ -37,7 +47,7 @@ const doc = (description: string, data: z.ZodType, errors = {}) =>
     },
   })
 
-// Settings' Remote section: the browser key this Mac takes Yard's writes from, the pair request waiting on the owner's Approve, and Approve and Revoke, all on the owner rung over loopback, so a key is paired only by a click on this Mac and the relay, which runs no route off RELAY_GETS, reaches none of it.
+// Settings' Remote section: the browser key this Mac takes Yard's writes from, the pair request waiting on the owner's Approve, the last writes from Yard, and Approve and Revoke, all on the owner rung over loopback, so a key is paired only by a click on this Mac and the relay, which runs no route off RELAY_GETS and RELAY_WRITES, reaches none of it.
 export const remoteRouter = new Hono<{ Variables: Session }>()
   .use("/*", guardWrites)
   .use("/*", requireLoopback)
@@ -46,15 +56,20 @@ export const remoteRouter = new Hono<{ Variables: Session }>()
   .get(
     "/",
     doc(
-      "The paired browser key, by its fingerprint, login and paired time, and the pair request waiting on Approve, each null with none",
-      z.object({ key: pairedSchema.nullable(), pending: pendingSchema.nullable() }),
+      "The last writes from Yard, newest first, each by its time, route, the paired key that signed it and the status it answered; the paired browser key, by its fingerprint, login and paired time; and the pair request waiting on Approve, each null with none",
+      z.object({
+        audit: z.array(auditSchema),
+        key: pairedSchema.nullable(),
+        pending: pendingSchema.nullable(),
+      }),
     ),
     async (c) => {
       const key = await keys.paired()
       const pending = keys.pending()
       return c.json({
         data: {
-          key: key && { fingerprint: key.fingerprint, login: key.login, pairedAt: key.pairedAt },
+          audit: await remoteAudit.recent(),
+          key: key && shown(key),
           pending: pending && {
             at: pending.at,
             fingerprint: pending.fingerprint,
@@ -79,9 +94,7 @@ export const remoteRouter = new Hono<{ Variables: Session }>()
     async (c) => {
       const key = await keys.approve(c.req.valid("json").id)
       if (!key) throw new ApiError(404, "NOT_FOUND", "No pair request waits with that id")
-      return c.json({
-        data: { fingerprint: key.fingerprint, login: key.login, pairedAt: key.pairedAt },
-      })
+      return c.json({ data: shown(key) })
     },
   )
   .post(

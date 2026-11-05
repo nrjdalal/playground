@@ -1,5 +1,6 @@
 import { signedBytes } from "@packages/message"
 
+import { type AuditLog, remoteAudit } from "@/lib/relay/audit"
 import { type KeyStore, type PairedKey, remoteKeys } from "@/lib/relay/key"
 import {
   pathOn,
@@ -9,15 +10,18 @@ import {
   RELAY_PREFIX,
   RELAY_SILENT_MS,
   relayAllowed,
+  RELAY_ANSWER_KINDS,
   relayPairSchema,
+  RELAY_WRITES,
   type RelayRequest,
   relayRequestSchema,
   type RelayResponse,
   type RelayWrite,
   relayWriteSchema,
 } from "@/lib/relay/protocol"
+import { markRelayed } from "@/lib/relay/relayed"
 
-// This Mac's side of the relay: it dials out to the hosted hub and answers the owner's reads from its own dashboard, in process, so no port opens here.
+// This Mac's side of the relay: it dials out to the hosted hub and answers the owner's reads, and the writes the paired key signed, from its own dashboard, in process, so no port opens here.
 
 // The ids this Mac has answered, each kept until it is too old to come again.
 export type SeenIds = Map<string, number>
@@ -113,24 +117,72 @@ export async function requireSignedWrite(
   return { write }
 }
 
-// Answers one frame. A pair request, once refuseStale passes it, waits in keys for the owner's Approve on this Mac and is answered with its fingerprint. A read passes requireRelay first, then runs in this Mac's own API as its local owner's session, so the routes' own owner check still runs here.
+// The Inbox card a relayed answer names, read from its path.
+const ANSWER_PATH = /^\/api\/v1\/inbox\/([^/?]+)\/answer(?:\?|$)/
+
+// The answer a route gave, as a frame: its status, the headers on RELAY_HEADERS, and its bytes.
+const framed = async (id: string, response: Response): Promise<RelayResponse> => ({
+  body: Buffer.from(await response.arrayBuffer()).toString("base64"),
+  headers: Object.fromEntries(
+    RELAY_HEADERS.flatMap((name) => {
+      const value = response.headers.get(name)
+      return value === null ? [] : [[name, value]]
+    }),
+  ),
+  id,
+  status: response.status,
+  type: "response",
+})
+
+type AnswerDeps = {
+  audit?: Pick<AuditLog, "append">
+  cookie: () => Promise<string>
+  dispatch: (request: Request) => Promise<Response>
+  keys?: Pick<KeyStore, "offer" | "paired">
+  login: string
+  now?: Date
+  // the kind of the Inbox card an id names, or null with none; a relayed answer is refused without it
+  kindOf?: (id: string) => Promise<string | null>
+  seen: SeenIds
+}
+
+// A write requireSignedWrite passed, run in this Mac's own API as its local owner's POST, marked in process so the loopback and origin guards take it, unless it answers an Inbox card whose kind is off RELAY_ANSWER_KINDS, or one this Mac cannot read, which it refuses before any route runs.
+async function runWrite(
+  write: RelayWrite,
+  { cookie, dispatch, kindOf }: Pick<AnswerDeps, "cookie" | "dispatch" | "kindOf">,
+): Promise<RelayResponse> {
+  const card = ANSWER_PATH.exec(write.path)?.[1]
+  if (card !== undefined) {
+    const kind = await (kindOf?.(card) ?? Promise.resolve(null)).catch(() => null)
+    if (kind === null || !(RELAY_ANSWER_KINDS as readonly string[]).includes(kind))
+      return json(write.id, 403, "FORBIDDEN", "Answer it on the Mac")
+  }
+  try {
+    const request = new Request(`http://127.0.0.1${write.path}`, {
+      body: write.body,
+      headers: { "content-type": "application/json", cookie: await cookie() },
+      method: "POST",
+    })
+    return await framed(write.id, await dispatch(markRelayed(request)))
+  } catch (error) {
+    console.error("[relay] a write failed", error)
+    return json(write.id, 500, "INTERNAL_SERVER_ERROR", "This Mac could not run it")
+  }
+}
+
+// Answers one frame. A pair request, once refuseStale passes it, waits in keys for the owner's Approve on this Mac and is answered with its fingerprint. A write passes requireSignedWrite against the paired key and RELAY_WRITES, then runWrite, and each one checked leaves an audit line, refusals included. A read passes requireRelay first. Both run in this Mac's own API as its local owner's session, so the routes' own owner check and limits still run here.
 export async function answerRelay(
   raw: string,
   {
+    audit = remoteAudit,
     cookie,
     dispatch,
     keys = remoteKeys,
     login,
     now = new Date(),
+    kindOf,
     seen,
-  }: {
-    cookie: () => Promise<string>
-    dispatch: (request: Request) => Promise<Response>
-    keys?: Pick<KeyStore, "offer">
-    login: string
-    now?: Date
-    seen: SeenIds
-  },
+  }: AnswerDeps,
 ): Promise<RelayResponse | null> {
   const pair = relayPairSchema.safeParse(parse(raw))
   if (pair.success) {
@@ -145,6 +197,29 @@ export async function answerRelay(
       type: "response",
     }
   }
+  if (relayWriteSchema.safeParse(parse(raw)).success) {
+    const key = await keys.paired()
+    const checked = await requireSignedWrite(raw, {
+      key,
+      login,
+      now,
+      seen,
+      writes: RELAY_WRITES,
+    })
+    if (checked === null) return null
+    const write = "write" in checked ? checked.write : relayWriteSchema.parse(parse(raw))
+    const answer =
+      "refused" in checked ? checked.refused : await runWrite(write, { cookie, dispatch, kindOf })
+    await audit
+      .append({
+        at: now.toISOString(),
+        fingerprint: key && write.keyId === key.id ? key.fingerprint : null,
+        path: write.path.split("?")[0]!,
+        status: answer.status,
+      })
+      .catch((error: unknown) => console.error("[relay] the audit line was not written", error))
+    return answer
+  }
   const checked = requireRelay(raw, { login, now, seen })
   if (checked === null || "refused" in checked) return checked?.refused ?? null
   const { request } = checked
@@ -152,18 +227,7 @@ export async function answerRelay(
     const response = await dispatch(
       new Request(`http://127.0.0.1${request.path}`, { headers: { cookie: await cookie() } }),
     )
-    return {
-      body: Buffer.from(await response.arrayBuffer()).toString("base64"),
-      headers: Object.fromEntries(
-        RELAY_HEADERS.flatMap((name) => {
-          const value = response.headers.get(name)
-          return value === null ? [] : [[name, value]]
-        }),
-      ),
-      id: request.id,
-      status: response.status,
-      type: "response",
-    }
+    return await framed(request.id, response)
   } catch (error) {
     console.error("[relay] a read failed", error)
     return json(request.id, 500, "INTERNAL_SERVER_ERROR", "This Mac could not read it")
@@ -201,6 +265,8 @@ type RelayDeps = {
   heartbeatMs?: number
   // the login the token's /me answers
   login: (token: string) => Promise<string>
+  // the kind of the Inbox card an id names, which a relayed answer is checked against
+  kindOf?: (id: string) => Promise<string | null>
   recycleMs?: number
   silentMs?: number
   // the Keychain token, or null with none

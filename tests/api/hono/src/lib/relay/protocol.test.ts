@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test"
 
-import { RELAY_GETS, relayAllowed } from "../../../../../../api/hono/src/lib/relay/protocol"
+import {
+  pathOn,
+  RELAY_ANSWER_KINDS,
+  RELAY_GETS,
+  RELAY_WRITES,
+  relayAllowed,
+} from "../../../../../../api/hono/src/lib/relay/protocol"
 
 describe("the relay's allowlist", () => {
   test("carries the dashboard's reads, a query included", () => {
@@ -53,5 +59,57 @@ describe("the relay's allowlist", () => {
 
   test("lists its routes A to Z", () => {
     expect([...RELAY_GETS]).toEqual([...RELAY_GETS].sort())
+  })
+})
+
+describe("the relay's write list", () => {
+  test("lists only the composer's send, an Inbox card's answer, and the Later, Archive and Done its shelves call, A to Z", () => {
+    expect([...RELAY_WRITES]).toEqual([
+      "/api/v1/inbox/:id/answer",
+      "/api/v1/inbox/:id/schedule",
+      "/api/v1/inbox/dismiss",
+      "/api/v1/messages",
+    ])
+  })
+
+  test("keeps every first-run, onboarding, sign-in, delete, secret and settings route on the Mac", () => {
+    for (const target of [
+      "/api/setup/container",
+      "/api/v1/onboard/finish",
+      "/api/agents/sign-in-as",
+      "/api/v1/inbox/abc/secret",
+      "/api/v1/remote/approve",
+      "/api/v1/remote/revoke",
+      "/api/v1/settings/privacy",
+      "/api/v1/apps/previews/abc",
+    ])
+      expect(pathOn(RELAY_WRITES, target)).toBe(false)
+  })
+
+  test("shares no route with the reads, which stay GET-only", () => {
+    expect(
+      RELAY_WRITES.filter((route) => (RELAY_GETS as readonly string[]).includes(route)),
+    ).toEqual([])
+    for (const route of RELAY_WRITES) expect(relayAllowed("POST", route)).toBe(false)
+  })
+})
+
+describe("the Inbox cards a relayed answer may reach", () => {
+  test("are exactly the kinds whose poster carries out the answer, A to Z", () => {
+    expect([...RELAY_ANSWER_KINDS]).toEqual([
+      "ask",
+      "budget",
+      "draft",
+      "schema",
+      "ship",
+      "slack",
+      "ticket",
+      "update",
+    ])
+  })
+
+  test("leave every Approve the Mac carries out itself, a delete and a secret ask on the Mac", () => {
+    for (const kind of ["accept", "apps", "delete", "grant", "secret"])
+      expect((RELAY_ANSWER_KINDS as readonly string[]).includes(kind)).toBe(false)
   })
 })

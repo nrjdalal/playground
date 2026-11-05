@@ -15,7 +15,7 @@ export const RELAY_TIMEOUT_MS = 25_000
 export const RELAY_HEARTBEAT_MS = 15_000
 export const RELAY_SILENT_MS = 45_000
 
-// The dashboard's reads the relay carries, A to Z, every one a GET: no first-run or onboarding route (requireThisMachine is the only guard on the passwordless sign-in), no write, and no route on the never-from-Yard list. A write never goes here: it takes its own list, checked with the paired key by requireSignedWrite in mac.ts.
+// The dashboard's reads the relay carries, A to Z, every one a GET: no first-run or onboarding route (requireThisMachine is the only guard on the passwordless sign-in), no write, and no route on the never-from-Yard list. A write never goes here: it takes RELAY_WRITES, checked with the paired key by requireSignedWrite in mac.ts.
 export const RELAY_GETS = [
   "/api/health",
   "/api/v1/agents",
@@ -42,15 +42,46 @@ export const RELAY_GETS = [
   "/api/v1/workers/:sessionId/transcript",
 ] as const
 
+// The dashboard's writes the relay carries, A to Z, every one a POST the owner's paired key signs: the composer's send, an Inbox card's answer (its Archive among them), and Later's schedule and Done's dismiss. No first-run, onboarding, delete, secret or settings route, and no route on the never-from-Yard list.
+export const RELAY_WRITES = [
+  "/api/v1/inbox/:id/answer",
+  "/api/v1/inbox/:id/schedule",
+  "/api/v1/inbox/dismiss",
+  "/api/v1/messages",
+] as const
+
+// The Inbox cards a relayed answer may reach, by their kind (a decision's preview type, else draft or update), A to Z: each one whose poster carries out the answer. Every other kind stays on the Mac, one added later included: an Approve the Mac carries out itself on its own settings and permissions (an extension accept, an apps change, a grant), a delete, and a secret ask, whose value goes to its sink through its own Submit alone.
+export const RELAY_ANSWER_KINDS = [
+  "ask",
+  "budget",
+  "draft",
+  "schema",
+  "ship",
+  "slack",
+  "ticket",
+  "update",
+] as const
+
+// Each route as the pattern its path matches, made once per list.
+const patterns = new WeakMap<readonly string[], RegExp[]>()
+const patternsOf = (routes: readonly string[]): RegExp[] => {
+  let made = patterns.get(routes)
+  if (!made) {
+    made = routes.map(
+      (route) => new RegExp(`^${route.replace(/:[a-zA-Z]+/g, "[A-Za-z0-9._~-]+")}$`),
+    )
+    patterns.set(routes, made)
+  }
+  return made
+}
+
 // Pure: whether a target's path, its query aside, is one of routes as written, with no dot segment, encoded slash or backslash that a server might read as another path.
 export function pathOn(routes: readonly string[], target: string): boolean {
   if (!target.startsWith("/")) return false
   const path = target.split("?")[0] ?? ""
   if (/%2f|%5c|\\/i.test(path) || path.split("/").some((part) => part === "." || part === ".."))
     return false
-  return routes.some((route) =>
-    new RegExp(`^${route.replace(/:[a-zA-Z]+/g, "[A-Za-z0-9._~-]+")}$`).test(path),
-  )
+  return patternsOf(routes).some((pattern) => pattern.test(path))
 }
 
 // Pure: whether the relay carries a request: a GET on RELAY_GETS.

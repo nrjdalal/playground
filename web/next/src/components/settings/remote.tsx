@@ -89,7 +89,7 @@ function MacRemote() {
         </EmptyHeader>
       </Empty>
     )
-  const { key, pending } = data
+  const { audit, key, pending } = data
   return (
     <>
       {key || pending ? (
@@ -153,6 +153,24 @@ function MacRemote() {
             </EmptyDescription>
           </EmptyHeader>
         </Empty>
+      )}
+      {audit.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <h3 className="text-muted-foreground text-xs font-medium">Last writes from Yard</h3>
+          <ul aria-label="Last writes from Yard" className="text-muted-foreground text-xs">
+            {audit.map((line, index) => (
+              <li key={`${line.at}-${index}`} className="truncate">
+                {relativeTime(line.at, now)} · <span className="font-mono">{line.path}</span> ·{" "}
+                {line.status} ·{" "}
+                {line.fingerprint ? (
+                  <span className="font-mono">{line.fingerprint}</span>
+                ) : (
+                  "a key not paired"
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       <ConfirmDialog
         open={revoking}

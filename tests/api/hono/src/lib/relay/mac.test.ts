@@ -1,4 +1,7 @@
 import { describe, expect, spyOn, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 // The router's auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets; any secret serves requests that carry no session. Set before the router loads.
 process.env.BETTER_AUTH_SECRET ||= "relay-mac-test-secret-not-for-use-anywhere"
@@ -6,10 +9,13 @@ const { answerRelay, CONNECT_MS, RECYCLE_MS, requireRelay, requireSignedWrite, s
   await import("../../../../../../api/hono/src/lib/relay/mac")
 const { keyIdOf, pairKeySchema, signedBytes } =
   await import("../../../../../../packages/message/src/index")
-const { RELAY_MAX_AGE_MS } = await import("../../../../../../api/hono/src/lib/relay/protocol")
+const { RELAY_ANSWER_KINDS, RELAY_MAX_AGE_MS } =
+  await import("../../../../../../api/hono/src/lib/relay/protocol")
 const { dashboardRouter } = await import("../../../../../../api/hono/src/routers/dashboard")
 const { errorHandler } = await import("../../../../../../api/hono/src/lib/error")
 const { Hono } = await import("../../../../../../api/hono/node_modules/hono")
+const { isRelayed } = await import("../../../../../../api/hono/src/lib/relay/relayed")
+const { auditLog } = await import("../../../../../../api/hono/src/lib/relay/audit")
 
 const NOW = new Date("2026-11-05T01:00:00.000Z")
 const ID = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
@@ -306,6 +312,7 @@ describe("a pair request from the relay", () => {
       {
         ...deps(dispatch),
         keys: {
+          paired: async () => null,
           offer: async (pair) => {
             offered.push(pair)
             return {
@@ -334,6 +341,7 @@ describe("a pair request from the relay", () => {
         offered.push(pair)
         return null as never
       },
+      paired: async () => null,
     }
     const old = new Date(NOW.getTime() - RELAY_MAX_AGE_MS).toISOString()
     for (const over of [{ login: "someone" }, { at: old }]) {
@@ -349,6 +357,193 @@ describe("a pair request from the relay", () => {
       expect(answer?.status).toBe(403)
     }
     expect(offered).toEqual([])
+  })
+})
+
+describe("a write from Yard through answerRelay", () => {
+  const paired = {
+    fingerprint: browser.fingerprint,
+    id: browser.id,
+    key: browser.key,
+    login: "owner",
+    pairedAt: NOW.toISOString(),
+  }
+  // what answerRelay was handed to run and to audit, with the paired key in place
+  const rig = (key: typeof paired | null = paired) => {
+    const ran: {
+      body: string
+      cookie: string | null
+      marked: boolean
+      method: string
+      path: string
+      type: string | null
+    }[] = []
+    const audited: unknown[] = []
+    const run = {
+      ...deps(async (request: Request) => {
+        const url = new URL(request.url)
+        ran.push({
+          body: await request.text(),
+          cookie: request.headers.get("cookie"),
+          marked: isRelayed(request),
+          method: request.method,
+          path: `${url.pathname}${url.search}`,
+          type: request.headers.get("content-type"),
+        })
+        return new Response('{"data":{"sent":true}}', {
+          headers: { "content-type": "application/json" },
+          status: 201,
+        })
+      }),
+      audit: { append: async (line: unknown) => void audited.push(line) },
+      keys: { offer: async () => null as never, paired: async () => key },
+    }
+    return { audited, ran, run }
+  }
+
+  test("runs a write the paired key signed in process, marked, as the local owner's POST with its body, and audits it", async () => {
+    const { audited, ran, run } = rig()
+    const raw = await signed(browser.privateKey, browser.id)
+    const answer = await answerRelay(raw, run)
+    expect([answer?.status, answer && words(answer.body)]).toEqual([201, { data: { sent: true } }])
+    expect(ran).toEqual([
+      {
+        body: JSON.stringify({ text: "hello" }),
+        cookie: "session=fake",
+        marked: true,
+        method: "POST",
+        path: "/api/v1/messages",
+        type: "application/json",
+      },
+    ])
+    expect(audited).toEqual([
+      {
+        at: NOW.toISOString(),
+        fingerprint: browser.fingerprint,
+        path: "/api/v1/messages",
+        status: 201,
+      },
+    ])
+  })
+
+  test("a write refused runs nothing and is audited with its refusal, the key named only when it is the paired one", async () => {
+    const other = await browserKey()
+    const { audited, ran, run } = rig()
+    const offList = await answerRelay(
+      await signed(browser.privateKey, browser.id, { path: "/api/v1/remote/revoke" }),
+      run,
+    )
+    const unpaired = await answerRelay(await signed(other.privateKey, other.id), run)
+    const revoked = rig(null)
+    const afterRevoke = await answerRelay(await signed(browser.privateKey, browser.id), revoked.run)
+    expect([offList?.status, unpaired?.status, afterRevoke?.status]).toEqual([403, 403, 403])
+    expect([ran, revoked.ran]).toEqual([[], []])
+    expect([...audited, ...revoked.audited]).toEqual([
+      {
+        at: NOW.toISOString(),
+        fingerprint: browser.fingerprint,
+        path: "/api/v1/remote/revoke",
+        status: 403,
+      },
+      { at: NOW.toISOString(), fingerprint: null, path: "/api/v1/messages", status: 403 },
+      { at: NOW.toISOString(), fingerprint: null, path: "/api/v1/messages", status: 403 },
+    ])
+  })
+
+  test("a test frame's write shows in the audit list the Remote section reads", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "relay-mac-audit-"))
+    try {
+      const audit = auditLog({ dir: () => dir })
+      const { run } = rig()
+      await answerRelay(await signed(browser.privateKey, browser.id), { ...run, audit })
+      expect(await audit.recent()).toEqual([
+        {
+          at: NOW.toISOString(),
+          fingerprint: browser.fingerprint,
+          path: "/api/v1/messages",
+          status: 201,
+        },
+      ])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("an answer to a card whose kind is off the relay's list, a secret ask's and one added later among them, is refused by the card's kind before it runs", async () => {
+    const item = "0b9c6f1e-1111-4111-8111-000000000001"
+    const path = `/api/v1/inbox/${item}/answer`
+    const asked: string[] = []
+    for (const kind of [
+      "accept",
+      "apps",
+      "delete",
+      "grant",
+      "secret",
+      "a-kind-added-later",
+      null,
+    ]) {
+      const { audited, ran, run } = rig()
+      const answer = await answerRelay(
+        await signed(browser.privateKey, browser.id, {
+          body: JSON.stringify({ action: "approve", value: "kept-off-yard" }),
+          path,
+        }),
+        {
+          ...run,
+          kindOf: async (id: string) => {
+            asked.push(id)
+            return kind
+          },
+        },
+      )
+      expect([kind, answer?.status, answer && words(answer.body).error.message, ran]).toEqual([
+        kind,
+        403,
+        "Answer it on the Mac",
+        [],
+      ])
+      expect(audited).toEqual([
+        { at: NOW.toISOString(), fingerprint: browser.fingerprint, path, status: 403 },
+      ])
+    }
+    expect(new Set(asked)).toEqual(new Set([item]))
+  })
+
+  test("an answer to a card whose kind is on the list runs, and one whose card cannot be read is refused", async () => {
+    const path = "/api/v1/inbox/0b9c6f1e-1111-4111-8111-000000000001/answer"
+    for (const kind of RELAY_ANSWER_KINDS) {
+      const listed = rig()
+      const answer = await answerRelay(await signed(browser.privateKey, browser.id, { path }), {
+        ...listed.run,
+        kindOf: async () => kind,
+      })
+      expect([kind, answer?.status, listed.ran.length]).toEqual([kind, 201, 1])
+    }
+    const plain = rig()
+    const ran = await answerRelay(await signed(browser.privateKey, browser.id, { path }), {
+      ...plain.run,
+      kindOf: async () => "ask",
+    })
+    const unread = rig()
+    const refused = await answerRelay(await signed(browser.privateKey, browser.id, { path }), {
+      ...unread.run,
+      kindOf: async () => {
+        throw new Error("the database is away")
+      },
+    })
+    expect([ran?.status, plain.ran.length, refused?.status, unread.ran]).toEqual([201, 1, 403, []])
+  })
+
+  test("a frame that reads as no write runs nothing and leaves no line", async () => {
+    const { audited, ran, run } = rig()
+    const raw = JSON.parse(await signed(browser.privateKey, browser.id))
+    for (const broken of [
+      "not json",
+      JSON.stringify({ ...raw, method: "DELETE" }),
+      JSON.stringify({ ...raw, extra: 1 }),
+    ])
+      expect(await answerRelay(broken, run)).toBeNull()
+    expect([ran, audited]).toEqual([[], []])
   })
 })
 

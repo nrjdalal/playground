@@ -10,6 +10,7 @@ import { apiReference, serveScalarBundle } from "@/lib/api-reference"
 import { baseApp } from "@/lib/base-app"
 import { keepSweeping } from "@/lib/dashboard/attachments"
 import { readsLive } from "@/lib/dashboard/fixture"
+import { getItem } from "@/lib/dashboard/inbox"
 import { startSdkProbe } from "@/lib/dashboard/sdk"
 import { globalErrorResponses } from "@/lib/error"
 import { DB_TIMEOUT_MS, healthData } from "@/lib/health"
@@ -292,7 +293,7 @@ startSdkProbe()
 // Yard's mentions of the owner into the Inbox, once a minute, when YARD_API_URL names a hosted Yard.
 startYardPoll(db, yardClient)
 
-// The relay to the hosted Yard, on a stack that reads this Mac alone, never a fixture's: with YARD_API_URL set and the Keychain token, the owner's browser on Yard reads this dashboard through one socket this API dials out, each read run here as the one local owner.
+// The relay to the hosted Yard, on a stack that reads this Mac alone, never a fixture's: with YARD_API_URL set and the Keychain token, the owner's browser on Yard reads this dashboard through one socket this API dials out, and sends the writes its paired key signs, each run here as the one local owner.
 if (env.YARD_API_URL && readsLive()) {
   const api = env.YARD_API_URL
   let made: Promise<string> | null = null
@@ -316,6 +317,12 @@ if (env.YARD_API_URL && readsLive()) {
       return response
     },
     login: async (token) => (await yardClient(api, token).me()).login,
+    // a card's kind by its id alone, never its #ref, as its answer route reads it: a decision's preview type, else draft or update
+    kindOf: async (id) => {
+      const item = await getItem(db, id)
+      if (item?.id !== id) return null
+      return item.kind === "decision" ? item.preview.type : item.kind
+    },
     token: () => keychain().read(),
   })
 }

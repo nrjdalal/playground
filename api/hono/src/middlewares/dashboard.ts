@@ -4,9 +4,11 @@ import { getConnInfo } from "hono/bun"
 import { createMiddleware } from "hono/factory"
 
 import { ApiError } from "@/lib/error"
+import { isRelayed } from "@/lib/relay/relayed"
 
-// A WebSocket handshake or a form post is not subject to CORS, so a page on another localhost port could send one with the session cookie; only the dashboard's own web origin may.
+// A WebSocket handshake or a form post is not subject to CORS, so a page on another localhost port could send one with the session cookie; only the dashboard's own web origin may, and a write from Yard that answerRelay marked in process once the paired key's signature checked out.
 export const requireTrustedOrigin = createMiddleware(async (c, next) => {
+  if (isRelayed(c.req.raw)) return next()
   const origin = c.req.header("origin")
   if (!origin || !env.HONO_TRUSTED_ORIGINS.includes(origin)) {
     throw new ApiError(403, "FORBIDDEN", "Untrusted origin")
@@ -16,8 +18,9 @@ export const requireTrustedOrigin = createMiddleware(async (c, next) => {
 
 const LOOPBACK_RE = /^(?:127(?:\.\d{1,3}){3}|::1|::ffff:127(?:\.\d{1,3}){3})$/
 
-// The API binds loopback, and a dashboard write checks its peer as well, so a HONO_HOSTNAME widened by mistake still takes no write from the network. A peer it cannot read (no Bun server behind the request) is refused.
+// The API binds loopback, and a dashboard write checks its peer as well, so a HONO_HOSTNAME widened by mistake still takes no write from the network. A peer it cannot read (no Bun server behind the request) is refused, but for the write from Yard answerRelay marked in process, which has none.
 export const requireLoopback = createMiddleware(async (c, next) => {
+  if (isRelayed(c.req.raw)) return next()
   let address: string | undefined
   try {
     address = getConnInfo(c).remote.address

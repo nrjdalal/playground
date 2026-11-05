@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 
 import { type Bus, createHub, type Hub } from "../../../../../../api/hono/src/lib/relay/hub"
 
@@ -220,5 +220,81 @@ describe("the relay's hub across instances", () => {
     holder.answer("u1", answer(sent, "yours"))
     const got = await forwarded
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("yours")
+  })
+})
+
+// A write frame as the owner's browser signs it: its body here holds a word no log or store may keep.
+const BODY = JSON.stringify({ text: "body-kept-nowhere" })
+const WRITE = {
+  at: AT.toISOString(),
+  body: BODY,
+  id: ID,
+  keyId: "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+  login: "owner",
+  method: "POST" as const,
+  path: "/api/v1/messages",
+  sig: "c2lnbmVk",
+  type: "write" as const,
+}
+
+// Every console line the hub writes while run runs, and run's result.
+const logged = async <T>(run: () => Promise<T>) => {
+  const spies = (["debug", "error", "info", "log", "warn"] as const).map((level) =>
+    spyOn(console, level).mockImplementation(() => {}),
+  )
+  try {
+    const result = await run()
+    return {
+      lines: spies.flatMap((spy) => spy.mock.calls.map((call) => call.map(String).join(" "))),
+      result,
+    }
+  } finally {
+    for (const spy of spies) spy.mockRestore()
+  }
+}
+
+describe("a write through the hub", () => {
+  test("reaches the owner's Mac as the browser signed it, and its answer comes back", async () => {
+    const hub = createHub({ id: () => "not-used", now: () => AT })
+    const socket = mac()
+    hub.attach("u1", socket)
+    const written = hub.write("u1", WRITE)
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([WRITE])
+    hub.answer("u1", answer(ID, "sent"))
+    const got = await written
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("sent")
+  })
+
+  test("keeps no body once it is answered: nothing waits, and no log line holds it", async () => {
+    const hub = createHub({ now: () => AT })
+    const release = hub.attach("u1", {
+      send: (data: string) => setTimeout(() => hub.answer("u1", answer(JSON.parse(data).id)), 1),
+    })
+    const { lines } = await logged(() => hub.write("u1", WRITE))
+    release()
+    expect(hub.busy()).toBe(false)
+    expect(lines.filter((line) => line.includes("body-kept-nowhere"))).toEqual([])
+    const offline = createHub()
+    const { lines: refused, result } = await logged(() => offline.write("u1", WRITE))
+    expect([
+      result,
+      offline.busy(),
+      refused.filter((line) => line.includes("body-kept-nowhere")),
+    ]).toEqual([{ type: "offline" }, false, []])
+  })
+
+  test("on another instance reaches the Mac's socket and comes back, the body in transit alone", async () => {
+    const { holder, other } = instances({ now: () => AT })
+    const frames: unknown[] = []
+    holder.attach("u1", {
+      send: (data: string) => {
+        frames.push(JSON.parse(data))
+        setTimeout(() => holder.answer("u1", answer(ID, "sent")), 5)
+      },
+    })
+    const got = await other.write("u1", WRITE)
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("sent")
+    expect(frames).toEqual([WRITE])
+    expect(other.busy()).toBe(false)
   })
 })
