@@ -1619,6 +1619,13 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   // Archive holds what he archived, kept out of items, and what was set aside before Archive kept items open
   const archived = [...(data?.archived ?? []), ...setAside].sort((a, b) => b.ref - a.ref)
   const snoozed = data?.snoozed ?? []
+  // the shelves under the open items, each row's label, icon, cards and place, read by the accordion and by a link to a shelved card
+  const shelves = [
+    ["In progress", RiProgress4Line, progress, "progress"],
+    ["Later", RiZzzLine, snoozed, "snoozed"],
+    ["Archive", RiArchive2Line, archived, "archived"],
+    ["Done", RiCheckDoubleLine, done, "done"],
+  ] as const
   const { held, rows } = pinnedView(shown, order)
   const pill = usePill(held.length)
   // the look before this one and the newest change as this one began: a card changed between the two reads Updated until he looks away and back, while one that changes as he looks shows in place
@@ -1683,14 +1690,9 @@ export function Inbox({ viewing }: { viewing: boolean }) {
       return false
     }
     // a card on a shut shelf (an answer's chip names one) opens its shelf first, so the next try finds its row
-    const shelf = (
-      [
-        ["In progress", progress],
-        ["Snoozed", snoozed],
-        ["Archived", archived],
-        ["Done", done],
-      ] as const
-    ).find(([, list]) => list.some((item) => needsYouAnchor(item.id) === anchor))?.[0]
+    const shelf = shelves.find(([, , list]) =>
+      list.some((item) => needsYouAnchor(item.id) === anchor),
+    )?.[0]
     if (shelf && !shelvesOpen.includes(shelf)) {
       setShelvesOpen((keys) => [...keys, shelf])
       return false
@@ -1709,12 +1711,9 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     .filter((item) => item.readAt === null && (item.kind === "update" || item.status === "open"))
     .map((item) => item.id)
   const clearing = unreadIds.length
-  const shelfSizes: Record<string, number> = {
-    Archive: archived.length,
-    Done: done.length,
-    "In progress": progress.length,
-    Later: snoozed.length,
-  }
+  const shelfSizes: Record<string, number> = Object.fromEntries(
+    shelves.map(([label, , shelf]) => [label, shelf.length]),
+  )
   const actions = (pill || rows.length > 0) && (
     <div className="absolute top-1.5 right-[calc(var(--pane-x,0px)+1.75rem)] flex items-center gap-2">
       {pill && <NewPill ref={pillButton} count={pill.count} leaving={pill.leaving} onTake={take} />}
@@ -1820,14 +1819,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
           </AccordionContent>
         </AccordionItem>
         <div ref={below}>
-          {(
-            [
-              ["In progress", RiProgress4Line, progress, "progress"],
-              ["Later", RiZzzLine, snoozed, "snoozed"],
-              ["Archive", RiArchive2Line, archived, "archived"],
-              ["Done", RiCheckDoubleLine, done, "done"],
-            ] as const
-          ).map(([label, Icon, shelf, place]) => (
+          {shelves.map(([label, Icon, shelf, place]) => (
             <AccordionItem
               key={label}
               value={label}
