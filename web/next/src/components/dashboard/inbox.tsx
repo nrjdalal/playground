@@ -1694,6 +1694,19 @@ export function Inbox({ viewing }: { viewing: boolean }) {
       setListOpen(true)
       return false
     }
+    // a card on a shut shelf (an answer's chip names one) opens its shelf first, so the next try finds its row
+    const shelf = (
+      [
+        ["In progress", progress],
+        ["Snoozed", snoozed],
+        ["Archived", archived],
+        ["Done", done],
+      ] as const
+    ).find(([, list]) => list.some((item) => needsYouAnchor(item.id) === anchor))?.[0]
+    if (shelf && !shelvesOpen.includes(shelf)) {
+      setShelvesOpen((keys) => [...keys, shelf])
+      return false
+    }
     const row = document.getElementById(anchor)
     row?.scrollIntoView({ block: "center" })
     // a row in a hidden tab cannot scroll yet, so it is tried again once its tab shows

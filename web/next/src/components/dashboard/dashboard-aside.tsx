@@ -287,9 +287,10 @@ export function DashboardAside({ children }: { children: ReactNode }) {
     setTab("inbox")
     setSide("inbox")
   }, [at])
-  // a link to an inbox item (a Waiting on your inbox badge, Playground's row) opens the Inbox tab, where the list scrolls to it
+  // a link to an inbox item (a Waiting on your inbox badge, Playground's row, an answer's chip) opens the Inbox tab, where the list scrolls to it, a shelved one's included
   useNeedsYouTarget(Boolean(inbox.data), (anchor) => {
-    if (inboxTarget(anchor, inbox.data?.items ?? [])) {
+    const { archived = [], items = [], snoozed = [] } = inbox.data ?? {}
+    if (inboxTarget(anchor, [...items, ...archived, ...snoozed])) {
       setTab("inbox")
       setSide("inbox")
     }

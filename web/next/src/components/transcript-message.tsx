@@ -1,7 +1,7 @@
 "use client"
 
 import { markerOf } from "@packages/config/threads"
-import { RiChatThreadLine } from "@remixicon/react"
+import { RiChatThreadLine, RiInboxLine } from "@remixicon/react"
 import { cn } from "cn"
 import Link from "next/link"
 import type { ReactNode } from "react"
@@ -11,6 +11,8 @@ import { TranscriptMarkdown, type TranscriptSurface } from "@/components/transcr
 import { Badge } from "@/components/ui/badge"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Message, MessageContent } from "@/components/ui/message"
+import { answerChipOf } from "@/lib/answer-chip"
+import { targetNeedsYou } from "@/lib/needs-you"
 import { threadHref } from "@/lib/threads"
 import { fullTime, messageTime } from "@/lib/time"
 
@@ -33,6 +35,8 @@ export function TranscriptBubble({
 }) {
   const mine = variant === "default"
   const marker = plain ? { id: null, text } : markerOf(text)
+  // an Inbox answer line reads as one chip, your note after it, rather than its JSON
+  const answer = plain ? null : answerChipOf(marker.text)
   return (
     <Bubble
       align={mine ? "end" : "start"}
@@ -51,7 +55,22 @@ export function TranscriptBubble({
             {marker.id}
           </Badge>
         ) : null}
-        <TranscriptMarkdown on={mine ? "muted" : "none"}>{marker.text}</TranscriptMarkdown>
+        {answer ? (
+          <Badge
+            variant="outline"
+            className={cn("max-w-full", answer.note && "mb-1.5")}
+            render={<button type="button" onClick={() => targetNeedsYou(answer.id)} />}
+          >
+            <RiInboxLine data-icon="inline-start" />
+            <span className="font-mono">{answer.ref}</span>
+            <span className="truncate">· {answer.label}</span>
+          </Badge>
+        ) : null}
+        {answer?.note ? (
+          <TranscriptMarkdown on={mine ? "muted" : "none"}>{answer.note}</TranscriptMarkdown>
+        ) : answer ? null : (
+          <TranscriptMarkdown on={mine ? "muted" : "none"}>{marker.text}</TranscriptMarkdown>
+        )}
       </BubbleContent>
     </Bubble>
   )
