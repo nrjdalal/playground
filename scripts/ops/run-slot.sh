@@ -836,7 +836,7 @@ slot_open() {
 # counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither
 lanes_open() {
   local idle swap tps mbs load need="" verdict=shut why="" seen free level
-  read -r idle swap tps mbs <<< "$(gauges)"
+  read -r idle swap tps mbs _ <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
   case "$idle" in
     -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
@@ -955,29 +955,30 @@ disk_rate() {
 SWAPINS_MAX=100
 # what a look says once a run while another takes the first reading of the gauges
 BUSY_TOLD="run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands"
-# `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s>`: the CPU's idle share in top's second sample (top -l 2 -n 0, as spawn.sh's load gate reads it), the swap-ins a second in
+# `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s> <the last reading's swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0, as spawn.sh's load gate reads it), the swap-ins a second in
 # vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them) and disk_rate's two figures, which lanes lines log and no verdict reads (a bound on disk load waits on a day of them), each - when unread; every look shares one reading through run-slot.gauges
-# (`<epoch> <idle> <swapins> <tps> <MB/s>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and some 27 waiters each look every 15 s;
+# (`<epoch> <idle> <swapins> <tps> <MB/s> <last swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and some 27 waiters each look every 15 s;
 # one look refreshes it, under gauges_lock, while the rest keep the reading they have, or `busy busy` when there is none yet, since without the
 # lock every look that found it stale ran its own top (3 Nov, 10:53Z: 16 to 23 tops at once from 26 waiters, and load1 56.8); the refresher
 # removes the lock only while it still carries the mtime it took, so a refresher that ran past a takeover leaves the new holder's lock
 gauges() {
-  local now cached= idle= swap= tps= mbs= took lock="$OPS/run-slot.gauges.lock"
+  local now cached= idle= swap= tps= mbs= last= took lock="$OPS/run-slot.gauges.lock"
   now=$(date +%s)
-  { read -r cached idle swap tps mbs < "$OPS/run-slot.gauges"; } 2>/dev/null
+  { read -r cached idle swap tps mbs last < "$OPS/run-slot.gauges"; } 2>/dev/null
   case "$cached" in ''|*[!0-9]*) cached=0 ;; esac
   if [ $((now - cached)) -ge 10 ]; then
     if took=$(gauges_lock "$now"); then
       idle=$(top -l 2 -n 0 2>/dev/null | sed -nE 's/^CPU usage:.* ([0-9.]+)% idle.*/\1/p' | awk 'END { if (NR == 2) print }')
+      last=$swap
       swap=$(swapin_rate)
       read -r tps mbs <<< "$(disk_rate)"
-      printf '%s %s %s %s %s\n' "$now" "${idle:--}" "${swap:--}" "${tps:--}" "${mbs:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
+      printf '%s %s %s %s %s %s\n' "$now" "${idle:--}" "${swap:--}" "${tps:--}" "${mbs:--}" "${last:--}" > "$OPS/run-slot.gauges.$$" 2>/dev/null && mv -f "$OPS/run-slot.gauges.$$" "$OPS/run-slot.gauges" 2>/dev/null
       [ "$(mtime "$lock")" = "$took" ] && rmdir "$lock" 2>/dev/null
     elif [ "$cached" -eq 0 ]; then
       idle=busy swap=busy
     fi
   fi
-  echo "${idle:--} ${swap:--} ${tps:--} ${mbs:--}"
+  echo "${idle:--} ${swap:--} ${tps:--} ${mbs:--} ${last:--}"
 }
 # takes the gauges' refresh lock at epoch $1, or one aged 30 s or more by its mtime, which a refresher killed mid-refresh left (a refresh
 # takes about 2 s), and prints the mtime it took the lock at (scripts/ops/README.md says why two takeovers together are harmless)
@@ -992,24 +993,25 @@ gauges_lock() {
 # macOS's memory reading $1: level (the free share) or vm_pressure_level (1 normal, 2 warn, 4 critical)
 memstat() { sysctl -n "kern.memorystatus_$1" 2>/dev/null | tr -cd 0-9; }
 # memory room for a second suite: macOS's free share at 40% or more, its pressure level normal (1; 2 is warn, 4 critical) and swap-ins under SWAPINS_MAX a
-# second; an unread reading (Claude Code's sandbox refuses the first two) leaves no room, said once a run on stderr
+# second in this reading or the last, since a one-second sample spikes and falls back (5 Nov, 06:19 to 07:45Z: all 24 memory shuts came at pressure 1
+# with 70 to 80% free, from readings such as 128, 242 and 1116 between 0, 8, 20 and 44); an unread reading (Claude Code's sandbox refuses the first two) leaves no room, said once a run on stderr
 MEM_TOLD="${TMPDIR:-/tmp}/run-slot-mem-told.$$"
 # says line $2 once a run on stderr, a file per kind ($1) marking it, since a look reads the gauges in a subshell
 told() { [ -e "$MEM_TOLD-$1" ] || { echo "$2" >&2; : > "$MEM_TOLD-$1"; }; }
 mem_unread() { told "$1" "run-slot.sh: cannot read the memory (sysctl kern.memorystatus_*), so $2"; }
 mem_ok() {
-  local free level swap
+  local free level swap last
   free=$(memstat level); level=$(memstat vm_pressure_level)
   if [ -z "$free" ] || [ -z "$level" ]; then
     mem_unread suite "no second suite runs beside this one"
     return 1
   fi
-  swap=$(gauges | cut -d' ' -f2)
+  read -r _ swap _ _ last <<< "$(gauges)"
   case "$swap" in
     -) told swap "run-slot.sh: cannot read the swap-ins (vm_stat -c 2 1), so no second suite runs beside this one"; return 1 ;;
     busy) told busy "$BUSY_TOLD"; return 1 ;;
   esac
-  [ "$free" -ge 40 ] && [ "$level" -eq 1 ] && [ "$swap" -lt "$SWAPINS_MAX" ]
+  [ "$free" -ge 40 ] && [ "$level" -eq 1 ] && { [ "$swap" -lt "$SWAPINS_MAX" ] || ! [ "$last" -ge "$SWAPINS_MAX" ] 2>/dev/null; }
 }
 
 # Dictation misses come from input delay under load, so every command runs under nice 10, and the

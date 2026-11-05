@@ -13,6 +13,21 @@ const look = (m: ReturnType<typeof machine>) => {
   return { err: run.stderr.toString(), slots: run.stdout.toString() }
 }
 const slots = (setup: Setup) => look(machine(setup)).slots
+// a machine whose cached reading is past its 10 s with `last` swap-ins a second, so its next look reads vm_stat again with that as the reading before
+const after = (setup: Setup, last: number) => {
+  const m = machine(setup)
+  writeFileSync(join(m.ops, "run-slot.gauges"), `0 80 ${last} 120 3.50 -\n`)
+  return m
+}
+// the fake vm_stat's last second now reads `n` swap-ins, and the cached reading is past its 10 s, so the next look reads it
+const swapins = (m: ReturnType<typeof machine>, n: number) => {
+  writeFileSync(
+    join(m.bin, "vm_stat"),
+    `#!/bin/bash\necho "Mach Virtual Memory Statistics: (page size of 16384 bytes)"\necho "    free  swapins swapouts"\necho "  203349  4049933   116968"\necho "  194438  ${n}        0"\n`,
+  )
+  const path = join(m.ops, "run-slot.gauges")
+  writeFileSync(path, readFileSync(path, "utf8").replace(/^\d+/, "0"))
+}
 // run-slot.runs.log's lanes lines
 const lanes = (m: ReturnType<typeof machine>) => {
   const path = join(m.ops, "run-slot.runs.log")
@@ -74,8 +89,8 @@ describe("from load1 30 up to 45 the CPU must be 40% idle", () => {
     expect(slots({ idle: 39.9, load1: 30 })).toBe("1\n")
   })
 
-  test("idle 56% at load1 31 with swap-ins at 100/s shuts them, as mem_ok reads it", () => {
-    expect(slots({ idle: 56, load1: 31, swapins: 100 })).toBe("1\n")
+  test("idle 56% at load1 31 with swap-ins at 100/s two readings in a row shuts them, as mem_ok reads it", () => {
+    expect(look(after({ idle: 56, load1: 31, swapins: 100 }, 100)).slots).toBe("1\n")
   })
 
   // PG-704's 08:47Z reading on 3 Nov, its runs waiting on paging: 176M of this Mac's 24 GB unused, a free share under 1%, so mem_ok shuts it
@@ -104,9 +119,23 @@ describe("under load1 30 the CPU must be 40% idle", () => {
 
 // spawn.sh's swapins() reads vm_stat's swap-ins a second, and a GLM session starts under 100/s
 describe("memory shuts slots 2 to 4 as mem_ok reads it", () => {
-  test("swap-ins at 100/s shut them, 99/s leave them open", () => {
-    expect(slots({ swapins: 100 })).toBe("1\n")
-    expect(slots({ swapins: 99 })).toBe("4\n")
+  test("swap-ins at 100/s two readings in a row shut them, and one reading, or 99/s after 100/s, leaves them open", () => {
+    expect(slots({ swapins: 100 })).toBe("4\n")
+    expect(look(after({ swapins: 100 }, 100)).slots).toBe("1\n")
+    expect(look(after({ swapins: 99 }, 100)).slots).toBe("4\n")
+  })
+
+  // 5 Nov, 06:19 to 07:45Z: all 24 memory shuts came at pressure 1 with 70 to 80% free, from one-second samples such as 128, 242 and 1116 between 0, 8, 20 and 44
+  test("a reading of 128 swap-ins then one under 100 leave them open on both, and two in a row over 100 shut them with why=mem", async () => {
+    const m = machine({ swapins: 128 })
+    expect(look(m).slots).toBe("4\n")
+    swapins(m, 44)
+    expect(look(m).slots).toBe("4\n")
+    const high = after({ idle: 80, load1: 18, swapins: 242 }, 128)
+    expect(await high.runs("worker-x")).toBe(true)
+    expect(lanes(high)).toEqual([
+      expect.stringMatching(/ shut why=mem idle=80% load1=18\.00 free=80% pressure=1 swapins=242 /),
+    ])
   })
 
   test("a free share under 40% shuts them, as does pressure over normal", () => {
