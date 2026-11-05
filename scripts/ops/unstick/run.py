@@ -428,7 +428,7 @@ def stall(live, state):
 # dispatcher, 8 Oct (load 80 on 15 cores, the dashboard 5.7s): at most 2 heavy jobs at once (3 while slot 3 is open). A heavy job is a full suite, a
 # build or type check, or a dev stack other than the live dashboard's. slot_alerts says which of them raise the outside-slot alert.
 HEAVY = re.compile(r"(NODE_ENV=test bun test|(^|/)bun test tests|bun run test(:skills)?\b|turbo run (build|check-types)|api/hono/src/bin/dev\.ts)")
-# precommit:light runs outside the slots by rule (scripts/ops/README.md), its trace-count test a few seconds long, so nothing under it is a job
+# precommit:light runs outside the slots by rule (scripts/ops/README.md) and its checks (trace-count's test, env-keys' one-package build) take seconds, so nothing under it is a job or counts toward the cap
 PRECOMMIT_LIGHT = re.compile(r"^(\S*/)?bun\s+(\S*/)?packages/scripts/src/precommit-light\.ts(\s|$)")
 
 
