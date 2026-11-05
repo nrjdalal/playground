@@ -42,34 +42,41 @@ export const RELAY_GETS = [
   "/api/v1/workers/:sessionId/transcript",
 ] as const
 
-// The writes that reach an Inbox card, each card's kind checked by the Mac against RELAY_ANSWER_KINDS (`@packages/message`): an answer and Later's schedule name theirs in the path, and Done's dismiss lists its ids in the body.
+// The writes that reach an Inbox card, each card's kind checked by the Mac against RELAY_ANSWER_KINDS (`@packages/message`): an answer and Later's schedule name theirs in the path, Done's dismiss lists its ids in the body, and a message records a reply on each card its text names (`re #iN`).
 export const RELAY_ANSWER = "/api/v1/inbox/:id/answer"
 const RELAY_SCHEDULE = "/api/v1/inbox/:id/schedule"
 const RELAY_DISMISS = "/api/v1/inbox/dismiss"
+const RELAY_MESSAGES = "/api/v1/messages"
 
 const CARD_ROUTES = [RELAY_ANSWER, RELAY_SCHEDULE]
 const DISMISS_ROUTES = [RELAY_DISMISS]
+const MESSAGE_ROUTES = [RELAY_MESSAGES]
 const dismissIds = z.object({ ids: z.array(z.string().min(1)).min(1) })
+const messageText = z.object({ text: z.string() })
 
-// Pure: the Inbox cards a write reaches: the one an answer's or a schedule's path names, every id a dismiss's body lists, none for any other write, or null for a dismiss whose body lists no ids, which the Mac refuses.
-export function cardsOf({ body, path }: { body: string; path: string }): string[] | null {
-  if (pathOn(CARD_ROUTES, path)) return [path.split("?")[0]!.split("/")[4]!]
-  if (!pathOn(DISMISS_ROUTES, path)) return []
+// The words a message names a card by, the API's REPLY_RE (`api/hono/src/lib/dashboard/inbox.ts`), every match read; a test holds the two equal.
+export const REPLY_REFS = /\bre #i(\d{1,9})\b/gi
+
+const parsed = <T>(schema: z.ZodType<T>, body: string): T | null => {
   try {
-    const parsed = dismissIds.safeParse(JSON.parse(body))
-    return parsed.success ? parsed.data.ids : null
+    const read = schema.safeParse(JSON.parse(body))
+    return read.success ? read.data : null
   } catch {
     return null
   }
 }
 
+// Pure: the Inbox cards a write reaches, each by its id or, for a card a message names, its `#iN`: the one an answer's or a schedule's path names, every id a dismiss's body lists, every card a message's text names, none for any other write, or null for a dismiss whose body lists no ids, which the Mac refuses.
+export function cardsOf({ body, path }: { body: string; path: string }): string[] | null {
+  if (pathOn(CARD_ROUTES, path)) return [path.split("?")[0]!.split("/")[4]!]
+  if (pathOn(DISMISS_ROUTES, path)) return parsed(dismissIds, body)?.ids ?? null
+  if (!pathOn(MESSAGE_ROUTES, path)) return []
+  const text = parsed(messageText, body)?.text ?? ""
+  return [...text.matchAll(REPLY_REFS)].map((match) => `#i${Number(match[1])}`)
+}
+
 // The dashboard's writes the relay carries, A to Z, every one a POST the owner's paired key signs: the composer's send, an Inbox card's answer (its Archive among them), and Later's schedule and Done's dismiss. No first-run, onboarding, delete, secret or settings route, and no route on the never-from-Yard list.
-export const RELAY_WRITES = [
-  RELAY_ANSWER,
-  RELAY_SCHEDULE,
-  RELAY_DISMISS,
-  "/api/v1/messages",
-] as const
+export const RELAY_WRITES = [RELAY_ANSWER, RELAY_SCHEDULE, RELAY_DISMISS, RELAY_MESSAGES] as const
 
 // Each route as the pattern its path matches, made once per list.
 const patterns = new WeakMap<readonly string[], RegExp[]>()

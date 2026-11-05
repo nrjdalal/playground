@@ -639,6 +639,62 @@ describe("a write from Yard through answerRelay", () => {
     expect([sent?.status, ran.length, asked]).toEqual([201, 1, []])
   })
 
+  // a message naming a card (`re #iN`) records it replied, so the card stops waiting on the owner: Reply's effect, which takes the same kind check
+  test("a message naming a card whose kind stays on the Mac, or one it cannot read, runs nothing, and one naming a listed card runs", async () => {
+    const write = (text: string) => ({ body: JSON.stringify({ text, to: "dispatcher" }) })
+    for (const kind of [
+      "accept",
+      "apps",
+      "delete",
+      "grant",
+      "secret",
+      "a-kind-added-later",
+      null,
+    ]) {
+      const asked: string[] = []
+      const { audited, ran, run } = rig()
+      const answer = await answerRelay(
+        await signed(browser.privateKey, browser.id, write("re #i3: done, drop it")),
+        {
+          ...run,
+          kindOf: async (key: string) => {
+            asked.push(key)
+            return kind
+          },
+        },
+      )
+      expect([
+        kind,
+        answer?.status,
+        answer && words(answer.body).error.message,
+        ran,
+        asked,
+      ]).toEqual([kind, 403, "Answer it on the Mac", [], ["#i3"]])
+      expect(audited).toEqual([
+        {
+          at: NOW.toISOString(),
+          fingerprint: browser.fingerprint,
+          path: "/api/v1/messages",
+          status: 403,
+        },
+      ])
+    }
+    const second = rig()
+    const named = await answerRelay(
+      await signed(browser.privateKey, browser.id, write("re #i4 first, then RE #i0007 too")),
+      { ...second.run, kindOf: async (key: string) => (key === "#i7" ? "secret" : "ask") },
+    )
+    expect([named?.status, second.ran]).toEqual([403, []])
+    for (const kind of RELAY_ANSWER_KINDS) {
+      const { ran, run } = rig()
+      const answer = await answerRelay(
+        await signed(browser.privateKey, browser.id, write("re #i3: on it")),
+        { ...run, kindOf: async () => kind },
+      )
+      expect([kind, answer?.status, ran.length]).toEqual([kind, 201, 1])
+    }
+  })
+
   test("a write replayed after a fresh start, its id read back from the data folder, never runs", async () => {
     const dir = mkdtempSync(join(tmpdir(), "relay-mac-ids-"))
     try {

@@ -137,8 +137,8 @@ type AnswerDeps = {
   cookie: () => Promise<string>
   dispatch: (request: Request) => Promise<Response>
   keys?: Pick<KeyStore, "offer" | "paired">
-  // the kind of the Inbox card an id names, or null with none; a relayed answer is refused without it
-  kindOf?: (id: string) => Promise<string | null>
+  // the kind of the Inbox card a key names (an id, or the `#iN` a message names), or null with none; a relayed write reaching a card is refused without it
+  kindOf?: (key: string) => Promise<string | null>
   login: string
   now?: Date
   seen: SeenIds
@@ -146,7 +146,7 @@ type AnswerDeps = {
   writeIds?: Pick<WriteIdStore, "claim">
 }
 
-// A write requireSignedWrite passed, run in this Mac's own API as its local owner's POST, marked in process so the loopback and origin guards take it, unless it reaches an Inbox card (cardsOf: an answer, a schedule or a dismiss) whose kind is off RELAY_ANSWER_KINDS, or one this Mac cannot read, or is a dismiss that lists no ids, which it refuses before any route runs.
+// A write requireSignedWrite passed, run in this Mac's own API as its local owner's POST, marked in process so the loopback and origin guards take it, unless it reaches an Inbox card (cardsOf: an answer, a schedule, a dismiss or a message's reply) whose kind is off RELAY_ANSWER_KINDS, or one this Mac cannot read, or is a dismiss that lists no ids, which it refuses before any route runs.
 async function runWrite(
   write: RelayWrite,
   { cookie, dispatch, kindOf }: Pick<AnswerDeps, "cookie" | "dispatch" | "kindOf">,
@@ -273,8 +273,8 @@ type RelayDeps = {
   cookie: () => Promise<string>
   dispatch: (request: Request) => Promise<Response>
   heartbeatMs?: number
-  // the kind of the Inbox card an id names, which a relayed answer is checked against
-  kindOf?: (id: string) => Promise<string | null>
+  // the kind of the Inbox card a key names (an id, or the `#iN` a message names), which a relayed write reaching a card is checked against
+  kindOf?: (key: string) => Promise<string | null>
   // the login the token's /me answers
   login: (token: string) => Promise<string>
   recycleMs?: number

@@ -317,10 +317,10 @@ if (env.YARD_API_URL && readsLive()) {
       if (response.status === 401) made = null
       return response
     },
-    // a card's kind by its id alone, never its #ref, as its answer route reads it (answerKind)
-    kindOf: async (id) => {
-      const item = await getItem(db, id)
-      if (item?.id !== id) return null
+    // a card's kind (answerKind) by its id, as its answer, schedule and dismiss read it, or by the exact `#iN` a message's reply names, never a bare `iN`
+    kindOf: async (key) => {
+      const item = await getItem(db, key)
+      if (!item || (key !== item.id && key !== `#i${item.ref}`)) return null
       return answerKind(item)
     },
     login: async (token) => (await yardClient(api, token).me()).login,

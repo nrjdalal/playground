@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 
+import { REPLY_RE } from "../../../../../../api/hono/src/lib/dashboard/inbox"
 import {
   cardsOf,
+  REPLY_REFS,
   pathOn,
   RELAY_GETS,
   RELAY_WRITES,
@@ -134,7 +136,7 @@ describe("cardsOf, the Inbox cards a relayed write reaches", () => {
     ).toEqual([id, "c2"])
   })
 
-  test("names no card for a message or a path that only looks like a card's", () => {
+  test("names no card for a message naming none or a path that only looks like a card's", () => {
     for (const path of [
       "/api/v1/messages",
       "/api/v1/inbox/../answer",
@@ -143,6 +145,18 @@ describe("cardsOf, the Inbox cards a relayed write reaches", () => {
       "/api/v1/inbox/abc/schedule/more",
     ])
       expect([path, cardsOf({ body: "{}", path })]).toEqual([path, []])
+  })
+
+  test("reads every card a message's text names by its #iN, as the API's REPLY_RE reads one", () => {
+    const message = (text: string) => JSON.stringify({ text, to: "dispatcher" })
+    expect(
+      cardsOf({ body: message("re #i4: done, and RE #i0007 too"), path: "/api/v1/messages" }),
+    ).toEqual(["#i4", "#i7"])
+    expect(
+      cardsOf({ body: message("a #i4 alone, or pre #i5, names none"), path: "/api/v1/messages" }),
+    ).toEqual([])
+    expect(cardsOf({ body: "not json", path: "/api/v1/messages" })).toEqual([])
+    expect(REPLY_REFS.source).toBe(REPLY_RE.source)
   })
 
   test("reads a dismiss whose body lists no ids as null, which the Mac refuses", () => {
