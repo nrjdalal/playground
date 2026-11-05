@@ -20,7 +20,16 @@ import {
   type SettingsRead,
   syncAliases,
 } from "@/lib/dev/launch"
-import { proxyRefusal } from "@/lib/dev/proxy"
+import {
+  FALLBACK_PORT,
+  fallbackDir,
+  portlessDir,
+  proxyDown,
+  proxySetup,
+  serviceDir,
+  shareCa,
+  startFallback,
+} from "@/lib/dev/proxy"
 import {
   claimRecord,
   clearRecord,
@@ -31,7 +40,7 @@ import {
   recordPath,
   startOf,
 } from "@/lib/dev/stop"
-import { trashRoots } from "@/lib/trash"
+import { discard, trashRoots } from "@/lib/trash"
 
 // `bun run dev` runs this with --no-env-file, so it sees the shell's environment as turbo did before it; the apps still read .env themselves. Arguments pass through to `turbo run dev` (`bun run dev --ui stream`). DEV_TURBO_BIN lets a test stand in for turbo's dev run.
 const ROOT = join(import.meta.dir, "../../../..")
@@ -125,10 +134,31 @@ if (!dry) {
     console.error(`dev: refusing to start: ${checked.refusal}`)
     leave(1)
   }
-  const proxy = await proxyRefusal(env)
-  if (proxy) {
-    console.error(`dev: refusing to start: ${proxy}`)
-    leave(1)
+  const portlessOwn = serviceDir(env.PORTLESS_STATE_DIR || portlessDir())
+  const down = await proxyDown(env, portlessOwn)
+  if (down !== null) {
+    const state = fallbackDir(portlessOwn)
+    const shared = shareCa(portlessOwn, state, (path) =>
+      discard(
+        path,
+        { reason: "the 1355 proxy's leaves of a CA it replaced", session: "dev" },
+        trashRoots(ROOT),
+      ),
+    )
+    const failed = await startFallback(join(ROOT, "node_modules/.bin/portless"), {
+      ...env,
+      PORTLESS_STATE_DIR: state,
+    })
+    if (failed) {
+      console.error(`dev: refusing to start: ${proxySetup(down)} (on ${FALLBACK_PORT}: ${failed})`)
+      leave(1)
+    }
+    env.PORTLESS_PORT = String(FALLBACK_PORT)
+    // process.env too, so this launcher's own route and alias writes reach the 1355 proxy's folder
+    env.PORTLESS_STATE_DIR = process.env.PORTLESS_STATE_DIR = state
+    console.error(
+      `dev: portless's proxy is not running on port ${down}, which needs your Mac's password, so it runs on ${FALLBACK_PORT}, which needs none; Settings' Things to fix sets up the web address on ${down}${shared ? "" : `, and until then your browser warns that the certificate on ${FALLBACK_PORT} is not trusted, once on the web's address and once on the API's`}`,
+    )
   }
   console.error(`dev: database ${checked.proof}`)
   // The live dashboard takes the bare names beside its own: the reconcile tick below points them at the ports its stack bound.

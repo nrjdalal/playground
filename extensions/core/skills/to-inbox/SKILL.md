@@ -1,19 +1,22 @@
 ---
 name: to-inbox
-description: "Write an Inbox item the owner reads at a glance: a picture of the point (diff, ASCII, before and after shots, an HTML demo), emoji bullets in ASD-STE100 plain English, one callout, times in the owner's zone. Use before every `bun run ask new`: an ask, a draft, an update or a demo."
+description: "Write every message the owner reads at a glance, an Inbox item or a reply in chat, Slack or Yard: a picture of the point (diff, ASCII, before and after shots, an HTML demo), emoji bullets in ASD-STE100 plain English, one callout, times in the owner's zone. Use before every `bun run ask new` and every message to the owner: an ask, a draft, an update, a work status, a relay in chat or a demo."
 license: Complete terms in the repository's NOTICE
 ---
 
 # to-inbox
 
-An Inbox card is read in seconds, in the aside's narrow column. This skill makes each item **glanceable**: the owner sees the point first, then the facts, then what Approve does. The item's shape (its picture, its bullets and its two choices, in that order), its width rule and the `bun run ask` commands live in asks.md's "The ask's shape" ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)); this skill picks the picture and writes the words.
+Every message to the owner is read in seconds, an Inbox card in the aside's narrow column most of all, and the **talk** rule gives each one this skill's shape. This skill makes each message **glanceable**: the owner sees the point first, then the facts, then what Approve does. The item's shape (its picture, its bullets and its two choices, in that order), its width rule and the `bun run ask` commands live in asks.md's "The ask's shape" ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)); this skill picks the picture and writes the words.
 
 An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 6. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps, step 1 always first:
 
 - An update with no `text`, or a `ship` or `schema` decision, carries only its fields, which the card lays out itself: its title takes step 4, then steps 7 and 8.
-- A `delete` or `budget` decision's `why` is free text, shown as written: it takes steps 3 and 4 as plain lines, one fact each, then steps 7 and 8.
+- An `accept`, `apps`, `budget`, `delete` or `grant` decision's `why` is free text, shown as written: it takes steps 3 and 4 as plain lines, one fact each, then steps 7 and 8.
 - A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 4, 7 and 8. A draft or a `slack` decision may carry `attachments`, such as an issue's before and after shots, which its card shows under the words and Send leaves out of Slack.
 - A `secret` ask carries only its key and sink, which the card words itself: its title takes step 4, then step 8; the value itself is the owner's to type into the card, so it appears nowhere in the item.
+
+A message outside the Inbox, a dispatcher's reply in chat or a Slack or Yard DM, takes steps 2 to 5 and 7, since Choices and Post belong to a card alone; a relay in chat, the dispatcher passing a session's message on to the owner, is one such message, its picture and bullets the session's point in the owner's words.
+In chat, step 2's picture is a fenced block (an ASCII flow or a diff; a work status block lives in its card, which chat names by its `#iN`), since no-chat-question sends a table, or three or more numbered steps, to one Inbox card instead (`scripts/hooks/README.md`).
 
 Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, and you resolve an alert update that has fixed itself.
 Every other update stays editable until the owner presses Done or Dismiss, as an ask stays editable, answered or not, until it closes, so a card you will replace (a mock's first version) or a progress you carry takes `bun run ask edit` before that.
@@ -23,15 +26,16 @@ Beside its choices, every card offers the owner five verbs (asks.md's footer lin
 ## Steps
 
 1. **Already open?** Run `bun run ask open` before you write anything (asks.md). Done when no open item asks the same thing, or you have named that item's `#iN` in chat and stopped here.
-2. **Picture.** Pick the one picture asks.md's shape leads with, within its `ASK_CODE_COLUMNS` rule, which a `diff` block is free of, since the card wraps it. Attachments always show under the text, so an item with one keeps its text to the bullets. Done when the text's first block is that picture, or the item's first attachment is.
+2. **Picture.** Pick the one picture asks.md's shape leads with, each line within the card's width ([Fit the card](#fit-the-card)), which a `diff` block is free of, since the card wraps it. Attachments always show under the text, so an item with one keeps its text to the bullets. Done when the text's first block is that picture, or the item's first attachment is.
 
    Beside asks.md's diff, ASCII flow and before and after pair, two more fit:
 
-   | The item is about              | Its picture                                                                               |
-   | ------------------------------ | ----------------------------------------------------------------------------------------- |
-   | A number or a short comparison | a markdown table of three columns or fewer                                                |
-   | A UI not yet built, or a demo  | an ASCII sketch of the page; one `html` attachment built by [HTML.md](references/HTML.md) |
-   | A code change past a few lines | its patch as a file, `git diff > x.diff`, which the viewer draws as a patch view          |
+   | The item is about                                    | Its picture                                                                               |
+   | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+   | A number or a short comparison                       | a markdown table of three columns or fewer                                                |
+   | A UI not yet built, or a demo                        | an ASCII sketch of the page; one `html` attachment built by [HTML.md](references/HTML.md) |
+   | A code change past a few lines                       | its patch as a file, `git diff > x.diff`, which the viewer draws as a patch view          |
+   | A job of several steps (a plan, a lane, a PR series) | the **work status** block, built by [PROGRESS.md](references/PROGRESS.md)                 |
 
    Mermaid is to render once the Inbox takes it; until then, draw the flow in ASCII.
 
@@ -73,6 +77,12 @@ Beside its choices, every card offers the owner five verbs (asks.md's footer lin
 7. **Fake data.** Read the text and every attachment once more. Done when no part holds a token, a customer detail or a real database row, and a demo's or screenshot's names and rows are made up.
 
 8. **Post.** Post it with `bun run ask new`, as asks.md says, and read stderr. Done when `bun run ask` prints the item's id and no shape hint; on a hint, the item has already posted, so fix what the hint names and replace it in place with `bun run ask edit <id> < item.json`, until edit prints no hint.
+
+## Fit the card
+
+Draw each code or ASCII line up to `ASK_CODE_COLUMNS` (`packages/config/src/inbox.ts`), 60 columns, an emoji counted as two.
+The card sizes a drawing's font so its widest line fills the block, from 16px on a wide card down to 7px on the narrowest one, so a line of that width shows whole on every card and a short drawing grows to fill a wide one.
+A picture that runs past it becomes a table of three columns or fewer, or bullets.
 
 ## Example
 
