@@ -47,3 +47,29 @@ test("ship:freeze with no version, a version beside --end, or a mistyped flag pr
   }
   expect(await Bun.file(path).exists()).toBe(false)
 })
+
+// 5 Nov: `freeze-cli.ts status`, run to read the freeze, wrote "status ships: ..." as the "*" line and held every PR
+test("ship:freeze status and a word that is not a version write nothing, and the word prints the usage", async () => {
+  const path = join(mkdtempSync(join(tmpdir(), "freeze-")), "held-prs.json")
+  const before = JSON.stringify({ held: { "acme/archive#9": "own" } })
+  writeFileSync(path, before)
+  const status = await run(path, "status")
+  expect(status).toMatchObject({ code: 0, out: expect.stringContaining('no "*" line is set') })
+  const word = await run(path, "foo")
+  expect(word.code).toBe(1)
+  expect(word.out).toContain("Usage: bun run ship:freeze")
+  expect(word.err).toContain("foo is not a version")
+  expect(readFileSync(path, "utf8")).toBe(before)
+})
+
+test('ship:freeze status prints the "*" line and its since when one is set', async () => {
+  const path = join(mkdtempSync(join(tmpdir(), "freeze-")), "held-prs.json")
+  const line = "v0.0.38 ships: canary is frozen until its tag lands"
+  const before = JSON.stringify({ held: { "*": line }, since: { "*": "2026-11-05T07:00:00.000Z" } })
+  writeFileSync(path, before)
+  const status = await run(path, "status")
+  expect(status.code).toBe(0)
+  expect(status.out).toContain(line)
+  expect(status.out).toContain("2026-11-05T07:00:00.000Z")
+  expect(readFileSync(path, "utf8")).toBe(before)
+})
