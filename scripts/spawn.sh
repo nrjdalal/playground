@@ -1399,6 +1399,21 @@ case "$SIZE" in
   *) ITEM=$(bash "$REPO/scripts/ops/run-slot.sh" size "$NAME" 2>/dev/null) || ITEM= ;;
 esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
+# While focus stands (playground focus), one session has the Mac, so a start waits for its end; a move closes the copy it replaces, so it goes on.
+if [ -z "$MOVE_PID" ] && FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
+import datetime, json, sys
+try:
+    f = json.load(open(sys.argv[1]))
+    until = datetime.datetime.fromisoformat(f["until"].replace("Z", "+00:00"))
+except Exception:
+    sys.exit(1)
+if until <= datetime.datetime.now(datetime.timezone.utc):
+    sys.exit(1)
+print(f"{f.get('session')} until {f['until']}")
+PY
+); then
+  refuse "focus stands for $FOCUS, so no new session starts until it ends (playground focus off ends it)"
+fi
 gate_capacity
 if [ "$RUNTIME" = herdr ]; then
   # herdr names an agent by [a-z][a-z0-9_-]{0,31}, so a longer name could never name the session's agent there.
