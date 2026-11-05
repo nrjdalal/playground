@@ -56,7 +56,7 @@ With `REDIS_URL` set, the lock's holder is also a Redis key with a time to live 
 a merge that cannot reach Redis keeps to the folder alone and so is refused by any holder.
 `bun run lock take|renew|free` gives a shell script the same Redis lock (exit 3: no Redis, keep the script's own lock file).
 It squash-merges with `--match-head-commit <head>` and `--body` set to the PR body less every line opening `Co-authored-by:`, in any case, since AGENTS.md's Commits rule keeps that trailer out of `canary` and GitHub's own squash body copies it from the PR's commits, tries once more on a GitHub 5xx, checks the PR reads `MERGED`, prints the merge SHA and, after letting the lock go, leaves its merge comment.
-Then it ends the PR's worker, reviewer and tester (`scripts/ops/optimizer/auto_end.ts`, the factory's SESSIONS.md End), each line to its lead; a failure there is printed and never undoes the merge.
+Then it ends the PR's worker, reviewer and tester (`scripts/ops/optimizer/auto_end.ts`, the factory's SESSIONS.md End) and cleans each worktree an ended one used, each line to its lead; a failure there is printed and never undoes the merge.
 `--explain` takes no lock.
 Like `bun run verify`, pr:merge and pr:train first build the workspace packages they import when a `dist` is missing or lacks an export (`packages/scripts/src/verify/prebuild.ts pr-merge`), so either runs from a fresh worktree;
 in the factory's main checkout (`$PLAYGROUND_REPO`), which builds only `packages/*` after a pull, the prebuild stops instead, verify's and `bun run dev`'s too, and says to run from your own worktree.
