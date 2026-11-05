@@ -636,7 +636,7 @@ with tempfile.TemporaryDirectory() as repo:
     git(repo, "commit", "-qam", "change two sources")
     code, listed, err = touched(repo)
     check(code == 0 and listed == ["tests/api/hono/src/routers/yard.test.ts", "tests/web/next/src/lib/outbox-reader.test.ts"],
-          "10p rule 3: a test joining a changed file's path from its package root, \"src/hosted.ts\" or \"src/lib/outbox\", is listed (yard.test.ts's miss); a longer name and a bare \"src\" stay out",
+          "10q rule 3: a test joining a changed file's path from its package root, \"src/hosted.ts\" or \"src/lib/outbox\", is listed (yard.test.ts's miss); a longer name and a bare \"src\" stay out",
           listed + [err])
 
 print(f"\n{len(failures)} failed" if failures else "\nall passed")
