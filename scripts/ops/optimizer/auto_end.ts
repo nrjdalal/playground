@@ -335,7 +335,7 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
         path,
         { home: rm.home, main: rm.main, trash: join(rm.data, "trash") },
         {
-          clones: rm.clones(),
+          clones: rm.clones,
           discard: true,
           live: STATUSES.live,
           merged: () => null,

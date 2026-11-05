@@ -19,6 +19,7 @@ import {
   ACKS_STAMPED_FROM,
   canDraft,
   checkAnswerNote,
+  decisionChoices,
   deliveryNote,
   cardKey,
   changedAt,
@@ -42,6 +43,7 @@ import {
   newLabel,
   outcomeLine,
   pickedAt,
+  pickedRow,
   pinnedView,
   PLACED_TYPES,
   resultLink,
@@ -193,11 +195,13 @@ describe("an accept decision (PG-658)", () => {
 
   test("once approved, reads what the dashboard's accept gave, done or failed by its exit code", () => {
     const ran = approved({ exitCode: 0, line: "rev 9b8c7d6 is accepted" })
-    expect(outcomeLine(ran)).toBe("You approved it · Accepted: rev 9b8c7d6 is accepted")
+    expect(outcomeLine(ran)).toBe(
+      "You approved: Accept the skill end-of-day · Accepted: rev 9b8c7d6 is accepted",
+    )
     expect(itemState(ran)).toBe("done")
     const refused = approved({ exitCode: 1, line: "409 the proposal is at 0a1b2c3d4e5f" })
     expect(outcomeLine(refused)).toBe(
-      "You approved it · Accept failed (exit 1): 409 the proposal is at 0a1b2c3d4e5f",
+      "You approved: Accept the skill end-of-day · Accept failed (exit 1): 409 the proposal is at 0a1b2c3d4e5f",
     )
     expect(itemState(refused)).toBe("failed")
   })
@@ -208,7 +212,7 @@ describe("an accept decision (PG-658)", () => {
       delivery: { code: "CMUX_FAILED", reason: "cmux is not running", status: "failed" },
     } as never)
     expect(outcomeLine(unsent)).toBe(
-      "You approved it · Accepted: rev 9b8c7d6 is accepted · Send failed: cmux is not running",
+      "You approved: Accept the skill end-of-day · Accepted: rev 9b8c7d6 is accepted · Send failed: cmux is not running",
     )
     expect(itemState(unsent)).toBe("failed")
   })
@@ -238,13 +242,15 @@ describe("an apps decision and a grant decision (PG-658)", () => {
     const ran = approved(apps, {
       listed: { exitCode: 0, line: "added Notes; your apps are Notes" },
     })
-    expect(outcomeLine(ran)).toBe("You approved it · Your apps: added Notes; your apps are Notes")
+    expect(outcomeLine(ran)).toBe(
+      "You approved: Add Notes · Your apps: added Notes; your apps are Notes",
+    )
     expect(itemState(ran)).toBe("done")
     const refused = approved(apps, {
       listed: { exitCode: 1, line: "Notes is not on your own apps list, so nothing changed" },
     })
     expect(outcomeLine(refused)).toBe(
-      "You approved it · Apps change failed (exit 1): Notes is not on your own apps list, so nothing changed",
+      "You approved: Add Notes · Apps change failed (exit 1): Notes is not on your own apps list, so nothing changed",
     )
     expect(itemState(refused)).toBe("failed")
   })
@@ -255,7 +261,7 @@ describe("an apps decision and a grant decision (PG-658)", () => {
     }
     const waiting = approved(grant, opened)
     expect(outcomeLine(waiting)).toBe(
-      "You approved it · Opened System Settings at Privacy & Security > Accessibility · Being carried out by Ops…",
+      "You approved: Open the accessibility settings · Opened System Settings at Privacy & Security > Accessibility · Being carried out by Ops…",
     )
     expect(itemState(waiting)).toBe("sending")
     const rechecked = approved(grant, {
@@ -266,7 +272,7 @@ describe("an apps decision and a grant decision (PG-658)", () => {
     expect(itemState(rechecked)).toBe("done")
     const failed = approved(grant, { opened: { exitCode: 1, line: "LSOpenURLsWithRole() failed" } })
     expect(outcomeLine(failed)).toBe(
-      "You approved it · Opening System Settings failed (exit 1): LSOpenURLsWithRole() failed",
+      "You approved: Open the accessibility settings · Opening System Settings failed (exit 1): LSOpenURLsWithRole() failed",
     )
     expect(itemState(failed)).toBe("failed")
   })
@@ -292,37 +298,41 @@ describe("the inbox's counts", () => {
       ...items[4]!,
       delivery: { at: "x", status: "delivered", to: "dispatcher", via: "session" },
     } as InboxItem
-    expect(outcomeLine(taken)).toBe("You approved it · Being carried out by Alpha…")
+    expect(outcomeLine(taken)).toBe(
+      "You approved: Ship 3f9a2c1 to main · Being carried out by Alpha…",
+    )
     expect(
       outcomeLine({
         ...taken,
         answer: { ackedAt: "y", at: "x", choice: "approve", noLink: "a budget has no page" },
       } as InboxItem),
-    ).toBe("You approved it · Delivered to Alpha · No link: a budget has no page")
+    ).toBe(
+      "You approved: Ship 3f9a2c1 to main · Delivered to Alpha · No link: a budget has no page",
+    )
     expect(
       outcomeLine({
         ...items[4]!,
         delivery: { at: "x", status: "delivered", to: "ops", via: "session" },
       }),
-    ).toBe("You approved it · Being carried out by Ops…")
+    ).toBe("You approved: Ship 3f9a2c1 to main · Being carried out by Ops…")
   })
 
   test("an answered item says what he chose and whether it reached its poster", () => {
     expect(outcomeLine(items[0]!)).toBeNull()
     // a go reads as being carried out until its poster closes it with a link or why there is none
     expect(outcomeLine({ ...items[4]!, delivery: { status: "pending" } })).toBe(
-      "You approved it · Being carried out by Ops…",
+      "You approved: Ship 3f9a2c1 to main · Being carried out by Ops…",
     )
     expect(
       outcomeLine({ ...items[4]!, delivery: { at: "x", status: "delivered", via: "session" } }),
-    ).toBe("You approved it · Being carried out by Ops…")
+    ).toBe("You approved: Ship 3f9a2c1 to main · Being carried out by Ops…")
     expect(
       outcomeLine({
         ...items[4]!,
         answer: { ackedAt: "y", at: "x", choice: "approve", noLink: "a budget has no page" },
         delivery: { at: "x", status: "delivered", via: "cli" },
       } as InboxItem),
-    ).toBe("You approved it · Read by Ops · No link: a budget has no page")
+    ).toBe("You approved: Ship 3f9a2c1 to main · Read by Ops · No link: a budget has no page")
     // an approved Slack message is sent, as a draft is
     expect(
       outcomeLine({
@@ -334,7 +344,7 @@ describe("the inbox's counts", () => {
           type: "slack",
         },
       } as InboxItem),
-    ).toBe("You approved it · Sending in Slack…")
+    ).toBe("You approved: Send it to @Merritt · Sending in Slack…")
     // a deny is carried out by reading it
     expect(
       outcomeLine({
@@ -343,7 +353,7 @@ describe("the inbox's counts", () => {
         delivery: { at: "x", status: "delivered", via: "cli" },
         status: "denied",
       } as InboxItem),
-    ).toBe("You denied it · Read by Ops")
+    ).toBe("You denied: Hold the ship · Read by Ops")
     // a clear archives it, read by its poster as a deny is, and is never carried out (PG-654: Archived and when)
     const archivedAt = "2026-10-07T11:00:00.000Z"
     expect(
@@ -359,7 +369,7 @@ describe("the inbox's counts", () => {
         ...items[4]!,
         delivery: { code: "ON_PICKER", reason: "busy", status: "failed" },
       }),
-    ).toBe("You approved it · Send failed: busy")
+    ).toBe("You approved: Ship 3f9a2c1 to main · Send failed: busy")
   })
 })
 
@@ -1478,11 +1488,85 @@ describe("Pick a time's moment", () => {
   })
 })
 
-describe("a labelled ask's Send before a pick", () => {
-  test("says to pick a side while none is picked, and nothing once one is", () => {
-    expect(sendWhy(null)).toBe("Pick Approve or Deny first")
-    expect(sendWhy("approve")).toBeNull()
-    expect(sendWhy("deny")).toBeNull()
+describe("a decision's Send before a pick", () => {
+  test("says to pick an option while none is picked, and nothing once one is", () => {
+    expect(sendWhy(null)).toBe("Pick an option first")
+    expect(sendWhy({ go: false, index: 1, label: "Deny", letter: "B" })).toBeNull()
+  })
+})
+
+// A decision's options (#873): a yes or no keeps Approve and Deny, real alternatives letter A to E with None of these, and the result line names the pick
+describe("a decision's options", () => {
+  const OPTIONS = [
+    { description: "Staging first, a day of soak", label: "Port to staging, then main" },
+    { label: "Hotfix main" },
+    { label: "Wait for the next ship" },
+  ]
+  const ask = (preview: object, answer: object | null = null) =>
+    item({
+      answer,
+      kind: "decision",
+      preview: { text: "Which way?", type: "ask", ...preview },
+      status: answer ? "approved" : "open",
+    } as never)
+
+  test("a lettered ask's rows run A to E, then None of these, or its own deny", () => {
+    const choices = decisionChoices(ask({ options: OPTIONS }))
+    expect(choices?.shape).toBe("letters")
+    expect(choices?.rows.map((row) => [row.letter, row.label, row.go])).toEqual([
+      ["A", "Port to staging, then main", true],
+      ["B", "Hotfix main", true],
+      ["C", "Wait for the next ship", true],
+      ["D", "None of these", false],
+    ])
+    expect(choices?.rows[0]?.description).toBe("Staging first, a day of soak")
+    expect(decisionChoices(ask({ deny: "Drop it", options: OPTIONS }))?.rows.at(-1)?.label).toBe(
+      "Drop it",
+    )
+  })
+
+  test("a yes or no is Approve and Deny with their labels, a typed decision's from the one map, and a secret has none", () => {
+    for (const [preview, labels] of [
+      [{ deny: "Keep it on dev", options: [{ label: "Port it" }] }, ["Port it", "Keep it on dev"]],
+      [{ approve: "Port it" }, ["Port it", "Deny"]],
+      [{}, ["Approve", "Deny"]],
+    ] as const) {
+      const choices = decisionChoices(ask(preview))
+      expect(choices?.shape).toBe("yes-no")
+      expect(choices?.rows.map((row) => row.label)).toEqual([...labels])
+    }
+    expect(decisionChoices(items[0]!)?.rows.map((row) => row.label)).toEqual([
+      "Ship 3f9a2c1 to main",
+      "Hold the ship",
+    ])
+    expect(
+      decisionChoices(
+        item({ kind: "decision", preview: { key: "K", sink: {}, type: "secret" } } as never),
+      ),
+    ).toBeNull()
+    expect(decisionChoices(items[1]!)).toBeNull()
+  })
+
+  test("the result line names the picked option: a letter and label, a side and label, or a bare side", () => {
+    const picked = (preview: object, answer: object) =>
+      outcomeLine({
+        ...ask(preview, { at: "x", ...answer }),
+        delivery: { status: "pending" },
+      } as InboxItem)
+    expect(picked({ options: OPTIONS }, { choice: "approve", option: 1 })).toStartWith(
+      "You picked B: Hotfix main ·",
+    )
+    expect(picked({ options: OPTIONS }, { choice: "deny" })).toStartWith(
+      "You picked D: None of these ·",
+    )
+    expect(
+      picked({ deny: "Keep it", options: [{ label: "Port it" }] }, { choice: "deny" }),
+    ).toStartWith("You denied: Keep it ·")
+    expect(picked({}, { choice: "approve" })).toStartWith("You approved it ·")
+    expect(
+      pickedRow(ask({ options: OPTIONS }, { at: "x", choice: "approve", option: 2 }))?.letter,
+    ).toBe("C")
+    expect(pickedRow(ask({ options: OPTIONS }))).toBeNull()
   })
 })
 
@@ -1850,13 +1934,17 @@ describe("an answer queued, delivered or lost", () => {
       ...base,
       delivery: { at: "x", id: "d1", status: "queued", to: "ops" },
     } as InboxItem
-    expect(outcomeLine(queued)).toBe("You approved it · Queued: Ops holds it, to take once free")
+    expect(outcomeLine(queued)).toBe(
+      "You approved: Ship 3f9a2c1 to main · Queued: Ops holds it, to take once free",
+    )
     expect(itemState(queued)).toBe("sending")
     const lost = {
       ...base,
       delivery: { code: "LOST", reason: "Retry sends it again.", status: "failed" },
     } as InboxItem
-    expect(outcomeLine(lost)).toBe("You approved it · Lost: Retry sends it again.")
+    expect(outcomeLine(lost)).toBe(
+      "You approved: Ship 3f9a2c1 to main · Lost: Retry sends it again.",
+    )
     expect(retryable(lost)).toBe(true)
   })
 
@@ -1866,7 +1954,7 @@ describe("an answer queued, delivered or lost", () => {
       delivery: { code: "INTERRUPTED", reason: "whatever deliver said", status: "failed" },
     } as InboxItem
     expect(outcomeLine(cut)).toBe(
-      "You approved it · Send unconfirmed: whether Ops has it is not known",
+      "You approved: Ship 3f9a2c1 to main · Send unconfirmed: whether Ops has it is not known",
     )
     expect(sendUnconfirmed(cut)).toBe(true)
     expect(retryable(cut)).toBe(false)

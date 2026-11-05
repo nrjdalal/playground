@@ -25,6 +25,7 @@ import {
   type Proc,
   purgeTrash,
   quarantine,
+  type Quarantined,
   removeScratch,
   restore,
   type Roots,
@@ -205,7 +206,7 @@ describe("quarantine, listTrash and restore", () => {
     })
     const plain = file(join(roots.home, "plain"))
     const holders = {
-      clones: [],
+      clones: () => [],
       discard: false,
       live: ["working"],
       merged: () => true,
@@ -289,7 +290,7 @@ const withWorktree = () => {
   const roster = join(roots.root, "roster.json")
   writeFileSync(roster, JSON.stringify({ agents: [] }))
   const holders = {
-    clones: [] as Clone[],
+    clones: (): Clone[] => [],
     discard: false,
     live: ["working"],
     merged: (_sha: string, _at: string): boolean | null => true,
@@ -496,14 +497,14 @@ describe("worktreeRefusal", () => {
       source,
       who: "k3m9px-worker",
     })
-    expect(worktreeRefusal(wt, roots, { ...holders, clones: [clone(wt, other)] })).toBe(
+    expect(worktreeRefusal(wt, roots, { ...holders, clones: () => [clone(wt, other)] })).toBe(
       `${wt} is held by k3m9px-worker's node_modules clone (pid 4242) from ${wt} into ${other}`,
     )
-    expect(worktreeRefusal(wt, roots, { ...holders, clones: [clone(other, wt)] })).toContain(
+    expect(worktreeRefusal(wt, roots, { ...holders, clones: () => [clone(other, wt)] })).toContain(
       `from ${other} into ${wt}`,
     )
     expect(
-      worktreeRefusal(wt, roots, { ...holders, clones: [clone(other, roots.main)] }),
+      worktreeRefusal(wt, roots, { ...holders, clones: () => [clone(other, roots.main)] }),
     ).toBeNull()
     expect(worktreeRefusal(wt, roots, holders)).toBeNull()
   })
@@ -549,6 +550,35 @@ describe("worktreeRefusal", () => {
       refused: expect.stringContaining("x9y8z7-reviewer"),
     })
     expect(existsSync(wt)).toBe(true)
+  })
+
+  test("quarantine reads the clones again right before the move, so a clone that starts during the walk keeps the worktree", () => {
+    const { holders, roots, wt } = withWorktree()
+    git(wt, "push", "-q", "origin", "PG-1-thing")
+    const other = join(roots.main, ".claude", "worktrees", "pg-2")
+    const running: Clone[] = []
+    const late = { ...holders, clones: () => running }
+    // the volume check runs after the walk and before the move, so a clone registered there started inside the window
+    const dev = () => {
+      running.splice(0, running.length, {
+        destination: other,
+        pid: 4242,
+        source: wt,
+        who: "k3m9px-worker",
+      })
+      return 1
+    }
+    expect(quarantine(wt, { ...opts, worktree: late }, roots, { dev, now: NOW })).toEqual({
+      kind: "refused",
+      refused: `${wt} is held by k3m9px-worker's node_modules clone (pid 4242) from ${wt} into ${other}`,
+    })
+    expect(existsSync(wt)).toBe(true)
+    const moved = quarantine(wt, { ...opts, worktree: holders }, roots, { dev: () => 1, now: NOW })
+    expect("refused" in moved ? moved.refused : "moved").toBe("moved")
+    const { files, size } = moved as Quarantined
+    expect(files).toBeGreaterThan(1)
+    expect(size).toBeGreaterThan(0)
+    expect(listTrash(roots.trash).find((e) => e.path === wt)).toMatchObject({ files, size })
   })
 
   test("refuses a dirty worktree, naming its changes and --discard, and --discard lets it go", () => {

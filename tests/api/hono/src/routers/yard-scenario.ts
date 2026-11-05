@@ -7,12 +7,14 @@ const bearer = (secret: string) => ({ authorization: `Bearer ${secret}` })
 const json = { "content-type": "application/json" }
 const status = async (path: string, init: RequestInit = {}) =>
   (await fetch(`${api}${path}`, init)).status
-const upgrade = {
-  connection: "Upgrade",
-  "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
-  "sec-websocket-version": "13",
-  upgrade: "websocket",
-}
+// a refused socket opens and closes at once with 4000 + the refusal's status (refusedUpgradeCloses in lib/server.ts)
+const closeCode = (path: string, headers: Record<string, string> = {}) =>
+  new Promise<number>((done) => {
+    const socket = new WebSocket(`ws://127.0.0.1:${server.port}/api/v1/yard${path}`, {
+      headers,
+    } as never)
+    socket.addEventListener("close", (event) => done(event.code))
+  })
 
 const out: Record<string, unknown> = {}
 out.noAuth = await status("/channels")
@@ -54,8 +56,8 @@ await fetch(`${api}/channels/${channel.id}/join`, {
   headers: bearer(process.env.DI_TOKEN!),
   method: "POST",
 })
-out.socketNoOrigin = await status(`/socket?token=${process.env.DI_OTT}`, { headers: upgrade })
-out.socketNoToken = await status("/socket", { headers: { ...upgrade, origin: web } })
+out.socketNoOrigin = await closeCode(`/socket?token=${process.env.DI_OTT}`)
+out.socketNoToken = await closeCode("/socket", { origin: web })
 
 const socket = new WebSocket(
   `ws://127.0.0.1:${server.port}/api/v1/yard/socket?token=${process.env.DI_OTT}`,

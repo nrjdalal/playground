@@ -1,5 +1,11 @@
 import type { InboxAction, InboxAnswer, InboxItem } from "@api/hono"
-import { CLOCKS_STOPPED_AT } from "@packages/config/inbox"
+import {
+  type ChoiceRow,
+  type Choices,
+  choicesOf,
+  CLOCKS_STOPPED_AT,
+  rowOfAnswer,
+} from "@packages/config/inbox"
 import { useQuery } from "@tanstack/react-query"
 
 import { agentLabel } from "@/lib/agent-label"
@@ -26,10 +32,11 @@ export async function answerItem(
   action: InboxAction,
   text?: string,
   note?: string,
+  option?: number,
 ) {
   const { data, error } = await unwrap(
     apiClient.v1.inbox[":id"].answer.$post({
-      json: { action, note, seen: updatedAt, text },
+      json: { action, note, option, seen: updatedAt, text },
       param: { id },
     }),
   )
@@ -450,7 +457,7 @@ export const movedStep = (
 ): { before: string[] | null; moved: string[] } =>
   ids === null ? { before, moved: [] } : { before: ids, moved: movedRows(before, ids) }
 
-// A key pressed on a card, as cardKey and reopenKey read it: where it was pressed, its box, a labelled ask's choice or elsewhere.
+// A key pressed on a card, as cardKey and reopenKey read it: where it was pressed, its box, a decision's choice or elsewhere.
 export type CardKey = {
   altKey: boolean
   ctrlKey: boolean
@@ -463,7 +470,7 @@ export type CardKey = {
   target: "box" | "choice" | "elsewhere"
 }
 
-// Pure: what a card does with Cmd/Ctrl+Enter, the Questionnaire's submit key, by where it was pressed: null leaves the key alone (a labelled ask's picked side goes through the Questionnaire's submit, and Shift, Alt or a key that composes text is not the shortcut); "leave" keeps a key pressed on a link or a button from the Questionnaire, so the browser does what it does there (Cmd+Enter on Open thread opens it in a tab); in the card's box, "send" presses the draft's Send, and "hold" takes the key with nothing to send, a repeat or a labelled ask with no side picked included, so the item is never checked and marked invalid.
+// Pure: what a card does with Cmd/Ctrl+Enter, the Questionnaire's submit key, by where it was pressed: null leaves the key alone (a decision's picked option goes through the Questionnaire's submit, and Shift, Alt or a key that composes text is not the shortcut); "leave" keeps a key pressed on a link or a button from the Questionnaire, so the browser does what it does there (Cmd+Enter on Open thread opens it in a tab); in the card's box, "send" presses the draft's Send, and "hold" takes the key with nothing to send, a repeat or a decision with no option picked included, so the item is never checked and marked invalid.
 export function cardKey(
   key: CardKey,
   card: {
@@ -481,9 +488,9 @@ export function cardKey(
   return card.draftReady ? "send" : "hold"
 }
 
-// Pure: why a labelled ask's Send is off, its hover and screen-reader words, until a side is picked.
-export const sendWhy = (pick: "approve" | "deny" | null): string | null =>
-  pick === null ? "Pick Approve or Deny first" : null
+// Pure: why a decision's Send is off, its hover and screen-reader words, until a row is picked.
+export const sendWhy = (pick: ChoiceRow | null): string | null =>
+  pick === null ? "Pick an option first" : null
 
 // Pure: whether Dismiss is offered: an answered decision or draft, one that failed to send included, one he replied to in chat, which stays open, or any update, read or not, still in the list; dismissing an update marks it read.
 export const dismissable = (item: InboxItem): boolean =>
@@ -664,9 +671,9 @@ export function outcomeLine(item: InboxItem): string | null {
     return carriedOut(item) ? said : `${said} · ${who} is on it…`
   }
   let done = {
-    approve: "You approved it",
+    approve: pickedLine(item, "You approved"),
     clear: `Archived ${fullTime(item.answer.at)}`,
-    deny: "You denied it",
+    deny: pickedLine(item, "You denied"),
     discard: "You discarded it",
     draft: item.answer.editedText
       ? "You saved it as a draft with changes"
@@ -809,4 +816,27 @@ export const inboxPosters = (items: readonly InboxItem[]): Set<string> =>
 export const inboxTarget = (anchor: string, items: readonly InboxItem[]): boolean => {
   const prefix = needsYouAnchor("")
   return anchor.startsWith(prefix) && items.some((item) => item.id === anchor.slice(prefix.length))
+}
+
+// Pure: a decision's rows as its card shows them (choicesOf), or null for a secret and any other item.
+export const decisionChoices = (item: InboxItem): Choices | null =>
+  item.kind === "decision" ? choicesOf(item.preview) : null
+
+// Pure: the row an approved or denied decision's answer picked: the go row its option names, the first when it names none, or the no-go row; null for any other answer.
+export function pickedRow(item: InboxItem): ChoiceRow | null {
+  if (item.kind !== "decision" || !item.answer || !("choice" in item.answer)) return null
+  const { choice } = item.answer
+  if (choice !== "approve" && choice !== "deny") return null
+  return rowOfAnswer(item.preview, item.answer)
+}
+
+// Pure: the result line's lead for a decision's pick, naming the option as the card showed it: a lettered row by its letter and label, a yes or no by its side and its own label, and an unlabelled Approve or Deny by its side alone.
+function pickedLine(item: InboxItem, side: "You approved" | "You denied"): string {
+  const picked = pickedRow(item)
+  if (!picked) return `${side} it`
+  if (decisionChoices(item)?.shape === "letters")
+    return `You picked ${picked.letter}: ${picked.label}`
+  return picked.label === "Approve" || picked.label === "Deny"
+    ? `${side} it`
+    : `${side}: ${picked.label}`
 }

@@ -131,8 +131,8 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       ottVerify: 404,
       posted: [201, "sent"],
       socket: "open",
-      socketNoOrigin: 403,
-      socketNoToken: 401,
+      socketNoOrigin: 4403,
+      socketNoToken: 4401,
       tokenOnWebOnly: 403,
       waiting: [{ items: [] }, 400],
     })
@@ -166,10 +166,10 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
     expect(run.err).not.toContain("error:")
     expect(JSON.parse(last(run.out))).toEqual({
       afterClose: 503,
-      cookieSocket: 403,
+      cookieSocket: 4403,
       macSocket: "open",
       member: 403,
-      memberSocket: 403,
+      memberSocket: 4403,
       offline: 503,
       onboard: 403,
       read: [200, { data: ["w1"] }, "no-store", "inline", "default-src 'none'; sandbox", "nosniff"],

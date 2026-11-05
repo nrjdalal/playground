@@ -2466,6 +2466,64 @@ function wholeLine(commands, env) {
     return writes || !(narrow(cmd, env) || quietCommit(cmd, parse(cmd), env));
   });
 }
+var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
+var SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g;
+var SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b(?=\s*[,})]))?/g;
+function namesShell(text) {
+  return [...text.matchAll(SHELL_WORD)].some((m) => !m[2]);
+}
+function skipSpace(src, k) {
+  while (k < src.length && /\s/.test(src[k]))
+    k++;
+  return k;
+}
+function stringLiteral(src, i) {
+  const quote = src[i];
+  if (quote !== '"' && quote !== "'" && quote !== "`")
+    return;
+  let value = "";
+  let k = i + 1;
+  while (k < src.length && src[k] !== quote) {
+    if (src[k] === "\\") {
+      value += src[k + 1] ?? "";
+      k += 2;
+    } else
+      value += src[k++];
+  }
+  if (quote === "`" && value.includes("${"))
+    return;
+  return { end: k + 1, value };
+}
+function commandString(src, open) {
+  let value = "";
+  let k = open;
+  for (;; ) {
+    k = skipSpace(src, k);
+    const literal = stringLiteral(src, k);
+    if (!literal)
+      return;
+    value += literal.value;
+    k = skipSpace(src, literal.end);
+    if (src[k] !== "+")
+      break;
+    k++;
+  }
+  return value;
+}
+function shellRunnerArgs(text) {
+  const out = [];
+  const childProcess = text.includes("child_process");
+  const shell = namesShell(text);
+  for (const m of text.matchAll(SHELL_RUNNER)) {
+    const open = m.index + m[0].length;
+    const command = commandString(text, open);
+    if (command === undefined)
+      continue;
+    if (IMPLICIT_SHELL.has(m[1]) && childProcess || shell)
+      out.push(command);
+  }
+  return out;
+}
 function runsOf(parsed, vars, whole, rootLine) {
   const { args, first, local } = parsed;
   const values = [...local.values(), ...vars].flatMap((text) => {
@@ -2477,6 +2535,7 @@ function runsOf(parsed, vars, whole, rootLine) {
       values.push(text.value.replace(/^!/, ""));
       if (rootLine)
         values.push(...text.value.split("\\n"));
+      values.push(...shellRunnerArgs(text.value));
     }
   values.push(...programLines(parsed, rootLine));
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value));

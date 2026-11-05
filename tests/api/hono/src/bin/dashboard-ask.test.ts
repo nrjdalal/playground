@@ -89,7 +89,7 @@ test("bun run ask example prints each template, and the usage for a kind it has 
 describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
   let container = ""
   let url = ""
-  let answer: (id: string) => Promise<void>
+  let answer: (id: string, input?: { action: "approve" | "deny"; option?: number }) => Promise<void>
   let dismiss: (id: string) => Promise<void>
   let answerRelayed: (id: string) => Promise<{ delivery: unknown }>
   let reply: (tag: string) => Promise<void>
@@ -137,8 +137,8 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     const { answerItem, dismissItems, recordReply, scheduleItem } =
       await import("../../../../../api/hono/src/lib/dashboard/inbox")
     const db = (await import("../../../../../packages/db/dist/index.mjs")).createDatabase(url)
-    answer = async (id) => {
-      const answered = await answerItem(db, id, { action: "approve" }, { actor: { label: "test" } })
+    answer = async (id, input = { action: "approve" }) => {
+      const answered = await answerItem(db, id, input, { actor: { label: "test" } })
       if (!answered.ok) throw new Error(answered.message)
     }
     answerRelayed = async (id) => {
@@ -337,6 +337,37 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(answered.status).toBe("approved")
     expect(answered.answer.choice).toBe("approve")
     expect(answered.delivery).toMatchObject({ status: "delivered", via: "cli" })
+  })
+
+  test("new hints at an ask that labels no options, and get prints the option the owner picked on stderr (#873)", async () => {
+    const bare = await cli(
+      ["new"],
+      JSON.stringify({
+        from: "worker-envy",
+        preview: { text: "Port it?", type: "ask" },
+        title: "Port it?",
+      }),
+    )
+    expect(bare.code).toBe(0)
+    expect(bare.stderr).toContain("ask: this ask labels no options")
+    const lettered = {
+      from: "worker-envy",
+      preview: {
+        options: [{ label: "Port to staging, then main" }, { label: "Hotfix main" }],
+        text: "Which way does the fix go?",
+        type: "ask",
+      },
+      title: "Which way?",
+    }
+    const picked = await post(lettered)
+    expect((await cli(["get", picked.id])).stderr).not.toContain("ask: picked")
+    await answer(picked.id, { action: "approve", option: 1 })
+    const got = await cli(["get", picked.tag])
+    expect(got.stderr).toContain("ask: picked B: Hotfix main")
+    expect(JSON.parse(got.stdout).answer).toMatchObject({ choice: "approve", option: 1 })
+    const none = await post(lettered)
+    await answer(none.id, { action: "deny" })
+    expect((await cli(["get", none.id])).stderr).toContain("ask: picked C: None of these")
   })
 
   test("get --ack prints a dismissed update as it is, since an update takes no answer to mark read", async () => {

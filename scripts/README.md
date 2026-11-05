@@ -166,6 +166,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   and once that clone succeeds, run-slot clones each workspace's own `node_modules` from the sibling with the same flags (`CLONE_WORKSPACES` in `scripts/ops/run-slot.sh`, run in the clone's own process group), so the worktree is ready for its checks with no install.
   The clone has no `dist` folders and no data table metrics: `bun run test:file` and `bun run check-types:tests` build the unbuilt packages their files import, and write the metrics when missing, before they run (`prebuildTests` in `packages/scripts/src/verify/prebuild.ts`), so a clone runs either one directly.
   While the clone runs, its holder line (`run-slot-clone.holder` in the ops folder) names the sibling it reads from and the worktree it copies into, so `playground rm --worktree` refuses either one, naming the clone, until the clone ends (`clone_ends` in `scripts/ops/run-slot.sh`, `clonesOf` in `packages/scripts/src/playground/rm.ts`).
+  rm reads the line again right before its move, so a clone that starts while rm counts the worktree's files still keeps it.
   When the copy prints any error, run `~/.playground/ops/run-slot.sh <your name> -- bun install --force --ignore-scripts --cwd <worktree>`, since a plain install then looks healthy while check-types fails on a missing module.
   Tests: `bun run test:file tests/scripts/ops/run-slot-nested-clone.test.ts tests/packages/scripts/src/playground/rm.test.ts tests/packages/safe-delete/src/index.test.ts`.
   A review worktree that only reads (no test run, no commit) takes no clone at all.
@@ -178,6 +179,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
   Each step runs in the suite's sandbox (`packages/scripts/src/sandbox.ts`, shared with `test-sandbox.ts`), with uv's Pythons and cache and Docker's config kept in the real home, so a step never writes the real `~/.claude` and a second run downloads nothing.
   Its `steps` list in [packages/scripts/src/test-skills.ts](../packages/scripts/src/test-skills.ts) names every step.
+- Run the touched tests before every push, beside `test:skills`: its steps leave out a test that pins a skill's wording, which only CI then catches (code-review-loop's **The touched tests** lists them with `state.py touched-tests`).
 
 ## bun run hooks:differential
 
