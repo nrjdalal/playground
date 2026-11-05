@@ -59,6 +59,9 @@ const invalidSecret = (result: { success: boolean }) => {
   }
 }
 
+// a card's own Done sets tell, so its update's poster is told done; a shelf's bulk leaves it out and types nothing
+const dismissInputSchema = idsInputSchema.extend({ tell: z.literal(true).optional() })
+
 const scheduleInputSchema = z.strictObject({ at: z.iso.datetime() })
 
 // Playground's Inbox (see lib/dashboard/inbox.ts), on the dashboard's owner rung since an answer is typed into a session. Its writes must come from the dashboard's own page on this machine before anything else is read.
@@ -102,7 +105,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Done: move the updates and answered decisions and drafts named to Done at once, rather than ten minutes after they settled, recording when in their answer, waking any put off or archived, and marking an update read; each update's poster is told done, through the delivery adapter, so it posts a new card rather than editing this one; an open decision or draft is left as it is",
+        "Done: move the updates and answered decisions and drafts named to Done at once, rather than ten minutes after they settled, recording when in their answer, waking any put off or archived, and marking an update read; with tell, a card's own Done, each update's poster is told done through the delivery adapter, so it posts a new card rather than editing this one, while a shelf's bulk types nothing; an open decision or draft is left as it is",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
@@ -110,14 +113,16 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         ...forbiddenErrorResponses,
       },
     }),
-    sValidator("json", idsInputSchema, invalid),
+    sValidator("json", dismissInputSchema, invalid),
     async (c) => {
       const user = c.get("user")
-      const dismissed = await dismissItems(db, c.req.valid("json").ids, new Date(), {
-        actor: { email: user.email, id: user.id },
-        deliver,
-        dispatcher: DISPATCHER,
-      })
+      const { ids, tell } = c.req.valid("json")
+      const dismissed = await dismissItems(
+        db,
+        ids,
+        new Date(),
+        tell && { actor: { email: user.email, id: user.id }, deliver, dispatcher: DISPATCHER },
+      )
       return c.json({ data: { dismissed } })
     },
   )

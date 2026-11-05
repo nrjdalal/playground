@@ -36,6 +36,11 @@ export async function answerItem(
   return data
 }
 
+// The Archived shelf's Dismiss all: each card's own Dismiss in turn, so one that still waits is set aside and anything else marked dismissed, each poster told as that card's own click tells it.
+export async function dismissEach(items: Pick<InboxItem, "id" | "updatedAt">[]) {
+  for (const item of items) await answerItem(item, "dismiss")
+}
+
 // A secret ask's value, posted once to its own route and kept nowhere here; seen as an answer's.
 export async function provideSecret(
   { id, updatedAt }: Pick<InboxItem, "id" | "updatedAt">,
@@ -61,8 +66,8 @@ export async function retryItem(id: string) {
   return data
 }
 
-export async function dismissItems(ids: string[]) {
-  const { data, error } = await unwrap(apiClient.v1.inbox.dismiss.$post({ json: { ids } }))
+export async function dismissItems(ids: string[], tell?: true) {
+  const { data, error } = await unwrap(apiClient.v1.inbox.dismiss.$post({ json: { ids, tell } }))
   if (error) throw new Error(error.message)
   return data
 }

@@ -456,7 +456,8 @@ describe("a card's verbs", () => {
       source.indexOf('buttons.includes("done")'),
       source.indexOf('buttons.includes("later")'),
     )
-    expect(done).toContain("void settle(() => dismissItems([item.id]))")
+    // a card's own Done tells its update's poster; the Done shelf's bulk below types nothing
+    expect(done).toContain("void settle(() => dismissItems([item.id], true))")
     expect(source).toContain('() => void onAnswer("archive"),')
     expect(source).toContain('() => void onAnswer("dismiss"),')
     expect(source).toContain('void onAnswer("unarchive")')
@@ -865,8 +866,12 @@ describe("the Inbox as one accordion: the open items, then Snoozed, Archived and
     expect(source).toContain(
       'label === "Archived" ? "Dismiss all archived" : "Mark all done as read"',
     )
-    expect(source).toContain("ids={shelf.filter(dismissable).map((item) => item.id)}")
-    expect(source).toContain("onDismiss={(ids) => void bulk(() => dismissItems(ids))}")
+    // the Archived shelf's one click is each card's own Dismiss, a waiting ask included; Done's marks read and tells no poster
+    expect(source).toContain('ids={(label === "Archived" ? shelf : shelf.filter(dismissable)).map(')
+    const bulkDismiss = source.slice(source.indexOf("onDismiss={(ids) =>"))
+    expect(bulkDismiss).toMatch(
+      /label === "Archived"\s+\? dismissEach\(shelf\.filter\(\(item\) => ids\.includes\(item\.id\)\)\)\s+: dismissItems\(ids\),/,
+    )
   })
 
   test("Done's ✓✓ marks every item in it read, and is gone once all are", () => {

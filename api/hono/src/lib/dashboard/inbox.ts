@@ -682,7 +682,7 @@ function answerOf(
 ): { answer: Omit<InboxAnswer, "at">; status: InboxStatus } | { message: string } {
   if (item.kind === "update") return { message: "An update is read, not answered" }
   if (item.status !== "open") return { message: "This item is already answered" }
-  // Dismiss on what still waits sets it aside as Archive's clear did, its poster told so, and sends it to Done; a secret ask takes it too, since no value travels
+  // Dismiss on what still waits sets it aside as the old `clear` did, its poster told so, and sends it to Done; a secret ask takes it too, since no value travels
   if (action === "dismiss") return { answer: { choice: "clear" }, status: "cleared" }
   if (item.kind === "decision") {
     if (item.preview.type === "secret") {
@@ -1424,7 +1424,7 @@ function stepOf(
   return undefined
 }
 
-// Move back: an archived item returns to the list as it was; a set-aside one (Archive's old clear, or a Dismiss while it waited) goes back to open with no answer, so it can be answered again. Nothing is typed into its poster, since nothing was decided.
+// Move back: an archived item returns to the list as it was; a set-aside one (the old `clear`, or a Dismiss while it waited) goes back to open with no answer, so it can be answered again. Nothing is typed into its poster, since nothing was decided.
 async function unarchive(
   db: Database,
   current: InboxItem,

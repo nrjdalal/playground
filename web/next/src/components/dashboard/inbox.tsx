@@ -118,6 +118,7 @@ import {
   checkAnswerNote,
   deliveryNote,
   dismissable,
+  dismissEach,
   dismissItems,
   filesCount,
   focusAfterTake,
@@ -1135,7 +1136,7 @@ export function InboxCard({
           "Done",
           "it goes to Done",
           <RiCheckDoubleLine />,
-          () => void settle(() => dismissItems([item.id])),
+          () => void settle(() => dismissItems([item.id], true)),
         )}
       {buttons.includes("later") && (
         <Schedule
@@ -1845,15 +1846,23 @@ export function Inbox({ viewing }: { viewing: boolean }) {
                 header={(props) => (
                   <h3 {...props} className={cn(props.className, STICKY_HEADER)}>
                     {props.children}
-                    {/* the Archived shelf empties in one click, its items to Done; Done marks what settled on its own read, greyed once all are */}
+                    {/* the Archived shelf empties in one click, each card's own Dismiss in turn; Done marks what settled on its own read, typing nothing into any session, greyed once all are */}
                     {label !== "Snoozed" && label !== "In progress" && shelf.length > 0 && (
                       <ShelfDismiss
                         disabled={bulkPending}
-                        ids={shelf.filter(dismissable).map((item) => item.id)}
+                        ids={(label === "Archived" ? shelf : shelf.filter(dismissable)).map(
+                          (item) => item.id,
+                        )}
                         label={
                           label === "Archived" ? "Dismiss all archived" : "Mark all done as read"
                         }
-                        onDismiss={(ids) => void bulk(() => dismissItems(ids))}
+                        onDismiss={(ids) =>
+                          void bulk(() =>
+                            label === "Archived"
+                              ? dismissEach(shelf.filter((item) => ids.includes(item.id)))
+                              : dismissItems(ids),
+                          )
+                        }
                       />
                     )}
                   </h3>
