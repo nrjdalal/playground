@@ -6340,6 +6340,30 @@ var ruleSettings = defineSettings({
 // packages/settings/src/sessions.ts
 var name = string2().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "a session name, lowercase words joined by hyphens");
 var manager = _enum(["builder", "dispatcher", "ops", "planner"]);
+var TEMPLATE_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "orchestrator",
+  "planner"
+];
+var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+var BRIEF_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+var sessionTemplate = strictObject({
+  account: string2().email().optional(),
+  backend: _enum(["claude", "glm"]),
+  brief: string2().regex(BRIEF_NAME, "a brief is a file name, with no /").refine((brief) => !brief.includes(".."), "a brief is a file name, with no .."),
+  effort: _enum(EFFORTS).optional(),
+  id: name,
+  kind: _enum(TEMPLATE_KINDS),
+  label: string2().min(1).max(40),
+  model: string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id").optional()
+}).refine((t) => t.backend === "claude" || t.account === undefined && t.effort === undefined && t.model === undefined, {
+  message: "a GLM template runs on models.glm and its first GLM row, so it takes no account, effort or model"
+});
+var sessionTemplates = array(sessionTemplate).refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "each id is listed once");
 var sessionSettings = defineSettings({
   "sessions.aliases": {
     default: {},
@@ -6350,6 +6374,40 @@ var sessionSettings = defineSettings({
     default: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" },
     description: "The session name each manager kind starts under; the second dispatcher takes the dispatcher's with -2.",
     schema: strictObject({ builder: name, dispatcher: name, ops: name, planner: name })
+  },
+  "sessions.templates": {
+    default: [
+      {
+        backend: "claude",
+        brief: "assistant.md",
+        id: "assistant",
+        kind: "assistant",
+        label: "Assistant"
+      },
+      {
+        backend: "claude",
+        brief: "orchestrator.md",
+        id: "orchestrator",
+        kind: "orchestrator",
+        label: "Orchestrator"
+      },
+      {
+        backend: "claude",
+        brief: "dispatcher-2.md",
+        id: "second-dispatcher-claude",
+        kind: "dispatcher",
+        label: "Second dispatcher on Claude"
+      },
+      {
+        backend: "glm",
+        brief: "dispatcher-2.md",
+        id: "second-dispatcher-glm",
+        kind: "dispatcher",
+        label: "Second dispatcher on GLM"
+      }
+    ],
+    description: "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, backend, model, effort, account and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
+    schema: sessionTemplates
   }
 });
 // packages/settings/src/slack.ts
@@ -8327,6 +8385,7 @@ var ROSTER_KINDS = [
   "dispatcher",
   "ops",
   "optimizer",
+  "orchestrator",
   "planner",
   "probe",
   "researcher",
@@ -8342,6 +8401,7 @@ var FACTORY_ROLE_OF_KIND = {
   dispatcher: "dispatcher",
   ops: "lead",
   optimizer: "lead",
+  orchestrator: "lead",
   planner: "lead",
   probe: "probe",
   researcher: "worker",

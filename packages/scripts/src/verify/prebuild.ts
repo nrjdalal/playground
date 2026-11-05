@@ -1,10 +1,10 @@
 import "@packages/env/aliases"
-import { existsSync, readFileSync, realpathSync } from "node:fs"
-import { dirname, join } from "node:path"
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
 
 import { withoutShebang } from "../shebang"
 
-// verify, pr:merge and the dev launcher reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow by adding an export; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists but lacks a name the target's sources import from it, those it reaches through relative imports included, counts as unbuilt; any other stale dist is left as it is.
+// verify, pr:merge, the dev launcher, test:file and check-types:tests reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow by adding an export; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists but lacks a name the target's sources import from it, those it reaches through relative and `@/` imports included, counts as unbuilt; any other stale dist is left as it is.
 const VERIFY = import.meta.dir
 const SRC = join(VERIFY, "..")
 const ROOT = join(VERIFY, "../../../..")
@@ -23,15 +23,44 @@ const scanners = {
 }
 const scannerOf = (file: string) =>
   file.endsWith(".tsx") ? scanners.tsx : /\.[cm]?ts$/.test(file) ? scanners.ts : scanners.js
+const tsxTrimmer = new Bun.Transpiler({ loader: "tsx", trimUnusedImports: true })
+// A source read as TypeScript, else as TSX, since a source string carries no file name; one that parses as neither gives nothing.
+const parsed = <T>(
+  source: string,
+  ts: (code: string) => T,
+  tsx: (code: string) => T,
+  none: T,
+): T => {
+  const code = withoutShebang(source)
+  try {
+    return ts(code)
+  } catch {
+    try {
+      return tsx(code)
+    } catch {
+      return none
+    }
+  }
+}
+// What a build makes: a workspace package's dist, the API's for the web's types, and the data table's metrics.
+const BUILT = /^(?:@packages\/|@api\/hono(?:\/|$)|generated\/)/
+// A type-only import at the start of a line, which Bun's scan drops and tsc still resolves; a string that spells one inside a line stays text.
+const TYPE_IMPORT =
+  /^(?:(?:import|export)\s+type\s+(?:\{[^}]*\}|\*(?:\s+as\s+[\w$]+)?|[\w$]+)|import\s*\{[^}]*\btype\s[^}]*\})\s*from\s+["']([^"']+)["']/gm
 
-// Every workspace package the given sources import, statically or dynamically.
-export const workspaceImports = (sources: string[]): string[] => [
+// Every built import the given sources make, statically or dynamically, and with `types` their type-only ones too.
+export const workspaceImports = (sources: string[], types = false): string[] => [
   ...new Set(
     sources.flatMap((source) =>
-      transpiler
-        .scanImports(withoutShebang(source))
-        .map(({ path }) => path)
-        .filter((path) => path.startsWith("@packages/")),
+      [
+        ...parsed(
+          source,
+          (code) => transpiler.scanImports(code),
+          (code) => scanners.tsx.scanImports(code),
+          [],
+        ).map(({ path }) => path),
+        ...(types ? [...source.matchAll(TYPE_IMPORT)].map(([, path]) => path) : []),
+      ].filter((path) => BUILT.test(path)),
     ),
   ),
 ]
@@ -40,10 +69,26 @@ export const workspaceImports = (sources: string[]): string[] => [
 export const importedNames = (sources: string[]): Record<string, string[]> => {
   const names: Record<string, Set<string>> = {}
   for (const source of sources) {
-    const code = trimmer.transformSync(withoutShebang(source))
+    if (!source.includes("@packages/")) continue
+    const code = parsed(
+      source,
+      (text) => trimmer.transformSync(text),
+      (text) => tsxTrimmer.transformSync(text),
+      "",
+    )
+    // a string that spells an import reads like one at the start of a line once printed, so a match counts only for a module the code really imports
+    const real = new Set(
+      parsed(
+        code,
+        (text) => scanners.js.scanImports(text),
+        () => [],
+        [],
+      ).map(({ path }) => path),
+    )
     for (const [, fallback, list, specifier] of code.matchAll(
       /^(?:import|export)\s+(?:([\w$]+)\s*,?\s*)?(?:\{([^}]*)\})?\s*from\s+"(@packages\/[^"]+)"/gm,
     )) {
+      if (!real.has(specifier)) continue
       const taken = (names[specifier] ||= new Set())
       if (fallback) taken.add("default")
       for (const item of (list || "").split(",")) {
@@ -62,11 +107,12 @@ export const unbuilt = (
   specifiers: string[],
   from: string,
   names: Record<string, string[]> = {},
+  resolve: (specifier: string, from: string) => string = Bun.resolveSync,
 ): string[] =>
   specifiers.filter((specifier) => {
     let file: string
     try {
-      file = Bun.resolveSync(specifier, from)
+      file = resolve(specifier, from)
     } catch {
       return true
     }
@@ -78,11 +124,9 @@ export const unbuilt = (
     return wanted.some((name) => !exported.has(name))
   })
 
-// Every source one target runs: each file of its folder (a folder under packages/scripts/src, or the API), and each `.ts` file those reach through a relative import, outside that folder too.
-export const sourcesIn = async (target: string): Promise<string[]> => {
-  const queue = [...new Bun.Glob("**/*.ts").scanSync(dirOf(target))].map((name) =>
-    join(dirOf(target), name),
-  )
+// Every source the given files run: each file, and each `.ts` or `.tsx` file it reaches through a relative or `@/` import, outside its folder too.
+export const reach = async (files: string[]): Promise<string[]> => {
+  const queue = [...files]
   const seen = new Set<string>()
   const sources: string[] = []
   for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
@@ -90,15 +134,101 @@ export const sourcesIn = async (target: string): Promise<string[]> => {
     seen.add(file)
     const source = await Bun.file(file).text()
     sources.push(source)
-    for (const { path } of transpiler.scanImports(withoutShebang(source))) {
-      if (!path.startsWith(".")) continue
+    let imports: { path: string }[] = []
+    try {
+      imports = scannerOf(file).scanImports(withoutShebang(source))
+    } catch {}
+    for (const { path } of imports) {
+      if (!path.startsWith(".") && !path.startsWith("@/")) continue
       try {
         const next = Bun.resolveSync(path, dirname(file))
-        if (next.endsWith(".ts") && !next.includes("/node_modules/")) queue.push(next)
+        if (/\.tsx?$/.test(next) && !next.includes("/node_modules/")) queue.push(next)
       } catch {}
     }
   }
   return sources
+}
+
+// Every source one target runs: each file of its folder (a folder under packages/scripts/src, or the API), and each source those reach.
+export const sourcesIn = (target: string): Promise<string[]> =>
+  reach(
+    [...new Bun.Glob("**/*.ts").scanSync(dirOf(target))].map((name) => join(dirOf(target), name)),
+  )
+
+// The test files a test:file or check-types:tests run takes, each path read from the working folder as bun test reads it: a file, or a folder's `.ts` and `.tsx` files; a name filter, which bun test also takes, adds none.
+export const testFiles = (paths: string[]): string[] =>
+  (paths.length > 0 ? paths : ["tests"]).flatMap((path) => {
+    const full = resolve(path)
+    if (!existsSync(full)) return []
+    if (!statSync(full).isDirectory()) return /\.tsx?$/.test(path) ? [full] : []
+    return [...new Bun.Glob("**/*.{ts,tsx}").scanSync(full)]
+      .filter((name) => !name.split("/").includes("node_modules"))
+      .map((name) => join(full, name))
+  })
+
+// Each workspace package of the checkout at root: its folder, relative and absolute, and its manifest.
+const workspaces = (
+  root: string,
+): {
+  dir: string
+  path: string
+  pkg: {
+    dependencies?: Record<string, string>
+    devDependencies?: Record<string, string>
+    exports?: unknown
+    name?: string
+    scripts?: Record<string, string>
+  }
+}[] => {
+  const { workspaces } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
+  const globs: string[] = Array.isArray(workspaces) ? workspaces : (workspaces?.packages ?? [])
+  return globs.flatMap((glob) =>
+    [...new Bun.Glob(`${glob}/package.json`).scanSync({ cwd: root })].map((manifest) => ({
+      dir: dirname(manifest),
+      path: join(root, dirname(manifest)),
+      pkg: JSON.parse(readFileSync(join(root, manifest), "utf8")),
+    })),
+  )
+}
+
+// The workspace package a built import or a built path belongs to: `@packages/env/gaps` and `packages/env/dist/gaps.mjs` are both `@packages/env`, `api/hono/dist` is `@api/hono`.
+const packageOf = (specifier: string): string => {
+  const [first, second] = specifier.split("/")
+  return first === "packages" || first === "api" ? `@${first}/${second}` : `${first}/${second}`
+}
+
+// A built file a source names by its path, as a test that imports a dist file by path or hands one to a child does: `packages/<name>/dist`, or `api/hono/dist`, and the file after it.
+const BUILT_PATH = /\b(?:packages|api)\/[\w-]+\/dist(?:\/[\w.-]+)*\b/g
+
+// Every built path the given sources name.
+export const builtPaths = (sources: string[]): string[] => [
+  ...new Set(sources.flatMap((source) => source.match(BUILT_PATH) ?? [])),
+]
+
+// Where a built import's file lives, by its workspace's exports and the conditions the reader takes (Bun's runtime, or tsc's types), so a test file outside any workspace resolves as the code it imports does; it throws when the file is not there yet.
+export const builtFile = (specifier: string, root: string, conditions: string[]): string => {
+  if (
+    specifier.startsWith("generated/") ||
+    /^(?:packages|api)\/[\w-]+\/dist(?:\/|$)/.test(specifier)
+  ) {
+    // a path counts as built once its dist folder is, so a file no build makes rebuilds nothing on the next run
+    const file = specifier.startsWith("generated/")
+      ? join(root, ".generated", specifier.slice("generated/".length))
+      : join(root, specifier.match(/^(?:packages|api)\/[\w-]+\/dist/)![0])
+    if (existsSync(file)) return file
+    throw new Error(`${specifier} is not built`)
+  }
+  const sub = specifier.split("/").length > 2 ? `./${specifier.split("/").slice(2).join("/")}` : "."
+  const pkg = workspaces(root).find((workspace) => workspace.pkg.name === packageOf(specifier))
+  const exports = pkg?.pkg.exports as Record<string, unknown> | string | undefined
+  let entry = typeof exports === "string" ? (sub === "." ? exports : undefined) : exports?.[sub]
+  if (entry && typeof entry === "object")
+    entry = conditions
+      .map((condition) => (entry as Record<string, unknown>)[condition])
+      .find(Boolean)
+  const file = pkg && typeof entry === "string" ? join(pkg.path, entry) : ""
+  if (file && existsSync(file)) return file
+  throw new Error(`${specifier} is unbuilt`)
 }
 
 // The factory's main checkout, which spawn.sh exports as PLAYGROUND_REPO, stays clean: every installed skill follows it.
@@ -113,20 +243,14 @@ export const isMainCheckout = (root: string, repo: string | undefined): boolean 
 
 // A worktree installed before a canary pull that added a workspace package, or a dependency of one, lacks its links, and its build then stops on "tsdown: command not found" or its run on "Cannot find module"; pr:merge refuses it naming the install that fixes it, while verify and `bun run dev`, the live dashboard's serve among them, build on as before.
 export const staleInstall = (target: string, root: string): string | null => {
-  const { workspaces } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
-  const globs: string[] = Array.isArray(workspaces) ? workspaces : (workspaces?.packages ?? [])
-  const missing = globs.flatMap((glob) =>
-    [...new Bun.Glob(`${glob}/package.json`).scanSync({ cwd: root })].flatMap((manifest) => {
-      const dir = dirname(manifest)
-      const pkg = JSON.parse(readFileSync(join(root, manifest), "utf8"))
-      const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter(
-        (dep) =>
-          !existsSync(join(root, dir, "node_modules", dep)) &&
-          !existsSync(join(root, "node_modules", dep)),
-      )
-      return deps.length > 0 ? [`${dir} (${deps.join(", ")})`] : []
-    }),
-  )
+  const missing = workspaces(root).flatMap(({ dir, pkg }) => {
+    const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter(
+      (dep) =>
+        !existsSync(join(root, dir, "node_modules", dep)) &&
+        !existsSync(join(root, "node_modules", dep)),
+    )
+    return deps.length > 0 ? [`${dir} (${deps.join(", ")})`] : []
+  })
   if (missing.length === 0) return null
   return `${target}: this worktree's install predates its bun.lock and misses ${missing.join(", ")}; run \`~/.playground/ops/run-slot.sh <your name> -- bun install --ignore-scripts --cwd ${root}\`, then run ${target} again`
 }
@@ -146,32 +270,77 @@ export const prebuildStep = (
   return stale ? { refused: stale } : { build: missing }
 }
 
-if (import.meta.main) {
-  const target = process.argv[2] ?? "verify"
-  const sources = await sourcesIn(target)
-  const step = prebuildStep(
-    target,
-    unbuilt(workspaceImports(sources), dirOf(target), importedNames(sources)),
-    ROOT,
-    process.env.PLAYGROUND_REPO,
-  )
+// Runs prebuildStep and builds what it names: each package by name (turbo builds its dependencies first) under the flags a worktree with no .env needs, then the data table's metrics when they are missing; the exit code.
+const prebuild = (target: string, missing: string[]): number => {
+  const step = prebuildStep(target, missing, ROOT, process.env.PLAYGROUND_REPO)
   if ("refused" in step) {
     console.error(step.refused)
-    process.exit(1)
+    return 1
   }
-  if (step.build.length > 0) {
-    console.error(`${target}: building what ${step.build.join(", ")} needs`)
-    // turbo's output goes to stderr, so `verify --json` keeps stdout to itself
-    const build = Bun.spawnSync(
-      [
-        join(ROOT, "node_modules/.bin/turbo"),
-        "run",
-        "build",
-        `--filter=${target === "api" ? "@api/hono" : "@packages/scripts"}^...`,
-        "--output-logs=errors-only",
-      ],
-      { cwd: ROOT, stdio: ["ignore", 2, "inherit"] },
+  if (step.build.length === 0) return 0
+  console.error(`${target}: building what ${step.build.join(", ")} needs`)
+  const env = { ...process.env, NODE_ENV: "production", SKIP_ENV_VALIDATION: "true" }
+  const packages = [
+    ...new Set(
+      step.build.filter((specifier) => !specifier.startsWith("generated/")).map(packageOf),
+    ),
+  ]
+  // turbo's output goes to stderr, so `verify --json` keeps stdout to itself
+  const steps = [
+    ...(packages.length > 0
+      ? [
+          [
+            join(ROOT, "node_modules/.bin/turbo"),
+            "run",
+            "build",
+            ...packages.map((name) => `--filter=${name}`),
+            "--output-logs=errors-only",
+          ],
+        ]
+      : []),
+    ...(step.build.some((specifier) => specifier.startsWith("generated/"))
+      ? [[process.execPath, join(SRC, "data-table-metrics.ts")]]
+      : []),
+  ]
+  for (const argv of steps) {
+    const run = Bun.spawnSync(argv, { cwd: ROOT, env, stdio: ["ignore", 2, "inherit"] })
+    if (run.exitCode !== 0) return run.exitCode ?? 1
+  }
+  return 0
+}
+
+// test:file's step before bun test, and with `types` check-types:tests' before tsc: what the given test paths reach, by the conditions each reader takes.
+export const prebuildTests = async (paths: string[], types = false): Promise<number> => {
+  const sources = await reach(testFiles(paths))
+  const conditions = types ? ["types", "import", "default"] : ["bun", "import", "default"]
+  // a workspace with no build script never makes a dist, so a path into one would read as unbuilt on every run
+  const built = new Set(
+    workspaces(ROOT)
+      .filter(({ pkg }) => pkg.scripts?.build)
+      .map(({ pkg }) => pkg.name),
+  )
+  const missing = unbuilt(
+    [...workspaceImports(sources, types), ...builtPaths(sources)].filter(
+      (specifier) => specifier.startsWith("generated/") || built.has(packageOf(specifier)),
+    ),
+    ROOT,
+    types ? {} : importedNames(sources),
+    (specifier) => builtFile(specifier, ROOT, conditions),
+  )
+  return prebuild(types ? "check-types:tests" : "test:file", missing)
+}
+
+if (import.meta.main) {
+  const [target = "verify", ...rest] = process.argv.slice(2)
+  if (target === "tests")
+    process.exit(
+      await prebuildTests(
+        rest.filter((arg) => arg !== "--types"),
+        rest.includes("--types"),
+      ),
     )
-    if (build.exitCode !== 0) process.exit(build.exitCode ?? 1)
-  }
+  const sources = await sourcesIn(target)
+  process.exit(
+    prebuild(target, unbuilt(workspaceImports(sources), dirOf(target), importedNames(sources))),
+  )
 }

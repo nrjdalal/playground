@@ -74,6 +74,7 @@ var ROSTER_KINDS = [
   "dispatcher",
   "ops",
   "optimizer",
+  "orchestrator",
   "planner",
   "probe",
   "researcher",
