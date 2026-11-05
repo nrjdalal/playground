@@ -102,7 +102,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Move the updates and answered decisions and drafts named to Done at once, rather than ten minutes after they settled, recording when in their answer and marking an update read; an open decision or draft is left as it is",
+        "Move the updates and answered decisions and drafts named to Done at once, where no clock would move them, recording when in their answer and marking an update read; an open decision or draft is left as it is",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
