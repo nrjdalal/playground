@@ -191,10 +191,11 @@ test("unbuilt names a package whose src holds a file newer than its dist while n
   try {
     const at = (path: string, seconds: number) => utimesSync(path, seconds, seconds)
     const files: Record<string, string> = {}
-    for (const [name, srcAt, distAt, served] of [
+    for (const [name, srcAt, distAt, served, folderAt = 500] of [
       ["stale", 2000, 1000, "dist/index.mjs"],
       ["fresh", 1000, 2000, "dist/index.mjs"],
       ["folder", 1500, 2000, "dist"],
+      ["stale-folder", 2000, 1500, "dist", 3000],
       ["source", 2000, 1000, "src/index.ts"],
       ["root", 2000, 1000, "tsconfig.json"],
     ] as const) {
@@ -210,14 +211,14 @@ test("unbuilt names a package whose src holds a file newer than its dist while n
       at(join(pkg, "src/index.ts"), 1000)
       at(join(pkg, "src/other.ts"), srcAt)
       at(join(pkg, "dist/index.mjs"), distAt)
-      at(join(pkg, "dist"), 500)
+      at(join(pkg, "dist"), folderAt)
       files[`@packages/${name}`] = join(pkg, served)
     }
     const resolve = (specifier: string) => files[specifier]
     expect({
       stackDown: unbuilt(Object.keys(files), dir, {}, resolve, false),
       stackUp: unbuilt(Object.keys(files), dir, {}, resolve, true),
-    }).toEqual({ stackDown: ["@packages/stale"], stackUp: [] })
+    }).toEqual({ stackDown: ["@packages/stale", "@packages/stale-folder"], stackUp: [] })
   } finally {
     rmSync(dir, { force: true, recursive: true })
   }
@@ -474,6 +475,35 @@ const clone = (): {
     },
   }
 }
+
+// A turbo cache hit restores a dist as it was, older than the src that sent the build, so a prebuild that left it there would build it again on every run; a src saved while the build runs still needs the next one.
+test("test:file builds a package whose src is newer than its dist, when turbo's cache hit leaves the dist as it was, again only for a src saved during that build, and then nothing", () => {
+  const { dir, log, run } = clone()
+  try {
+    const pkg = join(dir, "packages/one")
+    mkdirSync(join(pkg, "dist"))
+    mkdirSync(join(pkg, "src"))
+    writeFileSync(join(pkg, "src/index.ts"), "export const one = 1\n")
+    writeFileSync(join(pkg, "dist/index.mjs"), "export const one = 1\n")
+    utimesSync(join(pkg, "dist/index.mjs"), 1000, 1000)
+    const saved = join(dir, "saved")
+    writeFileSync(
+      join(dir, "node_modules/.bin/turbo"),
+      `#!/bin/bash\necho "$*" >> ${JSON.stringify(join(dir, "build.log"))}\n[ -e ${JSON.stringify(saved)} ] || { sleep 0.05; touch packages/one/src/index.ts ${JSON.stringify(saved)}; }\n`,
+    )
+    for (let i = 0; i < 3; i++) expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
+    expect(
+      log()
+        .split("\n")
+        .filter((line) => line.startsWith("run build")),
+    ).toEqual([
+      "run build --filter=@packages/one --output-logs=errors-only",
+      "run build --filter=@packages/one --output-logs=errors-only",
+    ])
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
 
 test("test:file in a cloned worktree builds only the packages its files import, under the flags a worktree with no .env needs, and then nothing", () => {
   const { dir, log, run } = clone()
