@@ -645,7 +645,37 @@ function decode(raw) {
 function lex(src, known = {}) {
   const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
+  calledAgain(lx.commands, src);
   return { commands: lx.commands, scopes: lx.scopes };
+}
+function calledAgain(commands, src) {
+  for (const [k, open] of commands.entries()) {
+    const [first, second] = open.words;
+    if (!open.held || !first || first.quoted)
+      continue;
+    const before = commands[k - 1]?.words;
+    const word = first.value === "function" ? second : open.group && before?.length === 1 ? before[0] : undefined;
+    if (!word || word.quoted)
+      continue;
+    const name = word.value.replace(/\(\)$/, "");
+    if (!/^[\w.:-]+$/.test(name))
+      continue;
+    let end = k;
+    for (let balance = 0;end < commands.length; end++) {
+      for (const w of markers(commands[end].words))
+        balance += w === "{" ? 1 : w === "}" ? -1 : 0;
+      if (balance <= 0)
+        break;
+    }
+    const body = commands.slice(k, end + 1);
+    const calls = commands.filter((c, at) => (at < k - 1 || at > end) && !c.words[0]?.quoted && c.words[0]?.value === name);
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const mentions = src.match(new RegExp(`(?<![\\w.:-])${escaped}(?![\\w.:-])`, "g"))?.length ?? 0;
+    const once = mentions === 2 && calls.length === 1 && !calls[0].repeated && !calls[0].kept;
+    if (!once)
+      for (const c of body)
+        c.repeated = true;
+  }
 }
 function nest(lx, inherit) {
   list(lx, lx.scopes.push(lx.scope) - 1, true, inherit);
@@ -669,6 +699,7 @@ function walk(lx, scope, nested, inherit) {
   let loops = 0;
   let after = "";
   const bodies = [];
+  const heads = [];
   const end = (op) => {
     const done = cmd;
     const pipe = op === "|" || op === "|&";
@@ -704,7 +735,15 @@ function walk(lx, scope, nested, inherit) {
         else if (CLOSES.has(w))
           bodies.pop();
       }
-      if (loops > 0 || loop)
+      let condition = heads.includes(true);
+      for (const w of reserved) {
+        if (w === "while" || w === "until" || w === "for" || w === "select")
+          heads.push(w === "while" || w === "until");
+        else if (w === "do")
+          heads.pop();
+        condition ||= heads.includes(true);
+      }
+      if (loops > 0 || loop || condition)
         done.repeated = true;
       depth = Math.max(0, depth + opened - closed);
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
@@ -1325,13 +1364,19 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
   else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
     const script = await scriptOf(args[0], cmd, here);
-    verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(lexScript(known(script), env), here, visit, builtins));
+    verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
   } else if (name === "eval") {
-    verdict = await nested(cmd, env, () => run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins));
+    verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record(cmd, name, args, here);
   return verdict;
+}
+function again(lexed, cmd, parsed) {
+  if (manyTimes(cmd, parsed))
+    for (const c of lexed.commands)
+      c.repeated = true;
+  return lexed;
 }
 async function nested(cmd, env, body) {
   const chain = env.cwdChain;
@@ -1411,7 +1456,10 @@ function cdTargets(name, cmd, parsed, env, from) {
   const paths = new Set;
   const many = manyTimes(cmd, parsed);
   let unread = dirs.length > 1;
-  for (const word of dirs.length > 1 ? dirs : [dir]) {
+  for (const typed of dirs.length > 1 ? dirs : [dir]) {
+    const word = env.hold?.(typed, cmd, env) ?? typed;
+    if (word !== typed)
+      unread = true;
     for (const base of from.length > 0 ? from : [undefined]) {
       tick();
       const path = pathOf(word, { ...env, cwd: base });
@@ -1714,6 +1762,224 @@ function knownVariables(command, environment, cwd) {
   }
   return known;
 }
+
+// scripts/hooks/steady.ts
+var SHELL_SETS = new Set([
+  "ARGC",
+  "BASH",
+  "BASHOPTS",
+  "BASHPID",
+  "COLUMNS",
+  "COPROC",
+  "CPUTYPE",
+  "DIRSTACK",
+  "EGID",
+  "EPOCHREALTIME",
+  "EPOCHSECONDS",
+  "ERRNO",
+  "EUID",
+  "FUNCNAME",
+  "FUNCNEST",
+  "GID",
+  "GROUPS",
+  "HISTCMD",
+  "HOST",
+  "HOSTNAME",
+  "HOSTTYPE",
+  "LINENO",
+  "LINES",
+  "LOGNAME",
+  "MACHTYPE",
+  "MAPFILE",
+  "MATCH",
+  "MBEGIN",
+  "MEND",
+  "OLDPWD",
+  "OPTARG",
+  "OPTIND",
+  "OSTYPE",
+  "PIPESTATUS",
+  "PPID",
+  "PWD",
+  "RANDOM",
+  "REPLY",
+  "SECONDS",
+  "SHELLOPTS",
+  "SHLVL",
+  "SRANDOM",
+  "TRY_BLOCK_ERROR",
+  "TRY_BLOCK_INTERRUPT",
+  "TTY",
+  "TTYIDLE",
+  "UID",
+  "USERNAME",
+  "VENDOR",
+  "ZCURSES_COLORS",
+  "ZCURSES_COLOR_PAIRS",
+  "ZPCRE_OP",
+  "_",
+  "aliases",
+  "argv",
+  "builtins",
+  "commands",
+  "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
+  "funcfiletrace",
+  "funcsourcetrace",
+  "funcstack",
+  "functions",
+  "functions_source",
+  "functrace",
+  "galiases",
+  "history",
+  "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "langinfo",
+  "mapfile",
+  "match",
+  "mbegin",
+  "mend",
+  "modules",
+  "nameddirs",
+  "options",
+  "parameters",
+  "patchars",
+  "pipestatus",
+  "reply",
+  "reswords",
+  "saliases",
+  "signals",
+  "status",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
+  "widgets",
+  "zcurses_attrs",
+  "zcurses_colors",
+  "zcurses_keycodes",
+  "zcurses_windows",
+  "zgdbm_tied"
+]);
+var TIED = new Set([
+  "CDPATH",
+  "FIGNORE",
+  "FPATH",
+  "HISTCHARS",
+  "MAILPATH",
+  "MANPATH",
+  "MODULE_PATH",
+  "PATH",
+  "PROMPT",
+  "PROMPT2",
+  "PROMPT3",
+  "PROMPT4",
+  "PS1",
+  "PS2",
+  "PS3",
+  "PS4",
+  "PSVAR",
+  "WATCH",
+  "cdpath",
+  "fignore",
+  "fpath",
+  "histchars",
+  "mailpath",
+  "manpath",
+  "module_path",
+  "path",
+  "prompt",
+  "psvar",
+  "watch"
+]);
+var NAME_SETTERS = new Set([
+  "compgen",
+  "declare",
+  "export",
+  "float",
+  "getln",
+  "getopts",
+  "integer",
+  "let",
+  "local",
+  "mapfile",
+  "pcre_match",
+  "print",
+  "printf",
+  "private",
+  "read",
+  "readarray",
+  "readonly",
+  "set",
+  "shift",
+  "stat",
+  "strftime",
+  "syserror",
+  "sysopen",
+  "sysread",
+  "syswrite",
+  "typeset",
+  "unset",
+  "vared",
+  "wait",
+  "zcurses",
+  "zformat",
+  "zgdbmpath",
+  "zgetattr",
+  "zlistattr",
+  "zmodload",
+  "zparseopts",
+  "zpty",
+  "zregexparse",
+  "zselect",
+  "zsocket",
+  "zstat",
+  "zstyle",
+  "zsystem",
+  "ztcp",
+  "ztie",
+  "zuntie"
+]);
+var PRINTS = new Set(["print", "printf"]);
+var NUMERIC = new Set(["float", "integer"]);
+var TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"]);
+var RUNS_TEXT = new Set([".", "eval", "source"]);
+var TESTS = new Set(["[", "[[", "test"]);
+var BINARY = new Set([
+  "!=",
+  "-a",
+  "-ef",
+  "-eq",
+  "-ge",
+  "-gt",
+  "-le",
+  "-lt",
+  "-ne",
+  "-nt",
+  "-o",
+  "-ot",
+  "<",
+  "=",
+  "==",
+  "=~",
+  ">"
+]);
+var OPENS2 = new Set(["case", "for", "if", "select", "until", "while", "{"]);
+var CLOSES2 = new Set(["done", "esac", "fi", "}"]);
+var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
 
 // scripts/hooks/no-main-checkout.ts
 function mainCheckout(dir) {

@@ -556,7 +556,37 @@ function decode(raw) {
 function lex(src, known = {}) {
   const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
+  calledAgain(lx.commands, src);
   return { commands: lx.commands, scopes: lx.scopes };
+}
+function calledAgain(commands, src) {
+  for (const [k, open] of commands.entries()) {
+    const [first, second] = open.words;
+    if (!open.held || !first || first.quoted)
+      continue;
+    const before = commands[k - 1]?.words;
+    const word = first.value === "function" ? second : open.group && before?.length === 1 ? before[0] : undefined;
+    if (!word || word.quoted)
+      continue;
+    const name = word.value.replace(/\(\)$/, "");
+    if (!/^[\w.:-]+$/.test(name))
+      continue;
+    let end = k;
+    for (let balance = 0;end < commands.length; end++) {
+      for (const w of markers(commands[end].words))
+        balance += w === "{" ? 1 : w === "}" ? -1 : 0;
+      if (balance <= 0)
+        break;
+    }
+    const body = commands.slice(k, end + 1);
+    const calls = commands.filter((c, at) => (at < k - 1 || at > end) && !c.words[0]?.quoted && c.words[0]?.value === name);
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const mentions = src.match(new RegExp(`(?<![\\w.:-])${escaped}(?![\\w.:-])`, "g"))?.length ?? 0;
+    const once = mentions === 2 && calls.length === 1 && !calls[0].repeated && !calls[0].kept;
+    if (!once)
+      for (const c of body)
+        c.repeated = true;
+  }
 }
 function nest(lx, inherit) {
   list(lx, lx.scopes.push(lx.scope) - 1, true, inherit);
@@ -580,6 +610,7 @@ function walk(lx, scope, nested, inherit) {
   let loops = 0;
   let after = "";
   const bodies = [];
+  const heads = [];
   const end = (op) => {
     const done = cmd;
     const pipe = op === "|" || op === "|&";
@@ -615,7 +646,15 @@ function walk(lx, scope, nested, inherit) {
         else if (CLOSES.has(w))
           bodies.pop();
       }
-      if (loops > 0 || loop)
+      let condition = heads.includes(true);
+      for (const w of reserved) {
+        if (w === "while" || w === "until" || w === "for" || w === "select")
+          heads.push(w === "while" || w === "until");
+        else if (w === "do")
+          heads.pop();
+        condition ||= heads.includes(true);
+      }
+      if (loops > 0 || loop || condition)
         done.repeated = true;
       depth = Math.max(0, depth + opened - closed);
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
@@ -1242,13 +1281,19 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
   else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
     const script = await scriptOf(args[0], cmd, here);
-    verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(lexScript(known(script), env), here, visit, builtins));
+    verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
   } else if (name === "eval") {
-    verdict = await nested(cmd, env, () => run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins));
+    verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record(cmd, name, args, here);
   return verdict;
+}
+function again(lexed, cmd, parsed) {
+  if (manyTimes(cmd, parsed))
+    for (const c of lexed.commands)
+      c.repeated = true;
+  return lexed;
 }
 async function nested(cmd, env, body) {
   const chain = env.cwdChain;
@@ -1328,7 +1373,10 @@ function cdTargets(name, cmd, parsed, env, from) {
   const paths = new Set;
   const many = manyTimes(cmd, parsed);
   let unread = dirs.length > 1;
-  for (const word of dirs.length > 1 ? dirs : [dir]) {
+  for (const typed of dirs.length > 1 ? dirs : [dir]) {
+    const word = env.hold?.(typed, cmd, env) ?? typed;
+    if (word !== typed)
+      unread = true;
     for (const base of from.length > 0 ? from : [undefined]) {
       tick();
       const path = pathOf(word, { ...env, cwd: base });
@@ -1632,225 +1680,8 @@ function knownVariables(command, environment, cwd) {
   return known;
 }
 
-// scripts/hooks/no-main-checkout.ts
-function real(path) {
-  const found = resolved(path);
-  if (found !== undefined || !isAbsolute2(path))
-    return found ?? nearest(path);
-  const parts = normalize(path).split(sep).filter(Boolean);
-  let low = 0;
-  let high = parts.length - 1;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (resolved(sep + parts.slice(0, mid).join(sep)) === undefined)
-      high = mid - 1;
-    else
-      low = mid;
-  }
-  return join4(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
-}
-var resolved = (path) => {
-  try {
-    return realpathSync(path);
-  } catch {
-    return;
-  }
-};
-function nearest(path) {
-  const rest = [];
-  for (let dir = path;; dir = dirname2(dir)) {
-    const found = resolved(dir);
-    if (found !== undefined)
-      return join4(found, ...rest.reverse());
-    if (dir === dirname2(dir))
-      return path;
-    rest.push(basename2(dir));
-  }
-}
-var FILE_TOOLS = {
-  Edit: "file_path",
-  MultiEdit: "file_path",
-  NotebookEdit: "notebook_path",
-  Write: "file_path"
-};
-var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
-var RUNNERS = new Set(["npx"]);
-var TOOLS = new Set(["lefthook", "turbo"]);
-function bunCall(args, env) {
-  let cwd = env.cwd;
-  let filtered = false;
-  const words = [];
-  let k = 0;
-  for (;k < args.length; k++) {
-    const v = args[k].value;
-    if (v === "--cwd")
-      cwd = args[k + 1] && pathOf(args[++k], env);
-    else if (v.startsWith("--cwd="))
-      cwd = pathOf({ ...args[k], value: v.slice(6) }, env);
-    else if (v === "--filter" || v === "-F") {
-      filtered = true;
-      k++;
-    } else if (v.startsWith("--filter="))
-      filtered = true;
-    else if (!v.startsWith("-")) {
-      words.push(v);
-      if (v !== "run" && v !== "x")
-        break;
-    }
-  }
-  return { at: k, cwd, filtered, words };
-}
-function gitCall(args, env) {
-  let cwd = env.cwd;
-  let gitDir;
-  let workTree;
-  const value = (k, flag) => args[k].value === flag ? args[k + 1] : { ...args[k], value: args[k].value.slice(flag.length + 1) };
-  let k = 0;
-  for (;k < args.length && args[k].value.startsWith("-"); k++) {
-    const v = args[k].value;
-    if (v === "-C")
-      cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd });
-    else if (v === "--git-dir" || v.startsWith("--git-dir=")) {
-      const word = value(k, "--git-dir");
-      if (v === "--git-dir")
-        k++;
-      gitDir = word && pathOf(word, { ...env, cwd });
-    } else if (v === "--work-tree" || v.startsWith("--work-tree=")) {
-      const word = value(k, "--work-tree");
-      if (v === "--work-tree")
-        k++;
-      workTree = word && pathOf(word, { ...env, cwd });
-    } else if (GIT_TAKES.has(v))
-      k++;
-  }
-  const repo = gitDir?.replace(/\/+$/, "");
-  const tree = repo?.endsWith(`${sep}.git`) ? dirname2(repo) : workTree ?? cwd;
-  return { cwd: tree, rest: args.slice(k + 1).map((a) => a.value), sub: args[k]?.value };
-}
-var GIT_MOVES = new Set([
-  "am",
-  "bisect",
-  "checkout",
-  "cherry-pick",
-  "mv",
-  "pull",
-  "rebase",
-  "reset",
-  "restore",
-  "revert",
-  "rm",
-  "switch",
-  "update-ref"
-]);
-var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
-var RUNNER_TAKES = new Set(["--package", "-p"]);
-var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
-var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
-var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
-if (false) {}
-
-// scripts/hooks/no-extensions-write.ts
-var shown = (word) => (word.raw ?? word.value).replaceAll(UNKNOWN, () => "$\u2026").replaceAll(READ, () => "$\u2026");
-var ROUTE = "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.";
-var PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"]);
-var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves";
-var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
-var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
-var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
-var READERS = new Set([
-  "[",
-  "cat",
-  "cmp",
-  "diff",
-  "grep",
-  "head",
-  "jq",
-  "ls",
-  "readlink",
-  "realpath",
-  "shasum",
-  "stat",
-  "tail",
-  "test",
-  "wc"
-]);
-var FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/;
-var GIT_READS = new Set([
-  "blame",
-  "cat-file",
-  "diff",
-  "grep",
-  "log",
-  "ls-files",
-  "rev-parse",
-  "show",
-  "status"
-]);
-var EXPORTS3 = new Set(["declare", "export", "local", "readonly", "typeset"]);
-var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
-var DUPLICATE = /^(?:\d+|-)$/;
-var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
-var GLOB = /[*?[{(]/;
-var RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/;
-var CLI = join5("packages", "scripts", "src", "playground", "cli.ts");
-var varsRun = new WeakMap;
-function runsVariable(vars) {
-  const [cursor, found] = varsRun.get(vars) ?? [undefined, false];
-  const [keys, next] = varsSince(vars, cursor);
-  const now = found || keys.some((key) => RUNS.test(key));
-  varsRun.set(vars, [next, now]);
-  return now;
-}
-function reads(parsed, env) {
-  const { args, local, name } = parsed;
-  if ([...local.keys()].some((key) => RUNS.test(key)) || runsVariable(env.vars))
-    return false;
-  if (READERS.has(name) || PRINTERS.has(name))
-    return true;
-  if (name === "rg")
-    return !args.some((a) => /^--(?:hostname-bin|pre)(?:=|$)/.test(a.value));
-  if (name === "find")
-    return !args.some((a) => FIND_ACTS.test(a.value));
-  if (name !== "git")
-    return false;
-  const { rest, sub } = gitCall(args, env);
-  const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
-  return !!sub && GIT_READS.has(sub) && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
-}
-var GH_READS = new Set([
-  "api",
-  "issue list",
-  "issue view",
-  "pr list",
-  "pr view",
-  "run list",
-  "run view",
-  "search"
-]);
-var GH_API_SENDS = /^(?:-[^-=qt]*[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/;
-var GH_WEB = /^(?:-[^-=qt]*w|--web(?:=|$))/;
-function ghFilters(parsed) {
-  const { args, first, name } = parsed;
-  const filters = new Set;
-  if (name !== "gh" || !first || marked(first.value))
-    return filters;
-  const [verb, sub] = args.map((a) => a.value);
-  const call = verb === "api" || verb === "search" ? verb : `${verb} ${sub}`;
-  if (!GH_READS.has(call))
-    return filters;
-  if (verb === "api" && args.some((a) => GH_API_SENDS.test(a.value)))
-    return filters;
-  if (args.some((a) => GH_WEB.test(a.value)))
-    return filters;
-  for (let k = 0;k < args.length; k++) {
-    const { value } = args[k];
-    if (["-q", "--jq", "-t", "--template"].includes(value) && args[k + 1])
-      filters.add(args[++k]);
-    else if (/^(?:-[qt].|--(?:jq|template)=)/.test(value))
-      filters.add(args[k]);
-  }
-  return filters;
-}
+// scripts/hooks/steady.ts
+var unquoted = (text) => text.replace(/\\\n|\$(?=["'])|["'\\]/g, "");
 var READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/;
 var EVALUATES = [
   /\(\([^)]*[A-Za-z_]/,
@@ -2306,6 +2137,226 @@ function heldVars(env, steady) {
   return known;
 }
 var held2 = (word, env, steady) => !marked(word.value) || !!heldWord(word, env, steady);
+
+// scripts/hooks/no-main-checkout.ts
+function real(path) {
+  const found = resolved(path);
+  if (found !== undefined || !isAbsolute2(path))
+    return found ?? nearest(path);
+  const parts = normalize(path).split(sep).filter(Boolean);
+  let low = 0;
+  let high = parts.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (resolved(sep + parts.slice(0, mid).join(sep)) === undefined)
+      high = mid - 1;
+    else
+      low = mid;
+  }
+  return join4(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
+}
+var resolved = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return;
+  }
+};
+function nearest(path) {
+  const rest = [];
+  for (let dir = path;; dir = dirname2(dir)) {
+    const found = resolved(dir);
+    if (found !== undefined)
+      return join4(found, ...rest.reverse());
+    if (dir === dirname2(dir))
+      return path;
+    rest.push(basename2(dir));
+  }
+}
+var FILE_TOOLS = {
+  Edit: "file_path",
+  MultiEdit: "file_path",
+  NotebookEdit: "notebook_path",
+  Write: "file_path"
+};
+var BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"]);
+var RUNNERS = new Set(["npx"]);
+var TOOLS = new Set(["lefthook", "turbo"]);
+function bunCall(args, env) {
+  let cwd = env.cwd;
+  let filtered = false;
+  const words = [];
+  let k = 0;
+  for (;k < args.length; k++) {
+    const v = args[k].value;
+    if (v === "--cwd")
+      cwd = args[k + 1] && pathOf(args[++k], env);
+    else if (v.startsWith("--cwd="))
+      cwd = pathOf({ ...args[k], value: v.slice(6) }, env);
+    else if (v === "--filter" || v === "-F") {
+      filtered = true;
+      k++;
+    } else if (v.startsWith("--filter="))
+      filtered = true;
+    else if (!v.startsWith("-")) {
+      words.push(v);
+      if (v !== "run" && v !== "x")
+        break;
+    }
+  }
+  return { at: k, cwd, filtered, words };
+}
+function gitCall(args, env) {
+  let cwd = env.cwd;
+  let gitDir;
+  let workTree;
+  const value = (k, flag) => args[k].value === flag ? args[k + 1] : { ...args[k], value: args[k].value.slice(flag.length + 1) };
+  let k = 0;
+  for (;k < args.length && args[k].value.startsWith("-"); k++) {
+    const v = args[k].value;
+    if (v === "-C")
+      cwd = args[k + 1] && pathOf(args[++k], { ...env, cwd });
+    else if (v === "--git-dir" || v.startsWith("--git-dir=")) {
+      const word = value(k, "--git-dir");
+      if (v === "--git-dir")
+        k++;
+      gitDir = word && pathOf(word, { ...env, cwd });
+    } else if (v === "--work-tree" || v.startsWith("--work-tree=")) {
+      const word = value(k, "--work-tree");
+      if (v === "--work-tree")
+        k++;
+      workTree = word && pathOf(word, { ...env, cwd });
+    } else if (GIT_TAKES.has(v))
+      k++;
+  }
+  const repo = gitDir?.replace(/\/+$/, "");
+  const tree = repo?.endsWith(`${sep}.git`) ? dirname2(repo) : workTree ?? cwd;
+  return { cwd: tree, rest: args.slice(k + 1).map((a) => a.value), sub: args[k]?.value };
+}
+var GIT_MOVES = new Set([
+  "am",
+  "bisect",
+  "checkout",
+  "cherry-pick",
+  "mv",
+  "pull",
+  "rebase",
+  "reset",
+  "restore",
+  "revert",
+  "rm",
+  "switch",
+  "update-ref"
+]);
+var APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"]);
+var RUNNER_TAKES = new Set(["--package", "-p"]);
+var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
+var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
+var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
+if (false) {}
+
+// scripts/hooks/no-extensions-write.ts
+var shown = (word) => (word.raw ?? word.value).replaceAll(UNKNOWN, () => "$\u2026").replaceAll(READ, () => "$\u2026");
+var ROUTE = "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand.";
+var PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"]);
+var PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves";
+var PRIVACY_ROUTE = "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand.";
+var refuse = (what) => `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`;
+var TOO_LONG = "a command too long or nested too deep to read inside the hook's time: split it into shorter calls";
+var READERS = new Set([
+  "[",
+  "cat",
+  "cmp",
+  "diff",
+  "grep",
+  "head",
+  "jq",
+  "ls",
+  "readlink",
+  "realpath",
+  "shasum",
+  "stat",
+  "tail",
+  "test",
+  "wc"
+]);
+var FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/;
+var GIT_READS = new Set([
+  "blame",
+  "cat-file",
+  "diff",
+  "grep",
+  "log",
+  "ls-files",
+  "rev-parse",
+  "show",
+  "status"
+]);
+var EXPORTS3 = new Set(["declare", "export", "local", "readonly", "typeset"]);
+var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
+var DUPLICATE = /^(?:\d+|-)$/;
+var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
+var GLOB = /[*?[{(]/;
+var RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/;
+var CLI = join5("packages", "scripts", "src", "playground", "cli.ts");
+var varsRun = new WeakMap;
+function runsVariable(vars) {
+  const [cursor, found] = varsRun.get(vars) ?? [undefined, false];
+  const [keys, next] = varsSince(vars, cursor);
+  const now = found || keys.some((key) => RUNS.test(key));
+  varsRun.set(vars, [next, now]);
+  return now;
+}
+function reads(parsed, env) {
+  const { args, local, name } = parsed;
+  if ([...local.keys()].some((key) => RUNS.test(key)) || runsVariable(env.vars))
+    return false;
+  if (READERS.has(name) || PRINTERS.has(name))
+    return true;
+  if (name === "rg")
+    return !args.some((a) => /^--(?:hostname-bin|pre)(?:=|$)/.test(a.value));
+  if (name === "find")
+    return !args.some((a) => FIND_ACTS.test(a.value));
+  if (name !== "git")
+    return false;
+  const { rest, sub } = gitCall(args, env);
+  const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
+  return !!sub && GIT_READS.has(sub) && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
+}
+var GH_READS = new Set([
+  "api",
+  "issue list",
+  "issue view",
+  "pr list",
+  "pr view",
+  "run list",
+  "run view",
+  "search"
+]);
+var GH_API_SENDS = /^(?:-[^-=qt]*[FXf]|--(?:cache|field|input|method|raw-field)(?:=|$))/;
+var GH_WEB = /^(?:-[^-=qt]*w|--web(?:=|$))/;
+function ghFilters(parsed) {
+  const { args, first, name } = parsed;
+  const filters = new Set;
+  if (name !== "gh" || !first || marked(first.value))
+    return filters;
+  const [verb, sub] = args.map((a) => a.value);
+  const call = verb === "api" || verb === "search" ? verb : `${verb} ${sub}`;
+  if (!GH_READS.has(call))
+    return filters;
+  if (verb === "api" && args.some((a) => GH_API_SENDS.test(a.value)))
+    return filters;
+  if (args.some((a) => GH_WEB.test(a.value)))
+    return filters;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (["-q", "--jq", "-t", "--template"].includes(value) && args[k + 1])
+      filters.add(args[++k]);
+    else if (/^(?:-[qt].|--(?:jq|template)=)/.test(value))
+      filters.add(args[k]);
+  }
+  return filters;
+}
 function gitConfigs(args) {
   const configs = [];
   for (let k = 0;k < args.length; k++) {
@@ -2363,7 +2414,6 @@ var IDENTITY = ["CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "PLAYGROUND_ROLE"
 var SETS = /^(?:CLAUDE_CODE_SESSION_ID|CLAUDE_CONFIG_DIR|PLAYGROUND_ROLE)\+?=/;
 var CLEARS = /^(?:-[^-\s]*i|--ignore-environment$|-$)/;
 var SCORE = /\bext\s+score\b/;
-var unquoted = (text) => text.replace(/\\\n|\$(?=["'])|["'\\]/g, "");
 var SCORE_AS_OTHER = `playground ext score on a line that clears or sets ${IDENTITY.join(", ")}, which reads as another author than the calling session`;
 var changes = (words) => words.some((w) => SETS.test(w.value)) || words.some((w) => program(w.value) === "env") && words.some((w) => CLEARS.test(w.value) || IDENTITY.some((k) => w.value.includes(k)));
 function changesIdentity(commands) {
