@@ -9,7 +9,7 @@ setDefaultTimeout(60_000)
 
 // Playground's own lefthook.yml, whose pre-commit runs the build
 const LEFTHOOK = readFileSync(join(import.meta.dir, "../../../lefthook.yml"), "utf8")
-// A machine whose fake git fails on a `-C` folder that is not one, answers `git rev-parse --show-toplevel` with its folder, which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths, `git ls-files --others` with `untracked` (under the paths after a `--`), and touches its last argument for anything else, as a commit's marker
+// A machine whose fake git fails on a `-C` folder that is not one, answers `git rev-parse --show-toplevel` with its folder (the root, from a folder under `web/`), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths, `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, as git prints them), and touches its last argument for anything else, as a commit's marker
 const repo = (
   setup: Setup,
   staged: string[],
@@ -23,11 +23,14 @@ const repo = (
     join(m.bin, "git"),
     `#!/bin/bash
 [ "$1" = -C ] && { [ -d "$2" ] || exit 128; }
-case " $* " in *" rev-parse --show-toplevel "*) [ "$1" = -C ] && cd "$2"; pwd; exit 0 ;; esac
+d=$PWD; [ "$1" = -C ] && d=$2
+case " $* " in *" rev-parse --show-toplevel "*) case "$d" in ${m.root}/web/*) echo ${m.root} ;; *) cd "$d"; pwd ;; esac; exit 0 ;; esac
+pre=""; case "$d" in ${m.root}/*) pre=\${d#${m.root}/}/ ;; esac
+full=""; case " $* " in *" --full-name "*) full=1 ;; esac
 case " $* " in
   *" ls-files "*" -- "*) while [ "$1" != -- ]; do shift; done; shift
-    for f in ${untracked.join(" ")}; do for p in "$@"; do case "$f" in "$p"|"$p"/*) echo "$f" ;; esac; done; done; exit 0 ;;
-  *" ls-files "*) printf '%s\\n' ${untracked.join(" ")}; exit 0 ;;
+    for f in ${untracked.join(" ")}; do for p in "$@"; do case "$f" in "$pre$p"|"$pre$p"/*) [ -n "$full" ] && echo "$f" || echo "\${f#"$pre"}" ;; esac; done; done; exit 0 ;;
+  *" ls-files "*) for f in ${untracked.join(" ")}; do case "$f" in "$pre"*) [ -n "$full" ] && echo "$f" || echo "\${f#"$pre"}" ;; esac; done; exit 0 ;;
 esac
 for a in "$@"; do
   [ "$a" = diff ] || continue
@@ -418,6 +421,15 @@ describe("a sh -c chain of git steps", () => {
       ).toBe(true)
       expect(log(m)).not.toContain("run-slot-commit")
     })
+
+  // review round 8: from a subfolder, git ls-files prints an untracked file relative to it unless --full-name
+  test("a chain on the list that adds an untracked web/next file from inside web/next waits as a big run", async () => {
+    const m = repo({ idle: 30 }, [], [], LEFTHOOK, ["web/next/src/app/new.tsx"])
+    mkdirSync(join(m.root, "web/next/src/app"), { recursive: true })
+    m.hold("run-slot", 3, "big")
+    expect(await start(m, "cd ROOT/web/next && git add . && git commit -m x").waits()).toBe(true)
+    expect(log(m)).not.toContain("run-slot-commit")
+  })
 
   test("while one whose add names only a Markdown file takes run-slot-commit", async () => {
     const m = repo({ idle: 30 }, [], ["docs/notes.md", "web/next/src/app/page.tsx"])

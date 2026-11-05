@@ -630,8 +630,8 @@ heavy_build() {
     "$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)/lefthook.yml" 2>/dev/null || return 1
   files=$({ git ${dir:+-C "$dir"} diff --cached --name-only; [ -z "$all" ] || git ${dir:+-C "$dir"} diff --name-only
     [ ${#paths[@]} -eq 0 ] || git ${dir:+-C "$dir"} diff --name-only HEAD -- "${paths[@]}"
-    [ -z "$CHAIN_ADD_ALL" ] || { git ${dir:+-C "$dir"} diff --name-only; git ${dir:+-C "$dir"} ls-files --others --exclude-standard; }
-    [ ${#CHAIN_ADD[@]} -eq 0 ] || { git ${dir:+-C "$dir"} diff --name-only -- "${CHAIN_ADD[@]}"; git ${dir:+-C "$dir"} ls-files --others --exclude-standard -- "${CHAIN_ADD[@]}"; }; } 2>/dev/null)
+    [ -z "$CHAIN_ADD_ALL" ] || { git ${dir:+-C "$dir"} diff --name-only; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name; }
+    [ ${#CHAIN_ADD[@]} -eq 0 ] || { git ${dir:+-C "$dir"} diff --name-only -- "${CHAIN_ADD[@]}"; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name -- "${CHAIN_ADD[@]}"; }; } 2>/dev/null)
   grep -Evq '^$|\.md$|^tests/.*\.py$' <<<"$files" || return 1
   grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$' <<<"$files"
 }
