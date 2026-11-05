@@ -721,8 +721,9 @@ function word(lx) {
     out.unknown ??= "a brace expansion";
   if (GLOB_CHARS.test(bare))
     out.glob = true;
+  out.source = src.slice(start, lx.i);
   if (marked(out.value))
-    out.raw = src.slice(start, lx.i);
+    out.raw = out.source;
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;

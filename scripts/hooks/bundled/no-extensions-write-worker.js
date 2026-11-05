@@ -696,8 +696,9 @@ function word(lx) {
     out.unknown ??= "a brace expansion";
   if (GLOB_CHARS.test(bare))
     out.glob = true;
+  out.source = src.slice(start, lx.i);
   if (marked(out.value))
-    out.raw = src.slice(start, lx.i);
+    out.raw = out.source;
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
@@ -1672,6 +1673,7 @@ var EVALUATES = [
   /@P\}/
 ];
 var SUBSCRIPT = /\w\[(?!(?:[@*]|[-\d:,\s]*)\]|\^)/;
+var INDIRECTS = /\$\{!(?!\}|[A-Za-z_]\w*(?:[*@]|\[[*@]\])\})/;
 var QUALIFIER = /[^\s(|&;<>$=]\((?:#q)?[^()\s|]*?(?:e(?:\[[^]*?\]|\{[^]*?\}|<[^]*?>|([^\s[{<])[^]*?\1)|\+\w+)[^()\s]*\)(?=$|[\s;&|)<>`}])/;
 function singleQuotesOut(command) {
   if (command.includes("$'"))
@@ -1744,15 +1746,13 @@ function namings(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
-  let blind = EVALUATES.some((evaluates) => evaluates.test(command)) || SUBSCRIPT.test(command) || SUBSCRIPT.test(unquoted(command)) || QUALIFIER.test(singleQuotesOut(command));
+  let blind = EVALUATES.some((evaluates) => evaluates.test(command)) || SUBSCRIPT.test(command) || SUBSCRIPT.test(unquoted(command)) || QUALIFIER.test(singleQuotesOut(command)) || INDIRECTS.test(command);
   for (const [, flags, closed] of command.matchAll(/\$\{\(([^)]*)(\)?)/g))
-    if (!closed || !/^[\w@#%~^=!*-]*$/.test(flags) || /[#%eP]/.test(flags))
+    if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags))
       blind = true;
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
     const [whole, expanded, key] = m;
     const next = command.slice(m.index + whole.length);
-    if (expanded === "${!" && !/^(?:[*@]|\[[*@]\])\}/.test(next))
-      blind = true;
     if (expanded && READS_ONLY.test(next))
       continue;
     const assigns = next[0] === "=" ? "=" : undefined;
@@ -1980,6 +1980,8 @@ var NUMERIC = new Set(["float", "integer"]);
 var TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var RUNS_TEXT = new Set([".", "eval", "source"]);
 var TESTS = new Set(["[", "[[", "test"]);
+var PLAIN_NAME = /^[A-Za-z_]\w*$/;
+var EXPANDS = /\$(?![A-Za-z_]\w*|\{[A-Za-z_]\w*\})|`|[<>]\(/;
 var BINARY = new Set([
   "!=",
   "-a",
@@ -2002,8 +2004,12 @@ var BINARY = new Set([
 var testsAName = (args, expands) => args.some((w, k) => {
   const next = args[k + 1];
   if (w.value === "-v")
-    return next !== undefined && (next.quoted || !/^[A-Za-z_]\w*$/.test(next.value));
-  if (!expands || !w.value.includes("\x00"))
+    return next !== undefined && !PLAIN_NAME.test(next.source ?? "");
+  if (!expands)
+    return false;
+  if (EXPANDS.test(w.source ?? "$"))
+    return true;
+  if (!marked(w.value))
     return false;
   return !w.quoted || next !== undefined && next.value !== "]" && !BINARY.has(next.value);
 });
