@@ -21,7 +21,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { config } from "@/lib/config"
-import { type BrowserKey, pairBrowser, readBrowserKey } from "@/lib/remote-key"
+import { BROWSER_KEY, type BrowserKey, pairBrowser, readBrowserKey } from "@/lib/remote-key"
 import { relativeTime } from "@/lib/time"
 
 const REMOTE_KEY = ["remote"] as const
@@ -197,8 +197,6 @@ async function sendPair(publicKey: BrowserKey["publicKey"]): Promise<string> {
   if (!response.ok || !body?.data) throw new Error(body?.error?.message ?? "The Mac did not answer")
   return body.data.fingerprint
 }
-
-const BROWSER_KEY = ["remote", "browser"] as const
 
 function PairThisBrowser() {
   const queryClient = useQueryClient()

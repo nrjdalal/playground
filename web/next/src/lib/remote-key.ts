@@ -34,6 +34,9 @@ const named = async (stored: Stored): Promise<BrowserKey> => ({
   publicKey: stored.publicKey,
 })
 
+// The query that reads this browser's key, shared by Settings' Remote and the writes a hosted page offers, so a Pair shows the composer at once.
+export const BROWSER_KEY = ["remote", "browser"] as const
+
 // The key this browser keeps, or null before one is made.
 export async function readBrowserKey(): Promise<BrowserKey | null> {
   const stored = await request<Stored | undefined>((store) => store.get(SLOT), "readonly")

@@ -107,6 +107,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useYardWrites } from "@/hooks/use-yard-writes"
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
@@ -165,6 +166,7 @@ import {
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
 import { insertPaste } from "@/lib/paste"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
+import { ON_THE_MAC_LINE } from "@/lib/relay"
 import { replyRoute, useTypedReply } from "@/lib/reply"
 import { iconTone, type ShownState, statusIcon } from "@/lib/status-icons"
 import { inboxMark, readMark } from "@/lib/tab-dot"
@@ -778,6 +780,9 @@ export function InboxCard({
 }) {
   const queryClient = useQueryClient()
   const { allowed, dispatcher, outbox, workers } = useDashboard()
+  // what the card answers: everything on a local stack, and on the hosted build its answer, Later and Done where the relay carries them
+  const writes = useYardWrites()
+  const answers = writes.answers(item)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Check it for me sends its note once
@@ -799,9 +804,9 @@ export function InboxCard({
     item.kind === "decision" && item.preview.type === "secret" ? item.preview.key : null
   const secretAsk = secretKey !== null
   const titleId = useId()
-  // every write the card makes goes through here, and the hosted build's relay carries none, so there it sends nothing
+  // every write the card makes goes through here, and a card whose answer the relay does not carry sends nothing; a refusal shows in the Mac's own words
   const settle = async (write: () => Promise<unknown>) => {
-    if (config.hosted) return false
+    if (!answers) return false
     setPending(true)
     setError(null)
     try {
@@ -849,7 +854,7 @@ export function InboxCard({
   // a folded row keeps its verbs, and the answers that need nothing its body holds; Seen is the band's tick, on a card in his list he has not marked read, and reading answers nothing
   const buttons = verbs(item, shelf)
   const unread = buttons.includes("seen")
-  // the hosted build's relay carries no write, so a click there leaves the read mark to this Mac
+  // the hosted build's relay carries no read mark, so a click there leaves it to this Mac
   const read = () =>
     unread && !paused && !config.hosted ? void settle(() => markRead([item.id])) : undefined
   const busy = pending || paused
@@ -964,7 +969,7 @@ export function InboxCard({
         {item.preview.thread && (
           <p className="text-muted-foreground text-xs font-medium">Your reply</p>
         )}
-        {config.hosted ? (
+        {!answers ? (
           <p className="whitespace-pre-wrap">{draft}</p>
         ) : (
           <Textarea
@@ -1046,7 +1051,8 @@ export function InboxCard({
           </Button>
         </Hint>
       ) : (
-        retryable(item, now) && (
+        retryable(item, now) &&
+        !config.hosted && (
           <Hint content={held}>
             <Button
               size="sm"
@@ -1192,31 +1198,38 @@ export function InboxCard({
           () => void onAnswer("dismiss"),
         )}
       <Reopen open={open} setOpen={setToggled} />
-      <Hint
-        content={
-          held ??
-          (secretAsk || !chat
-            ? "Reply: your comment alone, to its poster"
-            : "Reply: your comment alone, to its poster, or with the box empty, in your chat")
-        }
-      >
-        <Button
-          size="icon-sm"
-          variant="outline"
-          aria-label={`Reply to ${itemTag(item)}`}
-          className="shrink-0"
-          disabled={busy}
-          {...hold}
-          onClick={onReply}
+      {/* a Reply is a write the relay does not carry, so the hosted build's comment rides the answer alone */}
+      {!config.hosted && (
+        <Hint
+          content={
+            held ??
+            (secretAsk || !chat
+              ? "Reply: your comment alone, to its poster"
+              : "Reply: your comment alone, to its poster, or with the box empty, in your chat")
+          }
         >
-          <RiReplyLine />
-        </Button>
-      </Hint>
+          <Button
+            size="icon-sm"
+            variant="outline"
+            aria-label={`Reply to ${itemTag(item)}`}
+            className="shrink-0"
+            disabled={busy}
+            {...hold}
+            onClick={onReply}
+          >
+            <RiReplyLine />
+          </Button>
+        </Hint>
+      )}
     </div>
   )
 
-  // the hosted build's relay carries reads alone, so its cards hold no buttons and the Inbox's one read-only line stands for them
-  const footer = config.hosted ? null : (
+  // a card whose answer the relay does not carry holds no buttons: a paired hosted page says to answer it on the Mac, and one with no key leaves it to the Inbox's one read-only line
+  const footer = !answers ? (
+    writes.send ? (
+      <CardFooter className="text-muted-foreground text-xs">{ON_THE_MAC_LINE}</CardFooter>
+    ) : null
+  ) : (
     <CardFooter className="flex-wrap gap-2">
       {footerInForm ? (
         // shadcn's questionnaire actions in a row that wraps on a narrow card: Submit first, off until an option is picked and saying why on hover and focus, then the card's own buttons
@@ -1420,7 +1433,7 @@ export function InboxCard({
           </CardHeader>
           {body && <CardContent>{body}</CardContent>}
           {/* the card's last block before its buttons: his comment, the note with whatever he answers, or alone through Reply */}
-          {!folded && !config.hosted && (
+          {!folded && answers && (
             // the same gap-2 above it as between the choices
             <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
               {/* a box turned disabled drops focus to the page, so words dictated or typed as a card above leaves land nowhere: it stays enabled while the card is paused and turns read-only while its answer is on its way */}
@@ -1673,6 +1686,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   const { data, error, isPending } = useInbox(allowed)
   const queryClient = useQueryClient()
   const now = useNow()
+  const writes = useYardWrites()
   const [bulkPending, setBulkPending] = useState(false)
   const [bulkError, setBulkError] = useState<string | null>(null)
   // the ids in the order he sees them, set on the first read and when he takes what waits behind the pill
@@ -1817,7 +1831,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   }
   return (
     <section aria-label="Inbox" className="@container flex flex-col gap-3">
-      {config.hosted && <ReadOnlyLine />}
+      {!writes.send && <ReadOnlyLine />}
       {/* one accordion, each row an icon, its words and a count: the open items first, then the shelves, an empty row grayed and shut */}
       <Accordion
         multiple

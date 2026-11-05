@@ -1,5 +1,5 @@
 import type { RelayStatus } from "@api/hono"
-import { RELAY_PREFIX } from "@packages/message"
+import { type AnswerCard, answerKind, RELAY_ANSWER_KINDS, RELAY_PREFIX } from "@packages/message"
 
 import { fullTime } from "@/lib/time"
 
@@ -16,8 +16,26 @@ export const offlineLine = (since: string | null): string =>
 export const relayedBase = (base: string, hosted: boolean): string =>
   hosted ? `${base}${RELAY_PREFIX}` : base
 
-// The one line the hosted dashboard shows where a composer or a write button would be, and the reason on a message it drops: the relay carries reads alone.
+// The one line the hosted dashboard shows where a composer or a write button would be, and the reason on a message it drops, in a browser that keeps no paired key.
 export const READ_ONLY_LINE = "Read-only on Yard: send from your Mac"
+
+// What a paired hosted page shows on an Inbox card whose answer the relay does not carry, in the Mac's own words for its refusal.
+export const ON_THE_MAC_LINE = "Answer it on the Mac"
+
+export type YardWrites = { answers: (card: AnswerCard) => boolean; send: boolean }
+
+// Pure: the writes a dashboard page offers: every one on a local stack; on the hosted build, in a browser that keeps a paired key, the composer's send and a card's answer, Later and Done where its kind is on RELAY_ANSWER_KINDS, the writes the relay carries; and none in a browser that keeps no key.
+export const yardWrites = ({
+  hosted,
+  paired,
+}: {
+  hosted: boolean
+  paired: boolean
+}): YardWrites => ({
+  answers: (card) =>
+    !hosted || (paired && (RELAY_ANSWER_KINDS as readonly string[]).includes(answerKind(card))),
+  send: !hosted || paired,
+})
 
 // How long the hosted dashboard waits before it reads the status again, after a read that says offline or fails.
 export const RELAY_CONFIRM_MS = 1000

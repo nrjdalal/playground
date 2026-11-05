@@ -3,11 +3,11 @@ import { describe, expect, test } from "bun:test"
 import {
   cardOf,
   pathOn,
-  RELAY_ANSWER_KINDS,
   RELAY_GETS,
   RELAY_WRITES,
   relayAllowed,
 } from "../../../../../../api/hono/src/lib/relay/protocol"
+import { answerKind, RELAY_ANSWER_KINDS } from "../../../../../../packages/message/src/index"
 
 describe("the relay's allowlist", () => {
   test("carries the dashboard's reads, a query included", () => {
@@ -112,6 +112,12 @@ describe("the Inbox cards a relayed answer may reach", () => {
   test("leave every Approve the Mac carries out itself, a delete and a secret ask on the Mac", () => {
     for (const kind of ["accept", "apps", "delete", "grant", "secret"])
       expect((RELAY_ANSWER_KINDS as readonly string[]).includes(kind)).toBe(false)
+  })
+
+  test("read a card's kind as its decision's preview type, else as a draft or an update", () => {
+    expect(answerKind({ kind: "decision", preview: { type: "secret" } })).toBe("secret")
+    expect(answerKind({ kind: "draft" })).toBe("draft")
+    expect(answerKind({ kind: "update" })).toBe("update")
   })
 })
 

@@ -42,7 +42,7 @@ export const RELAY_GETS = [
   "/api/v1/workers/:sessionId/transcript",
 ] as const
 
-// An Inbox card's answer, the one write whose card's kind the Mac checks against RELAY_ANSWER_KINDS.
+// An Inbox card's answer, the one write whose card's kind the Mac checks against RELAY_ANSWER_KINDS (`@packages/message`).
 export const RELAY_ANSWER = "/api/v1/inbox/:id/answer"
 
 const ANSWER_ROUTES = [RELAY_ANSWER]
@@ -57,18 +57,6 @@ export const RELAY_WRITES = [
   "/api/v1/inbox/:id/schedule",
   "/api/v1/inbox/dismiss",
   "/api/v1/messages",
-] as const
-
-// The Inbox cards a relayed answer may reach, by their kind (a decision's preview type, else draft or update), A to Z: each one whose poster carries out the answer. Every other kind stays on the Mac, one added later included: an Approve the Mac carries out itself on its own settings and permissions (an extension accept, an apps change, a grant), a delete, and a secret ask, whose value goes to its sink through its own Submit alone.
-export const RELAY_ANSWER_KINDS = [
-  "ask",
-  "budget",
-  "draft",
-  "schema",
-  "ship",
-  "slack",
-  "ticket",
-  "update",
 ] as const
 
 // Each route as the pattern its path matches, made once per list.

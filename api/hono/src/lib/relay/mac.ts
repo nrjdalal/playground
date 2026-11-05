@@ -1,4 +1,4 @@
-import { signedBytes } from "@packages/message"
+import { RELAY_ANSWER_KINDS, signedBytes } from "@packages/message"
 
 import { type AuditLog, remoteAudit } from "@/lib/relay/audit"
 import { type KeyStore, type PairedKey, remoteKeys } from "@/lib/relay/key"
@@ -11,7 +11,6 @@ import {
   RELAY_PREFIX,
   RELAY_SILENT_MS,
   relayAllowed,
-  RELAY_ANSWER_KINDS,
   relayPairSchema,
   RELAY_WRITES,
   type RelayRequest,

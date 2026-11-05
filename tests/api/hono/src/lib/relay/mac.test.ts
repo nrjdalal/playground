@@ -7,10 +7,9 @@ import { join } from "node:path"
 process.env.BETTER_AUTH_SECRET ||= "relay-mac-test-secret-not-for-use-anywhere"
 const { answerRelay, CONNECT_MS, RECYCLE_MS, requireRelay, requireSignedWrite, startRelay } =
   await import("../../../../../../api/hono/src/lib/relay/mac")
-const { keyIdOf, pairKeySchema, signedBytes } =
+const { keyIdOf, pairKeySchema, RELAY_ANSWER_KINDS, signedBytes } =
   await import("../../../../../../packages/message/src/index")
-const { RELAY_ANSWER_KINDS, RELAY_MAX_AGE_MS } =
-  await import("../../../../../../api/hono/src/lib/relay/protocol")
+const { RELAY_MAX_AGE_MS } = await import("../../../../../../api/hono/src/lib/relay/protocol")
 const { dashboardRouter } = await import("../../../../../../api/hono/src/routers/dashboard")
 const { errorHandler } = await import("../../../../../../api/hono/src/lib/error")
 const { Hono } = await import("../../../../../../api/hono/node_modules/hono")

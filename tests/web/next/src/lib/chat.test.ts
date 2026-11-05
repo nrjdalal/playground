@@ -721,7 +721,7 @@ describe("transcriptFor", () => {
 })
 
 describe("the hosted build's outbox", () => {
-  // the hosted relay carries reads alone, so a message read "retry 3 · <session> is not live" and retried with no end
+  // in a browser with no paired key the relay carries no send, so a message read "retry 3 · <session> is not live" and retried with no end
   test("fails a new message at once with the read-only line, sends nothing and never retries it", async () => {
     const { calls, send } = fakeSend()
     const chats = new DashboardChats({ label: (name) => name, readOnly: true, send })
@@ -760,5 +760,32 @@ describe("the hosted build's outbox", () => {
     await settle()
     expect(after.calls).toEqual([])
     expect(hosted.outbox().map((m) => [m.state, m.reason])).toEqual([["failed", READ_ONLY_LINE]])
+  })
+
+  test("sends what a reloaded tab still held once the page reads a paired key, and drops nothing", async () => {
+    const kept = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => void kept.set(key, value),
+    }
+    const before = fakeSend()
+    const page = new DashboardChats({ label: (name) => name, send: before.send, storage })
+    page.resume()
+    page.post("dispatcher", { attachments: [], text: "held" })
+    await settle()
+    before.calls[0]?.resolve(refused("NETWORK_ERROR"))
+    await settle()
+    const after = fakeSend()
+    const hosted = new DashboardChats({
+      label: (name) => name,
+      readOnly: true,
+      send: after.send,
+      storage,
+    })
+    hosted.setReadOnly(false)
+    hosted.resume()
+    await settle()
+    expect(after.calls.map((call) => call.text)).toEqual(["held"])
+    expect(hosted.outbox().map((m) => m.state)).toEqual(["sending"])
   })
 })

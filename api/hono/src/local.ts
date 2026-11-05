@@ -2,6 +2,7 @@ import { site } from "@packages/config/site"
 import { db } from "@packages/db"
 import { getBuildVersion } from "@packages/env"
 import { env } from "@packages/env/api-hono"
+import { answerKind } from "@packages/message"
 import { describeRoute, openAPIRouteHandler, resolver } from "hono-openapi"
 import { HTTPException } from "hono/http-exception"
 import { z } from "zod"
@@ -316,11 +317,11 @@ if (env.YARD_API_URL && readsLive()) {
       if (response.status === 401) made = null
       return response
     },
-    // a card's kind by its id alone, never its #ref, as its answer route reads it: a decision's preview type, else draft or update
+    // a card's kind by its id alone, never its #ref, as its answer route reads it (answerKind)
     kindOf: async (id) => {
       const item = await getItem(db, id)
       if (item?.id !== id) return null
-      return item.kind === "decision" ? item.preview.type : item.kind
+      return answerKind(item)
     },
     login: async (token) => (await yardClient(api, token).me()).login,
     token: () => keychain().read(),
