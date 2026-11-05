@@ -328,6 +328,21 @@ describe("a sh -c chain of git steps", () => {
       expect(log(m)).not.toContain("run-slot-commit")
     })
 
+  // round 2 of the review: a cd before the add and commit was ignored, so a chain started outside the repo read the folder it started in
+  for (const [what, to] of [
+    ["an absolute path", (root: string) => root],
+    ["a relative one", () => ".."],
+  ] as const)
+    test(`a chain started outside the repo that cds in by ${what} reads the repo's files there`, async () => {
+      const m = repo({ idle: 30 }, [], ["web/next/src/app/page.tsx"])
+      const outside = join(m.root, "outside")
+      mkdirSync(outside)
+      m.hold("run-slot", 3, "big")
+      const own = ["sh", "-c", `cd ${to(m.root)} && git add . && git commit -m x && git push "$0"`]
+      expect(await m.start("worker-x", {}, undefined, own, outside).waits()).toBe(true)
+      expect(log(m)).not.toContain("run-slot-commit")
+    })
+
   test("while one whose add names only a Markdown file takes run-slot-commit", async () => {
     const m = repo({ idle: 30 }, [], ["docs/notes.md", "web/next/src/app/page.tsx"])
     // the fake git's add touches its last word, so the folder it names must exist

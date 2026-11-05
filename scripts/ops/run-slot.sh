@@ -494,7 +494,7 @@ chain_add() {
 }
 # a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a one it will stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
-  local a c f files dir="" commit="" all="" state=lead paths=() line words first=""
+  local a c f files dir="" commit="" all="" state=lead paths=() line words first="" cdir="" t
   # a chain builds when one of its git commit steps would, read as that commit with the files the chain's git add steps before it stage (the first word found outside a $( ), since bash 3.2 misparses a case inside one)
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
   case "$(basename -- "$first")" in
@@ -503,6 +503,13 @@ heavy_build() {
       while IFS= read -r line; do
         IFS=$'\x1f' read -ra words <<< "$line"
         [ ${#words[@]} -gt 0 ] || continue
+        # a cd step sets the folder its later git steps are read in, relative to the one before, as git -C does
+        if [ "${words[0]}" = cd ]; then
+          t=${words[${#words[@]}-1]}; [ ${#words[@]} -gt 1 ] || t=$HOME
+          case "$t" in /*) cdir=$t ;; *) cdir=${cdir:-.}/$t ;; esac
+          continue
+        fi
+        [ -n "$cdir" ] && [ "$(basename -- "${words[0]}")" = git ] && words=("${words[0]}" -C "$cdir" "${words[@]:1}")
         case "$(git_verb "${words[@]}")" in
           add) chain_add "${words[@]}" ;;
           commit) heavy_build "${words[@]}" && { CHAIN_ADD_ALL="" CHAIN_ADD=(); return 0; } ;;
@@ -516,7 +523,7 @@ heavy_build() {
     case "$state" in
       lead) case "$a" in env|*=*) continue ;; esac; [ "$(basename -- "$a")" = git ] || break; state=git ;;
       git) case "$a" in -C) state=dir ;; -c) state=gitvalue ;; -*) ;; commit) commit=1; state=commit ;; *) break ;; esac ;;
-      dir) dir=$a; state=git ;;
+      dir) case "$a" in /*) dir=$a ;; *) dir=${dir:+$dir/}$a ;; esac; state=git ;;
       gitvalue) state=git ;;
       value) state=commit ;;
       paths) paths+=("$a") ;;
