@@ -1424,7 +1424,7 @@ describe("the supervisor's alias check", () => {
       LIVE_ROUTES.map(([host, port]) => [host, host === "playground.localhost" ? 4851 : port]),
     )
     const proc = run(
-      `D=${join(root, "scripts", "ops", "dashboard")} OPS=${ops} RESULTS=${join(state, "results.log")} LOG=${join(state, "supervisor.log")} PORTLESS_STATE_DIR=${routesDir} ALIAS_CONFIRM=${confirm} FIX="cp ${right} ${routesFile}"\n${fn("say")}\n${fn("result")}\n${fn("dashboard_urls")}\n${fn("read_aliases")}\n${fn("check_aliases")}\n${body}\ntrue`,
+      `D=${join(root, "scripts", "ops", "dashboard")} OPS=${ops} RESULTS=${join(state, "results.log")} LOG=${join(state, "supervisor.log")} ALIAS_CONFIRM=${confirm} FIX="cp ${right} ${routesFile}"\nexport PORTLESS_STATE_DIR=${routesDir}\n${fn("say")}\n${fn("result")}\n${fn("dashboard_urls")}\n${fn("read_aliases")}\n${fn("check_aliases")}\n${body}\ntrue`,
     )
     expect(await proc.exited).toBe(0)
     const results = (await Bun.file(join(state, "results.log")).text()).trim()

@@ -20,6 +20,7 @@ const ALLOWLIST = [
   "dashboard/update.ts",
   "dashboard/vibe.ts",
   "dev/launch.ts",
+  "dev/proxy.ts",
   "dev/stop.ts",
   "keychain.ts",
   "onboard/fix.ts",
