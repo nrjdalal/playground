@@ -1427,3 +1427,103 @@ describe("the herdr servers", () => {
     )
   })
 })
+
+// Retro 31: one account's week ran out at night and ops-unstick re-sent each stopped session's limit alert every 10 minutes, 1,664 lines by morning.
+describe("a usage-limit block over a night", () => {
+  // run.py's cycle every 120 seconds for 8 hours on a made-up clock, its herdr, screens and side checks stubbed, one session at its limit throughout
+  const REPLAY = `
+import importlib.util, json, sys, time
+spec = importlib.util.spec_from_file_location("run", sys.argv[1])
+run = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(run)
+clock = [1_800_000_000.0]
+run.time.time = lambda: clock[0]
+run.time.sleep = lambda s: None
+sent = []
+run.notify = lambda text, to="dispatcher": sent.append([to, text])
+run.log = lambda line: None
+session = {"session_id": "s-1", "surface_id": "w1:p1", "workspace_id": "w1", "transcript_path": ""}
+run.herdr_sessions = lambda: [session]
+run.name_of = lambda s: "worker-a"
+run.roster_kinds = lambda: {}
+run.kind_of = lambda name, kinds=None: "worker"
+run.is_lead = lambda name, kinds: False
+run.manager_kind_of_name = lambda name: None
+run.named_kind = lambda name: None
+run.quiet_for = lambda path, now_t: 3600
+run.screen = lambda s: ["You've hit your weekly limit"]
+run.read_block = lambda lines, s: ("usage-limit", "You've hit your weekly limit", None)
+run.session_account = lambda name: "spent@example.com"
+run.moving = lambda now_t=None: None
+for fn in ("stall",):
+    setattr(run, fn, lambda *a, **k: None)
+for fn in ("shutdown_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts"):
+    setattr(run, fn, lambda *a, **k: [])
+run.heavy_cap = lambda: 1
+run.slot_stuck = lambda *a, **k: None
+import os
+os.makedirs(run.HERE, exist_ok=True)
+state = {"blocks": {}}
+for _ in range(8 * 3600 // 120 + 1):
+    run.cycle(state)
+    clock[0] += 120
+print(json.dumps(sent))
+`
+  const replay = async (accounts: object): Promise<[string, string][]> => {
+    const config = scratch()
+    writeFileSync(
+      join(config, "playground", "usage.json"),
+      JSON.stringify({ account: "spent@example.com", accounts, writtenAt: "2027-01-15T08:00:00Z" }),
+    )
+    const proc = Bun.spawn([...PYTHON, "-I", "-c", REPLAY, RUN_PY], {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        TZ: "UTC",
+        UV_CACHE_DIR: process.env.UV_CACHE_DIR,
+        UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
+    if (code !== 0) throw new Error(`replay exited ${code}: ${err}`)
+    return JSON.parse(out)
+  }
+
+  test("alerts each recipient once, then one summary an hour, and the alert names the account with the most room", async () => {
+    const sent = await replay({
+      "half@example.com": { week: 60 },
+      "roomy@example.com": { week: 20 },
+      "spent@example.com": { week: 100 },
+    })
+    for (const to of ["builder", "dispatcher"]) {
+      const lines = sent.filter(([who]) => who === to).map(([, text]) => text)
+      const alerts = lines.filter((text) => text.includes("is at its usage limit"))
+      const summaries = lines.filter((text) => text.includes("blocked on the usage limit"))
+      expect(alerts, to).toHaveLength(1)
+      expect(summaries, to).toHaveLength(8)
+      expect(lines, to).toHaveLength(9)
+      expect(alerts[0]).toContain("Most room: roomy@example.com (week 20%)")
+      expect(summaries[0]).toBe(
+        "1 session blocked on the usage limit. Nothing blocked for another reason. On the limit: worker-a",
+      )
+    }
+  })
+
+  test("says so when no account has room", async () => {
+    const sent = await replay({
+      "spent@example.com": { week: 100 },
+      "also@example.com": { week: 100 },
+    })
+    expect(sent.find(([, text]) => text.includes("is at its usage limit"))?.[1]).toContain(
+      "No account in usage.json's accounts has room",
+    )
+  })
+})

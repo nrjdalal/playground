@@ -28,6 +28,7 @@ HERE = os.path.join(OPS, "unstick")
 CYCLE = 120
 QUIET_READ = 60
 REALERT = 600
+LIMIT_SUMMARY = 3600  # retro 31: a limit block's alert goes once, then one summary an hour while any holds (1,664 lines in one night at REALERT)
 LIMIT_KINDS = ("usage-limit", "usage-limit-stuck")  # a session at its usage limit, or one still showing it past its reset
 STALL = 600
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -228,10 +229,27 @@ def limit_targets(name, transcript):
     return [alert_to(name, transcript)] if kind_of(name) == "probe" else ["builder", "dispatcher"]
 
 
+def most_room(skip):
+    """The account with the most of its week left in usage.json's accounts map, the readings login-flip picks from (a week past its reset
+    counts as 0), other than skip, as (account, week %); None when none is under 100%."""
+    best = None
+    for acct, a in own_accounts().items():
+        if acct == skip or not isinstance(a, dict):
+            continue
+        week, reset = a.get("week"), a.get("weekReset")
+        if isinstance(reset, (int, float)) and time.time() >= reset:
+            week = 0
+        if isinstance(week, (int, float)) and week < 100 and (best is None or week < best[1]):
+            best = (acct, week)
+    return best
+
+
 def limit_alert(name, line, transcript=None):
-    """A session at its usage limit goes to the builder and dispatcher at once, since the owner does not slow down at a limit (
-    the limit ends"), a probe's to its spawner. The script takes no option on the dialog: a key other than Escape is not its to press (**voice**)."""
-    msg = f"{name} is at its usage limit and is not continuing: {line}. No slowing down at a limit; decide its next step now (another account through spawn.sh resume --account)."
+    """A session at its usage limit goes to the builder and dispatcher once a block, naming the account with the most room, since the owner
+    does not slow down at a limit, a probe's to its spawner. The script takes no option on the dialog: a key other than Escape is not its to press (**voice**)."""
+    target = most_room(session_account(name))
+    move = f"Most room: {target[0]} (week {target[1]:g}%)" if target else "No account in usage.json's accounts has room"
+    msg = f"{name} is at its usage limit and is not continuing: {line}. {move}; decide its next step now (another account through spawn.sh resume --account)."
     for to in limit_targets(name, transcript):
         notify(msg, to=to)
 
@@ -350,7 +368,8 @@ def room(name):
         return False, "a GLM session, which no usage file reads"
     u = readings().get(acct)
     if not u:
-        return False, "no usage file reads " + (acct or "this machine's own login")
+        week = ((own_accounts().get(acct) or {}) if acct else {}).get("week")
+        return False, f"{acct}: 7d {week}% (usage.json's accounts)" if isinstance(week, (int, float)) else "no usage file reads " + (acct or "this machine's own login")
     try:
         fresh = time.time() - calendar.timegm(time.strptime(u["writtenAt"], "%Y-%m-%dT%H:%M:%SZ")) < 900
         used = {label: (u["rate_limits"].get(w) or {}).get("used_percentage") for label, w in (("5h", "five_hour"), ("7d", "seven_day"))}
@@ -359,6 +378,15 @@ def room(name):
     used = {label: pct for label, pct in used.items() if isinstance(pct, (int, float))}
     ok = fresh and "7d" in used and all(pct < 100 for pct in used.values())
     return ok, f"{acct}: " + ", ".join(f"{label} {pct}%" for label, pct in used.items())
+
+
+def own_accounts():
+    """usage.json's accounts map, each account's week as login-flip reads it; {} when it does not read."""
+    try:
+        accounts = json.load(open(os.path.join(LW, "usage.json"))).get("accounts")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return accounts if isinstance(accounts, dict) else {}
 
 
 def ago(t):
@@ -952,7 +980,7 @@ def cycle(state):
                 prev = state["blocks"].get(key, {})
                 blocks[key] = {"account": session_account(name), "kind": "usage-limit-stuck", "line": f"{stuck[0]} (still showing {int(stuck[1] // 60)}m after that reset; nudge it)", "name": name,
                                "since": prev.get("since", now_t), "alerted": prev.get("alerted", 0), "surface": s["surface_id"], "workspace": s["workspace_id"]}
-                if now_t - blocks[key]["alerted"] >= REALERT and not held_for_move("usage-limit-stuck", mover):
+                if not blocks[key]["alerted"] and not held_for_move("usage-limit-stuck", mover):
                     blocks[key]["alerted"] = now_t
                     limit_alert(name, blocks[key]["line"], s.get("transcript_path"))
             continue
@@ -983,7 +1011,8 @@ def cycle(state):
         blocks[key] = {"kind": kind, "line": line, "name": name, "since": since, "alerted": prev.get("alerted", 0), "surface": s["surface_id"], "workspace": s["workspace_id"]}
         if kind in LIMIT_KINDS:
             blocks[key]["account"] = session_account(name)  # ops-tick's limitWatch names it to the builder
-        if now_t - blocks[key]["alerted"] >= REALERT and not held_for_move(kind, mover) and not (kind != "usage-limit" and hook_owned(s["session_id"])):
+        due = not blocks[key]["alerted"] if kind in LIMIT_KINDS else now_t - blocks[key]["alerted"] >= REALERT
+        if due and not held_for_move(kind, mover) and not (kind != "usage-limit" and hook_owned(s["session_id"])):
             blocks[key]["alerted"] = now_t
             msg = f"{name} is blocked on a {kind} prompt, waiting {ago(since)}: {line}"
             if kind == "permission":
@@ -994,6 +1023,15 @@ def cycle(state):
                 notify(msg, to=alert_to(name, s.get("transcript_path")))
             log(msg)
     state["blocks"] = blocks
+    # a limit block's own alert went once; while any alerted one holds, the builder and dispatcher get one summary an hour (a move's dispatcher gets its own, below)
+    if mover or not any(b["kind"] in LIMIT_KINDS and b["alerted"] for b in blocks.values()):
+        state.pop("limitSummaryAt", None)
+    elif now_t - state.setdefault("limitSummaryAt", now_t) >= LIMIT_SUMMARY:
+        state["limitSummaryAt"] = now_t
+        summary = move_summary(blocks)
+        for to in ("builder", "dispatcher"):
+            notify(summary, to=to)
+        log(f"limit summary: {summary}")
     # during a move each session's limit alert waits, and the move's dispatcher gets one summary every REALERT instead; the alerts come back once move.json ends
     if not mover:
         state.pop("moveAlerted", None)
