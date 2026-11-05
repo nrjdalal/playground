@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { machine, type Setup } from "./run-slot-fake"
@@ -50,6 +50,19 @@ touch "\${@: -1}"
   )
   chmodSync(join(m.bin, "git"), 0o755)
   return m
+}
+// a fake bun whose `turbo run build --dry=json` reads every task with the cache status given, or fails for null, passing anything else to the machine's own
+const turbo = (m: ReturnType<typeof machine>, status: string | null) => {
+  renameSync(join(m.bin, "bun"), join(m.bin, "bun-machine"))
+  const dry =
+    status === null
+      ? "exit 1"
+      : `echo '{"tasks":[{"command":"next build","cache":{"status":"HIT"}},{"command":"tsc","cache":{"status":"${status}"}}]}'; exit 0`
+  writeFileSync(
+    join(m.bin, "bun"),
+    `#!/bin/bash\ncase " $* " in *" turbo run build --dry=json "*) ${dry} ;; esac\nexec ${join(m.bin, "bun-machine")} "$@"\n`,
+  )
+  chmodSync(join(m.bin, "bun"), 0o755)
 }
 // a pre-commit step as commit-slot.ts hands it to run-slot, its last word the step's name (sh's $0), touching the marker the fake appends
 const step = (name: string) => ["sh", "-c", 'touch "$1"', name]
@@ -293,6 +306,36 @@ describe("a commit whose pre-commit runs next build", () => {
   })
 })
 
+// 5 Nov: a lone commit waited up to 4,054 s as a big run; under run-slot, commit-slot.ts runs the build bare inside the commit's own slot, so only
+// a build turbo replays whole from its cache, which runs in seconds, leaves the queue
+describe("a commit whose next build turbo replays from its cache", () => {
+  test("takes run-slot-commit beside a big run", async () => {
+    const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"])
+    turbo(m, "HIT")
+    m.hold("run-slot", 3, "big")
+    expect(
+      await m.start("worker-x", {}, undefined, ["git", "-C", m.root, "commit", "-m", "x"]).ran(),
+    ).toBe(true)
+    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
+  })
+
+  for (const [what, status] of [
+    ["one task to run", "MISS"],
+    ["a dry run that fails", null],
+  ] as const)
+    test(`but with ${what} still waits as a big run`, async () => {
+      const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"])
+      turbo(m, status)
+      m.hold("run-slot", 3, "big")
+      expect(
+        await m
+          .start("worker-x", {}, undefined, ["git", "-C", m.root, "commit", "-m", "x"])
+          .waits(),
+      ).toBe(true)
+      expect(log(m)).not.toContain("run-slot-commit")
+    })
+})
+
 describe("a commit that stages no web/next file", () => {
   test("still takes run-slot-commit at once, beside a big run", async () => {
     const m = repo({ idle: 30 }, ["docs/notes.md"])
@@ -447,6 +490,12 @@ describe("a sh -c chain of git steps", () => {
     "cd ROOT | git commit -m x",
     "cd ROOT & git commit -m x",
     "(cd ROOT); git commit -m x",
+    // review round 1 of the cached-commit change: sh joins a \ line break before it reads a # line as a comment
+    "cd ROOT && git commit -m x\\\n#;bun run build",
+    // review round 2 of the cached-commit change: a line ending in an even run of \ is not joined, a # line ends at its newline, and set -k reads a later VAR=x as env
+    "cd ROOT && git commit -m a\\\\\nbun run build",
+    "# note \\\nbun run build\ncd ROOT && git commit -m x",
+    "set -k\ncd ROOT && git commit -m x",
   ])
     test(`a chain that commits with a step off the list counts as a build: ${steps}`, async () => {
       const m = repo({ idle: 30 }, ["docs/notes.md"])
@@ -540,5 +589,92 @@ describe("a sh -c chain of git steps", () => {
     expect(await lane(m, "cd ROOT && git add docs/notes.md && git commit -m x")).toBe(
       "run-slot-commit",
     )
+  })
+})
+
+// 5 Nov: a `bash <script>` whose only steps were commits was never read, so it queued as a general job; its lines go through the same closed list
+describe("a bash script file", () => {
+  const COMMITS = [
+    "#!/bin/bash",
+    "# commit and push the docs",
+    "set -euo pipefail",
+    "cd ROOT",
+    "git add docs/notes.md",
+    "git commit -m x",
+    "git push origin",
+  ]
+  const script = (m: ReturnType<typeof repo>, lines: string[]) => {
+    const path = join(m.root, "outside", "chain.sh")
+    mkdirSync(join(m.root, "outside"), { recursive: true })
+    writeFileSync(path, lines.join("\n").replaceAll("ROOT", m.root) + "\n")
+    return path
+  }
+
+  test("whose every line is on the closed list takes run-slot-commit beside a big run", async () => {
+    const m = repo({ idle: 30 }, [], ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    // the fake appends its marker as the script's argument, which only a $ word could read
+    await m.start("worker-x", {}, undefined, ["bash", script(m, COMMITS)]).p.exited
+    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
+  })
+
+  for (const [what, lines, args] of [
+    ["a build step", [...COMMITS.slice(0, 4), "bun run build", ...COMMITS.slice(4)], []],
+    ["a variable", ["S=x", ...COMMITS], []],
+    ["a set that sets arguments", ["set -- a", ...COMMITS], []],
+    ["a comment after a step", [...COMMITS, "git push origin # done"], []],
+    [
+      "a line break into a # line",
+      [...COMMITS.slice(0, 5), "git commit -m x\\", "#;bun run build", ...COMMITS.slice(6)],
+      [],
+    ],
+    [
+      "an even run of \\ before a line break",
+      [...COMMITS.slice(0, 5), "git commit -m a\\\\", "bun run build", ...COMMITS.slice(6)],
+      [],
+    ],
+    [
+      "a # line ending in \\",
+      [...COMMITS.slice(0, 5), "# note \\", "bun run build", ...COMMITS.slice(5)],
+      [],
+    ],
+    ["a set -k", ["set -k", ...COMMITS], []],
+  ] as const)
+    test(`with ${what} waits and never takes run-slot-commit`, async () => {
+      const m = repo({ idle: 30 }, [], ["docs/notes.md"])
+      m.hold("run-slot", 3, "big")
+      expect(
+        await m.start("worker-x", {}, undefined, ["bash", script(m, [...lines]), ...args]).waits(),
+      ).toBe(true)
+      expect(log(m)).not.toContain("run-slot-commit")
+    })
+
+  // bash runs the file after an option's argument, so a listed script named as --rcfile's argument must not stand in for it
+  test("named after an option word waits and never takes run-slot-commit", async () => {
+    const m = repo({ idle: 30 }, [], ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    const safe = script(m, COMMITS)
+    expect(await m.start("worker-x", {}, undefined, ["bash", "--rcfile", safe, safe]).waits()).toBe(
+      true,
+    )
+    expect(log(m)).not.toContain("run-slot-commit")
+  })
+
+  // a script's commit of a web/next file follows the cached-build rule, as a lone commit does
+  const NEXT = [...COMMITS.slice(0, 4), "git add web/next/src/app/page.tsx", ...COMMITS.slice(5)]
+  test("that commits a web/next file turbo replays from its cache takes run-slot-commit beside a big run", async () => {
+    const m = repo({ idle: 30 }, [], ["web/next/src/app/page.tsx"])
+    turbo(m, "HIT")
+    m.hold("run-slot", 3, "big")
+    await m.start("worker-x", {}, undefined, ["bash", script(m, NEXT)]).p.exited
+    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
+  })
+
+  test("that commits a web/next file with one task to build waits as a big run", async () => {
+    const m = repo({ idle: 30 }, [], ["web/next/src/app/page.tsx"])
+    turbo(m, "MISS")
+    m.hold("run-slot", 3, "big")
+    expect(await m.start("worker-x", {}, undefined, ["bash", script(m, NEXT)]).waits()).toBe(true)
+    expect(log(m)).not.toContain("run-slot-commit")
   })
 })

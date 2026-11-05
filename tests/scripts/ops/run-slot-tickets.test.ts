@@ -208,3 +208,75 @@ describe("a reviewer's run", () => {
     expect(await m.waits("a1b2c3-worker", { RUN_SLOT_SIZE: "small" })).toBe(true)
   })
 })
+
+// a session whose roster entry, or its worker's, has owner= (the owner's own ask) marks its ticket ask, ranked after the merge gates and before a reviewer's
+describe("a run for the owner's own ask", () => {
+  const asks = { agents: [{ name: "g7h8i9-worker", owner: "#i949" }] }
+
+  for (const ago of [0, 21 * 60])
+    test(`takes the one free slot ahead of an older worker's run${ago ? " past AGED" : ""}`, async () => {
+      const m = machine({ roster: asks })
+      m.ticket(1, "a1b2c3-worker", "s2 22 2 medium", ago)
+      expect(await m.runs("g7h8i9-worker", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+    })
+
+  test("and holds back a worker's newer small run", async () => {
+    const m = machine()
+    m.ticket(1, "g7h8i9-worker", "s2 22 2 medium ask")
+    expect(await m.waits("a1b2c3-worker", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+
+  test("goes ahead of an older reviewer's run", async () => {
+    const m = machine({ roster: asks })
+    m.ticket(1, "d4e5f6-reviewer", "s2 22 2 medium")
+    expect(await m.runs("g7h8i9-worker", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+  })
+
+  test("is the class of the worker's checker too", async () => {
+    const m = machine({
+      roster: { agents: [...asks.agents, { name: "g7h8i9-reviewer", worker: "g7h8i9-worker" }] },
+    })
+    m.ticket(1, "d4e5f6-reviewer", "s2 22 2 medium")
+    expect(await m.runs("g7h8i9-reviewer", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+  })
+
+  test("with an empty owner, keeps its place", async () => {
+    const m = machine({ roster: { agents: [{ name: "g7h8i9-worker", owner: "" }] } })
+    m.ticket(1, "a1b2c3-worker", "s2 22 2 medium")
+    expect(await m.waits("g7h8i9-worker", { RUN_SLOT_SIZE: "medium" })).toBe(true)
+  })
+
+  // an org's, the ready line's Checks and the merge gates still go first, past AGED or not
+  for (const [who, what, roster] of [
+    ["worker-lw", "an org's", { agents: [{ name: "worker-lw", repo: "acme-co/web" }] }],
+    ["ops-checks-8", "a ready-line Checks", undefined],
+    ["ops-checks-5", "a merge gate's", undefined],
+  ] as const)
+    for (const ago of [0, 21 * 60])
+      test(`waits behind ${what} newer run${ago ? ", past AGED" : ""}`, async () => {
+        const m = machine({
+          mergeQueue: { queue: [{ pr: 8, readyAt: "2026-10-19T00:00:00Z" }] },
+          roster,
+        })
+        m.ticket(1, "g7h8i9-worker", "s2 22 2 medium ask", ago)
+        expect(await m.runs(who, { RUN_SLOT_SIZE: "medium" })).toBe(true)
+      })
+
+  // past AGED a ticket is pinned within its own class, so a newer small run of the class, a checker's here, which would pass it as a reviewer's, waits behind a big one
+  test("past AGED, holds back a newer small run of its class", async () => {
+    const m = machine({
+      roster: { agents: [...asks.agents, { name: "g7h8i9-reviewer", worker: "g7h8i9-worker" }] },
+    })
+    m.ticket(1, "g7h8i9-worker", "s2 23 3 big ask", 21 * 60)
+    expect(await m.waits("g7h8i9-reviewer", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+
+  // commit-slot.ts hands a commit's pre-commit step over as commit-<worktree>, which run-slot.owner/<worktree> maps to its session
+  test("is the class of the worker's commit-<worktree> pre-commit step too", async () => {
+    const m = machine({ roster: asks })
+    mkdirSync(join(m.ops, "run-slot.owner"), { recursive: true })
+    writeFileSync(join(m.ops, "run-slot.owner", "aaa"), "g7h8i9-worker\n")
+    m.ticket(1, "a1b2c3-worker", "s2 21 1 small")
+    expect(await m.runs("commit-aaa")).toBe(true)
+  })
+})
