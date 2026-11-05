@@ -54,13 +54,19 @@ export const worktreesIn = (porcelain: string, main: string): Worktree[] =>
     return [{ branch: /^branch refs\/heads\/(.+)$/m.exec(block)?.[1] ?? null, path }]
   })
 
+// Pure: the PR number a review-<n> or test-<n> clone's folder names, else undefined.
+const cloneOf = (path: string): number | undefined => {
+  const n = /^(?:review|test)-(\d+)$/.exec(basename(path))?.[1]
+  return n ? Number(n) : undefined
+}
+
 // Pure: the worktrees whose PR is merged or closed, each with that PR: its branch's newest PR, else a review-<n> or test-<n> clone's PR n; a worktree with no PR, or an open one, stays.
 export const staleWorktrees = (worktrees: Worktree[], prs: Prs): (Worktree & { pr: Pr })[] =>
   worktrees.flatMap((w) => {
-    const n = /^(?:review|test)-(\d+)$/.exec(basename(w.path))?.[1]
+    const n = cloneOf(w.path)
     const pr =
       (w.branch ? prs.byBranch.get(w.branch) : undefined) ??
-      (n ? prs.byNumber.get(Number(n)) : undefined)
+      (n === undefined ? undefined : prs.byNumber.get(n))
     return pr !== undefined && pr.state !== "OPEN" ? [{ ...w, pr }] : []
   })
 
@@ -192,7 +198,8 @@ export const decisionOf = (
 
 // Pure: whether a cleanWorktree line kept work only the owner's Approve may drop: uncommitted or unpushed work, or rm's unlanded-work refusal that names --discard.
 export const discardable = (line: string): boolean =>
-  / (uncommitted work|unpushed commits)$/.test(line) || line.includes("--discard removes it anyway")
+  /: (uncommitted work|unpushed commits)$/.test(line) ||
+  line.includes("--discard removes it anyway")
 
 // --silent, since bun run's "$ bun ..." line goes to stderr, which ctx.run joins after stdout, and get's JSON would not parse
 const ask = async (ctx: Context, args: string[], stdin?: string) =>
@@ -203,7 +210,7 @@ const idOf = (out: string): string | undefined =>
     .map((l) => l.trim())
     .find((l) => /^[0-9a-f-]{36}$/.test(l))
 
-// Carries out last night's approved targets, closes a denied or set-aside one (keeping its targets out of later asks), and answers whether it is still open.
+// Carries out last night's approved targets, closes a denied or set-aside one (a denied one's targets kept out of later asks, a set-aside one's asked again), and answers whether it is still open.
 async function settleLast(
   ctx: Context,
   state: State,
@@ -257,7 +264,8 @@ async function settleLast(
     done.push(`decision ${last.id} approved: removed ${gone} of ${last.targets.length}`)
   } else {
     await ask(ctx, ["get", last.id, "--ack"])
-    state.denied = [...new Set([...(state.denied ?? []), ...last.targets.map(keyOf)])]
+    if (status === "denied")
+      state.denied = [...new Set([...(state.denied ?? []), ...last.targets.map(keyOf)])]
     done.push(`decision ${last.id} ${status}: its ${last.targets.length} kept`)
   }
   state.decision = undefined
@@ -314,8 +322,8 @@ export const nightlyClean =
     const remote = await refs("refs/remotes/origin", "%(refname:lstrip=3)")
     const worktrees = worktreesIn((await git(["worktree", "list", "--porcelain"])).out, main)
     const numbers = worktrees.flatMap((w) => {
-      const n = /^(?:review|test)-(\d+)$/.exec(basename(w.path))?.[1]
-      return n ? [Number(n)] : []
+      const n = cloneOf(w.path)
+      return n === undefined ? [] : [n]
     })
     const names = [...new Set([...(await local()), ...remote].map((r) => r.name))]
     const prs = await deps.prs(ctx, names, numbers)

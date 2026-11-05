@@ -98,6 +98,7 @@ describe("worktrees", () => {
   test("a kept line goes to the decision list only for work the owner's Approve may drop", () => {
     expect(discardable("kept /w: uncommitted work")).toBe(true)
     expect(discardable("kept /w: unpushed commits")).toBe(true)
+    expect(discardable("kept /w: could not count its unpushed commits")).toBe(false)
     expect(
       discardable(
         "kept /w: /w's HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree /w --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved",
@@ -266,6 +267,7 @@ describe("one night's run against a fixture data folder", () => {
   const night = (
     outputs: Record<string, string> = {},
     state?: (wt: (name: string) => string) => object,
+    grow = 0.6,
   ) => {
     const root = scratch()
     const data = join(root, "data")
@@ -336,7 +338,7 @@ describe("one night's run against a fixture data folder", () => {
     let free = 100 * 1024 ** 3
     const deps: NightDeps = {
       cleanup: async () => cleanup,
-      free: () => (free += 0.6 * 1024 ** 3),
+      free: () => (free += grow * 1024 ** 3),
       prs: async () =>
         prsOf({
           "PG-1-a": pr("MERGED"),
@@ -374,6 +376,12 @@ describe("one night's run against a fixture data folder", () => {
     })
   })
 
+  test("a night that frees under 1 GB posts no update", async () => {
+    const { ctx, deps, inputs } = night({}, undefined, 0.01)
+    await nightlyClean(deps)(ctx)
+    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["decision"])
+  })
+
   test("last night's open decision is settled into the new one", async () => {
     const { ctx, deps, runs } = night({ "ask get": JSON.stringify({ status: "open" }) }, () => ({
       decision: { id: OLD, targets: [] },
@@ -402,5 +410,20 @@ describe("one night's run against a fixture data folder", () => {
     const kept = JSON.parse(readFileSync(join(denied.ops, "tick", "nightly-clean.json"), "utf8"))
     expect(kept.denied).toEqual([`worktree ${denied.wt("pg-2")}`])
     expect(kept.decision).toBeUndefined()
+  })
+
+  test("a dismissed decision is closed, and its targets still standing are asked again", async () => {
+    const { ctx, deps, inputs, ops, runs, wt } = night(
+      { "ask get": JSON.stringify({ status: "cleared" }) },
+      (wt) => ({ decision: { id: OLD, targets: [{ kind: "worktree", name: wt("pg-2") }] } }),
+    )
+    await nightlyClean(deps)(ctx)
+    expect(runs.map((r) => r.join(" "))).toContain(
+      `bun run --silent --cwd ${ctx.repo} ask get ${OLD} --ack`,
+    )
+    const decision = inputs.map((i) => JSON.parse(i)).find((i) => i.kind === "decision")
+    expect(decision.preview.what).toBe(`- worktree \`${wt("pg-2")}\``)
+    const kept = JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))
+    expect(kept.denied).toBeUndefined()
   })
 })
