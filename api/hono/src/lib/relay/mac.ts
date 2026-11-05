@@ -1,13 +1,20 @@
+import { signedBytes } from "@packages/message"
+
+import { type KeyStore, type PairedKey, remoteKeys } from "@/lib/relay/key"
 import {
+  pathOn,
   RELAY_HEADERS,
   RELAY_HEARTBEAT_MS,
   RELAY_MAX_AGE_MS,
   RELAY_PREFIX,
   RELAY_SILENT_MS,
   relayAllowed,
+  relayPairSchema,
   type RelayRequest,
   relayRequestSchema,
   type RelayResponse,
+  type RelayWrite,
+  relayWriteSchema,
 } from "@/lib/relay/protocol"
 
 // This Mac's side of the relay: it dials out to the hosted hub and answers the owner's reads from its own dashboard, in process, so no port opens here.
@@ -23,51 +30,121 @@ const json = (id: string, status: number, code: string, message: string): RelayR
   type: "response",
 })
 
-// Pure but for seen, which it updates: the request a frame holds once it passes requireRelay, or the answer that refuses it. It refuses an id seen before, a request RELAY_MAX_AGE_MS old or from as far ahead, a login other than this Mac's own token's, and a path off the GET allowlist, so a refused frame never reaches a route. A frame with no readable id gets no answer.
+const parse = (raw: string): unknown => {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return undefined
+  }
+}
+
+const sameLogin = (one: string, other: string) => one.toLowerCase() === other.toLowerCase()
+
+// Updates seen: the refusal every relayed frame meets first, in this order: an id seen before, then a frame RELAY_MAX_AGE_MS old or from as far ahead, then a login other than this Mac's own token's.
+export function refuseStale(
+  frame: { at: string; id: string; login: string },
+  { login, now, seen }: { login: string; now: Date; seen: SeenIds },
+): RelayResponse | null {
+  const at = Date.parse(frame.at)
+  for (const [id, until] of seen) if (until <= now.getTime()) seen.delete(id)
+  if (seen.has(frame.id))
+    return json(frame.id, 409, "CONFLICT", "This request was answered already")
+  seen.set(frame.id, at + RELAY_MAX_AGE_MS)
+  if (Math.abs(now.getTime() - at) >= RELAY_MAX_AGE_MS)
+    return json(frame.id, 403, "FORBIDDEN", "This request is too old to answer")
+  if (!sameLogin(frame.login, login))
+    return json(frame.id, 403, "FORBIDDEN", "This Mac answers its own owner alone")
+  return null
+}
+
+// Pure but for seen, which it updates: the request a frame holds once it passes requireRelay, or the answer that refuses it. It refuses as refuseStale does, then a path off the GET allowlist, so a refused frame never reaches a route. A frame with no readable id gets no answer.
 export function requireRelay(
   raw: string,
-  { login, now, seen }: { login: string; now: Date; seen: SeenIds },
+  deps: { login: string; now: Date; seen: SeenIds },
 ): { request: RelayRequest } | { refused: RelayResponse } | null {
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return null
-  }
-  const frame = relayRequestSchema.safeParse(parsed)
+  const frame = relayRequestSchema.safeParse(parse(raw))
   if (!frame.success) return null
   const request = frame.data
-  const at = Date.parse(request.at)
-  for (const [id, until] of seen) if (until <= now.getTime()) seen.delete(id)
-  if (seen.has(request.id))
-    return { refused: json(request.id, 409, "CONFLICT", "This request was answered already") }
-  seen.set(request.id, at + RELAY_MAX_AGE_MS)
-  if (Math.abs(now.getTime() - at) >= RELAY_MAX_AGE_MS)
-    return { refused: json(request.id, 403, "FORBIDDEN", "This request is too old to answer") }
-  if (request.login.toLowerCase() !== login.toLowerCase())
-    return { refused: json(request.id, 403, "FORBIDDEN", "This Mac answers its own owner alone") }
+  const refused = refuseStale(request, deps)
+  if (refused) return { refused }
   if (!relayAllowed(request.method, request.path))
     return { refused: json(request.id, 403, "FORBIDDEN", "Answer on the Mac") }
   return { request }
 }
 
-// Answers one frame: requireRelay first, then the request runs in this Mac's own API as its local owner's session, so the routes' own owner check still runs here.
+// Pure but for seen, which it shares with requireRelay: the write a frame holds once the paired key's signature checks out, or the answer that refuses it, before any route runs. It refuses, in this order: an id seen before, a frame RELAY_MAX_AGE_MS old or ahead, a login other than this Mac's token's or the paired key's, a path off writes, a keyId other than the paired key's (none, once revoked), and a signature that does not verify over signedBytes.
+export async function requireSignedWrite(
+  raw: string,
+  {
+    key,
+    writes,
+    ...deps
+  }: {
+    key: PairedKey | null
+    login: string
+    now: Date
+    seen: SeenIds
+    writes: readonly string[]
+  },
+): Promise<{ refused: RelayResponse } | { write: RelayWrite } | null> {
+  const frame = relayWriteSchema.safeParse(parse(raw))
+  if (!frame.success) return null
+  const write = frame.data
+  const stale = refuseStale(write, deps)
+  if (stale) return { refused: stale }
+  const refuse = (message: string) => ({ refused: json(write.id, 403, "FORBIDDEN", message) })
+  if (key && !sameLogin(write.login, key.login))
+    return refuse("This Mac answers its own owner alone")
+  if (!pathOn(writes, write.path)) return refuse("Send it on the Mac")
+  if (!key || write.keyId !== key.id)
+    return refuse("This browser's key is not paired with this Mac")
+  const verified = await crypto.subtle
+    .importKey("jwk", key.key, { name: "ECDSA", namedCurve: "P-256" }, false, ["verify"])
+    .then(async (publicKey) =>
+      crypto.subtle.verify(
+        { hash: "SHA-256", name: "ECDSA" },
+        publicKey,
+        new Uint8Array(Buffer.from(write.sig, "base64url")),
+        await signedBytes(write),
+      ),
+    )
+    .catch(() => false)
+  if (!verified) return refuse("This write's signature does not verify")
+  return { write }
+}
+
+// Answers one frame. A pair request, once refuseStale passes it, waits in keys for the owner's Approve on this Mac and is answered with its fingerprint. A read passes requireRelay first, then runs in this Mac's own API as its local owner's session, so the routes' own owner check still runs here.
 export async function answerRelay(
   raw: string,
   {
     cookie,
     dispatch,
+    keys = remoteKeys,
     login,
     now = new Date(),
     seen,
   }: {
     cookie: () => Promise<string>
     dispatch: (request: Request) => Promise<Response>
+    keys?: Pick<KeyStore, "offer">
     login: string
     now?: Date
     seen: SeenIds
   },
 ): Promise<RelayResponse | null> {
+  const pair = relayPairSchema.safeParse(parse(raw))
+  if (pair.success) {
+    const refused = refuseStale(pair.data, { login, now, seen })
+    if (refused) return refused
+    const { fingerprint } = await keys.offer(pair.data)
+    return {
+      body: Buffer.from(JSON.stringify({ data: { fingerprint } })).toString("base64"),
+      headers: { "content-type": "application/json" },
+      id: pair.data.id,
+      status: 202,
+      type: "response",
+    }
+  }
   const checked = requireRelay(raw, { login, now, seen })
   if (checked === null || "refused" in checked) return checked?.refused ?? null
   const { request } = checked

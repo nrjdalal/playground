@@ -52,7 +52,14 @@ import { feedNeeds, useNeedsYouTarget } from "@/lib/needs-you"
 import { moveOldKeys } from "@/lib/old-keys"
 import { sentSince } from "@/lib/outbox"
 import { OPEN_PREVIEW, takeMove } from "@/lib/previews"
-import { inboxMark, newInInboxCount, useMark, useTabVisible, writeMark } from "@/lib/tab-dot"
+import {
+  inboxMark,
+  loudItems,
+  newInInboxCount,
+  useMark,
+  useTabVisible,
+  writeMark,
+} from "@/lib/tab-dot"
 import { useAppUnread } from "@/plugins/registry"
 
 // A phone's width, read as the page renders rather than after it paints (useIsMobile's effect), so a page opened by a click draws its tabs or its halves once. The server, which has no width, draws the halves.
@@ -275,9 +282,10 @@ export function DashboardAside({ children }: { children: ReactNode }) {
     setTab("inbox")
     setSide("inbox")
   }, [at])
-  // a link to an inbox item (a Waiting on your inbox badge, Playground's row) opens the Inbox tab, where the list scrolls to it
+  // a link to an inbox item (a Waiting on your inbox badge, Playground's row, an answer's chip) opens the Inbox tab, where the list scrolls to it, a shelved one's included
   useNeedsYouTarget(Boolean(inbox.data), (anchor) => {
-    if (inboxTarget(anchor, inbox.data?.items ?? [])) {
+    const { archived = [], items = [], snoozed = [] } = inbox.data ?? {}
+    if (inboxTarget(anchor, [...items, ...archived, ...snoozed])) {
       setTab("inbox")
       setSide("inbox")
     }
@@ -304,8 +312,10 @@ export function DashboardAside({ children }: { children: ReactNode }) {
       </div>
     )
 
-  // the bar counts what needs you and arrived since you last looked at the Inbox, so a look clears it with no answer given
-  const count = inbox.data ? newInInboxCount(inboxView(inbox.data.items).shown, inboxSeenAt) : 0
+  // the bar counts what needs you and arrived since you last looked at the Inbox, so a look clears it with no answer given; what focus holds quiet counts once it ends
+  const count = inbox.data
+    ? newInInboxCount(inboxView(loudItems(inbox.data)).shown, inboxSeenAt)
+    : 0
   // which squares show hangs on the socket's first frame (the view, Playground's chat), so the bar keeps its room but shows none until then, then all at once, never growing under the eye; an error frame sets dispatchers too, so a dashboard that cannot read its sessions still shows its Inbox
   const bar = cn(TAB_BAR, !dispatchers && "invisible")
   const squares: Partial<Record<AsideTab, ReactNode>> = {

@@ -12,6 +12,7 @@ const LIST = /^\s*(?:[-*+]|\d+[.)])\s/m
 export type ShapeHint =
   | { kind: "prose" }
   | { kind: "unlabelled" }
+  | { kind: "unlinked"; refs: string[] }
   | { kind: "wide"; longest: number }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -32,7 +33,31 @@ const longestCodeLine = (text: string): number => {
   return longest
 }
 
-// Pure: the hints for an `ask` decision: one when its text runs past PROSE_LIMIT with no list, no code block and no attachments, one when it labels no options, one when a code block other than a diff holds a line past ASK_CODE_COLUMNS; the wide one alone for a read-only update's text, which renders on the same card; none for any other item, which posts either way.
+// What the owner would open from a card: a PR (a number of 2 digits or more after a #, so step #1 is none, or any after PR), a tracker ID (ABC-123) or a commit sha (7 to 40 hex characters, holding a digit and a letter); an Inbox ref (#iN) is none.
+const REF =
+  /(?<![\w#/&])#\d{2,}\b|\bPR\s*#?\d+\b|(?<![\w/-])[A-Z]{2,10}-\d+(?![\w-])|(?<![\w-])[0-9a-f]{7,40}(?![\w-])/g
+// Encodings and standards that read as a team key and a number.
+const NOT_TRACKERS = new Set(["ISO", "SHA", "UTF"])
+const LINKED = /\]\([^)]+\)|https?:\/\//
+
+// Pure: the refs a text names on a line outside its code blocks with no link on that line, each once, in order.
+const unlinkedRefs = (text: string): string[] => {
+  const refs = new Set<string>()
+  let inside = false
+  for (const line of text.split("\n")) {
+    if (/^\s*```/.test(line)) inside = !inside
+    else if (!inside && !LINKED.test(line))
+      for (const [ref] of line.matchAll(REF)) {
+        const sha = /^[0-9a-f]+$/.test(ref)
+        if (sha && !(/\d/.test(ref) && /[a-f]/.test(ref))) continue
+        if (NOT_TRACKERS.has(ref.split("-")[0]!)) continue
+        refs.add(ref)
+      }
+  }
+  return [...refs]
+}
+
+// Pure: the hints for an `ask` decision: one when its text runs past PROSE_LIMIT with no list, no code block and no attachments, one when it labels no options, one when a code block other than a diff holds a line past ASK_CODE_COLUMNS, one when a line names a PR, a tracker ID or a commit with no link on it; the wide and unlinked ones alone for a read-only update's text, which renders on the same card; none for any other item, which posts either way.
 export function shapeHints(input: unknown): ShapeHint[] {
   const preview = isRecord(input) ? input.preview : undefined
   if (!isRecord(preview) || typeof preview.text !== "string") return []
@@ -48,6 +73,8 @@ export function shapeHints(input: unknown): ShapeHint[] {
   if (ask && preview.options === undefined && preview.approve === undefined) {
     hints.push({ kind: "unlabelled" })
   }
+  const refs = unlinkedRefs(text)
+  if (refs.length > 0) hints.push({ kind: "unlinked", refs })
   const longest = longestCodeLine(text)
   if (longest > ASK_CODE_COLUMNS) hints.push({ kind: "wide", longest })
   return hints

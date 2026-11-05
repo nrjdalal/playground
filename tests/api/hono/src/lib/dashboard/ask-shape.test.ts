@@ -36,7 +36,7 @@ describe("shapeHints", () => {
   })
 
   test("hints at an ask that labels no options, and stays quiet on one labelled in options or approve (#873)", () => {
-    const short = "Port DUNE-1401's fix to staging and main."
+    const short = "Port the export fix to staging and main."
     expect(shapeHints({ ...ask(short), preview: { text: short, type: "ask" } })).toEqual([
       { kind: "unlabelled" },
     ])
@@ -50,7 +50,7 @@ describe("shapeHints", () => {
   })
 
   test("stays quiet on short prose and on every kind but an ask", () => {
-    expect(shapeHints(ask("Port DUNE-1401's fix to staging and main."))).toEqual([])
+    expect(shapeHints(ask("Port the export fix to staging and main."))).toEqual([])
     expect(
       shapeHints({ ...ask(PROSE), preview: { text: PROSE, to: "@Merritt", type: "slack" } }),
     ).toEqual([])
@@ -87,6 +87,57 @@ describe("shapeHints", () => {
     ])
     expect(shapeHints(update(PROSE))).toEqual([])
     expect(shapeHints({ kind: "update", preview: { outcome: "merged" } })).toEqual([])
+  })
+})
+
+describe("shapeHints: unlinked refs (#1020)", () => {
+  const update = (text: string) => ({ kind: "update", preview: { outcome: "finding", text } })
+  const unlinked = (text: string) =>
+    shapeHints(update(text)).find((hint) => hint.kind === "unlinked")
+
+  test("hints at a bare PR ref, tracker ID or commit sha, each named once", () => {
+    expect(unlinked("Merged #1000 and PR 1001.")).toEqual({
+      kind: "unlinked",
+      refs: ["#1000", "PR 1001"],
+    })
+    expect(unlinked("PLAT-2779 and NG-1322 are done; NG-1322 again.")).toEqual({
+      kind: "unlinked",
+      refs: ["PLAT-2779", "NG-1322"],
+    })
+    expect(unlinked("Landed at d05240d6.")).toEqual({ kind: "unlinked", refs: ["d05240d6"] })
+    expect(
+      shapeHints(ask("Port it.\n\n- See #1000.", { options: [{ label: "Port it" }] })),
+    ).toEqual([{ kind: "unlinked", refs: ["#1000"] }])
+  })
+
+  test("stays quiet on a ref linked in its line, inside a code block, or an Inbox ref", () => {
+    expect(unlinked("Merged [#1000](https://github.com/acme/app/pull/1000).")).toBeUndefined()
+    expect(unlinked("PLAT-2779 is at https://linear.app/acme/issue/PLAT-2779")).toBeUndefined()
+    expect(
+      unlinked("[`d05240d6`](https://github.com/acme/app/commit/d05240d6) landed."),
+    ).toBeUndefined()
+    expect(unlinked("```\nmerged #1000 at d05240d6 for NG-1322\n```")).toBeUndefined()
+    expect(unlinked("Answered on #i369 and #i41.")).toBeUndefined()
+  })
+
+  test("leaves plain words, numbers, times, encodings and ids alone", () => {
+    expect(
+      unlinked("The export added 1234567 rows in UTF-8 at 15:46Z on 2026-11-05."),
+    ).toBeUndefined()
+    expect(unlinked("A defaced facade, step #1, and ISO-8601 dates.")).toBeUndefined()
+    expect(unlinked("Item 019ff17e-8ecb-0000-0dba-f7ab1c805ec1 and page#1234.")).toBeUndefined()
+  })
+
+  test("hints on a draft, a slack decision and other kinds never", () => {
+    expect(shapeHints({ kind: "draft", preview: { text: "See #1000.", to: "@Merritt" } })).toEqual(
+      [],
+    )
+    expect(
+      shapeHints({
+        ...ask("See #1000."),
+        preview: { text: "See #1000.", to: "@Merritt", type: "slack" },
+      }),
+    ).toEqual([])
   })
 })
 

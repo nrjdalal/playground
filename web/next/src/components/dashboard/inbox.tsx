@@ -238,6 +238,7 @@ const posterTone = (from: string): string | undefined => {
 // The item's kind as an icon and a word, its id, who posted it, and Updated when it changed since his last look, in one muted band across the pane at the card's start, ending in one time and a tick: the only place an item says what it is.
 function KindBand({
   busy,
+  focusHeld,
   item,
   now,
   onRead,
@@ -246,6 +247,7 @@ function KindBand({
   updated,
 }: {
   busy: boolean
+  focusHeld: boolean
   item: InboxItem
   now: number
   onRead: () => void
@@ -275,6 +277,14 @@ function KindBand({
           <>
             <span aria-hidden>·</span>
             <span className="text-info">Updated</span>
+          </>
+        )}
+        {focusHeld && (
+          <>
+            <span aria-hidden>·</span>
+            <Hint content="It came in while focus stands, so it counts once focus ends">
+              <span className="text-muted-foreground">Quiet</span>
+            </Hint>
           </>
         )}
         {/* the item the composer's words name as re #iN, until they are sent */}
@@ -504,7 +514,19 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           <ul className="text-foreground list-disc pl-5">
             {preview.prs.map((pr) => (
               <li key={pr.number}>
-                #{pr.number} {pr.title}
+                {pr.url ? (
+                  <a
+                    href={pr.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary font-medium underline"
+                  >
+                    #{pr.number}
+                  </a>
+                ) : (
+                  `#${pr.number}`
+                )}{" "}
+                {pr.title}
               </li>
             ))}
           </ul>
@@ -528,7 +550,7 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
         <>
           <p>On Approve, this is deleted:</p>
           <p className={QUOTE}>{preview.what}</p>
-          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+          <TranscriptMarkdown card>{`Why: ${preview.why}`}</TranscriptMarkdown>
         </>
       )
     case "schema":
@@ -728,6 +750,7 @@ const keyOf = (event: KeyboardEvent): CardKey => {
 // One item as a card: its band, place line and title, then what Approve does or a draft's words, then, once answered or settled, the result on its own line above the footer, wrapping freely, then one footer row with an open card's actions on the left and, on the right, its verbs (verbs()), its chevron, then Reply. The same card sits on every shelf; one that folds by default (foldsByDefault()) shows its band, place line, title, result line and row of choices until opened.
 export function InboxCard({
   defaultOpen = false,
+  focusHeld = false,
   item,
   marked,
   now,
@@ -738,6 +761,8 @@ export function InboxCard({
 }: {
   // a card that folds by default starts opened, as a click on it opens it
   defaultOpen?: boolean
+  // it came in while focus stands, so it waits uncounted until focus ends
+  focusHeld?: boolean
   item: InboxItem
   marked: boolean
   now: number
@@ -1292,6 +1317,7 @@ export function InboxCard({
     >
       <KindBand
         busy={busy}
+        focusHeld={focusHeld}
         item={item}
         now={now}
         onRead={() => read()}
@@ -1619,6 +1645,13 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   // Archive holds what he archived, kept out of items, and what was set aside before Archive kept items open
   const archived = [...(data?.archived ?? []), ...setAside].sort((a, b) => b.ref - a.ref)
   const snoozed = data?.snoozed ?? []
+  // the shelves under the open items, each row's label, icon, cards and place, read by the accordion and by a link to a shelved card
+  const shelves = [
+    ["In progress", RiProgress4Line, progress, "progress"],
+    ["Later", RiZzzLine, snoozed, "snoozed"],
+    ["Archive", RiArchive2Line, archived, "archived"],
+    ["Done", RiCheckDoubleLine, done, "done"],
+  ] as const
   const { held, rows } = pinnedView(shown, order)
   const pill = usePill(held.length)
   // the look before this one and the newest change as this one began: a card changed between the two reads Updated until he looks away and back, while one that changes as he looks shows in place
@@ -1630,6 +1663,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     setLook({ since: readMark("inbox"), upto: inboxMark(items) })
   if (!viewing && look !== null) setLook(null)
   const updated = (item: InboxItem) => look !== null && updatedSince(item, look.since, look.upto)
+  const quiet = new Set(data?.quiet ?? [])
   const rowIds = rows.map((item) => item.id)
   if (data && order?.join(" ") !== rowIds.join(" ")) setOrder(rowIds)
   // a card he moved back from Archive takes the list's top once it arrives, his own click, never behind the pill
@@ -1682,6 +1716,14 @@ export function Inbox({ viewing }: { viewing: boolean }) {
       setListOpen(true)
       return false
     }
+    // a card on a shut shelf (an answer's chip names one) opens its shelf first, so the next try finds its row
+    const shelf = shelves.find(([, , list]) =>
+      list.some((item) => needsYouAnchor(item.id) === anchor),
+    )?.[0]
+    if (shelf && !shelvesOpen.includes(shelf)) {
+      setShelvesOpen((keys) => [...keys, shelf])
+      return false
+    }
     const row = document.getElementById(anchor)
     row?.scrollIntoView({ block: "center" })
     // a row in a hidden tab cannot scroll yet, so it is tried again once its tab shows
@@ -1696,12 +1738,9 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     .filter((item) => item.readAt === null && (item.kind === "update" || item.status === "open"))
     .map((item) => item.id)
   const clearing = unreadIds.length
-  const shelfSizes: Record<string, number> = {
-    Archive: archived.length,
-    Done: done.length,
-    "In progress": progress.length,
-    Later: snoozed.length,
-  }
+  const shelfSizes: Record<string, number> = Object.fromEntries(
+    shelves.map(([label, , shelf]) => [label, shelf.length]),
+  )
   const actions = (pill || rows.length > 0) && (
     <div className="absolute top-1.5 right-[calc(var(--pane-x,0px)+1.75rem)] flex items-center gap-2">
       {pill && <NewPill ref={pillButton} count={pill.count} leaving={pill.leaving} onTake={take} />}
@@ -1796,6 +1835,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
               {rows.map((item) => (
                 <InboxCard
                   key={item.id}
+                  focusHeld={quiet.has(item.id)}
                   item={item}
                   marked={item.ref === reply?.ref}
                   now={now}
@@ -1807,14 +1847,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
           </AccordionContent>
         </AccordionItem>
         <div ref={below}>
-          {(
-            [
-              ["In progress", RiProgress4Line, progress, "progress"],
-              ["Later", RiZzzLine, snoozed, "snoozed"],
-              ["Archive", RiArchive2Line, archived, "archived"],
-              ["Done", RiCheckDoubleLine, done, "done"],
-            ] as const
-          ).map(([label, Icon, shelf, place]) => (
+          {shelves.map(([label, Icon, shelf, place]) => (
             <AccordionItem
               key={label}
               value={label}
