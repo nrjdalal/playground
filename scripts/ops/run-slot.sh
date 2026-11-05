@@ -760,12 +760,16 @@ light_run "$@" && SIZE=small UNITS=1
 # rest and may use the small reserve, as may an org's run (below) and the run-slot.priority pick. A checker's run is ranked by its worker's size (size_of), and
 # the rest keep class 2 so an older copy's ticket still ranks.
 case "$WHO" in ops-checks-*|ops-localci|ops-merge-train|ops-dashboard) CLASS=0 ;; *) CLASS=2 ;; esac
+# the session a run counts as for the priority pick and its class: a commit-<worktree> pre-commit step counts as the last named session that ran run-slot from
+# that worktree (run-slot.owner/<worktree>), since the hook's waiter carries no session's name (4 Nov: a commit's build waited from 20:45Z
+# while the priority named its session, until a lead named its commit-<worktree> by hand)
+owner_of() { case "$1" in commit-*) cat "$OPS/run-slot.owner/${1#commit-}" 2>/dev/null ;; *) echo "$1" ;; esac; }
 # A company's runs go ahead of every other waiter (the owner's priority): class 1, for a session whose roster
 # entry, or its worker's (a checker's), has a pr or repo under a GitHub org ext.links guards. Else a session whose entry, or its worker's, has an
-# owner (the owner's own ask, which its lead set) marks its ticket ask, which ordered_waiters ranks after the merge gates (5 Nov: 15 runs no
-# worker reported for run-slot.priority waited 30 to 90 minutes)
+# owner (the owner's own ask, which its lead set) marks its ticket ask, which ordered_waiters ranks after the merge gates; a commit-<worktree>
+# pre-commit step reads as its worktree's session (owner_of)
 ASK=""
-[ "$CLASS" = 2 ] && { python3 -I - "$WHO" "$SELF" <<'PY'
+[ "$CLASS" = 2 ] && { python3 -I - "$(owner_of "$WHO")" "$SELF" <<'PY'
 import json, os, re, shutil, subprocess, sys
 
 data = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
@@ -872,6 +876,7 @@ ordered_waiters() {
     esac
     # the class: 0 an org's, 1 the ready line, 2 the merge gates, 3 the owner's ask, 4 a reviewer's, 5 the rest
     case "$rank" in 0*) k=0 ;; 1*) k=1 ;; 20?) k=2 ;; 21?) k=4 ;; *) k=5 ;; esac
+    # an ask ticket ranks as 23<units>, so a checker's and a worker's sort by units alone within the class
     [ "$k" -lt 4 ] || [ "$ask" != ask ] || { k=3; rank=23${rank: -1}; }
     sub=${subs[$k]}
     if [ "$aged" = 0 ]; then echo "$seg $k $sub $rank 0 $t"; else echo "$seg $k $((sub + 1)) 00 1 $t"; subs[$k]=$((sub + 2)); fi
@@ -930,10 +935,6 @@ focus_wait() {
   sleep "$POLL"
   waited=$((waited + 15))
 }
-# the session a run counts as for the priority pick: a commit-<worktree> pre-commit step counts as the last named session that ran run-slot from
-# that worktree (run-slot.owner/<worktree>), since the hook's waiter carries no session's name (4 Nov: a commit's build waited from 20:45Z
-# while the priority named its session, until a lead named its commit-<worktree> by hand)
-owner_of() { case "$1" in commit-*) cat "$OPS/run-slot.owner/${1#commit-}" 2>/dev/null ;; *) echo "$1" ;; esac; }
 prio_for() { local h; h=$(prio_holder) && [ -n "$h" ] && [ "$(owner_of "$1")" = "$h" ]; }
 # the oldest live ticket the priority holder owns, its worktree's commit steps' included: the one of its tickets that skips the queue, so its
 # runs go in the order it asked for them (4 Nov: a merge asked later took a slot before the same session's older merge)

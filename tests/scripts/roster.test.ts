@@ -530,6 +530,7 @@ describe("owner", () => {
     const config = configWith([WITH_PR])
     for (const value of [
       "#i949",
+      "PG-1057",
       "#1057",
       "https://github.com/acme/app/issues/3",
       "https://github.com/acme/app/pull/4",

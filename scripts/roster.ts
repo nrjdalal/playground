@@ -191,13 +191,14 @@ function checkEta(pairs: [string, string][]): void {
 }
 
 // owner= names the owner's own ask a session works on, which run-slot.sh ranks after the merge gates: an Inbox item, an issue, a PR or a decision, never a person. An empty owner= clears it.
-const OWNER_REF = /^(?:#i?\d+|d-\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)$/
+const OWNER_REF =
+  /^(?:#i?\d+|PG-\d+|d-\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)$/
 
 function checkOwner(pairs: [string, string][]): void {
   const owner = pairs.find(([k, v]) => k === "owner" && v !== "" && !OWNER_REF.test(v))
   if (owner)
     throw new Refusal(
-      `roster.ts: owner takes the owner's ask it serves, #i<n> (an Inbox item), #<n> or an issue or PR URL, or d-<n> (a decision), not ${owner[1]}`,
+      `roster.ts: owner takes the owner's ask it serves, #i<n> (an Inbox item), PG-<n>, #<n> or an issue or PR URL, or d-<n> (a decision), not ${owner[1]}`,
       2,
     )
 }

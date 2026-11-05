@@ -209,8 +209,7 @@ describe("a reviewer's run", () => {
   })
 })
 
-// 5 Nov: run-slot.priority moved only the pids workers reported, and 15 runs nobody reported waited 30 to 90 minutes; a session whose roster
-// entry, or its worker's, has owner= (the owner's own ask, which its lead set) marks its ticket ask, ranked after the merge gates and before a reviewer's
+// a session whose roster entry, or its worker's, has owner= (the owner's own ask) marks its ticket ask, ranked after the merge gates and before a reviewer's
 describe("a run for the owner's own ask", () => {
   const asks = { agents: [{ name: "g7h8i9-worker", owner: "#i949" }] }
 
@@ -263,10 +262,21 @@ describe("a run for the owner's own ask", () => {
         expect(await m.runs(who, { RUN_SLOT_SIZE: "medium" })).toBe(true)
       })
 
-  // past AGED a ticket is pinned within its own class, so a newer small run of the class waits behind a big one
+  // past AGED a ticket is pinned within its own class, so a newer small run of the class, a checker's here, which would pass it as a reviewer's, waits behind a big one
   test("past AGED, holds back a newer small run of its class", async () => {
+    const m = machine({
+      roster: { agents: [...asks.agents, { name: "g7h8i9-reviewer", worker: "g7h8i9-worker" }] },
+    })
+    m.ticket(1, "g7h8i9-worker", "s2 23 3 big ask", 21 * 60)
+    expect(await m.waits("g7h8i9-reviewer", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+
+  // commit-slot.ts hands a commit's pre-commit step over as commit-<worktree>, which run-slot.owner/<worktree> maps to its session
+  test("is the class of the worker's commit-<worktree> pre-commit step too", async () => {
     const m = machine({ roster: asks })
-    m.ticket(1, "a1b2c3-worker", "s2 23 3 big ask", 21 * 60)
-    expect(await m.waits("g7h8i9-worker", { RUN_SLOT_SIZE: "small" })).toBe(true)
+    mkdirSync(join(m.ops, "run-slot.owner"), { recursive: true })
+    writeFileSync(join(m.ops, "run-slot.owner", "aaa"), "g7h8i9-worker\n")
+    m.ticket(1, "a1b2c3-worker", "s2 21 1 small")
+    expect(await m.runs("commit-aaa")).toBe(true)
   })
 })
