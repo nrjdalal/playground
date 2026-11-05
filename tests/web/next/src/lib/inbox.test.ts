@@ -921,6 +921,9 @@ describe("a sent draft before its poster acks it", () => {
     expect(outcomeLine(sent({ delivery: typed }))).toBe("Sent")
     expect(itemState(sent({ delivery: typed }))).toBe("sending")
     expect(outcomeLine(sent({ delivery: { status: "pending" } }))).toBe("Sent")
+    expect(outcomeLine(sent({ answer: { at: "x", choice: "send", editedText: "hey" } }))).toBe(
+      "Sent with your changes",
+    )
     expect(
       outcomeLine(
         sent({
