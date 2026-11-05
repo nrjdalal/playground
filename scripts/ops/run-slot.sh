@@ -542,11 +542,7 @@ set_flags() { local w; for w in "$@"; do case "$w" in pipefail) ;; [-+] | [-+]*[
 bare_dir() { local d=$1; while [ ${#d} -gt 1 ] && [ "${d%/}" != "$d" ]; do d=${d%/}; done; printf '%s' "$d"; }
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
-# Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form
-# a reading of cd, ~ or env let through): a git add, commit or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add,
-# commit or push after it or as `git -C <that kind of folder>`, `bun run precommit:light`, and a script's `set` of shell options, each word plain.
-# CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env
-# prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
+# Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form a reading of cd, ~ or env let through): a git add, commit or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add, commit or push after it or as `git -C <that kind of folder>`, `bun run precommit:light` in run-slot's own repo, and a script's `set` of shell options, each word plain. CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
 CHAIN_SAFE="" CHAIN_BAD=""
 chain_safe() {
   local line words cdir="" folder verb rest=()
@@ -582,9 +578,7 @@ chain_safe() {
   done < <(chain_steps "$@")
   CHAIN_BAD=""
 }
-# a chain's lane: `commit` when it commits or pushes and chain_safe takes every step, so it ends in seconds as a bare commit does (4 Nov: a
-# docs-only commit and push inside sh -c waited about 45 minutes in the general queue); `general <step>` for one that commits or pushes with a
-# step outside that list, which run-slot says, so its worker can run the commit on its own; else nothing
+# a chain's lane: `commit` when it commits or pushes and chain_safe takes every step, so it ends in seconds as a bare commit does (4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue); `general <step>` for one that commits or pushes with a step outside that list, which run-slot says, so its worker can run the commit on its own; else nothing
 chain_lane() {
   local line words commits=""
   while IFS= read -r line; do
@@ -595,11 +589,7 @@ chain_lane() {
   [ -n "$commits" ] || return
   if chain_safe "$@"; then echo commit; else echo "general $(shown "$CHAIN_BAD")"; fi
 }
-# Quick slots, outside the queue, one holder each: a plain git commit (its pre-commit build, about 17s) takes run-slot-commit (builder,
-# 13 Oct: five commits waited in a fifteen-deep queue; a commit with a longer hook goes through the queue as <who> -- bash -c '...'), and a
-# node_modules clone (cp -cR <sibling>/node_modules <worktree>/) takes run-slot-clone (dispatcher, 13 Oct: three load spikes, 77 and 43
-# among them, each with fseventsd near 100% while clones ran at once); a git merge or pull takes run-slot-commit too, and a short bun test,
-# docs:wrap or format:check takes run-slot-quick
+# Quick slots, outside the queue, one holder each: a plain git commit (its pre-commit build, about 17s) takes run-slot-commit (builder, 13 Oct: five commits waited in a fifteen-deep queue; a commit with a longer hook goes through the queue as <who> -- bash -c '...'), and a node_modules clone (cp -cR <sibling>/node_modules <worktree>/) takes run-slot-clone (dispatcher, 13 Oct: three load spikes, 77 and 43 among them, each with fseventsd near 100% while clones ran at once); a git merge or pull takes run-slot-commit too, and a short bun test, docs:wrap or format:check takes run-slot-quick
 quick_rule() {
   local a first=""
   # a pre-commit step commit-slot.ts hands over (the build or a type check), marked RUN_SLOT_COMMIT_STEP=1 under its commit-<worktree> name, is a plain git commit's own step, so it takes run-slot-commit too (3 Nov: a plain commit's build waited about an hour in the queue)

@@ -306,8 +306,7 @@ describe("a commit whose pre-commit runs next build", () => {
   })
 })
 
-// 5 Nov: a lone commit waited up to 4,054 s as a big run; under run-slot, commit-slot.ts runs the build bare inside the commit's own slot, so only
-// a build turbo replays whole from its cache, which runs in seconds, leaves the queue
+// 5 Nov: a lone commit waited up to 4,054 s as a big run; under run-slot, commit-slot.ts runs the build bare inside the commit's own slot, so only a build turbo replays whole from its cache, which runs in seconds, leaves the queue
 describe("a commit whose next build turbo replays from its cache", () => {
   test("takes run-slot-commit beside a big run", async () => {
     const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"])
