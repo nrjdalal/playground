@@ -487,6 +487,26 @@ describe("worktreeRefusal", () => {
     expect(worktreeRefusal(wt, roots, { ...holders, procs: null })).toContain("process")
   })
 
+  test("a live session holds a folder by its name only when the slug after PG-<n>- is that name or starts with it and a dash", () => {
+    const { holders, roots } = withWorktree()
+    // [folder, branch, live session, held]
+    const cases: [string, string, string, boolean][] = [
+      ["PG-864-second-dispatcher", "PG-864-second-dispatcher", "dispatcher", false],
+      ["PG-5-stops", "PG-5-stops", "ops", false],
+      ["PG-12-ops", "PG-12-ops", "ops", true],
+      ["PG-13-ops-job", "PG-13-ops-job", "ops", true],
+      ["PG-14-misc", "PG-14-ops-fix", "ops", true],
+    ]
+    const seen = cases.map(([folder, branch, name]) => {
+      const at = join(roots.main, ".claude", "worktrees", folder)
+      git(roots.main, "worktree", "add", "-q", "-b", branch, at)
+      writeFileSync(holders.roster, JSON.stringify({ agents: [{ name, status: "working" }] }))
+      const holds = `${at} is held by ${name}, which the roster lists as working`
+      return [folder, worktreeRefusal(at, roots, holders) === holds]
+    })
+    expect(seen).toEqual(cases.map(([folder, , , held]) => [folder, held]))
+  })
+
   test("refuses a worktree a running node_modules clone reads from or copies into, naming the clone, and lets it go once the clone is gone", () => {
     const { holders, roots, wt } = withWorktree()
     git(wt, "push", "-q", "origin", "PG-1-thing")
