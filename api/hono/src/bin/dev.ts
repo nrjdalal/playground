@@ -2,7 +2,13 @@ import "@packages/env/aliases"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 
-import { DASHBOARD_RULES, dropFixture, fixtureDir, writeFixture } from "@/lib/dashboard/fixture"
+import {
+  DASHBOARD_RULES,
+  dropFixture,
+  fixtureDir,
+  markLaunched,
+  writeFixture,
+} from "@/lib/dashboard/fixture"
 import {
   apiSettings,
   type ApiSettings,
@@ -174,6 +180,7 @@ if (!dry) {
     const scratch = fixtureDir({ PLAYGROUND_FIXTURE_DIR: settings.PLAYGROUND_FIXTURE_DIR })
     try {
       writeFixture(checked.dashboard.fixture, scratch, trashRoots(ROOT))
+      markLaunched(scratch)
       wrote = scratch
     } catch (error) {
       console.error(`dev: refusing to start: ${error instanceof Error ? error.message : error}`)

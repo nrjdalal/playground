@@ -26,6 +26,7 @@ import {
   fixtureDir,
   fixtureHerdrInput,
   loadFixture,
+  markLaunched,
   readFixtureHerdr,
   writeFixture,
 } from "../../../../../../api/hono/src/lib/dashboard/fixture"
@@ -413,7 +414,8 @@ describe("writeFixture", () => {
   })
 
   // A worker's run on #665 read an old copy: ensureFixture returned once a stamp existed, so an edit to the fixture's source never reached the next run.
-  const edited = (launched: boolean) => {
+  // beside: a CLI in the checkout of a stack whose launcher runs ("live") or has gone ("gone").
+  const edited = (launched: boolean, beside?: "gone" | "live") => {
     const root = scratch("fixture-newer")
     const dir = join(root, "fixture")
     const file = join(root, "source.json")
@@ -431,6 +433,13 @@ describe("writeFixture", () => {
       // The stamp goes back from its own mtime, the disk's clock, since the clock-ahead pass moves Date.now() and not the disk's.
       const back = new Date(statSync(stamp).mtimeMs - 60_000)
       utimesSync(stamp, back, back)
+      if (beside === "live") markLaunched(dir)
+      if (beside === "gone") {
+        writeFileSync(
+          join(dir, "launcher.json"),
+          JSON.stringify({ pid: process.pid, started: "gone" }),
+        )
+      }
       writeFileSync(file, JSON.stringify({ ...shipped(), origin: "edited" }))
       if (launched) process.env.PLAYGROUND_FIXTURE_LAUNCHED = "1"
       expect(ensureFixture(source)).toBe(dir)
@@ -452,6 +461,14 @@ describe("writeFixture", () => {
 
   test("a launched stack keeps its copy after the same edit, since the launcher owns it", () => {
     expect(edited(true)).toBe("first")
+  })
+
+  test("a CLI beside a running stack keeps the stack's copy after the same edit", () => {
+    expect(edited(false, "live")).toBe("first")
+  })
+
+  test("a copy whose launcher has gone is written again after the same edit", () => {
+    expect(edited(false, "gone")).toBe("edited")
   })
 
   test("replaces its own folder whole, so a stack starts from the fixture again", () => {

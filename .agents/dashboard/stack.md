@@ -77,6 +77,7 @@
   a fixture stack never asks cmux (its calls refuse with "This stack reads a fixture") and never runs the System probes, `git -C` or `gh` on the live machine, and its writes (a message, a Feed answer) land in that scratch copy and an inbox answer in the worktree's own database,
   so a tester drives end to end on it every flow a herdr session takes, a permission or plan answer refusing there as on a live herdr session (cmux.md).
   Outside a launched stack (a test run, a CLI), `ensureFixture()` writes that copy again once its source, `PLAYGROUND_FIXTURE`'s file or else the shipped `dashboard.json`, is newer than the copy's `stamp.json`, so an edit to the source reaches the next run.
+  A copy whose launcher still runs is left alone: the launcher marks it with its pid and start (`launcher.json`, `markLaunched()`), so a CLI in the same checkout keeps a running stack's copy and its writes.
   To undo a hand edit to that scratch copy, restart the stack, which writes it fresh, before taking evidence, rather than editing it back in place: a board once stayed two checkers short after an in-place revert until the restart.
   `bun run ingest` on a fixture stack reads that copy's transcripts, and its Sessions pages show only the sessions read from there (`shownHere()` in `api/hono/src/lib/sessions/read.ts`), so rows a worktree's database kept from a live config folder never show.
   `/api/health` names the source in `dashboard` (`fixture`, `hosted`, `live` or `refused`), and `bun run verify screenshots` refuses any stack but a fixture one.
