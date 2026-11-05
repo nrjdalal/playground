@@ -78,6 +78,7 @@
   An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
   A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
   `ASK_CODE_COLUMNS` (`@packages/config/inbox`) is the widest drawing line that fits the narrowest card at 12px.
+  A `delete` decision's `why` renders the same, so a link it holds opens, while its `what` stays plain text, the paths Approve removes.
   Every other preview's words, a Slack message's included, stay plain text, since they go out exactly as written, marked as quoted by a `border-l-2` rule rather than a background, and no card's body, a Done one's included, sits on gray, the band alone muted.
   The card's header is one `minmax(0,1fr)` column and a card's table cells wrap, so a wide table or drawing stays inside the card.
   A decision previews exactly what Approve does, then its options as shadcn's questionnaire choices, except a secret ask (below), and no card offers Edit: a change goes in the comment box, while the API still reads `edit` on an older row.
@@ -211,7 +212,8 @@
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with its options labelled one line each, `options`, 1 to 5 rows of `{label, description?}`, one row for a yes or no and 2 or more for lettered choices, or the older `approve` alone, never both, and an optional `deny` naming the no-go row (Deny, or None of these past one option),
   and optional `attachments`, below), `slack` (`to`, `text`, optional `attachments`),
-  `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below) or `secret` (`key`, `sink`); a decision with none is refused.
+  `ship` (`sha`, `prs` of `{number, title, url?}`, where `bun run ask new` and `edit` fill each `url` into the factory's repo, `factory.repo` else the checkout's origin, so the card links each PR),
+  `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below) or `secret` (`key`, `sink`); a decision with none is refused.
   A `delete`'s `what` names each target by its full path, the one `playground rm --decision` matches, so one approval is enough: `bun run ask new` refuses a short name that is there (a relative or `~` path, a worktree's bare folder name), naming the full path to write, unless that full path stands beside it (`deleteRefusal` in `api/hono/src/lib/dashboard/delete-targets.ts`).
   An `ask`'s `attachments`, a draft's, a `slack` decision's and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
@@ -380,7 +382,9 @@
   A job of several steps leads with to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`).
 
   `bun run ask example code|decision|slack|ui` prints each worked example as an item to fill in, the three asks below and the slack decision above.
-  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options, or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
+  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
+  a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
+  or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
   The three, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown

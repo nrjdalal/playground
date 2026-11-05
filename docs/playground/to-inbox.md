@@ -37,6 +37,7 @@ Any other update stays editable until you dismiss it, so a card the session will
 ```
 picture   diff, ASCII, shots, page
 bullets   🐛 ✅ ⚠️ ↩️ 📨 🕐 ⏱️ 💰, one fact each
+links     each PR, ticket and page it names
 callout   one, only for what must not be missed
 choices   yes or no: Approve: <verb ...>  Deny: <verb ...>
           or A to E: A. <verb ...>  B. <verb ...>  None of these
@@ -48,6 +49,7 @@ A whole patch can ride along as a file: a `.diff` or `.patch` attachment (`git d
 ## It's working if
 
 - You can say what an item asks, and what Approve does, before you read its second line.
+- Every PR, ticket, commit, thread, doc and page a card names opens from the card in one click.
 - No drawing on a card shrinks or scrolls sideways.
 - An item from any session reads like one from any other.
 - Every clock time on a card reads in your own time zone, the `clock.ownerZone` setting, and names it ("9:30 pm UTC").
@@ -56,5 +58,5 @@ A whole patch can ride along as a file: a `.diff` or `.patch` attachment (`git d
 
 Every factory session uses it under [playbook](./playbook.md)'s **ask** rule, which decides when an item goes to the owner; `to-inbox` decides how it reads.
 Before it posts, `playground ask open` lists the items already open, so a session names one on the same thing rather than posting it twice.
-`playground ask new` checks the shape and prints a hint when the text runs long with no list, code block or attachment, or when a line in a code block other than a `diff` one runs past the card's width (`ASK_CODE_COLUMNS`), since a `diff` block wraps.
+`playground ask new` checks the shape and prints a hint when the text runs long with no list, code block or attachment, when a line names a PR, a ticket or a commit with no link on it, or when a line in a code block other than a `diff` one runs past the card's width (`ASK_CODE_COLUMNS`), since a `diff` block wraps.
 Once you answer, the session that posted gets your answer as one `[inbox-answer]` line: it does what the line's `next` says, the way its `verb` names, then runs its `close` ([asks.md](../../.agents/dashboard/asks.md)).

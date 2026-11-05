@@ -240,6 +240,7 @@ describe("tick", () => {
       { text: "week passed 80% on pride@", to: "dispatcher" },
     ])
     expect(alertTitles(inputs)).toEqual(["ALERT 98 pride@example.com: week at 98%, past 98%"])
+    expect(JSON.parse(inputs[0]!).preview.text).toContain("[System page](/dashboard/system)")
   })
 
   test("an Inbox alert that fails to post is named to the builder, and its line still goes", async () => {
@@ -1251,7 +1252,10 @@ describe("relay watch", () => {
     expect(JSON.parse(first.asks[0]!.stdin!)).toEqual({
       from: OLD.ops,
       kind: "update",
-      preview: { outcome: "alert" },
+      preview: {
+        outcome: "alert",
+        text: expect.stringContaining("[System page](/dashboard/system)"),
+      },
       title: `The ops relay is down: no ops line has gone out since ${at(14, 7)
         .toISOString()
         .replace(/\.\d{3}Z$/, "Z")}. Resume runner-plain-relay.`,

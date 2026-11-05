@@ -16,12 +16,20 @@ import type { Context } from "./tick"
 // ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees, branches, worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, an Inbox update when 1 GB or more was freed, and one delete decision for what only the owner's Approve may remove.
 
 const GB = 1024 ** 3
+// The freed-space finding's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
+export const FREED_LINK = "- 💾 Free disk shows on the [System page](/dashboard/system)."
 const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
 
-export type Pr = { headRefOid: string; state: "CLOSED" | "MERGED" | "OPEN" }
-export type Prs = { byBranch: Map<string, Pr>; byNumber: Map<number, Pr> }
+export type Pr = { headRefOid: string; state: "CLOSED" | "MERGED" | "OPEN"; url: string }
+// repo is the repository's https URL, which a branch with no PR links its compare under.
+export type Prs = { byBranch: Map<string, Pr>; byNumber: Map<number, Pr>; repo?: string }
 export type Ref = { name: string; sha: string }
-export type Target = { kind: "branch" | "container" | "volume" | "worktree"; name: string }
+// link is the page the owner opens to judge it: a worktree's or branch's PR, else a pushed branch's compare.
+export type Target = {
+  kind: "branch" | "container" | "volume" | "worktree"
+  link?: string
+  name: string
+}
 export type Worktree = { branch: string | null; path: string }
 
 // What the beat reads and runs beyond ctx.run, so a test hands it fakes: the merge-time cleanup's deps, free bytes on the data folder's disk, the PRs of branches and numbers (null when GitHub cannot be read), and the turbo cache's folder.
@@ -168,18 +176,31 @@ export async function pruneTurbo(dir: string, now: Date, days = 2): Promise<stri
   return `removed ${removed}, kept ${kept}, freed ${Math.round(freed / 1_048_576)} MB`
 }
 
-// Pure: the night's delete decision, each target named whole (playground rm --decision matches full paths), as many as fit the Inbox's 4,000 characters; the rest wait for the next night.
+// Pure: the page a branch on the decision list links: its newest PR, else its compare once it is pushed, else none, since an unpushed branch has no page.
+export const branchLink = (name: string, prs: Prs, pushed: Set<string>): string | undefined =>
+  prs.byBranch.get(name)?.url ??
+  (prs.repo && pushed.has(name) ? `${prs.repo}/compare/${name}` : undefined)
+
+const WHY =
+  "The nightly cleanup found these left over: a worktree with work no merge landed, a branch with no merged PR, or a container or volume over 1 GB that no rule removes. Approve removes each on the next night's run; Deny keeps them, and they are not asked again."
+
+// Pure: the night's delete decision, each target named whole (playground rm --decision matches full paths), as many as fit the Inbox's 4,000 characters, the rest waiting for the next night; its why links each named target's PR or compare, as many as fit.
 export const decisionOf = (
   from: string,
   targets: Target[],
 ): { item: object; targets: Target[] } => {
   const named: Target[] = []
   let what = ""
+  let why = WHY
   for (const t of targets) {
     const line = `- ${t.kind} \`${t.name}\`\n`
     if (what.length + line.length > 3800) break
-    named.push(t)
+    named.push({ kind: t.kind, name: t.name })
     what += line
+    if (!t.link) continue
+    const pr = /\/pull\/(\d+)$/.exec(t.link)?.[1]
+    const linked = `${why === WHY ? "\n\n" : "\n"}- ${t.kind} \`${t.kind === "worktree" ? basename(t.name) : t.name}\`: [${pr ? `#${pr}` : "compare"}](${t.link})`
+    if (why.length + linked.length <= 3900) why += linked
   }
   return {
     item: {
@@ -188,7 +209,7 @@ export const decisionOf = (
       preview: {
         type: "delete",
         what: what.trimEnd(),
-        why: "The nightly cleanup found these left over: a worktree with work no merge landed, a branch with no merged PR, or a container or volume over 1 GB that no rule removes. Approve removes each on the next night's run; Deny keeps them, and they are not asked again.",
+        why,
       },
       title: `Delete ${named.length} leftover${named.length === 1 ? "" : "s"} the nightly cleanup found`,
     },
@@ -336,7 +357,7 @@ export const nightlyClean =
           pushed: w.pr.headRefOid,
         })
         out.push(line)
-        if (discardable(line)) decide.push({ kind: "worktree", name: w.path })
+        if (discardable(line)) decide.push({ kind: "worktree", link: w.pr.url, name: w.path })
       }
       return out.length ? out.join("; ") : "none stale"
     })
@@ -358,7 +379,9 @@ export const nightlyClean =
       let remotes = 0
       for (const name of plan.remote)
         if ((await git(["push", "-q", "origin", "--delete", name])).code === 0) remotes++
-      for (const name of plan.decide) decide.push({ kind: "branch", name })
+      const pushed = new Set(remote.map((r) => r.name))
+      for (const name of plan.decide)
+        decide.push({ kind: "branch", link: branchLink(name, prs, pushed), name })
       return `deleted ${locals} local, ${remotes} remote; ${plan.decide.length} to decide`
     })
     await step("docker", async () => {
@@ -433,7 +456,7 @@ export const nightlyClean =
         JSON.stringify({
           from,
           kind: "update",
-          preview: { outcome: "finding" },
+          preview: { outcome: "finding", text: FREED_LINK },
           title: `The nightly cleanup freed ${gbOf(after - before)} GB: free disk ${gbOf(before)} GB, now ${gbOf(after)} GB`,
         }),
       )
@@ -480,7 +503,7 @@ const liveNight: NightDeps = {
     const repo = /github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/.exec(url)
     if (!repo) return null
     const q = JSON.stringify
-    const fields = "state headRefOid"
+    const fields = "state headRefOid url"
     const parts = [
       ...branches.map(
         (b, i) =>
@@ -488,7 +511,11 @@ const liveNight: NightDeps = {
       ),
       ...numbers.map((n, i) => `n${i}: pullRequest(number: ${n}) { ${fields} }`),
     ]
-    const prs: Prs = { byBranch: new Map(), byNumber: new Map() }
+    const prs: Prs = {
+      byBranch: new Map(),
+      byNumber: new Map(),
+      repo: `https://github.com/${repo[1]}/${repo[2]}`,
+    }
     for (let i = 0; i < parts.length; i += 100) {
       const query = `query { repository(owner: ${q(repo[1])}, name: ${q(repo[2])}) { ${parts.slice(i, i + 100).join(" ")} } }`
       const read = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], 120_000)
