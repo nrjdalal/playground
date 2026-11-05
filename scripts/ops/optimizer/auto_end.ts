@@ -68,10 +68,10 @@ export async function endOne(target: Target, why: string, deps: EndDeps): Promis
       { text: `Not ended ${target.name} (${why}): spawn.sh close refused: ${closed.out}`, to },
     ]
   await deps.report(target.name, `ended automatically: ${why}`)
-  const cleaned = deps.cleanup ? await deps.cleanup(target) : []
+  const idle = why.startsWith("checker-nothing")
+  const cleaned = deps.cleanup && !idle ? await deps.cleanup(target) : []
   const after = cleaned.length ? `; cleanup: ${cleaned.join("; ")}` : ""
-  if (!why.startsWith("checker-nothing"))
-    return [{ text: `Ended ${target.name}: ${why}${after}`, to }]
+  if (!idle) return [{ text: `Ended ${target.name}: ${why}${after}`, to }]
   const text = `Ended ${target.name}: ${why}${after}; resume it on the next push: scripts/spawn.sh resume ${target.name} <dir>`
   return target.worker && target.worker !== to
     ? [
@@ -219,12 +219,14 @@ export async function unsavedLive(target: Target, projectsDir: string): Promise<
   return null
 }
 
-// What one worktree's cleanup reads and runs, so a test hands it fakes: git in a folder, the main checkout, its dev stack's stop, playground rm --worktree, the containers docker lists and its remove, and whether a name is the live dashboard's database.
+// What one worktree's cleanup reads and runs, so a test hands it fakes: git in a folder, the main checkout, the live dashboard's branch, the live session or clone holding a worktree, its dev stack's stop, playground rm --worktree, the containers docker lists and its remove, and whether a name is the live dashboard's database.
 export type CleanupDeps = {
   containers: () => Promise<string[] | null>
-  devStop: (dir: string) => Promise<void>
+  devStop: (dir: string) => Promise<{ ok: boolean; out: string }>
   git: (dir: string, args: string[]) => Promise<string | null>
+  held: (path: string) => Promise<string | null>
   live: (container: string) => boolean
+  liveBranch: string
   main: string
   removeContainer: (name: string) => Promise<boolean>
   rm: (path: string, reason: string) => Promise<{ ok: boolean; out: string }>
@@ -256,6 +258,8 @@ export async function cleanWorktree(
     ])) ?? ""
   ).split("\n")
   if (!gitDir || !commonDir || gitDir === commonDir) return `kept ${path}: not a linked worktree`
+  const branch = await deps.git(path, ["symbolic-ref", "--short", "-q", "HEAD"])
+  if (branch === deps.liveBranch) return `kept ${path}: the live dashboard's checkout`
   const status = await deps.git(path, ["status", "--porcelain"])
   if (status === null) return `kept ${path}: could not read its git status`
   if (status) return `kept ${path}: uncommitted work`
@@ -263,25 +267,35 @@ export async function cleanWorktree(
   if (ahead === null) return `kept ${path}: could not count its unpushed commits`
   if (Number(ahead) > 0) return `kept ${path}: unpushed commits`
   const repo = dirname(commonDir)
-  const branch = await deps.git(path, ["symbolic-ref", "--short", "-q", "HEAD"])
   const gone: string[] = []
+  let listed: string[] | null = []
   if (repo === deps.main) {
     const own = containersFor(path, deps.main, deps.live)
     if (!own.length)
       return `kept ${path}: not a worktree in ${join(deps.main, ".claude", "worktrees")}`
-    await deps.devStop(path)
+    const holder = await deps.held(path)
+    if (holder) return `kept ${path}: ${holder}`
+    const stopped = await deps.devStop(path)
+    if (!stopped.ok && !stopped.out.includes("no stack is recorded"))
+      return `kept ${path}: ${stopped.out}`
     const moved = await deps.rm(path, reason)
     if (!moved.ok) return `kept ${path}: ${moved.out}`
-    const listed = (await deps.containers()) ?? []
-    for (const name of own)
-      if (listed.includes(name) && (await deps.removeContainer(name))) gone.push(name)
+    listed = await deps.containers()
+    if (listed)
+      for (const name of own)
+        if (listed.includes(name) && (await deps.removeContainer(name))) gone.push(name)
   } else {
     if ((await deps.git(repo, ["worktree", "remove", path])) === null)
       return `kept ${path}: git worktree remove refused it`
     await deps.git(repo, ["worktree", "prune"])
   }
   const deleted = branch ? (await deps.git(repo, ["branch", "-D", branch])) !== null : false
-  return `removed ${path}${gone.length ? `, containers ${gone.join(", ")}` : ""}${deleted ? `, branch ${branch}` : ""}`
+  const containers = listed
+    ? gone.length
+      ? `, containers ${gone.join(", ")}`
+      : ""
+    : ", its containers kept since docker ps could not list them"
+  return `removed ${path}${containers}${deleted ? `, branch ${branch}` : ""}`
 }
 
 // This machine's cleanup deps: git, the main checkout this one belongs to, bun run dev:stop in the worktree, playground rm --worktree from this checkout, docker ps -a and docker rm -fv, and the live dashboard's database name.
@@ -289,15 +303,38 @@ async function cleanupDeps(): Promise<CleanupDeps | null> {
   const common = await git(REPO, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
   if (!common) return null
   const { isLiveDatabase, livePair } = await import("../../../api/hono/src/lib/dev/live-dashboard")
+  const { rmDeps } = await import("../../../packages/scripts/src/playground/rm")
+  const { worktreeRefusal } = await import("../../../packages/safe-delete/src/index")
+  const STATUSES = (await import("../../roster-statuses.json")).default
   const pair = livePair()
+  const rm = rmDeps(REPO)
   return {
     containers: async () => {
       const { code, out } = await runIn(["docker", "ps", "-a", "--format", "{{.Names}}"])
       return code === 0 ? out.split("\n").filter(Boolean) : null
     },
-    devStop: async (dir) => void (await runIn(["bun", "run", "--cwd", dir, "dev:stop"])),
+    devStop: async (dir) => {
+      const { code, out } = await runIn(["bun", "run", "--cwd", dir, "dev:stop"])
+      const lines = out.split("\n")
+      return { ok: code === 0, out: lines.find((l) => l.startsWith("dev:stop:")) ?? lines.at(-1)! }
+    },
     git,
+    // rm's roster and clone holders alone: its process check would see the stack dev:stop is about to stop, and its saved-work checks run after the stop
+    held: async (path) =>
+      worktreeRefusal(
+        path,
+        { home: rm.home, main: rm.main, trash: join(rm.data, "trash") },
+        {
+          clones: rm.clones(),
+          discard: true,
+          live: STATUSES.live,
+          merged: () => null,
+          procs: [],
+          roster: join(rm.data, "roster.json"),
+        },
+      ),
     live: (container) => isLiveDatabase(container, pair),
+    liveBranch: pair.branch,
     main: dirname(common),
     removeContainer: async (name) => (await runIn(["docker", "rm", "-fv", name])).code === 0,
     rm: async (path, reason) => {

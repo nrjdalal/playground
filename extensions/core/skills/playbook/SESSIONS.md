@@ -342,9 +342,10 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
 - ops-tick's auto-end beat, every 5 minutes, ends a checker whose PRs are all merged or closed or whose worker is gone, a worker whose PRs are all merged or closed, and a reviewer idle 30+ minutes whose every head carries its verdict.
   A session's PRs are its roster `pr` and `prs` list, its open branch PRs, its worker's, and every PR its own or its worker's transcript links, so one still open keeps it.
 - Each end runs `spawn.sh close <name>`, then `roster.ts report <name> "ended automatically: <why>" status=ended`, the merged sha in the why, and sends its lead one line: its roster `lead`, else its worker's.
-- Then it cleans each worktree the session used, one at a time (`cleanWorktree`), and the lead's line names what went and what stayed, with why.
-  A worktree with uncommitted work or unpushed commits stays.
-  A Playground worktree in `.claude/worktrees/` has its dev stack stopped (`bun run dev:stop` there), goes to the 7-day trash through `playground rm --worktree`, which keeps one a live session or a process holds, and then loses its `playground-<worktree>-db` and `-redis` containers (`docker rm -fv`, each name matched whole, never the live dashboard's database) and its local branch.
+- Then it cleans each worktree the session used, one at a time (`cleanWorktree`), and the lead's line names what went and what stayed, with why; a reviewer ended idle keeps its worktrees for its resume.
+  A worktree with uncommitted work or unpushed commits stays, and so does the live dashboard's checkout, by its branch.
+  A Playground worktree in `.claude/worktrees/` that a live session or a clone holds stays.
+  Any other has its dev stack stopped (`bun run dev:stop` there, whose refusal keeps it), goes to the 7-day trash through `playground rm --worktree`, which keeps one a process holds, and then loses its `playground-<worktree>-db` and `-redis` containers (`docker rm -fv`, each name matched whole, never the live dashboard's database) and its local branch.
   Another repo's worktree goes through `git -C <repo> worktree remove <path>` with no force flag, then `git worktree prune` and `git branch -D`; the main checkout is never one.
 - Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one); otherwise its lead gets a `Not ended` line saying why, and the session waits.
   A cmux session's close is refused the same way, so its lead closes it by hand below.

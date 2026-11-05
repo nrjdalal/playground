@@ -134,9 +134,12 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     ])
   })
 
-  test("a reviewer idle 30+ minutes on a scored head ends with its resume named; a tester does not", async () => {
+  test("a reviewer idle 30+ minutes on a scored head ends with its resume named and its worktrees left for that resume; a tester does not", async () => {
     const scored: PrState = { head: "abc1234567", state: "open", verdicts: ["abc1234"] }
-    const { closed, deps } = fakes()
+    const cleaned: string[] = []
+    const { closed, deps } = fakes({
+      cleanup: async (target) => (cleaned.push(target.name), [`removed /wt/${target.name}`]),
+    })
     const lines = await sweep(
       input({
         prState: async () => scored,
@@ -154,6 +157,7 @@ describe("sweep: ops-tick ends what the detector flags", () => {
       deps,
     )
     expect(closed).toEqual(["k8wjf3-reviewer"])
+    expect(cleaned).toEqual([])
     const text =
       "Ended k8wjf3-reviewer: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume k8wjf3-reviewer <dir>"
     expect(lines).toEqual([
@@ -598,16 +602,23 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
   const branches = (repo: string) =>
     Bun.spawnSync(["git", "-C", repo, "branch", "--format=%(refname:short)"]).stdout.toString()
   // Real git on the scratch repos; playground rm stands in as git worktree remove in the scratch main checkout, refusing when told to; docker lists the given names.
-  const fakes = (main: string, listed: string[], refuse?: string) => {
+  const fakes = (
+    main: string,
+    listed: string[] | null,
+    refuse?: string,
+    over: Partial<CleanupDeps> = {},
+  ) => {
     const calls: string[] = []
     const deps: CleanupDeps = {
       containers: async () => listed,
-      devStop: async (dir) => void calls.push(`dev:stop ${dir}`),
+      devStop: async (dir) => (calls.push(`dev:stop ${dir}`), { ok: true, out: "" }),
       git: async (dir, args) => {
         const r = Bun.spawnSync(["git", "-C", dir, ...args], { env: ENV })
         return r.exitCode === 0 ? r.stdout.toString().trim() : null
       },
+      held: async () => null,
       live,
+      liveBranch: "live/dashboard",
       main,
       removeContainer: async (name) => (calls.push(`docker rm -fv ${name}`), true),
       rm: async (path, reason) => {
@@ -616,6 +627,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
         run(main, "git", "worktree", "remove", path)
         return { ok: true, out: "" }
       },
+      ...over,
     }
     return { calls, deps }
   }
@@ -657,6 +669,54 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(await cleanWorktree(wt, "r ended", deps)).toBe(`kept ${wt}: ${refusal}`)
     expect(calls).toEqual([`dev:stop ${wt}`, `rm ${wt} (r ended)`])
     expect(branches(main)).toContain("PG-1-thing")
+  })
+
+  test("the live dashboard's checkout is kept before anything runs, even clean and pushed", async () => {
+    const { main } = machine()
+    const desk = join(main, ".claude", "worktrees", "desk")
+    run(main, "git", "worktree", "add", "-q", "-b", "live/dashboard", desk)
+    run(desk, "git", "push", "-q", "origin", "live/dashboard")
+    const { calls, deps } = fakes(main, ["playground-desk-db"])
+    expect(await cleanWorktree(desk, "r ended", deps)).toBe(
+      `kept ${desk}: the live dashboard's checkout`,
+    )
+    expect(calls).toEqual([])
+    expect(existsSync(desk)).toBe(true)
+  })
+
+  test("a worktree a live session holds is kept before its dev stack is stopped", async () => {
+    const { main, wt } = machine()
+    const holder = `${wt} is held by k3m9px-worker, which the roster lists as working`
+    const { calls, deps } = fakes(main, ["playground-pg-1-db"], undefined, {
+      held: async () => holder,
+    })
+    expect(await cleanWorktree(wt, "r ended", deps)).toBe(`kept ${wt}: ${holder}`)
+    expect(calls).toEqual([])
+  })
+
+  test("a dev:stop refusal keeps the worktree, while no recorded stack lets it go", async () => {
+    const { main, wt } = machine()
+    const refusal = "dev:stop: the stack's process groups also hold pid 9, so nothing is signalled"
+    const refused = fakes(main, ["playground-pg-1-db"], undefined, {
+      devStop: async () => ({ ok: false, out: refusal }),
+    })
+    expect(await cleanWorktree(wt, "r ended", refused.deps)).toBe(`kept ${wt}: ${refusal}`)
+    expect(refused.calls).toEqual([])
+    const none = fakes(main, ["playground-pg-1-db"], undefined, {
+      devStop: async () => ({ ok: false, out: `dev:stop: no stack is recorded in ${wt}` }),
+    })
+    expect(await cleanWorktree(wt, "r ended", none.deps)).toBe(
+      `removed ${wt}, containers playground-pg-1-db, branch PG-1-thing`,
+    )
+  })
+
+  test("a docker ps that cannot list keeps the containers and says so", async () => {
+    const { main, wt } = machine()
+    const { calls, deps } = fakes(main, null)
+    expect(await cleanWorktree(wt, "r ended", deps)).toBe(
+      `removed ${wt}, its containers kept since docker ps could not list them, branch PG-1-thing`,
+    )
+    expect(calls.filter((c) => c.startsWith("docker"))).toEqual([])
   })
 
   test("the main checkout and a worktree outside .claude/worktrees are never targets", async () => {
