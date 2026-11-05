@@ -55,7 +55,8 @@ describe("load1 at 45 is a hard stop", () => {
 })
 
 // retro 36, 4 Nov: lanes 2 to 4 were shut 109 of 120 minutes at load1 30 or more with the CPU about half idle ("shut idle=60.94% load1=33.75" at 19:29:23Z), and heavy runs waited up to 122 minutes
-describe("from load1 30 up to 45 the CPU must be half idle", () => {
+// 5 Nov, 06:19 to 07:45Z: a 50% bar from load1 30 to 45 left the CPU at a median 48% idle, and 14 of its 30 CPU shuts read 40 to 49% idle
+describe("from load1 30 up to 45 the CPU must be 40% idle", () => {
   test("idle 56% at load1 31 opens them", () => {
     expect(slots({ idle: 56, load1: 31 })).toBe("4\n")
   })
@@ -64,12 +65,13 @@ describe("from load1 30 up to 45 the CPU must be half idle", () => {
     expect(slots({ idle: 50, load1: 44.9 })).toBe("4\n")
   })
 
-  test("idle 45% at load1 31 shuts them", () => {
-    expect(slots({ idle: 45, load1: 31 })).toBe("1\n")
+  test("idle 45% at load1 31 opens them", () => {
+    expect(slots({ idle: 45, load1: 31 })).toBe("4\n")
   })
 
-  test("idle 49.9% at load1 30 shuts them", () => {
-    expect(slots({ idle: 49.9, load1: 30 })).toBe("1\n")
+  test("idle 40% at load1 44.9 opens them, and 39.9% at load1 30 shuts them", () => {
+    expect(slots({ idle: 40, load1: 44.9 })).toBe("4\n")
+    expect(slots({ idle: 39.9, load1: 30 })).toBe("1\n")
   })
 
   test("idle 56% at load1 31 with swap-ins at 100/s shuts them, as mem_ok reads it", () => {
@@ -95,7 +97,7 @@ describe("under load1 30 the CPU must be 40% idle", () => {
     expect(slots({ idle: 80, load1: 29.9 })).toBe("4\n")
   })
 
-  test("idle 45% at load1 29.9 opens them, where load1 30 asks for half", () => {
+  test("idle 45% at load1 29.9 opens them", () => {
     expect(slots({ idle: 45, load1: 29.9 })).toBe("4\n")
   })
 })
@@ -221,7 +223,7 @@ describe("the gauges", () => {
   // dispatcher, 5 Nov: retro 39 counted 19 shuts by the CPU, 12 by memory and 6 by load1, read from the gauges alone, so a shut line names its cause
   test.each([
     ["load1", { idle: 80, load1: 50 }, /shut why=load1 idle=80% load1=50\.00 free=80% pressure=1 /],
-    ["cpu", { idle: 45, load1: 31 }, /shut why=cpu idle=45% load1=31\.00 free=80% pressure=1 /],
+    ["cpu", { idle: 35, load1: 31 }, /shut why=cpu idle=35% load1=31\.00 free=80% pressure=1 /],
     [
       "mem",
       { free: 20, idle: 80, load1: 18 },
@@ -234,8 +236,8 @@ describe("the gauges", () => {
     ],
     [
       "cpu",
-      { free: 20, idle: 45, load1: 31 },
-      /shut why=cpu idle=45% load1=31\.00 free=20% pressure=1 /,
+      { free: 20, idle: 35, load1: 31 },
+      /shut why=cpu idle=35% load1=31\.00 free=20% pressure=1 /,
     ],
   ] as const)(
     "a shut lanes line names why=%s, the first gauge that shut it",
@@ -245,6 +247,13 @@ describe("the gauges", () => {
       expect(lanes(m)).toEqual([expect.stringMatching(line)])
     },
   )
+
+  test("an unread top shuts them with why=cpu", async () => {
+    const m = machine({ idle: 80, load1: 18 })
+    writeFileSync(join(m.bin, "top"), "#!/bin/bash\nexit 1\n")
+    expect(await m.runs("worker-x")).toBe(true)
+    expect(lanes(m)).toEqual([expect.stringMatching(/ shut why=cpu idle=-% load1=18\.00 /)])
+  })
 
   test("a read subcommand records no lanes line", () => {
     const m = machine()
