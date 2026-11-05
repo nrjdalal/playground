@@ -523,6 +523,26 @@ try:
             if isinstance(week_pct, (int, float)) and not isinstance(week_pct, bool) and week_pct >= 100 and resets > now:
                 readings["week"] = week_pct
                 refuse("usage", f"--account {account}: its week reads {fmt(week_pct)}% ({name} seven_day.used_percentage) until {resets:%a %H:%M} UTC. Name another account, or, for a session that may run on this machine's login, none, so it starts on the login with the most room")
+        # usage.json's accounts map holds every account's week as login-flip reads it, a week past its weekReset read as 0, so a full one refuses too, naming the account with the most room as login-flip picks it.
+        own_usage, own_detail = load("usage.json")
+        accounts = own_usage.get("accounts") if not own_detail and isinstance(own_usage, dict) else None
+        weeks = {}
+        for acct, entry in accounts.items() if isinstance(accounts, dict) else []:
+            acct_week = entry.get("week") if isinstance(entry, dict) else None
+            if not isinstance(acct_week, (int, float)) or isinstance(acct_week, bool):
+                continue
+            try:
+                acct_reset = from_iso(entry.get("weekReset"))
+            except (TypeError, ValueError):
+                acct_reset = None
+            weeks[str(acct).lower()] = (str(acct), 0 if acct_reset and acct_reset <= now else acct_week, acct_reset)
+        if account.lower() in weeks:
+            _, week_pct, resets = weeks[account.lower()]
+            if week_pct >= 100 and resets:
+                readings["week"] = week_pct
+                roomiest = sorted((week, acct) for key, (acct, week, _) in weeks.items() if key != account.lower() and week < 100)
+                hint = f"Name {roomiest[0][1]}, the account with the most room (its week reads {fmt(roomiest[0][0])}%), or, for a session that may run on this machine's login, none" if roomiest else "No account in usage.json's accounts has room; wait for a week to reset"
+                refuse("usage", f"--account {account}: its week reads {fmt(week_pct)}% (usage.json accounts) until {resets:%a %H:%M} UTC. {hint}")
         readings["usage"] = f"skipped (--account {account}, whose usage this machine does not read)"
     elif backend == "glm":
         beat = read("ops/ops-zai-usage.json")
