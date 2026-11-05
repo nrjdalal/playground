@@ -93,8 +93,10 @@ export async function answerRelay(
   }
 }
 
-// Vercel closes a socket at the function's 800 s cap, so this Mac opens a fresh one at RECYCLE_MS and lets the old one go once the new one is open and the old one's answers are out; after a drop it waits 1 s, doubling to a minute.
-export const RECYCLE_MS = 750_000
+// Vercel ends the hosted function, and its socket, at the 300 s default duration (measured on 5 Nov: the last heartbeat answered at 286 s, an unclean close at 316 s), so this Mac opens a fresh one at RECYCLE_MS and lets the old one go once the new one is open and the old one's answers are out; after a drop it waits 1 s, doubling to a minute. 240 s leaves 60 s of the 300 s default, so a maxDuration set in api/hono/vercel.json moves RECYCLE_MS with it.
+export const RECYCLE_MS = 240_000
+// A hub that takes the connection but never answers the upgrade leaves the socket in CONNECTING, with no close event until Bun gives up at about 124 s, so this Mac closes it at CONNECT_MS, which with login's 15 s still fits RECYCLE_MS's 60 s margin to the cap, and opens again after the backoff.
+export const CONNECT_MS = 30_000
 const RETRY_MS = 1000
 const RETRY_MAX_MS = 60_000
 
@@ -114,10 +116,11 @@ type RelayDeps = {
   api: string
   // opens the socket; a WebSocket by default
   connect?: (url: URL, token: string) => RelaySocket
+  // CONNECT_MS, RELAY_HEARTBEAT_MS, RECYCLE_MS and RELAY_SILENT_MS by default; a test shortens them
+  connectMs?: number
   // the local owner's session cookie, made once and again after the API refuses it
   cookie: () => Promise<string>
   dispatch: (request: Request) => Promise<Response>
-  // RELAY_HEARTBEAT_MS, RECYCLE_MS and RELAY_SILENT_MS by default; a test shortens them
   heartbeatMs?: number
   // the login the token's /me answers
   login: (token: string) => Promise<string>
@@ -131,10 +134,11 @@ type RelayDeps = {
 const webSocket = (url: URL, token: string): RelaySocket =>
   new WebSocket(url, { headers: { authorization: `Bearer ${token}` } } as never)
 
-// Holds the relay while the API runs: one outbound socket to the hub, opened with the owner's token, answering each read and sending a heartbeat every RELAY_HEARTBEAT_MS, replaced before Vercel's cap, and opened again after any drop or once the hub has been silent for RELAY_SILENT_MS.
+// Holds the relay while the API runs: one outbound socket to the hub, opened with the owner's token, answering each read and sending a heartbeat every RELAY_HEARTBEAT_MS, replaced before Vercel's cap, and opened again after any drop, a socket not open within CONNECT_MS, or once the hub has been silent for RELAY_SILENT_MS, each connect and each end said in a `[relay]` line.
 export function startRelay(deps: RelayDeps): () => void {
   const {
     connect = webSocket,
+    connectMs = CONNECT_MS,
     heartbeatMs = RELAY_HEARTBEAT_MS,
     recycleMs = RECYCLE_MS,
     silentMs = RELAY_SILENT_MS,
@@ -174,34 +178,53 @@ export function startRelay(deps: RelayDeps): () => void {
       let answering = 0
       let beat: ReturnType<typeof setInterval> | null = null
       let ended = false
+      // opened, and not yet let go by a successor that opened
+      let holding = false
       let heard = Date.now()
       let recycle: ReturnType<typeof setTimeout> | null = null
+      let connecting: ReturnType<typeof setTimeout> | null = null
       sockets.set(opened, () => {
         retiring.add(opened)
         if (answering === 0) opened.close()
       })
-      const end = () => {
+      const end = (why: string) => {
         if (ended) return
         ended = true
+        const held = holding && !retiring.has(opened)
         sockets.delete(opened)
         retiring.delete(opened)
         if (beat) clearInterval(beat)
         if (recycle) clearTimeout(recycle)
-        // a socket a newer one replaced ends with nothing more to do
-        if (socket !== opened) return
+        if (connecting) clearTimeout(connecting)
+        if (stopped) return
+        // a socket a newer one replaced ends with nothing more to do, but one that drops while the recycle's next socket still connects says so, and that socket's own open or end decides what comes next
+        if (socket !== opened) {
+          if (held) console.error(`[relay] ${why}; the next socket is still connecting`)
+          return
+        }
         // a replacement that never opened leaves the old socket holding the relay
         socket =
           previous?.readyState === WebSocket.OPEN && !retiring.has(previous) ? previous : null
+        console.error(`[relay] ${why}; opening again in ${backoff / 1000} s`)
         retry()
       }
+      connecting = setTimeout(() => {
+        end(`the hub did not answer within ${connectMs / 1000} s`)
+        opened.close()
+      }, connectMs)
+      connecting.unref?.()
       opened.addEventListener("open", () => {
+        if (connecting) clearTimeout(connecting)
+        holding = true
         backoff = RETRY_MS
         heard = Date.now()
+        // a recycle's next socket opens beside one that holds the relay already
+        if (previous?.readyState !== WebSocket.OPEN) console.log(`[relay] connected to ${url.host}`)
         if (previous) sockets.get(previous)?.()
         beat = setInterval(() => {
           // the hub answers each heartbeat, so its silence means a dead socket, whose close event may never come
           if (Date.now() - heard >= silentMs) {
-            end()
+            end(`the hub was silent for ${silentMs / 1000} s`)
             opened.close()
           } else if (opened.readyState === WebSocket.OPEN)
             opened.send(JSON.stringify({ type: "heartbeat" }))
@@ -220,7 +243,7 @@ export function startRelay(deps: RelayDeps): () => void {
           if (--answering === 0 && retiring.has(opened)) opened.close()
         })
       })
-      opened.addEventListener("close", end)
+      opened.addEventListener("close", () => end("the socket closed"))
     } catch (error) {
       console.error("[relay] could not open", error)
       if (socket === previous) retry()
