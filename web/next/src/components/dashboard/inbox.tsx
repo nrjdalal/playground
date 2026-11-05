@@ -909,15 +909,15 @@ export function InboxCard({
   ) : choices ? (
     <AskChoices busy={busy} choices={choices} paused={paused} pick={pick} setPick={setPick} />
   ) : secretAsk ? (
-    // masked, never saved by the browser, and a key here stays in the field; Enter submits
+    // masked, never saved by the browser, and a key here stays in the field; Enter submits; enabled while the card is paused, as the comment box is, so a paste in that second lands
     <Input
       aria-label={`Value for ${secretKey}`}
       autoComplete="new-password"
       className={BOX}
       data-1p-ignore
       data-lpignore="true"
-      disabled={busy}
       placeholder="Paste the value"
+      readOnly={pending}
       spellCheck={false}
       type="password"
       value={secret}
@@ -1383,8 +1383,9 @@ export function InboxCard({
           {!folded && (
             // the same gap-2 above it as between the choices
             <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
+              {/* a box turned disabled drops focus to the page, so words dictated or typed as a card above leaves land nowhere: it stays enabled while the card is paused and turns read-only while its answer is on its way */}
               <NoteBox
-                disabled={busy}
+                readOnly={pending}
                 id={commentId}
                 placeholder={noted ? "Add an optional comment" : "Add a comment"}
                 value={note}
@@ -1404,7 +1405,7 @@ export function InboxCard({
 function NoteBox(
   props: Pick<
     ComponentProps<typeof Textarea>,
-    "disabled" | "id" | "onChange" | "placeholder" | "value"
+    "id" | "onChange" | "placeholder" | "readOnly" | "value"
   >,
 ) {
   const box = useRef<HTMLTextAreaElement>(null)
