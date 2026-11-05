@@ -43,6 +43,8 @@ export type Setup = {
   load1?: number
   load5?: number
   mergeQueue?: unknown
+  // the epoch second every `date` that names no time of its own reads, so a log line written seconds back keeps its age through every look
+  now?: number
   off?: string[]
   peers?: string[]
   plan?: unknown
@@ -61,6 +63,7 @@ export const machine = ({
   load1 = 2,
   load5 = load1,
   mergeQueue,
+  now,
   off = [],
   peers = [],
   plan,
@@ -131,6 +134,13 @@ esac
     `#!/bin/bash\n[ "$2" = factory.repo ] && { echo '"acme/app"'; exit 0; }\n[ "$2" = --guarded-orgs ] && { echo '["acme-co"]'; exit 0; }\n[ "$2" = slots.peers ] && { echo '${JSON.stringify(peers)}'; exit 0; }\nexec ${process.execPath} "$@"\n`,
   )
   chmodSync(join(bin, "bun"), 0o755)
+  if (now !== undefined) {
+    writeFileSync(
+      join(bin, "date"),
+      `#!/bin/bash\nfor a in "$@"; do case "$a" in -r*|-d*) exec ${Bun.which("date")} "$@" ;; esac; done\nexec ${Bun.which("date")} ${process.platform === "darwin" ? `-r ${now}` : `-d @${now}`} "$@"\n`,
+    )
+    chmodSync(join(bin, "date"), 0o755)
+  }
   // SLOW_CHILD puts a slowed python3 in the fake bin folder, which PATH reads first
   slowChild("python3", bin)
   const env = (extra: Record<string, string> = {}) => ({
