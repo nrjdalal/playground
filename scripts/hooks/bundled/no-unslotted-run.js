@@ -1186,7 +1186,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   let verdict;
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name);
   if (followed && builtins && cmd.redirects.length > 0) {
-    const bare = { ...cmd, words: [] };
+    const bare = { ...cmd, bareOf: cmd, words: [] };
     verdict = await visit(bare, parse(bare), here);
     if (verdict)
       return verdict;
@@ -1690,6 +1690,8 @@ function runnerTarget(args) {
 }
 var isTurbo = (word) => program((word ?? "").replace(/(?<=.)@[^/]*$/, "")) === "turbo";
 var SED_VALUES = new Set(["--expression", "--file", "--line-length"]);
+var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
+var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 if (false) {}
 
 // scripts/hooks/no-unslotted-run.ts

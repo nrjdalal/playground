@@ -16,6 +16,8 @@ export type Text = {
 export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean; raw?: string }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
+  // Set on the bare copy run() hands a hook's visit for a followed command with a redirect: the command it stands for
+  bareOf?: Command
   // The token of the run of commands this one belongs to: it changes at each operator that runs a command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and carries into every group, body and pipeline the run reaches, so a cd is read as having moved the shell only for the commands whose token is its own
   chain?: number
   // Set when the command runs only if the one before it succeeded (it sits on the right of an `&&`), so a cd of its own has certainly run for every command the same chain joins after it
@@ -1254,7 +1256,7 @@ async function examineReading(
   let verdict: string | undefined
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name)
   if (followed && builtins && cmd.redirects.length > 0) {
-    const bare = { ...cmd, words: [] }
+    const bare = { ...cmd, bareOf: cmd, words: [] }
     verdict = await visit(bare, parse(bare), here)
     if (verdict) return verdict
   }

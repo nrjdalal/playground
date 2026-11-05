@@ -12,7 +12,7 @@ describe("auto-memory", () => {
     })
 })
 
-// read-screen drops a prompt suggestion's dimming, so deliver() reads it as a draft and refuses the message with INPUT_NOT_EMPTY; the factory's sessions start with suggestions off, and spawn.sh rebuilds the GLM settings file from this one on every launch
+// The screen read drops a prompt suggestion's dimming, so deliver() reads it as a draft and refuses the message with INPUT_NOT_EMPTY; the factory's sessions start with suggestions off, and spawn.sh rebuilds the GLM settings file from this one on every launch
 describe("prompt suggestions", () => {
   test("scripts/factory-settings.json turns them off", async () => {
     const settings = (await Bun.file(join(root, "scripts", "factory-settings.json")).json()) as {

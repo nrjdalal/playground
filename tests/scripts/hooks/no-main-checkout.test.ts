@@ -264,6 +264,16 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     expect(await bash("echo 'git status' | sh")).toBeUndefined()
   })
 
+  test("a root shell from the main checkout is judged by the script file it reads", async () => {
+    writeFileSync(join(MAIN, "commit.sh"), "git commit -m x\n")
+    writeFileSync(join(MAIN, "status.sh"), "git status\n")
+    for (const input of ["<", "0<"])
+      expect(await bash(`sudo -s ${input} ${MAIN}/commit.sh`)).toContain(
+        "git commit, which runs lefthook's pre-commit",
+      )
+    expect(await bash(`sudo -s < ${MAIN}/status.sh`)).toBeUndefined()
+  })
+
   test.each([
     ["xargs sh -c", "| xargs sh -c"],
     ["xargs with a placeholder script", "| xargs -I{} sh -c {}"],

@@ -213,6 +213,25 @@ describe("the composer's sources", () => {
     expect(composer).not.toContain("RiChatThread")
   })
 
+  // the arrow once sat at the badge's 12px and the close at Remix's own 24px in a bare button
+  test("the reply chip's arrow and close share the badge's size-3 icon, the close a ghost icon button that fits the badge", async () => {
+    const chip =
+      (await read("dashboard/composer.tsx")).match(
+        /<Badge variant="secondary"[\s\S]*?<\/Badge>/,
+      )?.[0] ?? ""
+    expect(chip).toContain("<RiReplyLine aria-hidden />")
+    expect(chip).toContain('<RiCloseLine className="size-3" aria-hidden />')
+    expect(chip).not.toContain("<button")
+    const close = chip.match(/<InputGroupButton[\s\S]*?<\/InputGroupButton>/)?.[0] ?? ""
+    expect(close).toContain('size="icon-xs"')
+    expect(close).toContain('variant="ghost"')
+    expect(close).toMatch(/className="[^"]*\bsize-4\b/)
+    expect(close).toContain("aria-label={`Stop replying to ${itemTag(reply)}`}")
+    expect(chip).toContain(
+      "<Hint content={`Stop replying to ${itemTag(reply)}`} description={null}>",
+    )
+  })
+
   test("its icons are Remix: no lucide icon", async () => {
     for (const path of ["dashboard/composer.tsx", "dashboard/mode-picker.tsx"]) {
       expect(await read(path)).not.toContain("lucide")
