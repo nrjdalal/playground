@@ -75,10 +75,6 @@ export const herdrSurface = (server: string, pane: string): string => `herdr:${s
 
 export const isHerdrSurface = (surface: string): boolean => SURFACE.test(surface)
 
-// A herdr workspace's ref on the board, `herdr:<server>:<workspace id>` (herdrWorkspaces()).
-export const isHerdrWorkspace = (ref: string): boolean =>
-  /^herdr:[a-z0-9][a-z0-9_-]*:w[0-9A-Za-z]+$/.test(ref)
-
 const paneAt = (surface: string): { pane: string; server: HerdrServer } => {
   const [, name, pane] = SURFACE.exec(surface) ?? []
   const server = herdrServers().find((s) => s.name === name)
