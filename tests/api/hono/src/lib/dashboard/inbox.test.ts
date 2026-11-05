@@ -737,6 +737,17 @@ describe("an answer", () => {
       ref: 45,
       title: "Port it?",
     })
+    const labelled = item({
+      id: "pqr",
+      kind: "decision",
+      preview: {
+        ...PREVIEWS.ask,
+        approve: "Port the fix to staging, then main",
+        deny: "Keep it on main",
+      } as never,
+      ref: 46,
+      title: "Port it?",
+    })
     const cases: [InboxItem, Parameters<typeof answerPayload>[1], Record<string, unknown>][] = [
       [
         decided,
@@ -755,6 +766,20 @@ describe("an answer", () => {
         asked,
         { at: AT, choice: "approve" },
         { close: ackOrWhy(45), next: "carry-out", type: "ask" },
+      ],
+      // a pick of an ask carrying its own labels names the label its card showed
+      [
+        labelled,
+        { at: AT, choice: "approve" },
+        {
+          option: { index: 0, label: "Port the fix to staging, then main", letter: "A" },
+          verb: "pick",
+        },
+      ],
+      [
+        labelled,
+        { at: AT, choice: "deny" },
+        { option: { index: 1, label: "Keep it on main", letter: "B" }, verb: "pick" },
       ],
       [
         decided,

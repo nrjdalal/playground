@@ -691,17 +691,24 @@ function answerOf(
   return { message: "A draft is sent, saved as a draft, discarded or cleared" }
 }
 
-// An old row's two options, as the card shows them: Approve is A, Deny is B.
+// A decision's two options with the card's default labels: Approve is A, Deny is B.
 const OLD_OPTIONS = {
   approve: { index: 0, label: "Approve", letter: "A" },
   deny: { index: 1, label: "Deny", letter: "B" },
+}
+
+// The option the owner picked, labelled as the card showed it: an ask carrying both its own labels shows them (labelsOf in the web Inbox), any other decision Approve or Deny.
+function optionOf(item: InboxItem, pick: "approve" | "deny") {
+  if (item.kind !== "decision" || item.preview.type !== "ask") return OLD_OPTIONS[pick]
+  const { approve, deny } = item.preview
+  if (!approve || !deny) return OLD_OPTIONS[pick]
+  return { ...OLD_OPTIONS[pick], label: pick === "approve" ? approve : deny }
 }
 
 // Pure: what an answer tells its poster, as data: the verb, whether to carry it out, the next step and the exact command that closes the item; the owner's comment in his words, a changed draft's text, a step's or a secret sink's results, never a secret's value; an update takes no answer.
 export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvided): AnswerPayload {
   if (item.kind === "update") throw new Error("An update takes no answer")
   const tag = itemTag(item.ref)
-  // a go closes with where it landed; one that may leave no page (a decision naming no link, a draft Slack refused) names --no-link too (asks.md)
   const ack = `bun run ask ack ${tag} --link <https url>`
   const ackOrWhy = `${ack}, or --no-link "<why>" when it leaves no page`
   const read = `bun run ask get ${tag} --ack`
@@ -743,7 +750,7 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
           close: `bun run ask ack ${tag} --no-link "<why>"`,
           go: true,
           next: answer.opened?.exitCode === 0 ? "carry-out" : "nothing",
-          option: OLD_OPTIONS.approve,
+          option: optionOf(item, "approve"),
           verb: "pick",
         }
       }
@@ -754,7 +761,7 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
         close: "link" in item.preview ? ack : ackOrWhy,
         go: true,
         next: "carry-out",
-        option: OLD_OPTIONS.approve,
+        option: optionOf(item, "approve"),
         verb: "pick",
       }
     case "deny":
@@ -764,7 +771,7 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
         close: read,
         go: false,
         next: "close",
-        option: OLD_OPTIONS.deny,
+        option: optionOf(item, "deny"),
         verb: "pick",
       }
     case "clear":
