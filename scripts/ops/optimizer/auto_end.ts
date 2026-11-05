@@ -302,7 +302,7 @@ export async function cleanWorktree(
 }
 
 // This machine's cleanup deps: git, the main checkout this one belongs to, bun run dev:stop in the worktree, playground rm --worktree from this checkout, docker ps -a and docker rm -fv, and the live dashboard's database name.
-async function cleanupDeps(): Promise<CleanupDeps | null> {
+export async function cleanupDeps(): Promise<CleanupDeps | null> {
   const common = await git(REPO, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
   if (!common) return null
   const { isLiveDatabase, livePair } = await import("../../../api/hono/src/lib/dev/live-dashboard")
