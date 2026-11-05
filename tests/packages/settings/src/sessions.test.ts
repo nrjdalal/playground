@@ -1,9 +1,13 @@
-import { afterAll, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { readSessionNames } from "../../../../packages/settings/src"
+import {
+  readSessionNames,
+  readSessionTemplates,
+  sessionTemplates,
+} from "../../../../packages/settings/src"
 
 const scratch = mkdtempSync(join(tmpdir(), "session-names-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -36,4 +40,34 @@ test("a policy.json's names are the machine's", () => {
     JSON.stringify({ values: { "sessions.names": names } }),
   )
   expect(readSessionNames(data)).toEqual({ aliases: {}, names })
+})
+
+describe("sessions.templates", () => {
+  const defaults = () => readSessionTemplates(mkdtempSync(join(scratch, "templates-")))
+
+  test("the defaults are Assistant, Orchestrator and a second dispatcher on Claude and on GLM, with no email in any", () => {
+    expect(defaults().map((t) => t.label)).toEqual([
+      "Assistant",
+      "Orchestrator",
+      "Second dispatcher on Claude",
+      "Second dispatcher on GLM",
+    ])
+    expect(defaults().some((t) => t.account)).toBe(false)
+  })
+
+  test.each(["../secrets.md", "briefs/builder.md", "/etc/passwd", "a..md"])(
+    "the schema refuses the brief %s, so no path leaves the brief folders",
+    (brief) => {
+      const orchestrator = defaults().find((t) => t.id === "orchestrator")!
+      expect(sessionTemplates.safeParse([{ ...orchestrator, brief }]).success).toBe(false)
+    },
+  )
+
+  test("the schema refuses an id listed twice, and a GLM template with an account", () => {
+    const [assistant, , , glm] = defaults()
+    expect(sessionTemplates.safeParse([assistant, assistant]).success).toBe(false)
+    expect(sessionTemplates.safeParse([{ ...glm!, account: "someone@example.com" }]).success).toBe(
+      false,
+    )
+  })
 })
