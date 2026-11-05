@@ -39,6 +39,14 @@ export function keyStore({
   let waiting: PairRequest | null = null
   const file = () => join(dir(), KEY_FILE)
 
+  // Approve and Revoke run one at a time, in the order the owner clicked them, so a Revoke never lands inside an Approve's write and is undone by its rename.
+  let queue: Promise<unknown> = Promise.resolve()
+  const inTurn = <T>(run: () => Promise<T>): Promise<T> => {
+    const turn = queue.then(run)
+    queue = turn.catch(() => undefined)
+    return turn
+  }
+
   const pending = (): PairRequest | null => {
     if (waiting && now().getTime() - Date.parse(waiting.at) >= PAIR_WAIT_MS) waiting = null
     return waiting
@@ -61,23 +69,24 @@ export function keyStore({
     pending,
 
     // The owner's Approve on this Mac: the waiting request named by id becomes the one paired key, which revokes the one before it.
-    async approve(id: string): Promise<PairedKey | null> {
-      const request = pending()
-      if (!request || request.id !== id) return null
-      const paired: PairedKey = {
-        fingerprint: request.fingerprint,
-        id: (await keyIdOf(request.key)).id,
-        key: request.key,
-        login: request.login,
-        pairedAt: now().toISOString(),
-      }
-      await mkdir(dir(), { mode: 0o700, recursive: true })
-      const next = `${file()}.${crypto.randomUUID()}`
-      await writeFile(next, JSON.stringify(paired), { flag: "wx", mode: 0o600 })
-      await rename(next, file())
-      waiting = null
-      return paired
-    },
+    approve: (id: string): Promise<PairedKey | null> =>
+      inTurn(async () => {
+        const request = pending()
+        if (!request || request.id !== id) return null
+        const paired: PairedKey = {
+          fingerprint: request.fingerprint,
+          id: (await keyIdOf(request.key)).id,
+          key: request.key,
+          login: request.login,
+          pairedAt: now().toISOString(),
+        }
+        await mkdir(dir(), { mode: 0o700, recursive: true })
+        const next = `${file()}.${crypto.randomUUID()}`
+        await writeFile(next, JSON.stringify(paired), { flag: "wx", mode: 0o600 })
+        await rename(next, file())
+        if (waiting === request) waiting = null
+        return paired
+      }),
 
     // The paired key, or null with none or a file that does not read as one.
     async paired(): Promise<PairedKey | null> {
@@ -91,10 +100,11 @@ export function keyStore({
     },
 
     // Revoke on this Mac: the paired key and any waiting request go, so the key's next write is refused.
-    async revoke(): Promise<void> {
-      waiting = null
-      await rm(file(), { force: true })
-    },
+    revoke: (): Promise<void> =>
+      inTurn(async () => {
+        waiting = null
+        await rm(file(), { force: true })
+      }),
   }
 }
 

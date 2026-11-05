@@ -184,7 +184,7 @@ socket.addEventListener("message", (event) => {
   .route("/v1/ext", extRouter)
   .route("/v1/extensions", extensionsRouter)
   .route("/v1/inbox", inboxRouter)
-  .route("/v1/remote", remoteRouter())
+  .route("/v1/remote", remoteRouter)
   .route("/v1/sessions/templates", templatesRouter)
   .route("/v1/sessions", sessionsRouter)
   .route("/v1/settings", settingsRouter)

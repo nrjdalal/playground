@@ -12,8 +12,7 @@ import {
   forbiddenErrorResponses,
   validationErrorResponses,
 } from "@/lib/error"
-import type { Forwarded } from "@/lib/relay/hub"
-import type { Hub } from "@/lib/relay/hub"
+import type { Forwarded, Hub } from "@/lib/relay/hub"
 import { RELAY_PREFIX, relayAllowed } from "@/lib/relay/protocol"
 import type { YardVariables } from "@/lib/yard/caller"
 

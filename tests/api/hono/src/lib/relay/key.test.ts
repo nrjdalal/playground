@@ -130,4 +130,14 @@ describe("the paired key, on this Mac", () => {
       keys.pending(),
     ]).toEqual([false, null, null])
   })
+
+  test("a Revoke pressed while an Approve is still writing the key wins, so no key is left paired", async () => {
+    const { keys } = store()
+    const browser = await browserKey()
+    await keys.offer(browser.frame)
+    const approving = keys.approve(browser.frame.id)
+    const revoking = keys.revoke()
+    await Promise.all([approving, revoking])
+    expect([await keys.paired(), keys.pending()]).toEqual([null, null])
+  })
 })
