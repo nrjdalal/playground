@@ -32,7 +32,6 @@
   typing `/` at the start or after a space or a new line opens it on the names that hold what follows, those starting with it first, about six rows tall and scrolling inside itself with the reached skill kept whole in view;
   on a wide screen it opens just above the `/` (`caretPoint` in `web/next/src/lib/caret.ts` finds where it sits), as wide as the longest name (10 to 20rem) and never past the composer's edges, and on a phone it spans the box above it; `bun run verify slash-menu` checks it;
   arrow keys and Enter pick, Escape or leaving the box closes it until the `/` or its letters change; and a pick puts `/<name> ` first in the message, replacing one of the session's skills already there (any other leading `/` word, a path or a built-in, stays as the owner's words), since Claude Code runs a skill only at the start and a message runs one.
-  A picked inbox reply's `re #iN` goes after such a skill (`withReply`), so the skill still leads.
   The box names the list and the skill the arrows reach for a screen reader (`aria-controls`, `aria-activedescendant`).
   A hosted session is offered none until a later change (`offersSkills`), since its sends refuse every `/`.
   Temporarily (open until then: removed once a reported miss is explained, or 7 days after its miss report reaches the live dashboard with none), the composer keeps a paste log (`watchPastes` in `web/next/src/lib/paste-log.ts`; dictation pastes arrive unreliably, so the log watches them):

@@ -175,7 +175,7 @@ describe("refusal", () => {
   })
 
   test("the paste rule keeps room for a reply's tag, with five files beside the words", () => {
-    // what deliver() would be asked to send: the words tagged with a picked reply, as withReply puts it, and five files, whose Attached lines no cap counts
+    // what deliver() would be asked to send: the words led by a reply's tag and five files, whose Attached lines no cap counts
     const fits = (pasted: string, before: string, after: string) =>
       !refusal(normalize(`re #i99999: ${before}${pasted}${after}`), MAX_ATTACHMENTS)
     const typed = "Made-up meeting notes. ".repeat(400).slice(0, 7000)

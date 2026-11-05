@@ -19,6 +19,7 @@ import {
   ACKS_STAMPED_FROM,
   canDraft,
   checkAnswerNote,
+  commentRefused,
   deliveryNote,
   cardKey,
   changedAt,
@@ -1886,5 +1887,18 @@ describe("an answer queued, delivered or lost", () => {
     expect(retryable(queued, at + STUCK_QUEUED_MS - 1)).toBe(false)
     expect(retryable(queued, at + STUCK_QUEUED_MS)).toBe(true)
     expect(API_retryable(queued, new Date(at + STUCK_QUEUED_MS))).toBe(true)
+  })
+})
+
+// ib-7: a secret ask's comment goes through Reply alone, so a value typed there would reach a transcript.
+describe("commentRefused", () => {
+  test("refuses a comment equal to the value field, its edges trimmed", () => {
+    expect(commentRefused(" sk-made-up-123 ", "sk-made-up-123\n")).toContain("That is the value")
+  })
+
+  test("passes any other comment, and any comment while the field is empty", () => {
+    expect(commentRefused("Which project is this for?", "sk-made-up-123")).toBeNull()
+    expect(commentRefused("sk-made-up-123", "")).toBeNull()
+    expect(commentRefused("", "  ")).toBeNull()
   })
 })

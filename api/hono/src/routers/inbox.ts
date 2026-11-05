@@ -16,6 +16,8 @@ import {
   listItems,
   markRead,
   provideSecret,
+  replyInputSchema,
+  replyItem,
   retryDelivery,
   scheduleItem,
   secretInputSchema,
@@ -171,6 +173,35 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         upload: slackUpload(),
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
+      return c.json({ data: result.item })
+    },
+  )
+  .post(
+    "/:id/reply",
+    describeRoute({
+      tags: ["Inbox"],
+      description:
+        "Reply on a card: his comment alone, typed into the posting session as re #iN: <words> through the delivery adapter, or into the dispatcher once the poster has ended; an open decision or draft with no answer yet records it as his reply and waits on its poster's edit, which returns it to him, or its close, while any other card keeps its answer as it was. A comment that reached no session is refused with why, recording nothing",
+      responses: {
+        200: { description: "OK" },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+      },
+    }),
+    sValidator("json", replyInputSchema, invalid),
+    async (c) => {
+      const user = c.get("user")
+      const result = await replyItem(db, c.req.param("id"), c.req.valid("json"), {
+        actor: { email: user.email, id: user.id },
+        deliver,
+        dispatcher: DISPATCHER,
+      })
+      if (!result.ok) {
+        if (result.code === "UNDELIVERED") throw new ApiError(502, "CMUX_FAILED", result.message)
+        throw new ApiError(STATUS[result.code], result.code, result.message)
+      }
       return c.json({ data: result.item })
     },
   )

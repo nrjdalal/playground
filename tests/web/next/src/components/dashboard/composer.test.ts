@@ -179,7 +179,7 @@ describe("the composer's sources", () => {
     const composer = await read("dashboard/composer.tsx")
     expect(composer).toContain("const words = submittable(value.text)")
     // judged on what the send would carry, so a lone backslash sends nothing
-    expect(composer).toContain("text: withReply(words, picked, skills)")
+    expect(composer).toContain("text: words,")
     // the refusal judges the words as the typing will hold them, trimmed, so x\ \ is refused, not typed as x\
     expect(composer).toContain("comparable(words).endsWith")
   })

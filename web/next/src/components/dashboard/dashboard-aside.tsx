@@ -52,7 +52,6 @@ import { feedNeeds, useNeedsYouTarget } from "@/lib/needs-you"
 import { moveOldKeys } from "@/lib/old-keys"
 import { sentSince } from "@/lib/outbox"
 import { OPEN_PREVIEW, takeMove } from "@/lib/previews"
-import { useReply } from "@/lib/reply"
 import { inboxMark, newInInboxCount, useMark, useTabVisible, writeMark } from "@/lib/tab-dot"
 import { useAppUnread } from "@/plugins/registry"
 
@@ -239,20 +238,9 @@ export function DashboardAside({ children }: { children: ReactNode }) {
     setTab(home ? "page" : "chat")
     if (!home) setSide("chat")
   }
-  // Chat about it in the Inbox brings Playground's chat forward as it renders, so the click's own focus finds his box shown (its flushSync); words handed to the composer (Edit) do so after, and either focuses his box once it shows
-  const reply = useReply()
-  const [replied, setReplied] = useState(reply)
-  if (replied !== reply) {
-    setReplied(reply)
-    if (reply) showChat()
-  }
   const primary = home ? selected : asideChat
   const handed = outbox.draft
-  // each on its own pick or hand alone, so a later render never takes the tab or the focus back: a hand cleared by its box never runs the reply's focus again
-  useEffect(() => {
-    if (!reply) return
-    requestAnimationFrame(() => document.getElementById(COMPOSER_ID)?.focus())
-  }, [reply])
+  // words handed to the composer (Edit) bring Playground's chat forward and focus his box once it shows, on each hand alone, so a later render never takes the tab or the focus back
   useEffect(() => {
     if (!handed) return
     // words handed to the page's own session (Edit on its view) bring the page forward instead

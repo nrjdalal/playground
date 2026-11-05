@@ -2831,6 +2831,114 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(store.deliveryFailed(answered.item)).toBe(false)
   })
 
+  describe("a card's Reply, his comment alone (ib-7)", () => {
+    const capture = () => {
+      const sent: Delivery[] = []
+      const deliver = async (delivery: Delivery) => {
+        sent.push(delivery)
+        return afterPoster(delivery)
+      }
+      return { deliver, sent }
+    }
+    const reached = async () =>
+      ({ at: "2026-10-26T06:00:00.000Z", ok: true, sessionId: "s1" }) as const
+
+    test("types re #iN: <words> into its poster and keeps an open card waiting on the poster, as a chat reply does", async () => {
+      const posted = await post({ ...decision(PREVIEWS.delete), from: "ops" })
+      const { deliver, sent } = capture()
+      const replied = await store.replyItem(
+        db,
+        posted.id,
+        { text: " Split it in two " },
+        { actor, deliver, dispatcher: "dispatcher" },
+      )
+      if (!replied.ok) throw new Error(replied.message)
+      expect(sent.map((d) => [d.to, d.text])).toEqual([
+        ["ops", `re #i${posted.ref}: Split it in two`],
+      ])
+      expect(replied.item).toMatchObject({
+        answer: { choice: "replied", said: "Split it in two" },
+        delivery: null,
+        status: "open",
+      })
+      await store.settleItem(db, posted.id)
+    })
+
+    test("on an answered card or an update, types the comment and keeps the card's answer and delivery", async () => {
+      const answered = await post({ ...decision(PREVIEWS.delete), from: "ops" })
+      await store.answerItem(db, answered.id, { action: "approve" }, { actor, deliver: reached })
+      const before = await store.getItem(db, answered.id)
+      const update = await post({
+        from: "builder",
+        kind: "update",
+        preview: { outcome: "merged" },
+        title: "Merged",
+      })
+      for (const item of [answered, update]) {
+        const { deliver, sent } = capture()
+        const replied = await store.replyItem(
+          db,
+          item.id,
+          { text: "Thanks" },
+          { actor, deliver, dispatcher: "dispatcher" },
+        )
+        if (!replied.ok) throw new Error(replied.message)
+        expect(sent.map((d) => d.text)).toEqual([`re #i${item.ref}: Thanks`])
+      }
+      expect(await store.getItem(db, answered.id)).toEqual(before)
+      expect((await store.getItem(db, update.id))?.answer).toBeNull()
+      await store.dismissItems(db, [answered.id, update.id])
+    })
+
+    test("goes to the dispatcher once its poster has ended, and one that reaches no session is refused, recording nothing", async () => {
+      const posted = await post({ ...decision(PREVIEWS.delete), from: "worker-eod" })
+      const { deliver, sent } = capture()
+      const relayed = await store.replyItem(
+        db,
+        posted.id,
+        { text: "Hold it" },
+        { actor, deliver, dispatcher: "dispatcher" },
+      )
+      expect(relayed.ok).toBe(true)
+      expect(sent.map((d) => [d.to, d.text])).toEqual([
+        ["worker-eod", `re #i${posted.ref}: Hold it`],
+        ["dispatcher", `re #i${posted.ref}: Hold it`],
+      ])
+      const lone = await post({ ...decision(PREVIEWS.delete), from: "worker-eod" })
+      expect(
+        await store.replyItem(db, lone.id, { text: "Hold it" }, { actor, deliver: gone }),
+      ).toMatchObject({ code: "UNDELIVERED", ok: false })
+      expect((await store.getItem(db, lone.id))?.answer).toBeNull()
+      expect(
+        await store.replyItem(db, lone.id, { text: "  " }, { actor, deliver: reached }),
+      ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      expect(
+        await store.replyItem(db, "#i999999", { text: "Hi" }, { actor, deliver: reached }),
+      ).toMatchObject({ code: "NOT_FOUND", ok: false })
+      await store.settleItem(db, posted.id)
+      await store.settleItem(db, lone.id)
+    })
+
+    test("its poster's edit after the comment returns the card to waiting on him", async () => {
+      const posted = await post({ ...decision(PREVIEWS.delete), from: "ops" })
+      await store.replyItem(
+        db,
+        posted.id,
+        { text: "Name the folders" },
+        { actor, deliver: reached },
+      )
+      const edited = await store.editItem(db, posted.id, {
+        ...decision(PREVIEWS.delete),
+        from: "ops",
+        title: "Delete these 47 worktrees?",
+      })
+      if (!edited.ok) throw new Error(edited.message)
+      expect(edited.item).toMatchObject({ answer: null, status: "open" })
+      expect(Date.parse(edited.item.updatedAt)).toBeGreaterThan(Date.parse(posted.updatedAt))
+      await store.settleItem(db, posted.id)
+    })
+  })
+
   test("an answer to a poster that is live goes to the poster alone", async () => {
     const posted = await post({
       from: "worker-eod",

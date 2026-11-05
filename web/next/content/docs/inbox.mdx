@@ -77,8 +77,8 @@ A Slack message shows exactly as it will be sent.
 Some decisions name what Approve does and what Deny does, one line each.
 That card shows the two as choices: press 1 or 2, or click one, then **Send**.
 
-Every open decision and draft ends in an **Add an optional comment** box above its buttons.
-Anything you would change goes there: what you type goes to the session with whatever you answer, and the answered card shows it as Your note.
+Every open card ends in a comment box above its buttons.
+On a decision or draft waiting for you it reads **Add an optional comment**: what you type goes to the session with whatever you answer, and the answered card shows it as Your note.
 
 A decision can carry pictures, shown as square previews in a grid of four by four under its words: up to sixteen, or fifteen and a tile saying how many more.
 Click one to see it full screen over the page, blurred and dimmed behind it, one at a time, with nothing else on screen.
@@ -109,7 +109,7 @@ Paste the value into the masked box, then press **Submit** or Enter.
 The value goes straight to that project, once for each environment, or into the Keychain, and is kept nowhere else: not in the Inbox, the chat, a log or the session.
 The card then shows only when you gave it and how each environment went, or that the Keychain saved it, green when every one took it and red when one did not.
 When the value was saved but the session that asked was not told yet, the card stays green and says so in a gray line underneath, with **Retry**, which tells the session again and never saves the value a second time.
-A secret card has no comment box and no Reply, so the value never lands in a chat.
+A secret card's comment box goes through **Reply** alone, never with Submit, and Reply refuses a comment that is the value itself, so the value never lands in a chat.
 
 ## Send a draft
 
@@ -190,11 +190,14 @@ Under the bar, an open Vibeground wears a **Vibeground** badge with its branch, 
 **Done** there asks Alpha, your chat, to have the session working in that worktree push the work to its branch's open PR, or open one into the branch it came from when none is open; it never merges.
 While your Mac is busy only one Vibeground runs at a time, and none when it is very busy.
 
-## Chat about it
+## Reply
 
-Click **Chat about it**, the button at the right end of a card, to talk about it.
-Your chat opens with Replying to #i41 above the box, and the message you send carries the id.
-Typing `re #i41` anywhere in a message does the same.
+Every card has **Reply**, the arrow at the right end of its buttons, folded cards too.
+On a folded card, or with the box empty, it opens the card and puts the cursor in its comment box.
+With words in the box, it sends them alone to the session that posted the card, as `re #i41: <your words>`.
+On a decision or draft, a comment with no answer asks for changes: the session changes the card in place, and it comes back to you marked Updated.
+
+Typing `re #i41` anywhere in a message to Alpha does the same: your chat shows Replying to #i41 above the box.
 
 A reply counts as acting on the item.
 It leaves the Inbox square's count at once and stays in the list, its card reading You replied, with your words, and that the session is on it, until the session closes it.

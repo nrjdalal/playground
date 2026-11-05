@@ -660,7 +660,7 @@ export const itemTag = (ref: number): string => `#i${ref}`
 
 const REF_RE = /^#?i(\d{1,9})$/
 
-// A chat reply names the item it is about (`re #iN`), typed by a picked Chat about it or his own words; the web's TYPED holds the same pattern, and a test holds the two equal.
+// A reply names the item it is about (`re #iN`), typed by the card's Reply or in his chat; the web's TYPED holds the same pattern, and a test holds the two equal.
 export const REPLY_RE = /\bre #i(\d{1,9})\b/i
 
 // An item's fields, kept apart by kind, so a preview reads as its own kind's.
@@ -1093,7 +1093,7 @@ const closed = (item: InboxItem): boolean => {
   return "choice" in answer && (answer.choice === "resolved" || answer.choice === "settled")
 }
 
-// The poster replaces its own item's title and preview in place (`bun run ask edit`), checked as postItem checks a new one, so one card carries a progress to its end: an update until the owner presses Done or Dismiss or its poster resolves it, and an ask until it closes, answered, archived, put away with Later or replied to in chat alike. Another session's item, a change of kind and a closed item are refused.
+// The poster replaces its own item's title and preview in place (`bun run ask edit`), checked as postItem checks a new one, so one card carries a progress to its end: an update until the owner presses Done or Dismiss or its poster resolves it, and an ask until it closes, answered, archived, put away with Later or replied to alike, an edit to one he replied to taking the reply off so it waits on him again. Another session's item, a change of kind and a closed item are refused.
 export async function editItem(
   db: Database,
   key: string,
@@ -1122,6 +1122,8 @@ export async function editItem(
   const [row] = await db
     .update(inboxItem)
     .set({
+      // an edit answers his reply, so the card waits on him again
+      ...(choiceOf(item) === "replied" && { answer: null }),
       preview: parsed.data.preview,
       title: parsed.data.title,
       updatedAt: now,
@@ -1168,7 +1170,7 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
     and(
       eq(inboxItem.status, "open"),
       sql`${inboxItem.kind} <> 'update'`,
-      // a chat reply took it off his hands: it waits on its poster closing it
+      // a reply took it off his hands: it waits on its poster closing it
       sql`coalesce(${inboxItem.answer} ->> 'choice', '') <> 'replied'`,
       awakeSql,
     ),
@@ -1354,7 +1356,7 @@ export async function answerItem(
   }
 }
 
-// Pure: whether an item still waits on his answer: an open decision or draft he has not replied to in chat, archived or put off included.
+// Pure: whether an item still waits on his answer: an open decision or draft he has not replied to, archived or put off included.
 const waits = (item: InboxItem): boolean =>
   item.kind !== "update" && item.status === "open" && choiceOf(item) !== "replied"
 
@@ -1493,7 +1495,7 @@ async function unarchive(
   return row ? { item: toItem(row), ok: true } : CHANGED
 }
 
-// Dismiss on what no longer waits on him (an answered item, a chat reply, an update, or one on Done he has not dismissed): it goes to Done marked dismissed, keeping when it first went there, and an update is read.
+// Dismiss on what no longer waits on him (an answered item, a reply, an update, or one on Done he has not dismissed): it goes to Done marked dismissed, keeping when it first went there, and an update is read.
 async function dismissAnswered(
   db: Database,
   current: InboxItem,
@@ -1832,7 +1834,7 @@ async function recordDelivery(
   return row ? toItem(row) : getItem(db, id)
 }
 
-// Later: pushes an open decision or draft, or an update in his list, out of it until a time, recorded in its answer's snoozedUntil, which answering or a chat reply replaces at once; the poster waits as before, and an archived one leaves the Archived shelf for it. A chat reply its poster has not closed is replaced in turn, since he puts away an item he opened again from its card.
+// Later: pushes an open decision or draft, or an update in his list, out of it until a time, recorded in its answer's snoozedUntil, which answering or a reply replaces at once; the poster waits as before, and an archived one leaves the Archived shelf for it. A chat reply its poster has not closed is replaced in turn, since he puts away an item he opened again from its card.
 export async function scheduleItem(
   db: Database,
   id: string,
@@ -1900,6 +1902,43 @@ export async function recordReply(
     )
     .returning()
   return row ? toItem(row) : null
+}
+
+// What a card's Reply posts: his comment alone.
+export const replyInputSchema = z.strictObject({ text: words })
+
+export type ReplyInput = z.input<typeof replyInputSchema>
+
+// Reply on a card: his comment alone, typed as `re #iN: <words>` into its poster, or into the dispatcher once the poster has ended, and kept as a reply is (recordReply) on an open decision or draft with no answer yet, so it waits on its poster's edit or close; any other card keeps its answer and delivery as they were. One that reached no session is refused with why, recording nothing.
+export async function replyItem(
+  db: Database,
+  id: string,
+  input: ReplyInput,
+  { actor, deliver, dispatcher, now = new Date() }: Omit<Telling, "now" | "wait"> & { now?: Date },
+): Promise<
+  { item: InboxItem; ok: true } | Refused | { code: "UNDELIVERED"; message: string; ok: false }
+> {
+  const parsed = replyInputSchema.safeParse(input)
+  if (!parsed.success) {
+    return { code: "VALIDATION_ERROR", message: zodMessage(parsed.error), ok: false }
+  }
+  const current = await getItem(db, id)
+  if (!current || current.id !== id) return NOT_FOUND
+  const text = `re ${itemTag(current.ref)}: ${parsed.data.text}`
+  const one = (to: string) => ({ actor, id: crypto.randomUUID(), text, to })
+  let delivery = await attempt(deliver, one(current.from), now)
+  if (dispatcher && current.from !== dispatcher && posterGone(delivery)) {
+    delivery = await attempt(deliver, one(dispatcher), now)
+  }
+  if (delivery.status === "failed") {
+    return {
+      code: "UNDELIVERED",
+      message: `Your comment did not send: ${delivery.reason}`,
+      ok: false,
+    }
+  }
+  const recorded = await recordReply(db, current.ref, now, text)
+  return { item: recorded ?? current, ok: true }
 }
 
 // The poster closes its answer (`bun run ask ack`): a go with where it landed (`link`) or why there is none (`noLink`), anything else as it is; its delivery is done by the CLI.
@@ -2044,7 +2083,7 @@ export async function openItems(db: Database, from?: string): Promise<InboxItem[
   return rows.map(toItem)
 }
 
-// Done: moves the answered decisions and drafts, those he replied to in chat included, and the updates named to Done at once, recording when inside their answer, so no column is added, waking any he put off or archived, and marks an update read, keeping when it was read; an open decision or draft asks something of him and is left.
+// Done: moves the answered decisions and drafts, those he replied to included, and the updates named to Done at once, recording when inside their answer, so no column is added, waking any he put off or archived, and marks an update read, keeping when it was read; an open decision or draft asks something of him and is left.
 export async function dismissItems(
   db: Database,
   ids: string[],
@@ -2147,7 +2186,7 @@ async function recordLink(
   return row ? toItem(row) : null
 }
 
-// The poster closes its own open decision or draft (`bun run ask settle`), when it was decided another way: it reads Answered by the poster, with the note, and goes to Done at once, as a closed answer does. One the owner has answered is refused, as is a chat reply its poster has acked (a settle would replace its answer) and an update, which asks nothing.
+// The poster closes its own open decision or draft (`bun run ask settle`), when it was decided another way: it reads Answered by the poster, with the note, and goes to Done at once, as a closed answer does. One the owner has answered is refused, as is a reply its poster has acked (a settle would replace its answer) and an update, which asks nothing.
 export async function settleItem(
   db: Database,
   key: string,
