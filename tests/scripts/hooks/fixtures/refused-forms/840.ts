@@ -20,8 +20,8 @@ export const groups: Group[] = [
         `node -e 'require("child_process").exec("rmdir ~/.play*")'`,
       ],
       [
-        "an inline bun program removing a data-folder glob through spawnSync with shell true",
-        `bun -e 'Bun.spawnSync("rmdir ~/.play*", { shell: true })'`,
+        "an inline node program removing a data-folder glob through spawnSync with a shell path",
+        `node -e 'require("child_process").spawnSync("rmdir ~/.play*", { shell: "/bin/sh" })'`,
       ],
       [
         "an inline node program removing a data-folder glob through spawn with shell true",

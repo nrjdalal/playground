@@ -2037,9 +2037,9 @@ function wholeLine(commands, env) {
     return writes || !(narrow(cmd, env) || quietCommit(cmd, parse(cmd), env));
   });
 }
-var ALWAYS_SHELL = new Set(["exec", "execSync"]);
+var IMPLICIT_SHELL = new Set(["exec", "execSync"]);
 var SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g;
-var SHELL_TRUE = /\bshell\s*:\s*true\b/;
+var SHELL_ENABLED = /\bshell\s*:\s*(?!false\b)\S/;
 function skipSpace(src, k) {
   while (k < src.length && /\s/.test(src[k]))
     k++;
@@ -2104,7 +2104,7 @@ function shellRunnerArgs(text) {
     const command = commandString(text, open);
     if (command === undefined)
       continue;
-    if (ALWAYS_SHELL.has(m[1]) && childProcess || SHELL_TRUE.test(text.slice(open, callEnd(text, open))))
+    if (IMPLICIT_SHELL.has(m[1]) && childProcess || SHELL_ENABLED.test(text.slice(open, callEnd(text, open))))
       out.push(command);
   }
   return out;

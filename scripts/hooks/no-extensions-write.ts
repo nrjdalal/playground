@@ -618,10 +618,10 @@ function wholeLine(commands: Command[], env: Env): boolean {
   })
 }
 
-// Calls whose string argument a shell runs: exec and execSync in a program that names child_process, and execFile, execFileSync, spawn and spawnSync beside a literal `shell: true`. A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
-const ALWAYS_SHELL = new Set(["exec", "execSync"])
+// Calls whose string argument a shell runs: exec and execSync in a program that names child_process, and execFile, execFileSync, spawn and spawnSync beside a `shell` option that is not a literal `false` (true, a shell's path, or a value read at run time all run one). A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
+const IMPLICIT_SHELL = new Set(["exec", "execSync"])
 const SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g
-const SHELL_TRUE = /\bshell\s*:\s*true\b/
+const SHELL_ENABLED = /\bshell\s*:\s*(?!false\b)\S/
 
 // The index of the first non-whitespace character at or after `k`.
 function skipSpace(src: string, k: number): number {
@@ -679,7 +679,7 @@ function callEnd(src: string, open: number): number {
   return k
 }
 
-// Each command string a shell-running call in a program's text is given, so a ~ in one is judged as the shell expands it; exec and execSync count only in a program that names child_process, so a regex's or a query's `.exec` is left alone, and a spawn, spawnSync, execFile or execFileSync counts only beside a literal `shell: true`.
+// Each command string a shell-running call in a program's text is given, so a ~ in one is judged as the shell expands it; exec and execSync count only in a program that names child_process, so a regex's or a query's `.exec` is left alone, and a spawn, spawnSync, execFile or execFileSync counts only beside a `shell` option that is not a literal `false`.
 function shellRunnerArgs(text: string): string[] {
   const out: string[] = []
   const childProcess = text.includes("child_process")
@@ -688,8 +688,8 @@ function shellRunnerArgs(text: string): string[] {
     const command = commandString(text, open)
     if (command === undefined) continue
     if (
-      (ALWAYS_SHELL.has(m[1]) && childProcess) ||
-      SHELL_TRUE.test(text.slice(open, callEnd(text, open)))
+      (IMPLICIT_SHELL.has(m[1]) && childProcess) ||
+      SHELL_ENABLED.test(text.slice(open, callEnd(text, open)))
     )
       out.push(command)
   }
