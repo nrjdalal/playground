@@ -62,9 +62,12 @@ export const useThreads = (enabled: boolean, page: number) =>
     refetchInterval: THREADS_REFRESH_MS,
   })
 
-// Pure: whether the sidebar waits on the threads' read before it draws, so the group arriving never pushes the rows below it: the first try alone, so a read that fails and retries never keeps the sessions off the page.
-export const holdsForThreads = (read: { failureCount: number; isPending: boolean }): boolean =>
-  read.isPending && read.failureCount === 0
+// Pure: whether the sidebar waits on a read (the threads', Yard's channels) before it draws, so a group arriving never pushes the rows below it: the first try alone, so a read that fails and retries, or reads again after a failure with no data, never keeps the sessions off the page.
+export const holdsForThreads = (read: {
+  errorUpdateCount: number
+  failureCount: number
+  isPending: boolean
+}): boolean => read.isPending && read.failureCount === 0 && read.errorUpdateCount === 0
 
 // Pure: the group label's pager, or null at five threads or fewer.
 export const threadPager = (data: ThreadsPage) =>

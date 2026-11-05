@@ -139,6 +139,7 @@
 - The Threads group (`ThreadsGroup` in `web/next/src/components/dashboard/app-sidebar.tsx`) is the nav's first group, right under the header's dispatcher rows, and lists your threads from `GET /api/v1/threads`, five to a page, pinned first, then the newest update,
   read again every 5 seconds (`THREADS_REFRESH_MS`) so a routed message moves its thread and count without a reload.
   The group is absent with no threads; `DashboardNav` (its groups in order from `navGroups`) draws nothing while the threads' first try is out, so the group never pushes the rows below it down (`bun run verify cls`), and draws the session groups without it once a try fails, while the read retries (`holdsForThreads`).
+  It holds for the first try alone: a read again after a failure, which React Query turns pending with no data, holds nothing (`errorUpdateCount`), so a group that reads the same query never holds the nav in a loop as it mounts.
   On the collapsed rail each row shows a thread's icon alone, its title on hover, and the pager and filler rows hide.
   Past five threads, the label holds an arrow each side of the page number (`threadPager` in `web/next/src/lib/threads.ts`, its span `data-slot="group-pager"`, which `bun run verify map` strips from the label's name), and a short page past the first keeps five rows' height with empty `data-filler` rows.
   A page emptied past the first, its last thread archived, steps back to the last page (`pageAfterEmpty`).
