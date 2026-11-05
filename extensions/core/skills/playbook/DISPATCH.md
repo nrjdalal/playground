@@ -114,4 +114,4 @@ Dispatch is done when the session holds its brief, the roster shows its task (an
 
 Slack mode lives in the bundled `slack` extension's `slack` skill, which a session loads once the owner turns Slack on in Settings (`ext.bundled`).
 When the DM watch hands you an owner message, follow that skill.
-Done when its steps are done.
+Done when the owner's message has its reply posted.

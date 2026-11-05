@@ -67,6 +67,18 @@ describe("playground dm and the bundled slack extension", () => {
     })
   })
 
+  test("with a scope's own slack skill in the bundled one's place, a send names that scope and runs nothing", async () => {
+    const { body, data } = machine({ ...ON, ...SLACK })
+    const skill = join(data, "extensions", "someone", "skills", "slack")
+    mkdirSync(skill, { recursive: true })
+    writeFileSync(join(skill, "SKILL.md"), "---\nname: slack\n---\n")
+    expect(await dm(data, ["send", body])).toEqual({
+      code: 2,
+      stderr:
+        "dm send: the slack skill in the scope someone holds no scripts/send.ts, and it takes the bundled slack extension's place",
+    })
+  })
+
   test("a wrong verb or file prints the usage, before any check of what is set up", async () => {
     const { data } = machine({})
     const { code, stderr } = await dm(data, ["send", "relative.md"])
