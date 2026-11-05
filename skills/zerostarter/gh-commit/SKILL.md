@@ -58,7 +58,7 @@ Leave out a `Co-authored-by` trailer (repo rule): the commit-msg hook refuses on
 
 `dev-stack`, `env-keys` and `build` skip a commit whose every staged file is Markdown (`*.md`) or a Python file anywhere under `tests/`; the two type checks run only when their tree is staged.
 
-`lint-staged` writes its fixes into your files, so read a file again after each commit before you edit it: an edit made from the copy you held before the commit lands on stale text (a test was once duplicated this way). While a commit's hook runs, edit no file that commit stages, or put those edits in a `wip` commit first: lefthook's `stage_fixed: true` (`lefthook.yml`) re-adds each staged file whole, unstaged edits included, and a merge stages every file the other side changed, so an edit made during a slot wait once landed inside a merge commit.
+`lint-staged` writes its fixes into your files, so read a file again after each commit before you edit it: an edit made from the copy you held before the commit lands on stale text (a test was once duplicated this way). While a commit's hook runs, edit no file that commit stages, or commit those edits before it starts, as `chore(<scope>): wip <what>` (below): lefthook's `stage_fixed: true` (`lefthook.yml`) re-adds each staged file whole, unstaged edits included, and a merge stages every file the other side changed, so an edit made during a slot wait once landed inside a merge commit.
 
 **Examples**:
 
