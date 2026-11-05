@@ -122,7 +122,8 @@
   and ranks with the sessions at a prompt;
   with nothing open or running it reads Idle (playbook's **ask** rule).
   The answer is recorded in one write that holds only while the item is open at the version read, then typed into the posting session through `deliver()` as one line, `[inbox-answer] {json}` (`answerPayload` and `answerLine` in `inbox.ts`), and the item records how that delivery went.
-  The JSON is `answerPayloadSchema` in `@packages/config/inbox` (`payloadOf` parses a line): the item's `ref`, `id`, `title`, `kind` and a decision's preview `type`; the `verb` (`ANSWER_VERBS`: `pick` an option, `send`, `draft`, `discard`, `set-aside`, `submit`); `go`, whether to carry it out; `next`, `carry-out`, `close` or `nothing`; and `close`, the exact command that closes the item.
+  The JSON is `answerPayloadSchema` in `@packages/config/inbox` (`payloadOf` parses a line): the item's `ref`, `id`, `title`, `kind` and a decision's preview `type`; the `verb` (`ANSWER_VERBS`: `pick` an option, `send`, `draft`, `discard`, `set-aside`, `submit`); `go`, whether to carry it out; `next`, `carry-out`, `close` or `nothing`;
+  and `close`, the exact command that closes the item, naming `--no-link "<why>"` beside `--link` for a go that may leave no page (a decision whose preview names no `link`, a Save as draft).
   A pick names its `option` (an old row's Approve is A and Deny is B), his comment rides as `comment`, a changed draft's words as `text`, a Slack draft's link command as `linkConverter`, what the dashboard ran on Approve as `accepted` (an accept), `listed` (an apps change) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
   A comment alone (a chat reply, `re #iN`) stays his own words, typed as he wrote them.
   A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `textsOf`).
@@ -314,7 +315,7 @@
   It reads the login scope's own list as accepted, adds or removes the app matched as the hook matches it (`appsChange`),
   and runs `ext put <login> list desktop-owner-apps - --reason "the owner approved it in the Inbox (#iN)"` with the new list on its stdin (`appsArgs`, `ownerApps` in `api/hono/src/lib/store/extensions.ts`), no shell, no `PLAYGROUND_ROLE`.
   An app already on the list, one to remove that the login's list lacks, or a list that is not names writes nothing.
-  The answer keeps `listed: {exitCode, line}`, and the card reads `Your apps: <line>` green or `Apps change failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`.
+  The answer keeps `listed: {exitCode, line}`, and the card reads `Your apps: <line>` green or `Apps change failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`, and after a failed one, whose list stays as it was, tells its lead.
 
   ```bash
   bun run ask new <<'EOF'
@@ -325,7 +326,8 @@
 
 - A `grant` decision asks the owner to grant agent-desktop a macOS permission, `permission` `accessibility` or `screen-recording`, and `why` (`grantSchema`); Edit is refused.
   Its Approve runs `/usr/bin/open x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility` (or `?Privacy_ScreenCapture`), one fixed argv (`grantArgv`, run by `api/hono/src/lib/dashboard/run-argv.ts`), which opens System Settings at that pane on this Mac for the owner to turn it on; a stack showing test data refuses it, opening nothing.
-  The answer keeps `opened: {exitCode, line}`, and the poster rechecks the grant with `agent-desktop permissions`, closes the item with what it reads and tells the session that stopped for it, since macOS grants the app that launches agent-desktop, which only the poster's own run reads; until then the card reads that it is being carried out.
+  The answer keeps `opened: {exitCode, line}`, and the poster rechecks the grant with `agent-desktop permissions` every 30 seconds for up to 5 minutes (after a pane that failed to open, it tells its lead instead), closes the item with what it reads and tells the session that stopped for it, since macOS grants the app that launches agent-desktop, which only the poster's own run reads;
+  until then the card reads that it is being carried out.
 
   ```bash
   bun run ask new <<'EOF'

@@ -9,9 +9,12 @@ export const ANSWER_LEAD = "[inbox-answer]"
 // The verbs that reach a poster: a pick of an option, a draft sent, saved as a draft or discarded, an item set aside, a secret submitted; a verb that changes only the owner's view (read, Snooze) sends nothing.
 export const ANSWER_VERBS = ["discard", "draft", "pick", "send", "set-aside", "submit"] as const
 
+// What a step the dashboard ran on Approve gave: its exit code and its first line.
+const ranSchema = z.strictObject({ exitCode: z.number().int(), line: z.string() })
+
 // The line's JSON: what the owner chose, what to do next and the exact command that closes the item; a relay to the dispatcher sets relay, and a step the dashboard ran on Approve (an accept, an apps change, a grant's pane) rides as accepted, listed or opened, and a secret's results carry each sink's status, never its value.
 export const answerPayloadSchema = z.strictObject({
-  accepted: z.strictObject({ exitCode: z.number().int(), line: z.string() }).optional(),
+  accepted: ranSchema.optional(),
   at: z.iso.datetime(),
   close: z.string().min(1),
   comment: z.string().optional(),
@@ -19,9 +22,9 @@ export const answerPayloadSchema = z.strictObject({
   id: z.string().min(1),
   kind: z.enum(["decision", "draft"]),
   linkConverter: z.string().optional(),
-  listed: z.strictObject({ exitCode: z.number().int(), line: z.string() }).optional(),
+  listed: ranSchema.optional(),
   next: z.enum(["carry-out", "close", "nothing"]),
-  opened: z.strictObject({ exitCode: z.number().int(), line: z.string() }).optional(),
+  opened: ranSchema.optional(),
   option: z
     .strictObject({
       index: z.number().int().min(0).max(5),

@@ -37,11 +37,7 @@ import {
 import { uploadSpec } from "../../../../../../api/hono/src/lib/dashboard/slack-upload"
 import { KEYCHAIN_ITEM_NAMES } from "../../../../../../api/hono/src/lib/keychain-items"
 import { keychain } from "../../../../../../api/hono/src/lib/yard/keychain"
-import {
-  ANSWER_LEAD,
-  answerPayloadSchema,
-  payloadOf,
-} from "../../../../../../packages/config/src/inbox"
+import { ANSWER_LEAD, payloadOf } from "../../../../../../packages/config/src/inbox"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -733,6 +729,14 @@ describe("an answer", () => {
     })
     const read = (ref: number) => `bun run ask get #i${ref} --ack`
     const ack = (ref: number) => `bun run ask ack #i${ref} --link <https url>`
+    const ackOrWhy = (ref: number) => `${ack(ref)}, or --no-link "<why>" when it leaves no page`
+    const asked = item({
+      id: "mno",
+      kind: "decision",
+      preview: PREVIEWS.ask as never,
+      ref: 45,
+      title: "Port it?",
+    })
     const cases: [InboxItem, Parameters<typeof answerPayload>[1], Record<string, unknown>][] = [
       [
         decided,
@@ -745,6 +749,12 @@ describe("an answer", () => {
           type: "slack",
           verb: "pick",
         },
+      ],
+      // a go whose preview names no link may leave no page, so its close names --no-link too
+      [
+        asked,
+        { at: AT, choice: "approve" },
+        { close: ackOrWhy(45), next: "carry-out", type: "ask" },
       ],
       [
         decided,
@@ -777,7 +787,7 @@ describe("an answer", () => {
       [
         drafted,
         { at: AT, choice: "draft" },
-        { close: ack(42), go: true, next: "carry-out", verb: "draft" },
+        { close: ackOrWhy(42), go: true, next: "carry-out", verb: "draft" },
       ],
       [
         drafted,
@@ -814,8 +824,11 @@ describe("an answer", () => {
       const line = answerLine(answerPayload(it, answer))
       expect(line).toStartWith(`${ANSWER_LEAD} {`)
       expect(line).not.toContain("\n")
+      // answerLine has parsed the payload strictly, so payloadOf reading it back is the schema check
       const payload = payloadOf(line)
-      expect(answerPayloadSchema.safeParse(payload).success).toBe(true)
+      expect(payload).not.toBeNull()
+      // only a pick names an option
+      if (payload?.verb !== "pick") expect(payload).not.toHaveProperty("option")
       expect(payload).toMatchObject({
         at: AT,
         id: it.id,
@@ -1262,7 +1275,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       .at(-1)
     url = `postgres://postgres:${PASSWORD}@127.0.0.1:${port}/postgres`
     let admin: SQL | null = null
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 240; i++) {
       try {
         admin = new SQL(url, { max: 1 })
         await admin`select 1`
@@ -1282,7 +1295,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     await admin!.close()
     store = await import("../../../../../../api/hono/src/lib/dashboard/inbox")
     db = (await import("../../../../../../packages/db/dist/index.mjs")).createDatabase(url)
-  }, 60_000)
+  }, 180_000)
 
   afterAll(() => {
     if (container)

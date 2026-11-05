@@ -701,7 +701,9 @@ const OLD_OPTIONS = {
 export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvided): AnswerPayload {
   if (item.kind === "update") throw new Error("An update takes no answer")
   const tag = itemTag(item.ref)
+  // a go closes with where it landed; one that may leave no page (a decision naming no link, a draft Slack refused) names --no-link too (asks.md)
   const ack = `bun run ask ack ${tag} --link <https url>`
+  const ackOrWhy = `${ack}, or --no-link "<why>" when it leaves no page`
   const read = `bun run ask get ${tag} --ack`
   const head = {
     at: answer.at,
@@ -749,7 +751,7 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
         ...head,
         ...comment,
         ...text,
-        close: ack,
+        close: "link" in item.preview ? ack : ackOrWhy,
         go: true,
         next: "carry-out",
         option: OLD_OPTIONS.approve,
@@ -777,7 +779,7 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
         ...head,
         ...comment,
         ...text,
-        close: ack,
+        close: ackOrWhy,
         go: true,
         ...(converter && { linkConverter: converter }),
         next: "carry-out",
