@@ -760,9 +760,16 @@ light_run "$@" && SIZE=small UNITS=1
 # rest and may use the small reserve, as may an org's run (below) and the run-slot.priority pick. A checker's run is ranked by its worker's size (size_of), and
 # the rest keep class 2 so an older copy's ticket still ranks.
 case "$WHO" in ops-checks-*|ops-localci|ops-merge-train|ops-dashboard) CLASS=0 ;; *) CLASS=2 ;; esac
+# the session a run counts as for the priority pick and its class: a commit-<worktree> pre-commit step counts as the last named session that ran run-slot from
+# that worktree (run-slot.owner/<worktree>), since the hook's waiter carries no session's name (4 Nov: a commit's build waited from 20:45Z
+# while the priority named its session, until a lead named its commit-<worktree> by hand)
+owner_of() { case "$1" in commit-*) cat "$OPS/run-slot.owner/${1#commit-}" 2>/dev/null ;; *) echo "$1" ;; esac; }
 # A company's runs go ahead of every other waiter (the owner's priority): class 1, for a session whose roster
-# entry, or its worker's (a checker's), has a pr or repo under a GitHub org ext.links guards
-[ "$CLASS" = 2 ] && python3 -I - "$WHO" "$SELF" <<'PY' && CLASS=1
+# entry, or its worker's (a checker's), has a pr or repo under a GitHub org ext.links guards. Else a session whose entry, or its worker's, has an
+# owner (the owner's own ask, which its lead set) marks its ticket ask, which ordered_waiters ranks after the merge gates; a commit-<worktree>
+# pre-commit step reads as its worktree's session (owner_of)
+ASK=""
+[ "$CLASS" = 2 ] && { python3 -I - "$(owner_of "$WHO")" "$SELF" <<'PY'
 import json, os, re, shutil, subprocess, sys
 
 data = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
@@ -773,9 +780,11 @@ except (OSError, ValueError, KeyError, TypeError):
     sys.exit(1)
 entry = by.get(sys.argv[1]) or {}
 chain = [entry, by.get(str(entry.get("worker"))) or {}]
+# exit 0 for an org's run, 3 for the owner's ask, 1 for neither
+other = 3 if any(str(e.get("owner") or "").strip() for e in chain) else 1
 values = [str(e.get(k, "")).lower() for e in chain for k in ("pr", "repo") if e.get(k)]
 if not values:
-    sys.exit(1)
+    sys.exit(other)
 # the guarded orgs as the settings reader in this script's checkout prints them, read only for a session with a pr or repo
 root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[2]))))
 bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
@@ -783,9 +792,10 @@ try:
     r = subprocess.run([bun, os.path.join(root, "packages", "scripts", "src", "playground", "setting.ts"), "--guarded-orgs"], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
     orgs = json.loads(r.stdout) if r.returncode == 0 else []
 except (OSError, ValueError, TypeError, subprocess.SubprocessError):
-    sys.exit(1)
-sys.exit(0 if any(re.search(rf"(?:^|/){re.escape(o)}/", v) for o in orgs for v in values) else 1)
+    sys.exit(other)
+sys.exit(0 if any(re.search(rf"(?:^|/){re.escape(o)}/", v) for o in orgs for v in values) else other)
 PY
+  case $? in 0) CLASS=1 ;; 3) ASK=ask ;; esac; }
 # Caps pytest-xdist's `-n auto` at 4 workers (a 15-worker round pushed load5 to 26).
 export PYTEST_XDIST_AUTO_NUM_WORKERS=4
 SLOT=""
@@ -803,8 +813,8 @@ if [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ -z "$CAN_TA
   mkdir -p "$QUEUE"
   TICKET="$QUEUE/$(python3 -I -c 'import time; print(time.time_ns())')-$$-$WHO"
   # "s2" marks a waiter that can take run-slot-2 in single-slot mode (#i162); an empty ticket is an older copy that takes run-slot only.
-  # Then its rank (class and units, 01 to 23), units and size, which order the queue
-  echo "s2 $CLASS$UNITS $UNITS $SIZE" > "$TICKET"
+  # Then its rank (class and units, 01 to 23), units and size, which order the queue, and ask for the owner's own ask, which an older copy ignores
+  echo "s2 $CLASS$UNITS $UNITS $SIZE${ASK:+ $ASK}" > "$TICKET"
 fi
 # A pinned ticket keeps its place by age: one with no rank, from an older copy or local CI (plain "s2", or empty), which no newer ticket
 # passes, since those take a slot only while theirs is the oldest live ticket and any other order deadlocks them (a review's round 1), and
@@ -837,23 +847,25 @@ ready_place() {
   echo "$best"
 }
 ordered_waiters() {
-  # the live tickets in the order they take slots, one "<pinned 0|1> <ticket>" a line. A ticket with no rank (local CI's, an older copy's) is
-  # a wall no newer ticket passes. Between walls go first the runs that go ahead, past AGED or not, class by class: an org's, then Checks for
-  # a PR in the ready line by its place there, then those that gate a merge, then a reviewer's (<id>-reviewer, -reviewer-spec), so a drafted
-  # review is never held behind workers' long runs (Ops, 2 Nov: 9 of 17 waiters were reviewers). Then the rest. Within each class one past
-  # AGED is pinned, so no newer ticket of its class passes it; each small before medium before big, oldest first. A dead waiter's goes on the way
-  local t pid rank m p aged k sub seg=0 now ready
-  local -a subs=(1 1 1 1 1)
+  # the live tickets in the order they take slots, one "<pinned 0|1> <ticket>" a line. A ticket with no rank (local CI's, an older copy's) is a wall
+  # no newer ticket passes. Between walls go first the runs that go ahead, past AGED or not, class by class: an org's, then Checks for a PR in the
+  # ready line by its place there, then those that gate a merge, then one for the owner's own ask (a ticket marked ask), then a reviewer's
+  # (<id>-reviewer, -reviewer-spec), so a drafted review is never held behind workers' long runs (Ops, 2 Nov: 9 of 17 waiters were reviewers). Then
+  # the rest. Within each class one past AGED is pinned, so no newer ticket of its class passes it; each small before medium before big, oldest first.
+  # A dead waiter's goes on the way
+  local t pid rank ask m p aged k sub seg=0 now ready
+  local -a subs=(1 1 1 1 1 1)
   now=$(date +%s)
   ready=$(ready_line)
   for t in $(ls "$QUEUE" 2>/dev/null | sort -t- -k1,1n); do
     pid=$(printf '%s' "$t" | cut -d- -f2)
     if ! alive "$pid"; then rm -f "${QUEUE:?}/${t:?}"; continue; fi
     m=$(mtime "$QUEUE/$t") || continue
-    rank=$(cut -d' ' -f2 "$QUEUE/$t" 2>/dev/null)
+    rank="" ask=""
+    read -r _ rank _ _ ask _ 2>/dev/null < "$QUEUE/$t"
     case "$rank" in
       [0-2][1-3]) ;;
-      *) echo "$((seg + 1)) 0 0 00 1 $t"; seg=$((seg + 2)); subs=(1 1 1 1 1); continue ;;
+      *) echo "$((seg + 1)) 0 0 00 1 $t"; seg=$((seg + 2)); subs=(1 1 1 1 1 1); continue ;;
     esac
     aged=0
     [ $((now - m)) -lt "$AGED" ] || aged=1
@@ -862,8 +874,10 @@ ordered_waiters() {
       2?) case "${t#*-*-}" in *-reviewer|*-reviewer-spec) rank=21${rank#2} ;; *) rank=2$rank ;; esac ;;
       *) p=$(ready_place "${t#*-*-}" "$ready"); if [ -n "$p" ]; then rank=1$(printf '%04d' "$p"); else rank=2$rank; fi ;;
     esac
-    # the class: 0 an org's, 1 the ready line, 2 the merge gates, 3 a reviewer's, 4 the rest
-    case "$rank" in 0*) k=0 ;; 1*) k=1 ;; 20?) k=2 ;; 21?) k=3 ;; *) k=4 ;; esac
+    # the class: 0 an org's, 1 the ready line, 2 the merge gates, 3 the owner's ask, 4 a reviewer's, 5 the rest
+    case "$rank" in 0*) k=0 ;; 1*) k=1 ;; 20?) k=2 ;; 21?) k=4 ;; *) k=5 ;; esac
+    # an ask ticket ranks as 23<units>, so a checker's and a worker's sort by units alone within the class
+    [ "$k" -lt 4 ] || [ "$ask" != ask ] || { k=3; rank=23${rank: -1}; }
     sub=${subs[$k]}
     if [ "$aged" = 0 ]; then echo "$seg $k $sub $rank 0 $t"; else echo "$seg $k $((sub + 1)) 00 1 $t"; subs[$k]=$((sub + 2)); fi
   done | sort -s -k1,1n -k2,2n -k3,3n -k4,4 | cut -d' ' -f5,6
@@ -921,10 +935,6 @@ focus_wait() {
   sleep "$POLL"
   waited=$((waited + 15))
 }
-# the session a run counts as for the priority pick: a commit-<worktree> pre-commit step counts as the last named session that ran run-slot from
-# that worktree (run-slot.owner/<worktree>), since the hook's waiter carries no session's name (4 Nov: a commit's build waited from 20:45Z
-# while the priority named its session, until a lead named its commit-<worktree> by hand)
-owner_of() { case "$1" in commit-*) cat "$OPS/run-slot.owner/${1#commit-}" 2>/dev/null ;; *) echo "$1" ;; esac; }
 prio_for() { local h; h=$(prio_holder) && [ -n "$h" ] && [ "$(owner_of "$1")" = "$h" ]; }
 # the oldest live ticket the priority holder owns, its worktree's commit steps' included: the one of its tickets that skips the queue, so its
 # runs go in the order it asked for them (4 Nov: a merge asked later took a slot before the same session's older merge)
