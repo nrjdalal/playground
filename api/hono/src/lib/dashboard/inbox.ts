@@ -826,6 +826,75 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
   }
 }
 
+// Pure: what the owner's Dismiss on an answered card, or Done or Dismiss on an update, tells its poster: drop it. A card its poster has not closed names how to close it (a go with why it has no link, a reply by its ack, anything else by reading it), and an update, which the owner closed, takes no more edits.
+export function closedPayload(
+  item: InboxItem,
+  verb: "dismiss" | "done",
+  at: string,
+): AnswerPayload {
+  const tag = itemTag(item.ref)
+  const head = {
+    at,
+    go: false,
+    id: item.id,
+    kind: item.kind,
+    ref: tag,
+    title: item.title,
+    ...(item.kind === "decision" && { type: item.preview.type }),
+    v: 1 as const,
+    verb,
+  }
+  const answer = item.answer
+  if (
+    item.kind === "update" ||
+    !answer ||
+    !("choice" in answer) ||
+    ("ackedAt" in answer && answer.ackedAt)
+  ) {
+    return { ...head, next: "nothing" }
+  }
+  const close = isGo(answer.choice)
+    ? `bun run ask ack ${tag} --no-link "<why>"`
+    : answer.choice === "replied"
+      ? `bun run ask ack ${tag}`
+      : `bun run ask get ${tag} --ack`
+  return { ...head, close, next: "close" }
+}
+
+// Tells a poster the owner closed its card (closedPayload), recording how that went as an answer's delivery is; an update's poster that has ended is told nothing, since nothing waits on it, and a card its poster already closed or the owner already sent to Done types nothing again.
+async function tellClosed(
+  db: Database,
+  item: InboxItem,
+  verb: "dismiss" | "done",
+  before: InboxItem,
+  telling?: Telling,
+): Promise<InboxItem> {
+  if (!telling) return item
+  const answer = before.answer
+  if (answer && "ackedAt" in answer && answer.ackedAt) return item
+  if (before.kind === "update" && answer && "dismissedAt" in answer && answer.dismissedAt)
+    return item
+  if (
+    answer &&
+    "choice" in answer &&
+    (answer.choice === "resolved" || answer.choice === "settled")
+  ) {
+    return item
+  }
+  const payload = closedPayload(item, verb, telling.now.toISOString())
+  return send(
+    db,
+    item,
+    {
+      relay: answerLine({ ...payload, relay: { for: item.from, why: "poster-ended" } }),
+      text: answerLine(payload),
+    },
+    { ...telling, dispatcher: item.kind === "update" ? undefined : telling.dispatcher },
+  )
+}
+
+type Telling = Omit<Sending, "upload">
+
 // Pure: the one line typed into a session for an answer: ANSWER_LEAD, then the payload as JSON, whose escaped line ends keep it one line.
 export const answerLine = (payload: AnswerPayload): string =>
   `${ANSWER_LEAD} ${JSON.stringify(answerPayloadSchema.parse(payload))}`
@@ -1176,7 +1245,9 @@ export async function answerItem(
   }
   if (input.action === "archive") return archive(db, current, now)
   if (input.action === "unarchive") return unarchive(db, current, now)
-  if (input.action === "dismiss" && !waits(current)) return dismissAnswered(db, current, now)
+  if (input.action === "dismiss" && !waits(current)) {
+    return dismissAnswered(db, current, now, deliver && { actor, deliver, dispatcher, now, wait })
+  }
   const checked = checkAnswer(current, input)
   if ("message" in checked) {
     // an answered decision or draft conflicts with this answer; an update never takes one
@@ -1397,6 +1468,7 @@ async function dismissAnswered(
   db: Database,
   current: InboxItem,
   now: Date,
+  telling?: Telling,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   if (current.answer && "dismissed" in current.answer && current.answer.dismissed) {
     return { code: "CONFLICT", message: "This item is already dismissed", ok: false }
@@ -1411,7 +1483,8 @@ async function dismissAnswered(
     })
     .where(unchanged(current))
     .returning()
-  return row ? { item: toItem(row), ok: true } : CHANGED
+  if (!row) return CHANGED
+  return { item: await tellClosed(db, toItem(row), "dismiss", current, telling), ok: true }
 }
 
 // How often a queued answer is read again: deliver() types nothing for it, and reads it delivered once its transcript shows it, or lost QUEUED_MS on.
@@ -1942,8 +2015,19 @@ export async function openItems(db: Database, from?: string): Promise<InboxItem[
 }
 
 // Done: moves the answered decisions and drafts, those he replied to in chat included, and the updates named to Done at once, recording when inside their answer, so no column is added, waking any he put off or archived, and marks an update read, keeping when it was read; an open decision or draft asks something of him and is left.
-export async function dismissItems(db: Database, ids: string[], now = new Date()): Promise<number> {
+export async function dismissItems(
+  db: Database,
+  ids: string[],
+  now = new Date(),
+  telling?: Omit<Telling, "now">,
+): Promise<number> {
   if (ids.length === 0) return 0
+  const before = new Map(
+    (await db.select().from(inboxItem).where(inArray(inboxItem.id, ids))).map((row) => [
+      row.id,
+      toItem(row),
+    ]),
+  )
   const rows = await db
     .update(inboxItem)
     .set({
@@ -1963,7 +2047,15 @@ export async function dismissItems(db: Database, ids: string[], now = new Date()
         inArray(inboxItem.id, ids),
       ),
     )
-    .returning({ id: inboxItem.id })
+    .returning()
+  // Done tells an update's poster done, so it posts a new card rather than editing this one; an answered card's poster hears nothing
+  for (const row of rows) {
+    const item = toItem(row)
+    const was = before.get(row.id)
+    if (telling && was && item.kind === "update") {
+      await tellClosed(db, item, "done", was, { ...telling, now })
+    }
+  }
   return rows.length
 }
 

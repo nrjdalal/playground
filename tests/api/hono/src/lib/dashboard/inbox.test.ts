@@ -2293,7 +2293,12 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           dismissedAt: expect.any(String),
         })
         expect(sent).toHaveLength(1)
-        expect(sent[0]!.text).toContain("Cleared for now")
+        expect(payloadOf(sent[0]!.text)).toMatchObject({
+          go: false,
+          id: posted.id,
+          next: "close",
+          verb: "set-aside",
+        })
         expect(await listed(posted.id)).toMatchObject({ archived: false })
       }
       // an archived one dismissed is set aside the same way
@@ -2327,6 +2332,73 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(gone.ok && gone.item).toMatchObject({
         answer: { dismissed: true, dismissedAt: expect.any(String) },
         readAt: expect.any(String),
+      })
+    })
+
+    test("Dismiss tells an answered card's poster dismiss with how to close it, and an update's poster dismiss or, on Done, done; an answered card on Done, and one its poster closed, type nothing", async () => {
+      const go = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, go.id, { action: "approve" }, { actor })
+      const told = typed()
+      const dropped = await store.answerItem(db, go.id, { action: "dismiss" }, { actor, ...told })
+      if (!dropped.ok) throw new Error(dropped.message)
+      expect(told.sent).toHaveLength(1)
+      expect(told.sent[0]!.to).toBe(go.from)
+      expect(payloadOf(told.sent[0]!.text)).toMatchObject({
+        close: `bun run ask ack #i${go.ref} --no-link "<why>"`,
+        go: false,
+        id: go.id,
+        kind: "decision",
+        next: "close",
+        verb: "dismiss",
+      })
+      expect(dropped.item.delivery).toMatchObject({ status: "delivered" })
+
+      const denied = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, denied.id, { action: "deny" }, { actor })
+      const deniedTold = typed()
+      await store.answerItem(db, denied.id, { action: "dismiss" }, { actor, ...deniedTold })
+      expect(payloadOf(deniedTold.sent[0]!.text)).toMatchObject({
+        close: `bun run ask get #i${denied.ref} --ack`,
+        verb: "dismiss",
+      })
+
+      const closed = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, closed.id, { action: "deny" }, { actor })
+      await store.ackItem(db, closed.id)
+      const quiet = typed()
+      const done = await store.answerItem(db, closed.id, { action: "dismiss" }, { actor, ...quiet })
+      expect(done.ok).toBe(true)
+      expect(quiet.sent).toHaveLength(0)
+
+      const finished = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, finished.id, { action: "deny" }, { actor })
+      const doneQuiet = typed()
+      expect(await store.dismissItems(db, [finished.id], new Date(), { actor, ...doneQuiet })).toBe(
+        1,
+      )
+      expect(doneQuiet.sent).toHaveLength(0)
+
+      const progress = await update()
+      const doneTold = typed()
+      expect(await store.dismissItems(db, [progress.id], new Date(), { actor, ...doneTold })).toBe(
+        1,
+      )
+      expect(doneTold.sent).toHaveLength(1)
+      const line = payloadOf(doneTold.sent[0]!.text)
+      expect(line).toMatchObject({ go: false, kind: "update", next: "nothing", verb: "done" })
+      expect(line).not.toHaveProperty("close")
+      // Done already told it, so its Dismiss on Done types nothing again
+      const again = typed()
+      await store.answerItem(db, progress.id, { action: "dismiss" }, { actor, ...again })
+      expect(again.sent).toHaveLength(0)
+
+      const listedUpdate = await update()
+      const dismissTold = typed()
+      await store.answerItem(db, listedUpdate.id, { action: "dismiss" }, { actor, ...dismissTold })
+      expect(payloadOf(dismissTold.sent[0]!.text)).toMatchObject({
+        kind: "update",
+        next: "nothing",
+        verb: "dismiss",
       })
     })
   })

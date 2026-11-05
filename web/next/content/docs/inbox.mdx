@@ -148,14 +148,14 @@ A card with no Retry offers Dismiss.
 
 Every card has the buttons its state takes, beside its own answers:
 
-| Button    | On                                                          | Moves the card                          | The session that posted it                         |
-| --------- | ----------------------------------------------------------- | --------------------------------------- | -------------------------------------------------- |
-| ✓ Seen    | anything in the list you have not read                      | nowhere; it is marked read              | hears nothing                                      |
-| ✓✓ Done   | an update, or a card you have answered                      | to Done                                 | hears nothing                                      |
-| Snooze    | a decision, draft or update in the list, or an archived one | out of the list until the time you pick | hears nothing                                      |
-| Archive   | a decision, draft or update in the list                     | to Archived, unanswered                 | hears nothing, and keeps waiting                   |
-| Move back | an archived card, or one dismissed while it waited          | back to the top of the list             | hears nothing                                      |
-| Dismiss   | every card, until it is dismissed                           | to Done, marked dismissed               | while it waits on you, hears that you set it aside |
+| Button    | On                                                          | Moves the card                          | The session that posted it                                                     |
+| --------- | ----------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------ |
+| ✓ Seen    | anything in the list you have not read                      | nowhere; it is marked read              | hears nothing                                                                  |
+| ✓✓ Done   | an update, or a card you have answered                      | to Done                                 | for an update, hears it is done; otherwise nothing                             |
+| Snooze    | a decision, draft or update in the list, or an archived one | out of the list until the time you pick | hears nothing                                                                  |
+| Archive   | a decision, draft or update in the list                     | to Archived, unanswered                 | hears nothing, and keeps waiting                                               |
+| Move back | an archived card, or one dismissed while it waited          | back to the top of the list             | hears nothing                                                                  |
+| Dismiss   | every card, until it is dismissed                           | to Done, marked dismissed               | while it waits on you, hears that you set it aside; otherwise hears to drop it |
 
 **Snooze**, the zzz button, offers times, each shown with its day and time in IST, or Pick a time… for a day and time of your own.
 The item moves to Snoozed and leaves the count until then, then comes back as new.
