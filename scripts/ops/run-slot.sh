@@ -420,17 +420,15 @@ if [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" 
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# a `sh -c`, `bash -c` or `zsh -c` chain's steps, or those of a `bash <script file>`, whose arguments only a $ word reads (5 Nov: a script that only
-# commits waited in the general queue), one a line, each step's words joined by the unit separator, as python's shlex splits the script at each run of
-# &, |, ;, <, > and parentheses, zsh's |& and &| among them (a line whose first word starts with # is a comment, dropped whatever it ends with, a line
-# ending in an odd run of `\` is joined to the next, as sh does, and a newline then counts as ;); a cd beside any other separator than && or ; keeps
-# it as a word, since that cd does not carry to the next step, and env words before the shell (a BASH_ENV or PATH changes what it runs) are a step of
-# their own; nothing for any other command, a file after an option word (`--rcfile a.sh b.sh` runs b.sh), or a script shlex cannot split or a file
-# over 64 KB
+# A `sh -c`, `bash -c` or `zsh -c` chain's steps, or a `bash <script file>`'s, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, an option word before a file, or a script shlex cannot split or over 64 KB
 chain_steps() {
-  local a first="" script="" next="" file="" opt="" lead=""
+  local a first="" script="" next="" file="" opt="" lead="" oval=""
   for a in "$@"; do
-    [ -n "$next" ] && { script=$a; break; }
+    if [ -n "$next" ]; then
+      if [ -n "$oval" ]; then [ "$a" = pipefail ] || return; oval=""; continue; fi
+      case "$a" in -o | +o) oval=1; continue ;; - | + | [-+]*[!euxv]*) return ;; [-+]*) continue ;; esac
+      script=$a; break
+    fi
     [ -n "$file" ] && break
     case "$a" in env|*=*) [ -z "$first" ] && { lead+=$a$'\x1f'; continue; } ;; esac
     if [ -z "$first" ]; then first=$(basename -- "$a"); case "$first" in sh|bash|zsh) continue ;; *) return ;; esac; fi
@@ -459,6 +457,22 @@ try:
         lines.append(buf)
         buf = None
     text = "\n".join(lines + ([buf] if buf is not None else []))
+    # each ?, *, [, {, # or ~ inside quotes or after a backslash becomes \x02 to \x07, which sh leaves as written, so plain() tells a quoted message's from one sh expands
+    held, out, quote, esc = "?*[{#~", [], "", False
+    if any(chr(n) in text for n in range(2, 8)):
+        sys.exit(1)
+    for c in text:
+        lit = quote or esc
+        if esc:
+            esc = False
+        elif c == "\\" and quote != "'":
+            esc = True
+        elif c == quote:
+            quote = ""
+        elif not quote and c in "'\"":
+            quote = c
+        out.append(chr(2 + held.index(c)) if lit and c in held else c)
+    text = "".join(out)
     lex = shlex.shlex(text.replace("\n", "\n;"), posix=True, punctuation_chars=True)
     lex.whitespace_split = True
     lex.commenters = ""
@@ -477,28 +491,55 @@ if sys.argv[3]:
 for i, step in enumerate(steps):
     if step[:1] == ["cd"]:
         step += [s for s in (seps[i], seps[i + 1]) if s not in ("", "&&", ";")]
+        # a cd after && or || that a later step follows by any other separator than && may not have run when that step does
+        if seps[i] in ("&&", "||") and seps[i + 1] not in ("", "&&"):
+            step += [seps[i], seps[i + 1]]
     if step:
         print("\x1f".join(step))
 PY
 }
-# a chain step's git subcommand, past env, VAR=x and git's -C <dir> or -c <value>; nothing for a step that runs no git
+# a git run's subcommand, past env, VAR=x and git's own options, each of -C, -c, --git-dir, --work-tree, --namespace and --config-env with its value; nothing for a step that runs no git
 git_verb() {
   local a state=lead
   for a in "$@"; do
     case "$state" in
       lead) case "$a" in env|*=*) continue ;; esac; [ "$(basename -- "$a")" = git ] || return; state=git ;;
-      git) case "$a" in -C|-c) state=value ;; -*) ;; *) echo "$a"; return ;; esac ;;
+      git) case "$a" in -C | -c | --git-dir | --work-tree | --namespace | --config-env) state=value ;; -*) ;; *) echo "$a"; return ;; esac ;;
       value) state=git ;;
     esac
   done
 }
-# a word sh would leave as written: no $, backquote, ~, glob, brace or # (a comment to sh, which shlex here keeps as a word), so the word run-slot
-# reads is the word the command gets; a ( is left alone, since chain_steps splits at each unquoted one, so a word that keeps one was quoted or escaped (a type(scope): commit message)
-plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['* | *'{'* | *'#'*) return 1 ;; esac; done; }
+# a word sh would leave as written, with no $, backquote, ~, glob, brace or # (a comment to sh, which shlex keeps as a word), quoted or not, so the word run-slot reads is the word the command gets; a ( stays, since chain_steps splits at each unquoted one (a type(scope): message)
+plain() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['* | *'{'* | *'#'* | *[$'\x02\x03\x04\x05\x06\x07']*) return 1 ;; esac; done; }
+# a commit message word: as plain, but a ?, *, [, {, # or ~ that chain_steps found quoted is the message's own text (a `closes` line naming an issue), which no git step reads as a path
+said() { local a; for a in "$@"; do case "$a" in *'$'* | *'`'* | *'~'* | *'*'* | *'?'* | *'['* | *'{'* | *'#'*) return 1 ;; esac; done; }
+# a chain step's words as its script wrote them, each held \x02 to \x07 back to its ?, *, [, {, # or ~
+shown() { local t=$1 c n=2; for c in '?' '*' '[' '{' '#' '~'; do t=${t//$(printf "\\$(printf %o $n)")/$c}; n=$((n + 1)); done; printf '%s' "$t"; }
+# whether a git commit's words are plain but for its -m or --message value, which said() reads
+commit_words() {
+  local w next=""
+  for w in "$@"; do
+    if [ -n "$next" ]; then said "$w" || return 1; next=""; continue; fi
+    case "$w" in -m | --message) next=1 ;; -m* | --message=*) said "$w" || return 1 ;; *) plain "$w" || return 1 ;; esac
+  done
+}
 # a chain's git add words, failing closed (builder, 5 Nov): paths, and only the flags whose staging chain_add reads, never -f, which stages ignored files
-add_flags() { local w; for w in "$@"; do case "$w" in -A | --all | -u | --update | -- | --pathspec-from-file=*) ;; -*) return 1 ;; esac; done; }
+add_flags() {
+  local w skip=""
+  for w in "$@"; do
+    [ -z "$skip" ] || { skip=""; continue; }
+    case "$w" in
+      --pathspec-from-file) skip=1 ;;
+      -A | --all | -u | --update | -v | --verbose | -n | --dry-run | -N | --intent-to-add | -p | --patch | -- | --pathspec-from-file=*) ;;
+      -*) return 1 ;;
+    esac
+  done
+  [ -z "$skip" ]
+}
 # a script's `set` words that only switch -e, -o pipefail, -u or -x, as a chain script's `set -euo pipefail` does (set -k reads a later VAR=x as env)
 set_flags() { local w; for w in "$@"; do case "$w" in pipefail) ;; [-+] | [-+]*[!eoux]*) return 1 ;; [-+]*) ;; *) return 1 ;; esac; done; }
+# a folder with no trailing /, so `R` and `R/` read as one
+bare_dir() { local d=$1; while [ ${#d} -gt 1 ] && [ "${d%/}" != "$d" ]; do d=${d%/}; done; printf '%s' "$d"; }
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
 # Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form
@@ -515,20 +556,28 @@ chain_safe() {
     [ ${#words[@]} -gt 0 ] || continue
     CHAIN_BAD=${line//$'\x1f'/ }
     case "${words[0]}" in
-      cd) [ ${#words[@]} -eq 2 ] && abs_in_repo "${words[1]}" || return 1; cdir=${words[1]}; continue ;;
-      bun) [ "${words[1]:-}" = run ] && [ "${words[2]:-}" = precommit:light ] && plain "${words[@]}" || return 1; continue ;;
+      cd) [ ${#words[@]} -eq 2 ] && abs_in_repo "${words[1]}" || return 1; cdir=$(bare_dir "${words[1]}"); continue ;;
+      # precommit:light in run-slot's own repo, since after a cd to another one it runs that repo's script
+      bun) [ "${words[1]:-}" = run ] && [ "${words[2]:-}" = precommit:light ] && plain "${words[@]}" || return 1
+        [ -z "$cdir" ] || [ "$(git -C "$cdir" rev-parse --show-toplevel 2>/dev/null)" = "$(git rev-parse --show-toplevel 2>/dev/null)" ] || return 1
+        continue ;;
       set) set_flags "${words[@]:1}" || return 1; continue ;;
       git) ;;
       *) return 1 ;;
     esac
-    plain "${words[@]}" || return 1
     if [ "${words[1]:-}" = -C ]; then
-      abs_in_repo "${words[2]:-}" || return 1
-      folder=${words[2]} verb=${words[3]:-} rest=("${words[@]:4}")
+      plain "${words[@]:0:3}" && abs_in_repo "${words[2]:-}" || return 1
+      folder=$(bare_dir "${words[2]}") verb=${words[3]:-} rest=("${words[@]:4}")
     else
-      folder=${cdir:-$PWD} verb=${words[1]:-} rest=("${words[@]:2}")
+      folder=${cdir:-$(bare_dir "$PWD")} verb=${words[1]:-} rest=("${words[@]:2}")
     fi
-    case "$verb" in add) add_flags ${rest[@]+"${rest[@]}"} || return 1 ;; commit|push) ;; *) return 1 ;; esac
+    plain git "$verb" || return 1
+    case "$verb" in
+      add) plain ${rest[@]+"${rest[@]}"} && add_flags ${rest[@]+"${rest[@]}"} || return 1 ;;
+      commit) commit_words ${rest[@]+"${rest[@]}"} || return 1 ;;
+      push) plain ${rest[@]+"${rest[@]}"} || return 1 ;;
+      *) return 1 ;;
+    esac
     CHAIN_SAFE+=$(printf '%s\x1f' git -C "$folder" "$verb" ${rest[@]+"${rest[@]}"})$'\n'
   done < <(chain_steps "$@")
   CHAIN_BAD=""
@@ -544,7 +593,7 @@ chain_lane() {
     case "$(git_verb "${words[@]}")" in commit|push) commits=1 ;; esac
   done < <(chain_steps "$@")
   [ -n "$commits" ] || return
-  if chain_safe "$@"; then echo commit; else echo "general $CHAIN_BAD"; fi
+  if chain_safe "$@"; then echo commit; else echo "general $(shown "$CHAIN_BAD")"; fi
 }
 # Quick slots, outside the queue, one holder each: a plain git commit (its pre-commit build, about 17s) takes run-slot-commit (builder,
 # 13 Oct: five commits waited in a fifteen-deep queue; a commit with a longer hook goes through the queue as <who> -- bash -c '...'), and a
@@ -556,12 +605,12 @@ quick_rule() {
   # a pre-commit step commit-slot.ts hands over (the build or a type check), marked RUN_SLOT_COMMIT_STEP=1 under its commit-<worktree> name, is a plain git commit's own step, so it takes run-slot-commit too (3 Nov: a plain commit's build waited about an hour in the queue)
   case "$WHO" in commit-*) [ "${RUN_SLOT_COMMIT_STEP:-}" = 1 ] && { echo commit; return; } ;; esac
   # the command's first word past env and VAR=x, as box_fits finds it (optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue)
-  for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
+  first=$(first_word "$@")
   case "$(basename -- "$first")" in sh|bash|zsh) [ "$(chain_lane "$@")" = commit ] && echo commit; return ;; esac
   if [ "$(basename -- "$first")" = git ]; then
     # a merge or pull runs no pre-commit build (lefthook.yml has no merge hook), so it ends in seconds (optimizer, 20 Oct: a 1s git merge waited 26.6 min behind suites)
     # a push runs only the pre-push hook's seconds (retro 2, 31 Oct: git push queued 205 min in a day)
-    for a in "$@"; do case "$a" in commit|merge|pull|push) echo commit; return ;; esac; done
+    case "$(git_verb "$@")" in commit | merge | pull | push) echo commit ;; esac
   elif [ "$(basename -- "$first")" = cp ]; then
     for a in "$@"; do a=${a%/.}; case "${a%/}" in node_modules|*/node_modules) echo clone; return ;; esac; done
   elif [ "$(basename -- "$first")" = bun ]; then
@@ -628,46 +677,73 @@ sys.exit(0 if p.returncode == 0 and tasks and all(t["cache"]["status"] == "HIT" 
 PY
   )
 }
-# what a chain's git add step stages, for the chain's later commit step: the whole tree, untracked files included, for :/, -A, --all, -u or a
-# pathspec file, else the paths it names, . among them, each read from the step's own folder (4 Nov: read against the index alone, a chain whose own add staged a next file took the commit lane)
-CHAIN_ADD_ALL="" CHAIN_ADD=()
+# what a chain's git add step stages, for its later commit step, read from the step's own folder (4 Nov: read against the index alone, a chain whose own add staged a next file took the commit lane): the whole tree, untracked files included, for :/, -A, --all or a pathspec file; every tracked change for -u, --update or -p; else the paths it names, . among them; nothing for -n or --dry-run
+CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=()
 chain_add() {
-  local a past=""
+  local a past="" skip="" dry="" all="" tracked="" paths=()
   for a in "$@"; do
     [ -n "$past" ] || { [ "$a" = add ] && past=1; continue; }
+    [ -z "$skip" ] || { skip=""; continue; }
     case "$a" in
       --) ;;
-      :/ | -A | --all | -u | --update | --pathspec-from-file* | -[!-]*[Au]*) CHAIN_ADD_ALL=1 ;;
+      -n | --dry-run) dry=1 ;;
+      --pathspec-from-file) all=1; skip=1 ;;
+      :/ | -A | --all | --pathspec-from-file=* | -[!-]*A*) all=1 ;;
+      -u | --update | -p | --patch | -[!-]*u*) tracked=1 ;;
       -*) ;;
-      *) CHAIN_ADD+=("$a") ;;
+      *) paths+=("$a") ;;
     esac
   done
+  [ -z "$dry" ] || return 0
+  [ -z "$all" ] || CHAIN_ADD_ALL=1
+  [ -z "$tracked" ] || CHAIN_ADD_TRACKED=1
+  CHAIN_ADD+=(${paths[@]+"${paths[@]}"})
 }
-# a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
+# whether a git verb is an alias in that folder's config, which may run a commit (`git ci`); git ignores an alias that names one of its own commands
+aliased() {
+  case "$1" in
+    add | am | apply | archive | bisect | blame | branch | bundle | checkout | cherry | cherry-pick | clean | clone | commit | config | describe | diff \
+      | difftool | fetch | format-patch | fsck | gc | grep | help | init | log | ls-files | ls-remote | ls-tree | merge | mergetool | mv | notes | pull \
+      | push | range-diff | rebase | reflog | remote | repack | replace | reset | restore | revert | rev-list | rev-parse | rm | shortlog | show \
+      | show-ref | sparse-checkout | stash | status | submodule | switch | tag | version | whatchanged | worktree) return 1 ;;
+  esac
+  git ${2:+-C "$2"} config --get "alias.$1" >/dev/null 2>&1
+}
+# the first word past env and VAR=x, the command box_fits finds
+first_word() { local a; for a in "$@"; do case "$a" in env | *=*) continue ;; esac; printf '%s' "$a"; return; done; }
+# a git -c key that runs a program or a hook (core.hooksPath, an alias, an include), which counts as a build for any verb
+runs_program() {
+  case "$(printf '%s' "${1%%=*}" | tr '[:upper:]' '[:lower:]')" in
+    core.hookspath | core.fsmonitor | core.editor | core.askpass | core.gitproxy | alias.* | include.* | includeif.* | filter.* | credential.* | sequence.editor \
+      | diff.external | *.driver | *.textconv | *.command | *.program | *.cmd | *.tool | *.uploadpack | *.receivepack | *.proxycommand) return 0 ;;
+  esac
+  return 1
+}
+# a commit whose pre-commit build runs next build goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56): a git commit but -n, in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every one is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one; and, failing closed, a git run with a word outside these lists, or a verb that is an alias
 heavy_build() {
-  local a c f files top dir="" commit="" all="" nv="" odd="" state=lead paths=() vars=() line words first="" adir=""
-  # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with the
-  # files the chain's git add steps before it stage, and counts as a build when an add runs in another folder than a commit, whose paths it would
-  # misread (the first word is found outside a $( ), since bash 3.2 misparses a case inside one)
-  for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
+  local a c f files top dir="" commit="" all="" gitc="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir=""
+  # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with what its git add steps stage, and when an add runs in another folder than a commit, whose paths it would misread
+  first=$(first_word "$@")
   case "$(basename -- "$first")" in
     sh|bash|zsh)
       while IFS= read -r line; do
         IFS=$'\x1f' read -ra words <<< "$line"
-        [ ${#words[@]} -gt 0 ] && [ "$(git_verb "${words[@]}")" = commit ] && commit=1
+        [ ${#words[@]} -gt 0 ] || continue
+        verb=$(git_verb "${words[@]}")
+        { [ "$verb" = commit ] || { [ -n "$verb" ] && aliased "$verb"; }; } && commit=1
       done < <(chain_steps "$@")
       if [ -n "$commit" ]; then
         chain_safe "$@" || return 0
-        CHAIN_ADD_ALL="" CHAIN_ADD=()
+        CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=()
         while IFS= read -r line; do
           IFS=$'\x1f' read -ra words <<< "$line"
           [ ${#words[@]} -gt 0 ] || continue
           case "${words[3]}" in
-            add) adir=${adir:-${words[2]}}; [ "$adir" = "${words[2]}" ] && chain_add "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD=(); return 0; } ;;
-            commit) { [ -z "$adir" ] || [ "$adir" = "${words[2]}" ]; } && ! heavy_build "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD=(); return 0; } ;;
+            add) adir=${adir:-${words[2]}}; [ "$adir" = "${words[2]}" ] && chain_add "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0; } ;;
+            commit) { [ -z "$adir" ] || [ "$adir" = "${words[2]}" ]; } && ! heavy_build "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0; } ;;
           esac
         done <<< "$CHAIN_SAFE"
-        CHAIN_ADD_ALL="" CHAIN_ADD=()
+        CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=()
         return 1
       fi ;;
   esac
@@ -675,46 +751,70 @@ heavy_build() {
   case "$WHO" in commit-*) for a in "$@"; do [ "$a" = build ] && commit=1; done ;; esac
   for a in "$@"; do
     case "$state" in
-      lead) case "$a" in env) continue ;; NODE_ENV=* | RUN_SLOT_HERE=*) vars+=("$a"); continue ;; *=*) odd=1; continue ;; esac; [ "$(basename -- "$a")" = git ] || break; state=git ;;
-      git) case "$a" in -C) state=dir ;; -c) odd=1; state=gitvalue ;; -*) odd=1 ;; commit) commit=1; state=commit ;; *) [ -n "$odd" ] || break ;; esac ;;
-      gitvalue) state=git ;;
+      lead) case "$a" in
+          env) continue ;;
+          NODE_ENV=* | RUN_SLOT_HERE=* | SKIP_ENV_VALIDATION=* | TURBO_CACHE_DIR=*) vars+=("$a"); continue ;;
+          GIT_AUTHOR_NAME=* | GIT_AUTHOR_EMAIL=* | GIT_AUTHOR_DATE=* | GIT_COMMITTER_NAME=* | GIT_COMMITTER_EMAIL=* | GIT_COMMITTER_DATE=* | GIT_SSH_COMMAND=* | GIT_TERMINAL_PROMPT=*) continue ;;
+          *=*) unlisted=1 loose=1; continue ;;
+        esac
+        [ "$(basename -- "$a")" = git ] || break; state=git ;;
+      git) case "$a" in
+          -C) state=dir ;;
+          -c | --config-env) state=gitvalue ;;
+          --git-dir | --work-tree | --namespace) unlisted=1 loose=1; state=gitvalue ;;
+          -p | -P | --paginate | --no-pager | --version | --help | --no-optional-locks | --literal-pathspecs | --glob-pathspecs | --noglob-pathspecs | --icase-pathspecs | --no-replace-objects | --no-advice) ;;
+          -*) unlisted=1 loose=1 ;;
+          # a -c before a commit fails closed: a config key can turn its hook path or editor to a program
+          commit) commit=1; state=commit; [ -z "$gitc" ] || unlisted=1 loose=1 ;;
+          *) verb=$a; break ;;
+        esac ;;
+      gitvalue) gitc=1; runs_program "$a" && unlisted=1 loose=1; state=git ;;
       dir) case "$a" in /*) dir=$a ;; *) dir=${dir:+$dir/}$a ;; esac; state=git ;;
-      value) state=commit ;;
+      value) after=""; state=commit ;;
       paths) paths+=("$a") ;;
-      commit) case "$a" in
+      commit) prev=$after after=""
+        case "$a" in
           --) state=paths ;;
-          -n|--no-verify) nv=1 ;;
+          # -n turns the hook off unless the word before it is an unlisted option, which may take it as its value
+          -n | --no-verify) [ -n "$prev" ] || noverify=1 ;;
           --all | --pathspec-from-file=*) all=1 ;;
           --pathspec-from-file) all=1; state=value ;;
           --author|--cleanup|--date|--file|--fixup|--message|--reedit-message|--reuse-message|--squash|--template|--trailer) state=value ;;
-          --allow-empty | --allow-empty-message | --amend | --gpg-sign | --gpg-sign=* | --include | --no-edit | --no-gpg-sign | --no-signoff \
+          --allow-empty | --allow-empty-message | --amend | --edit | --gpg-sign | --gpg-sign=* | --include | --no-edit | --no-gpg-sign | --no-signoff \
             | --only | --pathspec-file-nul | --quiet | --reset-author | --signoff | --untracked-files | --untracked-files=* | --verbose | --author=* \
             | --cleanup=* | --date=* | --file=* | --fixup=* | --message=* | --reedit-message=* | --reuse-message=* | --squash=* | --template=* | --trailer=*) ;;
-          --*) odd=1 ;;
-          -?*) f=${a#-}
+          # an unlisted long option may be --verify, which turns the hook back on
+          --*) unlisted=1 loose=1 after=1 ;;
+          -?*) f=${a#-} seen=""
             while [ -n "$f" ]; do c=${f:0:1}; f=${f:1}
-              case "$c" in a) all=1 ;; n) nv=1 ;; [CFcmt]) [ -z "$f" ] && state=value; break ;; [uS]) break ;; [ioqsv]) ;; *) odd=1 ;; esac
+              case "$c" in a) all=1 ;; n) [ -n "$prev$seen" ] || noverify=1 ;; [CFcmt]) [ -z "$f" ] && state=value; break ;; [uS]) break ;; [eioqsv]) ;; *) unlisted=1 seen=1 after=1 ;; esac
             done ;;
           *) paths+=("$a") ;;
         esac ;;
     esac
   done
-  [ -n "$commit" ] || { [ "$state" = git ] && [ -n "$odd" ]; } || return 1
-  # fail closed (builder, 5 Nov): a flag outside the lists above, git's own or the commit's, counts as a build
-  [ -z "$odd" ] || return 0
-  [ -z "$nv" ] || return 1
+  if [ -z "$commit" ]; then
+    # a git run that commits nothing builds nothing, but for an alias, which may commit, and one with an unlisted word, failing closed
+    [ "$state" = git ] && [ -n "$verb$unlisted" ] || return 1
+    [ -n "$verb" ] && aliased "$verb" "$dir" && return 0
+    [ -z "$unlisted" ] || return 0
+    return 1
+  fi
+  # -n with every other word listed or an unlisted short letter after it runs no hook; any other unlisted word counts as a build, failing closed (builder, 5 Nov)
+  [ -z "$noverify" ] || [ -n "$loose" ] || return 1
+  [ -z "$unlisted" ] || return 0
   # only a repo whose own lefthook.yml pre-commit runs a build builds on commit (the dispatcher, 4 Nov: another repo's lint-staged commit sat 65 min in the big-run queue for a 1 s job)
   top=$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)
   awk '/^[^ #]/ { pre = ($0 ~ /^pre-commit:/) } pre && /^ +(- )?run:.* run build([ "'"'"']|$)/ { found = 1 } END { exit !found }' \
     "$top/lefthook.yml" 2>/dev/null || return 1
   files=$({ git ${dir:+-C "$dir"} diff --cached --name-only; [ -z "$all" ] || git ${dir:+-C "$dir"} diff --name-only
     [ ${#paths[@]} -eq 0 ] || git ${dir:+-C "$dir"} diff --name-only HEAD -- "${paths[@]}"
-    [ -z "$CHAIN_ADD_ALL" ] || { git ${dir:+-C "$dir"} diff --name-only; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name :/; }
+    [ -z "$CHAIN_ADD_ALL$CHAIN_ADD_TRACKED" ] || git ${dir:+-C "$dir"} diff --name-only
+    [ -z "$CHAIN_ADD_ALL" ] || git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name :/
     [ ${#CHAIN_ADD[@]} -eq 0 ] || { git ${dir:+-C "$dir"} diff --name-only -- "${CHAIN_ADD[@]}"; git ${dir:+-C "$dir"} ls-files --others --exclude-standard --full-name -- "${CHAIN_ADD[@]}"; }; } 2>/dev/null)
   grep -Evq '^$|\.md$|^tests/.*\.py$' <<<"$files" || return 1
   grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$' <<<"$files" || return 1
-  # a build turbo replays whole from its cache runs in seconds, so only one with a task to run counts big (5 Nov: under run-slot, commit-slot.ts
-  # runs the build bare inside the commit's own slot, so a big one stays in the queue); the cache folder is lefthook.yml's pre-commit default
+  # a build turbo replays whole from its cache runs in seconds, so only one with a task to run counts big (5 Nov: under run-slot, commit-slot.ts runs the build bare inside the commit's own slot, so a big one stays in the queue); the cache folder is lefthook.yml's pre-commit default
   ! turbo_cached build "$top" "TURBO_CACHE_DIR=${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" ${vars[@]+"${vars[@]}"}
 }
 # a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
