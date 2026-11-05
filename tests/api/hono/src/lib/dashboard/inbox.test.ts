@@ -3095,6 +3095,44 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     })
   })
 
+  describe("a post and its later writes, stamped by one clock (#1034)", () => {
+    const at = new Date("2026-10-26T06:00:00.000Z")
+    const plus = (ms: number) => new Date(at.getTime() + ms)
+    const postAt = async (now: Date) => {
+      const posted = await store.postItem(db, decision(PREVIEWS.delete), undefined, now)
+      if (!posted.ok) throw new Error(posted.message)
+      return posted.item
+    }
+
+    test("a post takes createdAt and updatedAt from its own now", async () => {
+      const posted = await postAt(at)
+      expect([posted.createdAt, posted.updatedAt]).toEqual([at.toISOString(), at.toISOString()])
+      await store.settleItem(db, posted.id)
+    })
+
+    test("an edit 999 ms and 1000 ms after its post stores exactly that gap, the one changedAt's threshold reads", async () => {
+      for (const ms of [999, 1000]) {
+        const posted = await postAt(at)
+        const edited = await store.editItem(
+          db,
+          posted.id,
+          { ...decision(PREVIEWS.delete), title: "Ship canary to main tonight?" },
+          plus(ms),
+        )
+        if (!edited.ok) throw new Error(edited.message)
+        expect(Date.parse(edited.item.updatedAt) - Date.parse(edited.item.createdAt)).toBe(ms)
+        await store.settleItem(db, posted.id)
+      }
+    })
+
+    test("quietIds holds a post from focus's start on, and none from the millisecond before", async () => {
+      const before = await postAt(plus(-1))
+      const from = await postAt(at)
+      expect(quietIds([before, from], { since: at.toISOString() })).toEqual([from.id])
+      await store.dismissItems(db, [before.id, from.id])
+    })
+  })
+
   test("an answer to a poster that is live goes to the poster alone", async () => {
     const posted = await post({
       from: "worker-eod",
