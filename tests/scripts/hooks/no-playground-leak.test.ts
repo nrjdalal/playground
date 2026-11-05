@@ -1366,6 +1366,23 @@ describe("an org whose extension gates its Slack sends", () => {
           env,
         ),
       ).toContain("slack.gatedSends")
+      // every other Slack URL is refused: an incoming webhook, a path that is not /api/<method>, a host behind user info or a trailing dot
+      for (const write of [
+        "curl -X POST -H 'Content-type: application/json' -d '{\"text\":\"hi\"}' https://hooks.slack.com/services/T0AAA/B0BBB/XXXX",
+        "curl -d channel=C0OTHER001 -d text=hi https://slack.com//api/chat.postMessage",
+        "curl -d channel=C0OTHER001 -d text=hi https://slack.com/api/conversations.history/../chat.postMessage",
+        // joined, so the user info does not read as an address
+        [
+          "curl -d channel=C0OTHER001 -d text=hi https://x:y",
+          "slack.com/api/chat.postMessage",
+        ].join("@"),
+        "curl -d channel=C0OTHER001 -d text=hi https://slack.com./api/chat.postMessage",
+        "curl -d channel=C0OTHER001 -d text=hi slack.com/api/chat.postMessage",
+      ])
+        expect([write, await asCurl(write, env)]).toEqual([
+          write,
+          expect.stringContaining("slack.gatedSends"),
+        ])
       expect(
         await asCurl(
           'curl -G -d channel=C0OTHER001 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/conversations.history',
@@ -1373,6 +1390,15 @@ describe("an org whose extension gates its Slack sends", () => {
         ),
       ).toBeUndefined()
     }
+    // the reads the firefighting watcher makes, and the token check, stay open under a gate
+    for (const env of [await gated(GATE), await gated({ servers: "slack-acme" })])
+      for (const read of [
+        'curl -G -d channel=C0OTHER001 -d limit=100 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/conversations.history',
+        'curl -G -d channel=C0OTHER001 -d ts=1.2 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/conversations.replies',
+        'curl -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/auth.test',
+        'curl -G -d query=PLAT-1 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/search.messages',
+      ])
+        expect([read, await asCurl(read, env)]).toEqual([read, undefined])
     expect(await asCurl(post, await gated(GATE))).toContain("the acme extension's post.ts")
     expect(
       await asCurl(post, {
@@ -1380,6 +1406,32 @@ describe("an org whose extension gates its Slack sends", () => {
         PLAYGROUND_DATA_DIR: join(config, "playground"),
       }),
     ).toBeUndefined()
+  })
+
+  test("leaves the declared send path's own run alone: the extension's post.ts posts its lines through its own client, and the MCP reads the watcher makes pass", async () => {
+    const env = await gated(GATE)
+    const asBash = (command: string) =>
+      check(
+        JSON.stringify({
+          cwd: dirs.lm,
+          hook_event_name: "PreToolUse",
+          tool_input: { command },
+          tool_name: "Bash",
+        }),
+        env,
+        undefined,
+        lists,
+      )
+    for (const run of [
+      "bun --no-env-file /Users/someone/.claude-ext/acme-blue/skills/templates/scripts/post.ts review-request --pr https://github.com/acme-blue/app/pull/7 --ticket ACME-1",
+      "bun --no-env-file /Users/someone/.claude-ext/acme-blue/skills/templates/scripts/post.ts triage-start --ticket ACME-1 --thread C0OTHER001/1.2",
+    ])
+      expect([run, await asBash(run)]).toEqual([run, undefined])
+    for (const [tool, input] of [
+      ["mcp__slack-acme__conversations_history", { channel: "C0OTHER001", limit: 100 }],
+      ["mcp__slack-acme__conversations_replies", { channel: "C0OTHER001", ts: "1.2" }],
+    ] as const)
+      expect(await mcp(tool, input, env)).toBeUndefined()
   })
 
   test("passes a post whose only destination is the self-DM, still judged by its text", async () => {

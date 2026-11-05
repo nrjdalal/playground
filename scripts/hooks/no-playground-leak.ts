@@ -884,14 +884,22 @@ function conversation(route: string): boolean {
   return segments[0] === "pulls" && !segments.some((s) => s === "merge" || s === "update-branch")
 }
 
+// A URL's host, lowercased, past any user info and with no trailing dot.
+const hostOf = (url: string): string | undefined =>
+  /^[a-z][a-z\d+.-]*:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i
+    .exec(url)?.[1]
+    ?.toLowerCase()
+    .replace(/\.+$/, "")
+const slackHost = (host: string | undefined): boolean =>
+  host === "slack.com" || !!host?.endsWith(".slack.com")
+
 // A URL on Linear's or Slack's API is a guarded org's; GitHub's API is judged by the repository in its path.
 function hostTarget(url: string): Target | undefined {
-  const host = /^[a-z][a-z\d+.-]*:\/\/([^/?#:]+)/i.exec(url)?.[1]?.toLowerCase()
+  const host = hostOf(url)
   if (!host || !policy.hosts) return
   if (host === "linear.app" || host.endsWith(".linear.app"))
     return { label: "Linear", where: "guarded" }
-  if (host === "slack.com" || host.endsWith(".slack.com"))
-    return { label: "Slack", where: "guarded" }
+  if (slackHost(host)) return { label: "Slack", where: "guarded" }
 }
 
 async function curl(
@@ -1371,23 +1379,24 @@ function gatedPost(
 const brokenGate = (what: string, gate: { broken: string; org: string }): string =>
   `no-playground-leak hook refused ${what}: the ${gate.org} extension's slack.gatedSends does not read (${gate.broken}), so the hook cannot tell which Slack writes its gate covers. Tell your lead: it is set in that extension's settings as {"path": "<its send path>", "selfDm": "D…", "servers": ["<MCP server>"]}, or "" for no gate; then run the call again.`
 
-// While any org gates its Slack sends, a curl that writes to Slack's API is refused, since the hook cannot tell which workspace its token posts to: a read method (conversations.history, users.info, search.messages) passes.
+// While any org gates its Slack sends, a curl to any Slack URL is refused, since the hook cannot tell which workspace its token posts to: only /api/<a read method> (conversations.history, users.info, search.messages) and /api/auth.test pass.
 const SLACK_READ_METHOD =
-  /^(?:search\.[a-z]+|(?:[a-z]+\.)+(?:history|info|list|replies|unreads|get[A-Za-z]*|lookup[A-Za-z]*))$/
+  /^(?:auth\.test|search\.[a-z]+|(?:[a-z]+\.)+(?:history|info|list|replies|unreads|get[A-Za-z]*|lookup[A-Za-z]*))$/
 function gatedCurl(urls: Word[]): string | undefined {
   const gates = policy.gates ?? []
   if (!gates.length) return
-  const methods = urls.map(
-    (u) =>
-      /^(?:[a-z][a-z\d+.-]*:\/\/)?(?:[^/?#]+\.)?slack\.com(?::\d+)?\/api\/([^/?#]*)/i.exec(
-        visible(u.value),
-      )?.[1],
-  )
-  if (methods.every((m) => m === undefined || SLACK_READ_METHOD.test(m))) return
+  const writes = urls.some((u) => {
+    const value = visible(u.value)
+    const url = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `http://${value}`
+    if (!slackHost(hostOf(url))) return false
+    const method = /^[a-z][a-z\d+.-]*:\/\/[^/?#]*\/api\/([^/?#]+)(?:[?#]|$)/i.exec(url)?.[1]
+    return !method || !SLACK_READ_METHOD.test(method)
+  })
+  if (!writes) return
   const broken = gates.find((g) => "broken" in g)
   if (broken && "broken" in broken) return brokenGate("curl", broken)
   const paths = gates.flatMap((g) => ("path" in g ? [`${g.org}'s ${g.path}`] : []))
-  return `no-playground-leak hook refused curl to Slack's API: an org gates its Slack sends (slack.gatedSends), so a Slack write goes through ${paths.join(" or ")}, and curl passes only a read method. Send it through that path.`
+  return `no-playground-leak hook refused curl to Slack's API: an org gates its Slack sends (slack.gatedSends), so a Slack write goes through ${paths.join(" or ")}, and curl passes only a read method on /api/. Send it through that path.`
 }
 
 function strings(node: unknown): string[] {

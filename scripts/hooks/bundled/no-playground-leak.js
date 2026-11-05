@@ -8299,13 +8299,15 @@ function conversation(route) {
     return true;
   return segments[0] === "pulls" && !segments.some((s) => s === "merge" || s === "update-branch");
 }
+var hostOf = (url) => /^[a-z][a-z\d+.-]*:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i.exec(url)?.[1]?.toLowerCase().replace(/\.+$/, "");
+var slackHost = (host) => host === "slack.com" || !!host?.endsWith(".slack.com");
 function hostTarget(url) {
-  const host = /^[a-z][a-z\d+.-]*:\/\/([^/?#:]+)/i.exec(url)?.[1]?.toLowerCase();
+  const host = hostOf(url);
   if (!host || !policy.hosts)
     return;
   if (host === "linear.app" || host.endsWith(".linear.app"))
     return { label: "Linear", where: "guarded" };
-  if (host === "slack.com" || host.endsWith(".slack.com"))
+  if (slackHost(host))
     return { label: "Slack", where: "guarded" };
 }
 async function curl(args, cmd, env, xargs) {
@@ -8685,19 +8687,26 @@ function gatedPost(tool, server, name, input) {
   }
 }
 var brokenGate = (what, gate) => `no-playground-leak hook refused ${what}: the ${gate.org} extension's slack.gatedSends does not read (${gate.broken}), so the hook cannot tell which Slack writes its gate covers. Tell your lead: it is set in that extension's settings as {"path": "<its send path>", "selfDm": "D\u2026", "servers": ["<MCP server>"]}, or "" for no gate; then run the call again.`;
-var SLACK_READ_METHOD = /^(?:search\.[a-z]+|(?:[a-z]+\.)+(?:history|info|list|replies|unreads|get[A-Za-z]*|lookup[A-Za-z]*))$/;
+var SLACK_READ_METHOD = /^(?:auth\.test|search\.[a-z]+|(?:[a-z]+\.)+(?:history|info|list|replies|unreads|get[A-Za-z]*|lookup[A-Za-z]*))$/;
 function gatedCurl(urls) {
   const gates = policy.gates ?? [];
   if (!gates.length)
     return;
-  const methods = urls.map((u) => /^(?:[a-z][a-z\d+.-]*:\/\/)?(?:[^/?#]+\.)?slack\.com(?::\d+)?\/api\/([^/?#]*)/i.exec(visible(u.value))?.[1]);
-  if (methods.every((m) => m === undefined || SLACK_READ_METHOD.test(m)))
+  const writes = urls.some((u) => {
+    const value = visible(u.value);
+    const url = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `http://${value}`;
+    if (!slackHost(hostOf(url)))
+      return false;
+    const method = /^[a-z][a-z\d+.-]*:\/\/[^/?#]*\/api\/([^/?#]+)(?:[?#]|$)/i.exec(url)?.[1];
+    return !method || !SLACK_READ_METHOD.test(method);
+  });
+  if (!writes)
     return;
   const broken = gates.find((g) => ("broken" in g));
   if (broken && "broken" in broken)
     return brokenGate("curl", broken);
   const paths = gates.flatMap((g) => ("path" in g) ? [`${g.org}'s ${g.path}`] : []);
-  return `no-playground-leak hook refused curl to Slack's API: an org gates its Slack sends (slack.gatedSends), so a Slack write goes through ${paths.join(" or ")}, and curl passes only a read method. Send it through that path.`;
+  return `no-playground-leak hook refused curl to Slack's API: an org gates its Slack sends (slack.gatedSends), so a Slack write goes through ${paths.join(" or ")}, and curl passes only a read method on /api/. Send it through that path.`;
 }
 function strings(node) {
   if (typeof node === "string")
