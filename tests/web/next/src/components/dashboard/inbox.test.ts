@@ -268,8 +268,8 @@ describe("one action where two overlapped, and Draft where the app has a draft A
   test("a card's answer names the updatedAt it showed, so the API refuses one to words its poster edited since", () => {
     const card = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
     const client = readFileSync(join(web, "src/lib/inbox.ts"), "utf8")
-    expect(card).toContain("answerItem(item, action, text, note.trim() || undefined)")
-    expect(client).toContain("json: { action, note, seen: updatedAt, text }")
+    expect(card).toContain("answerItem(item, action, text, note.trim() || undefined, option)")
+    expect(client).toContain("json: { action, note, option, seen: updatedAt, text }")
   })
 
   test("an unread update's line ends in a single tick, Mark as read; once read, a muted double tick named Read, folded, its row keeping Dismiss (#882)", () => {
@@ -1270,8 +1270,8 @@ describe("every kind of card on the Questionnaire", () => {
     )
   })
 
-  test("the footer sits outside the form, so a key pressed on its buttons or its time field never submits the question", () => {
-    for (const html of [render(false), render(false, draft), render(false, failed)]) {
+  test("a card but an open decision keeps its footer outside the form, so a key pressed on its buttons or its time field never submits the question", () => {
+    for (const html of [render(false, draft), render(false, failed)]) {
       const [inside, outside] = html.split("</form>")
       expect(inside).not.toContain('data-slot="card-footer"')
       expect(outside).toContain('data-slot="card-footer"')
