@@ -28,6 +28,14 @@ describe("the hosted dashboard is read-only", () => {
     const writes: [string, string][] = [
       ["app-sidebar.tsx", "i === 0 && !muted && !config.hosted ? ("],
       ["app-sidebar.tsx", "!message || config.hosted) return null"],
+      ["app-sidebar.tsx", "{!config.hosted && (\n          <ContextMenuContent>"],
+      ["app-sidebar.tsx", ") : muted || config.hosted ? ("],
+      ["app-sidebar.tsx", "{!config.hosted && (\n                <DropdownMenu>"],
+      ["thread-view.tsx", "if (unread === 0 || config.hosted) return"],
+      [
+        "../../plugins/changelog/view.tsx",
+        "const mark = config.hosted ? null : seenMark(newest, seenAt)",
+      ],
       ["dashboard-view.tsx", "{list.start && config.hosted && <ReadOnlyLine />}"],
       ["login-expired.tsx", '<ReadOnlyLine className="mt-2" />'],
       ["needs-you-card.tsx", "if (config.hosted) return READ_ONLY_LINE"],

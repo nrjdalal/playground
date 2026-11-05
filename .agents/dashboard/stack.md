@@ -133,7 +133,7 @@
   `RelayGate` reads the status again the moment the tab becomes visible, and counts an offline answer or a failed read only once a second read a second later agrees (`confirmedStatus`, `gateView` in `web/next/src/lib/relay.ts`), so one answer from an instance still connecting, or one left from before the tab was hidden, never shows the line.
   The relayed dashboard is read-only: it shows no composer and no write button (the Inbox's answers, read ticks and shelf buttons included), and one line, "Read-only on Yard: send from your Mac" (`READ_ONLY_LINE`, `ReadOnlyLine`), stands in the composer's place, at the Inbox's top and on Settings.
   Settings keeps its Remote section alone there, since a pair request is the one frame a browser sends besides a read.
-  Its outbox fails each message it holds at once with that line as its reason, and never sends or retries one (`readOnly` on `DashboardChats` in `web/next/src/lib/chat.ts`).
+  The sidebar draws no thread menu and no Orchestrators order there, and an opened thread or the Changelog leaves its read mark to this Mac.
   With `KV_URL` set, a read or a status call on any instance reaches the one holding the Mac's socket over Redis pub/sub, in transit alone, on its own `relay` channel through the code Yard's socket uses (`redisChannel` in `api/hono/src/lib/yard/channel.ts`),
   and reads offline when no instance acks it within `RELAY_ACK_MS` of the message reaching the bus, so a cold instance's first Redis connect spends none of the wait;
   a socket's close tells the other instances it is gone only when no instance answers a ping in that time, so a Mac that moved its socket to another instance stays online; with none, the hub reaches only its own instance's sockets.

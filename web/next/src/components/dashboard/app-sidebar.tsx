@@ -1425,17 +1425,20 @@ function ManagersGroup({
           <LabelChevron open={open} />
           <GroupCount count={count} />
         </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuGroup>
-            <ContextMenuItem
-              className="text-xs"
-              disabled={managers.order.length === 0}
-              onClick={managers.reset}
-            >
-              Reset order to A to Z
-            </ContextMenuItem>
-          </ContextMenuGroup>
-        </ContextMenuContent>
+        {/* the order is a write, so the hosted build keeps A to Z with no Reset and no drag */}
+        {!config.hosted && (
+          <ContextMenuContent>
+            <ContextMenuGroup>
+              <ContextMenuItem
+                className="text-xs"
+                disabled={managers.order.length === 0}
+                onClick={managers.reset}
+              >
+                Reset order to A to Z
+              </ContextMenuItem>
+            </ContextMenuGroup>
+          </ContextMenuContent>
+        )}
       </ContextMenu>
       <SidebarMenu
         aria-busy={muted || undefined}
@@ -1453,7 +1456,7 @@ function ManagersGroup({
               <span>None running</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
-        ) : muted ? (
+        ) : muted || config.hosted ? (
           sessions.map((worker) => row(worker, membersOf(worker)))
         ) : (
           <DndContext
@@ -2067,35 +2070,42 @@ export function ThreadsGroup({
                   {countLabel(thread.unread)}
                 </SidebarMenuBadge>
               )}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <SidebarMenuAction
-                      showOnHover
-                      aria-label={`More for ${thread.title}`}
-                      className={cn(
-                        "right-1.5",
-                        thread.unread > 0 && "max-md:right-7",
-                        capped && "max-md:right-10",
-                      )}
-                    />
-                  }
-                >
-                  <RiMoreLine />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="right">
-                  {threadActions(thread).map(({ label, patch }) => (
-                    <DropdownMenuItem
-                      key={label}
-                      onClick={() =>
-                        runAction(thread, { label, patch }, { patch: onPatch, rename: setRenaming })
-                      }
-                    >
-                      {label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {/* each of its actions is a write, so the hosted build draws no menu */}
+              {!config.hosted && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <SidebarMenuAction
+                        showOnHover
+                        aria-label={`More for ${thread.title}`}
+                        className={cn(
+                          "right-1.5",
+                          thread.unread > 0 && "max-md:right-7",
+                          capped && "max-md:right-10",
+                        )}
+                      />
+                    }
+                  >
+                    <RiMoreLine />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" side="right">
+                    {threadActions(thread).map(({ label, patch }) => (
+                      <DropdownMenuItem
+                        key={label}
+                        onClick={() =>
+                          runAction(
+                            thread,
+                            { label, patch },
+                            { patch: onPatch, rename: setRenaming },
+                          )
+                        }
+                      >
+                        {label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </SidebarMenuItem>
           )
         })}
