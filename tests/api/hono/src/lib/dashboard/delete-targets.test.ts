@@ -15,6 +15,8 @@ const deps = (there: string[]): TargetDeps => ({
   worktrees: WORKTREES,
 })
 const MACHINE = deps([
+  "/repo/.claude",
+  WORKTREES,
   `${WORKTREES}/PG-882-before`,
   "/repo/.claude/worktrees/PG-1-mine/scratch/old-copy",
   "/home/me/.cache/old",
