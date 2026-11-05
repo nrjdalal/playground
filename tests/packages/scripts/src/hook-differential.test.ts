@@ -346,7 +346,7 @@ describe("a stored result", () => {
   test.each([
     ["--fresh", ["--fresh"], new Date().toISOString()],
     ["a result over 24 h old", [], "2000-01-01T00:00:00.000Z"],
-  ])("%s runs fresh through a run-slot ticket", (_, more, iso) => {
+  ])("%s runs fresh through a run-slot ticket", async (_, more, iso) => {
     const at = home(`fresh-${more.length}`)
     const { forms, root, sha } = repo(`fresh-${more.length}-repo`)
     const key = keyOf({
@@ -355,7 +355,7 @@ describe("a stored result", () => {
       projects: join(at, ".claude", "projects"),
       root,
     })!
-    store(join(at, ".playground"), key, { changed: [], counts: ["stored"] })
+    await store(join(at, ".playground"), key, { changed: [], counts: ["stored"] })
     const path = resultPath(join(at, ".playground"), key.key)
     writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), at: iso }))
     const second = run(at, root, args(forms, ...more))
@@ -363,11 +363,52 @@ describe("a stored result", () => {
     expect(readFileSync(join(at, "tickets"), "utf8")).toContain(`-- bun ${SCRIPT} sweep`)
   })
 
-  test("a result is read back while it is under a day old", () => {
+  test("a result is read back while it is under a day old", async () => {
     const data = join(DIR, "data")
-    store(data, { canary: "c", head: "h", key: "k" }, { changed: [], counts: ["a"] })
-    const at = Date.parse(stored(data, "k")!.at)
-    expect(stored(data, "k", at + 23 * 3600_000)?.counts).toEqual(["a"])
-    expect(stored(data, "k", at + 24 * 3600_000)).toBeUndefined()
+    await store(
+      data,
+      { canary: "c", head: "h", input: "i", key: "k" },
+      { changed: [], counts: ["a"] },
+    )
+    const at = Date.parse((await stored(data, "k"))!.at)
+    expect((await stored(data, "k", at + 23 * 3600_000))?.counts).toEqual(["a"])
+    expect(await stored(data, "k", at + 24 * 3600_000)).toBeUndefined()
+  })
+
+  test("a run after a committed one-byte change runs fresh through a run-slot ticket", () => {
+    const at = home("committed")
+    const { forms, root } = repo("committed-repo")
+    expect(run(at, root, args(forms), { RUN_SLOT_NICE: "10" }).exitCode).toBe(0)
+    const hook = join(root, "scripts", "hooks", "x.ts")
+    writeFileSync(hook, `${readFileSync(hook, "utf8")} `)
+    git(root, "commit", "-qam", "one byte")
+    expect(run(at, root, args(forms)).stdout.toString()).not.toContain("reused:")
+    expect(readFileSync(join(at, "tickets"), "utf8")).toContain(`-- bun ${SCRIPT} sweep`)
+  })
+
+  test("a run whose worktree changes while it runs stores nothing, so the next run at the clean head runs fresh", () => {
+    const at = home("moved-mid-run")
+    const { forms, root } = repo("moved-mid-run-repo")
+    const hook = join(root, "scripts", "hooks", "x.ts")
+    // canary's hook, imported mid-run, stands in for an edit made while the run is in flight
+    writeFileSync(
+      hook,
+      `import { writeFileSync } from "node:fs"\nif (process.env.RACE_TARGET) writeFileSync(process.env.RACE_TARGET, "export const check = () => undefined\\n")\nexport const check = () => "refused"\n`,
+    )
+    git(root, "commit", "-qam", "canary")
+    writeFileSync(
+      hook,
+      `export const check = (raw: string) => (raw.includes("ALLOW") ? undefined : "refused")\n`,
+    )
+    git(root, "commit", "-qam", "head")
+    const sweepAt = (...more: string[]) =>
+      args(forms, ...more).map((a) => (a === "HEAD" ? "HEAD~1" : a))
+    const first = run(at, root, sweepAt(), { RACE_TARGET: hook, RUN_SLOT_NICE: "10" })
+    expect(first.exitCode).toBe(0)
+    expect(git(root, "status", "--porcelain")).not.toBe("")
+    git(root, "checkout", "--", ".")
+    expect(existsSync(join(at, ".playground", "hook-differential", "results"))).toBe(false)
+    expect(run(at, root, sweepAt()).stdout.toString()).not.toContain("reused:")
+    expect(readFileSync(join(at, "tickets"), "utf8")).toContain(`-- bun ${SCRIPT} sweep`)
   })
 })

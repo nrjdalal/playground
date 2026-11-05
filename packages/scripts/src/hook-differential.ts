@@ -5,13 +5,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  readFileSync,
   renameSync,
   statSync,
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { join, resolve } from "node:path"
 
 import { dataDirOf } from "@packages/env/data-dir"
 
@@ -225,7 +224,16 @@ const newest = (projects: string) =>
       )
     : 0
 
-type Key = { canary: string; head: string; key: string }
+type Key = { canary: string; head: string; input: string; key: string }
+
+// The head's tree when the worktree has no modified or untracked file
+const cleanTree = (root: string) =>
+  git(root, ["status", "--porcelain", "--untracked-files=all"]) === ""
+    ? git(root, ["rev-parse", "HEAD^{tree}"])
+    : undefined
+
+const formsBlob = (root: string, options: Options) =>
+  git(root, ["hash-object", resolve(options.formsAt!)])
 
 // A run's key: the head's tree at a clean worktree, the canary sha, the mode with its inputs (the forms module's blob, or the hours and the newest transcript) and the sorted hooks; a worktree with any modified or untracked file has none
 export function keyOf({
@@ -239,18 +247,21 @@ export function keyOf({
   projects: string
   root: string
 }): Key | undefined {
-  if (git(root, ["status", "--porcelain", "--untracked-files=all"]) !== "") return undefined
-  const head = git(root, ["rev-parse", "HEAD^{tree}"])
+  const head = cleanTree(root)
+  if (!head) return undefined
   const input =
-    options.mode === "sweep"
-      ? git(root, ["hash-object", resolve(options.formsAt!)])
-      : `${options.hours}:${newest(projects)}`
+    options.mode === "sweep" ? formsBlob(root, options) : `${options.hours}:${newest(projects)}`
   const key = new Bun.CryptoHasher("sha256")
     .update(JSON.stringify([head, canary, options.mode, input, options.hooks.toSorted()]))
     .digest("hex")
     .slice(0, 16)
-  return { canary, head, key }
+  return { canary, head, input, key }
 }
+
+// Whether the worktree is still clean at the key's tree, and a sweep's forms module still the key's blob, so a run whose inputs moved under it stores nothing
+export const unmoved = (root: string, found: Key, options: Options) =>
+  cleanTree(root) === found.head &&
+  (options.mode !== "sweep" || formsBlob(root, options) === found.input)
 
 type Result = { at: string; canary: string; changed: string[]; counts: string[]; head: string }
 
@@ -258,17 +269,26 @@ export const resultPath = (data: string, key: string) =>
   join(data, "hook-differential", "results", `${key}.json`)
 
 // The result stored under the key, while it is under a day old
-export function stored(data: string, key: string, now = Date.now()): Result | undefined {
-  const path = resultPath(data, key)
-  if (!existsSync(path)) return undefined
-  const result: Result = JSON.parse(readFileSync(path, "utf8"))
+export async function stored(
+  data: string,
+  key: string,
+  now = Date.now(),
+): Promise<Result | undefined> {
+  const file = Bun.file(resultPath(data, key))
+  if (!(await file.exists())) return undefined
+  const result: Result = await file.json()
   return now - Date.parse(result.at) < DAY ? result : undefined
 }
 
-export function store(data: string, { key, ...base }: Key, result: Omit<Result, keyof Key | "at">) {
-  const path = resultPath(data, key)
-  mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, JSON.stringify({ at: new Date().toISOString(), ...base, ...result }))
+export async function store(
+  data: string,
+  { canary, head, key }: Key,
+  result: Pick<Result, "changed" | "counts">,
+) {
+  await Bun.write(
+    resultPath(data, key),
+    JSON.stringify({ at: new Date().toISOString(), canary, head, ...result }),
+  )
 }
 
 const projectsOf = (env: Record<string, string | undefined>, home: string) =>
@@ -278,7 +298,7 @@ const commitOf = (root: string, ref: string) =>
   git(root, ["rev-parse", "--verify", `${ref}^{commit}`])
 
 // The stored result a run with these options would reproduce, printed under its `reused:` line; false when it runs fresh
-export function reuse(args: string[], cwd: string, env: Record<string, string | undefined>) {
+export async function reuse(args: string[], cwd: string, env: Record<string, string | undefined>) {
   const options = parse(args)
   if (!options || options.fresh) return false
   const home = env.HOME || homedir()
@@ -288,7 +308,7 @@ export function reuse(args: string[], cwd: string, env: Record<string, string | 
     const root = git(cwd, ["rev-parse", "--show-toplevel"])
     const canary = commitOf(root, options.ref)
     found = keyOf({ canary, options, projects: projectsOf(env, home), root })
-    result = found && stored(dataDirOf(env, home), found.key)
+    result = found && (await stored(dataDirOf(env, home), found.key))
   } catch {
     return false
   }
@@ -315,14 +335,14 @@ async function main(args: string[]): Promise<number> {
     return 2
   }
   const home = process.env.HOME || homedir()
+  const sha = commitOf(root, ref)
+  const projects = projectsOf(process.env, home)
+  const found = keyOf({ canary: sha, options, projects, root })
   const forms: Form[] = formsAt ? (await import(resolve(formsAt))).forms : []
   if (mode === "sweep" && !Array.isArray(forms)) {
     console.error(`hook-differential: the --forms module exports no forms array\n${USAGE}`)
     return 2
   }
-  const sha = commitOf(root, ref)
-  const projects = projectsOf(process.env, home)
-  const found = keyOf({ canary: sha, options, projects, root })
   const before = canaryTree({
     base: join(tmpdir(), "hook-differential"),
     root,
@@ -351,12 +371,13 @@ async function main(args: string[]): Promise<number> {
       console.error(result.changed.at(-1))
     }
   }
-  if (found) store(dataDirOf(process.env, home), found, result)
+  if (found && unmoved(root, found, options))
+    await store(dataDirOf(process.env, home), found, result)
   return 0
 }
 
 if (import.meta.main) {
-  if (reuse(process.argv.slice(2), process.cwd(), process.env)) process.exit(0)
+  if (await reuse(process.argv.slice(2), process.cwd(), process.env)) process.exit(0)
   const home = process.env.HOME || homedir()
   const argv = routed({
     argv: ["bun", import.meta.path, ...process.argv.slice(2)],
