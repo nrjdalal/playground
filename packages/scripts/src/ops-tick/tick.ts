@@ -19,6 +19,7 @@ import {
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { pending } from "../ops-outbox/drain"
+import { focusCard } from "../playground/focus"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
 import { guardProbe } from "./guard-probe"
@@ -129,8 +130,12 @@ const loadReport = async (ctx: Context): Promise<string[]> =>
     .slice(0, 4)
     .map(({ command, cpu, pid }) => `${command} pid ${pid}: ${Math.round(cpu)}% CPU`)
 
-// Posts one Inbox alert update under the ops manager's name with bun run ask, and answers its item's id.
-const postAlert = async (ctx: Context, title: string): Promise<{ by: string; id: string }> => {
+// Posts one Inbox alert update under the ops manager's name with bun run ask, its text the line that links where the owner looks next, and answers its item's id.
+const postAlert = async (
+  ctx: Context,
+  title: string,
+  text: string,
+): Promise<{ by: string; id: string }> => {
   const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
     agents?: unknown
   } | null
@@ -138,7 +143,7 @@ const postAlert = async (ctx: Context, title: string): Promise<{ by: string; id:
   const posted = await ctx.run(
     ["bun", "run", "--cwd", ctx.repo, "ask", "new"],
     120_000,
-    JSON.stringify({ from: by, kind: "update", preview: { outcome: "alert" }, title }),
+    JSON.stringify({ from: by, kind: "update", preview: { outcome: "alert", text }, title }),
   )
   const id = lines(posted.out)
     .map((l) => l.trim())
@@ -147,13 +152,28 @@ const postAlert = async (ctx: Context, title: string): Promise<{ by: string; id:
   return { by, id }
 }
 
+// Once focus has ended, by off or at its end, one Inbox update under the ops manager's name names what queued while it stood (focusCard)
+const focusCardBeat = async (ctx: Context) => {
+  await focusCard(join(ctx.ops, ".."), ctx.now, async (card) => {
+    const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+      agents?: unknown
+    } | null
+    const posted = await ctx.run(
+      ["bun", "run", "--cwd", ctx.repo, "ask", "new"],
+      120_000,
+      JSON.stringify({ from: managerOf(roster?.agents, "ops"), ...card }),
+    )
+    if (posted.code !== 0) throw new Error(`bun run ask new: ${lines(posted.out).at(-1)}`)
+  })
+}
+
 // The usage marks, the login flip, the load, the train's slot wait and the near-limit marks, each routed as the old tick routed it.
 const tick = async (ctx: Context) => {
   const marks = lines((await python(ctx, "usage/week-marks.py", false)).out)
   for (const line of marks.filter((l) => l.includes("ALERT"))) {
     // an alert that fails to post is named to the builder beside its line, which prints once a week and so goes out either way
     if (/ALERT 9[78]\b/.test(line))
-      await postAlert(ctx, line).catch((error: Error) =>
+      await postAlert(ctx, line, USAGE_LINK).catch((error: Error) =>
         ctx.send("builder", `Inbox alert not posted: ${error.message}`),
       )
     await ctx.send("builder", line)
@@ -595,6 +615,14 @@ const neverRanSince = async (ctx: Context, outbox: string): Promise<string | und
   return ctx.now.toISOString()
 }
 
+// The week-usage alert's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
+export const USAGE_LINK = "- 💰 Each account's week shows on the [System page](/dashboard/system)."
+// Pure: the relay-down alert's link line, naming the row that relays on this machine: the relay runner under AI Runners, else Ops under Orchestrators, whose sweep relays.
+export const relayLink = (relay: boolean): string =>
+  relay
+    ? `- 🔎 The relay's row is under AI Runners in the sidebar (${RELAY} on hover), and this Mac's state is on the [System page](/dashboard/system).`
+    : "- 🔎 Ops' row is under Orchestrators in the sidebar, since its sweep relays here, and this Mac's state is on the [System page](/dashboard/system)."
+
 // The Inbox alert's title: the relay's own on a machine that runs it, else the sweep's, each with the next step and naming only what this machine runs.
 const relayDown = (relay: boolean, moved: number): string => {
   const since = moved ? `since ${isoSeconds(new Date(moved))}` : "since the watch began"
@@ -647,7 +675,7 @@ const relayWatch = async (ctx: Context) => {
   }
   const relay = await hasRelay(ctx)
   if (ctx.now.getTime() - since < 2 * (relay ? RELAY_CYCLE_MS : SWEEP_CYCLE_MS)) return
-  const { by, id } = await postAlert(ctx, relayDown(relay, moved))
+  const { by, id } = await postAlert(ctx, relayDown(relay, moved), relayLink(relay))
   await writeAtomic(
     statePath,
     JSON.stringify({ at: ctx.now.toISOString(), by, id, pendingSince: state?.pendingSince }),
@@ -675,6 +703,7 @@ export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
   { cron: "*/5 * * * *", name: "relay-watch", run: relayWatch, to: "the Inbox, by bun run ask" },
   { cron: "*/10 * * * *", name: "guard-probe", run: guardProbe, to: "dispatcher" },
+  { cron: "* * * * *", name: "focus-card", run: focusCardBeat, to: "the Inbox, by bun run ask" },
   {
     cron: "* * * * *",
     name: "dashboard-watch",

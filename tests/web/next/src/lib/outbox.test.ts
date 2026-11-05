@@ -10,6 +10,7 @@ import {
   failWithFiles,
   findDelivery,
   isNext,
+  landed,
   MAX_ATTEMPTS,
   matchDeliveries,
   nextToSend,
@@ -657,6 +658,47 @@ describe("delivery", () => {
     expect(matchDeliveries([typed], entries, { id: "s-2", name: "dispatcher" })).toEqual([])
     expect(matchDeliveries([typed], entries, null)).toEqual([])
     expect(matchDeliveries([{ ...typed, sessionId: null }], entries, SESSION)).toEqual([])
+  })
+
+  // herdr answers a send only once the box settles, so the transcript can hold the message while its request still runs: its pending copy goes as the line lands, not when the answer comes
+  test("a message still sending is delivered by its entry in the session it was sent to, and a late answer leaves it delivered", () => {
+    const sending = message("a", { at: T0, state: "sending", text: held })
+    const entry = human("e1", "2026-10-06T00:00:01.000Z", held)
+    expect(matchDeliveries([sending], [entry], SESSION)).toEqual([
+      { at: entry.at, entryId: "e1", id: "a" },
+    ])
+    expect(matchDeliveries([{ ...sending, to: "builder" }], [entry], SESSION)).toEqual([])
+    expect(
+      matchDeliveries([sending], [human("e0", "2026-10-05T23:59:59.000Z", held)], SESSION),
+    ).toEqual([])
+    const delivered = outboxReducer([sending], {
+      at: entry.at,
+      entryId: "e1",
+      id: "a",
+      type: "delivered",
+    })
+    // it keeps sending, so the session's next message waits for this answer, while its line stands in for its pending copy
+    expect(delivered[0]).toMatchObject({ entryId: "e1", state: "sending" })
+    expect(landed(delivered[0]!)).toBe(true)
+    expect(landed(sending)).toBe(false)
+    expect(matchDeliveries(delivered, [entry], SESSION)).toEqual([])
+    const queued = message("b", { at: "2026-10-06T00:00:02.000Z", text: "next" })
+    expect(nextToSend([...delivered, queued], "dispatcher", Date.parse(T0))).toBeNull()
+    const answered = outboxReducer(delivered, {
+      at: "2026-10-06T00:00:04.000Z",
+      id: "a",
+      sessionId: "s-1",
+      type: "typed",
+    })
+    expect(answered[0]).toMatchObject({ entryId: "e1", sessionId: "s-1", state: "delivered" })
+    expect(nextToSend([...answered, queued], "dispatcher", Date.parse(T0))?.id).toBe("b")
+    const refused = outboxReducer(delivered, {
+      code: "INTERRUPTED",
+      id: "a",
+      reason: "cut",
+      type: "fail",
+    })
+    expect(refused[0]?.state).toBe("delivered")
   })
 
   test("a message with files is delivered by an entry with its words and the same files, files alone included", () => {

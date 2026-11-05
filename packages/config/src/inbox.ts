@@ -73,5 +73,109 @@ export const payloadOf = (line: string): AnswerPayload | null => {
   }
 }
 
+// A decision's options as its card shows them and its answer names them: a go row carries the decision out, the no-go row (always last) declines it.
+export type ChoiceRow = {
+  description?: string
+  go: boolean
+  index: number
+  label: string
+  letter: string
+}
+
+// yes-no: one go row and its no, Approve and Deny with their own labels; letters: two or more go rows, A to E, then None of these.
+export type Choices = { rows: ChoiceRow[]; shape: "letters" | "yes-no" }
+
+// The most go rows a decision offers, A to E.
+export const MAX_OPTIONS = 5
+
+// What choicesOf reads of a decision's preview: an ask's own options or labels, and the fields a typed decision's default labels name.
+export type ChoicePreview =
+  | {
+      approve?: string
+      deny?: string
+      options?: { description?: string; label: string }[]
+      type: "ask"
+    }
+  | { key: string; kind: string; type: "accept" }
+  | { app: string; change: "add" | "remove"; type: "apps" }
+  | { amount: string; type: "budget" }
+  | { type: "delete" }
+  | { permission: string; type: "grant" }
+  | { type: "schema" }
+  | { type: "secret" }
+  | { sha: string; type: "ship" }
+  | { to: string; type: "slack" }
+  | { team: string; type: "ticket" }
+
+// Pure: a typed decision's default go and no-go labels, one map for every type a poster labels no options on.
+const defaultLabels = (
+  preview: Exclude<ChoicePreview, { type: "ask" } | { type: "secret" }>,
+): [string, string] => {
+  switch (preview.type) {
+    case "accept":
+      return [`Accept the ${preview.kind} ${preview.key}`, "Leave it unaccepted"]
+    case "apps":
+      return [
+        `${preview.change === "add" ? "Add" : "Remove"} ${preview.app}`,
+        "Keep the list as it is",
+      ]
+    case "budget":
+      return [`Spend ${preview.amount}`, "Do not spend it"]
+    case "delete":
+      return ["Delete it", "Keep it"]
+    case "grant":
+      return [`Open the ${preview.permission} settings`, "Not now"]
+    case "schema":
+      return ["Apply this schema", "Do not apply it"]
+    case "ship":
+      return [`Ship ${preview.sha.slice(0, 7)} to main`, "Hold the ship"]
+    case "slack":
+      return [`Send it to ${preview.to}`, "Do not send it"]
+    case "ticket":
+      return [`File it in ${preview.team}`, "Do not file it"]
+  }
+}
+
+// Pure: an option's letter, A for the first row.
+export const optionLetter = (index: number): string => String.fromCharCode(65 + index)
+
+// Pure: a decision's rows, its go rows then its no-go row, each lettered by place; null for a secret, which takes a value instead.
+export function choicesOf(preview: ChoicePreview): Choices | null {
+  if (preview.type === "secret") return null
+  if (preview.type !== "ask") {
+    const [go, no] = defaultLabels(preview)
+    return {
+      rows: lettered([
+        { go: true, label: go },
+        { go: false, label: no },
+      ]),
+      shape: "yes-no",
+    }
+  }
+  const go = preview.options ?? [{ label: preview.approve ?? "Approve" }]
+  const shape = go.length > 1 ? "letters" : "yes-no"
+  const no = preview.deny ?? (shape === "letters" ? "None of these" : "Deny")
+  return {
+    rows: lettered([...go.map((row) => ({ ...row, go: true })), { go: false, label: no }]),
+    shape,
+  }
+}
+
+const lettered = (rows: Omit<ChoiceRow, "index" | "letter">[]): ChoiceRow[] =>
+  rows.map((row, index) => ({ ...row, index, letter: optionLetter(index) }))
+
+// Pure: the row an answer picked, for the poster's payload and the owner's result line alike: a deny's no-go row, else the go row its option names, the first when it names none; null for a secret or an option past the rows.
+export function rowOfAnswer(
+  preview: ChoicePreview,
+  answer: { choice: string; option?: number },
+): ChoiceRow | null {
+  const rows = choicesOf(preview)?.rows ?? []
+  const row =
+    answer.choice === "deny"
+      ? rows.find((r) => !r.go)
+      : rows.filter((r) => r.go)[answer.option ?? 0]
+  return row ?? null
+}
+
 // When the Inbox stopped moving cards by the clock, set at this change's last code commit before the live dashboard took it: the old clock had already moved every card answered or read before then to Done, so those keep the list's week, while each one since stays in the Inbox until a verb moves it (inboxView in the web, listItems in the API).
 export const CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z"

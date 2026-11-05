@@ -36,6 +36,50 @@ export const invitePath = (inviteId: string) => `/yard/invites/${encodeURICompon
 // Where the hosted API's relay to the owner's own Mac sits: the hosted web's dashboard reads go to this prefix plus their own path.
 export const RELAY_PREFIX = "/api/v1/yard/relay"
 
+// The public half of the browser's paired key, an ECDSA P-256 key as WebCrypto exports it to JWK, kept to the four members that name it.
+export const pairKeySchema = z
+  .object({
+    crv: z.literal("P-256"),
+    kty: z.literal("EC"),
+    x: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+    y: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+  })
+  .transform(({ crv, kty, x, y }) => ({ crv, kty, x, y }))
+
+export type PairKey = z.infer<typeof pairKeySchema>
+
+// base64url with no padding, written out since the browser has no Buffer
+export const base64url = (bytes: ArrayBuffer | Uint8Array): string =>
+  btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "")
+
+const sha256 = (text: string) => crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))
+
+// The key's id, its RFC 7638 thumbprint, and the short fingerprint the browser and the Mac both show, so the owner can see they name one key.
+export async function keyIdOf(key: PairKey): Promise<{ fingerprint: string; id: string }> {
+  const digest = await sha256(JSON.stringify({ crv: key.crv, kty: key.kty, x: key.x, y: key.y }))
+  const hex = [...new Uint8Array(digest).slice(0, 8)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("")
+  return { fingerprint: hex.match(/.{4}/g)!.join(" "), id: base64url(digest) }
+}
+
+// The bytes a relayed write's signature covers: its id, time, login, method and path, and its body's SHA-256, in one JSON array so no field can run into the next.
+export async function signedBytes(write: {
+  at: string
+  body: string
+  id: string
+  login: string
+  method: string
+  path: string
+}): Promise<Uint8Array<ArrayBuffer>> {
+  const { at, id, login, method, path } = write
+  const body = base64url(await sha256(write.body))
+  return new TextEncoder().encode(JSON.stringify([id, at, login, method, path, body]))
+}
+
 // A token's name, which a post made with it carries as from.device, so none may take the browser's name.
 export const tokenNameSchema = device.refine(
   (name) => name !== WEB_DEVICE,

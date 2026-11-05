@@ -81,7 +81,7 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - When a round leaves only fixes the next push can close, the reviewer asks the worker to merge canary in with that push, so the 5/5 candidate scores a head canary has not moved past.
 - After a compaction, a resume, or a notice that background tasks did not finish before the previous session ended, the reviewer runs `state.py pr` for each PR it holds and re-arms every `state.py wait` with none running, since an account flip kills the waiters with no notice.
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
-- On a collaborator's org PR whose review ask came to you, the session that posts your review replies to the ask right after, in the same DM or thread, with what you approved and any blocking note.
+- On a collaborator's org PR whose review ask came to you, the session that posts your review turns at once to the work org's extension (triage-and-implement's PR.md) for what follows a review you were asked for.
 - A reviewer agrees with an author's reply only once it has reproduced the author's reason with one command, named in its reply.
 - A 5/5 verdict says the fresh full read found nothing blocking or should-fix and `bun run check-types` ran green, or green CI at the head stood in for it; a red run is a blocking finding.
 - The reviewer posts the 5/5 verdict and its `Review • 5/5` label; GitHub's two checks green at the head are the next gate, never an input to the score, and a run cited where CI stands in is evidence of the touched tests and check-types alone.

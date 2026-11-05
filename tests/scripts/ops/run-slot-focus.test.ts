@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { SCRIPT, WAITING, machine, stop } from "./run-slot-fake"
@@ -64,5 +64,115 @@ describe("run-slot.focus", () => {
     )
     expect(await m.runs("worker-x", { RUN_SLOT_SIZE: "small" })).toBe(true)
     expect(existsSync(join(m.ops, "run-slot.focus"))).toBe(false)
+  })
+
+  test("on, the focused session's own reviewer and tester run while another session's run waits", async () => {
+    const m = machine()
+    await set(m, "abc-worker", "focus", "--for", "30m", "--reason", "an urgent ticket")
+    expect(await m.runs("abc-reviewer", { RUN_SLOT_SIZE: "small" })).toBe(true)
+    expect(await m.runs("abc-tester", { RUN_SLOT_SIZE: "small" })).toBe(true)
+    expect(await m.waits("worker-x", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+
+  test("on, a checker with an id of its own runs when its roster row names the focused session as its worker, and another session's checker waits", async () => {
+    const m = machine({
+      roster: {
+        agents: [
+          { kind: "reviewer", name: "k3m9px-reviewer", worker: "abc-worker" },
+          { kind: "tester", name: "b7c8dq-tester", worker: "worker-x" },
+        ],
+      },
+    })
+    await set(m, "abc-worker", "focus", "--for", "30m", "--reason", "an urgent ticket")
+    expect(await m.runs("k3m9px-reviewer", { RUN_SLOT_SIZE: "small" })).toBe(true)
+    expect(await m.waits("b7c8dq-tester", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
+})
+
+// for an urgent ticket the owner wants everything else stopped, so its fix goes first
+describe("run-slot.sh preempt", () => {
+  // a run that marks itself started, then waits a minute, as a suite in a slot does
+  const hang = (m: ReturnType<typeof machine>) => {
+    writeFileSync(join(m.bin, "hang"), '#!/bin/bash\ntouch "$1.started"\nexec sleep 60\n')
+    chmodSync(join(m.bin, "hang"), 0o755)
+  }
+  const started = async (run: { marker: string }) => {
+    while (!existsSync(`${run.marker}.started`)) await Bun.sleep(20)
+  }
+  const preempt = async (m: ReturnType<typeof machine>) => {
+    const p = Bun.spawn(["bash", SCRIPT, "preempt"], {
+      cwd: m.root,
+      env: m.env(),
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    return {
+      code: await p.exited,
+      err: await new Response(p.stderr).text(),
+      out: await new Response(p.stdout).text(),
+    }
+  }
+
+  test("stops the run another session holds a slot with, which exits saying focus preempted it, and leaves the focused session's run", async () => {
+    const m = machine()
+    hang(m)
+    const other = m.start("worker-x", { RUN_SLOT_SIZE: "small" }, SCRIPT, ["hang"])
+    const own = m.start("worker-f", { RUN_SLOT_SIZE: "small" }, SCRIPT, ["hang"])
+    await started(other)
+    await started(own)
+    await set(m, "worker-f", "focus", "--for", "30m", "--reason", "an urgent ticket")
+    const r = await preempt(m)
+    expect(r.code).toBe(0)
+    expect(r.out).toContain("preempted worker-x's run")
+    expect(r.out).not.toContain("worker-f's run")
+    expect(await other.p.exited).toBe(143)
+    expect(await other.saw(/^run-slot\.sh: focus preempted this run for worker-f/gm)).toBe(true)
+    expect(readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")).toMatch(/ preempt worker-x \d+ /)
+    expect(own.p.exitCode).toBeNull()
+    await stop(own.p)
+  })
+
+  test("leaves the run of the focused session's checker with an id of its own, which its roster row names", async () => {
+    const m = machine({
+      roster: { agents: [{ kind: "reviewer", name: "k3m9px-reviewer", worker: "worker-f" }] },
+    })
+    hang(m)
+    const checker = m.start("k3m9px-reviewer", { RUN_SLOT_SIZE: "small" }, SCRIPT, ["hang"])
+    await started(checker)
+    await set(m, "worker-f", "focus", "--for", "30m", "--reason", "an urgent ticket")
+    const r = await preempt(m)
+    expect(r.code).toBe(0)
+    expect(r.out).not.toContain("k3m9px-reviewer's run")
+    expect(checker.p.exitCode).toBeNull()
+    await stop(checker.p)
+  })
+
+  test("leaves alone a recorded pid that is not the holder's own child leading its own group", async () => {
+    const m = machine()
+    m.hold("run-slot", 1, "small")
+    const outside = Bun.spawn(["sleep", "60"])
+    writeFileSync(join(m.ops, "run-slot.child"), `${outside.pid}\n`)
+    await set(m, "worker-f", "focus", "--for", "30m", "--reason", "an urgent ticket")
+    const r = await preempt(m)
+    expect(r.code).toBe(0)
+    expect(r.out).toContain(
+      "run-slot: worker-held's run has no child of its holder leading its own group; left alone",
+    )
+    expect(existsSync(join(m.ops, "run-slot.preempted"))).toBe(false)
+    expect(outside.exitCode).toBeNull()
+    outside.kill()
+    await outside.exited
+  })
+
+  test("with no focus standing, stops nothing and says so", async () => {
+    const m = machine()
+    hang(m)
+    const other = m.start("worker-x", { RUN_SLOT_SIZE: "small" }, SCRIPT, ["hang"])
+    await started(other)
+    const r = await preempt(m)
+    expect(r.code).toBe(2)
+    expect(r.err).toContain("no focus stands")
+    expect(other.p.exitCode).toBeNull()
+    await stop(other.p)
   })
 })

@@ -8,12 +8,14 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## spawn.sh
 
-- While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start but a move, naming focus's session and its end.
+- While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start, naming focus's session and its end, but three: a move, a reviewer or tester that reports to the focused session (a resume's, the worker its roster row names),
+  and a `--firefighting` start while `firefighting-stop.json` or `firefighting-headstart.json` stands in the data folder (with neither, a `--firefighting` start is refused).
 - A factory session starts another only through `scripts/spawn.sh` (playbook's SESSIONS.md, Spawn), which runs a capacity gate that refuses, failing closed, unless four checks pass in order, the first failure naming its gate and its reading,
   and counts no live sessions or workers (no count is capped; Ops watches the live board for the risk of cmux no longer answering, as it once stopped at 49 live sessions and load5 97): the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`) in its own `capacity.jsonl` and in each `slots.peers` folder's,
   each weighing half its item's load units (small 1, medium 2, big 3; `--size`, else small for a reviewer or tester, else what `scripts/ops/run-slot.sh size <name>` reads from the roster and plan.json), under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
   less a quarter of that (`gates.smallReserve`) kept for small items unless the start is small, so a big plan never blocks the small ones, while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the reviewers and testers, which start small, so a held review starts ahead of a new worker,
-  and once over that line the CPU's busy cores plus the starts too (`top -l 2 -n 0`'s idle share of the cores, held to the same line at no more than the core count), refusing only when both are over or `top` gives no reading, the refusal naming both; memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, room for its runs:
+  refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores so a worker or two can be closed to make room, the refusal naming the load, the starts and the line,
+  while a `--firefighting` start passes it with its trigger file standing (above), its row's `readings.firefighting` naming the file, since firefighting comes first; memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, room for its runs:
   `scripts/ops/run-slot.sh room`'s lanes, held lanes, free lanes (open, unheld and with the load units for a medium run, `slots.peers`' holders counted) and live waiters, refusing while no lane is free and a run waits in the queue, or when room gives no reading, so a new worker never joins a queue it has no room in, while a reviewer, tester,
   resume or move skips it and work already admitted finishes; and the launching backend's usage:
   Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, which never sits below one day's share of 14.3 points, so a week that has just reset passes its first day,
@@ -179,6 +181,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
   Each step runs in the suite's sandbox (`packages/scripts/src/sandbox.ts`, shared with `test-sandbox.ts`), with uv's Pythons and cache and Docker's config kept in the real home, so a step never writes the real `~/.claude` and a second run downloads nothing.
   Its `steps` list in [packages/scripts/src/test-skills.ts](../packages/scripts/src/test-skills.ts) names every step.
+- Run the touched tests before every push, beside `test:skills`: its steps leave out a test that pins a skill's wording, which only CI then catches (code-review-loop's **The touched tests** lists them with `state.py touched-tests`).
 
 ## bun run hooks:differential
 

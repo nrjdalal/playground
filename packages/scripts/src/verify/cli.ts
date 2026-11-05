@@ -85,8 +85,8 @@ Checks (default: all)
                 each route at 1280 loads with a screen recorder extension's node in body, a div
                 with a shadow root as Scrnli adds it while the page streams, after the theme
                 script, and Next's dev overlay counts no issue
-  reply-focus   on /dashboard at 1280x800, Reply on an Inbox card puts focus in Playground's
-                box in the click's own frame, so a paste sent at once lands there; it posts the
+  reply-focus   on /dashboard at 1280x800, Reply on an Inbox card puts focus in the card's own
+                comment box in the click's own frame, so a paste sent at once lands there; it posts the
                 card into this checkout's database with bun run ask and settles it after, so it
                 needs a fixture stack whose database is this checkout's own (all skips it on
                 any other)

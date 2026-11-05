@@ -180,6 +180,8 @@ A row's menu marks it read or unread, renames, pins or archives it.
 ### The red dot
 
 The browser tab reads Playground on every page, and its icon wears a red dot only when something is new for you: a Changelog entry you have not read, or an Inbox item that came after you last looked at the Inbox.
+While a session has focus (`playground focus on`), what comes into the Inbox waits quietly, marked Quiet and left out of the dot and the counts; an alert, such as the low battery one, still shows at once.
+When focus ends, one Inbox card says how many runs queued meanwhile and how long they waited, and the quiet items count again.
 Each of these is also marked where it lives: the Inbox square and the Changelog square show their count inside a red dot at their top right.
 Opening the Inbox square beside any page, or the Changelog, clears its mark.
 
@@ -212,6 +214,7 @@ This Mac dials out to Yard, so nothing here listens beyond this machine: it hold
 Yard keeps nothing this Mac sends, and only the owner reaches the page; anyone else gets the 404.
 For now it reads alone, the board refreshing every 5 seconds and the Inbox's Preview row showing no preview there.
 It shows no message box and no button that changes anything: "Read-only on Yard: send from your Mac" stands in the message box's place and at the top of the Inbox, and a message the page still held is dropped with that reason, never sent.
+Sending from Yard will count only what a browser you paired signs; pair one from Settings under [Remote](/docs/settings#remote).
 While this Mac sleeps or is offline, the page says "Your Mac is offline since" and the time.
 When you come back to the tab, it checks again at once, and it says the Mac is offline only once a second check agrees.
 After a drop, or a try Yard leaves unanswered for 30 seconds, this Mac connects again on its own, and the API's log says each connect and each drop in a `[relay]` line.
