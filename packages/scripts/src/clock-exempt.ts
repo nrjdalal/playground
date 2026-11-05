@@ -3,7 +3,7 @@ export const CLOCK_EXEMPT: [pattern: string, reason: string][] = [
   ["tests/api/hono/src/bin/dashboard-ask.test.ts", "runs bun run ask as a child"],
   ["tests/api/hono/src/lib/dashboard/attachments.test.ts", "sweeps by a file's mtime"],
   ["tests/api/hono/src/lib/dashboard/inbox-attachments.test.ts", "sweeps by a file's mtime"],
-  ["tests/packages/scripts/src/dm/send.test.ts", "takes a lock by its file's mtime"],
+  ["tests/extensions/slack/skills/slack/scripts/send.test.ts", "takes a lock by its file's mtime"],
   ["tests/packages/scripts/src/hook-differential.test.ts", "reads transcripts by their mtime"],
   ["tests/packages/scripts/src/pr-merge/freeze-cli.test.ts", "runs ship:freeze as a child"],
   ["tests/scripts/ops/run-slot*.test.ts", "runs run-slot.sh as a child"],

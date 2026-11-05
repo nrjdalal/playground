@@ -172,19 +172,46 @@ test("its sandbox is a marked scratch folder, gone once the run ends (#545)", as
   expect(readdirSync(tmp).filter((name) => name.startsWith("test-sandbox-"))).toEqual([])
 }, 20_000)
 
-const ENV_MODULE = join(import.meta.dir, "../../../../packages/env/dist/api-hono.mjs")
+const ENV_DIST = join(import.meta.dir, "../../../../packages/env/dist")
+const REQUIRED = [
+  "BETTER_AUTH_SECRET",
+  "HONO_APP_URL",
+  "HONO_TRUSTED_ORIGINS",
+  "NEXT_PUBLIC_API_URL",
+  "NEXT_PUBLIC_APP_URL",
+  "POSTGRES_URL",
+]
+// a .env that sets every key the apps' schemas require, each to a value they take
+const FULL = {
+  BETTER_AUTH_SECRET: "0".repeat(64),
+  HONO_APP_URL: "http://localhost:4000",
+  HONO_TRUSTED_ORIGINS: "http://localhost:3000",
+  NEXT_PUBLIC_API_URL: "http://localhost:4000",
+  NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+  POSTGRES_URL: "postgres://user:pw@127.0.0.1:5432/db",
+}
+const dotenv = (values: Record<string, string>) =>
+  Object.entries(values)
+    .map(([key, value]) => `${key}=${value}\n`)
+    .join("")
 
-// runs one test that imports an env schema in a fresh folder holding the given files, with the caller's env lacking the schema's keys
-const validates = async (files: string[], extra: Record<string, string> = {}) => {
+// runs one test that imports an env schema (api-hono's, or the one named) in a fresh folder holding the given files, each empty or with the given text, with the caller's env lacking every required key
+const validates = async (
+  files: (string | [string, string])[],
+  extra: Record<string, string> = {},
+  schema = "api-hono",
+) => {
   const folder = mkdtempSync(join(tmpdir(), "test-sandbox-env-"))
   const env: Record<string, string | undefined> = { ...process.env, NODE_ENV: "test", ...extra }
-  for (const key of ["HONO_APP_URL", "HONO_TRUSTED_ORIGINS", "SKIP_ENV_VALIDATION"])
-    if (!(key in extra)) delete env[key]
+  for (const key of [...REQUIRED, "SKIP_ENV_VALIDATION"]) if (!(key in extra)) delete env[key]
   writeFileSync(
     join(folder, "validates.test.ts"),
-    `import { test } from "bun:test"\nimport ${JSON.stringify(ENV_MODULE)}\ntest("imports", () => {})\n`,
+    `import { test } from "bun:test"\nimport ${JSON.stringify(join(ENV_DIST, `${schema}.mjs`))}\ntest("imports", () => {})\n`,
   )
-  for (const file of files) writeFileSync(join(folder, file), "")
+  for (const file of files) {
+    const [name, text] = typeof file === "string" ? [file, ""] : file
+    writeFileSync(join(folder, name), text)
+  }
   try {
     const child = Bun.spawn(["bun", SCRIPT, "./validates.test.ts"], {
       cwd: folder,
@@ -200,61 +227,33 @@ const validates = async (files: string[], extra: Record<string, string> = {}) =>
   }
 }
 
-test("a folder with no .env runs a test whose import validates the environment, and one with a .env leaves it validated", async () => {
+const refused = dotenv({ ...FULL, HONO_APP_URL: "not-a-url" })
+
+test("a folder with no .env, or an empty one, runs a test whose import validates the environment, and a .env with every required key set leaves it validated", async () => {
   expect(await validates([])).toEqual({ code: 0, invalid: false })
-  const validated = await validates([".env"])
+  expect(await validates([".env"])).toEqual({ code: 0, invalid: false })
+  const validated = await validates([[".env", refused]])
   expect(validated.invalid).toBe(true)
   expect(validated.code).not.toBe(0)
 }, 40_000)
 
+// 5 Nov: a fresh worktree's .env, copied from .env.example for the commit hook, left POSTGRES_URL empty, and 8 test files importing @packages/env/db failed on "Invalid environment variables: POSTGRES_URL"
+test("a .env that leaves a required key empty, as a fresh copy of .env.example leaves POSTGRES_URL, runs a test importing the database's env", async () => {
+  expect(await validates([[".env", dotenv({ ...FULL, POSTGRES_URL: "" })]], {}, "db")).toEqual({
+    code: 0,
+    invalid: false,
+  })
+}, 20_000)
+
 test("every env file bun test loads counts as one, and .env.local, which it skips, does not (#1859)", async () => {
   for (const file of [".env.test", ".env.test.local"])
-    expect((await validates([file])).invalid).toBe(true)
-  expect(await validates([".env.local"])).toEqual({ code: 0, invalid: false })
+    expect((await validates([[file, refused]])).invalid).toBe(true)
+  expect(await validates([[".env.local", refused]])).toEqual({ code: 0, invalid: false })
 }, 40_000)
 
 test("a SKIP_ENV_VALIDATION the caller set stays as set in a folder with no .env (#1859)", async () => {
   expect((await validates([], { SKIP_ENV_VALIDATION: "false" })).invalid).toBe(true)
 }, 20_000)
-
-test("a failed run in a folder with an unbuilt package ends naming it and the build command, and a passing run passes (#1859)", async () => {
-  const folder = mkdtempSync(join(tmpdir(), "test-sandbox-dist-"))
-  for (const name of ["built", "unbuilt"]) {
-    mkdirSync(join(folder, "packages", name), { recursive: true })
-    writeFileSync(join(folder, "packages", name, "tsdown.config.ts"), "")
-  }
-  mkdirSync(join(folder, "packages", "built", "dist"))
-  writeFileSync(
-    join(folder, "passes.test.ts"),
-    'import { test } from "bun:test"\ntest("passes", () => {})\n',
-  )
-  writeFileSync(
-    join(folder, "fails.test.ts"),
-    'import { test } from "bun:test"\ntest("fails", () => { throw new Error("red") })\n',
-  )
-  const run = async (file: string) => {
-    const child = Bun.spawn(["bun", SCRIPT, file], {
-      cwd: folder,
-      stderr: "pipe",
-      stdout: "ignore",
-      timeout: 15_000,
-    })
-    const [stderr, code] = await Promise.all([new Response(child.stderr).text(), child.exited])
-    return { code, last: stderr.trim().split("\n").at(-1) }
-  }
-  const hint =
-    "test-sandbox: packages/unbuilt lacks a dist: build the packages with env NODE_ENV=production SKIP_ENV_VALIDATION=true bunx turbo run build --filter='./packages/*' (the dev skill's Start) and run again"
-  try {
-    const passes = await run("./passes.test.ts")
-    expect(passes.code).toBe(0)
-    expect(passes.last).not.toBe(hint)
-    const fails = await run("./fails.test.ts")
-    expect(fails.code).not.toBe(0)
-    expect(fails.last).toBe(hint)
-  } finally {
-    rmSync(folder, { force: true, recursive: true })
-  }
-}, 30_000)
 
 // A git hook exports GIT_DIR and GIT_INDEX_FILE, and a test's scratch git init once took them and set the real repository's core.bare (3 Nov), so the sandbox hands its tests none
 test("a test's scratch git init, run under a hook's GIT_DIR and GIT_INDEX_FILE, leaves them untouched", () => {

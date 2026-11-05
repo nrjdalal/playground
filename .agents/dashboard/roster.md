@@ -52,7 +52,7 @@
   ```
 
   `name` (the session's full name), `role` (`manager`, `worker` or `runner`), `status` (one word from `scripts/roster-statuses.json`, which roster.ts checks on every write) and `task` are required; `title` is the triaged task title, at most 40 characters.
-  `kind` says what the session is, whatever its name: one of `ROSTER_KINDS` in `packages/config/src/kinds.ts` (assistant, builder, dispatcher, ops, optimizer, planner, probe, researcher, reviewer, runner, tester, worker), which spawn.sh writes at every start;
+  `kind` says what the session is, whatever its name: one of `ROSTER_KINDS` in `packages/config/src/kinds.ts` (assistant, builder, dispatcher, ops, optimizer, orchestrator, planner, probe, researcher, reviewer, runner, tester, worker), which spawn.sh writes at every start;
   `roleOf` in `workers.ts` places a session by it before its name's prefix (a dispatcher by its name still, a probe in Other), and an unknown kind is named and ignored, the agent kept.
   `slot` is a dispatcher's slot, `2` for the second (Bravo), which spawn.sh writes for a second `<id>-dispatcher` and `roster.ts who dispatcher` reads.
   `eta` is when a worker expects its chore done, the time it last sent its lead (playbook's **eta** rule); the sidebar row's tooltip counts down to it on a worker that is working, fixing or stuck (`timeLeft` in `web/next/src/lib/agents.ts`), showing nothing once it passes, once its pull request is merged or while it sits paused on a usage limit,

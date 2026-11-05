@@ -12,6 +12,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 
 - An update with no `text`, or a `ship` or `schema` decision, carries only its fields, which the card lays out itself: its title takes step 4, then steps 7 and 8.
 - An `accept`, `apps`, `budget`, `delete` or `grant` decision's `why` is free text, shown as written: it takes steps 3 and 4 as plain lines, one fact each, then steps 7 and 8.
+- A `delete` decision's `what` names each target by its full path (`<main checkout>/.claude/worktrees/<name>`), since `playground rm --decision` matches that path and `ask new` refuses a short name.
 - A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 4, 7 and 8. A draft or a `slack` decision may carry `attachments`, such as an issue's before and after shots, which its card shows under the words and Send leaves out of Slack.
 - A `secret` ask carries only its key and sink, which the card words itself: its title takes step 4, then step 8; the value itself is the owner's to type into the card, so it appears nowhere in the item.
 
