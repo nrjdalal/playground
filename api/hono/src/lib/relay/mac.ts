@@ -93,10 +93,9 @@ export async function answerRelay(
   }
 }
 
-// Vercel ends the hosted function, and its socket, at the 300 s default duration (measured on 5 Nov: the last heartbeat answered at 286 s, an unclean close at 316 s), so this Mac opens a fresh one at RECYCLE_MS and lets the old one go once the new one is open and the old one's answers are out; after a drop it waits 1 s, doubling to a minute.
-// 240 s leaves 60 s of the 300 s default; a maxDuration set in api/hono/vercel.json moves this with it
+// Vercel ends the hosted function, and its socket, at the 300 s default duration (measured on 5 Nov: the last heartbeat answered at 286 s, an unclean close at 316 s), so this Mac opens a fresh one at RECYCLE_MS and lets the old one go once the new one is open and the old one's answers are out; after a drop it waits 1 s, doubling to a minute. 240 s leaves 60 s of the 300 s default, so a maxDuration set in api/hono/vercel.json moves RECYCLE_MS with it.
 export const RECYCLE_MS = 240_000
-// A hub that takes the connection but never answers the upgrade leaves the socket in CONNECTING, with no close event until Bun gives up at about 124 s, so this Mac closes it at CONNECT_MS, inside RECYCLE_MS's 60 s margin to the cap, and opens again after the backoff.
+// A hub that takes the connection but never answers the upgrade leaves the socket in CONNECTING, with no close event until Bun gives up at about 124 s, so this Mac closes it at CONNECT_MS, which with login's 15 s still fits RECYCLE_MS's 60 s margin to the cap, and opens again after the backoff.
 export const CONNECT_MS = 30_000
 const RETRY_MS = 1000
 const RETRY_MAX_MS = 60_000
@@ -179,6 +178,8 @@ export function startRelay(deps: RelayDeps): () => void {
       let answering = 0
       let beat: ReturnType<typeof setInterval> | null = null
       let ended = false
+      // opened, and not yet let go by a successor that opened
+      let holding = false
       let heard = Date.now()
       let recycle: ReturnType<typeof setTimeout> | null = null
       let connecting: ReturnType<typeof setTimeout> | null = null
@@ -189,13 +190,18 @@ export function startRelay(deps: RelayDeps): () => void {
       const end = (why: string) => {
         if (ended) return
         ended = true
+        const held = holding && !retiring.has(opened)
         sockets.delete(opened)
         retiring.delete(opened)
         if (beat) clearInterval(beat)
         if (recycle) clearTimeout(recycle)
         if (connecting) clearTimeout(connecting)
-        // a socket a newer one replaced, or one stop closed, ends with nothing more to do
-        if (socket !== opened || stopped) return
+        if (stopped) return
+        // a socket a newer one replaced ends with nothing more to do, but one that drops while the recycle's next socket still connects says so, and that socket's own open or end decides what comes next
+        if (socket !== opened) {
+          if (held) console.error(`[relay] ${why}; the next socket is still connecting`)
+          return
+        }
         // a replacement that never opened leaves the old socket holding the relay
         socket =
           previous?.readyState === WebSocket.OPEN && !retiring.has(previous) ? previous : null
@@ -209,6 +215,7 @@ export function startRelay(deps: RelayDeps): () => void {
       connecting.unref?.()
       opened.addEventListener("open", () => {
         if (connecting) clearTimeout(connecting)
+        holding = true
         backoff = RETRY_MS
         heard = Date.now()
         // a recycle's next socket opens beside one that holds the relay already

@@ -424,6 +424,60 @@ describe("startRelay, this Mac's socket to the hub", () => {
     }
   })
 
+  test("a recycle's next socket that never opens is closed at the connect timeout while the old one keeps the relay, and another follows", async () => {
+    const said = spyOn(console, "error").mockImplementation(() => {})
+    const { connect, made } = sockets()
+    const stop = relay(connect, { connectMs: 40, recycleMs: 30 })
+    try {
+      await until("the socket", () => made.length === 1)
+      made[0]!.open()
+      await until("the next socket", () => made.length === 2)
+      await until("the stalled next socket closing", () => made[1]!.readyState === 3)
+      expect(made[0]!.readyState).toBe(1)
+      await until("another try", () => made.length === 3)
+    } finally {
+      stop()
+      said.mockRestore()
+    }
+  })
+
+  // the holding socket's drop returned before its log line, so the dev.log read two connected lines with no drop between them
+  test("the old socket dropping while the recycle's next one connects says so, and the next one's open says connected", async () => {
+    const told = spyOn(console, "log").mockImplementation(() => {})
+    const said = spyOn(console, "error").mockImplementation(() => {})
+    const { connect, made } = sockets()
+    const stop = relay(connect, { recycleMs: 30 })
+    try {
+      await until("the socket", () => made.length === 1)
+      made[0]!.open()
+      await until("the next socket", () => made.length === 2)
+      made[0]!.close()
+      expect(said.mock.calls.flat().join(" ")).toContain(
+        "[relay] the socket closed; the next socket is still connecting",
+      )
+      made[1]!.open()
+      expect(
+        told.mock.calls.flat().filter((line) => String(line).includes("[relay] connected")),
+      ).toHaveLength(2)
+    } finally {
+      stop()
+      told.mockRestore()
+      said.mockRestore()
+    }
+  })
+
+  // with no token it tries again only after RETRY_MAX_MS, a minute no dep shortens
+  test("no token in the Keychain opens no socket", async () => {
+    const { connect, made } = sockets()
+    const stop = relay(connect, { token: async () => null })
+    try {
+      await Bun.sleep(100)
+      expect(made).toHaveLength(0)
+    } finally {
+      stop()
+    }
+  })
+
   test("stop closes the socket, and one still connecting, and opens no other", async () => {
     const { connect, made } = sockets()
     const stop = relay(connect, { recycleMs: 30 })
