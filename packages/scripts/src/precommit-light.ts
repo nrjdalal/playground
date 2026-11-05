@@ -1,4 +1,4 @@
-// precommit:light: the pre-commit checks that take seconds, run before a chain is queued through run-slot, so a bounce costs no place in the queue
+// precommit:light: the checks that take seconds and bounce a commit or test:skills, run before a chain is queued through run-slot, so a bounce costs no place in the queue
 import { join } from "node:path"
 
 export const CHECKS = [
