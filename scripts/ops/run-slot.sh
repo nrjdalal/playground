@@ -241,6 +241,7 @@ while [ -z "$CAN_TAKE" ]; do
   case "${2:-}" in
     --model-bound) MODEL_BOUND=1; set -- "$1" "${@:3}" ;;
     --after)
+      case "${3:-}" in 0*|1) echo "run-slot.sh: --after $3 names no run (a pid of 0 or 1 is never a run's, and kill -0 0 always succeeds), so this run never waits: give the pid on the first run's ask line" >&2; exit 2 ;; esac
       case "${3:-}" in ''|*[!0-9]*) echo "run-slot.sh: --after takes the pid on the first run's ask line in run-slot.runs.log (ask <who> <pid>)" >&2; exit 2 ;; esac
       AFTER=$3; set -- "$1" "${@:4}" ;;
     *) break ;;
@@ -304,6 +305,7 @@ if [ -n "$AFTER" ] && [ -z "$REREAD" ]; then
     [ -n "$told" ] || { echo "run-slot.sh: waiting for $WHO's run $AFTER to end before this one asks (--after)" >&2; told=1; }
     sleep "${RUN_SLOT_POLL:-5}"
   done
+  ASKED=$(date +%s)
 fi
 # dispatcher, 18 Oct: a test, type check (from the checkout's root), lint or format check runs on the runner host, taking no slot here. ci.sh exec
 # sends the working tree, tracked edits and untracked source alike, and gives back the command's output and exit code; anything else (a browser,

@@ -58,12 +58,14 @@ const after = (m: Machine, who: string, pid: string) => {
   })
   let err = ""
   let ended = false
-  void p.exited.then(() => (ended = true))
-  void (async () => {
+  const read = (async () => {
     const text = new TextDecoder()
     for await (const chunk of p.stderr) err += text.decode(chunk, { stream: true })
   })()
-  return { ended: () => ended, err: () => err, marker, p }
+  // the run's rc once its stderr is read to the end, so err() holds every line it wrote
+  const exited = Promise.all([p.exited, read]).then(([rc]) => rc)
+  void exited.then(() => (ended = true))
+  return { ended: () => ended, err: () => err, exited, marker, p }
 }
 const WAITING = /waiting for worker-a's run \d+ to end before this one asks/
 
@@ -89,7 +91,7 @@ describe("run-slot --after <pid>", () => {
 
     first.open()
     expect(await first.p.exited).toBe(0)
-    expect(await second.p.exited).toBe(0)
+    expect(await second.exited).toBe(0)
     expect(existsSync(second.marker)).toBe(true)
     expect(logged(m, "ask", "worker-a", second.p.pid)).toBe(true)
   })
@@ -103,7 +105,7 @@ describe("run-slot --after <pid>", () => {
     expect(second.err()).toMatch(WAITING)
     first.open()
     expect(await first.p.exited).toBe(1)
-    expect(await second.p.exited).toBe(1)
+    expect(await second.exited).toBe(1)
     expect(existsSync(second.marker)).toBe(false)
     expect(logged(m, "ask", "worker-a", second.p.pid)).toBe(false)
     expect(second.err()).toContain(
@@ -116,17 +118,43 @@ describe("run-slot --after <pid>", () => {
     const gone = Bun.spawn(["true"])
     await gone.exited
     const second = after(m, "worker-a", `${gone.pid}`)
-    expect(await second.p.exited).toBe(2)
+    expect(await second.exited).toBe(2)
     expect(existsSync(second.marker)).toBe(false)
     expect(logged(m, "ask", "worker-a", second.p.pid)).toBe(false)
     expect(second.err()).toContain("with no end line in run-slot.runs.log")
   })
 
+  test("counts only its time in the queue as waited=, not the wait for the first run", async () => {
+    const m = machine()
+    const first = gated(m, "worker-a", 0)
+    await until(() => logged(m, "start", "worker-a", first.p.pid))
+    const second = after(m, "worker-a", `${first.p.pid}`)
+    await until(() => second.ended() || WAITING.test(second.err()))
+    await Bun.sleep(3000)
+    first.open()
+    expect(await first.p.exited).toBe(0)
+    expect(await second.exited).toBe(0)
+    const start = log(m)
+      .split("\n")
+      .find((l) => l.split(" ")[1] === "start" && l.split(" ")[3] === `${second.p.pid}`)
+    expect(Number(/waited=(\d+)s/.exec(start ?? "")?.[1])).toBeLessThan(3)
+  })
+
   test("refuses an --after that names no pid", async () => {
     const m = machine()
     const second = after(m, "worker-a", "abc")
-    expect(await second.p.exited).toBe(2)
+    expect(await second.exited).toBe(2)
     expect(existsSync(second.marker)).toBe(false)
     expect(second.err()).toContain("--after takes the pid")
   })
+
+  // kill -0 0 always succeeds, so a wait on pid 0 would never end, and pid 1 is never a run's
+  for (const pid of ["0", "007", "1"])
+    test(`refuses --after ${pid} at once, never waiting`, async () => {
+      const m = machine()
+      const second = after(m, "worker-a", pid)
+      expect(await second.exited).toBe(2)
+      expect(existsSync(second.marker)).toBe(false)
+      expect(second.err()).toContain(`--after ${pid} names no run`)
+    })
 })
