@@ -10,6 +10,7 @@ import type { CSSProperties, KeyboardEvent } from "react"
 import { AttachmentChips, useAttachments } from "@/components/dashboard/attachments"
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { ModePicker } from "@/components/dashboard/mode-picker"
+import { ReadOnlyLine } from "@/components/dashboard/read-only-line"
 import { SettingPicker } from "@/components/dashboard/setting-picker"
 import { Hint } from "@/components/hint"
 import { Badge } from "@/components/ui/badge"
@@ -25,6 +26,7 @@ import { toast } from "@/components/ui/toast"
 import { chatLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { caretPoint } from "@/lib/caret"
+import { config } from "@/lib/config"
 import { isPrimary } from "@/lib/dashboard"
 import { draftSaver, readDrafts, takeHanded } from "@/lib/drafts"
 import { itemTag, useInbox } from "@/lib/inbox"
@@ -92,7 +94,12 @@ const useSkills = (sessionId: string | null) =>
 const MENU_GAP = 4
 
 // Says something to a session as the owner: typed into its own terminal as if the owner typed it there, or for the session the dashboard hosts, put on its input; its reply arrives in the steps above, from the transcript. Phase 2a: either dispatcher, the assistant, and the session the dashboard hosts on the Agent SDK. Files come with a message by the attach button, a paste or a drop: each uploads at once and shows as a chip above the box, and the message carries their paths for the session to Read. What is typed and attached stays as the session's draft until it is sent. Sending hands the message to the dashboard's outbox and clears the box and the draft at once, so nothing waits on the request: the message shows in the stream as a pending bubble, and while more than one is on its way the chat's Checkpoint bar above the box counts them. It is AI Elements' Prompt Input, an InputGroup in a form: the reply chip and files above the box, which grows with what is typed up to 40% of the view and scrolls past that, then attach, the mode menu and send, whose tooltip holds the key hint.
-export function Composer({ threadId, worker }: { threadId?: string; worker: Worker }) {
+// The hosted build's chat has no composer, since its relay carries reads alone, only the one read-only line in the box's place.
+export function Composer(props: { threadId?: string; worker: Worker }) {
+  return config.hosted ? <ReadOnlyLine className="mb-2 py-2" /> : <WritableComposer {...props} />
+}
+
+function WritableComposer({ threadId, worker }: { threadId?: string; worker: Worker }) {
   const onPicker = worker.light === "needs-you"
   const { allowed, approvals, dispatcher, outbox } = useDashboard()
   // The session is shown by its label as its chat names it (chatLabel: Message Alpha); the message still goes to its raw name.
@@ -262,7 +269,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
   // every Cmd+V and paste on the page, and each insert into the box but plain typing, goes to the browser's paste log (lib/paste-log.ts), lengths only, and a miss to this machine's API
   useEffect(() => watchPastes(() => box.current), [])
 
-  // A failed message's Edit puts its text and files back here to fix and send again, after anything already there, taken once so coming back to the page does not put it back again; a thread's box beside the session's own leaves it to that one.
+  // A failed message's Edit puts its text and files back here to fix and send again, after anything already there, and an Inbox card's Reply puts re #iN: before it, each taken once so coming back to the page does not put it back again, with focus in the box and the caret at the end; a thread's box beside the session's own leaves it to that one.
   const { clearDraft, draft } = outbox
   const { restore } = attachments
   const taken = useRef<typeof draft>(null)
@@ -275,6 +282,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
     restore(draft.attachments)
     clearDraft()
     box.current?.focus()
+    requestAnimationFrame(() => box.current?.setSelectionRange(text.length, text.length))
   }, [clearDraft, draft, form, restore, threadId, worker.name])
 
   return (

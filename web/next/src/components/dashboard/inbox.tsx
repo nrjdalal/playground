@@ -54,8 +54,10 @@ import {
 } from "react"
 import { flushSync } from "react-dom"
 
+import { COMPOSER_ID } from "@/components/dashboard/composer"
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { PreviewPane } from "@/components/dashboard/preview-pane"
+import { ReadOnlyLine } from "@/components/dashboard/read-only-line"
 import { Attachments } from "@/components/dashboard/viewer/thumbnails"
 import { Hint, OFF_FOCUSABLE } from "@/components/hint"
 import { OPEN_HEADER, SHELF_ITEM, SHELF_ROW, STICKY_HEADER } from "@/components/shelf"
@@ -108,7 +110,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
-import { useNow } from "@/lib/dashboard"
+import { config } from "@/lib/config"
+import { dispatcherOf, useNow } from "@/lib/dashboard"
 import {
   answerItem,
   canDraft,
@@ -160,8 +163,9 @@ import {
   waiting,
 } from "@/lib/inbox"
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
+import { insertPaste } from "@/lib/paste"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
-import { useTypedReply } from "@/lib/reply"
+import { replyRoute, useTypedReply } from "@/lib/reply"
 import { iconTone, type ShownState, statusIcon } from "@/lib/status-icons"
 import { inboxMark, readMark } from "@/lib/tab-dot"
 import { fullTime, relativeTime } from "@/lib/time"
@@ -312,7 +316,7 @@ function KindBand({
               </span>
             )}
           </time>
-          {unread ? (
+          {unread && !config.hosted ? (
             <Hint content="Mark as read">
               <button
                 type="button"
@@ -773,7 +777,7 @@ export function InboxCard({
   updated: boolean
 }) {
   const queryClient = useQueryClient()
-  const { dispatcher, outbox } = useDashboard()
+  const { allowed, dispatcher, outbox, workers } = useDashboard()
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Check it for me sends its note once
@@ -795,7 +799,9 @@ export function InboxCard({
     item.kind === "decision" && item.preview.type === "secret" ? item.preview.key : null
   const secretAsk = secretKey !== null
   const titleId = useId()
+  // every write the card makes goes through here, and the hosted build's relay carries none, so there it sends nothing
   const settle = async (write: () => Promise<unknown>) => {
+    if (config.hosted) return false
     setPending(true)
     setError(null)
     try {
@@ -843,7 +849,9 @@ export function InboxCard({
   // a folded row keeps its verbs, and the answers that need nothing its body holds; Seen is the band's tick, on a card in his list he has not marked read, and reading answers nothing
   const buttons = verbs(item, shelf)
   const unread = buttons.includes("seen")
-  const read = () => (unread && !paused ? void settle(() => markRead([item.id])) : undefined)
+  // the hosted build's relay carries no write, so a click there leaves the read mark to this Mac
+  const read = () =>
+    unread && !paused && !config.hosted ? void settle(() => markRead([item.id])) : undefined
   const busy = pending || paused
   // a row that just moved under him keeps its buttons focusable, dimmed and saying why, so focus stays put and a click meant for another item lands on none
   const hold = paused ? OFF_FOCUSABLE : {}
@@ -859,10 +867,18 @@ export function InboxCard({
     if (sent && noted && action !== "archive" && action !== "unarchive") setNote("")
   }
   const commentId = useId()
-  // Reply opens a folded card, or an empty box, to its comment box, focused in the click's own frame so a paste sent at once lands there; with words in the box it sends them alone
+  // Playground's live session, whose composer, the page's or the aside's, takes a Reply's hand, as the dashboard mounts it
+  const chat = allowed ? dispatcherOf(workers, dispatcher) : null
+  // Reply with an empty box hands the card's ref to Playground's composer (a secret ask's, or any while that session is down, opens its own box), and with words opens a folded card to them or sends them alone; either box takes focus in the click's own frame, so a paste sent at once lands there
   const onReply = () => {
     const text = note.trim()
-    if (folded || text === "") {
+    const route = replyRoute({ chat: chat !== null, folded, secret: secretAsk, text })
+    if (route === "composer" && chat) {
+      flushSync(() => outbox.reply(chat.name, item.ref))
+      document.getElementById(COMPOSER_ID)?.focus()
+      return
+    }
+    if (route !== "send") {
       // only a folded card is opened, so one open by default still folds once answered
       if (folded) flushSync(() => setToggled(true))
       document.getElementById(commentId)?.focus()
@@ -884,7 +900,7 @@ export function InboxCard({
       >
         {item.title}
       </a>
-    ) : unread ? (
+    ) : unread && !config.hosted ? (
       <button type="button" className="text-left" onClick={read}>
         {item.title}
       </button>
@@ -920,16 +936,16 @@ export function InboxCard({
     sentWords
   ) : choices ? (
     <AskChoices busy={busy} choices={choices} paused={paused} pick={pick} setPick={setPick} />
-  ) : secretAsk ? (
-    // masked, never saved by the browser, and a key here stays in the field; Enter submits
+  ) : secretAsk && !config.hosted ? (
+    // masked, never saved by the browser, and a key here stays in the field; Enter submits; enabled while the card is paused, as the comment box is, so a paste in that second lands
     <Input
       aria-label={`Value for ${secretKey}`}
       autoComplete="new-password"
       className={BOX}
       data-1p-ignore
       data-lpignore="true"
-      disabled={busy}
       placeholder="Paste the value"
+      readOnly={pending}
       spellCheck={false}
       type="password"
       value={secret}
@@ -948,12 +964,16 @@ export function InboxCard({
         {item.preview.thread && (
           <p className="text-muted-foreground text-xs font-medium">Your reply</p>
         )}
-        <Textarea
-          aria-label={`Message to ${item.preview.to}`}
-          className={BOX}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-        />
+        {config.hosted ? (
+          <p className="whitespace-pre-wrap">{draft}</p>
+        ) : (
+          <Textarea
+            aria-label={`Message to ${item.preview.to}`}
+            className={BOX}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+        )}
       </div>
       {item.preview.attachments ? <Attachments items={item.preview.attachments} /> : null}
       <UploadMark item={item} />
@@ -1172,7 +1192,14 @@ export function InboxCard({
           () => void onAnswer("dismiss"),
         )}
       <Reopen open={open} setOpen={setToggled} />
-      <Hint content={held ?? "Reply: your comment alone, to its poster"}>
+      <Hint
+        content={
+          held ??
+          (secretAsk || !chat
+            ? "Reply: your comment alone, to its poster"
+            : "Reply: your comment alone, to its poster, or with the box empty, in your chat")
+        }
+      >
         <Button
           size="icon-sm"
           variant="outline"
@@ -1188,7 +1215,8 @@ export function InboxCard({
     </div>
   )
 
-  const footer = (
+  // the hosted build's relay carries reads alone, so its cards hold no buttons and the Inbox's one read-only line stands for them
+  const footer = config.hosted ? null : (
     <CardFooter className="flex-wrap gap-2">
       {footerInForm ? (
         // shadcn's questionnaire actions in a row that wraps on a narrow card: Submit first, off until an option is picked and saying why on hover and focus, then the card's own buttons
@@ -1392,13 +1420,14 @@ export function InboxCard({
           </CardHeader>
           {body && <CardContent>{body}</CardContent>}
           {/* the card's last block before its buttons: his comment, the note with whatever he answers, or alone through Reply */}
-          {!folded && (
+          {!folded && !config.hosted && (
             // the same gap-2 above it as between the choices
             <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
+              {/* a box turned disabled drops focus to the page, so words dictated or typed as a card above leaves land nowhere: it stays enabled while the card is paused and turns read-only while its answer is on its way */}
               <NoteBox
-                disabled={busy}
                 id={commentId}
                 placeholder={noted ? "Add an optional comment" : "Add a comment"}
+                readOnly={pending}
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
               />
@@ -1416,7 +1445,7 @@ export function InboxCard({
 function NoteBox(
   props: Pick<
     ComponentProps<typeof Textarea>,
-    "disabled" | "id" | "onChange" | "placeholder" | "value"
+    "id" | "onChange" | "placeholder" | "readOnly" | "value"
   >,
 ) {
   const box = useRef<HTMLTextAreaElement>(null)
@@ -1432,7 +1461,16 @@ function NoteBox(
     observer.observe(choice)
     return () => observer.disconnect()
   }, [])
-  return <Textarea ref={box} aria-label="Comment" className={cn("min-h-14 py-2", BOX)} {...props} />
+  return (
+    <Textarea
+      ref={box}
+      aria-label="Comment"
+      className={cn("min-h-14 py-2", BOX)}
+      // a paste lands as the text its event carried, as the composer's does, since the browser's own insert reads the clipboard again, which a dictation app may have put back by then
+      onPaste={(event) => void insertPaste(event)}
+      {...props}
+    />
+  )
 }
 
 // Taking what waits behind the pill glides the rows already in view down from the top while the taken ones fade in above them, this long; nothing moves under reduced motion.
@@ -1745,7 +1783,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     <div className="absolute top-1.5 right-[calc(var(--pane-x,0px)+1.75rem)] flex items-center gap-2">
       {pill && <NewPill ref={pillButton} count={pill.count} leaving={pill.leaving} onTake={take} />}
       {/* an icon alone, bare like the chevron beside it: the card's ✓ while anything is unread, its muted ✓✓ once all is read */}
-      {clearing === 0 ? (
+      {config.hosted ? null : clearing === 0 ? (
         <span className="text-muted-foreground grid size-6 place-items-center">
           <RiCheckDoubleLine className="size-3" aria-label="All read" />
         </span>
@@ -1779,6 +1817,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   }
   return (
     <section aria-label="Inbox" className="@container flex flex-col gap-3">
+      {config.hosted && <ReadOnlyLine />}
       {/* one accordion, each row an icon, its words and a count: the open items first, then the shelves, an empty row grayed and shut */}
       <Accordion
         multiple
@@ -1866,26 +1905,29 @@ export function Inbox({ viewing }: { viewing: boolean }) {
                   <h3 {...props} className={cn(props.className, STICKY_HEADER)}>
                     {props.children}
                     {/* the Archive shelf empties in one click, each card's own Dismiss in turn; Done marks what settled on its own read, typing nothing into any session, greyed once all are */}
-                    {label !== "Later" && label !== "In progress" && shelf.length > 0 && (
-                      <ShelfDismiss
-                        disabled={bulkPending}
-                        ids={(label === "Archive" ? shelf : shelf.filter(dismissable)).map(
-                          (item) => item.id,
-                        )}
-                        label={
-                          label === "Archive"
-                            ? "Dismiss all in Archive"
-                            : "Mark all in Done as read"
-                        }
-                        onDismiss={(ids) =>
-                          void bulk(() =>
+                    {label !== "Later" &&
+                      label !== "In progress" &&
+                      shelf.length > 0 &&
+                      !config.hosted && (
+                        <ShelfDismiss
+                          disabled={bulkPending}
+                          ids={(label === "Archive" ? shelf : shelf.filter(dismissable)).map(
+                            (item) => item.id,
+                          )}
+                          label={
                             label === "Archive"
-                              ? dismissEach(shelf.filter((item) => ids.includes(item.id)))
-                              : dismissItems(ids),
-                          )
-                        }
-                      />
-                    )}
+                              ? "Dismiss all in Archive"
+                              : "Mark all in Done as read"
+                          }
+                          onDismiss={(ids) =>
+                            void bulk(() =>
+                              label === "Archive"
+                                ? dismissEach(shelf.filter((item) => ids.includes(item.id)))
+                                : dismissItems(ids),
+                            )
+                          }
+                        />
+                      )}
                   </h3>
                 )}
               >

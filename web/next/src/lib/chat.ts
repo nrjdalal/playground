@@ -15,6 +15,7 @@ import {
 } from "react"
 
 import { attachmentUrl } from "@/lib/attachments"
+import { config } from "@/lib/config"
 import { sendMessage, toolLabel } from "@/lib/dashboard"
 import { INBOX_QUERY_KEY } from "@/lib/inbox"
 import {
@@ -32,6 +33,7 @@ import {
   type OutboxAttachment,
   type OutboxMessage,
 } from "@/lib/outbox"
+import { READ_ONLY_LINE } from "@/lib/relay"
 import { TYPED } from "@/lib/reply"
 
 // What a session's step says beyond its parts: when it was written, who wrote it (a peer's name), and for a message sent from here, where the outbox has it.
@@ -281,6 +283,8 @@ export class DashboardChats {
   private readonly chats = new Map<string, Chat<DashboardMessage>>()
   private readonly listeners = new Set<() => void>()
   private readonly label: (name: string) => string
+  // the hosted build, whose relay carries reads alone: a message it holds fails at once with READ_ONLY_LINE, and nothing sends or retries it
+  private readonly readOnly: boolean
   private resumed = false
   private readonly send: Send
   private readonly storage: OutboxStorage | null
@@ -289,14 +293,17 @@ export class DashboardChats {
 
   constructor({
     label,
+    readOnly = false,
     send = sendMessage,
     storage = null,
   }: {
     label: (name: string) => string
+    readOnly?: boolean
     send?: Send
     storage?: OutboxStorage | null
   }) {
     this.label = label
+    this.readOnly = readOnly
     this.send = send
     this.storage = storage
     // sendMessages answers when deliver() has typed the message, or the message has settled without it (failed for good, cancelled); the reply is no stream, since it reaches the transcript and the socket on its own time.
@@ -417,6 +424,18 @@ export class DashboardChats {
   }
 
   private enqueue(record: OutboxMessage) {
+    if (this.readOnly) {
+      const chat = this.chat(record.to)
+      const dropped = {
+        ...record,
+        code: "READ_ONLY",
+        reason: READ_ONLY_LINE,
+        state: "failed" as const,
+      }
+      chat.messages = [...chat.messages, outboxMessage(dropped)]
+      this.changed()
+      return
+    }
     const last = this.posted.get(record.to)
     if (!isUnsentMarker(record.text) && (!last || record.at > last)) {
       this.posted.set(record.to, record.at)
@@ -440,6 +459,7 @@ export class DashboardChats {
 
   // A failed message queued again in its place, sent by the same loop a new one is.
   retry(to: string, id: string) {
+    if (this.readOnly) return
     this.dispatch(to, { id, type: "retry" })
     void this.run(to, id)
   }
@@ -527,11 +547,13 @@ export type Outbox = {
   discard: (id: string) => void
   // Drops a typed message that will not be matched (its session ended, it was pulled back out of the queue): it may still arrive, and the transcript would show it.
   dismiss: (id: string) => void
-  // Words handed to the composer, a failed message's by Edit, cleared once the composer takes it.
-  draft: { attachments: OutboxAttachment[]; text: string; to: string } | null
+  // Words handed to the composer, a failed message's by Edit, or an Inbox card's ref by Reply, cleared once the composer takes it.
+  draft: { attachments: OutboxAttachment[]; ref?: number; text: string; to: string } | null
   edit: (id: string) => void
   // Every message on its way or sent from here, across sessions, read from the chats.
   messages: OutboxMessage[]
+  // Hands an Inbox card's ref to the composer of the session `to`, which puts re #iN: before its words.
+  reply: (to: string, ref: number) => void
   retry: (id: string) => void
   send: (
     to: string,
@@ -559,6 +581,7 @@ export function useDashboardChats(
     () =>
       new DashboardChats({
         label: labelOf,
+        readOnly: config.hosted,
         send: refreshingReplies(
           sendMessage,
           () => void queryClient.invalidateQueries({ queryKey: INBOX_QUERY_KEY }),
@@ -613,6 +636,7 @@ export function useDashboardChats(
         setDraft({ attachments: message.attachments, text: message.text, to: message.to })
       },
       messages,
+      reply: (to, ref) => setDraft({ attachments: [], ref, text: "", to }),
       retry: (id) => {
         const to = toOf(id)
         if (to) chats.retry(to, id)

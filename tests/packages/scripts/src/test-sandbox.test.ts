@@ -274,6 +274,33 @@ test("a test's scratch git init, run under a hook's GIT_DIR and GIT_INDEX_FILE, 
   expect(run.exitCode).toBe(0)
 }, 30_000)
 
+// A worktree .env set for a hosted stack turned config.hosted on inside test:file, and 14 Inbox render tests read the hosted build's gates (#1055)
+test("a hosted .env and a hosted caller leave both hosted flags empty in a test, and a flag the test sets itself reaches its child", () => {
+  const folder = mkdtempSync(join(DIR, "hosted-"))
+  const seen = join(folder, "seen.json")
+  writeFileSync(join(folder, ".env"), "NEXT_PUBLIC_PLAYGROUND_HOSTED=1\nPLAYGROUND_HOSTED=1\n")
+  writeFileSync(
+    join(folder, "hosted.test.ts"),
+    `import { test } from "bun:test"
+import { writeFileSync } from "node:fs"
+test("reads", () => {
+  const read = [process.env.NEXT_PUBLIC_PLAYGROUND_HOSTED, process.env.PLAYGROUND_HOSTED]
+  process.env.PLAYGROUND_HOSTED = "1"
+  const child = Bun.spawnSync(["bun", "-e", "process.stdout.write(process.env.PLAYGROUND_HOSTED ?? 'unset')"], { env: process.env }).stdout.toString()
+  writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ child, read }))
+})
+`,
+  )
+  const run = Bun.spawnSync(["bun", SCRIPT, "./hosted.test.ts"], {
+    cwd: folder,
+    env: { ...process.env, NEXT_PUBLIC_PLAYGROUND_HOSTED: "1", PLAYGROUND_HOSTED: "1" },
+    stderr: "pipe",
+    stdout: "ignore",
+  })
+  expect(run.exitCode).toBe(0)
+  expect(JSON.parse(readFileSync(seen, "utf8"))).toEqual({ child: "1", read: ["", ""] })
+}, 30_000)
+
 // bun reads a path it cannot find as a name filter that matches nothing, so a mistyped path once let a run pass on its other files (2 Nov)
 test("a test path that names no file fails the run, naming it, and runs nothing (#627)", async () => {
   const ran = join(DIR, "real-ran")

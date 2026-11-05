@@ -21,6 +21,8 @@ const SERIAL = [
 const { env, scratch } = sandbox()
 // a git hook (pre-commit runs tests) exports GIT_DIR and GIT_INDEX_FILE, which turn a test's scratch git init or commit onto the real repository: one set its core.bare (3 Nov); a test that needs a GIT_ variable sets it on its own git call
 for (const name of Object.keys(env)) if (name.startsWith("GIT_")) delete env[name]
+// a worktree .env set for a hosted stack would turn the hosted build's gates on in every test, and bun test fills only a key its env leaves unset, so both flags go in empty, which the env schemas read as unset; a test that wants the hosted build sets the flag itself
+Object.assign(env, { NEXT_PUBLIC_PLAYGROUND_HOSTED: "", PLAYGROUND_HOSTED: "" })
 const dropScratch = () => {
   const refused = removeScratch(scratch)
   if (refused) console.error(`test-sandbox: ${refused}`)

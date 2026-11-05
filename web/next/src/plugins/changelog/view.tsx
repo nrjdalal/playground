@@ -38,6 +38,7 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { appById } from "@/lib/apps"
 import { useInAside, useUrlKey } from "@/lib/aside-url"
+import { config } from "@/lib/config"
 import { SETUP } from "@/lib/setup"
 import {
   CHANGELOG_VISIBILITY,
@@ -187,7 +188,8 @@ function Changelog({ entries, seenAt }: { entries: ChangelogEntry[]; seenAt: str
   const { mutate: markSeen } = useMarkSeen()
   const newest = newestArrival(entries)
   React.useEffect(() => {
-    const mark = seenMark(newest, seenAt)
+    // the hosted build's relay carries no write, so it leaves the seen mark to this Mac
+    const mark = config.hosted ? null : seenMark(newest, seenAt)
     if (mark) markSeen(mark)
   }, [markSeen, newest, seenAt])
   // A version the search or a filter leaves empty goes whole, header and all; when none is left, one empty state says so.

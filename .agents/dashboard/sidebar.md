@@ -256,3 +256,4 @@
   The menu then lists Settings (`/dashboard/settings`), in the Dashboard and the Console alike; the menu has no Home, since `/` opens the dashboard.
   The Dashboard's menu has no Log out (`logOut={false}` in `owner-menu.tsx`), since `/dashboard`'s first-run pane signs this Mac's owner straight back in; the Console's keeps it.
   The Console's user menu reads the account by the same rules: `SidebarUserMenu` reads it only when its caller passes `account`, which both layouts do on the owner rung alone.
+- On the hosted build the sidebar draws none of its writes (the template plus, a thread's menu, the Orchestrators order, Update now), and the read-only line stands for them, by stack.md's relay rule.

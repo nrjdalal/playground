@@ -837,13 +837,16 @@ def slot_idle_alerts(state, now_t):
             c = todo.pop()
             tree.append(c)
             todo += kids.get(c, [])
-        total = sum(cpu.get(c, 0.0) for c in tree)
+        # ps reads CPU time in hundredths, so the sum is rounded to them and the same times never read as a drop
+        total = round(sum(cpu.get(c, 0.0) for c in tree), 2)
         key = f"{slot}:{pid}"
         e = prev.get(key)
         # a total below the saved one means a step exited and took its CPU time with it, so the next step is measured from the new total
-        if not e or total - e["cpu"] >= SLOT_IDLE_CPU or total < e["cpu"]:
-            cur[key] = {"cpu": total, "since": now_t, "told": False}
+        # a pid the last check did not see started since, so its run is younger than the wait; an entry with no pids reads as this tree
+        if not e or total - e["cpu"] >= SLOT_IDLE_CPU or total < e["cpu"] or set(tree) - set(e.get("pids", tree)):
+            cur[key] = {"cpu": total, "pids": sorted(tree), "since": now_t, "told": False}
             continue
+        e["pids"] = sorted(tree)
         cur[key] = e
         idle = SLOT_IDLE_INSTALL if any(INSTALL.search(cmd.get(c, "")) for c in tree) else SLOT_IDLE
         if now_t - e["since"] >= idle:

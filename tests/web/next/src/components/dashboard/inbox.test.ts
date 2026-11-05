@@ -680,8 +680,8 @@ describe("Schedule's row", () => {
     const click = source.slice(at, source.indexOf("</button>", at))
     expect(click).toContain("onClick={onRead}")
     expect(source).toContain("onRead={() => read()}")
-    expect(source).toContain(
-      "const read = () => (unread && !paused ? void settle(() => markRead([item.id])) : undefined)",
+    expect(source).toMatch(
+      /const read = \(\) =>\s+unread && !paused && !config\.hosted \? void settle\(\(\) => markRead\(\[item\.id\]\)\) : undefined/,
     )
     expect(source).not.toContain('answerItem(item.id, "read"')
     expect(source).not.toContain('answerItem(item, "read"')
@@ -700,6 +700,27 @@ describe("Schedule's row", () => {
     const html = render(false)
     expect(html).toContain('placeholder="Add an optional comment"')
     expect(html).toContain('aria-label="Comment"')
+  })
+
+  // a focused box that turns disabled drops focus to the page, so words dictated or typed while a card above it leaves land nowhere
+  test("the comment box stays enabled on a card that just moved under him, and only reads read-only while its answer is on its way", () => {
+    const box = (html: string) => html.match(/<textarea[^>]*aria-label="Comment"[^>]*>/)?.[0] ?? ""
+    expect(box(render(true))).not.toBe("")
+    expect(box(render(true))).not.toMatch(/\sdisabled=""/)
+    expect(box(render(false))).not.toMatch(/\sdisabled=""|\sreadonly=""/i)
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    expect(source).toMatch(/<NoteBox[^>]*readOnly=\{pending\}/)
+    expect(source).toMatch(/placeholder="Paste the value"\s+readOnly=\{pending\}/)
+  })
+
+  // the browser's own paste reads the clipboard again at the insert, which a dictation app may have put back by then, so the box inserts the text its paste event carried, as the composer does
+  test("the comment box lands a paste as the text its event carried, through insertPaste", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const box = source.slice(
+      source.indexOf("function NoteBox("),
+      source.indexOf("// Taking what waits behind the pill"),
+    )
+    expect(box).toContain("onPaste={(event) => void insertPaste(event)}")
   })
 
   test("an unread ask keeps its light and draws no unread dot, which stays an update's", () => {
@@ -841,6 +862,15 @@ describe("the comment box and Reply on every card", () => {
     }
   })
 
+  test("a secret ask's value field stays enabled on a card that just moved under him, so a paste in that second lands", () => {
+    const field = (html: string) =>
+      html.match(/<input[^>]*placeholder="Paste the value"[^>]*>/)?.[0] ?? ""
+    const paused = render(true, secret, false, { defaultOpen: true })
+    expect(field(paused)).not.toBe("")
+    expect(field(paused)).not.toMatch(/\sdisabled=""|\sreadonly=""/i)
+    expect(field(paused)).toContain('type="password"')
+  })
+
   test("the box reads optional where it rides an answer as its note, and plain where Reply alone sends it", () => {
     expect(opened(decision)).toContain('placeholder="Add an optional comment"')
     for (const item of [answered, update, secret]) {
@@ -856,6 +886,26 @@ describe("the comment box and Reply on every card", () => {
       }
     }
     expect(render(false, update)).not.toContain('aria-label="Comment"')
+  })
+
+  test("Reply with an empty box hands the card's ref to Playground's composer, which the aside brings forward, focused in the click's frame (#1045)", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const reply = source.slice(source.indexOf("const onReply = () => {"))
+    // the hand goes only while Playground's session is live, the one whose composer the dashboard mounts, else the card's own box opens as before
+    expect(source).toContain("const chat = allowed ? dispatcherOf(workers, dispatcher) : null")
+    expect(reply).toContain("replyRoute({ chat: chat !== null, folded, secret: secretAsk, text })")
+    expect(reply).toContain('if (route === "composer" && chat) {')
+    expect(reply).toContain("flushSync(() => outbox.reply(chat.name, item.ref))")
+    expect(reply).toContain("document.getElementById(COMPOSER_ID)?.focus()")
+    // the hand goes to the primary dispatcher's box alone, the page's own chat or the aside's, and the aside shows that chat on every hand, so it never lands in a box out of sight
+    const aside = readFileSync(join(web, "src/components/dashboard/dashboard-aside.tsx"), "utf8")
+    expect(aside).toContain("const handed = outbox.draft")
+    expect(aside).toContain("else showChat()")
+    const composer = readFileSync(join(web, "src/components/dashboard/composer.tsx"), "utf8")
+    expect(composer).toContain(
+      'const text = takeHanded(form.getFieldValue("text"), draft, worker.name, taken.current)',
+    )
+    expect(composer).toContain("if (threadId) return")
   })
 
   test("Reply opens a folded card to its box, focused in the click's frame, and sends the words alone, a secret's guarded by its value", () => {
@@ -961,8 +1011,8 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
   })
 
   test("Done's ✓✓ marks every item in it read, and is gone once all are", () => {
-    expect(source).toContain(
-      '{label !== "Later" && label !== "In progress" && shelf.length > 0 && (',
+    expect(source).toMatch(
+      /\{label !== "Later" &&\s+label !== "In progress" &&\s+shelf\.length > 0 &&\s+!config\.hosted && \(/,
     )
     const button = (ids: string[]) =>
       /<button[^>]*>/.exec(
@@ -1002,8 +1052,8 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
   test("each row ends in its ShelfMark, the open row and every shelf, and In progress offers no ✓ since its poster closes it", () => {
     expect(source).toContain("<ShelfMark empty={shown.length === 0} />")
     expect(source).toContain("<ShelfMark empty={shelf.length === 0} />")
-    expect(source).toContain(
-      '{label !== "Later" && label !== "In progress" && shelf.length > 0 && (',
+    expect(source).toMatch(
+      /\{label !== "Later" &&\s+label !== "In progress" &&\s+shelf\.length > 0 &&\s+!config\.hosted && \(/,
     )
   })
 
@@ -1031,7 +1081,7 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
     const actions = source.slice(source.indexOf("const actions ="), source.indexOf("const bulk ="))
     expect(actions).toContain("const actions = (pill || rows.length > 0) && (")
     expect(actions).toMatch(
-      /\{clearing === 0 \? \(\n\s+<span[^>]*>\n\s+<RiCheckDoubleLine className="size-3" aria-label="All read" \/>/,
+      /\{config\.hosted \? null : clearing === 0 \? \(\n\s+<span[^>]*>\n\s+<RiCheckDoubleLine className="size-3" aria-label="All read" \/>/,
     )
     expect(actions).toContain("<RiCheckLine />")
     const shelf = source.slice(
