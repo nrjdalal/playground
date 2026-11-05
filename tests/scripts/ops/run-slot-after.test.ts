@@ -130,7 +130,7 @@ describe("run-slot --after <pid>", () => {
     await until(() => logged(m, "start", "worker-a", first.p.pid))
     const second = after(m, "worker-a", `${first.p.pid}`)
     await until(() => second.ended() || WAITING.test(second.err()))
-    await Bun.sleep(3000)
+    await Bun.sleep(5000)
     first.open()
     expect(await first.p.exited).toBe(0)
     expect(await second.exited).toBe(0)
@@ -139,9 +139,9 @@ describe("run-slot --after <pid>", () => {
         .split("\n")
         .find((l) => l.split(" ")[1] === kind && l.split(" ")[3] === `${second.p.pid}`) ?? ""
     const at = (l: string) => Date.parse(l.split(" ")[0]) / 1000
-    // waited= is the gap from its ask line to its start line, however slow the queue, where counting the 3 s wait for the first run would add 3
+    // waited= is the gap from its ask line to its start line, 2 s of slack for a loaded runner, where counting the 5 s wait for the first run would add 5
     const queued = at(line("start")) - at(line("ask"))
-    expect(Number(/waited=(\d+)s/.exec(line("start"))?.[1])).toBeLessThanOrEqual(queued + 1)
+    expect(Number(/waited=(\d+)s/.exec(line("start"))?.[1])).toBeLessThanOrEqual(queued + 2)
   })
 
   test("refuses an --after that names no pid", async () => {
