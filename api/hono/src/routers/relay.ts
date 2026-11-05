@@ -1,13 +1,22 @@
+import { sValidator } from "@hono/standard-validator"
+import { pairKeySchema } from "@packages/message"
 import { Hono, type MiddlewareHandler } from "hono"
 import { describeRoute } from "hono-openapi"
 import type { UpgradeWebSocket } from "hono/ws"
+import { z } from "zod"
 
-import { ApiError, authErrorResponses, errorResponse, forbiddenErrorResponses } from "@/lib/error"
-import type { Hub } from "@/lib/relay/hub"
+import {
+  ApiError,
+  authErrorResponses,
+  errorResponse,
+  forbiddenErrorResponses,
+  validationErrorResponses,
+} from "@/lib/error"
+import type { Forwarded, Hub } from "@/lib/relay/hub"
 import { RELAY_PREFIX, relayAllowed } from "@/lib/relay/protocol"
 import type { YardVariables } from "@/lib/yard/caller"
 
-// The relay's hosted routes, inside Yard's router: the socket the owner's Mac holds with its own token, the Mac's status, and the owner's browser's reads, each forwarded to the Mac with a fresh id and time, its answer passed back and kept nowhere. Every route takes the owner rung; a read also takes the hosted web's Origin when it names one, and its answer comes sandboxed and unsniffed, as the Mac's own files are.
+// The relay's hosted routes, inside Yard's router: the socket the owner's Mac holds with its own token, the Mac's status, the owner's browser's pair request, and its reads, each forwarded to the Mac with a fresh id and time, its answer passed back and kept nowhere. Every route takes the owner rung; a read also takes the hosted web's Origin when it names one, and its answer comes sandboxed and unsniffed, as the Mac's own files are.
 export function relayRouter({
   hub,
   mac,
@@ -26,6 +35,13 @@ export function relayRouter({
     if (origin !== undefined && origin !== webOrigin)
       throw new ApiError(403, "FORBIDDEN", "The relay reads from the hosted web alone")
     return next()
+  }
+  // the Mac's answer, or the 503 that says why there is none
+  const online = (answer: Forwarded) => {
+    if (answer.type === "offline") throw new ApiError(503, "MAC_OFFLINE", "Your Mac is offline")
+    if (answer.type === "timeout")
+      throw new ApiError(503, "MAC_OFFLINE", "Your Mac did not answer in time")
+    return answer
   }
   return new Hono<{ Variables: YardVariables }>()
     .get(
@@ -75,6 +91,35 @@ export function relayRouter({
       fromWeb,
       async (c) => c.json({ data: await hub.status(c.get("caller").id) }),
     )
+    .post(
+      "/pair",
+      describeRoute({
+        description:
+          "Sends the owner's browser's public key to the owner's Mac as a pair request, which the owner approves on the Mac's own Settings; the Mac answers with the key's fingerprint, and pairs nothing until then",
+        responses: {
+          202: { description: "The Mac holds the request, with the key's fingerprint" },
+          ...authErrorResponses,
+          ...forbiddenErrorResponses,
+          ...validationErrorResponses,
+          503: errorResponse("MAC_OFFLINE", "Your Mac is offline"),
+        },
+        tags: ["Yard"],
+      }),
+      owner,
+      fromWeb,
+      sValidator("json", z.strictObject({ key: pairKeySchema }), (result) => {
+        if (!result.success)
+          throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
+      }),
+      async (c) => {
+        const caller = c.get("caller")
+        const answer = online(await hub.pair(caller.id, caller.login, c.req.valid("json").key))
+        return new Response(Buffer.from(answer.body, "base64"), {
+          headers: { "cache-control": "no-store", "content-type": "application/json" },
+          status: answer.status,
+        })
+      },
+    )
     .get(
       "/api/*",
       describeRoute({
@@ -96,10 +141,7 @@ export function relayRouter({
         if (!relayAllowed(c.req.method, target))
           throw new ApiError(403, "FORBIDDEN", "The relay does not carry this request")
         const caller = c.get("caller")
-        const answer = await hub.forward(caller.id, caller.login, target)
-        if (answer.type === "offline") throw new ApiError(503, "MAC_OFFLINE", "Your Mac is offline")
-        if (answer.type === "timeout")
-          throw new ApiError(503, "MAC_OFFLINE", "Your Mac did not answer in time")
+        const answer = online(await hub.forward(caller.id, caller.login, target))
         return new Response(Buffer.from(answer.body, "base64"), {
           headers: {
             ...answer.headers,

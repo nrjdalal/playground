@@ -70,6 +70,16 @@ Privacy holds two settings: **Names you go by**, your first name and handles, lo
 Until both are set, the trace count counts nothing, and a session that runs it asks you, through its lead, to fill them in here.
 Before your settings are set up the section shows the same **Set up settings** step as Accounts.
 
+### Remote
+
+Remote pairs one browser with this Mac, so sending from the hosted Yard can count only what that browser signs.
+
+1. On the hosted Yard, open Settings and press **Pair** under Remote. The browser makes its own key, which never leaves it, sends its public half to this Mac and shows the key's fingerprint.
+2. On this Mac, open Settings: the pair request shows under Remote with the same fingerprint. Press **Approve** only if the two match.
+
+One key is paired at a time: pairing another browser replaces it, and **Revoke** removes it, so a lost device can sign nothing more.
+The pairing step comes first; sending from Yard is not on yet.
+
 ## From the terminal
 
 `playground settings` reads and changes your settings from a terminal, each change with its reason ([Settings and extensions](/docs/extensions#settings)).

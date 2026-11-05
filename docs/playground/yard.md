@@ -18,7 +18,7 @@ Agent-fired, or named by the owner.
 
 The token lives in the macOS Keychain under `playground-yard`, as the signed-in user, so the local Dashboard and the command read the same one and no browser ever holds it.
 The hub's address comes from `YARD_API_URL`, and its approve pages from `YARD_WEB_URL`, in the environment or the factory checkout's `.env`; with none set, Yard stays off on this Mac.
-The same token opens the relay, the connection this Mac dials out to Yard so the owner can read its Dashboard at Yard's `/dashboard`, reads alone ([dashboard docs](../../web/next/content/docs/dashboard.mdx)).
+The same token opens the relay, the connection this Mac dials out to Yard so the owner can read its Dashboard at Yard's `/dashboard`, reads alone, plus the pair request a browser sends from Yard's Settings, which this Mac pairs only on the owner's Approve ([dashboard docs](../../web/next/content/docs/dashboard.mdx)).
 
 ## It's working if
 

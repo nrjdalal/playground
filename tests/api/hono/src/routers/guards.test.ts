@@ -75,7 +75,7 @@ const send = (router: Router, route: Route, origin: string, server?: ReturnType<
 describe("every write on the owner rung is guarded by its method, not its path", () => {
   test("the walk finds the dashboard's routers", () => {
     expect(owners.map((f) => f.file).toSorted()).toEqual(
-      expect.arrayContaining(["apps.ts", "dashboard.ts", "inbox.ts", "sessions.ts"]),
+      expect.arrayContaining(["apps.ts", "dashboard.ts", "inbox.ts", "remote.ts", "sessions.ts"]),
     )
   })
 
@@ -86,7 +86,7 @@ describe("every write on the owner rung is guarded by its method, not its path",
       ([, at, name]) => ({ at: at!, name: name! }),
     )
     const ownerNames = owners.map((f) => f.name)
-    for (const at of ["v1/apps", "v1/inbox", "v1/sessions"])
+    for (const at of ["v1/apps", "v1/inbox", "v1/remote", "v1/sessions"])
       expect(ownerNames).toContain(mounted.find((m) => m.at === at)?.name ?? "")
     // the dashboard's own router has no segment of its own: it mounts at v1 beside v1Router
     expect(mounted.filter((m) => m.at === "v1").some((m) => ownerNames.includes(m.name))).toBe(true)
