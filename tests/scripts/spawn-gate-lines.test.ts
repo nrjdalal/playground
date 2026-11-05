@@ -10,95 +10,25 @@ import { capacityLog, minutesAgo, placing, spawn } from "./spawn-fake"
 setDefaultTimeout(40_000)
 
 describe("the capacity gate refuses and spawns nothing", () => {
-  // on 22 Oct load 24 on 15 cores read 55% CPU idle, so the gate also reads the CPU's real use, in cores.
-  describe("CPU use", () => {
-    test("a load over the line passes while the CPU is mostly idle", async () => {
+  // the owner's rule keeps the load under the cores, so an idle CPU no longer lets a start past a load at or over them.
+  describe("the core count", () => {
+    test("a load over the cores refuses while the CPU is mostly idle, and never reads the CPU", async () => {
       const r = await spawn(["runner", "runner-x", "b.md", "--size", "small"], [], {
         FAKE_CPU_IDLE: "55.00",
         FAKE_LOAD5: "24.00",
       })
-      expect(r.code).toBe(0)
-      expect(placing(r)).not.toEqual([])
-      expect(capacityLog(r)).toEqual([
-        expect.objectContaining({
-          readings: expect.objectContaining({ cpu_busy: 6.75, cpu_idle: 55 }),
-          verdict: "pass",
-        }),
-      ])
-      expect(readFileSync(join(r.home, "top.calls"), "utf8")).toBe("-l 2 -n 0\n")
-    })
-
-    test("a load and a CPU use both over the line refuse, naming both", async () => {
-      const r = await spawn(["runner", "runner-x", "b.md", "--size", "medium"], [], {
-        FAKE_CPU_IDLE: "20.00",
-        FAKE_LOAD5: "24.00",
-      })
       expect(r.code).not.toBe(0)
       expect(placing(r)).toEqual([])
-      expect(r.err).toContain("max(load1, load5) is 24.00 and 0 started in the last 5 minutes")
       expect(r.err).toContain(
-        "the CPU is 80% busy (top), 12 of the 15 cores, which with the starts is at or over 11.25 too",
+        "max(load1, load5) is 24.00 and 0 started in the last 5 minutes, at or over the 15 cores. Wait for it to fall",
       )
-    })
-
-    test("a CPU at its cores' count holds a small start at a multiplied load line", async () => {
-      const r = await spawn(["runner", "runner-x", "b.md", "--size", "small"], [], {
-        FAKE_LOAD5: "30.00",
-        PLAYGROUND_LOAD_MULT: "2",
-      })
-      expect(r.code).not.toBe(0)
-      expect(r.err).toContain("the CPU is 100% busy (top), 15 of the 15 cores")
-    })
-
-    test("a load multiplier leaves a medium start's CPU line at the cores less a quarter", async () => {
-      const r = await spawn(["runner", "runner-x", "b.md", "--size", "medium"], [], {
-        FAKE_CPU_IDLE: "40.00",
-        FAKE_LOAD5: "24.00",
-        PLAYGROUND_LOAD_MULT: "2",
-      })
-      expect(r.code).toBe(0)
-      expect(capacityLog(r)).toEqual([
-        expect.objectContaining({
-          readings: expect.objectContaining({ cpu_busy: 9 }),
-          verdict: "pass",
-        }),
-      ])
-    })
-
-    test("the starts of the last 5 minutes count toward the CPU's line too", async () => {
-      const passes = [...Array(2)]
-        .map(() =>
-          JSON.stringify({
-            at: minutesAgo(1),
-            gate: null,
-            readings: { units: 2 },
-            verdict: "pass",
-          }),
-        )
-        .join("\n")
-      const r = await spawn(["runner", "runner-x", "b.md", "--size", "medium"], [], {
-        CAPACITY_JSONL: `${passes}\n`,
-        FAKE_CPU_IDLE: "30.00",
-        FAKE_LOAD5: "24.00",
-      })
-      expect(r.code).not.toBe(0)
-      expect(r.err).toContain("the CPU is 70% busy (top), 10.5 of the 15 cores")
+      expect(existsSync(join(r.home, "top.calls"))).toBe(false)
     })
 
     test("a start under the line never reads the CPU", async () => {
       const r = await spawn(["runner", "runner-x", "b.md", "--size", "small"], [])
       expect(r.code).toBe(0)
       expect(existsSync(join(r.home, "top.calls"))).toBe(false)
-    })
-
-    test("a CPU use it cannot read leaves the load alone to decide", async () => {
-      const r = await spawn(["runner", "runner-x", "b.md", "--size", "small"], [], {
-        FAKE_LOAD5: "24.00",
-        FAKE_TOP_BROKEN: "1",
-      })
-      expect(r.code).not.toBe(0)
-      expect(r.err).toContain("max(load1, load5) is 24.00")
-      expect(r.err).toContain("it cannot read the CPU use (top), so the load alone decides")
     })
   })
 

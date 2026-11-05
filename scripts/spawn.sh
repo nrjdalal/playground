@@ -13,9 +13,8 @@ set -euo pipefail
 #      half its item's load units (small 1, medium 2, big 3: --size, else small
 #      for a reviewer or tester, else what `ops/run-slot.sh size <name>` reads),
 #      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
-#      a small worker keeping an eighth in its place for the reviewers and testers; a load over that
-#      line reads the CPU's busy cores (top -l 2 -n 0) too, and refuses only when they and the starts
-#      are over it as well, or when top cannot be read
+#      a small worker keeping an eighth in its place for the reviewers and testers; a load at or over
+#      that line refuses whatever the CPU's idle share, so the load stays under the cores
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
@@ -439,32 +438,15 @@ else:
         share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
         keep = cap * share
         readings["reserve"] = keep
-        # the load average counts the sessions' many short-lived processes (load 24 on 15 cores at 55% idle, 22 Oct), so a load over the line reads the CPU's busy cores too, against the same line held at the cores' count, and refuses only when both are over
+        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share
         if readings["load5"] + starts >= cap - keep:
-            idle = None
-            try:
-                out = subprocess.run(["top", "-l", "2", "-n", "0"], capture_output=True, text=True, timeout=10).stdout
-                idle = float([line for line in out.splitlines() if line.startswith("CPU usage:")][-1].split(",")[-1].split("%")[0])
-            except (IndexError, OSError, subprocess.TimeoutExpired, ValueError):
-                pass
-            readings["cpu_idle"] = idle
-            cpu_cap = min(cap, cores)
-            cpu_line = cpu_cap - cpu_cap * share
-            if idle is not None:
-                readings["cpu_busy"] = round(cores * (100 - idle) / 100, 2)
-            if idle is None or readings["cpu_busy"] + starts >= cpu_line:
-                at = (
-                    f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
-                    if mult != 1
-                    else f"the {cores} cores"
-                )
-                at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
-                cpu = (
-                    "it cannot read the CPU use (top), so the load alone decides"
-                    if idle is None
-                    else f"the CPU is {100 - idle:g}% busy (top), {readings['cpu_busy']:g} of the {cores} cores, which with the starts is at or over {cpu_line:g} too"
-                )
-                refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}; {cpu}. Wait for it to fall, or close a session that is done, and run it again.")
+            at = (
+                f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
+                if mult != 1
+                else f"the {cores} cores"
+            )
+            at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
+            refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}. Wait for it to fall, or close a session that is done, and run it again.")
     except Skip:
         pass
 
