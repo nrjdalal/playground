@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -94,6 +94,7 @@ const fixtureRepo = () => {
   git("worktree", "add", "-q", "-b", "live-old", join(repo, ".claude", "worktrees", "old"))
   git("worktree", "add", "-q", "-b", "live", join(repo, ".claude", "worktrees", "desk"))
   git("worktree", "add", "-q", "--detach", join(repo, ".claude", "worktrees", "loose"))
+  symlinkSync(join(import.meta.dir, "../../../api"), join(repo, "api"))
   return realpathSync(repo)
 }
 

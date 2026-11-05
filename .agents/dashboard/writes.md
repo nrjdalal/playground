@@ -1,6 +1,7 @@
 - ALWAYS: Guard every dashboard write with `requireTrustedOrigin` and `requireLoopback` (`api/hono/src/middlewares/dashboard.ts`) before the session is read, then the owner rung (first run's `POST /api/setup/container`, `POST /api/v1/onboard/finish` and `/sign-in` have no session to read,
   so `requireThisMachine` takes the place of the session and the rung, stack.md; `POST /api/v1/onboard/fix/:id` takes it while no owner exists and the owner rung after, as its `GET` does):
-  the dashboard router's `guardWrites` applies both to every request other than GET, HEAD and OPTIONS, the apps router's (`api/hono/src/routers/apps.ts`) to `POST /api/v1/apps/plan/order` and `DELETE /api/v1/apps/previews/:name`, and `POST /api/v1/inbox/:id/answer`,
+  the dashboard router's `guardWrites` applies both to every request other than GET, HEAD and OPTIONS, the apps router's (`api/hono/src/routers/apps.ts`) to `POST /api/v1/apps/plan/order` and `DELETE /api/v1/apps/previews/:name`,
+  the extensions router's (`api/hono/src/routers/extensions.ts`) to each write Settings' Extensions section sends, `PUT /api/v1/extensions/bundled/:name` (a bundled extension's switch) among them, and `POST /api/v1/inbox/:id/answer`,
   `POST /api/v1/inbox/:id/retry`, `POST /api/v1/inbox/:id/schedule`, `POST /api/v1/inbox/:id/secret`, `POST /api/v1/inbox/dismiss` and `POST /api/v1/inbox/read` mount them themselves.
   `POST /api/v1/messages` adds a per-user limit of 20 a minute, `POST /api/v1/workers/:sessionId/feed/:requestId` one of 20, `POST /api/v1/attachments` one of 30, `POST /api/v1/debug/paste` one of 6, `POST` and `DELETE /api/v1/managers/order` one of 30, `POST /api/v1/stacks/start` and `/stop` one of 6, `POST /api/v1/workers/:sessionId/mode` one of 10,
   `POST /api/v1/workers/:sessionId/setting` one of 10,
@@ -8,7 +9,7 @@
   An owner's GET and HEAD reads count against a budget of their own instead, ten times that (`OWNER_READ_LIMIT` in `api/hono/src/middlewares/auth.ts`, 1200 a minute), since every open Dashboard tab polls (the inbox every 5s, ops, system, agents, apps, a running subagent every 5s); the rung comes from the cached session, and each route's `requireConsoleRole` still decides access.
   On the web every read shares one QueryClient (`makeQueryClient` in `web/next/src/lib/query.ts`): a 429 keeps the read's last data and retries after 2, 4, 8 and 16 seconds, so its page shows the failure only once the 429s have lasted 30 seconds, while any other failure keeps React Query's three retries and a write is never retried.
   The agents read a message asks for is folded into one per 5 seconds (`AGENTS_MESSAGE_COALESCE_MS`).
-  An inbox item's Approve, Deny, Send, Draft, Discard, Clear, Retry, Snooze and a secret ask's Submit, the composer's send, the user menu's Update now, a Feed prompt card's Submit, a pick in the hosted session's mode picker, a pick in the composer's model and effort menu,
+  An inbox item's Approve, Deny, Send, Draft, Discard, Retry, Seen, Done, Snooze, Archive, Move back, Dismiss and a secret ask's Submit, the composer's send, the user menu's Update now, a Feed prompt card's Submit, a pick in the hosted session's mode picker, a pick in the composer's model and effort menu,
   the Preview row's Start, Stop and Done and a drop of a sidebar Orchestrators row or its menu's Move up, Move down or Reset order are the confirmation for the answer, its put-away, the value's run through its sink,
   the message,
   the update message, a sent row action, the prompt's answer, the mode, the model or effort, the Vibeground's start or stop, its hand-back message to the dispatcher and the managers' order.
@@ -19,8 +20,10 @@
 - ALWAYS: Test a dashboard write on a fixture stack, where it lands in the fixture's scratch copy.
   Only a test that must reach a real session uses a live-reads stack (`PLAYGROUND_LIVE_READS=true` in the worktree's `.env`), never for a screenshot, and against a throwaway session, never a real one:
   spawn a probe named `probe-<what>` (spawn.sh takes it as a probe's name, and the `-2` one below as well) as a column beside its spawner (playbook's SESSIONS.md,
-  Spawn) and set `PLAYGROUND_DISPATCHER=probe-<what>` in the worktree's `.env` so the composer targets it (the second dispatcher then takes the primary's name plus `-2`, `probe-<what>-2`, so the real second dispatcher stays out of its reach; a test of the second dispatcher's chat spawns that second probe, or names another in `PLAYGROUND_DISPATCHER_SECONDARY`), and `PLAYGROUND_ATTACHMENTS_DIR` and
+  Spawn) and set `PLAYGROUND_DISPATCHER=probe-<what>` in the worktree's `.env` so the composer targets it
+  (the second dispatcher then takes the primary's name plus `-2`, `probe-<what>-2`, so the real second dispatcher stays out of its reach; a test of the second dispatcher's chat spawns that second probe, or names another in `PLAYGROUND_DISPATCHER_SECONDARY`), and `PLAYGROUND_ATTACHMENTS_DIR` and
   `PLAYGROUND_DEBUG_PASTE_DIR` (each honoured on a live-reads stack alone) to scratch folders so its uploads and paste reports stay out of the live dashboard's.
+  Such a stack seats no assistant (`assistantOf`), so the real one stays out of its reach too.
   Answering an inbox item types into the session its `from` names, so a test stack posts its test items `from` the probe, into the worktree's own database, which never holds a real one.
   Close the probe the moment its test is done.
 - ALWAYS: Verify dashboard work with `bun run verify` (`--help` lists its checks) rather than a script of your own: a worker before it opens or updates a PR, the reviewer before it scores one, a runner after it restarts a stack.

@@ -108,7 +108,7 @@ describe("bun run dev", () => {
     )
   }, 30_000)
 
-  // The launcher runs with --no-env-file, and its checks import API modules (cmux.ts and its ApiError): none of them may validate the API's settings as it loads, or the launcher dies before it reads .env at all.
+  // The launcher runs with --no-env-file, and its checks import API modules (ApiError's among them): none of them may validate the API's settings as it loads, or the launcher dies before it reads .env at all.
   test("starts with none of the API's settings in its environment", async () => {
     const { dry } = await dryRun(["--filter=@api/hono"], {
       HOME: process.env.HOME ?? "",
@@ -178,14 +178,9 @@ describe("the launcher's signals", () => {
   })
   const settingsOf = (env: Record<string, string | undefined>) =>
     apiSettings(envRoot, devEnv(env, "").env, join(ROOT, "packages/env/dist/load-dotenv.mjs"))
-  // The checks' verdict on this checkout for a launcher given env, computed as the launcher computes it, with cmux refused
+  // The checks' verdict on this checkout for a launcher given env, computed as the launcher computes it
   const expectedPreflight = (env: Record<string, string | undefined>) =>
-    preflight(checkoutOf(ROOT), () => settingsOf(env), {
-      attach: async () => {
-        throw new Error("a test run's launcher asked cmux")
-      },
-      root: ROOT,
-    })
+    preflight(checkoutOf(ROOT), () => settingsOf(env), { root: ROOT })
   afterAll(() => rmSync(dir, { force: true, recursive: true }))
 
   // Signals go only to the launcher this test spawned, by the pid its own spawn returned.
@@ -218,7 +213,7 @@ describe("the launcher's signals", () => {
     }, 30_000)
   }
 
-  // The checks' verdict on this checkout, computed here as the launcher computes it: on a CI runner's detached HEAD it refuses the HEAD; on a branch, a fixture stack never asks cmux (a PLAYGROUND_LIVE_READS one outside cmux refuses there), and the exported remote URL refuses, unless a .env.<stage> names its own container, which passes (the scratch checkout holds none). Either way the launcher must do just what the checks say, with the stand-in in turbo's place.
+  // The checks' verdict on this checkout, computed here as the launcher computes it: on a CI runner's detached HEAD it refuses the HEAD; on a branch, a fixture stack never asks cmux, and the exported remote URL refuses, unless a .env.<stage> names its own container, which passes (the scratch checkout holds none). Either way the launcher must do just what the checks say, with the stand-in in turbo's place.
   test("refuses to start before turbo runs when the checks refuse, and starts it when they pass", async () => {
     const logFile = join(dir, "preflight.log")
     const record = join(dir, "preflight.pgid")

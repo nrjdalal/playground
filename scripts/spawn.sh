@@ -49,7 +49,7 @@ set -euo pipefail
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with and an --effort other than high; a live one is skipped, and one restore runs at a time
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
 #   spawn.sh move      <name>                           takes the live cmux session holding <name> to herdr: every check and the usage gate run but the load and memory gates, since the copy it closes frees what the new one takes; only then it closes the session's cmux surface (its workspace when that was the last surface), waits up to 30s (PLAYGROUND_MOVE_WAIT seconds) for its process to exit, and resumes it in herdr by its session id. It takes --model, --effort, --account and --brief as a resume does, --backend for a session with no pin, and --runtime herdr alone; a session cmux holds no record of at its pid is left alone, and a session cannot move itself: its lead moves it
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
@@ -928,27 +928,48 @@ lw, server = sys.argv[1], sys.argv[2]
 roster = os.path.join(lw, "roster.json")
 try:
     agents = json.load(open(roster)).get("agents", []) if os.path.exists(roster) else []
-    down = {a.get("name") for a in agents if isinstance(a, dict) and a.get("status") in ("done", "ended", "parked", "paused")}
+    down = {a.get("name"): a.get("status") for a in agents if isinstance(a, dict) and a.get("status") in ("done", "ended", "parked", "paused")}
 except (OSError, ValueError, AttributeError, TypeError):
     sys.exit("it cannot read the roster " + roster)
+
+def skip(name, reason):
+    print("skip\t" + name + "\t" + reason)
+
 folder = os.path.join(lw, "resume")
 for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
     name = file[:-3]
-    if not file.endswith(".sh") or name in down:
+    if not file.endswith(".sh") or "\t" in name or "\n" in name:
+        continue
+    try:
+        lines = open(os.path.join(folder, file)).read().splitlines()
+    except (OSError, ValueError):
+        skip(name, "its resume record does not read")
+        continue
+    if next((l[len("# server: "):] for l in lines if l.startswith("# server: ")), "playground") != server:
+        continue
+    if name in down:
+        skip(name, "its roster row reads " + down[name])
+        continue
+    try:
+        words = shlex.split(next(l for l in lines if l.startswith("exec ")))
+    except StopIteration:
+        skip(name, "its resume record has no exec line")
+        continue
+    except ValueError:
+        skip(name, "its exec line does not parse")
         continue
     try:
         runtime = open(os.path.join(lw, "runtimes", name)).read().strip()
-        lines = open(os.path.join(folder, file)).read().splitlines()
-        words = shlex.split(next(l for l in lines if l.startswith("exec ")))
-    except (OSError, StopIteration, ValueError):
+    except (OSError, ValueError):
+        skip(name, "it has no runtime pin")
         continue
-    if next((l[len("# server: "):] for l in lines if l.startswith("# server: ")), "playground") != server:
+    if runtime != "herdr":
+        skip(name, "it runs in " + (runtime if runtime.isalnum() else "another runtime") + ", not herdr")
         continue
     extras = words[6:]
     keys = extras[::2]
     if (
-        runtime == "herdr"
-        and len(words) >= 6
+        len(words) >= 6
         and words[1].endswith("/scripts/spawn.sh")
         and words[2:4] == ["resume", name]
         and len(extras) % 2 == 0
@@ -956,21 +977,30 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
         and set(keys) <= {"--account", "--effort", "--model"}
         and not any("\t" in w or "\n" in w for w in words)
     ):
-        print("\t".join(words[3:]))
+        print("run\t" + "\t".join(words[3:]))
+    else:
+        skip(name, "its exec line is not a resume restore runs")
 PY
   }
   lines=$(restore_list) || refuse "it cannot read the roster or the resume files"
   failed=0
   while IFS=$'\t' read -r -a args; do
-    [ "${#args[@]}" -ge 3 ] || continue
-    if said=$(bash "$0" resume "${args[@]}" 2>&1 </dev/null); then
-      echo "restored ${args[0]}"
-    elif [ $? -eq 3 ]; then
-      echo "skipped ${args[0]}: live"
-    else
-      failed=1
-      echo "not restored: $(tail -1 <<<"$said")"
-    fi
+    case "${args[0]:-}" in
+      skip) echo "skipped ${args[1]}: ${args[2]}" ;;
+      run)
+        args=("${args[@]:1}")
+        [ "${#args[@]}" -ge 3 ] || continue
+        if said=$(bash "$0" resume "${args[@]}" 2>&1 </dev/null); then
+          echo "restored ${args[0]}"
+        elif [ $? -eq 3 ]; then
+          echo "skipped ${args[0]}: live"
+        else
+          failed=1
+          said=$(tail -1 <<<"$said")
+          echo "not restored ${args[0]}: ${said#"spawn.sh refuses ${args[0]}: "}"
+        fi
+        ;;
+    esac
   done <<<"$lines"
   exit "$failed"
 fi
@@ -1478,8 +1508,14 @@ if [ "$MODE" = resume ]; then
       PROMPT=
     fi
   else
-    # Whom it reports to, from the prompt its start recorded, so the re-sends reach the right session; a session started in cmux has no record.
-    UP=$(sed -n 's/.*; you report to \([A-Za-z0-9-]*\)\..*/\1/p' "$RESUME_DIR/$NAME.prompt" 2>/dev/null | head -1) || UP=
+    # Whom it reports to, by scripts/README.md's order, so the re-sends reach the right session; a value that is not a session name would break the launch's quotes.
+    if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
+      UP=$(roster_field "$NAME" worker)
+    else
+      UP=$(roster_field "$NAME" reportsTo)
+      word "$UP" || UP=$(roster_field "$NAME" lead)
+    fi
+    word "$UP" || UP=$(sed -n 's/.*; you report to \([A-Za-z0-9-]*\)\..*/\1/p' "$RESUME_DIR/$NAME.prompt" 2>/dev/null | head -1) || UP=
     # A session idle at the restart takes no turn, so it would never act on after-resume's context.
     PROMPT="You are $NAME, resumed after a restart${UP:+; you report to $UP}. Act on the after-resume instruction in your context first, then carry on."
   fi

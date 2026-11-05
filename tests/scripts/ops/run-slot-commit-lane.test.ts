@@ -7,13 +7,22 @@ import { machine, type Setup } from "./run-slot-fake"
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
 
-// A machine whose fake git fails on a `-C` folder that is not one, answers `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only HEAD -- <paths>` with each of either under one of the paths, and touches its last argument for anything else, as a commit's marker
-const repo = (setup: Setup, staged: string[], unstaged: string[] = []) => {
+// Playground's own lefthook.yml, whose pre-commit runs the build
+const LEFTHOOK = readFileSync(join(import.meta.dir, "../../../lefthook.yml"), "utf8")
+// A machine whose fake git fails on a `-C` folder that is not one, answers `git rev-parse --show-toplevel` with its folder, which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only HEAD -- <paths>` with each of either under one of the paths, and touches its last argument for anything else, as a commit's marker
+const repo = (
+  setup: Setup,
+  staged: string[],
+  unstaged: string[] = [],
+  lefthook: string | null = LEFTHOOK,
+) => {
   const m = machine(setup)
+  if (lefthook !== null) writeFileSync(join(m.root, "lefthook.yml"), lefthook)
   writeFileSync(
     join(m.bin, "git"),
     `#!/bin/bash
 [ "$1" = -C ] && { [ -d "$2" ] || exit 128; }
+case " $* " in *" rev-parse --show-toplevel "*) [ "$1" = -C ] && cd "$2"; pwd; exit 0 ;; esac
 for a in "$@"; do
   [ "$a" = diff ] || continue
   case " $* " in
@@ -240,5 +249,42 @@ describe("a commit that stages no web/next file", () => {
     m.hold("run-slot", 3, "big")
     m.hold("run-slot-2", 2, "medium")
     expect(await m.start("commit-wt", {}, undefined, step("build")).ran()).toBe(true)
+  })
+})
+
+// the dispatcher, 4 Nov: a commit in another repo, whose pre-commit ran lint-staged and commitlint with no build, sat 65 minutes in the big-run queue for a 1-second job
+describe("a commit in a repo whose lefthook.yml pre-commit runs no build", () => {
+  const OTHER = `pre-commit:
+  commands:
+    lint-staged:
+      run: bunx lint-staged
+pre-push:
+  commands:
+    build:
+      run: bun run build
+commit-msg:
+  commands:
+    commitlint:
+      run: bunx commitlint --edit {1}
+`
+  test("takes run-slot-commit at once with a web/next file staged, beside a big run", async () => {
+    const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx", "packages/env/src/x.ts"], [], OTHER)
+    m.hold("run-slot", 3, "big")
+    expect(await m.start("worker-x", {}, undefined, ["git", "commit"]).ran()).toBe(true)
+    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
+  })
+
+  test("while one whose pre-commit lists its build as a quoted job still waits as a big run", async () => {
+    const jobs = `pre-commit:\n  jobs:\n    - run: "bun run build"\n`
+    const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"], [], jobs)
+    m.hold("run-slot", 3, "big")
+    expect(await m.start("worker-x", {}, undefined, ["git", "commit"]).waits()).toBe(true)
+  })
+
+  test("but one in a repo with no lefthook.yml takes run-slot-commit at once too", async () => {
+    const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"], [], null)
+    m.hold("run-slot", 3, "big")
+    expect(await m.start("worker-x", {}, undefined, ["git", "commit"]).ran()).toBe(true)
+    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
   })
 })

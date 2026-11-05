@@ -464,6 +464,20 @@ describe("worktreeRefusal", () => {
     expect(worktreeRefusal(wt, roots, holders)).toContain("x9y8z7-reviewer")
     rosterOf([{ name: "x9y8z7-reviewer", pr: "https://github.com/o/r/pull/11", status: "working" }])
     expect(worktreeRefusal(wt, roots, holders)).toBeNull()
+    // the merging worker of the PR whose checker used the worktree holds it by that PR's number alone, which counts for any other PR
+    rosterOf([{ name: "abc123-worker", pr: "https://github.com/o/r/pull/1", status: "working" }])
+    const of = (pr: string) => worktreeRefusal(wt, roots, { ...holders, pr })
+    expect(of("https://github.com/o/r/pull/1")).toBeNull()
+    expect(of("https://github.com/o/r/pull/2")).toContain("abc123-worker")
+    rosterOf([
+      {
+        branch: "PG-1-thing",
+        name: "abc123-worker",
+        pr: "https://github.com/o/r/pull/1",
+        status: "working",
+      },
+    ])
+    expect(of("https://github.com/o/r/pull/1")).toContain("abc123-worker")
     rosterOf([{ branch: "PG-1-thing", name: "abc123-worker", status: "ended" }])
     expect(worktreeRefusal(wt, roots, holders)).toBeNull()
     expect(

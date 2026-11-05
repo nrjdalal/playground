@@ -23,7 +23,7 @@ import {
 import { type ViewerItem, VIEWERS } from "@/components/dashboard/viewer/registry"
 import {
   attachmentDownloadUrl,
-  useAttachmentUrl,
+  useAttachment,
 } from "@/components/dashboard/viewer/use-attachment-url"
 import { OFF_FOCUSABLE } from "@/components/hint"
 import { Button } from "@/components/ui/button"
@@ -102,7 +102,7 @@ function Slide({
   onEdge: (direction: -1 | 1) => void
 }) {
   const viewer = VIEWERS[item.kind]
-  const url = useAttachmentUrl(item.id, near && Boolean(viewer))
+  const { missing, url } = useAttachment(item.id, near && Boolean(viewer))
   const Icon = viewer?.icon ?? RiFileLine
   return (
     <CarouselItem
@@ -113,11 +113,17 @@ function Slide({
       {viewer && url ? (
         <viewer.View active={active} item={item} onEdge={onEdge} url={url} />
       ) : (
-        <Icon className="text-muted-foreground size-8" />
+        <span className="text-muted-foreground flex flex-col items-center gap-2 text-xs">
+          <Icon className="size-8" />
+          {missing ? <Missing /> : null}
+        </span>
       )}
     </CarouselItem>
   )
 }
+
+// What a file the API answered 404 for shows in its place
+export const Missing = () => <span className="text-muted-foreground text-xs">Missing</span>
 
 const CAROUSEL_ITEM = '[data-slot="carousel-item"]'
 
@@ -154,7 +160,7 @@ export const OPENS_IN_TAB: readonly InboxAttachmentKind[] = ["image", "pdf"]
 // The shown file on a tab of its own, at full size, off until its file has arrived; a kind OPENS_IN_TAB leaves out has no button at all. No tooltips in the bar: each square's icon says it.
 export function OpenInNewTab({ item }: { item: ViewerItem }) {
   const opens = OPENS_IN_TAB.includes(item.kind)
-  const url = useAttachmentUrl(item.id, opens && Boolean(VIEWERS[item.kind]))
+  const { url } = useAttachment(item.id, opens && Boolean(VIEWERS[item.kind]))
   // a kind that never opens in a tab keeps the square's room, so the bar holds one width
   if (!opens) return <span aria-hidden className="size-8 shrink-0" />
   return url ? (

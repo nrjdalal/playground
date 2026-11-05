@@ -470,6 +470,7 @@ function walk(lx, scope, nested, inherit) {
   let depth = 0;
   let loops = 0;
   let after = "";
+  const bodies = [];
   const end = (op) => {
     const done = cmd;
     const pipe = op === "|" || op === "|&";
@@ -497,6 +498,14 @@ function walk(lx, scope, nested, inherit) {
       done.chain = lx.token;
       if (reserved.some((w) => HELD.has(w)))
         done.held = true;
+      if (done.held || bodies.includes(true))
+        done.kept = true;
+      for (const w of reserved) {
+        if (OPENS.has(w))
+          bodies.push(HELD.has(w));
+        else if (CLOSES.has(w))
+          bodies.pop();
+      }
       if (loops > 0 || loop)
         done.repeated = true;
       depth = Math.max(0, depth + opened - closed);
@@ -673,7 +682,7 @@ function word(lx) {
       merge(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
-    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
+    } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir3();
       lx.i++;
     } else {
@@ -686,11 +695,16 @@ function word(lx) {
     out.unknown ??= "a brace expansion";
   if (GLOB_CHARS.test(bare))
     out.glob = true;
+  out.source = src.slice(start, lx.i);
   if (marked(out.value))
-    out.raw = src.slice(start, lx.i);
+    out.raw = out.source;
+  if (src[start] === "~" && TILDE.test(out.value))
+    out.tilde = true;
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
+var TILDE = /^~[-+](?=\/|$|\u0000)/;
+var ends = (c = "") => c === "" || c === "/" || BREAK.has(c);
 function double(lx) {
   const { src } = lx;
   const out = { value: "" };

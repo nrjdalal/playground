@@ -10,7 +10,7 @@ import type {
   ViewerItem,
   ViewProps,
 } from "@/components/dashboard/viewer/registry"
-import { useAttachmentUrl } from "@/components/dashboard/viewer/use-attachment-url"
+import { useAttachment } from "@/components/dashboard/viewer/use-attachment-url"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Separator } from "@/components/ui/separator"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -272,24 +272,26 @@ function PairThumb({ after, before }: Pair) {
   )
 }
 
-// A folded pair keeps its before's id, so the url handed in is the before's; the after's is fetched here, null until it arrives.
-function usePair(item: ViewerItem, url: string): Pair | null {
+// A folded pair keeps its before's id, so the url handed in is the before's; the after's is fetched here, null until it arrives, and "before" once its file is gone, so the pair shows its before alone.
+function usePair(item: ViewerItem, url: string): Pair | "before" | null {
   const pair = item.pair
-  const afterUrl = useAttachmentUrl(pair ? pair.after.id : item.id, Boolean(pair))
-  if (!pair || !afterUrl) return null
-  return { after: { alt: pair.after.name, url: afterUrl }, before: { alt: pair.before.name, url } }
+  const after = useAttachment(pair ? pair.after.id : item.id, Boolean(pair))
+  if (!pair) return null
+  if (after.missing) return "before"
+  if (!after.url) return null
+  return { after: { alt: pair.after.name, url: after.url }, before: { alt: pair.before.name, url } }
 }
 
 function ImageThumb({ item, url }: ThumbProps) {
   const pair = usePair(item, url)
-  if (!item.pair)
+  if (!item.pair || pair === "before")
     return <img alt={item.name} className="size-full object-cover" draggable={false} src={url} />
   return pair ? <PairThumb {...pair} /> : null
 }
 
 function ImageView({ item, onEdge, url }: ViewProps) {
   const pair = usePair(item, url)
-  if (!item.pair) return <ZoomPicture picture={{ alt: item.name, url }} />
+  if (!item.pair || pair === "before") return <ZoomPicture picture={{ alt: item.name, url }} />
   return pair ? <PairView {...pair} onEdge={onEdge} /> : null
 }
 

@@ -9,21 +9,12 @@ import {
   type Attachment,
 } from "../../../../../../api/hono/src/lib/dashboard/attachments"
 import {
-  CmuxTimedOut,
-  holdsKeystroke,
-  writeCommand,
-  type Write,
-} from "../../../../../../api/hono/src/lib/dashboard/cmux"
-import {
   deliver,
   holdsMessage,
   inputState,
-  keystrokes,
   MAX_CHARS,
-  MAX_KEYSTROKES,
   MAX_LINES,
   normalize,
-  pieces,
   QUEUED_MS,
   readSkills,
   refusal,
@@ -41,16 +32,14 @@ import {
 import type { Entry } from "../../../../../../api/hono/src/lib/dashboard/transcript"
 import type { Live, Worker } from "../../../../../../api/hono/src/lib/dashboard/workers"
 import {
-  keystrokeCount,
   MESSAGE_MAX_CHARS,
-  MESSAGE_MAX_KEYSTROKES,
   MESSAGE_MAX_LINES,
   pastedFile,
 } from "../../../../../../web/next/src/lib/paste"
 import { LEADING_SKILL } from "../../../../../../web/next/src/lib/skill-menu"
 import { NORMALIZE_CASES } from "../../../../../dashboard-normalize-cases"
 
-const SURFACE = "42A9D5E3-E49A-454C-80E6-8884E5ACCC92"
+const SURFACE = "herdr:factory:w2:p1"
 
 const worker = (over: Partial<Worker> = {}): Worker => ({
   cwd: "/repo",
@@ -81,7 +70,7 @@ const live = (workers: Worker[], surfaces: Record<string, string> = {}): Live =>
   workers,
 })
 
-// A Claude Code screen's last lines as read-screen gives them, measured on a probe session: the input box between the rule carrying the session's name and a plain rule, then the status lines.
+// A Claude Code screen's last lines as the screen read gives them, measured on a probe session: the input box between the rule carrying the session's name and a plain rule, then the status lines.
 const RULE = "─".repeat(40)
 const screen = (...box: string[]) =>
   [
@@ -117,21 +106,21 @@ const OLDER: Entry = {
   tool: null,
 }
 
-// A fake terminal and activity table: what was typed where, and what was recorded, in order. The terminal is cmux 0.65's, whose draft guard refuses a send into an input that holds text unless it passes --force (measured by Soren); with `guard` false it is 0.64's, which has no guard and types a --force as text (measured on probe-multiline).
-function fakes(board: Live, failOn?: (step: Write, index: number) => boolean, guard = true) {
-  const typed: Write[] = []
+// A fake herdr pane and activity table: each message as it went, whole, as one prompt to the pane it went to, and what was recorded, in order. `failOn` refuses a send as herdr does before sending anything.
+function fakes(board: Live, failOn?: (text: string, index: number) => boolean) {
+  const typed: { surface: string; text: string }[] = []
   const recorded: string[] = []
   const rows = new Map<string, Date>()
   const skillsRead: string[] = []
-  let input = ""
   const deps: DeliverDeps = {
     board: async () => board,
-    canForce: async () => guard,
     delivered: async (id) => rows.get(id) ?? null,
     now: () => new Date("2026-10-06T12:00:00.000Z"),
     pressEnter: async () => {},
-    prompt: async () => {},
-    prompts: async () => [],
+    prompt: async (surface, text) => {
+      if (failOn?.(text, typed.length)) throw new Error("no such pane")
+      typed.push({ surface, text })
+    },
     readScreen: async () => EMPTY,
     readSession: async () => board,
     record: async (event, typing) => {
@@ -145,19 +134,6 @@ function fakes(board: Live, failOn?: (step: Write, index: number) => boolean, gu
       return new Set(["end-of-day", "acme"])
     },
     wait: async () => {},
-    write: async (step) => {
-      if (failOn?.(step, typed.length)) throw new Error("no such surface")
-      if ("text" in step) {
-        if (step.force && !guard) throw new Error("this cmux types --force as text")
-        if (guard && input && !step.force) {
-          throw new Error(
-            "send: the agent prompt holds text someone is typing, so nothing was sent.",
-          )
-        }
-        input += step.text
-      } else input = step.key === "enter" ? "" : `${input}\n`
-      typed.push(step)
-    },
   }
   return { deps, recorded, skillsRead, typed }
 }
@@ -198,39 +174,15 @@ describe("refusal", () => {
     expect(refusal("", 1)).toBeNull()
   })
 
-  test("the paste rule counts keystrokes as deliver() types them, and keeps room for a reply's tag and five files", () => {
-    expect(MESSAGE_MAX_KEYSTROKES).toBe(MAX_KEYSTROKES)
-    for (const text of ["", "a", "a\nb", "a\\n\\t\\rb\n\\", "\\\\n", "x\n\ny"]) {
-      expect(keystrokeCount(text)).toBe(keystrokes(text).length)
-    }
-    // a short log line dense with escaped new lines
-    const log = `{"log":"${"a\\n".repeat(450)}"}`
-    expect(log.length).toBeLessThan(2000)
-    expect(pastedFile(log, "")).not.toBeNull()
-    const files = Array.from({ length: MAX_ATTACHMENTS }, (_, i) => ({
-      path: `/Users/someone/.playground/attachments/0000000${i}-0000-4000-8000-000000000000.txt`,
-    }))
-    // what deliver() would be asked to type: the words tagged with a picked reply, as withReply puts it, and five files
-    const fits = (pasted: string, before: string, after: string) => {
-      const sent = normalize(`re #i99999: ${before}${pasted}${after}`)
-      return (
-        !refusal(sent, MAX_ATTACHMENTS) &&
-        keystrokes(withAttachments(sent, files)).length <= MAX_KEYSTROKES
-      )
-    }
+  test("the paste rule keeps room for a reply's tag, with five files beside the words", () => {
+    // what deliver() would be asked to send: the words tagged with a picked reply, as withReply puts it, and five files, whose Attached lines no cap counts
+    const fits = (pasted: string, before: string, after: string) =>
+      !refusal(normalize(`re #i99999: ${before}${pasted}${after}`), MAX_ATTACHMENTS)
     const typed = "Made-up meeting notes. ".repeat(400).slice(0, 7000)
     for (const [pasted, words, asFile, after = ""] of [
       ["x".repeat(995), typed, true],
       ["x".repeat(1000), typed.slice(0, 6984), false],
       ["x".repeat(1000), typed.slice(0, 6985), true],
-      // at the keystroke cap from both sides: one line, then a piece per escape
-      [`x${"a\\n".repeat(386)}`, "", false],
-      [`x${"a\\n".repeat(387)}`, "", true],
-      // an empty first line, where the reply's tag costs a keystroke of its own
-      [`\n${"a\\n".repeat(385)}`, "", false],
-      [`\n${"a\\n".repeat(386)}`, "", true],
-      // a control character between the backslash and the n is dropped before deliver() counts
-      ["\\\u0001n".repeat(450), "", true],
       // lone carriage returns are line ends
       [Array(MAX_LINES).fill("z").join("\r"), "", false],
       [
@@ -249,9 +201,6 @@ describe("refusal", () => {
         true,
         "\nz",
       ],
-      // pasted mid-box: its closing backslash meets the n after the cursor and makes a piece of its own
-      [`${"a\\n".repeat(385)}\\`, "x", false, "n"],
-      [`${"a\\n".repeat(386)}\\`, "x", true, "n"],
     ] as const) {
       expect(pastedFile(pasted, words, after) !== null).toBe(asFile)
       if (!asFile) expect(fits(pasted, words, after)).toBe(true)
@@ -334,58 +283,6 @@ describe("skillDirs", () => {
 
   test("a stack that does not read this machine never reads a session's cwd, which a fixture made up", () => {
     expect(skillDirs("/work/app", "/fixture/claude", false)).toEqual(["/fixture/claude/skills"])
-  })
-})
-
-describe("pieces", () => {
-  test("a line is cut after every backslash that precedes n, r or t, and nowhere else", () => {
-    expect(pieces("C:\\temp\\new")).toEqual(["C:\\", "temp\\", "new"])
-    expect(pieces("a\\\\nb")).toEqual(["a\\\\", "nb"])
-    expect(pieces("keep \\N \\e \\x41 \\u0041 and a trailing \\")).toEqual([
-      "keep \\N \\e \\x41 \\u0041 and a trailing \\",
-    ])
-    expect(pieces("plain")).toEqual(["plain"])
-    expect(pieces("")).toEqual([])
-  })
-})
-
-describe("keystrokes", () => {
-  test("one line is its text, then Enter", () => {
-    expect(keystrokes("hello")).toEqual([{ text: "hello" }, { key: "enter" }])
-  })
-
-  test("lines are joined by Shift+Enter, a blank line included, and only the end submits", () => {
-    expect(keystrokes("one\n\nthree")).toEqual([
-      { text: "one" },
-      { key: "shift+enter" },
-      { key: "shift+enter" },
-      { text: "three" },
-      { key: "enter" },
-    ])
-  })
-
-  test("every piece is safe for cmux send, and the pieces put back together are the message", () => {
-    const samples = [
-      "C:\\temp\\new\\red\\tab",
-      "\\n\\r\\t at the start",
-      "ends with \\",
-      "double \\\\n and \\\\\\t",
-      "unicode café → ✓ 🙂 and `code` with $HOME",
-      "line one\nline \\two\n\n  indented \\n line",
-      "a C1 \u0085 control and \u009b",
-    ]
-    for (const sample of samples) {
-      const text = normalize(sample)
-      const steps = keystrokes(text)
-      const rebuilt = steps
-        .map((step) => ("text" in step ? step.text : step.key === "shift+enter" ? "\n" : ""))
-        .join("")
-      expect(rebuilt).toBe(text)
-      for (const step of steps) {
-        if ("text" in step) expect(holdsKeystroke(step.text)).toBe(false)
-        expect(() => writeCommand({ ...step, surface: SURFACE })).not.toThrow()
-      }
-    }
   })
 })
 
@@ -480,7 +377,7 @@ describe("inputState", () => {
     ).toBe("holds")
   })
 
-  // A prompt suggestion is the dim text Claude Code fills an empty box with after a turn: read-screen drops the dimming, so it reads like a draft and the dashboard refuses the send rather than typing over it. Factory sessions start with suggestions off (scripts/factory-settings.json), so this is the shape a session with them on still shows.
+  // A prompt suggestion is the dim text Claude Code fills an empty box with after a turn: the screen read drops the dimming, so it reads like a draft and the dashboard refuses the send rather than typing over it. Factory sessions start with suggestions off (scripts/factory-settings.json), so this is the shape a session with them on still shows.
   test("an input holding only a prompt suggestion holds something", () => {
     expect(inputState(screen('❯ Try "run the suite"'))).toBe("holds")
     expect(inputState(screen('❯\u00a0Try "run the suite"'))).toBe("holds")
@@ -511,19 +408,14 @@ describe("inputState", () => {
 })
 
 describe("deliver", () => {
-  test("types the message into the named session's own surface and records its size, not its words", async () => {
+  test("sends the message whole to the named session's own pane and records its size, not its words", async () => {
     const { deps, recorded, typed } = fakes(board())
     const result = await deliver(
       { actor, text: "check the queue\nthen stop", to: "dispatcher" },
       deps,
     )
     expect(result).toEqual({ at: "2026-10-06T12:00:00.000Z", ok: true, sessionId: "s-dispatcher" })
-    expect(typed).toEqual([
-      { force: true, surface: SURFACE, text: "check the queue" },
-      { key: "shift+enter", surface: SURFACE },
-      { force: true, surface: SURFACE, text: "then stop" },
-      { key: "enter", surface: SURFACE },
-    ])
+    expect(typed).toEqual([{ surface: SURFACE, text: "check the queue\nthen stop" }])
     expect(recorded).toEqual(["Sent dispatcher a message of 25 characters on 2 lines"])
     expect(recorded[0]).not.toContain("queue")
   })
@@ -533,7 +425,7 @@ describe("deliver", () => {
       live([worker({ lifecycle: "running", light: "working" })], { "s-dispatcher": SURFACE }),
     )
     expect((await deliver({ actor, text: "next", to: "dispatcher" }, deps)).ok).toBe(true)
-    expect(typed).toHaveLength(2)
+    expect(typed).toHaveLength(1)
   })
 
   test("two live sessions named for the dispatcher: the oldest keeps the role and takes the send, with no 409", async () => {
@@ -544,16 +436,15 @@ describe("deliver", () => {
           worker({ role: "other", sessionId: "s-new", startedAt: "2026-10-06T13:00:00.000Z" }),
           worker({ startedAt: "2026-10-06T09:00:00.000Z" }),
         ],
-        { "s-dispatcher": SURFACE, "s-new": "SURF-2" },
+        { "s-dispatcher": SURFACE, "s-new": "herdr:factory:w3:p1" },
       ),
     )
     expect((await deliver({ actor, text: "hi", to: "dispatcher" }, deps)).ok).toBe(true)
-    expect(typed).toHaveLength(2)
-    expect(typed.every((t) => t.surface === SURFACE)).toBe(true)
+    expect(typed).toEqual([{ surface: SURFACE, text: "hi" }])
   })
 
   // #i520: the second dispatcher is a target as the primary is, its name reaching the session that holds its role
-  test("the second dispatcher takes the send into its own surface, and of two by its name the one holding the role does", async () => {
+  test("the second dispatcher takes the send into its own pane, and of two by its name the one holding the role does", async () => {
     const { deps, typed } = fakes(
       live(
         [
@@ -561,15 +452,18 @@ describe("deliver", () => {
           worker({ name: "dispatcher-2", role: "other", sessionId: "s-glm-new" }),
           worker({ name: "dispatcher-2", sessionId: "s-glm" }),
         ],
-        { "s-glm": "SURF-GLM", "s-glm-new": "SURF-2", "s-dispatcher": SURFACE },
+        {
+          "s-glm": "herdr:factory:w4:p1",
+          "s-glm-new": "herdr:factory:w3:p1",
+          "s-dispatcher": SURFACE,
+        },
       ),
     )
     expect(await deliver({ actor, text: "hi", to: "dispatcher-2" }, deps)).toMatchObject({
       ok: true,
       sessionId: "s-glm",
     })
-    expect(typed.length).toBeGreaterThan(0)
-    expect(typed.every((t) => t.surface === "SURF-GLM")).toBe(true)
+    expect(typed).toEqual([{ surface: "herdr:factory:w4:p1", text: "hi" }])
   })
 
   test("two live sessions sharing another name still refuse as ambiguous", async () => {
@@ -611,6 +505,26 @@ describe("deliver", () => {
     }
   })
 
+  test("a read cut short that misses the session is read once more, and still missing it is a failed read, never NOT_FOUND (PG-880)", async () => {
+    const cut: Live = { ...live([], {}), partial: true }
+    const { deps, recorded, typed } = fakes(cut)
+    let reads = 0
+    deps.board = async () => (reads++, cut)
+    const refused = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
+    expect(refused).toMatchObject({ code: "CMUX_FAILED", ok: false })
+    expect(refused.ok ? "" : refused.reason).not.toContain("No live session is named")
+    expect(reads).toBe(2)
+    expect(typed).toEqual([])
+    expect(recorded).toEqual([])
+
+    const second = fakes(board())
+    const reads2: Live[] = [cut, board()]
+    second.deps.board = async () => reads2.shift() ?? board()
+    expect(await deliver({ actor, text: "hi", to: "dispatcher" }, second.deps)).toMatchObject({
+      ok: true,
+    })
+  })
+
   test("refuses to type into an input that already holds something, which the message would join", async () => {
     for (const box of ["❯\u00a0a draft", "!", "❯\u00a0/"]) {
       const { deps, recorded, typed } = fakes(board())
@@ -633,7 +547,7 @@ describe("deliver", () => {
     expect(typed).toEqual([])
   })
 
-  test("refuses text it will not type before it reads cmux", async () => {
+  test("refuses text it will not type before it reads the board", async () => {
     const { deps, typed } = fakes(board())
     deps.board = async () => {
       throw new Error("must not be read")
@@ -643,14 +557,13 @@ describe("deliver", () => {
       ["   ", "EMPTY"],
       ["!ls", "COMMAND"],
       ["\u200B/end-of-day", "COMMAND"],
-      [Array(MAX_KEYSTROKES).fill("\\n").join(""), "TOO_LONG"],
     ]) {
       expect(await deliver({ actor, text: text!, to: "dispatcher" }, deps)).toMatchObject({ code })
     }
     expect(typed).toEqual([])
   })
 
-  test("a / and the name of a skill the session can run is typed, as Merritt would type it", async () => {
+  test("a / and the name of a skill the session can run is sent, as the owner would type it", async () => {
     const { deps, skillsRead, typed } = fakes(
       live([worker({ cwd: "/work/dispatcher" })], { "s-dispatcher": SURFACE }),
     )
@@ -660,10 +573,7 @@ describe("deliver", () => {
       ok: true,
     })
     expect(skillsRead).toEqual(["/work/dispatcher"])
-    expect(typed).toEqual([
-      { force: true, surface: SURFACE, text: "/end-of-day for me" },
-      { key: "enter", surface: SURFACE },
-    ])
+    expect(typed).toEqual([{ surface: SURFACE, text: "/end-of-day for me" }])
   })
 
   test("any other / is refused once the session's skills are read: a built-in, an unknown name, a lookalike", async () => {
@@ -697,7 +607,7 @@ describe("deliver", () => {
     expect(typed).toEqual([])
   })
 
-  test("a cmux that cannot be read is CMUX_FAILED, with cmux's own words", async () => {
+  test("a board that cannot be read is CMUX_FAILED, with the read's own words", async () => {
     const { deps } = fakes(live([]))
     deps.board = async () => {
       throw new Error("Access denied")
@@ -705,16 +615,6 @@ describe("deliver", () => {
     const result = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
     expect(result).toMatchObject({ code: "CMUX_FAILED" })
     expect(result.ok ? "" : result.reason).toBe("Could not read the sessions: Access denied")
-  })
-
-  // A keystroke cmux refuses after typing began is INTERRUPTED, saying what may be left in the input: cmux ends a write that runs past its timeout, so even the Enter reported failed may have landed.
-  test("a keystroke cmux refuses once typing began is INTERRUPTED, saying what may be left in the input", async () => {
-    const middle = fakes(board(), (_, i) => i === 2)
-    const part = await deliver({ actor, text: "a\nb", to: "dispatcher" }, middle.deps)
-    expect(part.ok ? "" : part.reason).toContain("Part of it may sit unsent in dispatcher's input.")
-    const enter = fakes(board(), (step) => "key" in step && step.key === "enter")
-    const atEnter = await deliver({ actor, text: "a\nb", to: "dispatcher" }, enter.deps)
-    expect(atEnter.ok ? "" : atEnter.reason).toContain("The Enter may have gone through anyway")
   })
 
   test("a record that cannot be inserted throws, and nothing is typed", async () => {
@@ -737,102 +637,8 @@ describe("deliver", () => {
     await expect(deliver({ actor, text: "hi", to: "dispatcher" }, deps)).rejects.toThrow(
       "commit failed",
     )
-    expect(typed.map((step) => ("text" in step ? step.text : step.key))).toEqual(["hi", "enter"])
+    expect(typed.map((sent) => sent.text)).toEqual(["hi"])
   })
-
-  test("a picker raised while typing stops it before the Enter, which would answer the picker", async () => {
-    const { deps, recorded, typed } = fakes(board())
-    // The session is read once when its turn comes, and once more before the Enter.
-    let reads = 0
-    deps.readSession = async () => {
-      reads += 1
-      return reads < 2
-        ? board()
-        : live([worker({ light: "needs-you" })], { "s-dispatcher": SURFACE })
-    }
-    const result = await deliver({ actor, text: "a\nb", to: "dispatcher" }, deps)
-    expect(result).toMatchObject({ code: "INTERRUPTED", ok: false })
-    expect(result.ok ? "" : result.reason).toContain("typed but not sent")
-    expect(typed.map((step) => ("text" in step ? step.text : step.key))).toEqual([
-      "a",
-      "shift+enter",
-      "b",
-    ])
-    expect(recorded).toHaveLength(1)
-  })
-
-  // a 30-line paste reached the session whole yet read as failed, since cmux 0.65 refused the second line's send into an input holding the first.
-  test("a long message goes whole past cmux's draft guard: every send, the first included, passes --force", async () => {
-    const { deps, typed } = fakes(board())
-    const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1} of a pasted thread`)
-    const result = await deliver({ actor, text: lines.join("\n"), to: "dispatcher" }, deps)
-    expect(result.ok).toBe(true)
-    const sends = typed.filter((step) => "text" in step)
-    expect(sends.map((step) => step.text)).toEqual(lines)
-    expect(sends.map((step) => "force" in step && step.force === true)).toEqual(
-      lines.map(() => true),
-    )
-  })
-
-  test("a single line cut at a backslash before n, r or t goes whole past the guard", async () => {
-    const { deps, typed } = fakes(board())
-    expect((await deliver({ actor, text: "open C:\\new\\tmp", to: "dispatcher" }, deps)).ok).toBe(
-      true,
-    )
-    expect(typed).toEqual([
-      { force: true, surface: SURFACE, text: "open C:\\" },
-      { force: true, surface: SURFACE, text: "new\\" },
-      { force: true, surface: SURFACE, text: "tmp" },
-      { key: "enter", surface: SURFACE },
-    ])
-  })
-
-  // cmux 0.64 has no draft guard and no --force: it types the flag into the input as text (measured on probe-multiline).
-  test("a cmux with no --force gets none, and the message still goes whole", async () => {
-    const { deps, typed } = fakes(board(), undefined, false)
-    expect((await deliver({ actor, text: "a\nb\nc", to: "dispatcher" }, deps)).ok).toBe(true)
-    expect(typed.some((step) => "force" in step)).toBe(false)
-    expect(typed.map((step) => ("text" in step ? step.text : step.key))).toEqual([
-      "a",
-      "shift+enter",
-      "b",
-      "shift+enter",
-      "c",
-      "enter",
-    ])
-  })
-
-  test("a cmux whose --force cannot be told is CMUX_FAILED, and nothing is typed", async () => {
-    const { deps, recorded, typed } = fakes(board())
-    deps.canForce = async () => {
-      throw new Error("no answer from cmux")
-    }
-    const result = await deliver({ actor, text: "a\nb", to: "dispatcher" }, deps)
-    expect(result).toMatchObject({ code: "CMUX_FAILED", ok: false })
-    expect(typed).toEqual([])
-    expect(recorded).toEqual([])
-  })
-
-  // --force skips cmux's dialog check too, so a prompt the session raises mid-message stops the typing before the next forced line would land in it.
-  test("a prompt raised while typing stops it before the next line, which --force would type into the prompt", async () => {
-    const { deps, typed } = fakes(board())
-    let reads = 0
-    // Read once for the baseline, once before the first send, once before the second.
-    deps.prompts = async () => (++reads > 2 ? ["old", "new"] : ["old"])
-    const result = await deliver({ actor, text: "a\nb\nc", to: "dispatcher" }, deps)
-    expect(result).toMatchObject({ code: "INTERRUPTED", ok: false })
-    expect(result.ok ? "" : result.reason).toContain(
-      "Part of it sits unsent in dispatcher's input.",
-    )
-    expect(typed.map((step) => ("text" in step ? step.text : step.key))).toEqual([
-      "a",
-      "shift+enter",
-    ])
-  })
-
-  // A send once failed with "holds text someone is typing, so nothing was sent" on an empty input: Claude Code's queued-messages hint and a mid-turn prompt line read as an empty input by design, yet cmux 0.65's draft guard sees text there and refuses a send without --force.
-  const DRAFT_GUARD =
-    "send: the agent prompt in 77BD77D9 holds text someone is typing, so nothing was sent. Retry when the prompt is clear, or pass --force to send anyway."
 
   // deliver logs every failed try; a test that expects one listens, the rest stay quiet.
   const logged = async (run: (warn: ReturnType<typeof spyOn>) => Promise<void>) => {
@@ -844,161 +650,12 @@ describe("deliver", () => {
     }
   }
 
-  test("the first send takes --force too, so a guard that sees a queued hint cannot refuse a message of one line", async () => {
-    const { deps, typed } = fakes(board())
-    const write = deps.write
-    deps.write = async (step) => {
-      if ("text" in step && !step.force) throw new Error(DRAFT_GUARD)
-      await write(step)
-    }
-    expect((await deliver({ actor, text: "hello", to: "dispatcher" }, deps)).ok).toBe(true)
-    expect(typed).toEqual([
-      { force: true, surface: SURFACE, text: "hello" },
-      { key: "enter", surface: SURFACE },
-    ])
-  })
-
-  // The Feed is read first of all and kept, so a prompt raised in the gap before the screen read or between the tries is one the typing stops for.
-  test("a message of one send reads whether cmux takes --force and the Feed before the session's screen, and the Feed again at the send", async () => {
-    const { deps } = fakes(board())
-    const reads: string[] = []
-    const canForce = deps.canForce
-    const readScreen = deps.readScreen
-    deps.canForce = async () => {
-      reads.push("help")
-      return canForce()
-    }
-    deps.prompts = async () => {
-      reads.push("feed")
-      return []
-    }
-    deps.readScreen = async (surface) => {
-      reads.push("screen")
-      return readScreen(surface)
-    }
-    expect((await deliver({ actor, text: "one line", to: "dispatcher" }, deps)).ok).toBe(true)
-    expect(reads).toEqual(["help", "feed", "screen", "feed"])
-  })
-
-  // --force skips the guard's dialog check, so a prompt raised after the Feed was read must stop even the first send.
-  test("a prompt raised before the first send refuses it as ON_PICKER, with nothing typed", async () => {
-    const { deps, typed } = fakes(board())
-    let reads = 0
-    deps.prompts = async () => (++reads > 1 ? ["raised"] : [])
-    const result = await deliver({ actor, text: "a\nb", to: "dispatcher" }, deps)
-    expect(result).toMatchObject({ code: "ON_PICKER", ok: false })
-    expect(result.ok ? "" : result.reason).toContain("Nothing was typed.")
-    expect(typed).toEqual([])
-  })
-
-  test("a prompt raised during the screen read stops the send, which --force would have typed into it", async () => {
-    const { deps, typed } = fakes(board())
-    let raised = false
-    deps.prompts = async () => (raised ? ["raised"] : [])
-    const readScreen = deps.readScreen
-    deps.readScreen = async (surface) => {
-      raised = true
-      return readScreen(surface)
-    }
-    expect(await deliver({ actor, text: "hello", to: "dispatcher" }, deps)).toMatchObject({
-      code: "ON_PICKER",
-      ok: false,
-    })
-    expect(typed).toEqual([])
-  })
-
-  // cmux 0.64 has no --force and no dialog check to skip, but a later line of a message still lands in a prompt raised meanwhile.
-  test("on a cmux with no --force, a prompt raised while typing still stops the rest, and a message of one send reads no Feed", async () => {
-    const stops = fakes(board(), undefined, false)
-    let reads = 0
-    stops.deps.prompts = async () => (++reads > 1 ? ["new"] : [])
-    const result = await deliver({ actor, text: "a\nb\nc", to: "dispatcher" }, stops.deps)
-    expect(result).toMatchObject({ code: "INTERRUPTED", ok: false })
-    expect(stops.typed.some((step) => "force" in step)).toBe(false)
-    const one = fakes(board(), undefined, false)
-    let feed = 0
-    one.deps.prompts = async () => {
-      feed += 1
-      return []
-    }
-    expect((await deliver({ actor, text: "one line", to: "dispatcher" }, one.deps)).ok).toBe(true)
-    expect(feed).toBe(0)
-  })
-
-  test("a send cmux refuses before anything is typed is tried once more at once, and goes when that passes", async () => {
-    const { deps, typed } = fakes(board())
-    const write = deps.write
-    let refusals = 0
-    deps.write = async (step) => {
-      if (refusals++ < 1) throw new Error(DRAFT_GUARD)
-      await write(step)
-    }
-    await logged(async (warn) => {
-      expect((await deliver({ actor, text: "hello", to: "dispatcher" }, deps)).ok).toBe(true)
-      expect(typed).toEqual([
-        { force: true, surface: SURFACE, text: "hello" },
-        { key: "enter", surface: SURFACE },
-      ])
-      expect(warn).toHaveBeenCalledTimes(1)
-      expect(String(warn.mock.calls[0]?.[0])).toContain(DRAFT_GUARD)
-    })
-  })
-
-  test("a send cmux refuses twice before typing is CMUX_FAILED, which the outbox tries again, and every try is logged with cmux's own words", async () => {
-    const { deps, typed } = fakes(board())
-    deps.write = async () => {
-      throw new Error(DRAFT_GUARD)
-    }
-    await logged(async (warn) => {
-      const result = await deliver({ actor, text: "hello", to: "dispatcher" }, deps)
-      expect(result).toMatchObject({ code: "CMUX_FAILED", ok: false })
-      expect(result.ok ? "" : result.reason).toBe(`The message did not go through: ${DRAFT_GUARD}`)
-      expect(typed).toEqual([])
-      expect(warn).toHaveBeenCalledTimes(2)
-      for (const call of warn.mock.calls) expect(String(call[0])).toContain(DRAFT_GUARD)
-    })
-  })
-
-  // cmux ends a write that runs past its timeout, so even a first send reported failed may have typed its text; trying again would find the text, and the outbox's retry after the owner pressed Enter would send it twice.
-  test("a send killed at cmux's timeout stays INTERRUPTED and is not tried again", async () => {
-    const { deps, typed } = fakes(board())
-    let writes = 0
-    deps.write = async () => {
-      writes += 1
-      throw new CmuxTimedOut(["send"])
-    }
-    await logged(async (warn) => {
-      const result = await deliver({ actor, text: "hello", to: "dispatcher" }, deps)
-      expect(result).toMatchObject({ code: "INTERRUPTED", ok: false })
-      expect(result.ok ? "" : result.reason).toContain("The message did not go through")
-      expect(writes).toBe(1)
-      expect(typed).toEqual([])
-      expect(warn).not.toHaveBeenCalled()
-    })
-  })
-
-  // A read of the Feed that times out has typed nothing and sent nothing, so it is a refusal a retry can pass, not a possibly landed send.
-  test("a Feed read that times out before the first send is CMUX_FAILED, not INTERRUPTED, and nothing is typed", async () => {
-    const { deps, typed } = fakes(board())
-    let reads = 0
-    deps.prompts = async () => {
-      if (++reads > 1) throw new CmuxTimedOut(["rpc"])
-      return []
-    }
-    await logged(async (warn) => {
-      const result = await deliver({ actor, text: "hello", to: "dispatcher" }, deps)
-      expect(result).toMatchObject({ code: "CMUX_FAILED", ok: false })
-      expect(typed).toEqual([])
-      expect(warn).toHaveBeenCalledTimes(2)
-    })
-  })
-
   test("the second try reads the screen again, so text that landed after all refuses it rather than joining it", async () => {
     const { deps, typed } = fakes(board())
     const screens = [EMPTY, screen("❯ hello")]
     deps.readScreen = async () => screens.shift() ?? EMPTY
-    deps.write = async () => {
-      throw new Error(DRAFT_GUARD)
+    deps.prompt = async () => {
+      throw new Error("no such pane")
     }
     await logged(async () => {
       expect(await deliver({ actor, text: "hello", to: "dispatcher" }, deps)).toMatchObject({
@@ -1009,37 +666,26 @@ describe("deliver", () => {
     })
   })
 
-  test("a prompt already in cmux's Feed when typing began does not stop it", async () => {
-    const { deps } = fakes(board())
-    deps.prompts = async () => ["answered-but-kept"]
-    expect((await deliver({ actor, text: "a\nb", to: "dispatcher" }, deps)).ok).toBe(true)
-  })
-
   test("a queued delivery reads the session when its turn comes: a picker the first one raised refuses the second", async () => {
     let state = board()
     const typed: string[] = []
     const deps: DeliverDeps = {
       board: async () => state,
-      canForce: async () => true,
       delivered: async () => null,
       now: () => new Date(),
       pressEnter: async () => {},
-      prompt: async () => {},
-      prompts: async () => [],
+      prompt: async (_, text) => {
+        await Bun.sleep(1)
+        typed.push(text)
+        // The first message makes the session ask the owner something.
+        state = live([worker({ light: "needs-you" })], { "s-dispatcher": SURFACE })
+      },
       readScreen: async () => EMPTY,
       readSession: async () => state,
       record: async (_, typing) => typing(),
       said: async () => [OLDER],
       skills: async () => new Set(),
       wait: async () => {},
-      write: async (step) => {
-        await Bun.sleep(1)
-        typed.push("text" in step ? step.text : step.key)
-        // The first message's Enter makes the session ask the owner something.
-        if ("key" in step && step.key === "enter") {
-          state = live([worker({ light: "needs-you" })], { "s-dispatcher": SURFACE })
-        }
-      },
     }
     const [first, second] = await Promise.all([
       deliver({ actor, text: "first", to: "dispatcher" }, deps),
@@ -1047,23 +693,24 @@ describe("deliver", () => {
     ])
     expect(first.ok).toBe(true)
     expect(second).toMatchObject({ code: "ON_PICKER", ok: false })
-    expect(typed).toEqual(["first", "enter"])
+    expect(typed).toEqual(["first"])
   })
 
-  // A fake terminal whose screen shows what has been typed and not yet sent, as read-screen would.
-  function terminal(failOnText?: string) {
-    let input = ""
+  // A fake pane that takes each message whole a moment after it is sent, and refuses `failOn` before sending anything.
+  function terminal(failOn?: string) {
     const typed: string[] = []
     const rows = new Map<string, Date>()
     const deps: DeliverDeps = {
       board: async () => board(),
-      canForce: async () => true,
       delivered: async (id) => rows.get(id) ?? null,
       now: () => new Date(),
       pressEnter: async () => {},
-      prompt: async () => {},
-      prompts: async () => [],
-      readScreen: async () => (input ? screen(`❯\u00a0${input}`) : EMPTY),
+      prompt: async (_, text) => {
+        await Bun.sleep(1)
+        if (text === failOn) throw new Error("no such pane")
+        typed.push(text)
+      },
+      readScreen: async () => EMPTY,
       readSession: async () => board(),
       record: async (event, typing) => {
         await typing()
@@ -1072,14 +719,6 @@ describe("deliver", () => {
       said: async () => [OLDER],
       skills: async () => new Set(),
       wait: async () => {},
-      write: async (step) => {
-        await Bun.sleep(1)
-        if ("text" in step && step.text === failOnText) throw new Error("cmux hiccup")
-        typed.push("text" in step ? step.text : step.key)
-        if ("text" in step) input += step.text
-        else if (step.key === "shift+enter") input += "\n"
-        else input = ""
-      },
     }
     return { deps, typed }
   }
@@ -1090,7 +729,7 @@ describe("deliver", () => {
       deliver({ actor, text: "a1\na2", to: "dispatcher" }, deps),
       deliver({ actor, text: "b1\nb2", to: "dispatcher" }, deps),
     ])
-    expect(typed).toEqual(["a1", "shift+enter", "a2", "enter", "b1", "shift+enter", "b2", "enter"])
+    expect(typed).toEqual(["a1\na2", "b1\nb2"])
   })
 
   // A retry of a request whose answer was lost, as when the dashboard restarts: the row its first try committed answers it.
@@ -1101,7 +740,7 @@ describe("deliver", () => {
     const again = await deliver({ actor, id, text: "once", to: "dispatcher" }, deps)
     expect(first.ok).toBe(true)
     expect(again).toMatchObject({ ok: true, sessionId: "s-dispatcher" })
-    expect(typed).toEqual(["once", "enter"])
+    expect(typed).toEqual(["once"])
   })
 
   // The session may answer the message with a picker before the retry arrives: the row still answers it, while a fresh send is refused.
@@ -1117,7 +756,7 @@ describe("deliver", () => {
     expect(await deliver({ actor, text: "fresh", to: "dispatcher" }, deps)).toMatchObject({
       code: "ON_PICKER",
     })
-    expect(typed).toHaveLength(2)
+    expect(typed).toHaveLength(1)
   })
 
   // Two live sessions named for the dispatcher: the retry finds the one holding the role, as a send does, so its row still answers it.
@@ -1132,7 +771,7 @@ describe("deliver", () => {
           worker({ light: "needs-you", role: "other", sessionId: "s-new" }),
           worker({ light: "needs-you" }),
         ],
-        { "s-dispatcher": SURFACE, "s-new": "SURF-2" },
+        { "s-dispatcher": SURFACE, "s-new": "herdr:factory:w3:p1" },
       )
     expect(await deliver({ actor, id, text: "once", to: "dispatcher" }, deps)).toEqual({
       at: "2026-10-06T12:00:00.000Z",
@@ -1140,7 +779,7 @@ describe("deliver", () => {
       replayed: true,
       sessionId: "s-dispatcher",
     })
-    expect(typed).toHaveLength(2)
+    expect(typed).toHaveLength(1)
   })
 
   test("a retry that arrives while its first try still types waits for it, then is answered as delivered", async () => {
@@ -1151,24 +790,11 @@ describe("deliver", () => {
       deliver({ actor, id, text: "a1\na2", to: "dispatcher" }, deps),
     ])
     expect(first.ok && again.ok).toBe(true)
-    expect(typed).toEqual(["a1", "shift+enter", "a2", "enter"])
-  })
-
-  // The server stopped part way through typing it: no row was committed, and the half in the input is refused as a draft rather than joined.
-  test("a retry after typing was cut off finds the draft and types nothing", async () => {
-    const { deps, typed } = terminal("a2")
-    const id = "7d0c6a8e-1f2b-4c3d-9e4f-5a6b7c8d9e0f"
-    expect(await deliver({ actor, id, text: "a1\na2", to: "dispatcher" }, deps)).toMatchObject({
-      code: "INTERRUPTED",
-    })
-    expect(await deliver({ actor, id, text: "a1\na2", to: "dispatcher" }, deps)).toMatchObject({
-      code: "INPUT_NOT_EMPTY",
-    })
-    expect(typed).toEqual(["a1", "shift+enter"])
+    expect(typed).toEqual(["a1\na2"])
   })
 
   test("a first delivery that fails before typing does not block the second", async () => {
-    const { deps, typed } = terminal("a1")
+    const { deps, typed } = terminal("a1\na2")
     await logged(async () => {
       const [a, b] = await Promise.all([
         deliver({ actor, text: "a1\na2", to: "dispatcher" }, deps),
@@ -1176,19 +802,8 @@ describe("deliver", () => {
       ])
       expect(a).toMatchObject({ code: "CMUX_FAILED" })
       expect(b.ok).toBe(true)
-      expect(typed).toEqual(["b1", "enter"])
+      expect(typed).toEqual(["b1"])
     })
-  })
-
-  test("a first delivery that fails part-way leaves its text in the input, so the second is refused rather than joined to it", async () => {
-    const { deps, typed } = terminal("a2")
-    const [a, b] = await Promise.all([
-      deliver({ actor, text: "a1\na2", to: "dispatcher" }, deps),
-      deliver({ actor, text: "b1", to: "dispatcher" }, deps),
-    ])
-    expect(a).toMatchObject({ code: "INTERRUPTED" })
-    expect(b).toMatchObject({ code: "INPUT_NOT_EMPTY" })
-    expect(typed).toEqual(["a1", "shift+enter"])
   })
 
   test("a name that moves to another session while its delivery waits is refused, not typed into the new one", async () => {
@@ -1202,8 +817,8 @@ describe("deliver", () => {
     expect(typed).toEqual([])
   })
 
-  // Every record cmux holds took 2.6s to list on 9 Oct, and three such reads a message made each one slow: the board finds the session, and only that session is read again.
-  test("finds the session on the board once, then reads only that session: when its turn comes and before the Enter", async () => {
+  // A read of every session is slow on a busy machine, so the board finds the session, and only that session is read again.
+  test("finds the session on the board once, then reads only that session: when its turn comes and before the send", async () => {
     const { deps } = fakes(board())
     const reads: string[] = []
     deps.board = async () => {
@@ -1236,14 +851,14 @@ describe("deliver", () => {
     }
   })
 
-  test("a session's own read that cmux does not answer is CMUX_FAILED, and nothing is typed", async () => {
+  test("a session's own read that does not answer is CMUX_FAILED, and nothing is typed", async () => {
     const { deps, typed } = fakes(board())
     deps.readSession = async () => {
-      throw new Error("cmux did not answer")
+      throw new Error("herdr did not answer")
     }
     const result = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
     expect(result).toMatchObject({ code: "CMUX_FAILED", ok: false })
-    expect(result.ok ? "" : result.reason).toBe("Could not read the sessions: cmux did not answer")
+    expect(result.ok ? "" : result.reason).toBe("Could not read the sessions: herdr did not answer")
     expect(typed).toEqual([])
   })
 })
@@ -1267,13 +882,7 @@ describe("deliver with attachments", () => {
     )
     expect(result.ok).toBe(true)
     expect(typed).toEqual([
-      { force: true, surface: SURFACE, text: "look at these" },
-      { key: "shift+enter", surface: SURFACE },
-      { key: "shift+enter", surface: SURFACE },
-      { force: true, surface: SURFACE, text: `Attached: ${png.path}` },
-      { key: "shift+enter", surface: SURFACE },
-      { force: true, surface: SURFACE, text: `Attached: ${pdf.path}` },
-      { key: "enter", surface: SURFACE },
+      { surface: SURFACE, text: `look at these\n\nAttached: ${png.path}\nAttached: ${pdf.path}` },
     ])
     expect(recorded).toEqual([
       "Sent dispatcher a message of 13 characters with 2 attachments of 1.3 MB",
@@ -1287,10 +896,7 @@ describe("deliver with attachments", () => {
     expect(
       (await deliver({ actor, attachments: [png], text: "  ", to: "dispatcher" }, deps)).ok,
     ).toBe(true)
-    expect(typed).toEqual([
-      { force: true, surface: SURFACE, text: `Attached: ${png.path}` },
-      { key: "enter", surface: SURFACE },
-    ])
+    expect(typed).toEqual([{ surface: SURFACE, text: `Attached: ${png.path}` }])
     expect(recorded).toEqual(["Sent dispatcher 1 attachment of 293 KB"])
   })
 
@@ -1334,11 +940,7 @@ describe("deliver with attachments", () => {
       (await deliver({ actor, attachments: [png, pdf], text: lines, to: "dispatcher" }, tall.deps))
         .ok,
     ).toBe(true)
-    expect(tall.typed.at(-2)).toEqual({
-      force: true,
-      surface: SURFACE,
-      text: `Attached: ${pdf.path}`,
-    })
+    expect(tall.typed.at(-1)?.text).toEndWith(`Attached: ${pdf.path}`)
     const over = fakes(board())
     expect(
       await deliver(
@@ -1432,7 +1034,7 @@ describe("who calls deliver()", () => {
   })
 })
 
-// The one route beside deliver()'s that types into a pane: a herdr prompt's answer, the owner's own Submit on its card, which answerFeed() hands to answerHerdr() past its guards: the same contract as deliver() for the composer and answerFeed() for cmux. cmux.test.ts holds typeKeys() to feed.ts.
+// The one route beside deliver()'s that types into a pane: a herdr prompt's answer, the owner's own Submit on its card, which answerFeed() hands to answerHerdr() past its guards: the same contract as deliver() for the composer. cmux.test.ts holds typeKeys() to feed.ts.
 const HERDR_ANSWER_ROUTE = {
   file: "api/hono/src/routers/dashboard.ts",
   path: "/workers/:sessionId/feed/:requestId",
@@ -1479,15 +1081,6 @@ describe("deliver to a herdr session", () => {
     const sent: { surface: string; text: string }[] = []
     const recorded: string[] = []
     const { deps } = fakes(state)
-    deps.canForce = async () => {
-      throw new Error("cmux is not asked for --force")
-    }
-    deps.prompts = async () => {
-      throw new Error("cmux's Feed is not read")
-    }
-    deps.write = async () => {
-      throw new Error("nothing is typed key by key")
-    }
     // as the real record's transaction, a row stands only once the typing went whole
     deps.record = async (event, typing) => {
       await typing()
@@ -2210,7 +1803,7 @@ describe("deliver to a herdr session", () => {
     })
   })
 
-  // The outbox reads a message delivered only when the transcript holds its words and files exactly, so the prompt carries the Attached lines as cmux types them
+  // The outbox reads a message delivered only when the transcript holds its words and files exactly, so the prompt carries the Attached lines as withAttachments writes them
   test("a message's files go in the same prompt, one Attached line each after a blank line", async () => {
     const { deps, recorded, sent } = herdr()
     const DIR = "/home/x/.playground/attachments"
@@ -2302,7 +1895,7 @@ describe("deliver to a herdr session", () => {
     }
   })
 
-  test("a refusal that sent nothing is tried once more at once, as a cmux send is", async () => {
+  test("a refusal that sent nothing is tried once more at once", async () => {
     let tries = 0
     const { deps, sent } = herdr()
     deps.prompt = async (surface, text) => {
