@@ -5,6 +5,7 @@ import { OwnerOnly } from "@/components/dashboard/owner-only"
 import { Accounts } from "@/components/settings/accounts"
 import { Extensions } from "@/components/settings/extensions"
 import { MacChecks } from "@/components/settings/mac-checks"
+import { Templates } from "@/components/settings/templates"
 import { PageHeader } from "@/components/shell/page-header"
 
 // The Settings page the user menu opens, on the owner rung, its sections one under the other.
@@ -14,12 +15,13 @@ export function SettingsHome() {
     <>
       <PageHeader
         title="Settings"
-        description="This Mac's accounts, extensions and how the Dashboard runs."
+        description="This Mac's accounts, templates, extensions and how the Dashboard runs."
       />
       {allowed ? (
         <div className="flex flex-col gap-6">
           <MacChecks />
           <Accounts />
+          <Templates />
           <Extensions />
         </div>
       ) : (

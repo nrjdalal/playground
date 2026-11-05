@@ -8,4 +8,8 @@ describe("the Settings page", () => {
   test("shows nothing of the machine below the owner rung", () => {
     expect(home).toMatch(/allowed \?[\s\S]*<Accounts \/>[\s\S]*: \(\s*<OwnerOnly/)
   })
+
+  test("lists Templates between Accounts and Extensions", () => {
+    expect(home).toMatch(/<Accounts \/>\s*<Templates \/>\s*<Extensions \/>/)
+  })
 })

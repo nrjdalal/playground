@@ -39,8 +39,13 @@ export const itemKeySchema = z
     "an item key is lowercase letters, digits, dots, dashes and underscores",
   )
 
+// A refusal a value earns from another setting, at a path into the value, which the schema alone cannot check.
+export type Refusal = { message: string; path: (number | string)[] }
+
 export type Field<S extends z.ZodType = z.ZodType> = {
   aliases?: string[]
+  // What the value's schema cannot check alone: each refusal it earns from the settings beside it, read through read, which gives a key's value or its default.
+  against?(value: z.output<S>, read: (key: string) => unknown): Refusal[]
   default: z.output<S>
   description: string
   schema: S
@@ -103,6 +108,21 @@ export const checkSetting = (key: string, value: unknown): Checked => {
       ok: false,
     }
   return { key: name, ok: true, value: parsed.data }
+}
+
+// A checked value against the settings it will be read beside: each refusal its field's against gives, worded as the schema's are, or undefined when none.
+export const checkAgainst = (
+  key: string,
+  value: unknown,
+  settings: Settings,
+): string | undefined => {
+  const field = fields.get(key)
+  const refusals = field?.against?.(value, (name) => settingValue(settings, name)?.value) ?? []
+  if (!refusals.length) return undefined
+  const error = new z.ZodError(
+    refusals.map(({ message, path }) => ({ code: "custom" as const, input: value, message, path })),
+  )
+  return `${key}: ${z.prettifyError(error).replaceAll("\n", " ")}`
 }
 
 // An extension's links: each GitHub org, lowercase as a repo's origin is matched, whose repos read it, or * for every repo.

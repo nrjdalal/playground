@@ -48,6 +48,15 @@ The token goes to this Mac's Keychain and is never shown again, and **Remove**, 
 From a terminal, `playground accounts add --provider claude --email <email>` signs one in through Claude Code and keeps its token in the Keychain, and `playground accounts add --provider glm --label <label>` keeps a Z.ai key there under that label.
 `playground accounts list` shows each with its usage and `playground accounts remove <email|label>` takes one off; no token or key is ever shown ([The playground command](/docs/cli#accounts-playground-accounts)).
 
+### Templates
+
+Templates lists the sessions the plus on Alpha's row in the sidebar can start ([the Dashboard](/docs/dashboard)), each with its kind, its model or GLM, its effort, its account and its brief, and whether it is a **Default**, an **Edited default** or one you **Added**.
+**Edit** opens a form of its label, kind and backend, then on Claude its model, effort and account (**Default**, or a Claude account from Accounts), and its brief, a file name in the data folder or `scripts/briefs`.
+A default's own values stay in Playground: saving an edit keeps your copy over it, and **Reset** puts the default back.
+**Add template** makes a new one, and **Remove** takes one you added away; Reset and Remove each ask first.
+Each save is the same change `playground settings set sessions.templates` makes, checked the same way: a brief that is not a file name, or an account `usage.accounts` does not list, is refused, and the reason shows beside its field.
+**Edit templates** at the foot of the plus's list opens this section.
+
 ### Extensions
 
 Extensions lists every extension in the order sessions read them, first wins: one card each with its place, name and repo, the orgs it is linked to (or everywhere), its skills, rules and lists counted, and when it last synced.

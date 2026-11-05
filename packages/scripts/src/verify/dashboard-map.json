@@ -40,7 +40,7 @@
         "worker": "A live session's id: the page is that session's own view. Absent, or no longer live, it is Playground's chat."
       },
       "reach": [
-        "Sidebar dispatcher rows: in the sidebar's header under its name row, above every group, with no group title or count, one row for each dispatcher drawn as every agent's (its one icon, its label, Alpha or Bravo, its model, effort and state in its tooltip, with no count and no dropdown, and on the Claude dispatcher's row the week and the 5-hour window after its name, GLM's on the GLM dispatcher's row or, with none on GLM, the second dispatcher's row behind Z.ai's mark, each an icon and its number in mono, in its level's colour, a stale one gray and dimmed, then its provider's logo and its effort's icon at its right end); the primary's opening /dashboard, and with something waiting /dashboard#needs-you-<id>, scrolled to the first card (the newest Inbox item, else the oldest prompt), and the second's, shown only while it is live or the roster lists it neither done nor ended, opening /dashboard?worker=<sessionId>; on the live Alpha row a plus in its effort's place (on hover, keyboard focus and always on a phone) opens the template picker, whose row starts a second dispatcher or an orchestrator and whose foot links Edit templates to /dashboard/settings",
+        "Sidebar dispatcher rows: in the sidebar's header under its name row, above every group, with no group title or count, one row for each dispatcher drawn as every agent's (its one icon, its label, Alpha or Bravo, its model, effort and state in its tooltip, with no count and no dropdown, and on the Claude dispatcher's row the week and the 5-hour window after its name, GLM's on the GLM dispatcher's row or, with none on GLM, the second dispatcher's row behind Z.ai's mark, each an icon and its number in mono, in its level's colour, a stale one gray and dimmed, then its provider's logo and its effort's icon at its right end); the primary's opening /dashboard, and with something waiting /dashboard#needs-you-<id>, scrolled to the first card (the newest Inbox item, else the oldest prompt), and the second's, shown only while it is live or the roster lists it neither done nor ended, opening /dashboard?worker=<sessionId>; on the live Alpha row a plus in its effort's place (on hover, keyboard focus and always on a phone) opens the template picker, whose row starts a second dispatcher or an orchestrator and whose foot links Edit templates to Settings' Templates section, /dashboard/settings#templates",
         "Sidebar Orchestrators, Subagents, AI Runners or Other: a session's row opens /dashboard?worker=<sessionId>, and with something waiting (a Feed card, or the red alarm while it is Stuck) /dashboard?worker=<sessionId>#needs-you-<id>, scrolled to the oldest card, or while it waits only on an inbox item it posted, /dashboard#needs-you-<id>, that item in Playground's Inbox",
         "System page: an agent's name in the Agents table, or a place in Needs you, opens /dashboard?worker=<sessionId>",
         "User menu square: at the aside toolbar's end, a green dot at its top right while the build is behind, and Auto-hide tab bar then Update now first in its menu, sending the dispatcher one line naming the update and opening /dashboard",
@@ -256,7 +256,10 @@
         "DELETE /api/v1/extensions/:name",
         "POST /api/v1/accounts/claude/setup",
         "POST /api/v1/accounts/claude/setup/:id/code",
-        "POST /api/v1/accounts/claude/open-private"
+        "POST /api/v1/accounts/claude/open-private",
+        "GET /api/v1/settings/:key",
+        "PUT /api/v1/settings/:key",
+        "POST /api/v1/settings/:key/reset"
       ],
       "heading": "Settings",
       "reach": [
@@ -268,6 +271,7 @@
         "Below the owner rung, a lock.",
         "Beside the page, the aside window drawn once for every dashboard page, in half-and-half panes the divider resizes, its size and picked tab kept from page to page: the Inbox and dispatcher's own chat and composer (Chat), as on /dashboard, then a square for each app you show (Changelog with its unread count; Plan, Previews and Usage are parked off the bar), each opening that app in the aside, then Apps, which shows, hides and orders them in this browser, then a Settings square that opens /dashboard/settings; on a phone the page's own tab first, then the same squares, in one bar at the bottom that scrolls sideways when they outgrow it.",
         "Extensions: every extension in the order sessions read them, first wins, each a card with its place, name and repo, its Linked to chips (an org, or everywhere) with a cross on each but the login's and + org, its skills, rules and lists counted and when it last synced, dragged by its handle (or Space and the arrows) into a new order, and a menu: Sync now, Open on GitHub, Why… (which extension a session in a repo of an org takes a skill from, and the copies it hides) and Remove (not on the login's, its folder kept); core last, locked, built into Playground; Add extension (a name, a repo or the login's playground-<name>, and its links), which checks GitHub as you type (repo is private and has skills/ with its count, or the repo will be created, private) and names a repo not on GitHub yet in a confirm before it is made; before the settings are set up, the same Set up settings step as Accounts, and a read that fails says Extensions could not be read; below them, Bundled with Playground: each extension Playground ships under extensions/ (Slack today), off until its switch turns it on, read after your extensions and before core, shown once the settings are set up.",
+        "Templates: the templates the sidebar's plus starts a session from (sessions.templates), each with its label, whether it is a default, an edited default or one you added, its kind, backend or model, effort, account and brief, and Edit on each, Reset on an edited default and Remove on an added one, each Reset and Remove confirmed first; Add template and Edit open one form of its label, kind, backend, and on Claude its model, effort and account (Default, or a Claude account Accounts lists), and its brief; a save writes the whole list through the settings write path, a list of the defaults alone resets the setting, and a refusal (a brief that is no file name, an account usage.accounts does not name) shows beside its field; the picker's Edit templates opens it at #templates; before the settings are set up, every action is off.",
         "Things to fix: each check first run finds missing on this Mac, or optional with a fix the app runs (portless's Set up the web address or Trust the certificate), read live whatever the done mark says (GET /api/v1/onboard/checks?live=1, the onboard router's, outside the owner rung), with why and the button that fixes it, and Re-check; shown only while it lists one, so a Mac with nothing to fix shows nothing here."
       ],
       "title": "Settings"
@@ -412,10 +416,6 @@
       "use": "Every setting key with its default, description and the rows set off it, the same list `playground settings list` reads from the folder itself; no page reads it yet."
     },
     {
-      "route": "GET /api/v1/settings/:key",
-      "use": "One setting's value as it applies, at its narrowest scope, the same value `playground settings get` reads from the folder itself."
-    },
-    {
       "route": "GET /api/v1/settings/:key/why",
       "use": "One setting's history, each change with its author, reason and inbox ref, the same history `playground settings why` reads from the folder itself."
     },
@@ -448,20 +448,12 @@
       "use": "Saves the order you drag the sidebar's Orchestrators rows into, which every dashboard page's sidebar offers; read back as managersOrder on GET /api/v1/agents."
     },
     {
-      "route": "POST /api/v1/settings/:key/reset",
-      "use": "Puts a setting back to its default at a scope, with a reason, the same write `playground settings reset` makes in the folder itself."
-    },
-    {
       "route": "POST /api/v1/stacks/start",
       "use": "Starts a stopped worktree as a Vibeground on a copy of the live data, from Start in the Inbox's Preview row on every dashboard page's aside."
     },
     {
       "route": "POST /api/v1/stacks/stop",
       "use": "Stops a Vibeground and removes its copy, keeping the worktree, from Stop in the Inbox's Preview row's bar on every dashboard page's aside."
-    },
-    {
-      "route": "PUT /api/v1/settings/:key",
-      "use": "Sets a setting at a scope, with a reason, checked by its key's schema, the same write `playground settings set` makes in the folder itself."
     }
   ]
 }
