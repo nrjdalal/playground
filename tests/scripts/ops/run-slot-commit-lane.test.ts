@@ -9,12 +9,13 @@ setDefaultTimeout(60_000)
 
 // Playground's own lefthook.yml, whose pre-commit runs the build
 const LEFTHOOK = readFileSync(join(import.meta.dir, "../../../lefthook.yml"), "utf8")
-// A machine whose fake git fails on a `-C` folder that is not one, answers `git rev-parse --show-toplevel` with its folder, which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only HEAD -- <paths>` with each of either under one of the paths, and touches its last argument for anything else, as a commit's marker
+// A machine whose fake git fails on a `-C` folder that is not one, answers `git rev-parse --show-toplevel` with its folder, which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths, `git ls-files --others` with `untracked` (under the paths after a `--`), and touches its last argument for anything else, as a commit's marker
 const repo = (
   setup: Setup,
   staged: string[],
   unstaged: string[] = [],
   lefthook: string | null = LEFTHOOK,
+  untracked: string[] = [],
 ) => {
   const m = machine(setup)
   if (lefthook !== null) writeFileSync(join(m.root, "lefthook.yml"), lefthook)
@@ -23,6 +24,11 @@ const repo = (
     `#!/bin/bash
 [ "$1" = -C ] && { [ -d "$2" ] || exit 128; }
 case " $* " in *" rev-parse --show-toplevel "*) [ "$1" = -C ] && cd "$2"; pwd; exit 0 ;; esac
+case " $* " in
+  *" ls-files "*" -- "*) while [ "$1" != -- ]; do shift; done; shift
+    for f in ${untracked.join(" ")}; do for p in "$@"; do case "$f" in "$p"|"$p"/*) echo "$f" ;; esac; done; done; exit 0 ;;
+  *" ls-files "*) printf '%s\\n' ${untracked.join(" ")}; exit 0 ;;
+esac
 for a in "$@"; do
   [ "$a" = diff ] || continue
   case " $* " in
@@ -305,6 +311,30 @@ describe("a sh -c chain of git steps", () => {
     const m = repo({ idle: 30 }, ["docs/notes.md"])
     m.hold("run-slot", 3, "big")
     expect(await m.start("worker-x", {}, undefined, chain).ran()).toBe(true)
+    expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
+  })
+
+  // round 1 of the review: read against the index alone, a chain whose own add staged a next file took run-slot-commit while its pre-commit built
+  for (const [what, add, unstaged, untracked] of [
+    ["the whole tree", "git add .", ["web/next/src/app/page.tsx"], []],
+    ["a path it names", "git add web/next/src/app/page.tsx", ["web/next/src/app/page.tsx"], []],
+    ["an untracked file, with -A", "git add -A", [], ["web/next/src/app/new.tsx"]],
+  ] as const)
+    test(`a chain whose own add stages a web/next file, ${what}, waits as a big run`, async () => {
+      const m = repo({ idle: 30 }, [], [...unstaged], LEFTHOOK, [...untracked])
+      m.hold("run-slot", 3, "big")
+      const own = ["sh", "-c", `${add} && git commit -m x && git push "$0"`]
+      expect(await m.start("worker-x", {}, undefined, own).waits()).toBe(true)
+      expect(log(m)).not.toContain("run-slot-commit")
+    })
+
+  test("while one whose add names only a Markdown file takes run-slot-commit", async () => {
+    const m = repo({ idle: 30 }, [], ["docs/notes.md", "web/next/src/app/page.tsx"])
+    // the fake git's add touches its last word, so the folder it names must exist
+    mkdirSync(join(m.root, "docs"))
+    m.hold("run-slot", 3, "big")
+    const own = ["sh", "-c", 'git add docs/notes.md && git commit -m x && git push "$0"']
+    expect(await m.start("worker-x", {}, undefined, own).ran()).toBe(true)
     expect(log(m)).toMatch(/ start worker-x \d+ run-slot-commit waited=/)
   })
 })

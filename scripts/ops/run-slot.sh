@@ -388,6 +388,7 @@ chain_lane() {
   local line verb words commits="" heavier=""
   while IFS= read -r line; do
     IFS=$'\x1f' read -ra words <<< "$line"
+    [ ${#words[@]} -gt 0 ] || continue
     verb=$(git_verb "${words[@]}")
     case "$verb" in
       commit|push) commits=1 ;;
@@ -476,17 +477,38 @@ sys.exit(0 if p.returncode == 0 and tasks and all(t["cache"]["status"] == "HIT" 
 PY
   )
 }
+# what a chain's git add step stages, for the chain's later commit step: the whole tree, untracked files included, for ., :/, -A, --all, -u or a
+# pathspec file, else the paths it names (4 Nov: read against the index alone, a chain whose own add staged a next file took the commit lane)
+CHAIN_ADD_ALL="" CHAIN_ADD=()
+chain_add() {
+  local a past=""
+  for a in "$@"; do
+    [ -n "$past" ] || { [ "$a" = add ] && past=1; continue; }
+    case "$a" in
+      --) ;;
+      . | ./ | :/ | -A | --all | -u | --update | --pathspec-from-file* | -[!-]*[Au]*) CHAIN_ADD_ALL=1 ;;
+      -*) ;;
+      *) CHAIN_ADD+=("$a") ;;
+    esac
+  done
+}
 # a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a one it will stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
   local a c f files dir="" commit="" all="" state=lead paths=() line words first=""
-  # a chain builds when one of its git commit steps would, read as that commit alone (the first word found outside a $( ), since bash 3.2 misparses a case inside one)
+  # a chain builds when one of its git commit steps would, read as that commit with the files the chain's git add steps before it stage (the first word found outside a $( ), since bash 3.2 misparses a case inside one)
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
   case "$(basename -- "$first")" in
     sh|bash|zsh)
+      CHAIN_ADD_ALL="" CHAIN_ADD=()
       while IFS= read -r line; do
         IFS=$'\x1f' read -ra words <<< "$line"
-        [ "$(git_verb "${words[@]}")" = commit ] && heavy_build "${words[@]}" && return 0
-      done < <(chain_steps "$@") ;;
+        [ ${#words[@]} -gt 0 ] || continue
+        case "$(git_verb "${words[@]}")" in
+          add) chain_add "${words[@]}" ;;
+          commit) heavy_build "${words[@]}" && { CHAIN_ADD_ALL="" CHAIN_ADD=(); return 0; } ;;
+        esac
+      done < <(chain_steps "$@")
+      CHAIN_ADD_ALL="" CHAIN_ADD=() ;;
   esac
   # commit-slot.ts's build step (`bun run build`) alone, never its type checks, which build nothing
   case "$WHO" in commit-*) for a in "$@"; do [ "$a" = build ] && commit=1; done ;; esac
@@ -517,7 +539,9 @@ heavy_build() {
   awk '/^[^ #]/ { pre = ($0 ~ /^pre-commit:/) } pre && /^ +(- )?run:.* run build([ "'"'"']|$)/ { found = 1 } END { exit !found }' \
     "$(git ${dir:+-C "$dir"} rev-parse --show-toplevel 2>/dev/null)/lefthook.yml" 2>/dev/null || return 1
   files=$({ git ${dir:+-C "$dir"} diff --cached --name-only; [ -z "$all" ] || git ${dir:+-C "$dir"} diff --name-only
-    [ ${#paths[@]} -eq 0 ] || git ${dir:+-C "$dir"} diff --name-only HEAD -- "${paths[@]}"; } 2>/dev/null)
+    [ ${#paths[@]} -eq 0 ] || git ${dir:+-C "$dir"} diff --name-only HEAD -- "${paths[@]}"
+    [ -z "$CHAIN_ADD_ALL" ] || { git ${dir:+-C "$dir"} diff --name-only; git ${dir:+-C "$dir"} ls-files --others --exclude-standard; }
+    [ ${#CHAIN_ADD[@]} -eq 0 ] || { git ${dir:+-C "$dir"} diff --name-only -- "${CHAIN_ADD[@]}"; git ${dir:+-C "$dir"} ls-files --others --exclude-standard -- "${CHAIN_ADD[@]}"; }; } 2>/dev/null)
   grep -Evq '^$|\.md$|^tests/.*\.py$' <<<"$files" || return 1
   grep -Eq '^(web/next|api/hono|packages)/|^(bun\.lock|package\.json|turbo\.json)$' <<<"$files"
 }
@@ -542,7 +566,7 @@ case "$WHO:$PWD" in
   commit-*) ;;
   */.claude/worktrees/*)
     if [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
-      OWNED=${PWD##*/.claude/worktrees/}
+      OWNED=${PWD#*/.claude/worktrees/}
       OWNED=$(printf '%s' "${OWNED%%/*}" | tr -c 'A-Za-z0-9._#-' '-')
       mkdir -p "$OPS/run-slot.owner" && printf '%s\n' "$WHO" > "$OPS/run-slot.owner/$OWNED"
     fi ;;
