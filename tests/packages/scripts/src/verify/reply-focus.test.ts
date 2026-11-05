@@ -7,8 +7,8 @@ import {
 } from "../../../../../packages/scripts/src/verify/reply-focus"
 
 describe("focusResult", () => {
-  test("passes focus in the box the moment Reply is clicked", () => {
-    expect(focusResult("f", "composer").ok).toBe(true)
+  test("passes focus in the card's own box the moment Reply is clicked", () => {
+    expect(focusResult("f", "comment").ok).toBe(true)
   })
 
   test("finds the card's Reply by the aria-label the Inbox gives it", () => {
@@ -26,16 +26,16 @@ describe("focusResult", () => {
   })
 })
 
-// A page whose card draws at once and whose box mounts later, as on a loaded host: the click finds the box only once it is there.
-const lateBox = () => {
+// A page whose card draws late, as on a loaded host: the click waits for the card's Reply.
+const lateCard = () => {
   let mounted = false
   const mount = Bun.sleep(50).then(() => {
     mounted = true
   })
   return {
-    eval: async <T>() => (mounted ? "composer" : "body") as T,
+    eval: async <T>() => (mounted ? "comment" : "no card") as T,
     run: async (...args: string[]) => {
-      if (args[0] === "wait" && args[1] === "#composer") await mount
+      if (args[0] === "wait" && args[1] === '[aria-label="Reply to #i1"]') await mount
       return {}
     },
     viewport: async () => {},
@@ -44,7 +44,7 @@ const lateBox = () => {
 }
 
 describe("clickFocus", () => {
-  test("waits for the box before it clicks, so a box that mounts after the card still takes focus (#2373)", async () => {
-    expect((await clickFocus(lateBox(), "http://dashboard", "f", "#i1")).ok).toBe(true)
+  test("waits for the card's Reply before it clicks, so a card that draws late still takes the click (#2373)", async () => {
+    expect((await clickFocus(lateCard(), "http://dashboard", "f", "#i1")).ok).toBe(true)
   })
 })

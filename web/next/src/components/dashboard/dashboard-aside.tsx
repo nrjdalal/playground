@@ -52,8 +52,14 @@ import { feedNeeds, useNeedsYouTarget } from "@/lib/needs-you"
 import { moveOldKeys } from "@/lib/old-keys"
 import { sentSince } from "@/lib/outbox"
 import { OPEN_PREVIEW, takeMove } from "@/lib/previews"
-import { useReply } from "@/lib/reply"
-import { inboxMark, newInInboxCount, useMark, useTabVisible, writeMark } from "@/lib/tab-dot"
+import {
+  inboxMark,
+  loudItems,
+  newInInboxCount,
+  useMark,
+  useTabVisible,
+  writeMark,
+} from "@/lib/tab-dot"
 import { useAppUnread } from "@/plugins/registry"
 
 // A phone's width, read as the page renders rather than after it paints (useIsMobile's effect), so a page opened by a click draws its tabs or its halves once. The server, which has no width, draws the halves.
@@ -239,20 +245,9 @@ export function DashboardAside({ children }: { children: ReactNode }) {
     setTab(home ? "page" : "chat")
     if (!home) setSide("chat")
   }
-  // Reply in the Inbox brings Playground's chat forward as it renders, so the click's own focus finds his box shown (its flushSync); words handed to the composer (Edit) do so after, and either focuses his box once it shows
-  const reply = useReply()
-  const [replied, setReplied] = useState(reply)
-  if (replied !== reply) {
-    setReplied(reply)
-    if (reply) showChat()
-  }
   const primary = home ? selected : asideChat
   const handed = outbox.draft
-  // each on its own pick or hand alone, so a later render never takes the tab or the focus back: a hand cleared by its box never runs the reply's focus again
-  useEffect(() => {
-    if (!reply) return
-    requestAnimationFrame(() => document.getElementById(COMPOSER_ID)?.focus())
-  }, [reply])
+  // words handed to the composer (Edit) bring Playground's chat forward and focus his box once it shows, on each hand alone, so a later render never takes the tab or the focus back
   useEffect(() => {
     if (!handed) return
     // words handed to the page's own session (Edit on its view) bring the page forward instead
@@ -316,8 +311,10 @@ export function DashboardAside({ children }: { children: ReactNode }) {
       </div>
     )
 
-  // the bar counts what needs you and arrived since you last looked at the Inbox, so a look clears it with no answer given
-  const count = inbox.data ? newInInboxCount(inboxView(inbox.data.items).shown, inboxSeenAt) : 0
+  // the bar counts what needs you and arrived since you last looked at the Inbox, so a look clears it with no answer given; what focus holds quiet counts once it ends
+  const count = inbox.data
+    ? newInInboxCount(inboxView(loudItems(inbox.data)).shown, inboxSeenAt)
+    : 0
   // which squares show hangs on the socket's first frame (the view, Playground's chat), so the bar keeps its room but shows none until then, then all at once, never growing under the eye; an error frame sets dispatchers too, so a dashboard that cannot read its sessions still shows its Inbox
   const bar = cn(TAB_BAR, !dispatchers && "invisible")
   const squares: Partial<Record<AsideTab, ReactNode>> = {
