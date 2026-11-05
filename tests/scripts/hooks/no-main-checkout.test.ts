@@ -625,6 +625,16 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     expect(await bash(command, WORKTREE)).toContain("no-main-checkout hook refuses")
   })
 
+  // #623: a climb the shell runs at most once reaches one folder up, the worktrees folder, so each stays running
+  test.each([
+    ["a function whose cd climbs, called once", "f() { cd ..; }; f; git commit -m x"],
+    ["an if condition that climbs", "if cd ..; then git commit -m x; fi"],
+    ["a single eval of a climb", "eval 'cd ..'; git commit -m x"],
+    ["one climb through a variable", "U=..; cd $U; git commit -m x"],
+  ])("from a worktree, %s runs", async (_name, command) => {
+    expect(await bash(command, WORKTREE)).toBeUndefined()
+  })
+
   test("from a worktree, bun's --cwd into another worktree runs", async () => {
     expect(await bash(`bun run --cwd ${MAIN}/.claude/worktrees/b build`, WORKTREE)).toBeUndefined()
   })
