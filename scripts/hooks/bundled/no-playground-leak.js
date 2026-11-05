@@ -6106,7 +6106,7 @@ function shellOperand(args, shell) {
     if (takes.has(v))
       k++;
     else if (v === "-" && args[k - 1]?.value !== "--")
-      return { inline, operand: args[k + 1] };
+      return { inline, operand: args[k + 1] ?? (inline ? args[k] : undefined) };
     else if (/^[-+][A-Za-z]+$/.test(v))
       inline ||= v.startsWith("-") && v.includes("c");
     else if (!v.startsWith("--"))

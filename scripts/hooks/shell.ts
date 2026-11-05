@@ -1603,8 +1603,9 @@ export function shellOperand(args: Word[], shell: string): { inline: boolean; op
   for (let k = 0; k < args.length; k++) {
     const v = args[k].value
     if (takes.has(v)) k++
-    // a lone `-` ends the options, so the word after it is the operand, and with none the shell reads stdin; right after `--` it is the operand itself
-    else if (v === "-" && args[k - 1]?.value !== "--") return { inline, operand: args[k + 1] }
+    // a lone `-` ends the options, so the word after it is the operand, and with none the shell reads stdin, but after `-c` the dash stays the operand, since the shell then has no command and runs nothing; right after `--` it is the operand itself
+    else if (v === "-" && args[k - 1]?.value !== "--")
+      return { inline, operand: args[k + 1] ?? (inline ? args[k] : undefined) }
     else if (/^[-+][A-Za-z]+$/.test(v)) inline ||= v.startsWith("-") && v.includes("c")
     else if (!v.startsWith("--")) return { inline, operand: args[k] }
   }
