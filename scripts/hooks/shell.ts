@@ -42,6 +42,8 @@ export type Command = {
   inner?: () => Command[]
   // Set on every command of a body the shell may keep for a later call (`held`'s, up to its close), so a word's ~- there may expand at that call, wherever the shell has moved by then
   kept?: boolean
+  // Set on a zsh head whose body is a brace group in its own words (`repeat 3 { cd ..; }`, `while true { … }`, `if true { … }`), which the reader does not read, so the shell reads as able to be in any folder after it (`Env.cwdAnywhere`)
+  opaque?: boolean
   redirects: Redirect[]
   // Set when a count or a loop may run the command more than once, so a relative cd of its own may climb or descend any number of folders
   repeated?: boolean
@@ -629,15 +631,41 @@ export function lex(src: string, known: Record<string, string> = {}): Lexed {
   const lx: Lexer = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() }
   list(lx, 0, false)
   calledAgain(lx.commands, src)
+  braced(lx.commands)
   return { commands: lx.commands, scopes: lx.scopes }
 }
 
-// A function's body runs each time the line calls it, so its commands are marked repeated unless the line names the function just twice, by its definition and by one call that runs at most once: a call in a loop, in another body, or one the line names anywhere else (an eval's text, a recursive call) may run it again
+// The heads after which zsh takes a brace group as the body, in the head's own words
+const BRACED = new Set([
+  "elif",
+  "else",
+  "for",
+  "foreach",
+  "if",
+  "repeat",
+  "select",
+  "until",
+  "while",
+])
+
+// Marks each zsh head that holds an unquoted `{` past its command position, closed by a later `}`, as opaque: bash reads `if grep -q { f` with no `}` after it, so that one stays read as typed
+function braced(commands: Command[]): void {
+  for (const [k, c] of commands.entries()) {
+    const head = c.words[0]
+    if (!head || head.quoted || !BRACED.has(head.value)) continue
+    const at = c.words.findIndex((w, i) => i > 0 && !w.quoted && w.value === "{")
+    if (at < 0 || markers(c.words).length > at) continue
+    if (commands.slice(k + 1).some((d) => d.words.some((w) => !w.quoted && w.value === "}")))
+      c.opaque = true
+  }
+}
+
+// A function's body runs each time the line calls it, so its commands are marked repeated unless the line names the function just twice, by its definition and by one call that runs at most once: a call in a loop, in another body, or one the line names anywhere else (an eval's text, a recursive call) may run it again; a name the reader cannot read as a plain word, a call through a word it cannot read, and any eval or source may call it again too
 function calledAgain(commands: Command[], src: string): void {
   for (const [k, open] of commands.entries()) {
     const [first, second] = open.words
     if (!open.held || !first || first.quoted) continue
-    // `function f {` names it in its own words, and `f() {` in the one word before the `()` the lexer reads as an empty group
+    // `function f {` names it in its own words, and `f() {` (or `f() if`, any compound) in the one word before the `()` the lexer reads as an empty group
     const before = commands[k - 1]?.words
     const word =
       first.value === "function"
@@ -645,17 +673,27 @@ function calledAgain(commands: Command[], src: string): void {
         : open.group && before?.length === 1
           ? before[0]
           : undefined
-    if (!word || word.quoted) continue
-    const name = word.value.replace(/\(\)$/, "")
-    if (!/^[\w.:-]+$/.test(name)) continue
+    if (!word) continue
     let end = k
     for (let balance = 0; end < commands.length; end++) {
-      for (const w of markers(commands[end].words)) balance += w === "{" ? 1 : w === "}" ? -1 : 0
+      const reserved = markers(commands[end].words)
+      balance +=
+        reserved.filter((w) => OPENS.has(w)).length - reserved.filter((w) => CLOSES.has(w)).length
       if (balance <= 0) break
     }
     const body = commands.slice(k, end + 1)
-    const calls = commands.filter(
-      (c, at) => (at < k - 1 || at > end) && !c.words[0]?.quoted && c.words[0]?.value === name,
+    const name = word.value.replace(/\(\)$/, "")
+    if (word.quoted || !/^[\w.:-]+$/.test(name)) {
+      for (const c of body) c.repeated = true
+      continue
+    }
+    const outside = commands.filter((_, at) => at < k - 1 || at > end).map(callee)
+    const calls = outside.filter((w) => w?.value === name)
+    const others = outside.some(
+      (w) =>
+        w !== undefined &&
+        (w.unknown !== undefined ||
+          (!w.quoted && (w.value === "eval" || w.value === "source" || w.value === "."))),
     )
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
     // a redirect's target names a file, never a call, so a file of the function's name is no mention of it
@@ -664,9 +702,24 @@ function calledAgain(commands: Command[], src: string): void {
       .filter((r) => r.target?.value === name).length
     const mentions =
       (src.match(new RegExp(`(?<![\\w.:-])${escaped}(?![\\w.:-])`, "g"))?.length ?? 0) - files
-    const once = mentions === 2 && calls.length === 1 && !calls[0].repeated && !calls[0].kept
+    const call = commands.find((c, at) => (at < k - 1 || at > end) && callee(c)?.value === name)
+    const once = mentions === 2 && calls.length === 1 && !others && !call?.repeated && !call?.kept
     if (!once) for (const c of body) c.repeated = true
   }
+}
+
+// The word a command runs as its program, past its assignments, its reserved words and `builtin` or `command` with their options, quoted or not, so `$'\x66'` reads as the `f` it calls
+function callee(cmd: Command): Word | undefined {
+  return cmd.words.find(
+    (w) =>
+      w.quoted ||
+      !(
+        ASSIGN.test(w.value) ||
+        MARKERS.has(w.value) ||
+        BUILTIN.has(w.value) ||
+        w.value.startsWith("-")
+      ),
+  )
 }
 
 // A subshell or a substitution is a scope of its own, so a cd inside it stays inside it.
@@ -723,21 +776,35 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       if (after === "||" || depth > 0 || body) done.unsure = true
       if (after === "&&") done.chained = true
       done.chain = lx.token
-      if (reserved.some((w) => HELD.has(w))) done.held = true
+      // `f() if …`, a function whose body is a compound other than a brace group, keeps that body for each call as `f() {` keeps its own
+      const last = lx.commands[lx.commands.length - 1]?.words
+      const compound =
+        !!done.group &&
+        last?.length === 1 &&
+        OPENS.has(reserved[0] ?? "") &&
+        !HELD.has(reserved[0] ?? "")
+      if (reserved.some((w) => HELD.has(w)) || compound) done.held = true
       if (done.held || bodies.includes(true)) done.kept = true
-      for (const w of reserved) {
-        if (OPENS.has(w)) bodies.push(HELD.has(w))
+      for (const [at, w] of reserved.entries()) {
+        if (OPENS.has(w)) bodies.push(HELD.has(w) || (compound && at === 0))
         else if (CLOSES.has(w)) bodies.pop()
       }
-      let condition = heads.includes(true)
+      // zsh's foreach runs its body up to an `end`, with no `do`
+      const each = done.words[0]?.quoted ? undefined : done.words[0]?.value
+      const outer = heads.length === 0 && loops === 0
+      let head = heads.length > 0
       for (const w of reserved) {
         if (w === "while" || w === "until" || w === "for" || w === "select")
           heads.push(w === "while" || w === "until")
         else if (w === "do") heads.pop()
-        condition ||= heads.includes(true)
+        head ||= heads.length > 0
       }
-      if (loops > 0 || loop || condition) done.repeated = true
-      if (condition && loops === 0 && !loop) done.atLeastOnce = true
+      if (each === "foreach") heads.push(false)
+      else if (each === "end" && heads.length > 0 && !loop) heads.pop()
+      // every command between a loop's head and its `do` runs once for each pass: a while's or an until's condition, and the body of zsh's short loops, which have no `do`
+      if (loops > 0 || loop || head || each === "foreach") done.repeated = true
+      if (outer && !loop && reserved.some((w) => w === "while" || w === "until"))
+        done.atLeastOnce = true
       depth = Math.max(0, depth + opened - closed)
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0))
       // a run ends only at an operator that runs the next command whatever this one did, and only outside every body: a `|` keeps the pipeline in the run, and entering a group, a body or a script keeps the run it was reached through
@@ -1310,6 +1377,11 @@ export async function examine(
 ): Promise<string | undefined> {
   tick()
   unchain(cmd, env)
+  if (cmd.opaque) {
+    env.cwdAnywhere = true
+    env.cwdSure = undefined
+    env.cwdUnread = true
+  }
   const [primary, ...others] = readings(parse(cmd))
   const expanded = expandTilde(cmd, primary.name, env)
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
@@ -1509,10 +1581,11 @@ const sureToRun = (cmd: Command, parsed: Parsed): boolean =>
   !cmd.repeated &&
   (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
 
-// Whether the shell runs a command at least once and may run it again: a while's or an until's condition, sure to run as `sureToRun` reads it but for `repeated`, so a count in front of it (`repeat 0`) keeps it out
+// Whether the shell runs a command at least once and may run it again: a while's or an until's condition, sure to run as `sureToRun` reads it but for `repeated`, so a count in front of it (`repeat 0`) or a body kept for a later call keeps it out
 const onceOrMore = (cmd: Command, parsed: Parsed): boolean =>
   !!cmd.atLeastOnce &&
   !cmd.detached &&
+  !cmd.kept &&
   !cmd.unsure &&
   (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
 
