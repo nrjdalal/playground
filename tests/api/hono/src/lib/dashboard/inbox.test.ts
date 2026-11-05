@@ -3207,11 +3207,21 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     await store.markRead(db, pile.map((i) => i.id).slice(200))
   }, 60_000)
 
-  test("the list counts what needs him and keeps answered items a week", async () => {
+  test("the list counts what needs him and keeps answered items a week, but for each card that waits on a verb since the clocks stopped", async () => {
     const list = await store.listItems(db)
     expect(list.count).toBe(store.inboxCount(list.items))
     const later = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000)
     const old = await store.listItems(db, later)
+    const stopped = Date.parse(CLOCKS_STOPPED_AT)
+    // since the clocks stopped, an answer its poster has not closed and an update he read and has not dismissed stay at any age
+    const waitsOnVerb = (i: InboxItem) => {
+      const answer = i.answer as { ackedAt?: string; at?: string; dismissedAt?: string } | null
+      if (i.kind === "update")
+        return answer === null && i.readAt !== null && Date.parse(i.readAt) >= stopped
+      return (
+        !!answer?.at && Date.parse(answer.at) >= stopped && !answer.ackedAt && !answer.dismissedAt
+      )
+    }
     expect(
       old.items.every(
         (i) =>
@@ -3219,7 +3229,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           // a set-aside item stays, however old, for the Archived shelf
           i.status === "cleared" ||
           (i.kind === "update" && i.readAt === null) ||
-          store.deliveryFailed(i),
+          store.deliveryFailed(i) ||
+          waitsOnVerb(i),
       ),
     ).toBe(true)
   })
