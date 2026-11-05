@@ -48,6 +48,47 @@ export const groups: Group[] = [
         "a commit after one cd through a variable that climbs to the main checkout",
         "U=../../..; cd $U; git commit -m x",
       ],
+      // a function whose name the reader does not read as a plain word, called three times
+      [
+        "a commit after a function named with a plus whose cd climbs, called three times",
+        "f+() { cd ..; }; f+; f+; f+; git commit -m x",
+      ],
+      [
+        "a commit after a function named with a slash whose cd climbs, called three times",
+        "a/b() { cd ..; }; a/b; a/b; a/b; git commit -m x",
+      ],
+      // a call the line does not spell as the function's bare name
+      [
+        "a commit after a function whose cd climbs, called again through ANSI-C quoting",
+        "f() { cd ..; }; f; $'\\x66'; $'\\x66'; git commit -m x",
+      ],
+      [
+        "a commit after a function whose cd climbs, called again through a substring expansion",
+        "b=ff; f() { cd ..; }; f; ${b:1}; ${b:1}; git commit -m x",
+      ],
+      // a function whose body is a compound command other than a brace group
+      [
+        "a commit after a function whose if body climbs, called three times",
+        "f() if true; then cd ..; fi; f; f; f; git commit -m x",
+      ],
+      // zsh's short loops, whose body follows the head with no do
+      [
+        "a commit after zsh's short for with a list in parentheses",
+        "for i (1 2 3) cd ..; git commit -m x",
+      ],
+      ["a commit after zsh's short for with in", "for i in 1 2 3; cd ..; git commit -m x"],
+      [
+        "a commit after zsh's short for with a brace body",
+        "for i (1 2 3) { cd ..; }; git commit -m x",
+      ],
+      ["a commit after zsh's foreach", "foreach i (1 2 3); cd ..; end; git commit -m x"],
+      ["a commit after zsh's repeat with a brace body", "repeat 3 { cd ..; }; git commit -m x"],
+      [
+        "a commit after zsh's while with a brace body",
+        "while true { cd ../../..; break }; git commit -m x",
+      ],
+      ["a commit after zsh's short arithmetic for", "for ((i=0;i<3;i++)) cd ..; git commit -m x"],
+      ["a commit after zsh's short select", "select i in a; cd ..; git commit -m x"],
     ],
   },
   // the same forms from the home, after a cd into the worktree the shell is sure of

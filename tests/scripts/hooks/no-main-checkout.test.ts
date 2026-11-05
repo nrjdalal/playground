@@ -632,6 +632,9 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     ["a single eval of a climb", "eval 'cd ..'; git commit -m x"],
     ["one climb through a variable", "U=..; cd $U; git commit -m x"],
     ["a function called once beside a file of its name", "f() { cd ..; }; f; echo x > f"],
+    ["a function called once beside a variable argument", 'f() { cd ..; }; f; git commit -m "$m"'],
+    ["an if condition with a brace argument", "if grep -q { f; then :; fi; git commit -m x"],
+    ["a for loop with no cd", "for i in 1 2 3; do echo $i; done; git commit -m x"],
   ])("from a worktree, %s runs", async (_name, command) => {
     expect(await bash(command, WORKTREE)).toBeUndefined()
   })
