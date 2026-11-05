@@ -345,7 +345,11 @@ const clone = (): {
   mkdirSync(join(dir, "api/hono"), { recursive: true })
   writeFileSync(
     join(dir, "api/hono/package.json"),
-    JSON.stringify({ exports: "./dist/index.mjs", name: "@api/hono" }),
+    JSON.stringify({
+      exports: "./dist/index.mjs",
+      name: "@api/hono",
+      scripts: { build: "tsdown" },
+    }),
   )
   for (const name of ["one", "two", "three"]) {
     mkdirSync(join(dir, "packages", name), { recursive: true })
@@ -354,9 +358,15 @@ const clone = (): {
       JSON.stringify({
         exports: { ".": { default: "./dist/index.mjs", types: "./dist/index.d.mts" } },
         name: `@packages/${name}`,
+        scripts: { build: "tsdown" },
       }),
     )
   }
+  mkdirSync(join(dir, "packages/plain"))
+  writeFileSync(
+    join(dir, "packages/plain/package.json"),
+    JSON.stringify({ name: "@packages/plain" }),
+  )
   const verify = join(dir, "packages/scripts/src/verify")
   mkdirSync(verify, { recursive: true })
   cpSync(join(ROOT, "packages/scripts/src/verify/prebuild.ts"), join(verify, "prebuild.ts"))
@@ -403,6 +413,10 @@ const clone = (): {
   writeFileSync(
     join(dir, "tests/plan.test.ts"),
     'import { p } from "../lib/plan"\nexport const q = p\n',
+  )
+  writeFileSync(
+    join(dir, "tests/path.test.ts"),
+    'const three = "../packages/three/dist/index.mjs"\nconst plain = "../packages/plain/dist/x.mjs"\nexport const paths = [three, plain]\n',
   )
   writeFileSync(
     join(dir, "tests/table.test.ts"),
@@ -452,7 +466,8 @@ test("check-types:tests builds the packages its files import for their types alo
       "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
       "run build --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
     ])
-    expect(run(["--types"]).exitCode).toBe(0)
+    expect(run(["--types", "tests/one.test.ts", "tests/two.test.ts"]).exitCode).toBe(0)
+    expect(log().split("\n").filter(Boolean)).toHaveLength(2)
     expect(log()).not.toContain("@packages/three")
   } finally {
     rmSync(dir, { force: true, recursive: true })
@@ -473,6 +488,23 @@ test("check-types:tests in a cloned worktree builds @api/hono, whose declaration
     )
     expect(existsSync(join(dir, "api/hono/dist/index.d.mts"))).toBe(true)
     expect(run(["--types", "tests/plan.test.ts"]).exitCode).toBe(0)
+    expect(log().split("\n").filter(Boolean)).toHaveLength(1)
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+// round 1 of review: with packages/env/dist moved aside, test-sandbox.test.ts alone gave 4 fails, since it, gaps.test.ts, keys.test.ts and redis's index.test.ts reach a dist file by its path
+test("test:file builds a package whose dist file a test names by path, and builds nothing for a workspace with no build", () => {
+  const { dir, log, run } = clone()
+  try {
+    const first = run(["tests/path.test.ts"])
+    expect(first.stderr).toContain("test:file: building what packages/three/dist/index.mjs needs")
+    expect(first.exitCode).toBe(0)
+    expect(log()).toBe(
+      "run build --filter=@packages/three --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
+    )
+    expect(run(["tests/path.test.ts"]).exitCode).toBe(0)
     expect(log().split("\n").filter(Boolean)).toHaveLength(1)
   } finally {
     rmSync(dir, { force: true, recursive: true })

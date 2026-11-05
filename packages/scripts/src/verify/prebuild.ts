@@ -166,35 +166,66 @@ export const testFiles = (paths: string[]): string[] =>
       .map((name) => join(full, name))
   })
 
-// Each workspace package of the checkout at root: its name, its folder and its exports.
-const workspaces = (root: string): { dir: string; exports: unknown; name: string }[] => {
+// Each workspace package of the checkout at root: its folder, relative and absolute, and its manifest.
+const workspaces = (
+  root: string,
+): {
+  dir: string
+  path: string
+  pkg: {
+    dependencies?: Record<string, string>
+    devDependencies?: Record<string, string>
+    exports?: unknown
+    name?: string
+    scripts?: Record<string, string>
+  }
+}[] => {
   const { workspaces } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
   const globs: string[] = Array.isArray(workspaces) ? workspaces : (workspaces?.packages ?? [])
   return globs.flatMap((glob) =>
-    [...new Bun.Glob(`${glob}/package.json`).scanSync({ cwd: root })].map((manifest) => {
-      const { exports, name } = JSON.parse(readFileSync(join(root, manifest), "utf8"))
-      return { dir: join(root, dirname(manifest)), exports, name }
-    }),
+    [...new Bun.Glob(`${glob}/package.json`).scanSync({ cwd: root })].map((manifest) => ({
+      dir: dirname(manifest),
+      path: join(root, dirname(manifest)),
+      pkg: JSON.parse(readFileSync(join(root, manifest), "utf8")),
+    })),
   )
 }
 
+// The workspace package a built import or a built path belongs to: `@packages/env/gaps` and `packages/env/dist/gaps.mjs` are both `@packages/env`, `api/hono/dist` is `@api/hono`.
+const packageOf = (specifier: string): string => {
+  const [first, second] = specifier.split("/")
+  return first === "packages" || first === "api" ? `@${first}/${second}` : `${first}/${second}`
+}
+
+// A built file a source names by its path, as a test that imports a dist file by path or hands one to a child does: `packages/<name>/dist`, or `api/hono/dist`, and the file after it.
+const BUILT_PATH = /\b(?:packages|api)\/[\w-]+\/dist(?:\/[\w.-]+)*\b/g
+
+// Every built path the given sources name.
+export const builtPaths = (sources: string[]): string[] => [
+  ...new Set(sources.flatMap((source) => source.match(BUILT_PATH) ?? [])),
+]
+
 // Where a built import's file lives, by its workspace's exports and the conditions the reader takes (Bun's runtime, or tsc's types), so a test file outside any workspace resolves as the code it imports does; it throws when the file is not there yet.
 export const builtFile = (specifier: string, root: string, conditions: string[]): string => {
-  if (specifier.startsWith("generated/")) {
-    const file = join(root, ".generated", specifier.slice("generated/".length))
+  if (
+    specifier.startsWith("generated/") ||
+    /^(?:packages|api)\/[\w-]+\/dist(?:\/|$)/.test(specifier)
+  ) {
+    const file = specifier.startsWith("generated/")
+      ? join(root, ".generated", specifier.slice("generated/".length))
+      : join(root, specifier)
     if (existsSync(file)) return file
-    throw new Error(`${specifier} is not generated`)
+    throw new Error(`${specifier} is not built`)
   }
-  const [scope, name, ...rest] = specifier.split("/")
-  const sub = rest.length > 0 ? `./${rest.join("/")}` : "."
-  const pkg = workspaces(root).find((workspace) => workspace.name === `${scope}/${name}`)
-  const exports = pkg?.exports as Record<string, unknown> | string | undefined
+  const sub = specifier.split("/").length > 2 ? `./${specifier.split("/").slice(2).join("/")}` : "."
+  const pkg = workspaces(root).find((workspace) => workspace.pkg.name === packageOf(specifier))
+  const exports = pkg?.pkg.exports as Record<string, unknown> | string | undefined
   let entry = typeof exports === "string" ? (sub === "." ? exports : undefined) : exports?.[sub]
   if (entry && typeof entry === "object")
     entry = conditions
       .map((condition) => (entry as Record<string, unknown>)[condition])
       .find(Boolean)
-  const file = pkg && typeof entry === "string" ? join(pkg.dir, entry) : ""
+  const file = pkg && typeof entry === "string" ? join(pkg.path, entry) : ""
   if (file && existsSync(file)) return file
   throw new Error(`${specifier} is unbuilt`)
 }
@@ -211,20 +242,14 @@ export const isMainCheckout = (root: string, repo: string | undefined): boolean 
 
 // A worktree installed before a canary pull that added a workspace package, or a dependency of one, lacks its links, and its build then stops on "tsdown: command not found" or its run on "Cannot find module"; pr:merge refuses it naming the install that fixes it, while verify and `bun run dev`, the live dashboard's serve among them, build on as before.
 export const staleInstall = (target: string, root: string): string | null => {
-  const { workspaces } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
-  const globs: string[] = Array.isArray(workspaces) ? workspaces : (workspaces?.packages ?? [])
-  const missing = globs.flatMap((glob) =>
-    [...new Bun.Glob(`${glob}/package.json`).scanSync({ cwd: root })].flatMap((manifest) => {
-      const dir = dirname(manifest)
-      const pkg = JSON.parse(readFileSync(join(root, manifest), "utf8"))
-      const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter(
-        (dep) =>
-          !existsSync(join(root, dir, "node_modules", dep)) &&
-          !existsSync(join(root, "node_modules", dep)),
-      )
-      return deps.length > 0 ? [`${dir} (${deps.join(", ")})`] : []
-    }),
-  )
+  const missing = workspaces(root).flatMap(({ dir, pkg }) => {
+    const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies }).filter(
+      (dep) =>
+        !existsSync(join(root, dir, "node_modules", dep)) &&
+        !existsSync(join(root, "node_modules", dep)),
+    )
+    return deps.length > 0 ? [`${dir} (${deps.join(", ")})`] : []
+  })
   if (missing.length === 0) return null
   return `${target}: this worktree's install predates its bun.lock and misses ${missing.join(", ")}; run \`~/.playground/ops/run-slot.sh <your name> -- bun install --ignore-scripts --cwd ${root}\`, then run ${target} again`
 }
@@ -256,9 +281,7 @@ const prebuild = (target: string, missing: string[]): number => {
   const env = { ...process.env, NODE_ENV: "production", SKIP_ENV_VALIDATION: "true" }
   const packages = [
     ...new Set(
-      step.build
-        .filter((specifier) => !specifier.startsWith("generated/"))
-        .map((specifier) => specifier.split("/").slice(0, 2).join("/")),
+      step.build.filter((specifier) => !specifier.startsWith("generated/")).map(packageOf),
     ),
   ]
   // turbo's output goes to stderr, so `verify --json` keeps stdout to itself
@@ -289,11 +312,15 @@ const prebuild = (target: string, missing: string[]): number => {
 export const prebuildTests = async (paths: string[], types = false): Promise<number> => {
   const sources = await reach(testFiles(paths))
   const conditions = types ? ["types", "import", "default"] : ["bun", "import", "default"]
-  const names = new Set(workspaces(ROOT).map(({ name }) => name))
+  // a workspace with no build script never makes a dist, so a path into one would read as unbuilt on every run
+  const built = new Set(
+    workspaces(ROOT)
+      .filter(({ pkg }) => pkg.scripts?.build)
+      .map(({ pkg }) => pkg.name),
+  )
   const missing = unbuilt(
-    workspaceImports(sources, types).filter(
-      (specifier) =>
-        specifier.startsWith("generated/") || names.has(specifier.split("/").slice(0, 2).join("/")),
+    [...workspaceImports(sources, types), ...builtPaths(sources)].filter(
+      (specifier) => specifier.startsWith("generated/") || built.has(packageOf(specifier)),
     ),
     ROOT,
     types ? {} : importedNames(sources),

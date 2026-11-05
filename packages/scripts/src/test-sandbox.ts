@@ -118,7 +118,7 @@ if (built !== 0) {
   process.exit(built)
 }
 // a worktree with none of the env files bun test loads (a skill-only chore; it skips .env.local), or whose files leave a key the apps' schemas require empty (a fresh copy of .env.example leaves POSTGRES_URL so), has no values for those schemas, so a test that imports one would fail its validation, unless the caller set the flag; a key set to a value the schema refuses stays validated
-const blank = async (): Promise<boolean> => {
+const skipValidation = async (): Promise<boolean> => {
   if (![".env", ".env.test", ".env.test.local"].some((file) => existsSync(file))) return true
   try {
     const { requiredKeys } = await import("@packages/env/gaps")
@@ -127,7 +127,7 @@ const blank = async (): Promise<boolean> => {
     return false
   }
 }
-if (await blank())
+if (await skipValidation())
   Object.assign(env, { SKIP_ENV_VALIDATION: process.env.SKIP_ENV_VALIDATION ?? "true" })
 const serial = SERIAL.filter((file) =>
   paths.map(bare).some((path) => path === "." || file === path || file.startsWith(`${path}/`)),
