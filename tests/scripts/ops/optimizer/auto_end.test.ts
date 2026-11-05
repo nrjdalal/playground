@@ -694,6 +694,22 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(calls).toEqual([])
   })
 
+  test("the session's PR goes to the holder check and playground rm, so the merging worker's hold by that PR's number alone does not keep a checker's review-<n>", async () => {
+    const { main, wt } = machine("review-2110")
+    const url = "https://github.com/o/r/pull/2110"
+    const asked: (string | undefined)[] = []
+    const { deps } = fakes(main, [], undefined, {
+      held: async (_path, pr) => (asked.push(pr), null),
+      rm: async (path, _reason, pr) => {
+        asked.push(pr)
+        run(main, "git", "worktree", "remove", path)
+        return { ok: true, out: "" }
+      },
+    })
+    expect(await cleanWorktree(wt, "r ended", deps, url)).toBe(`removed ${wt}, branch PG-1-thing`)
+    expect(asked).toEqual([url, url])
+  })
+
   test("a dev:stop refusal keeps the worktree, while no recorded stack lets it go", async () => {
     const { main, wt } = machine()
     const refusal = "dev:stop: the stack's process groups also hold pid 9, so nothing is signalled"
@@ -779,7 +795,7 @@ describe("endMerged: a closed session's worktrees are cleaned after its close, a
   test("the cleanup's lines join the end's line, and a session whose close is refused is not cleaned", async () => {
     const cleaned: string[] = []
     const cleanup = async (target: Target) => (
-      cleaned.push(target.name),
+      cleaned.push(`${target.name} ${target.pr}`),
       [`removed /wt/${target.name}`]
     )
     const roster = { "m4tqzr-reviewer": { kind: "reviewer", name: "m4tqzr-reviewer", pr: URL } }
@@ -793,6 +809,6 @@ describe("endMerged: a closed session's worktrees are cleaned after its close, a
     ])
     const refused = fakes({ cleanup, close: async () => ({ ok: false, out: "no pane" }) })
     await endMerged(URL, "daaac8e0000", input({ roster, sessions }), refused.deps)
-    expect(cleaned).toEqual(["m4tqzr-reviewer"])
+    expect(cleaned).toEqual([`m4tqzr-reviewer ${URL}`])
   })
 })

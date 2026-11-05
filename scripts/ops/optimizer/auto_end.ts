@@ -27,6 +27,7 @@ export type Target = {
   kind: string | null
   lead?: string
   name: string
+  pr?: string
   refs: string[]
   sessionId?: string
   worker?: string
@@ -137,6 +138,7 @@ export async function endMerged(
       kind,
       lead,
       name,
+      pr: url,
       refs: pr?.ref ? [pr.ref] : [],
       sessionId: d.sessionId,
       worker,
@@ -224,12 +226,12 @@ export type CleanupDeps = {
   containers: () => Promise<string[] | null>
   devStop: (dir: string) => Promise<{ ok: boolean; out: string }>
   git: (dir: string, args: string[]) => Promise<string | null>
-  held: (path: string) => Promise<string | null>
+  held: (path: string, pr?: string) => Promise<string | null>
   live: (container: string) => boolean
   liveBranch: string
   main: string
   removeContainer: (name: string) => Promise<boolean>
-  rm: (path: string, reason: string) => Promise<{ ok: boolean; out: string }>
+  rm: (path: string, reason: string, pr?: string) => Promise<{ ok: boolean; out: string }>
 }
 
 // Pure: the containers a worktree's cleanup may remove, playground-<worktree>-db and -redis as AGENTS.md names a worktree's own, for a folder directly in <main>/.claude/worktrees alone and never the live dashboard's database.
@@ -243,11 +245,12 @@ export const containersFor = (
   return [`playground-${name}-db`, `playground-${name}-redis`].filter((c) => !live(c))
 }
 
-// One worktree a closed session used, cleaned once its work is saved: a Playground worktree's dev stack stopped, the worktree moved to the trash by playground rm (which refuses one a live session or a process holds), then its containers removed by exact name; another repo's worktree removed by git with no force flag, then pruned; then its branch deleted. The line saying what went, or why it stayed.
+// One worktree a closed session used, cleaned once its work is saved, a hold by its PR's number alone from another session of that PR (the merging worker, a sibling checker) not counting: a Playground worktree's dev stack stopped, the worktree moved to the trash by playground rm (which refuses one a live session or a process holds), then its containers removed by exact name; another repo's worktree removed by git with no force flag, then pruned; then its branch deleted. The line saying what went, or why it stayed.
 export async function cleanWorktree(
   path: string,
   reason: string,
   deps: CleanupDeps,
+  pr?: string,
 ): Promise<string> {
   const [gitDir, commonDir] = (
     (await deps.git(path, [
@@ -273,12 +276,12 @@ export async function cleanWorktree(
     const own = containersFor(path, deps.main, deps.live)
     if (!own.length)
       return `kept ${path}: not a worktree in ${join(deps.main, ".claude", "worktrees")}`
-    const holder = await deps.held(path)
+    const holder = await deps.held(path, pr)
     if (holder) return `kept ${path}: ${holder}`
     const stopped = await deps.devStop(path)
     if (!stopped.ok && !stopped.out.includes("no stack is recorded"))
       return `kept ${path}: ${stopped.out}`
-    const moved = await deps.rm(path, reason)
+    const moved = await deps.rm(path, reason, pr)
     if (!moved.ok) return `kept ${path}: ${moved.out}`
     listed = await deps.containers()
     if (listed)
@@ -320,7 +323,7 @@ async function cleanupDeps(): Promise<CleanupDeps | null> {
     },
     git,
     // rm's roster and clone holders alone: its process check would see the stack dev:stop is about to stop, and its saved-work checks run after the stop
-    held: async (path) =>
+    held: async (path, pr) =>
       worktreeRefusal(
         path,
         { home: rm.home, main: rm.main, trash: join(rm.data, "trash") },
@@ -329,6 +332,7 @@ async function cleanupDeps(): Promise<CleanupDeps | null> {
           discard: true,
           live: STATUSES.live,
           merged: () => null,
+          ...(pr ? { pr } : {}),
           procs: [],
           roster: join(rm.data, "roster.json"),
         },
@@ -337,10 +341,10 @@ async function cleanupDeps(): Promise<CleanupDeps | null> {
     liveBranch: pair.branch,
     main: dirname(common),
     removeContainer: async (name) => (await runIn(["docker", "rm", "-fv", name])).code === 0,
-    rm: async (path, reason) => {
+    rm: async (path, reason, pr) => {
       const cli = join(REPO, "packages", "scripts", "src", "playground", "cli.ts")
       const argv = [process.execPath, "--no-env-file", cli, "rm", "--worktree", path]
-      const { code, out } = await runIn([...argv, "--reason", reason])
+      const { code, out } = await runIn([...argv, ...(pr ? ["--pr", pr] : []), "--reason", reason])
       return { ok: code === 0, out: out.split("\n").at(-1) ?? "" }
     },
   }
@@ -356,7 +360,8 @@ export const cleanupLive =
     const deps = await cleanupDeps()
     if (!deps) return ["could not find the main checkout, so nothing was cleaned"]
     const lines: string[] = []
-    for (const dir of dirs) lines.push(await cleanWorktree(dir, `${target.name} ended`, deps))
+    for (const dir of dirs)
+      lines.push(await cleanWorktree(dir, `${target.name} ended`, deps, target.pr))
     return lines
   }
 
