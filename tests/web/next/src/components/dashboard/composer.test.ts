@@ -222,12 +222,14 @@ describe("the composer's sources", () => {
     expect(chip).toContain("<RiReplyLine aria-hidden />")
     expect(chip).toContain('<RiCloseLine className="size-3" aria-hidden />')
     expect(chip).not.toContain("<button")
-    const close = chip.match(/<InputGroupButton[\s\S]*?>/)?.[0] ?? ""
+    const close = chip.match(/<InputGroupButton[\s\S]*?<\/InputGroupButton>/)?.[0] ?? ""
     expect(close).toContain('size="icon-xs"')
     expect(close).toContain('variant="ghost"')
     expect(close).toMatch(/className="[^"]*\bsize-4\b/)
     expect(close).toContain("aria-label={`Stop replying to ${itemTag(reply)}`}")
-    expect(chip).toContain("<Hint content={`Stop replying to ${itemTag(reply)}`}>")
+    expect(chip).toContain(
+      "<Hint content={`Stop replying to ${itemTag(reply)}`} description={null}>",
+    )
   })
 
   test("its icons are Remix: no lucide icon", async () => {

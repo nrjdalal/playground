@@ -341,9 +341,8 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                           Replying to <span className="font-mono">{itemTag(reply)}</span> ·{" "}
                           {reply.title}
                         </span>
-                        {/* the badge's own size-3 icon in its own tone at both ends, the close a round ghost icon button that fits the badge's line */}
                         {picked && (
-                          <Hint content={`Stop replying to ${itemTag(reply)}`}>
+                          <Hint content={`Stop replying to ${itemTag(reply)}`} description={null}>
                             <InputGroupButton
                               aria-label={`Stop replying to ${itemTag(reply)}`}
                               size="icon-xs"
