@@ -21,12 +21,22 @@ export const CHECKS = [
   },
 ]
 
+// A commit message file adds commitlint, as lefthook's commit-msg step runs it
+export const checksFor = (msgFile?: string) =>
+  msgFile
+    ? [...CHECKS, { argv: ["bunx", "commitlint", "--edit", msgFile], name: "commitlint" }]
+    : CHECKS
+
 export type Run = (argv: string[]) => Promise<number>
 
 // Runs every check, a failed one included, so one call names each one that would bounce the commit; the exit code is 1 when any failed
-export const precommitLight = async (run: Run, log: (line: string) => void = console.error) => {
+export const precommitLight = async (
+  run: Run,
+  log: (line: string) => void = console.error,
+  msgFile?: string,
+) => {
   const failed: string[] = []
-  for (const check of CHECKS) if ((await run(check.argv)) !== 0) failed.push(check.name)
+  for (const check of checksFor(msgFile)) if ((await run(check.argv)) !== 0) failed.push(check.name)
   log(
     failed.length ? `precommit:light: failed: ${failed.join(", ")}` : "precommit:light: all passed",
   )
@@ -37,5 +47,5 @@ if (import.meta.main) {
   const cwd = join(import.meta.dir, "..", "..", "..")
   const run: Run = (argv) =>
     Bun.spawn(argv, { cwd, stdio: ["ignore", "inherit", "inherit"] }).exited
-  process.exit(await precommitLight(run))
+  process.exit(await precommitLight(run, console.error, process.argv[2]))
 }

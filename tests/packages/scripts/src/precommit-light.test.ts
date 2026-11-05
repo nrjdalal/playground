@@ -1,17 +1,22 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { CHECKS, precommitLight } from "../../../../packages/scripts/src/precommit-light"
+import { CHECKS, checksFor, precommitLight } from "../../../../packages/scripts/src/precommit-light"
 
 const ROOT = join(import.meta.dir, "../../../..")
+const DIR = mkdtempSync(join(tmpdir(), "precommit-light-"))
+
+afterAll(() => rmSync(DIR, { force: true, recursive: true }))
 
 const runner = (failing: string[]) => {
   const ran: string[] = []
   const run = async (argv: string[]) => {
-    const check = CHECKS.find((c) => c.argv === argv)
-    if (!check) throw new Error(`not a check: ${argv.join(" ")}`)
-    ran.push(check.name)
-    return failing.includes(check.name) ? 1 : 0
+    const name = argv[1] === "commitlint" ? "commitlint" : CHECKS.find((c) => c.argv === argv)?.name
+    if (!name) throw new Error(`not a check: ${argv.join(" ")}`)
+    ran.push(name)
+    return failing.includes(name) ? 1 : 0
   }
   return { ran, run }
 }
@@ -62,6 +67,36 @@ describe("precommit:light", () => {
       expect(lines).toEqual([`precommit:light: failed: ${name}`])
     },
   )
+
+  test("a message file adds commitlint, as lefthook's commit-msg step runs it", async () => {
+    const hooks = await Bun.file(join(ROOT, "lefthook.yml")).text()
+    expect(hooks).toContain("run: bunx commitlint --edit {1}\n")
+    expect(checksFor("msg.txt").at(-1)).toEqual({
+      argv: ["bunx", "commitlint", "--edit", "msg.txt"],
+      name: "commitlint",
+    })
+    expect(checksFor()).toEqual(CHECKS)
+  })
+
+  test("commitlint fails: exit 1, and the other four still run", async () => {
+    const { ran, run } = runner(["commitlint"])
+    const lines: string[] = []
+    expect(await precommitLight(run, (l) => lines.push(l), "msg.txt")).toBe(1)
+    expect(ran).toEqual(["docs-wrap", "em-dashes", "env-keys", "trace-count", "commitlint"])
+    expect(lines).toEqual(["precommit:light: failed: commitlint"])
+  })
+
+  test.each([
+    ["Feat: a capitalised type", 1],
+    [`feat: ${"a".repeat(101)}`, 1],
+    ["feat: a header commitlint takes", 0],
+  ])("the commitlint argv run for real on %p exits %p", async (header, code) => {
+    const file = join(DIR, `${code}-${header.length}.txt`)
+    await Bun.write(file, `${header}\n`)
+    const argv = checksFor(file).at(-1)!.argv
+    const exit = await Bun.spawn(argv, { cwd: ROOT, stdio: ["ignore", "ignore", "ignore"] }).exited
+    expect(exit === 0 ? 0 : 1).toBe(code)
+  })
 
   test("two fail: both are named", async () => {
     const { run } = runner(["docs-wrap", "trace-count"])
