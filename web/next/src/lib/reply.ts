@@ -3,10 +3,10 @@ import { useSyncExternalStore } from "react"
 
 import { leadingSkill } from "@/lib/skill-menu"
 
-// The inbox item Playground's composer is replying to, picked by an item's Chat about it button; the composer sends it as "re #iN" before the words, and the list marks it until then.
+// The inbox item Playground's composer is replying to, picked by an item's Reply button; the composer sends it as "re #iN" before the words, and its card's band reads Replying until then.
 export type Reply = Pick<InboxItem, "ref" | "title">
 
-// One value React reads and anything may set: the reply picked by a button, and the one the composer's words name, which the list marks too. A pick notifies every time, even of the same item, so a second Chat about it still brings a phone's chat forward; the words' store notifies only on a change, since the composer sets it whenever the item its words name changes.
+// One value React reads and anything may set: the reply picked by a button, and the one the composer's words name, which the list marks too. A pick notifies every time, even of the same item, so a second Reply still brings a phone's chat forward; the words' store notifies only on a change, since the composer sets it whenever the item its words name changes.
 function store(everySet: boolean) {
   let value: Reply | null = null
   const listeners = new Set<() => void>()

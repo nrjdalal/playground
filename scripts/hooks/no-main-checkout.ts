@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from "no
 
 import { fromFactory } from "./role"
 import {
+  codeFed,
   type Command,
   type Env,
   examine,
@@ -459,10 +460,10 @@ async function fedScript(
   const input = shell.redirects.findLast(
     (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
   )
-  const fed = input !== undefined || shell.stdin !== undefined
-  const kind = !fed
-    ? undefined
-    : (stdinShell(shell) ?? (parsed && suShell(parsed) ? "root" : undefined))
+  if (input === undefined && shell.stdin === undefined) return
+  const fedKind = stdinShell(shell)
+  if (fedKind === "code") return
+  const kind = fedKind ?? (parsed && suShell(parsed) ? "root" : undefined)
   if (!kind) return
   const script = await stdinOf(shell, here)
   const unread = script.unknown ?? (marked(script.value) ? "a value it cannot read" : undefined)
@@ -496,8 +497,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   const known = knownVariables(command, environment, directory)
   const lexed = lex(command, known)
   // the shell each pipeline feeds, by the command whose output it reads, since the walk judges that command in the folder the pipeline runs in and never visits a shell of its own
-  const fed = new Map<Command, Command>()
-  for (const cmd of lexed.commands) if (cmd.stdin && stdinShell(cmd)) fed.set(cmd.stdin, cmd)
+  const fed = codeFed(lexed.commands)
   const visit: Visit = async (cmd, parsed, env) => {
     // a builtin run() hands over for this hook alone (a bare `sudo -s`, a bare copy of a followed shell, an export) is read only for the script a here-string, a heredoc or a pipeline feeds it; one that feeds a shell (a loop's `done`) is judged in full, as the reader hands it to every hook
     if ((parsed.name === "" && !cmd.feedsShell) || EXPORTS.has(parsed.name)) {
@@ -528,10 +528,15 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     for (const here of places(env, directory)) {
       // only the folder the reader proved takes the command's own fix, so a refusal in any other folder names the fix for a folder the hook cannot pin down
       const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure
-      // the shell this command's output feeds runs whatever it prints, so a script the hook cannot read is refused where that shell would run in the main checkout
+      // the command this command's output feeds runs whatever it prints as code, so a script the hook cannot read is refused where it would run in the main checkout, and one in another language always is
       const pipedTo = fed.get(cmd)
+      if (pipedTo?.kind === "code" && inMain(here.cwd))
+        return refuse(
+          `a pipe into an interpreter whose script, the piped input, the hook cannot read`,
+          fixFor(sure),
+        )
       if (pipedTo) {
-        const verdict = await unreadScript(pipedTo, here, sure, inMain)
+        const verdict = await unreadScript(pipedTo.consumer, here, sure, inMain)
         if (verdict) return verdict
       }
       const script = await fedScript(cmd, here, sure, inMain, visit, parsed)

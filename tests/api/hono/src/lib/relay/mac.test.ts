@@ -161,9 +161,10 @@ describe("a relayed read that passes", () => {
 type Fake = {
   addEventListener: (
     type: "close" | "message" | "open",
-    listener: (event: { data?: unknown }) => void,
+    listener: (event: { code?: number; data?: unknown; reason?: string }) => void,
   ) => void
-  close: () => void
+  // a code and reason, as the hub's close of a refused socket carries
+  close: (code?: number, reason?: string) => void
   feed: (data: string) => void
   open: () => void
   readyState: number
@@ -178,14 +179,14 @@ const sockets = () => {
   const connect = (url: URL, token: string) => {
     const on = { close: [], message: [], open: [] } as Record<
       string,
-      ((event: { data?: unknown }) => void)[]
+      ((event: { code?: number; data?: unknown; reason?: string }) => void)[]
     >
     const one: Fake = {
       addEventListener: (type, listener) => void on[type]!.push(listener),
-      close: () => {
+      close: (code, reason) => {
         if (one.readyState === 3) return
         one.readyState = 3
-        for (const listener of on.close!) listener({})
+        for (const listener of on.close!) listener({ code, reason })
       },
       feed: (data) => {
         for (const listener of on.message!) listener({ data })
@@ -475,6 +476,23 @@ describe("startRelay, this Mac's socket to the hub", () => {
       expect(made).toHaveLength(0)
     } finally {
       stop()
+    }
+  })
+
+  test("a socket the hub refuses says the close code and reason it carries", async () => {
+    const said = spyOn(console, "error").mockImplementation(() => {})
+    const { connect, made } = sockets()
+    const stop = relay(connect)
+    try {
+      await until("the socket", () => made.length === 1)
+      made[0]!.open()
+      made[0]!.close(4401, "Unauthorized")
+      expect(said.mock.calls.flat().join(" ")).toContain(
+        "[relay] the socket closed (4401 Unauthorized)",
+      )
+    } finally {
+      stop()
+      said.mockRestore()
     }
   })
 

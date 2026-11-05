@@ -239,7 +239,7 @@ describe("the composer's sources", () => {
   })
 })
 
-// Two boxes share a page once the aside holds Playground's chat beside a session's own, so each takes its own id, and an Inbox card's Chat about it finds Playground's by the bare one.
+// Two boxes share a page once the aside holds Playground's chat beside a session's own, so each takes its own id, and an Inbox card's Reply finds Playground's by the bare one.
 describe("composerId", () => {
   const dispatcher = { name: "dispatcher", role: "dispatcher" as const }
   test("Playground's own box keeps the bare id", () => {
