@@ -460,10 +460,10 @@ async function fedScript(
   const input = shell.redirects.findLast(
     (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
   )
-  const fed = input !== undefined || shell.stdin !== undefined
-  const read = fed ? stdinShell(shell) : undefined
-  const kind =
-    !fed || read === "code" ? undefined : (read ?? (parsed && suShell(parsed) ? "root" : undefined))
+  if (input === undefined && shell.stdin === undefined) return
+  const fedKind = stdinShell(shell)
+  if (fedKind === "code") return
+  const kind = fedKind ?? (parsed && suShell(parsed) ? "root" : undefined)
   if (!kind) return
   const script = await stdinOf(shell, here)
   const unread = script.unknown ?? (marked(script.value) ? "a value it cannot read" : undefined)

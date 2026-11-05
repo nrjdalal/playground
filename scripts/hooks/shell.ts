@@ -283,6 +283,8 @@ export function stdinShell(cmd: Command): StdinKind | undefined {
 }
 
 export type StdinKind = "code" | "root" | "shell"
+// A command whose piped input may run as code, with the kind stdinShell gives it
+type Fed = { consumer: Command; kind: StdinKind }
 
 function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): StdinKind | undefined {
   // piped input, or input xargs hands on as words, reaches whatever the command runs, so a command that can run code takes it as code whatever its arguments say
@@ -408,8 +410,8 @@ function interpreted(family: Family, args: Word[], xargs: Xargs): boolean {
 }
 
 // Every command whose piped input may run as code, by the command whose output it reads, with the kind stdinShell gives it: one stdinShell names, or one that opens a loop, a conditional or a brace group whose body up to its closing word holds a command that would be one under the same pipe, since every command of the body reads that stdin; "code" wins over "shell", since the hook can read none of it
-export function codeFed(commands: Command[]): Map<Command, { consumer: Command; kind: StdinKind }> {
-  const fed = new Map<Command, { consumer: Command; kind: StdinKind }>()
+export function codeFed(commands: Command[]): Map<Command, Fed> {
+  const fed = new Map<Command, Fed>()
   const add = (cmd: Command, kind: StdinKind | undefined) => {
     if (!kind || !cmd.stdin) return
     const known = fed.get(cmd.stdin)
