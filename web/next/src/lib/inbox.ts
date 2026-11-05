@@ -373,12 +373,13 @@ export const inboxWaiting = (items: InboxItem[]): string[] =>
 const working = (item: InboxItem): boolean =>
   !answeredDismissedAt(item) && itemState(item) === "sending"
 
-// Pure: whether a card stays in the list: it asks something of him; he only commented on it, so he still owes its answer while its poster reads the comment; or it is an update he read and has not dismissed or seen resolved, read since CLOCKS_STOPPED_AT.
+// Pure: whether a card stays in the list: it asks something of him; he only commented on it, so he still owes its answer while its poster reads the comment; or it is an update he read and has not sent to Done, dismissed or seen resolved, read since CLOCKS_STOPPED_AT, one woken from Snooze included.
 const listed = (item: InboxItem): boolean =>
   needsYou(item) ||
   (reopenable(item) && !answeredDismissedAt(item)) ||
   (item.kind === "update" &&
-    item.answer === null &&
+    !answeredDismissedAt(item) &&
+    !(item.answer && "choice" in item.answer) &&
     Date.parse(item.readAt ?? item.updatedAt) >= Date.parse(CLOCKS_STOPPED_AT))
 
 // Pure: the time Done orders an item by: when he dismissed it or its poster closed it, else when it was answered, resolved or read.
