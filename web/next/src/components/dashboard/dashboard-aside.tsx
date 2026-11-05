@@ -311,7 +311,7 @@ export function DashboardAside({ children }: { children: ReactNode }) {
   const inboxSeenAt = useMark("inbox")
   const unreadOf = useAppUnread(allowed)
   useEffect(() => {
-    const mark = viewingInbox && inbox.data ? inboxMark(loudItems(inbox.data)) : null
+    const mark = viewingInbox && inbox.data ? inboxMark(inbox.data.items) : null
     if (mark) writeMark("inbox", mark)
   }, [inbox.data, viewingInbox])
 

@@ -33,13 +33,12 @@ const T2 = "2026-10-08T12:10:00.000Z"
 
 // What came in while focus stands lights nothing until it ends (#974).
 describe("loudItems", () => {
-  test("leaves out what the list holds quiet, so the count, the dot and a look skip it, and every item once quiet is empty", () => {
+  test("leaves out what the list holds quiet, so the count and the dot skip it, and every item counts once quiet is empty", () => {
     const old = item(T0)
     const held = item(T2, { id: "held" })
     const quiet = { items: [old, held], quiet: ["held"] }
     expect(loudItems(quiet)).toEqual([old])
     expect(newInInboxCount(loudItems(quiet), T1)).toBe(0)
-    expect(inboxMark(loudItems(quiet))).toBe(T0)
     const ended = { items: [old, held], quiet: [] }
     expect(newInInboxCount(loudItems(ended), T1)).toBe(1)
     expect(newInInbox(loudItems(ended), T1)).toBe(true)

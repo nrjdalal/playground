@@ -73,7 +73,7 @@ export const TAB_DOT_POLLING = { background: true, poll: true } as const
 const snoozedUntil = (item: InboxItem): string | null =>
   item.answer && "snoozedUntil" in item.answer ? item.answer.snoozedUntil : null
 
-// Pure: the list's items but the ones it holds quiet while focus stands (the API's quiet), which the dot, the Inbox square's count and a look at the Inbox leave out until focus ends.
+// Pure: the list's items but the ones it holds quiet while focus stands (the API's quiet), which the dot and the Inbox square's count leave out until focus ends; a look marks them seen with the rest, since the Inbox shows them.
 export const loudItems = ({ items, quiet }: { items: InboxItem[]; quiet: string[] }): InboxItem[] =>
   items.filter((item) => !quiet.includes(item.id))
 

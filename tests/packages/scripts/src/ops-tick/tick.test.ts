@@ -1541,7 +1541,6 @@ test("the switch watch reads no account on a machine with no extensions, so it s
   rmSync(data, { force: true, recursive: true })
 })
 
-// 31 Oct: tick ran five helpers no checkout held, and the beats' stubs above passed, so their alerts never fired on a real machine.
 describe("the focus card", () => {
   test("posts one Inbox update under the ops manager's name once focus.json has lapsed, and none while it stands (#974)", async () => {
     const ops = scratch()
@@ -1597,6 +1596,7 @@ describe("the focus card", () => {
   })
 })
 
+// 31 Oct: tick ran five helpers no checkout held, and the beats' stubs above passed, so their alerts never fired on a real machine.
 describe("every script a beat runs", () => {
   const REPO = join(import.meta.dir, "../../../../..")
   // where each base tick.ts joins from lives in a checkout: the ops folder is scripts/ops, linked into the data folder by link-skills.sh

@@ -122,7 +122,9 @@ const on = async (args: string[], deps: FocusDeps): Promise<number> => {
     await lift(deps.data, now)
     return fail(`focus is off, since merges could not be held: ${(error as Error).message}`, 1)
   }
-  const focus: Focus = { reason, session, since: now.toISOString(), until: until.toISOString() }
+  // the same session's on extends its focus, so what came in since it began stays quiet and its card counts from the start
+  const since = held?.since ?? now.toISOString()
+  const focus: Focus = { reason, session, since, until: until.toISOString() }
   await Bun.write(focusPath(deps.data), `${JSON.stringify(focus, null, 2)}\n`)
   console.log(
     `focus: ${session} until ${focus.until}: merges wait (${merges.line}), other sessions' heavy runs wait, new sessions are refused`,

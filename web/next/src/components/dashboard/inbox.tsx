@@ -160,7 +160,7 @@ import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
 import { setReply, useReply, useTypedReply } from "@/lib/reply"
 import { iconTone, type ShownState, statusIcon } from "@/lib/status-icons"
-import { inboxMark, loudItems, readMark } from "@/lib/tab-dot"
+import { inboxMark, readMark } from "@/lib/tab-dot"
 import { fullTime, relativeTime } from "@/lib/time"
 
 const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
@@ -1657,7 +1657,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     upto: string | null
   } | null>(null)
   if (viewing && data && look === null)
-    setLook({ since: readMark("inbox"), upto: inboxMark(loudItems(data)) })
+    setLook({ since: readMark("inbox"), upto: inboxMark(items) })
   if (!viewing && look !== null) setLook(null)
   const updated = (item: InboxItem) => look !== null && updatedSince(item, look.since, look.upto)
   const quiet = new Set(data?.quiet ?? [])

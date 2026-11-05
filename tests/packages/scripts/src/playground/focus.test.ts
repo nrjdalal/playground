@@ -200,6 +200,18 @@ describe("playground focus", () => {
     expect(await focusCard(m.data, new Date(NOW.getTime() + 42 * MIN), post)).toBe("none")
   })
 
+  test("the same session's on while its focus stands keeps since, so what came in earlier stays quiet", async () => {
+    const m = machine()
+    await on(m.deps)
+    expect(await on({ ...m.deps, now: () => new Date(NOW.getTime() + 20 * MIN) }, "60")).toBe(0)
+    expect(await standing(m.data, new Date(NOW.getTime() + 70 * MIN))).toEqual({
+      reason: "a timed demo",
+      session: "worker-f",
+      since: NOW.toISOString(),
+      until: new Date(NOW.getTime() + 80 * MIN).toISOString(),
+    })
+  })
+
   test("a card that fails to post leaves focus.json for the next beat", async () => {
     const m = machine()
     await on(m.deps)
