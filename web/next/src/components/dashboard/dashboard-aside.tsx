@@ -229,9 +229,10 @@ export function DashboardAside({ children }: { children: ReactNode }) {
   const side = tabs.includes(pickedSide) ? pickedSide : "inbox"
   // a page or a document opens in a tab of its own, or brings its open tab forward, on a phone too
   const openInAside = (doc: AsideDoc) => {
+    const { tab: opened } = openDoc(docs, doc)
     setDocs((open) => openDoc(open, doc).docs)
-    setTab(docTab(doc))
-    setSide(docTab(doc))
+    setTab(opened)
+    setSide(opened)
   }
   // Playground's chat: the page itself on your chat, else the aside's Chat tab
   const showChat = () => {
