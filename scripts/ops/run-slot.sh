@@ -290,11 +290,6 @@ fi
 WHO=$1
 shift 2
 case "$WHO" in *[!A-Za-z0-9._#-]*|"") echo "run-slot.sh: <who> is a session name (letters, digits, . _ - #)" >&2; exit 2 ;; esac
-# bun run pr:merge or pr:train, as the whole command, runs at once outside the queue, since a merge carries its own gates and its type steps take their own slots (5 Nov: three wrapped merges in an hour each waited behind the heavy queue, and each inner type step queued again)
-if [ "${1:-}" = bun ] && [ "${2:-}" = run ] && { [ "${3:-}" = pr:merge ] || [ "${3:-}" = pr:train ]; }; then
-  echo "run-slot.sh: bun run $3 runs at once, outside the queue: a merge carries its own gates, and its type steps take their own slots (packages/scripts/src/pr-merge/README.md)" >&2
-  exec "$@" 3<&-
-fi
 # every run drops each expired switch, so the readers that only look for the file (the merge train, Checks, the leads' sweep) find it gone too
 for s in $SWITCHES; do switch_on "$s"; done
 # a dev stack never ends, so it would hold a slot for hours (dispatcher, 19 Oct: a tester's `bun run dev` held run-slot.single with 7 waiters)
@@ -347,6 +342,11 @@ if [ -n "$AFTER" ] && [ -z "$REREAD" ]; then
     sleep "${RUN_SLOT_POLL:-5}"
   done
   ASKED=$(date +%s)
+fi
+# bun run pr:merge or pr:train, as the whole command, runs at once outside the queue once any --after wait ends, since a merge carries its own gates and its type steps take their own slots (5 Nov: three wrapped merges in an hour each waited behind the heavy queue, and each inner type step queued again)
+if [ "${1:-}" = bun ] && [ "${2:-}" = run ] && { [ "${3:-}" = pr:merge ] || [ "${3:-}" = pr:train ]; }; then
+  echo "run-slot.sh: bun run $3 runs at once, outside the queue: a merge carries its own gates, and its type steps take their own slots (packages/scripts/src/pr-merge/README.md)" >&2
+  exec "$@" 3<&-
 fi
 # dispatcher, 18 Oct: a test, type check (from the checkout's root), lint or format check runs on the runner host, taking no slot here. ci.sh exec
 # sends the working tree, tracked edits and untracked source alike, and gives back the command's output and exit code; anything else (a browser,
