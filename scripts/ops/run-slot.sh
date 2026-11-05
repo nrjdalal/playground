@@ -52,11 +52,23 @@ alive() {
   local err
   err=$(LC_ALL=C kill -0 "$1" 2>&1) || case "$err" in *"not permitted"*) true ;; *) false ;; esac
 }
-# whether focus for session $1 spares session $2's runs, neither holding nor preempting them: its own, its own reviewer's and tester's, and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov)
+# whether focus for session $1 spares session $2's runs, neither holding nor preempting them: its own, its own reviewer's and tester's (by name or by the roster row's worker), and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov)
 focus_spares() {
-  case "$2" in "${1%-worker}-reviewer" | "${1%-worker}-tester") return 0 ;; esac
   case "$2" in "$1" | ops-dashboard | ops-tick) return 0 ;; esac
-  return 1
+  case "$2" in "${1%-worker}-reviewer" | "${1%-worker}-tester") return 0 ;; *-reviewer | *-tester | reviewer-* | tester-*) ;; *) return 1 ;; esac
+  # a checker with an id of its own is the focused session's when its roster row names it as the worker, the key spawn.sh writes and size_of reads
+  python3 -I - "$2" "$1" <<'PY'
+import json, os, sys
+
+data = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
+try:
+    with open(os.path.join(data, "roster.json")) as f:
+        agents = json.load(f).get("agents") or []
+except (OSError, ValueError, AttributeError):
+    agents = []
+row = next((a for a in agents if isinstance(a, dict) and a.get("name") == sys.argv[1]), {})
+sys.exit(0 if row.get("worker") == sys.argv[2] else 1)
+PY
 }
 # whether slot directory $1, whose holder line is $2, is stale: its pid has died, or a line with no pid (or no line, read by the directory's
 # own mtime) has aged 2 hours; a run killed between free()'s rm of its holder and its rmdir leaves a directory with no line

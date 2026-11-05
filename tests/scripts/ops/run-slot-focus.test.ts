@@ -73,6 +73,20 @@ describe("run-slot.focus", () => {
     expect(await m.runs("abc-tester", { RUN_SLOT_SIZE: "small" })).toBe(true)
     expect(await m.waits("worker-x", { RUN_SLOT_SIZE: "small" })).toBe(true)
   })
+
+  test("on, a checker with an id of its own runs when its roster row names the focused session as its worker, and another session's checker waits", async () => {
+    const m = machine({
+      roster: {
+        agents: [
+          { kind: "reviewer", name: "k3m9px-reviewer", worker: "abc-worker" },
+          { kind: "tester", name: "b7c8dq-tester", worker: "worker-x" },
+        ],
+      },
+    })
+    await set(m, "abc-worker", "focus", "--for", "30m", "--reason", "an urgent ticket")
+    expect(await m.runs("k3m9px-reviewer", { RUN_SLOT_SIZE: "small" })).toBe(true)
+    expect(await m.waits("b7c8dq-tester", { RUN_SLOT_SIZE: "small" })).toBe(true)
+  })
 })
 
 // for an urgent ticket the owner wants everything else stopped, so its fix goes first
@@ -116,6 +130,21 @@ describe("run-slot.sh preempt", () => {
     expect(readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")).toMatch(/ preempt worker-x \d+ /)
     expect(own.p.exitCode).toBeNull()
     await stop(own.p)
+  })
+
+  test("leaves the run of the focused session's checker with an id of its own, which its roster row names", async () => {
+    const m = machine({
+      roster: { agents: [{ kind: "reviewer", name: "k3m9px-reviewer", worker: "worker-f" }] },
+    })
+    hang(m)
+    const checker = m.start("k3m9px-reviewer", { RUN_SLOT_SIZE: "small" }, SCRIPT, ["hang"])
+    await started(checker)
+    await set(m, "worker-f", "focus", "--for", "30m", "--reason", "an urgent ticket")
+    const r = await preempt(m)
+    expect(r.code).toBe(0)
+    expect(r.out).not.toContain("k3m9px-reviewer's run")
+    expect(checker.p.exitCode).toBeNull()
+    await stop(checker.p)
   })
 
   test("leaves alone a recorded pid that is not the holder's own child leading its own group", async () => {
