@@ -36,7 +36,7 @@ export const PERMISSION_MODE_LABELS = {
   bypassPermissions: "Bypass permissions",
 } as const
 
-// The models and efforts the composer's pickers set on a dispatcher or the hosted session, as Claude Code's /model and /effort take them: models by alias A to Z, efforts from least to most; a dashboard.setting row names them the same way.
+// The models and efforts the composer's pickers set on a dispatcher, the assistant or the hosted session, as Claude Code's /model and /effort take them: models by alias A to Z, efforts from least to most; a dashboard.setting row names them the same way.
 export const SESSION_MODELS = ["fable", "haiku", "opus", "sonnet"] as const
 
 export const SESSION_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const

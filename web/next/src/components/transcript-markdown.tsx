@@ -240,7 +240,7 @@ function useWidestEm(code: string, drawing: boolean, pre: RefObject<HTMLPreEleme
 }
 
 // On a card a drawing never wraps: its font shrinks from text-xs until its widest line fits the block's width less the pre's 1.25rem padding, down to 10px, and only then does it scroll sideways; the container query keeps it fitted as the card resizes, with no layout read.
-const fitWidth = (em: number) => `clamp(10px, calc((100cqi - 1.25rem) / ${em}), 12px)`
+export const fitWidth = (em: number) => `clamp(10px, calc((100cqi - 1.25rem) / ${em}), 12px)`
 
 function FencedCode({
   card,
