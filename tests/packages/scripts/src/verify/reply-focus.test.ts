@@ -7,8 +7,9 @@ import {
 } from "../../../../../packages/scripts/src/verify/reply-focus"
 
 describe("focusResult", () => {
-  test("passes focus in the card's own box the moment Reply is clicked", () => {
-    expect(focusResult("f", "comment").ok).toBe(true)
+  test("passes focus in the composer, reading re #iN:, the moment Reply is clicked (#1045)", () => {
+    expect(focusResult("f", "composer").ok).toBe(true)
+    expect(focusResult("f", "comment").ok).toBe(false)
   })
 
   test("finds the card's Reply by the aria-label the Inbox gives it", () => {
@@ -33,7 +34,7 @@ const lateCard = () => {
     mounted = true
   })
   return {
-    eval: async <T>() => (mounted ? "comment" : "no card") as T,
+    eval: async <T>() => (mounted ? "composer" : "no card") as T,
     run: async (...args: string[]) => {
       if (args[0] === "wait" && args[1] === '[aria-label="Reply to #i1"]') await mount
       return {}

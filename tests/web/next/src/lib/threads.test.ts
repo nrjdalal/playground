@@ -194,6 +194,11 @@ describe("pendingIn (a thread view's messages on their way)", () => {
     expect(pendingIn([], messages, "k7mq", now).map((m) => m.id)).toEqual(["q", "s", "f"])
   })
 
+  test("a sending message whose line has landed shows no more, though its answer is still on its way", () => {
+    const landedOne = message({ entryId: "e", id: "s", state: "sending" })
+    expect(pendingIn([], [landedOne], "k7mq", now)).toEqual([])
+  })
+
   test("a typed message shows until the thread holds it", () => {
     const typed = message({ state: "typed", typedAt: "2026-10-23T10:00:01.000Z" })
     expect(pendingIn([], [typed], "k7mq", now)).toEqual([typed])
