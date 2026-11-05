@@ -8,7 +8,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## spawn.sh
 
-- While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start but a move, naming focus's session and its end.
+- While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start, naming focus's session and its end, but three: a move, a reviewer or tester that reports to the focused session,
+  and a `--firefighting` start while `firefighting-stop.json` or `firefighting-headstart.json` stands in the data folder (with neither, a `--firefighting` start is refused).
 - A factory session starts another only through `scripts/spawn.sh` (playbook's SESSIONS.md, Spawn), which runs a capacity gate that refuses, failing closed, unless four checks pass in order, the first failure naming its gate and its reading,
   and counts no live sessions or workers (no count is capped; Ops watches the live board for the risk of cmux no longer answering, as it once stopped at 49 live sessions and load5 97): the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`) in its own `capacity.jsonl` and in each `slots.peers` folder's,
   each weighing half its item's load units (small 1, medium 2, big 3; `--size`, else small for a reviewer or tester, else what `scripts/ops/run-slot.sh size <name>` reads from the roster and plan.json), under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
