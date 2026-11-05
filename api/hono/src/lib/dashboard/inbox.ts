@@ -2329,7 +2329,7 @@ async function recordLink(
   return row ? toItem(row) : null
 }
 
-// The poster closes its own open decision or draft (`bun run ask settle`), when it was decided another way: it reads Answered by the poster, with the note, and goes to Done at once, as a closed answer does. One the owner has answered is refused, as is a reply its poster has acked (a settle would replace its answer) and an update, which asks nothing.
+// The poster closes its own open decision or draft (`bun run ask settle`), when it was decided another way: it reads Decided by the poster, with the note, and goes to Done at once, as a closed answer does. One the owner has answered is refused, as is a reply its poster has acked (a settle would replace its answer) and an update, which asks nothing.
 export async function settleItem(
   db: Database,
   key: string,

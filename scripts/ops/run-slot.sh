@@ -343,6 +343,11 @@ if [ -n "$AFTER" ] && [ -z "$REREAD" ]; then
   done
   ASKED=$(date +%s)
 fi
+# bun run pr:merge or pr:train, as the whole command, runs at once outside the queue once any --after wait ends, since a merge carries its own gates and its type steps take their own slots (5 Nov: three wrapped merges in an hour each waited behind the heavy queue, and each inner type step queued again)
+if [ "${1:-}" = bun ] && [ "${2:-}" = run ] && { [ "${3:-}" = pr:merge ] || [ "${3:-}" = pr:train ]; }; then
+  echo "run-slot.sh: bun run $3 runs at once, outside the queue: a merge carries its own gates, and its type steps take their own slots (packages/scripts/src/pr-merge/README.md)" >&2
+  exec "$@" 3<&-
+fi
 # dispatcher, 18 Oct: a test, type check (from the checkout's root), lint or format check runs on the runner host, taking no slot here. ci.sh exec
 # sends the working tree, tracked edits and untracked source alike, and gives back the command's output and exit code; anything else (a browser,
 # verify, an install, a dev stack) waits for a slot here, and so does a run the box cannot take (ci.sh exits 255, as on an untracked file it does not take).

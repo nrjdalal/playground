@@ -112,6 +112,29 @@ const instances = (options: { ackMs?: number; now?: () => Date } = {}) => {
   return { holder: hubs[0]!, listening: () => listening, other: hubs[1]! }
 }
 
+// Two instances on one bus, the second cold: its first publish waits coldMs for its subscriber and sender to connect before the message reaches the bus, as a fresh instance's first Redis connect does.
+const coldInstances = (coldMs: number, options: { ackMs?: number } = {}) => {
+  const hubs: Hub[] = []
+  const fan = async (data: string) => {
+    await Bun.sleep(0)
+    for (const one of hubs) one.receive(data)
+  }
+  let connected: Promise<void> | null = null
+  const warm: Bus = { listen() {}, publish: fan }
+  const cold: Bus = {
+    listen() {},
+    publish: async (data) => {
+      connected ??= Bun.sleep(coldMs)
+      await connected
+      await fan(data)
+    },
+  }
+  let n = 0
+  const id = () => `00000000-0000-4000-8000-00000000001${n++}`
+  hubs.push(createHub({ ...options, bus: warm, id }), createHub({ ...options, bus: cold, id }))
+  return { holder: hubs[0]!, other: hubs[1]! }
+}
+
 describe("a Mac that goes silent", () => {
   // a sleeping Mac's half-open socket read online, so every read waited out its timeout and the page never said offline
   test("reads offline from when the hub last heard it, closes its socket and fails a read, while a heartbeat keeps it online", async () => {
@@ -157,6 +180,40 @@ describe("the relay's hub across instances", () => {
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
     expect(await other.status("u1")).toEqual({ online: true, since: null })
     expect(other.busy()).toBe(false)
+  })
+
+  // a cold instance spent its whole ack wait connecting to Redis, so a read and the status read offline while the Mac held its socket on another instance
+  // each path meets its own cold first publish, so neither rides a bus the other warmed
+  const coldPair = () => {
+    const { holder, other } = coldInstances(60, { ackMs: 20 })
+    holder.attach("u1", {
+      send: (data: string) => {
+        const { id } = JSON.parse(data) as { id: string }
+        setTimeout(() => holder.answer("u1", answer(id, "workers")), 5)
+      },
+    })
+    return other
+  }
+
+  test("on a cold instance, the status waits for the bus before the ack wait starts", async () => {
+    expect(await coldPair().status("u1")).toEqual({ online: true, since: null })
+  })
+
+  test("on a cold instance, a read waits for the bus before the ack wait starts", async () => {
+    const got = await coldPair().forward("u1", "owner", "/api/v1/workers")
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
+  })
+
+  test("a publish that fails reads offline at once", async () => {
+    const hub = createHub({
+      ackMs: 10_000,
+      bus: { listen() {}, publish: () => Promise.reject(new Error("down")) },
+    })
+    const started = performance.now()
+    expect(await hub.status("u1")).toEqual({ online: false, since: null })
+    expect(await hub.forward("u1", "owner", "/api/v1/workers")).toEqual({ type: "offline" })
+    // long before the 10 s ack wait, which a failed publish never starts
+    expect(performance.now() - started).toBeLessThan(1000)
   })
 
   test("a pair request on another instance reaches the Mac's socket and comes back", async () => {

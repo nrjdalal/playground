@@ -96,8 +96,8 @@ const named = (html: string, label: string): string =>
     })
     ?.split(">")[0] ?? ""
 
-// The delivery line names its poster by its label, and the label keeps the raw session name on hover, as the sender label does. The dashboard here holds no live session, so the poster reads as plain text with its hover.
-describe("a delivered answer's poster", () => {
+// A result line that names its poster (Queued for, Send unconfirmed) names it by its label, and the label keeps the raw session name on hover, as the sender label does. The dashboard here holds no live session, so the poster reads as plain text with its hover.
+describe("a queued answer's poster", () => {
   const answered = {
     ...decision,
     answer: {
@@ -114,16 +114,20 @@ describe("a delivered answer's poster", () => {
   } as InboxItem
 
   test("is shown by its label with the raw name on hover", () => {
-    const html = render(false, answered)
-    expect(html).toContain("Delivered to")
+    const html = render(false, {
+      ...answered,
+      delivery: { at: "2026-10-12T10:05:01.000Z", status: "queued" },
+    } as InboxItem)
+    expect(html).toContain("Queued for")
     expect(html).toContain('aria-description="ops"')
   })
 
   test("is the session that took the answer when the poster had ended, with its raw name on hover", () => {
     const html = render(false, {
       ...answered,
-      delivery: { ...answered.delivery, to: "dispatcher" },
+      delivery: { at: "2026-10-12T10:05:01.000Z", status: "queued", to: "dispatcher" },
     } as InboxItem)
+    expect(html).toContain("Queued for")
     expect(html).toContain('aria-description="dispatcher"')
   })
 })
@@ -239,14 +243,14 @@ describe("a card's change and colour: its updated time, and colour for its kind 
   // #882: a folded row keeps its choices
   test("an answered card folds to its result, keeping Done, Dismiss and its chevron, and opened, they sit in the footer row left of Reply, its result above the row", () => {
     const folded = render(false, sending)
-    expect(folded).toContain("Being carried out")
+    expect(folded).toContain("Approve · Ship 3f9a2c1 to main")
     for (const label of ["Done", "Dismiss", "Expand"]) expect(named(folded, label)).not.toBe("")
     const html = opened(sending)
     const dismiss = named(html, "Dismiss")
     expect(dismiss).not.toBe("")
     const reply = html.indexOf('aria-label="Reply to #i41"')
     expect(reply).toBeGreaterThan(-1)
-    expect(html.indexOf("Being carried out")).toBeLessThan(html.indexOf(dismiss))
+    expect(html.indexOf("Approve · Ship 3f9a2c1 to main")).toBeLessThan(html.indexOf(dismiss))
     expect(html.indexOf(dismiss)).toBeLessThan(reply)
   })
 })
@@ -356,9 +360,10 @@ describe("a card a chat reply collapsed", () => {
       .find((button) => /aria-label="(Expand|Collapse)"/.test(button))
       ?.split(">")[0] ?? ""
 
-  test("reads as being worked on, folded: no Send, Draft, Discard or Later, and Expand to open it, on E too", () => {
+  test("reads as being worked on, folded: its blue light, no Send, Draft, Discard or Later, and Expand to open it, on E too", () => {
     const html = render(false, replied())
-    expect(html).toContain("is on it…")
+    expect(html).toContain("You replied")
+    expect(html).toContain("animate-spin")
     for (const label of ["Send", "Draft", "Discard", "Later"]) expect(named(html, label)).toBe("")
     expect(toggle(html)).toContain('aria-expanded="false"')
     expect(toggle(html)).toContain('aria-keyshortcuts="E"')
@@ -680,8 +685,8 @@ describe("Schedule's row", () => {
     const click = source.slice(at, source.indexOf("</button>", at))
     expect(click).toContain("onClick={onRead}")
     expect(source).toContain("onRead={() => read()}")
-    expect(source).toContain(
-      "const read = () => (unread && !paused ? void settle(() => markRead([item.id])) : undefined)",
+    expect(source).toMatch(
+      /const read = \(\) =>\s+unread && !paused && !config\.hosted \? void settle\(\(\) => markRead\(\[item\.id\]\)\) : undefined/,
     )
     expect(source).not.toContain('answerItem(item.id, "read"')
     expect(source).not.toContain('answerItem(item, "read"')
@@ -776,7 +781,7 @@ describe("a settled card's footer", () => {
 
   test("the result sits above the footer row and Dismiss stands in the row, left of Reply", () => {
     const html = opened(settled)
-    const resultAt = html.indexOf("Answered by")
+    const resultAt = html.indexOf("Decided by")
     const footerAt = html.indexOf('data-slot="card-footer"')
     const dismissAt = html.indexOf(named(html, "Dismiss"))
     const replyAt = html.indexOf('aria-label="Reply to #i41"')
@@ -793,15 +798,15 @@ describe("a settled card's footer", () => {
     ).toBe(-1)
   })
 
-  test("the poster's settle reason reads once, in the result, never as Your note, since he never wrote it", () => {
+  test("the poster's settle reason reads once, in the result, never as his comment, since he never wrote it", () => {
     const html = render(false, settled)
-    expect(html).not.toContain("Your note")
+    expect(html).not.toContain("You: ")
     const approved = {
       ...decision,
       answer: { at: "2026-10-12T10:05:00.000Z", choice: "approve", note: "Ship it after lunch." },
       status: "done",
     } as InboxItem
-    expect(render(false, approved)).toContain("Your note: Ship it after lunch.")
+    expect(render(false, approved)).toContain("You: Ship it after lunch.")
   })
 })
 
@@ -1011,8 +1016,8 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
   })
 
   test("Done's ✓✓ marks every item in it read, and is gone once all are", () => {
-    expect(source).toContain(
-      '{label !== "Later" && label !== "In progress" && shelf.length > 0 && (',
+    expect(source).toMatch(
+      /\{label !== "Later" &&\s+label !== "In progress" &&\s+shelf\.length > 0 &&\s+!config\.hosted && \(/,
     )
     const button = (ids: string[]) =>
       /<button[^>]*>/.exec(
@@ -1052,8 +1057,8 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
   test("each row ends in its ShelfMark, the open row and every shelf, and In progress offers no ✓ since its poster closes it", () => {
     expect(source).toContain("<ShelfMark empty={shown.length === 0} />")
     expect(source).toContain("<ShelfMark empty={shelf.length === 0} />")
-    expect(source).toContain(
-      '{label !== "Later" && label !== "In progress" && shelf.length > 0 && (',
+    expect(source).toMatch(
+      /\{label !== "Later" &&\s+label !== "In progress" &&\s+shelf\.length > 0 &&\s+!config\.hosted && \(/,
     )
   })
 
@@ -1081,7 +1086,7 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
     const actions = source.slice(source.indexOf("const actions ="), source.indexOf("const bulk ="))
     expect(actions).toContain("const actions = (pill || rows.length > 0) && (")
     expect(actions).toMatch(
-      /\{clearing === 0 \? \(\n\s+<span[^>]*>\n\s+<RiCheckDoubleLine className="size-3" aria-label="All read" \/>/,
+      /\{config\.hosted \? null : clearing === 0 \? \(\n\s+<span[^>]*>\n\s+<RiCheckDoubleLine className="size-3" aria-label="All read" \/>/,
     )
     expect(actions).toContain("<RiCheckLine />")
     const shelf = source.slice(

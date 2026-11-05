@@ -682,6 +682,7 @@ export const GUARD_KEYS = new Set([
   "paths.codeRoot",
   "sessions.aliases",
   "sessions.names",
+  "slack.gatedSends",
   "usage.keychainService",
 ])
 // ext verbs that change a scope's lists or settings, or which scopes the lists and policy.json render from
