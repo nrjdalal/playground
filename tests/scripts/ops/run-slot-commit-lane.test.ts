@@ -9,7 +9,7 @@ setDefaultTimeout(60_000)
 
 // Playground's own lefthook.yml, whose pre-commit runs the build
 const LEFTHOOK = readFileSync(join(import.meta.dir, "../../../lefthook.yml"), "utf8")
-// A machine whose fake git fails on a `-C` folder that is not one, answers `git rev-parse --show-toplevel` with its folder (the root, from `docs` or a folder under `web/`), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths (each pathspec read from the `-C` folder, `.` included), `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, every one for `:/`, as git prints them), and touches its last argument for anything else, as a commit's marker
+// A machine whose fake git fails on a `-C` folder that is not one, answers `git rev-parse --show-toplevel` with its folder (the root, from `docs`, `web` or a folder under it), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths (each pathspec read from the `-C` folder, `.` included), `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, every one for `:/`, as git prints them), and touches its last argument for anything else, as a commit's marker
 const repo = (
   setup: Setup,
   staged: string[],
@@ -24,7 +24,7 @@ const repo = (
     `#!/bin/bash
 [ "$1" = -C ] && { [ -d "$2" ] || exit 128; }
 d=$PWD; [ "$1" = -C ] && d=$2
-case " $* " in *" rev-parse --show-toplevel "*) case "$d" in ${m.root}/web/* | ${m.root}/docs) echo ${m.root} ;; *) cd "$d"; pwd ;; esac; exit 0 ;; esac
+case " $* " in *" rev-parse --show-toplevel "*) case "$d" in ${m.root}/web | ${m.root}/web/* | ${m.root}/docs) echo ${m.root} ;; *) cd "$d"; pwd ;; esac; exit 0 ;; esac
 pre=""; case "$d" in ${m.root}/*) pre=\${d#${m.root}/}/ ;; esac
 full=""; case " $* " in *" --full-name "*) full=1 ;; esac
 case " $* " in *" :/ "*) pre="" ;; esac
@@ -172,6 +172,7 @@ describe("a commit whose pre-commit runs next build", () => {
   for (const flags of [
     ["commit", "--no-such-flag", "-m", "x"],
     ["commit", "-Zm", "x"],
+    ["commit", "-m", "x", "--pathspec-fr=list.txt"],
     ["-c", "core.hooksPath=/x", "commit", "-m", "x"],
   ])
     test(`git ${flags.join(" ")} counts as a build`, async () => {
@@ -393,6 +394,8 @@ describe("a sh -c chain of git steps", () => {
     "cd ROOT && git commit -m x &| bun run build",
     // builder, 5 Nov: a git add flag outside the list, such as -f, which stages ignored files
     "cd ROOT && git add -f docs/notes.md && git commit -m x",
+    // review round 10: an add option cluster
+    "cd ROOT && git add -Av && git commit -m x",
     // review round 7: a cd beside |, &, || or in a subshell does not carry to the next step
     "cd ROOT | git commit -m x",
     "cd ROOT & git commit -m x",
@@ -471,6 +474,16 @@ describe("a sh -c chain of git steps", () => {
     mkdirSync(join(m.root, "docs"), { recursive: true })
     m.hold("run-slot", 3, "big")
     expect(await start(m, "cd ROOT/docs && git add -A && git commit -m x").waits()).toBe(true)
+    expect(log(m)).not.toContain("run-slot-commit")
+  })
+
+  // review round 10: an add reads its paths from its own folder, so one in another folder than the commit counts as a build
+  test("a chain on the list whose add runs in another folder than its commit waits as a big run", async () => {
+    const m = repo({ idle: 30 }, [], ["web/next/src/app/page.tsx"])
+    mkdirSync(join(m.root, "web"), { recursive: true })
+    m.hold("run-slot", 3, "big")
+    const steps = "git -C ROOT/web add next/src/app/page.tsx && git -C ROOT commit -m x"
+    expect(await start(m, steps).waits()).toBe(true)
     expect(log(m)).not.toContain("run-slot-commit")
   })
 

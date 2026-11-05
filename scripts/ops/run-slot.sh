@@ -577,9 +577,10 @@ chain_add() {
 }
 # a commit whose pre-commit build runs next build, a git commit (but -n), in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every file is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one, goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56)
 heavy_build() {
-  local a c f files dir="" commit="" all="" odd="" state=lead paths=() line words first=""
+  local a c f files dir="" commit="" all="" odd="" state=lead paths=() line words first="" adir=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with the
-  # files the chain's git add steps before it stage (the first word is found outside a $( ), since bash 3.2 misparses a case inside one)
+  # files the chain's git add steps before it stage, and counts as a build when an add runs in another folder than a commit, whose paths it would
+  # misread (the first word is found outside a $( ), since bash 3.2 misparses a case inside one)
   for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
   case "$(basename -- "$first")" in
     sh|bash|zsh)
@@ -594,8 +595,8 @@ heavy_build() {
           IFS=$'\x1f' read -ra words <<< "$line"
           [ ${#words[@]} -gt 0 ] || continue
           case "${words[3]}" in
-            add) chain_add "${words[@]}" ;;
-            commit) heavy_build "${words[@]}" && { CHAIN_ADD_ALL="" CHAIN_ADD=(); return 0; } ;;
+            add) adir=${adir:-${words[2]}}; [ "$adir" = "${words[2]}" ] && chain_add "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD=(); return 0; } ;;
+            commit) { [ -z "$adir" ] || [ "$adir" = "${words[2]}" ]; } && ! heavy_build "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD=(); return 0; } ;;
           esac
         done <<< "$CHAIN_SAFE"
         CHAIN_ADD_ALL="" CHAIN_ADD=()
