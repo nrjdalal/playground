@@ -19,6 +19,7 @@ import {
   ACKS_STAMPED_FROM,
   canDraft,
   checkAnswerNote,
+  deliveryNote,
   cardKey,
   changedAt,
   dismissable,
@@ -137,6 +138,32 @@ describe("a secret ask (PG-59)", () => {
     expect(itemState(provided([{ environment: "production", exitCode: 0 }]))).toBe("done")
     expect(itemState(provided([{ environment: "production", exitCode: 1 }]))).toBe("failed")
     expect(itemState(provided())).toBe("sending")
+  })
+
+  test("a saved secret its poster was not told of still reads saved, with the failed telling as a note of its own that offers Retry (PG-880)", () => {
+    const untold = {
+      ...provided([{ environment: "Keychain", exitCode: 0, line: "saved" } as never]),
+      delivery: {
+        code: "CMUX_FAILED",
+        reason:
+          "The sessions read was cut short (a herdr server or pane did not answer whole), so dispatcher was not found; nothing was typed.",
+        status: "failed",
+      },
+      from: "dispatcher",
+    } as InboxItem
+    expect(itemState(untold)).toBe("done")
+    expect(inboxLight(untold)).toBe("done")
+    expect(outcomeLine(untold)).toEndWith(" · Keychain: saved")
+    expect(deliveryNote(untold)).toStartWith("Not told to ")
+    expect(deliveryNote(untold)).toContain("cut short")
+    expect(retryable(untold)).toBe(true)
+    expect(
+      itemState({
+        ...untold,
+        answer: { ...untold.answer, results: [{ environment: "Keychain", exitCode: 1 }] },
+      } as InboxItem),
+    ).toBe("failed")
+    expect(deliveryNote(provided([{ environment: "production", exitCode: 0 }]))).toBeNull()
   })
 })
 

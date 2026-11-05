@@ -4,7 +4,7 @@ import { dirname, join } from "node:path"
 
 import { withoutShebang } from "../shebang"
 
-// verify, pr:merge and the dev launcher reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow by adding an export; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists but lacks an export counts as unbuilt; any other stale dist is left as it is.
+// verify, pr:merge and the dev launcher reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow by adding an export; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists but lacks a name the target's sources import from it, those it reaches through relative imports included, counts as unbuilt; any other stale dist is left as it is.
 const VERIFY = import.meta.dir
 const SRC = join(VERIFY, "..")
 const ROOT = join(VERIFY, "../../../..")
@@ -14,6 +14,15 @@ const dirOf = (target: string): string =>
   target === "api" ? join(ROOT, "api/hono/src") : join(SRC, target)
 
 const transpiler = new Bun.Transpiler({ loader: "ts" })
+// Bun's runtime drops an import its module never uses, a name used only as a type among them, so a dist need not export one.
+const trimmer = new Bun.Transpiler({ loader: "ts", trimUnusedImports: true })
+const scanners = {
+  js: new Bun.Transpiler({ loader: "js" }),
+  ts: transpiler,
+  tsx: new Bun.Transpiler({ loader: "tsx" }),
+}
+const scannerOf = (file: string) =>
+  file.endsWith(".tsx") ? scanners.tsx : /\.[cm]?ts$/.test(file) ? scanners.ts : scanners.js
 
 // Every workspace package the given sources import, statically or dynamically.
 export const workspaceImports = (sources: string[]): string[] => [
@@ -27,24 +36,70 @@ export const workspaceImports = (sources: string[]): string[] => [
   ),
 ]
 
-// The imports that resolve to nothing yet, an exports target whose file is missing among them.
-export const unbuilt = (specifiers: string[], from: string): string[] =>
+// The value names the sources import from each workspace package, by the name it exports (`default` for a default import).
+export const importedNames = (sources: string[]): Record<string, string[]> => {
+  const names: Record<string, Set<string>> = {}
+  for (const source of sources) {
+    const code = trimmer.transformSync(withoutShebang(source))
+    for (const [, fallback, list, specifier] of code.matchAll(
+      /^(?:import|export)\s+(?:([\w$]+)\s*,?\s*)?(?:\{([^}]*)\})?\s*from\s+"(@packages\/[^"]+)"/gm,
+    )) {
+      const taken = (names[specifier] ||= new Set())
+      if (fallback) taken.add("default")
+      for (const item of (list || "").split(",")) {
+        const name = item.trim().split(/\s+as\s+/)[0]
+        if (name) taken.add(name)
+      }
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(names).map(([specifier, taken]) => [specifier, [...taken].sort()]),
+  )
+}
+
+// The imports that resolve to nothing yet, an exports target whose file is missing among them, and those whose file lacks a name the sources import from it; a file that re-exports with `export *` is taken as exporting every name.
+export const unbuilt = (
+  specifiers: string[],
+  from: string,
+  names: Record<string, string[]> = {},
+): string[] =>
   specifiers.filter((specifier) => {
+    let file: string
     try {
-      Bun.resolveSync(specifier, from)
-      return false
+      file = Bun.resolveSync(specifier, from)
     } catch {
       return true
     }
+    const wanted = names[specifier] || []
+    if (wanted.length === 0) return false
+    const code = readFileSync(file, "utf8")
+    if (/\bexport\s*\*/.test(code)) return false
+    const exported = new Set(scannerOf(file).scan(code).exports)
+    return wanted.some((name) => !exported.has(name))
   })
 
-// Every source of one target: a folder under packages/scripts/src, or the API.
-export const sourcesIn = async (target: string): Promise<string[]> =>
-  Promise.all(
-    [...new Bun.Glob("**/*.ts").scanSync(dirOf(target))].map((name) =>
-      Bun.file(join(dirOf(target), name)).text(),
-    ),
+// Every source one target runs: each file of its folder (a folder under packages/scripts/src, or the API), and each `.ts` file those reach through a relative import, outside that folder too.
+export const sourcesIn = async (target: string): Promise<string[]> => {
+  const queue = [...new Bun.Glob("**/*.ts").scanSync(dirOf(target))].map((name) =>
+    join(dirOf(target), name),
   )
+  const seen = new Set<string>()
+  const sources: string[] = []
+  for (let file = queue.pop(); file !== undefined; file = queue.pop()) {
+    if (seen.has(file)) continue
+    seen.add(file)
+    const source = await Bun.file(file).text()
+    sources.push(source)
+    for (const { path } of transpiler.scanImports(withoutShebang(source))) {
+      if (!path.startsWith(".")) continue
+      try {
+        const next = Bun.resolveSync(path, dirname(file))
+        if (next.endsWith(".ts") && !next.includes("/node_modules/")) queue.push(next)
+      } catch {}
+    }
+  }
+  return sources
+}
 
 // The factory's main checkout, which spawn.sh exports as PLAYGROUND_REPO, stays clean: every installed skill follows it.
 export const isMainCheckout = (root: string, repo: string | undefined): boolean => {
@@ -93,9 +148,10 @@ export const prebuildStep = (
 
 if (import.meta.main) {
   const target = process.argv[2] ?? "verify"
+  const sources = await sourcesIn(target)
   const step = prebuildStep(
     target,
-    unbuilt(workspaceImports(await sourcesIn(target)), dirOf(target)),
+    unbuilt(workspaceImports(sources), dirOf(target), importedNames(sources)),
     ROOT,
     process.env.PLAYGROUND_REPO,
   )
