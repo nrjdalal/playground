@@ -3,15 +3,10 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } fr
 import { tmpdir } from "node:os"
 import { join, relative } from "node:path"
 
-import {
-  importedNames,
-  isMainCheckout,
-  prebuildStep,
-  sourcesIn,
-  staleInstall,
-  unbuilt,
-  workspaceImports,
-} from "../../../../../packages/scripts/src/verify/prebuild"
+import * as prebuild from "../../../../../packages/scripts/src/verify/prebuild"
+
+const { isMainCheckout, prebuildStep, sourcesIn, staleInstall, unbuilt, workspaceImports } =
+  prebuild
 
 const ROOT = join(import.meta.dir, "../../../../..")
 
@@ -166,7 +161,7 @@ test("unbuilt names a package whose dist lacks a name the sources import, and pa
 
 test("importedNames lists the value names each workspace import takes, by their exported names, with no type-only one", () => {
   expect(
-    importedNames([
+    prebuild.importedNames([
       'import { a, type B, c as d } from "@packages/config/kinds"\nimport type { X } from "@packages/env"\nimport def, { e } from "@packages/db"\nexport { f } from "@packages/config/org"\nimport { g } from "./map"\nexport const y = (q: B, r: X) => [a, d, def, e, g]',
     ]),
   ).toEqual({
