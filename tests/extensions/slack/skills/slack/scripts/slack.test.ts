@@ -11,15 +11,18 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
   locked,
+  NO_TOKEN,
   ownerMessages,
   PLAYGROUND,
   readSent,
   recordSent,
+  slackOf,
+  tokenOf,
   USER,
-} from "../../../../../packages/scripts/src/dm/slack"
+} from "../../../../../../extensions/slack/skills/slack/scripts/slack"
+import { MARKER } from "../../../../../../packages/safe-delete/src"
 import { OWNER } from "./fake-dm"
 
 const scratch = mkdtempSync(join(tmpdir(), "dm-slack-"))
@@ -121,5 +124,46 @@ describe("the send lock", () => {
     } finally {
       said.mockRestore()
     }
+  })
+})
+
+describe("the token, from the Keychain's slack item", () => {
+  test("tokenOf reads the slack item through security, and slackOf sends that token as the bearer", async () => {
+    const argvs: string[][] = []
+    const token = await tokenOf(async (argv) => {
+      argvs.push(argv)
+      return { code: 0, stderr: "", stdout: "xoxp-fake-token-1\n" }
+    })
+    expect(token).toBe("xoxp-fake-token-1")
+    expect(argvs[0]!.slice(0, 4)).toEqual([
+      "security",
+      "find-generic-password",
+      "-s",
+      "playground-slack",
+    ])
+    const seen: Headers[] = []
+    const fetched = spyOn(globalThis, "fetch").mockImplementation((async (_url, init) => {
+      seen.push(new Headers(init?.headers))
+      return Response.json({ ok: true, ts: "1.000100" })
+    }) as typeof fetch)
+    try {
+      expect(
+        await slackOf(token)("chat.postMessage", { channel: "D0FIXTURE", text: "hi" }),
+      ).toEqual({
+        ok: true,
+        ts: "1.000100",
+      })
+    } finally {
+      fetched.mockRestore()
+    }
+    expect(seen[0]!.get("authorization")).toBe("Bearer xoxp-fake-token-1")
+  })
+
+  test("with no item, or one that is not a Slack token, tokenOf says where to save it", async () => {
+    for (const found of [
+      { code: 44, stderr: "", stdout: "" },
+      { code: 0, stderr: "", stdout: "not-a-token" },
+    ])
+      await expect(tokenOf(async () => found)).rejects.toThrow(NO_TOKEN)
   })
 })
