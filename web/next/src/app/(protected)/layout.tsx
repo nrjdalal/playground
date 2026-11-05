@@ -11,6 +11,7 @@ import {
 } from "@/components/dashboard/app-sidebar"
 import { DashboardProvider } from "@/components/dashboard/dashboard"
 import { OwnerMenuProvider } from "@/components/dashboard/owner-menu"
+import { RelayGate } from "@/components/dashboard/relay-gate"
 import { DashboardFooter } from "@/components/dashboard/sidebar"
 import { TabDot } from "@/components/dashboard/tab-dot"
 import { FirstRun, SignInKept } from "@/components/first-run/first-run"
@@ -35,13 +36,21 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: { absolute: tabTitle(badge) } }
 }
 
+// The hosted build's signed-in user, read past the cookie cache, so the dashboard reaches the owner rung alone there; null when none or the API cannot say.
+const hostedUser = async () => {
+  const session = await sessionOrUnavailable(() =>
+    auth.api.getSession({ disableCookieCache: true }),
+  )
+  return session === UNAVAILABLE ? null : (session?.user ?? null)
+}
+
 // Once the API answers its setup route 404 it stays the normal app for the life of this process, so a normal stack asks once.
 let normal = false
 
 export default async function Layout({ children }: { children: React.ReactNode }) {
-  localPagesOnly(config.hosted)
-  // First run comes before any session read: with no database the API serves only its setup routes, so the first-run pane stands in for the dashboard.
-  if (!normal) {
+  localPagesOnly(config.hosted, config.hosted ? await hostedUser() : null)
+  // First run comes before any session read: with no database the API serves only its setup routes, so the first-run pane stands in for the dashboard. The hosted build has no first run.
+  if (!normal && !config.hosted) {
     const gate = gateOf(await readSetup(config.api.internalUrl || config.api.url))
     if (gate === "setup") return <FirstRun gate="setup" />
     normal = gate === "normal"
@@ -80,7 +89,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
   const badge = await readBadge()
   const machine = thisMachine(await readHealth())
 
-  return (
+  const shell = (
     // The dashboard has no use for organizations, so the sidebar carries its live status and its sessions (manager, workers, runners) instead of the org switcher.
     <DashboardProvider allowed={reachesConsole(session.user, "owner")}>
       <TabDot />
@@ -100,4 +109,6 @@ export default async function Layout({ children }: { children: React.ReactNode }
       </SidebarShell>
     </DashboardProvider>
   )
+  // the hosted build draws the dashboard only while the owner's Mac holds the relay
+  return config.hosted ? <RelayGate>{shell}</RelayGate> : shell
 }

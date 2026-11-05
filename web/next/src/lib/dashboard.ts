@@ -13,6 +13,7 @@ import {
   withoutIdKind,
 } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
+import { config } from "@/lib/config"
 import { createWatch, type ActivityFrame, type SessionActivity } from "@/lib/live-activity"
 
 const RECONNECT_MIN_MS = 2000
@@ -542,6 +543,9 @@ export const afterFrame = (state: Misses, failure: DashboardProblem | null): Mis
         problem: state.problem || state.misses + 1 >= MISSES_TO_ALERT ? failure : null,
       }
 
+// How often the hosted build reads the board through the relay.
+export const BOARD_POLL_MS = 5000
+
 // The dashboard's one WebSocket: every worker change, every new transcript entry handed to whoever subscribed, and the activity of the one chat it watches (watch names it, null for none).
 export function useDashboardSocket(enabled: boolean) {
   const [workers, setWorkers] = useState<Worker[] | null>(null)
@@ -565,6 +569,53 @@ export function useDashboardSocket(enabled: boolean) {
     let fresh = false
     let misses: Misses = { misses: 0, problem: null }
 
+    // A board frame, from the socket or, on the hosted build, from a read of the board.
+    const onFrame = (frame: DashboardFrame) => {
+      if (frame.type === "workers") {
+        // each frame is parsed afresh, so a session it left as it was keeps its object and a frame that moved nothing keeps the board, and nothing reading them draws again
+        setWorkers((shown) => replaceEqualDeep(shown, frame.workers))
+        setApprovals(frame.approvals)
+        setDispatcher(frame.dispatcher)
+        setSessionNames(frame.names)
+        setDispatcherOrder(frame.dispatchers)
+        setDispatchers((shown) => replaceEqualDeep(shown, frame.dispatchers))
+        misses = afterFrame(misses, null)
+        setProblem(null)
+        if (fresh) {
+          fresh = false
+          setGeneration((n) => n + 1)
+        }
+      } else if (frame.type === "error") {
+        setDispatcher(frame.dispatcher)
+        setSessionNames(frame.names)
+        setDispatcherOrder(frame.dispatchers)
+        setDispatchers((shown) => replaceEqualDeep(shown, frame.dispatchers))
+        misses = afterFrame(misses, { code: frame.code, message: frame.message })
+        setProblem(misses.problem)
+      } else {
+        for (const listener of listeners.current) listener(frame.sessionId, frame.entries)
+      }
+    }
+
+    // The hosted build reaches the Mac through the relay, which carries reads alone until live frames come, so it reads the board every BOARD_POLL_MS in place of the socket.
+    if (config.hosted) {
+      const read = async () => {
+        const { data } = await unwrap(apiClient.v1.board.$get())
+        if (closed) return
+        if (data) {
+          setConnected(true)
+          onFrame(data)
+        }
+        retry = setTimeout(() => void read(), BOARD_POLL_MS)
+      }
+      fresh = true
+      void read()
+      return () => {
+        closed = true
+        if (retry) clearTimeout(retry)
+      }
+    }
+
     const connect = () => {
       const opened = apiClient.v1.ws.$ws()
       socket = opened
@@ -581,30 +632,7 @@ export function useDashboardSocket(enabled: boolean) {
         const frame = JSON.parse(String(event.data)) as DashboardFrame | ActivityFrame
         if (frame.type === "activity") {
           setActivity({ activity: frame.activity, sessionId: frame.sessionId })
-        } else if (frame.type === "workers") {
-          // each frame is parsed afresh, so a session it left as it was keeps its object and a frame that moved nothing keeps the board, and nothing reading them draws again
-          setWorkers((shown) => replaceEqualDeep(shown, frame.workers))
-          setApprovals(frame.approvals)
-          setDispatcher(frame.dispatcher)
-          setSessionNames(frame.names)
-          setDispatcherOrder(frame.dispatchers)
-          setDispatchers((shown) => replaceEqualDeep(shown, frame.dispatchers))
-          misses = afterFrame(misses, null)
-          setProblem(null)
-          if (fresh) {
-            fresh = false
-            setGeneration((n) => n + 1)
-          }
-        } else if (frame.type === "error") {
-          setDispatcher(frame.dispatcher)
-          setSessionNames(frame.names)
-          setDispatcherOrder(frame.dispatchers)
-          setDispatchers((shown) => replaceEqualDeep(shown, frame.dispatchers))
-          misses = afterFrame(misses, { code: frame.code, message: frame.message })
-          setProblem(misses.problem)
-        } else {
-          for (const listener of listeners.current) listener(frame.sessionId, frame.entries)
-        }
+        } else onFrame(frame)
       })
       opened.addEventListener("close", () => {
         watcher.current.disconnected(sendWatch)

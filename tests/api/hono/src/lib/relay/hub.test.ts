@@ -1,0 +1,141 @@
+import { describe, expect, test } from "bun:test"
+
+import { type Bus, createHub, type Hub } from "../../../../../../api/hono/src/lib/relay/hub"
+
+const ID = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+const AT = new Date("2026-11-05T01:00:00.000Z")
+
+// A Mac's socket that keeps what the hub sends it.
+const mac = () => {
+  const sent: string[] = []
+  return { send: (data: string) => void sent.push(data), sent }
+}
+
+const answer = (id: string, body = "ok") =>
+  JSON.stringify({
+    body: Buffer.from(body).toString("base64"),
+    contentType: "text/plain",
+    id,
+    status: 200,
+    type: "response",
+  })
+
+describe("the relay's hub", () => {
+  test("sends a read to the owner's Mac with a fresh id and time, and passes its answer back", async () => {
+    const hub = createHub({ id: () => ID, now: () => AT })
+    const socket = mac()
+    hub.attach("u1", socket)
+    const forwarded = hub.forward("u1", "owner", "/api/v1/workers")
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([
+      {
+        at: AT.toISOString(),
+        id: ID,
+        login: "owner",
+        method: "GET",
+        path: "/api/v1/workers",
+        type: "request",
+      },
+    ])
+    hub.answer("u1", answer(ID, "workers"))
+    const got = await forwarded
+    expect(got.type).toBe("response")
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
+  })
+
+  test("drops an answer for an id it is not waiting on, or from another owner's socket", async () => {
+    const hub = createHub({ id: () => ID, now: () => AT, timeoutMs: 50 })
+    hub.attach("u1", mac())
+    const forwarded = hub.forward("u1", "owner", "/api/v1/workers")
+    hub.answer("u1", answer("00000000-0000-4000-8000-000000000000"))
+    hub.answer("u2", answer(ID))
+    hub.answer("u1", "not json")
+    expect(await forwarded).toEqual({ type: "timeout" })
+  })
+
+  test("reads offline with no socket, and since when once the socket goes, failing what still waits", async () => {
+    let now = AT
+    const hub = createHub({ id: () => ID, now: () => now })
+    expect(await hub.forward("u1", "owner", "/api/v1/workers")).toEqual({ type: "offline" })
+    expect(await hub.status("u1")).toEqual({ online: false, since: null })
+    const release = hub.attach("u1", mac())
+    expect(await hub.status("u1")).toEqual({ online: true, since: null })
+    const waiting = hub.forward("u1", "owner", "/api/v1/workers")
+    now = new Date("2026-11-05T01:05:00.000Z")
+    release()
+    expect(await waiting).toEqual({ type: "offline" })
+    expect(await hub.status("u1")).toEqual({ online: false, since: "2026-11-05T01:05:00.000Z" })
+  })
+
+  test("a newer socket replaces the old, and the old one's close leaves the newer in place", async () => {
+    const hub = createHub()
+    const release = hub.attach("u1", mac())
+    hub.attach("u1", mac())
+    release()
+    expect((await hub.status("u1")).online).toBe(true)
+  })
+})
+
+// Two instances on one fake bus, which hands each published message to every instance, the publisher's included, on a later tick, as Redis does.
+const instances = (options: { ackMs?: number; now?: () => Date } = {}) => {
+  const hubs: Hub[] = []
+  let listening = 0
+  const bus: Bus = {
+    listen: () => void listening++,
+    publish: async (data) => {
+      await Bun.sleep(0)
+      for (const one of hubs) one.receive(data)
+    },
+  }
+  let n = 0
+  const id = () => `00000000-0000-4000-8000-00000000000${n++}`
+  hubs.push(createHub({ ...options, bus, id }), createHub({ ...options, bus, id }))
+  return { holder: hubs[0]!, listening: () => listening, other: hubs[1]! }
+}
+
+describe("the relay's hub across instances", () => {
+  test("a read on another instance reaches the Mac's socket and comes back", async () => {
+    const { holder, listening, other } = instances({ now: () => AT })
+    const socket = {
+      send: (data: string) => {
+        const { id } = JSON.parse(data) as { id: string }
+        setTimeout(() => holder.answer("u1", answer(id, "workers")), 5)
+      },
+    }
+    holder.attach("u1", socket)
+    expect(listening()).toBe(1)
+    const got = await other.forward("u1", "owner", "/api/v1/workers")
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
+    expect(await other.status("u1")).toEqual({ online: true, since: null })
+    expect(other.busy()).toBe(false)
+  })
+
+  test("with no instance holding the socket, a read and the status read offline once the ack wait passes", async () => {
+    const { other } = instances({ ackMs: 20 })
+    expect(await other.forward("u1", "owner", "/api/v1/workers")).toEqual({ type: "offline" })
+    expect(await other.status("u1")).toEqual({ online: false, since: null })
+  })
+
+  test("a socket that goes fails what waits on another instance, and every instance learns since when", async () => {
+    const { holder, other } = instances({ ackMs: 50, now: () => AT })
+    const release = holder.attach("u1", { send() {} })
+    const waiting = other.forward("u1", "owner", "/api/v1/workers")
+    await Bun.sleep(10)
+    release()
+    expect(await waiting).toEqual({ type: "offline" })
+    expect(await other.status("u1")).toEqual({ online: false, since: AT.toISOString() })
+  })
+
+  test("an answer settles only a request its own owner's Mac was sent", async () => {
+    const { holder, other } = instances({ ackMs: 1000 })
+    let sent = ""
+    holder.attach("u1", { send: (data) => void (sent = (JSON.parse(data) as { id: string }).id) })
+    holder.attach("u2", { send() {} })
+    const forwarded = other.forward("u1", "owner", "/api/v1/workers")
+    await Bun.sleep(10)
+    holder.answer("u2", answer(sent, "not yours"))
+    await Bun.sleep(10)
+    holder.answer("u1", answer(sent, "yours"))
+    const got = await forwarded
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("yours")
+  })
+})

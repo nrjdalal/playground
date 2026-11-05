@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { attachmentsDir } from "../../../../../../api/hono/src/lib/dashboard/attachments"
 import {
+  boardFrame,
   DashboardHub,
   movesTheBoard,
   type DashboardFrame,
@@ -670,5 +671,44 @@ describe("DashboardHub", () => {
     again()
     third()
     expect(hub.snapshot).toBeNull()
+  })
+})
+
+describe("boardFrame, the board for a reader with no socket", () => {
+  const frame = {
+    code: "X",
+    dispatcher: "d",
+    dispatchers: [],
+    message: "m",
+    names: {},
+    type: "error",
+  } as unknown as DashboardFrame
+
+  // A hub that hands a listener a frame now (a board already watching) or later (one it refreshes for this read), and counts who still listens.
+  const fake = (now: DashboardFrame | null) => {
+    const listeners = new Set<(frame: DashboardFrame) => void>()
+    return {
+      listeners,
+      subscribe(listener: (frame: DashboardFrame) => void) {
+        listeners.add(listener)
+        if (now) listener(now)
+        return () => void listeners.delete(listener)
+      },
+    }
+  }
+
+  test("answers the frame a watching board already holds, and stops listening", async () => {
+    const hub = fake(frame)
+    expect(await boardFrame(hub, 1000)).toBe(frame)
+    await Promise.resolve()
+    expect(hub.listeners.size).toBe(0)
+  })
+
+  test("waits for the frame of a refresh, and gives null when none comes in time", async () => {
+    const hub = fake(null)
+    const waiting = boardFrame(hub, 1000)
+    for (const listener of hub.listeners) listener(frame)
+    expect(await waiting).toBe(frame)
+    expect(await boardFrame(fake(null), 10)).toBeNull()
   })
 })

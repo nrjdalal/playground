@@ -1,4 +1,5 @@
 import type { AppType, ErrorCode } from "@api/hono"
+import { RELAY_PREFIX } from "@packages/message"
 import { hc } from "hono/client"
 
 import { config } from "@/lib/config"
@@ -7,7 +8,9 @@ type Client = ReturnType<typeof hc<AppType>>
 
 const hcWithType = (...args: Parameters<typeof hc>): Client => hc<AppType>(...args)
 
-const url = config.api.internalUrl ? config.api.internalUrl : config.api.url
+// On the hosted build the dashboard's reads go through the relay to the owner's own Mac, each at the relay's prefix plus its own path.
+const base = config.api.internalUrl ? config.api.internalUrl : config.api.url
+const url = config.hosted ? `${base}${RELAY_PREFIX}` : base
 
 const honoClient = hcWithType(url, {
   init: {

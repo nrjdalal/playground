@@ -396,3 +396,26 @@ export class DashboardHub {
 }
 
 export const dashboardHub = new DashboardHub()
+
+// The board as the socket sends it, for a client with no socket (the hosted relay, which carries reads alone): the hub's newest frame while a board watches, else the first frame of a refresh it runs for this read; null when none comes within timeoutMs.
+export const boardFrame = (
+  hub: Pick<DashboardHub, "subscribe"> = dashboardHub,
+  timeoutMs = 10_000,
+): Promise<DashboardFrame | null> =>
+  new Promise((resolve) => {
+    let got = false
+    let leave: (() => void) | null = null
+    const timer = setTimeout(() => {
+      got = true
+      leave?.()
+      resolve(null)
+    }, timeoutMs)
+    leave = hub.subscribe((frame) => {
+      if (got) return
+      got = true
+      clearTimeout(timer)
+      // after subscribe returns, which may call this first
+      queueMicrotask(() => leave?.())
+      resolve(frame)
+    })
+  })

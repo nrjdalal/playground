@@ -50,7 +50,7 @@ import {
   type FeedFailure,
   type FeedResult,
 } from "@/lib/dashboard/feed"
-import { dashboardHub } from "@/lib/dashboard/hub"
+import { boardFrame, dashboardHub } from "@/lib/dashboard/hub"
 import { recordReply as recordReplyItem, REPLY_RE } from "@/lib/dashboard/inbox"
 import {
   clearManagersOrder,
@@ -733,6 +733,16 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
       if (!found) throw new ApiError(404, "NOT_FOUND", "No thread with that id")
       return c.json({ data: found })
     },
+  )
+  .get(
+    "/board",
+    describeRoute({
+      tags: ["Dashboard"],
+      description:
+        "The board as the WebSocket's workers or error frame sends it, for a client that reads with no socket (the hosted relay): null when no frame came within 10s",
+      responses: { 200: { description: "OK" }, ...authErrorResponses },
+    }),
+    async (c) => c.json({ data: await boardFrame() }),
   )
   .get(
     "/workers",
