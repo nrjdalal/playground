@@ -70,8 +70,8 @@
   or a failed send dismissed;
   an unread update keeps its dot.
   An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
-  A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font sized so its widest line, measured with pretext, fills the block: up to 16px on a wide card, down to 7px on a narrow one, and only then does it scroll sideways.
-  `ASK_CODE_COLUMNS` (`@packages/config/inbox`) is the widest drawing line the narrowest card shows whole, so a session fits the card by drawing up to it.
+  A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
+  `ASK_CODE_COLUMNS` (`@packages/config/inbox`) is the widest drawing line that fits the narrowest card at 12px.
   Every other preview's words, a Slack message's included, stay plain text, since they go out exactly as written, marked as quoted by a `border-l-2` rule rather than a background, and no card's body, a Done one's included, sits on gray, the band alone muted, but the card a reply is about (Chat about it, below).
   The card's header is one `minmax(0,1fr)` column and a card's table cells wrap, so a wide table or drawing stays inside the card.
   A decision previews exactly what Approve does, then Approve and Deny, except a secret ask (below), and no card offers Edit: a change goes in the comment box, while the API still reads `edit` on an older row; an `ask` whose poster labelled both sides is shadcn's questionnaire card instead:
@@ -345,7 +345,7 @@
 - The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
      Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
-     Fit the card: draw up to that width, since the card grows a narrower drawing's font to fill it, and a wider one still posts and shrinks to 7px, then scrolls, so the limit is a writing guide.
+     A wider drawing still posts and shrinks to 10px, then scrolls, so the limit is a writing guide.
   2. Short bullets, one fact each, an emoji as each one's marker.
   3. What Approve does, in the `approve` label, with `deny` beside it: the card shows the two as its choices under the text, in place of its On Approve line.
 
