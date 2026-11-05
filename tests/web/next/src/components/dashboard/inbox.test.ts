@@ -858,6 +858,24 @@ describe("the comment box and Reply on every card", () => {
     expect(render(false, update)).not.toContain('aria-label="Comment"')
   })
 
+  test("Reply with an empty box hands the card's ref to Playground's composer, which the aside brings forward, focused in the click's frame (#1045)", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const reply = source.slice(source.indexOf("const onReply = () => {"))
+    expect(reply).toContain("replyRoute({ folded, secret: secretAsk, text })")
+    expect(reply).toContain('if (route === "composer" && dispatcher) {')
+    expect(reply).toContain("flushSync(() => outbox.reply(dispatcher, item.ref))")
+    expect(reply).toContain("document.getElementById(COMPOSER_ID)?.focus()")
+    // the hand goes to the primary dispatcher's box alone, the page's own chat or the aside's, and the aside shows that chat on every hand, so it never lands in a box out of sight
+    const aside = readFileSync(join(web, "src/components/dashboard/dashboard-aside.tsx"), "utf8")
+    expect(aside).toContain("const handed = outbox.draft")
+    expect(aside).toContain("else showChat()")
+    const composer = readFileSync(join(web, "src/components/dashboard/composer.tsx"), "utf8")
+    expect(composer).toContain(
+      'const text = takeHanded(form.getFieldValue("text"), draft, worker.name, taken.current)',
+    )
+    expect(composer).toContain("if (threadId) return")
+  })
+
   test("Reply opens a folded card to its box, focused in the click's frame, and sends the words alone, a secret's guarded by its value", () => {
     const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
     const reply = source.slice(source.indexOf("const onReply = () => {"))

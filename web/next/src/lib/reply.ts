@@ -34,3 +34,19 @@ export function typedReply(text: string, items: readonly InboxItem[]): Reply | n
   const item = ref === undefined ? undefined : items.find((i) => i.ref === Number(ref))
   return item ? { ref: item.ref, title: item.title } : null
 }
+
+// A ref the composer's words open with, its colon and the spaces after it too, so Reply on another card swaps it rather than adding a second.
+const LEADING = /^\s*re #i\d{1,9}\b:?[ \t]*/i
+
+// Pure: the composer's words once a card's Reply hands them over: re #iN: first, then the words the box held, any item's ref they opened with swapped for this one.
+export const withRef = (text: string, ref: number): string =>
+  `re #i${ref}: ${text.replace(LEADING, "")}`
+
+// Where a card's Reply takes the owner: words in the box send, or open a folded card to them; an empty box goes to the composer, but a secret ask's opens its own box, since a secret never reaches the chat.
+export type ReplyRoute = "composer" | "open" | "send"
+
+// Pure: a card's Reply, by its comment box's words, whether it is folded and whether it is a secret ask.
+export function replyRoute(card: { folded: boolean; secret: boolean; text: string }): ReplyRoute {
+  if (card.text.trim() !== "") return card.folded ? "open" : "send"
+  return card.secret ? "open" : "composer"
+}
