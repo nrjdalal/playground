@@ -76,7 +76,9 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - A test that fails only on the runner box counts against the score once a rerun on the Mac fails too, so a difference in the box alone never lowers a score.
 - A report that fails to send by name reaches the worker anyway, sent again to the `uds:` address its newest message came from.
 - The reviewer's small fix goes to the worker as a patch, never as a commit of its own, since ADR 0004 makes the gate a reviewer independent of the code it scores: save `git -C <clone> diff > <scratch>/fix.patch`, restore the clone, check it with `git -C <clone> apply --check <scratch>/fix.patch`, and hand it over, since the worker applies it word for word.
-  It applies a patch or a suggested wording in its clone and runs the checks its files call for before it posts, so its own fix never costs the PR a round.
+  It applies a patch or a suggested wording in its clone and runs the checks its files call for before it posts, the trace ratchet's test and the em-dash check among them on any doc, so its own fix never costs the PR a round.
+  A patch to a promoted skill's `SKILL.md` also greps each changed term over that skill's docs page and every README that lists it, and patches every hit.
+- When a round leaves only fixes the next push can close, the reviewer asks the worker to merge canary in with that push, so the 5/5 candidate scores a head canary has not moved past.
 - After a compaction, a resume, or a notice that background tasks did not finish before the previous session ended, the reviewer runs `state.py pr` for each PR it holds and re-arms every `state.py wait` with none running, since an account flip kills the waiters with no notice.
 - A finding that asks for a behaviour states the behaviour wanted, not only the defect.
 - On a collaborator's org PR whose review ask came to you, the session that posts your review replies to the ask right after, in the same DM or thread, with what you approved and any blocking note.
@@ -88,6 +90,7 @@ Its waiter for the next push polls GitHub's REST API, so a reviewer waiting all 
 - When the ticket carries samples, the verdict holds a samples table, and a sample left unhandled holds the score down.
 - When the diff holds a long-lived connection (a socket, a pub/sub subscriber, a retrying client), the PR's Evidence holds a lifecycle table, one row per path from connect to close, and a missing table holds the score at 3.
 - When the diff loosens a guard, the PR's Evidence holds a `canary | head` table of refusal rows from round 1 for each refused-forms row it adds or allows and each bypass the review finds that canary refuses, with the refused-forms test's pass count for the rest, and a row canary refuses that runs at the head, unless the fixture's allow list names it, holds the score at 3.
+- When the diff changes a hook, the reviewer runs the `bun run hooks:differential` command the PR's Evidence names and quotes its `reused:` line when it shows, since that line is the author's run at the same head and base; a moved head or base runs fresh on its own, and `--fresh` is for a run the reviewer doubts.
 - A working bypass the review finds in a guard is explained on the PR by its mechanism alone, and its exact forms go to the worker in a message until the fix refuses them, so no working payload sits in a public comment.
 - A PR that changes a skill, an agent guide or a docs page has its writing judged against writing-for-agents in the verdict, beside the code.
 - A FAIL a lead overruled on the PR (`Lead ruling:`) no longer counts against the score, once the issue the ruling names exists.

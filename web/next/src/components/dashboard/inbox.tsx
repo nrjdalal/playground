@@ -11,6 +11,7 @@ import {
   RiChat3Line,
   RiCheckDoubleLine,
   RiCheckLine,
+  RiCloseCircleLine,
   RiCloseLine,
   RiDeleteBinLine,
   RiDraftLine,
@@ -42,6 +43,7 @@ import { cn } from "cn"
 import {
   type ComponentProps,
   type KeyboardEvent,
+  type ReactNode,
   type Ref,
   useEffect,
   useId,
@@ -116,6 +118,7 @@ import {
   checkAnswerNote,
   deliveryNote,
   dismissable,
+  dismissEach,
   dismissItems,
   filesCount,
   focusAfterTake,
@@ -126,7 +129,6 @@ import {
   inboxView,
   itemTag,
   kindWord,
-  lifecycle,
   markRead,
   MOVED_PAUSE_MS,
   movedStep,
@@ -151,6 +153,8 @@ import {
   upfrontLink,
   uploadsOn,
   useInbox,
+  verbs,
+  waiting,
 } from "@/lib/inbox"
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
@@ -619,7 +623,7 @@ function ChatAbout({ item }: { item: InboxItem }) {
 
 // Opens a folded card to its full self, a chat reply's its answers and Snooze back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
 function Reopen({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
-  const label = open ? "Hide actions" : "Show actions"
+  const label = open ? "Collapse" : "Expand"
   return (
     <Tooltip>
       <TooltipTrigger
@@ -737,7 +741,7 @@ const keyOf = (event: KeyboardEvent): CardKey => {
   }
 }
 
-// One item as a card: its band, place line and title, then what Approve does or a draft's words, then, once answered or settled, the result on its own line above the footer, wrapping freely, then one footer row with an open card's actions on the left and, on the right, its lifecycle buttons (lifecycle()), then Reply. The same card sits on every shelf; one that folds by default (foldsByDefault()) shows its band, place line, title and result line alone until opened.
+// One item as a card: its band, place line and title, then what Approve does or a draft's words, then, once answered or settled, the result on its own line above the footer, wrapping freely, then one footer row with an open card's actions on the left and, on the right, its verbs (verbs()), its chevron, then Reply. The same card sits on every shelf; one that folds by default (foldsByDefault()) shows its band, place line, title, result line and row of choices until opened.
 export function InboxCard({
   defaultOpen = false,
   item,
@@ -753,7 +757,7 @@ export function InboxCard({
   item: InboxItem
   marked: boolean
   now: number
-  // Move to Inbox's click, before its answer, so the list shows the card at its top rather than behind the pill
+  // Move back's click, before its answer, so the list shows the card at its top rather than behind the pill
   onBack?: () => void
   paused: boolean
   shelf?: Shelf
@@ -813,12 +817,13 @@ export function InboxCard({
     setDay(undefined)
     setTime(PICKED_TIME)
   }
-  // a card that folds by default (all but one that needs an answer now), opened by Show actions, a click on it or E; a chat reply's card opens to its answers and Snooze
-  const [reopened, setReopened] = useState(defaultOpen)
+  // every card opens and folds by its chevron, a click on a folded one or E; one that folds by default (all but one that needs an answer now) starts folded, and a chat reply's card opens to its answers and Later
+  const [toggled, setToggled] = useState<boolean | null>(defaultOpen ? true : null)
   const folds = foldsByDefault(item, now)
-  const folded = folds && !reopened
+  const open = toggled ?? !folds
+  const folded = !open
   const outcome =
-    item.kind === "update" || (reopenable(item) && folds && reopened) ? null : outcomeLine(item)
+    item.kind === "update" || (reopenable(item) && folds && open) ? null : outcomeLine(item)
   // The taker's label in the outcome keeps the raw name on hover, as its band does: its first mention renders under the same Hint.
   const who = agentLabel(takenBy(item))
   const at = outcome === null ? -1 : outcome.indexOf(who)
@@ -826,17 +831,15 @@ export function InboxCard({
   const untold = deliveryNote(item)
   const failed = sendFailed(item) && !untold
   const light = inboxLight(item)
-  // an update, or an ask or draft still open, that he has not marked read; reading answers nothing
-  const unread = item.readAt === null && (item.kind === "update" || item.status === "open")
+  // a folded row keeps its verbs, and the answers that need nothing its body holds; Seen is the band's tick, on a card in his list he has not marked read, and reading answers nothing
+  const buttons = verbs(item, shelf)
+  const unread = buttons.includes("seen")
   const read = () => (unread && !paused ? void settle(() => markRead([item.id])) : undefined)
   const busy = pending || paused
   // a row that just moved under him keeps its buttons focusable, dimmed and saying why, so focus stays put and a click meant for another item lands on none
   const hold = paused ? OFF_FOCUSABLE : {}
   const held = paused ? PAUSED_WHY : undefined
   const quiet = (outcome !== null && !failed) || (item.kind === "update" && item.readAt !== null)
-  const buttons = folded ? [] : lifecycle(item, shelf)
-  // an archived card's Dismiss, renamed Done
-  const dismiss = buttons.includes("done") ? "Done" : buttons.includes("dismiss") ? "Dismiss" : null
 
   const title =
     item.kind === "update" && item.preview.link ? (
@@ -970,136 +973,143 @@ export function InboxCard({
       </QuestionnaireDescription>
     )
 
-  const left = folded ? null : outcome !== null ? (
-    sendUnconfirmed(item) && dispatcher ? (
-      <Hint content="Ask the dispatcher to look at the session and tell you whether your answer arrived">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={busy || asked}
-          {...hold}
-          onClick={() => {
-            setAsked(true)
-            outbox.send(dispatcher, { attachments: [], text: checkAnswerNote(item) })
-          }}
-        >
-          <RiQuestionLine data-icon="inline-start" />
-          Check it for me
-        </Button>
-      </Hint>
-    ) : (
-      retryable(item, now) && (
-        <Hint content={held}>
+  // a folded row keeps the answers that need nothing its body holds: Approve and Deny, an update's Approve link, Retry and Check it for me, but not a labelled ask's pick, a secret's value or a draft's words
+  const needsBody = outcome === null && (labels !== null || secretAsk || item.kind === "draft")
+  const left =
+    folded && needsBody ? null : outcome !== null ? (
+      sendUnconfirmed(item) && dispatcher ? (
+        <Hint content="Ask the dispatcher to look at the session and tell you whether your answer arrived">
           <Button
             size="sm"
-            disabled={busy}
+            variant="outline"
+            disabled={busy || asked}
             {...hold}
-            onClick={() => void settle(() => retryItem(item.id))}
+            onClick={() => {
+              setAsked(true)
+              outbox.send(dispatcher, { attachments: [], text: checkAnswerNote(item) })
+            }}
           >
-            <RiRefreshLine data-icon="inline-start" />
-            Retry
+            <RiQuestionLine data-icon="inline-start" />
+            Check it for me
           </Button>
         </Hint>
+      ) : (
+        retryable(item, now) && (
+          <Hint content={held}>
+            <Button
+              size="sm"
+              disabled={busy}
+              {...hold}
+              onClick={() => void settle(() => retryItem(item.id))}
+            >
+              <RiRefreshLine data-icon="inline-start" />
+              Retry
+            </Button>
+          </Hint>
+        )
       )
-    )
-  ) : secretAsk ? (
-    <Hint content={held}>
-      <Button
-        size="sm"
-        variant="outline"
-        className={SIDE_TONES.approve}
-        {...hold}
-        disabled={!secretReady}
-        onClick={() => void onProvide()}
-      >
-        <RiSendPlaneLine data-icon="inline-start" />
-        Submit
-      </Button>
-    </Hint>
-  ) : item.kind === "decision" ? null : item.kind === "draft" ? (
-    <>
+    ) : secretAsk ? (
       <Hint content={held}>
         <Button
           size="sm"
           variant="outline"
           className={SIDE_TONES.approve}
           {...hold}
-          disabled={!draftReady}
-          onClick={() => void onAnswer("send", draft)}
+          disabled={!secretReady}
+          onClick={() => void onProvide()}
         >
           <RiSendPlaneLine data-icon="inline-start" />
-          Send
+          Submit
         </Button>
       </Hint>
-      {canDraft(item) && (
-        <Hint
-          content={paused ? PAUSED_WHY : "Save it as a draft in Slack, for you to finish and send"}
-        >
+    ) : item.kind === "decision" ? null : item.kind === "draft" ? (
+      <>
+        <Hint content={held}>
           <Button
             size="sm"
             variant="outline"
-            className={DRAFT_TONE}
+            className={SIDE_TONES.approve}
             {...hold}
             disabled={!draftReady}
-            onClick={() => void onAnswer("draft", draft)}
+            onClick={() => void onAnswer("send", draft)}
           >
-            <RiDraftLine data-icon="inline-start" />
-            Draft
+            <RiSendPlaneLine data-icon="inline-start" />
+            Send
           </Button>
         </Hint>
-      )}
-      <Hint content={held}>
-        <Button
-          size="sm"
-          variant="outline"
-          className={SIDE_TONES.deny}
-          disabled={busy}
-          {...hold}
-          onClick={() => void onAnswer("discard")}
-        >
-          <RiCloseLine data-icon="inline-start" />
-          Discard
-        </Button>
-      </Hint>
-    </>
-  ) : item.kind === "update" && item.preview.approve ? (
-    // a pending Yard post's Approve opens Yard's approve page in the browser, where the owner is signed in, since a token never approves (the tier-two rule)
-    <Button
-      size="sm"
-      variant="outline"
-      className={SIDE_TONES.approve}
-      render={<a href={item.preview.approve} target="_blank" rel="noopener noreferrer" />}
-      nativeButton={false}
-      onClick={read}
-    >
-      <RiExternalLinkLine data-icon="inline-start" />
-      Approve
-    </Button>
-  ) : null
-
-  const right = (
-    <div className="ml-auto flex shrink-0 gap-2">
-      {/* Archive sets the ask or draft aside on the Archived shelf, its icon the shelf's */}
-      {buttons.includes("archive") && (
-        <Hint
-          content={
-            held ??
-            "Archive: set it aside, you will talk more about it later; what is moving keeps moving"
-          }
-        >
+        {canDraft(item) && (
+          <Hint
+            content={
+              paused ? PAUSED_WHY : "Save it as a draft in Slack, for you to finish and send"
+            }
+          >
+            <Button
+              size="sm"
+              variant="outline"
+              className={DRAFT_TONE}
+              {...hold}
+              disabled={!draftReady}
+              onClick={() => void onAnswer("draft", draft)}
+            >
+              <RiDraftLine data-icon="inline-start" />
+              Draft
+            </Button>
+          </Hint>
+        )}
+        <Hint content={held}>
           <Button
-            aria-label="Archive"
-            size="icon-sm"
+            size="sm"
             variant="outline"
+            className={SIDE_TONES.deny}
             disabled={busy}
             {...hold}
-            onClick={() => void onAnswer("clear")}
+            onClick={() => void onAnswer("discard")}
           >
-            <RiArchive2Line />
+            <RiCloseLine data-icon="inline-start" />
+            Discard
           </Button>
         </Hint>
-      )}
-      {buttons.includes("snooze") && (
+      </>
+    ) : item.kind === "update" && item.preview.approve ? (
+      // a pending Yard post's Approve opens Yard's approve page in the browser, where the owner is signed in, since a token never approves (the tier-two rule)
+      <Button
+        size="sm"
+        variant="outline"
+        className={SIDE_TONES.approve}
+        render={<a href={item.preview.approve} target="_blank" rel="noopener noreferrer" />}
+        nativeButton={false}
+        onClick={read}
+      >
+        <RiExternalLinkLine data-icon="inline-start" />
+        Approve
+      </Button>
+    ) : null
+
+  // one icon button per verb, named in its label and saying on hover what it does
+  const verb = (name: string, why: string, icon: ReactNode, onClick: () => void) => (
+    <Hint key={name} content={held ?? `${name}: ${why}`}>
+      <Button
+        aria-label={name}
+        size="icon-sm"
+        variant="outline"
+        disabled={busy}
+        {...hold}
+        onClick={onClick}
+      >
+        {icon}
+      </Button>
+    </Hint>
+  )
+  const right = (
+    <div className="ml-auto flex shrink-0 gap-2">
+      {buttons.includes("done") &&
+        verb(
+          "Done",
+          "it goes to Done",
+          <RiCheckDoubleLine />,
+          () => void settle(() => dismissItems([item.id], true)),
+        )}
+      {buttons.includes("later") && (
         <Schedule
           busy={busy}
           held={held}
@@ -1108,40 +1118,28 @@ export function InboxCard({
           setPicking={setPicking}
         />
       )}
-      {/* Move to Inbox: an archived card goes back to the list, its choices back */}
-      {buttons.includes("unarchive") && (
-        <Hint content={held ?? "Move to Inbox: answer it again"}>
-          <Button
-            aria-label="Move to Inbox"
-            size="icon-sm"
-            variant="outline"
-            disabled={busy}
-            {...hold}
-            onClick={() => {
-              onBack?.()
-              void onAnswer("unarchive")
-            }}
-          >
-            <RiInboxUnarchiveLine />
-          </Button>
-        </Hint>
-      )}
-      {/* Dismiss sends an update or an answered card to Done; on an archived card the same button reads Done */}
-      {dismiss && (
-        <Hint content={held ?? `${dismiss}: it goes to Done`}>
-          <Button
-            aria-label={dismiss}
-            size="icon-sm"
-            variant="outline"
-            disabled={busy}
-            {...hold}
-            onClick={() => void settle(() => dismissItems([item.id]))}
-          >
-            <RiCheckDoubleLine />
-          </Button>
-        </Hint>
-      )}
-      {folds && <Reopen open={reopened} setOpen={setReopened} />}
+      {buttons.includes("archive") &&
+        verb(
+          "Archive",
+          "out of your list, unanswered; its poster keeps waiting and is told nothing",
+          <RiArchive2Line />,
+          () => void onAnswer("archive"),
+        )}
+      {buttons.includes("moveBack") &&
+        verb("Move back", "back to your list, to answer it again", <RiInboxUnarchiveLine />, () => {
+          onBack?.()
+          void onAnswer("unarchive")
+        })}
+      {buttons.includes("dismiss") &&
+        verb(
+          "Dismiss",
+          waiting(item)
+            ? "it goes to Done, and its poster is told it is set aside"
+            : "it goes to Done, marked dismissed",
+          <RiCloseCircleLine />,
+          () => void onAnswer("dismiss"),
+        )}
+      <Reopen open={open} setOpen={setToggled} />
       {/* an open secret ask offers no chat, so its value is never typed where a transcript keeps it; a folded card shows its toggle alone */}
       {!folded && !(secretAsk && outcome === null) && <ChatAbout item={item} />}
     </div>
@@ -1174,7 +1172,7 @@ export function InboxCard({
           {right}
         </>
       )}
-      {picking && buttons.includes("snooze") && (
+      {picking && buttons.includes("later") && (
         // shadcn's date and time picker: a day from the Calendar, a time from the field, in this browser's time zone
         <div className="flex basis-full flex-wrap items-center gap-2">
           <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
@@ -1266,20 +1264,15 @@ export function InboxCard({
       onClick={
         folded
           ? (event) => {
-              if (!(event.target as Element).closest("a, button, input, textarea"))
-                setReopened(true)
+              if (!(event.target as Element).closest("a, button, input, textarea")) setToggled(true)
             }
           : undefined
       }
-      onKeyDown={
-        folds
-          ? (event) => {
-              if (!reopenKey(keyOf(event))) return
-              event.preventDefault()
-              setReopened(!reopened)
-            }
-          : undefined
-      }
+      onKeyDown={(event) => {
+        if (!reopenKey(keyOf(event))) return
+        event.preventDefault()
+        setToggled(!open)
+      }}
     >
       <KindBand
         busy={busy}
@@ -1562,7 +1555,6 @@ export function NewPill({
   )
 }
 
-// Playground's Inbox: one list of cards, each keeping its place while he looks, what arrived since waiting behind a pill until he takes it, then In progress, Snoozed, Archived and Done as rows that open and shut.
 // The Inbox's first load: its open row where it will sit, a blank count and the Mark all as read room kept, the Spinner under it, so the data lands below without moving the row
 function InboxLoading() {
   return (
@@ -1595,6 +1587,7 @@ function InboxLoading() {
   )
 }
 
+// Playground's Inbox: one list of cards, each keeping its place while he looks, what arrived since waiting behind a pill until he takes it, then In progress, Snoozed, Archived and Done as rows that open and shut.
 export function Inbox({ viewing }: { viewing: boolean }) {
   const { allowed } = useDashboard()
   const { data, error, isPending } = useInbox(allowed)
@@ -1605,8 +1598,10 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   // the ids in the order he sees them, set on the first read and when he takes what waits behind the pill
   const [order, setOrder] = useState<string[] | null>(null)
   const items = data?.items ?? []
-  // answered and read items leave the list for Done ten minutes after they settle, one dismissed or closed by its poster at once
-  const { archived, done, progress, shown } = inboxView(items, now)
+  // a card moves by a verb alone: an answer its poster carries out goes to In progress, and one he dismissed or its poster closed to Done
+  const { archived: setAside, done, progress, shown } = inboxView(items)
+  // Archived holds what he archived, kept out of items, and what was set aside before Archive kept items open
+  const archived = [...(data?.archived ?? []), ...setAside].sort((a, b) => b.ref - a.ref)
   const snoozed = data?.snoozed ?? []
   const { held, rows } = pinnedView(shown, order)
   const pill = usePill(held.length)
@@ -1823,15 +1818,23 @@ export function Inbox({ viewing }: { viewing: boolean }) {
                 header={(props) => (
                   <h3 {...props} className={cn(props.className, STICKY_HEADER)}>
                     {props.children}
-                    {/* the Archived shelf empties in one click, its items to Done; Done marks what settled on its own read, greyed once all are */}
+                    {/* the Archived shelf empties in one click, each card's own Dismiss in turn; Done marks what settled on its own read, typing nothing into any session, greyed once all are */}
                     {label !== "Snoozed" && label !== "In progress" && shelf.length > 0 && (
                       <ShelfDismiss
                         disabled={bulkPending}
-                        ids={shelf.filter(dismissable).map((item) => item.id)}
+                        ids={(label === "Archived" ? shelf : shelf.filter(dismissable)).map(
+                          (item) => item.id,
+                        )}
                         label={
                           label === "Archived" ? "Dismiss all archived" : "Mark all done as read"
                         }
-                        onDismiss={(ids) => void bulk(() => dismissItems(ids))}
+                        onDismiss={(ids) =>
+                          void bulk(() =>
+                            label === "Archived"
+                              ? dismissEach(shelf.filter((item) => ids.includes(item.id)))
+                              : dismissItems(ids),
+                          )
+                        }
                       />
                     )}
                   </h3>

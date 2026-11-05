@@ -121,7 +121,7 @@ const LOCAL_DIRS = [
   "lib/usage",
   "plugins",
 ]
-const HOSTED_ROUTERS = ["routers/auth.ts", "routers/yard.ts"]
+const HOSTED_ROUTERS = ["routers/auth.ts", "routers/relay.ts", "routers/yard.ts"]
 
 const transpiler = new Bun.Transpiler({ loader: "ts" })
 

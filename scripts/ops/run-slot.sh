@@ -1,5 +1,5 @@
 #!/bin/bash
-# run-slot.sh <who> [--model-bound] -- <command> [args...]: run one heavy run (a suite, a type check, Checks, a build) holding one of the machine's run slots.
+# run-slot.sh <who> [--model-bound] [--after <pid>] -- <command> [args...]: run one heavy run (a suite, a type check, Checks, a build) holding one of the machine's run slots.
 # A --model-bound run (one that mostly waits on a model, such as a parity replay) takes run-slot-model-<n> instead, at most slots.modelBound at once (model_cap, below), counted apart from the CPU slots and their queue.
 # It takes ops/run-slot, run-slot-2, run-slot-3 or run-slot-4 by mkdir, as the load rules (lanes_open) open them and its size's load units fit, waiting and
 # retrying while none does; writes "<who> <its own pid> <iso> <units> <size>" to the slot's .holder file beside it
@@ -236,9 +236,19 @@ if [ "${1:-}" = can-take ]; then
   set -- "$3" -- true
 fi
 MODEL_BOUND=
-[ -z "$CAN_TAKE" ] && [ "${2:-}" = --model-bound ] && { MODEL_BOUND=1; set -- "$1" "${@:3}"; }
+AFTER=
+while [ -z "$CAN_TAKE" ]; do
+  case "${2:-}" in
+    --model-bound) MODEL_BOUND=1; set -- "$1" "${@:3}" ;;
+    --after)
+      case "${3:-}" in 0*|1) echo "run-slot.sh: --after $3 names no run (a pid of 0 or 1 is never a run's, and kill -0 0 always succeeds), so this run never waits: give the pid on the first run's ask line" >&2; exit 2 ;; esac
+      case "${3:-}" in ''|*[!0-9]*) echo "run-slot.sh: --after takes the pid on the first run's ask line in run-slot.runs.log (ask <who> <pid>)" >&2; exit 2 ;; esac
+      AFTER=$3; set -- "$1" "${@:4}" ;;
+    *) break ;;
+  esac
+done
 if [ $# -lt 3 ] || [ "$2" != "--" ]; then
-  echo "usage: run-slot.sh <who> [--model-bound] -- <command> [args...]" >&2
+  echo "usage: run-slot.sh <who> [--model-bound] [--after <pid>] -- <command> [args...]" >&2
   exit 2
 fi
 WHO=$1
@@ -270,6 +280,32 @@ if [ -z "$REREAD" ]; then
         ;;
     esac
   done
+fi
+# --after <pid>: a run that needs <who>'s run <pid> to land first waits here, with no ask line, ticket or slot, until that run's end line: rc=0 asks, any other rc exits with it, and a pid gone with no end line exits 2 (4 Nov: a run that polled for another inside its slot held run-slot-2 for 1575 s while that run sat behind it in the queue)
+# the last state of <who>'s run $1 in run-slot.runs.log: pending (asked, no end yet), ended <rc>, or none
+after_state() {
+  tail -n 20000 "$OPS/run-slot.runs.log" 2>/dev/null | W=$WHO P=$1 awk '
+    $3 == ENVIRON["W"] && $4 == ENVIRON["P"] { if ($2 == "ask") s = "pending"; else if ($2 == "end") s = "ended " substr($5, 4) }
+    END { print (s == "" ? "none" : s) }'
+}
+if [ -n "$AFTER" ] && [ -z "$REREAD" ]; then
+  told=
+  while :; do
+    gone=
+    alive "$AFTER" || gone=1
+    st=$(after_state "$AFTER")
+    case "$st" in
+      "ended 0") break ;;
+      ended\ *) echo "run-slot.sh: $WHO's run $AFTER ended rc=${st#ended }, so this run never asks" >&2; exit "${st#ended }" ;;
+    esac
+    if [ -n "$gone" ]; then
+      echo "run-slot.sh: $WHO's run $AFTER has ended with no end line in run-slot.runs.log (a runner-host run, or one stopped hard), so this run never asks: read that run's result, then run this one again" >&2
+      exit 2
+    fi
+    [ -n "$told" ] || { echo "run-slot.sh: waiting for $WHO's run $AFTER to end before this one asks (--after)" >&2; told=1; }
+    sleep "${RUN_SLOT_POLL:-5}"
+  done
+  ASKED=$(date +%s)
 fi
 # dispatcher, 18 Oct: a test, type check (from the checkout's root), lint or format check runs on the runner host, taking no slot here. ci.sh exec
 # sends the working tree, tracked edits and untracked source alike, and gives back the command's output and exit code; anything else (a browser,
@@ -791,23 +827,36 @@ slot_open() {
   fi
   return 0
 }
-# whether the gauges open slots 2 to 4: the CPU 40% idle or more, load1 under 30 and mem_ok passing (dispatcher, 3 Nov: the resting sessions
-# held load1 at 14 to 20 on 15 cores while the CPU sat 53 to 67% idle, so the old load1 lines of 12 and the cores left one lane open with 24 to
-# 33 runs waiting; load1 30 stays a hard stop for the spikes, load1 64 after a burst of starts and 73 after a clone); a run's verdict that
-# differs from the last, run-slot.lanes, is a lanes line in run-slot.runs.log with both gauges, while a read subcommand writes neither
+# whether the gauges open slots 2 to 4: mem_ok passing and the CPU 40% idle or more under load1 30, or 50% idle or more from load1 30 up to 45
+# (dispatcher, 3 Nov: the resting sessions held load1 at 14 to 20 on 15 cores while the CPU sat 53 to 67% idle, so the old load1 lines of 12
+# and the cores left one lane open with 24 to 33 runs waiting; retro 36, 4 Nov: at a load1 30 stop the lanes were shut 109 of 120 minutes
+# with the CPU about half idle, and heavy runs waited up to 122 minutes); load1 45 stays a hard stop for the spikes, load1 64 after a burst
+# of starts and 73 after a clone; a run's verdict that differs from the last, run-slot.lanes, is a lanes line in run-slot.runs.log with the
+# gauges, mem_ok's free share and pressure level and, when shut, why: the first of load1, cpu and mem that shut it (dispatcher, 5 Nov: retro 39
+# counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither
 lanes_open() {
-  local idle swap tps mbs load verdict=shut seen
+  local idle swap tps mbs load need="" verdict=shut why="" seen free level
   read -r idle swap tps mbs <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
   case "$idle" in
     -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
     busy) told busy "$BUSY_TOLD" ;;
   esac
-  [ "$idle" != - ] && [ "$idle" != busy ] && [ "${idle%.*}" -ge 40 ] && [ "${load%.*}" -lt 30 ] 2>/dev/null && mem_ok && verdict=open
+  if [ "${load%.*}" -lt 30 ] 2>/dev/null; then need=40; elif [ "${load%.*}" -lt 45 ] 2>/dev/null; then need=50; fi
+  if [ -z "$need" ]; then
+    why=load1
+  elif [ "$idle" = - ] || [ "$idle" = busy ] || ! [ "${idle%.*}" -ge "$need" ] 2>/dev/null; then
+    why=cpu
+  elif ! mem_ok; then
+    why=mem
+  else
+    verdict=open
+  fi
   seen=$(cat "$OPS/run-slot.lanes" 2>/dev/null)
   if [ -z "$CAN_TAKE" ] && [ "$seen" != "$verdict" ]; then
     echo "$verdict" > "$OPS/run-slot.lanes"
-    rlog lanes "$verdict idle=$idle% load1=$load swapins=$swap disk0_tps=${tps:--} disk0_mbs=${mbs:--}"
+    free=$(memstat level); level=$(memstat vm_pressure_level)
+    rlog lanes "$verdict${why:+ why=$why} idle=$idle% load1=$load free=${free:--}${free:+%} pressure=${level:--} swapins=$swap disk0_tps=${tps:--} disk0_mbs=${mbs:--}"
   fi
   [ "$verdict" = open ]
 }

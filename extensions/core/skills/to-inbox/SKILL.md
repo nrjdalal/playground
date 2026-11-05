@@ -20,7 +20,11 @@ Every decision and draft then takes step 9 once the owner answers; an update get
 A message outside the Inbox, a dispatcher's reply in chat or a Slack or Yard DM, takes steps 2 to 5 and 7, since Choices and Post belong to a card alone; a relay in chat, the dispatcher passing a session's message on to the owner, is one such message, its picture and bullets the session's point in the owner's words.
 In chat, step 2's picture is a fenced block (an ASCII flow or a diff; a work status block lives in its card, which chat names by its `#iN`), since no-chat-question sends a table, or three or more numbered steps, to one Inbox card instead (`scripts/hooks/README.md`).
 
-Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, you resolve an alert update that has fixed itself, and every other update stays editable until the owner dismisses it, so a card you will replace (a mock's first version) takes `bun run ask edit` before that.
+Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, and you resolve an alert update that has fixed itself.
+Every other update stays editable until the owner presses Done or Dismiss, as an ask stays editable, answered or not, until it closes, so a card you will replace (a mock's first version) or a progress you carry takes `bun run ask edit` before that.
+
+Beside its choices, every card offers the owner five verbs (asks.md's footer line): ✓ Seen, Snooze and Archive change only his view, so your item keeps waiting and nothing is typed to you; ✓✓ Done sends an update or an answered card to Done; and Dismiss sends any card to Done, typing you `set-aside` while it still waits, so you hold only its new step, and `dismiss`, drop it, once answered.
+On an update, Done types you `done` and Dismiss `dismiss`: post a new card for more, since `ask edit` refuses this one.
 
 ## Steps
 
@@ -81,8 +85,8 @@ Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): y
 
 ## Fit the card
 
-Draw each code or ASCII line up to `ASK_CODE_COLUMNS` (`packages/config/src/inbox.ts`), 60 columns, an emoji counted as two.
-The card sizes a drawing's font so its widest line fills the block, from 16px on a wide card down to 7px on the narrowest one, so a line of that width shows whole on every card and a short drawing grows to fill a wide one.
+Draw each code or ASCII line up to `ASK_CODE_COLUMNS` (`packages/config/src/inbox.ts`), 37 columns, an emoji counted as two.
+The card shows a drawing at its 12px code size, and shrinks a wider one's font to fit, down to 10px, before it scrolls sideways, so a line of that width shows whole at 12px on the narrowest card.
 A picture that runs past it becomes a table of three columns or fewer, or bullets.
 
 ## Example
