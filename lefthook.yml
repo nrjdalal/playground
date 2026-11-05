@@ -115,3 +115,7 @@ pre-push:
         - ref: canary
     ensure-branches:
       run: bun packages/scripts/src/ensure-remote-branches.ts {1}
+    keeps-canary:
+      # refuses a push whose canary merge dropped a line git merges clean, as pr:merge's keeps canary gate would a review round later
+      run: bun --no-env-file packages/scripts/src/pr-merge/prepush.ts
+      use_stdin: true
