@@ -78,7 +78,8 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   the alert says to resume runner-plain-relay on a machine with that session's roster row or resume record;
   a machine with neither relays through Ops' sweep (SWEEP.md step 2), so there a line may wait 30 minutes, two sweeps, and the alert says Ops' sweep is late and Ops runs it, naming no relay session;
   with no `cursor.json`, a relay that has never run, the lines queued since the watch first found none (`ops/tick/relay-watch-start`) count as waiting, and the alert says the outbox relay has never run),
-  the focus card (every minute: once `playground focus` has ended, by `off` or at its end, one Inbox update under the ops manager's name naming the runs that queued while it stood and their wait, then `focus.json` set aside as `.ended-<ts>`, `focusCard` in `packages/scripts/src/playground/focus.ts`),
+  the focus card (every minute: once `playground focus` has ended, by `off` or at its end, one Inbox update under the ops manager's name naming the runs that queued while it stood and their wait,
+  then its record set aside as `.ended-<ts>`: `focus.json`, or the `.uncarded-<since>` copy an `on` makes of a lapsed one the beat has not carded yet, oldest first, `focusCard` in `packages/scripts/src/playground/focus.ts`),
   and the guard probe (every 10 minutes: each PreToolUse guard the factory settings register run on `{}` from its bundle, else its source, without its wrapper's tail, and each that exits other than 0 or 2 named to the dispatcher with the fix, once a change of what is broken, [Restoring the main checkout](#restoring-the-main-checkout));
   `--dry` prints each beat's next due time and target, and `--once <beat>` runs one beat now.
   The relay, runner-plain-relay, sends every line `outbox/relay.py` prints to its `to`, since relay.py applies quiet mode before it prints; only the drops the relay's brief names hold a line back.

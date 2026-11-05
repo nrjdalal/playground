@@ -169,6 +169,37 @@ describe("playground focus", () => {
     expect(cards).toHaveLength(2)
   })
 
+  test("an on before the beat has carded a lapsed focus keeps that focus's card, posted before the new one's", async () => {
+    const m = machine()
+    const at = (minutes: number) => ({
+      ...m.deps,
+      now: () => new Date(NOW.getTime() + minutes * MIN),
+    })
+    await runFocus(["on", "--session", "worker-a", "--for", "30", "--reason", "first"], m.deps)
+    await runFocus(["off"], at(10))
+    expect(
+      await runFocus(
+        ["on", "--session", "worker-b", "--for", "30", "--reason", "second"],
+        at(10.3),
+      ),
+    ).toBe(0)
+    const cards: FocusCard[] = []
+    const post = async (card: FocusCard) => void cards.push(card)
+    expect(await focusCard(m.data, new Date(NOW.getTime() + 10.6 * MIN), post)).toBe("posted")
+    expect(cards.map((card) => card.title)).toEqual([
+      "Focus for worker-a ended: 0 runs queued while it stood, 0m0s in all",
+    ])
+    expect(await standing(m.data, new Date(NOW.getTime() + 11 * MIN))).toMatchObject({
+      session: "worker-b",
+    })
+    expect(await focusCard(m.data, new Date(NOW.getTime() + 41 * MIN), post)).toBe("posted")
+    expect(cards.map((card) => card.title)).toEqual([
+      "Focus for worker-a ended: 0 runs queued while it stood, 0m0s in all",
+      "Focus for worker-b ended: 0 runs queued while it stood, 0m0s in all",
+    ])
+    expect(await focusCard(m.data, new Date(NOW.getTime() + 42 * MIN), post)).toBe("none")
+  })
+
   test("a card that fails to post leaves focus.json for the next beat", async () => {
     const m = machine()
     await on(m.deps)
