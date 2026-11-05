@@ -13,7 +13,14 @@ export type Text = {
 }
 // `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
 // `raw` keeps the source of a word that holds a value the lexer cannot read, so a hook can lex it again once the call has set its variables.
-export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean; raw?: string }
+// `source` is the word as written, quotes and expansions included, so a hook can judge what a word expands rather than what it came to.
+export type Word = Text & {
+  glob?: boolean
+  procs?: Command[]
+  quoted: boolean
+  raw?: string
+  source?: string
+}
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
   // Set on the bare copy run() hands a hook's visit for a followed command with a redirect: the command it stands for
@@ -765,7 +772,8 @@ function word(lx: Lexer): Word {
   // the lookahead finds the close once, so a { with no } costs its length rather than its square
   if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare)) out.unknown ??= "a brace expansion"
   if (GLOB_CHARS.test(bare)) out.glob = true
-  if (marked(out.value)) out.raw = src.slice(start, lx.i)
+  out.source = src.slice(start, lx.i)
+  if (marked(out.value)) out.raw = out.source
   // zsh expands ~- and ~+ after removing quotes and filling in expansions, so a word opening with an unquoted ~ is read by its value (`~-"/f"`, `~"-"/f`, `~-$Y/f`)
   if (src[start] === "~" && TILDE.test(out.value)) out.tilde = true
   return out

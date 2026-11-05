@@ -19,14 +19,21 @@ import { mainCheckout } from "../main-checkout"
 import { sessionName } from "../trash"
 
 export const RM_USAGE =
-  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--discard [--decision <id>]] [--reason "<why>"] | --list | --restore <id>'
+  'usage: playground rm <path> [--reason "<why>"] | --worktree <path> [--discard [--decision <id>]] [--pr <url>] [--reason "<why>"] | --list | --restore <id>'
 
 export type RmArgs =
   | { list: true }
   | { restore: string }
-  | { decision?: string; discard: boolean; path: string; reason: string; worktree: boolean }
+  | {
+      decision?: string
+      discard: boolean
+      path: string
+      pr?: string
+      reason: string
+      worktree: boolean
+    }
 
-// playground rm's words: one path, or --worktree's with an optional --discard and its --decision, with an optional --reason; --list or --restore <id> alone.
+// playground rm's words: one path, or --worktree's with an optional --discard and its --decision and an optional --pr, with an optional --reason; --list or --restore <id> alone.
 export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   if (words.length === 1 && words[0] === "--list") return { list: true }
   if (words.length === 2 && words[0] === "--restore") return { restore: words[1]! }
@@ -35,21 +42,33 @@ export const rmArgs = (words: string[]): RmArgs | { error: string } => {
   let worktree = false
   let discard = false
   let decision: string | undefined
+  let pr: string | undefined
   for (let i = 0; i < words.length; i++) {
     const word = words[i]!
     if (word === "--reason" && words[i + 1] !== undefined) reason = words[++i]!
     else if (word === "--discard" && !discard) discard = true
     else if (word === "--decision" && words[i + 1] !== undefined && decision === undefined)
       decision = words[++i]!
+    else if (word === "--pr" && words[i + 1] !== undefined && pr === undefined) pr = words[++i]!
     else if (word === "--worktree" && words[i + 1] !== undefined && path === undefined) {
       worktree = true
       path = words[++i]!
     } else if (!word.startsWith("--") && path === undefined) path = word
     else return { error: RM_USAGE }
   }
-  return path === undefined || (discard && !worktree) || (decision !== undefined && !discard)
+  return path === undefined ||
+    (discard && !worktree) ||
+    (decision !== undefined && !discard) ||
+    (pr !== undefined && !worktree)
     ? { error: RM_USAGE }
-    : { ...(decision === undefined ? {} : { decision }), discard, path, reason, worktree }
+    : {
+        ...(decision === undefined ? {} : { decision }),
+        discard,
+        path,
+        ...(pr === undefined ? {} : { pr }),
+        reason,
+        worktree,
+      }
 }
 
 // An Inbox item as bun run ask get prints it, read for a delete decision's status and what.
@@ -282,6 +301,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
                   discard: args.discard,
                   live: STATUSES.live,
                   merged: deps.merged,
+                  ...(args.pr ? { pr: args.pr } : {}),
                   procs: deps.procs(),
                   roster: join(deps.data, "roster.json"),
                 }

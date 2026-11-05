@@ -37,7 +37,11 @@ import {
 import { uploadSpec } from "../../../../../../api/hono/src/lib/dashboard/slack-upload"
 import { KEYCHAIN_ITEM_NAMES } from "../../../../../../api/hono/src/lib/keychain-items"
 import { keychain } from "../../../../../../api/hono/src/lib/yard/keychain"
-import { ANSWER_LEAD, payloadOf } from "../../../../../../packages/config/src/inbox"
+import {
+  ANSWER_LEAD,
+  CLOCKS_STOPPED_AT,
+  payloadOf,
+} from "../../../../../../packages/config/src/inbox"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -1025,9 +1029,10 @@ describe("a secret ask (PG-59)", () => {
     ])
   })
 
-  test("takes no Approve, Deny, Archive or Edit: its value comes through Submit alone", () => {
+  test("takes no Approve, Deny or Edit as an answer: its value comes through Submit alone, Dismiss setting it aside", () => {
     const open = { kind: "decision", preview: SECRET, status: "open" } as const
-    for (const action of ACTIONS) {
+    expect(checkAnswer(open as never, { action: "dismiss" })).toMatchObject({ status: "cleared" })
+    for (const action of ACTIONS.filter((action) => action !== "dismiss")) {
       expect(checkAnswer(open as never, { action, text: "made-up-value" }), action).toHaveProperty(
         "message",
       )
@@ -1828,7 +1833,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
   })
 
-  test("the poster edits its own open item in place, bumping updatedAt and version; another session's, an answered or closed item and a bad shape are refused (PG-2547)", async () => {
+  test("the poster edits its own item in place, bumping updatedAt and version; another session's, a closed item and a bad shape are refused (PG-2547)", async () => {
     const posted = await post(decision(SLACK))
     const at = new Date(Date.parse(posted.updatedAt) + 60_000)
     const edited = await store.editItem(
@@ -1869,12 +1874,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       code: "NOT_FOUND",
       ok: false,
     })
-    // an answered decision and a settled one are refused
-    await store.answerItem(db, posted.id, { action: "approve" }, { actor })
-    expect(await store.editItem(db, posted.id, decision(SLACK))).toMatchObject({
-      code: "CONFLICT",
-      ok: false,
-    })
+    // a settled decision is refused
     const settled = await post(decision(SLACK))
     await store.settleItem(db, settled.id)
     expect(await store.editItem(db, settled.id, decision(SLACK))).toMatchObject({
@@ -1933,7 +1933,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(answered).toMatchObject({ item: { status: "approved" }, ok: true })
   })
 
-  test("an item put away with Snooze edits as an open one, while one he replied to in chat is refused (PG-2547)", async () => {
+  test("an item put away with Snooze edits as an open one, and so does one replied to in chat (PG-2547, #903)", async () => {
     const snoozed = await post(decision(SLACK))
     const scheduled = await store.scheduleItem(
       db,
@@ -1949,10 +1949,76 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(await store.settleItem(db, snoozed.id)).toMatchObject({ ok: true })
     const replied = await post(decision(SLACK))
     await store.recordReply(db, replied.ref)
-    expect(await store.editItem(db, replied.id, decision(SLACK))).toMatchObject({
-      code: "CONFLICT",
-      message: expect.stringContaining("replied to in chat"),
-      ok: false,
+    expect(await store.editItem(db, replied.id, decision(SLACK))).toMatchObject({ ok: true })
+  })
+
+  describe("an item stays editable until it closes (#903)", () => {
+    const progress = {
+      from: "builder",
+      kind: "update",
+      preview: { outcome: "finding", text: "40%" },
+      title: "Round 2",
+    }
+    const at = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString()
+
+    test("an update edits while archived and put away with Later, and is refused once Done or dismissed", async () => {
+      const update = await post(progress)
+      await store.markRead(db, [update.id])
+      expect(await store.answerItem(db, update.id, { action: "archive" }, { actor })).toMatchObject(
+        { ok: true },
+      )
+      expect(await store.editItem(db, update.id, progress)).toMatchObject({ ok: true })
+      expect((await store.scheduleItem(db, update.id, at(60))).ok).toBe(true)
+      expect(await store.editItem(db, update.id, progress)).toMatchObject({
+        item: { answer: { snoozedUntil: expect.any(String) } },
+        ok: true,
+      })
+      await store.dismissItems(db, [update.id])
+      expect(await store.editItem(db, update.id, progress)).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+      const other = await post(progress)
+      expect(await store.answerItem(db, other.id, { action: "dismiss" }, { actor })).toMatchObject({
+        ok: true,
+      })
+      expect(await store.editItem(db, other.id, progress)).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+    })
+
+    test("an answered ask edits while it is being carried out, and is refused once its poster closes it or the owner dismisses it", async () => {
+      const denied = await post(decision(SLACK))
+      expect(await store.answerItem(db, denied.id, { action: "deny" }, { actor })).toMatchObject({
+        ok: true,
+      })
+      const moved = await store.editItem(
+        db,
+        denied.id,
+        decision({ ...SLACK, text: "hi, 2 of 3 done." }),
+      )
+      expect(moved).toMatchObject({
+        item: { preview: { text: "hi, 2 of 3 done." }, status: "denied" },
+        ok: true,
+      })
+      expect((await store.ackItem(db, denied.id)).ok).toBe(true)
+      expect(await store.editItem(db, denied.id, decision(SLACK))).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+      const approved = await post(decision(SLACK))
+      expect(
+        await store.answerItem(db, approved.id, { action: "approve" }, { actor }),
+      ).toMatchObject({ ok: true })
+      expect(await store.editItem(db, approved.id, decision(SLACK))).toMatchObject({ ok: true })
+      expect(
+        await store.answerItem(db, approved.id, { action: "dismiss" }, { actor }),
+      ).toMatchObject({ ok: true })
+      expect(await store.editItem(db, approved.id, decision(SLACK))).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
     })
   })
 
@@ -2113,13 +2179,231 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(archived.ok && archived.item.status).toBe("cleared")
     const reopened = await store.answerItem(db, draft.id, { action: "unarchive" }, { actor })
     expect(reopened.ok && reopened.item.status).toBe("open")
-    // an archived item already sent to Done stays there, as the Archived shelf leaves it out
+    // one set aside and sent to Done moves back too, as Done's Move back offers it (#882)
     const done = await post(decision(PREVIEWS.ship))
     await store.answerItem(db, done.id, { action: "clear" }, { actor })
     await store.dismissItems(db, [done.id])
-    expect(await store.answerItem(db, done.id, { action: "unarchive" }, { actor })).toMatchObject({
-      code: "CONFLICT",
-      ok: false,
+    const fromDone = await store.answerItem(db, done.id, { action: "unarchive" }, { actor })
+    expect(fromDone.ok && fromDone.item).toMatchObject({ answer: null, status: "open" })
+  })
+
+  describe("Archive, Later, Move back, Done and Dismiss on every state (#882)", () => {
+    const typed = () => {
+      const sent: Delivery[] = []
+      const deliver = async (delivery: Delivery) => {
+        sent.push(delivery)
+        return { at: "2026-10-07T12:00:00.000Z", ok: true as const, sessionId: "s1" }
+      }
+      return { deliver, sent }
+    }
+    const update = () =>
+      post({
+        from: "ops",
+        kind: "update",
+        preview: { outcome: "merged" },
+        title: "Merged: the fix",
+      })
+    const listed = async (id: string) => {
+      const list = await store.listItems(db)
+      return {
+        archived: list.archived.some((item) => item.id === id),
+        items: list.items.some((item) => item.id === id),
+        snoozed: list.snoozed.some((item) => item.id === id),
+      }
+    }
+    const later = new Date(Date.now() + 3_600_000).toISOString()
+
+    test("Archive keeps a waiting decision open and unanswered, types nothing, and lists it as archived alone, out of items and the count", async () => {
+      const { deliver, sent } = typed()
+      const posted = await post(decision(PREVIEWS.ship))
+      const before = (await store.listItems(db)).count
+      const archived = await store.answerItem(
+        db,
+        posted.id,
+        { action: "archive" },
+        { actor, deliver },
+      )
+      if (!archived.ok) throw new Error(archived.message)
+      expect(archived.item.status).toBe("open")
+      expect(archived.item.answer).toMatchObject({ archivedAt: expect.any(String) })
+      expect(sent).toHaveLength(0)
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+      expect((await store.listItems(db)).count).toBe(before - 1)
+      // archived twice is refused
+      expect(await store.answerItem(db, posted.id, { action: "archive" }, { actor })).toMatchObject(
+        {
+          code: "CONFLICT",
+          ok: false,
+        },
+      )
+    })
+
+    test("Move back returns an archived item to the list as it was, and Later takes it off Archived until its time", async () => {
+      const posted = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      const back = await store.answerItem(db, posted.id, { action: "unarchive" }, { actor })
+      expect(back.ok && back.item).toMatchObject({ answer: null, status: "open" })
+      expect(await listed(posted.id)).toEqual({ archived: false, items: true, snoozed: false })
+      await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      const put = await store.scheduleItem(db, posted.id, later)
+      if (!put.ok) throw new Error(put.message)
+      expect(put.item.answer).toEqual({ snoozedUntil: later })
+      expect(await listed(posted.id)).toEqual({ archived: false, items: false, snoozed: true })
+      // settled, so no open item sleeps past the other tests' clocks
+      expect(await store.settleItem(db, posted.id)).toMatchObject({ ok: true })
+    })
+
+    test("an update archives, comes back, and is put off until a time, Later's shelf holding it", async () => {
+      const posted = await update()
+      const archived = await store.answerItem(db, posted.id, { action: "archive" }, { actor })
+      expect(archived.ok).toBe(true)
+      expect(await listed(posted.id)).toEqual({ archived: true, items: false, snoozed: false })
+      await store.answerItem(db, posted.id, { action: "unarchive" }, { actor })
+      expect(await listed(posted.id)).toEqual({ archived: false, items: true, snoozed: false })
+      const put = await store.scheduleItem(db, posted.id, later)
+      expect(put.ok).toBe(true)
+      expect(await listed(posted.id)).toEqual({ archived: false, items: false, snoozed: true })
+      // Done wakes it and sends it to Done
+      await store.dismissItems(db, [posted.id])
+      const done = await store.getItem(db, posted.id)
+      expect(done?.answer).toEqual({ dismissedAt: expect.any(String) })
+      expect(await listed(posted.id)).toMatchObject({ archived: false, snoozed: false })
+    })
+
+    test("Dismiss on a waiting decision, draft or secret sets it aside as clear did, telling its poster so, and sends it to Done marked dismissed", async () => {
+      const draft = await post({
+        from: "dispatcher",
+        kind: "draft",
+        preview: { link: CHANNEL, text: "hi Merritt", to: "@Merritt" },
+        title: "Ask Merritt",
+      })
+      for (const posted of [
+        await post(decision(PREVIEWS.ship)),
+        draft,
+        await post(decision(SECRET)),
+      ]) {
+        const { deliver, sent } = typed()
+        const dismissed = await store.answerItem(
+          db,
+          posted.id,
+          { action: "dismiss" },
+          { actor, deliver },
+        )
+        if (!dismissed.ok) throw new Error(dismissed.message)
+        expect(dismissed.item.status).toBe("cleared")
+        expect(dismissed.item.answer).toMatchObject({
+          choice: "clear",
+          dismissed: true,
+          dismissedAt: expect.any(String),
+        })
+        expect(sent).toHaveLength(1)
+        expect(payloadOf(sent[0]!.text)).toMatchObject({
+          go: false,
+          id: posted.id,
+          next: "close",
+          verb: "set-aside",
+        })
+        expect(await listed(posted.id)).toMatchObject({ archived: false })
+      }
+      // an archived one dismissed is set aside the same way
+      const archived = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, archived.id, { action: "archive" }, { actor })
+      const aside = await store.answerItem(db, archived.id, { action: "dismiss" }, { actor })
+      expect(aside.ok && aside.item.status).toBe("cleared")
+    })
+
+    test("Dismiss on an answered item or an update marks it dismissed, keeping when it first went to Done, and a second is refused", async () => {
+      const posted = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, posted.id, { action: "approve" }, { actor })
+      const at = new Date("2026-10-07T12:00:00.000Z")
+      await store.dismissItems(db, [posted.id], at)
+      const dismissed = await store.answerItem(db, posted.id, { action: "dismiss" }, { actor })
+      if (!dismissed.ok) throw new Error(dismissed.message)
+      expect(dismissed.item.status).toBe("approved")
+      expect(dismissed.item.answer).toMatchObject({
+        choice: "approve",
+        dismissed: true,
+        dismissedAt: at.toISOString(),
+      })
+      expect(await store.answerItem(db, posted.id, { action: "dismiss" }, { actor })).toMatchObject(
+        {
+          code: "CONFLICT",
+          ok: false,
+        },
+      )
+      const read = await update()
+      const gone = await store.answerItem(db, read.id, { action: "dismiss" }, { actor })
+      expect(gone.ok && gone.item).toMatchObject({
+        answer: { dismissed: true, dismissedAt: expect.any(String) },
+        readAt: expect.any(String),
+      })
+    })
+
+    test("Dismiss tells an answered card's poster dismiss with how to close it, and an update's poster dismiss or, on Done, done; an answered card on Done, and one its poster closed, type nothing", async () => {
+      const go = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, go.id, { action: "approve" }, { actor })
+      const told = typed()
+      const dropped = await store.answerItem(db, go.id, { action: "dismiss" }, { actor, ...told })
+      if (!dropped.ok) throw new Error(dropped.message)
+      expect(told.sent).toHaveLength(1)
+      expect(told.sent[0]!.to).toBe(go.from)
+      expect(payloadOf(told.sent[0]!.text)).toMatchObject({
+        close: `bun run ask ack #i${go.ref} --no-link "<why>"`,
+        go: false,
+        id: go.id,
+        kind: "decision",
+        next: "close",
+        verb: "dismiss",
+      })
+      expect(dropped.item.delivery).toMatchObject({ status: "delivered" })
+
+      const denied = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, denied.id, { action: "deny" }, { actor })
+      const deniedTold = typed()
+      await store.answerItem(db, denied.id, { action: "dismiss" }, { actor, ...deniedTold })
+      expect(payloadOf(deniedTold.sent[0]!.text)).toMatchObject({
+        close: `bun run ask get #i${denied.ref} --ack`,
+        verb: "dismiss",
+      })
+
+      const closed = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, closed.id, { action: "deny" }, { actor })
+      await store.ackItem(db, closed.id)
+      const quiet = typed()
+      const done = await store.answerItem(db, closed.id, { action: "dismiss" }, { actor, ...quiet })
+      expect(done.ok).toBe(true)
+      expect(quiet.sent).toHaveLength(0)
+
+      const finished = await post(decision(PREVIEWS.ship))
+      await store.answerItem(db, finished.id, { action: "deny" }, { actor })
+      const doneQuiet = typed()
+      expect(await store.dismissItems(db, [finished.id], new Date(), { actor, ...doneQuiet })).toBe(
+        1,
+      )
+      expect(doneQuiet.sent).toHaveLength(0)
+
+      const progress = await update()
+      const doneTold = typed()
+      expect(await store.dismissItems(db, [progress.id], new Date(), { actor, ...doneTold })).toBe(
+        1,
+      )
+      expect(doneTold.sent).toHaveLength(1)
+      const line = payloadOf(doneTold.sent[0]!.text)
+      expect(line).toMatchObject({ go: false, kind: "update", next: "nothing", verb: "done" })
+      expect(line).not.toHaveProperty("close")
+      // Done already told it, so its Dismiss on Done types nothing again
+      const again = typed()
+      await store.answerItem(db, progress.id, { action: "dismiss" }, { actor, ...again })
+      expect(again.sent).toHaveLength(0)
+
+      const listedUpdate = await update()
+      const dismissTold = typed()
+      await store.answerItem(db, listedUpdate.id, { action: "dismiss" }, { actor, ...dismissTold })
+      expect(payloadOf(dismissTold.sent[0]!.text)).toMatchObject({
+        kind: "update",
+        next: "nothing",
+        verb: "dismiss",
+      })
     })
   })
 
@@ -2152,16 +2436,69 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect((await store.getItem(db, bare.id))?.answer).toEqual(bareClosed.item.answer)
   })
 
-  test("a replied item leaves the list once its week is up, as an answered one does", async () => {
+  test("a replied item from before the clocks stopped leaves the list once its week is up, as an answered one does", async () => {
     const posted = await post(decision(PREVIEWS.ticket))
-    await store.recordReply(db, posted.ref, new Date(Date.now() - 8 * 24 * 60 * 60 * 1000))
-    expect((await store.listItems(db)).items.map((i) => i.id)).not.toContain(posted.id)
+    const stopped = Date.parse(CLOCKS_STOPPED_AT)
+    await store.recordReply(db, posted.ref, new Date(stopped - 60 * 60_000))
+    const later = new Date(stopped + 8 * 24 * 60 * 60 * 1000)
+    expect((await store.listItems(db, later)).items.map((i) => i.id)).not.toContain(posted.id)
   })
 
-  // The replied-wait guard in listItems's what-needs-him query is visible only through the rest list's cap: without the guard a fresh replied item rides the uncapped needs-him side and never drops off, with it the 200 fresher rows push it out.
-  test("a fresh replied item drops off the list once the rest side's 200 rows are full", async () => {
+  // Since the clocks stopped, a card moves by a verb alone, so the list's week drops none of these: an approved go its poster has not acked, a card he only commented on, and an update he read; each leaves once its poster closes it or he dismisses it.
+  test("an unacked go, a comment-alone card, a read update and one woken from Later since the clocks stopped stay listed 8 days on, until a verb closes each", async () => {
+    const stopped = Date.parse(CLOCKS_STOPPED_AT)
+    const at = new Date(stopped + 60 * 60_000)
+    const delivered = async () => ({ at: at.toISOString(), ok: true as const, sessionId: "s1" })
+    const go = await post(decision(PREVIEWS.ship))
+    const approved = await store.answerItem(
+      db,
+      go.id,
+      { action: "approve" },
+      { actor, deliver: delivered, now: at },
+    )
+    if (!approved.ok) throw new Error(approved.message)
+    const replied = await post(decision(PREVIEWS.ticket))
+    await store.recordReply(db, replied.ref, at, "wait for the docs first")
+    const update = await post({
+      from: "builder",
+      kind: "update",
+      preview: { outcome: "merged" },
+      title: "Merged a made-up change",
+    })
+    expect(await store.markRead(db, [update.id], at)).toBe(1)
+    // put off with Later and woken: its answer holds the past snoozedUntil, yet it waits on his Done as a read update does
+    const woken = await post({
+      from: "builder",
+      kind: "update",
+      preview: { outcome: "merged" },
+      title: "Merged a made-up change put off",
+    })
+    expect(await store.markRead(db, [woken.id], at)).toBe(1)
+    const put = await store.scheduleItem(
+      db,
+      woken.id,
+      new Date(at.getTime() + 60 * 60_000).toISOString(),
+      {
+        now: at,
+      },
+    )
+    if (!put.ok) throw new Error(put.message)
+    const ids = [go.id, replied.id, update.id, woken.id]
+    const later = new Date(stopped + 8 * 24 * 60 * 60 * 1000)
+    const listed = (await store.listItems(db, later)).items.map((i) => i.id)
+    expect(ids.filter((id) => listed.includes(id))).toEqual(ids)
+    const closed = new Date(at.getTime() + 60_000)
+    const acked = await store.ackItem(db, go.id, { noLink: "made-up", now: closed })
+    if (!acked.ok) throw new Error(acked.message)
+    expect(await store.dismissItems(db, [replied.id, update.id, woken.id], closed)).toBe(3)
+    const after = (await store.listItems(db, later)).items.map((i) => i.id)
+    expect(ids.filter((id) => after.includes(id))).toEqual([])
+  })
+
+  // The rest side caps at 200 rows, newest first; a replied item since the clocks stopped waits on its poster's verb, so the cap never pushes it out.
+  test("a replied item since the clocks stopped stays in the list once the rest side's 200 rows are full", async () => {
     const posted = await post(decision(PREVIEWS.ticket))
-    await store.recordReply(db, posted.ref)
+    await store.recordReply(db, posted.ref, new Date(Date.parse(CLOCKS_STOPPED_AT) + 60_000))
     const updates: string[] = []
     for (let i = 0; i < 200; i++) {
       const update = await post({
@@ -2172,9 +2509,12 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       })
       updates.push(update.id)
     }
-    expect((await store.listItems(db)).items.map((i) => i.id)).not.toContain(posted.id)
+    expect((await store.listItems(db)).items.map((i) => i.id)).toContain(posted.id)
     // read the 200 back, so the store's later tests see no unread pile of ours
-    expect(await store.markRead(db, updates)).toBe(200)
+    expect(
+      await store.markRead(db, updates, new Date(Date.parse(CLOCKS_STOPPED_AT) - 60_000)),
+    ).toBe(200)
+    expect(await store.dismissItems(db, [posted.id])).toBe(1)
   })
 
   // An item he opened again from its card after a chat reply: its poster reads one answer, the one that replaced the reply, and is chased for that alone.
@@ -2225,7 +2565,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const at = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()
       expect(await store.scheduleItem(db, posted.id, at)).toMatchObject({
         code: "CONFLICT",
-        message: "This item already has your answer",
+        message: "Only an open decision or draft, or an update in your list, can be scheduled",
       })
     })
   })
@@ -3110,7 +3450,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(await store.markRead(db, [one.id])).toBe(0)
     const list = await store.listItems(db)
     const unread = list.items
-      .filter((i) => i.kind === "update" && i.readAt === null)
+      // its own three alone: an unread update stays listed at any age, so another test's can show here too
+      .filter((i) => [one.id, two.id, three.id].includes(i.id) && i.readAt === null)
       .map((i) => i.id)
     expect(unread).toEqual([three.id, two.id])
     // only the updates named are marked, so one that arrived since stays unread
@@ -3164,11 +3505,21 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     await store.markRead(db, pile.map((i) => i.id).slice(200))
   }, 60_000)
 
-  test("the list counts what needs him and keeps answered items a week", async () => {
+  test("the list counts what needs him and keeps answered items a week, but for each card that waits on a verb since the clocks stopped", async () => {
     const list = await store.listItems(db)
     expect(list.count).toBe(store.inboxCount(list.items))
     const later = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000)
     const old = await store.listItems(db, later)
+    const stopped = Date.parse(CLOCKS_STOPPED_AT)
+    // since the clocks stopped, an answer its poster has not closed and an update he read and has not dismissed stay at any age
+    const waitsOnVerb = (i: InboxItem) => {
+      const answer = i.answer as { ackedAt?: string; at?: string; dismissedAt?: string } | null
+      if (i.kind === "update")
+        return answer === null && i.readAt !== null && Date.parse(i.readAt) >= stopped
+      return (
+        !!answer?.at && Date.parse(answer.at) >= stopped && !answer.ackedAt && !answer.dismissedAt
+      )
+    }
     expect(
       old.items.every(
         (i) =>
@@ -3176,7 +3527,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
           // a set-aside item stays, however old, for the Archived shelf
           i.status === "cleared" ||
           (i.kind === "update" && i.readAt === null) ||
-          store.deliveryFailed(i),
+          store.deliveryFailed(i) ||
+          waitsOnVerb(i),
       ),
     ).toBe(true)
   })
@@ -3206,7 +3558,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(store.snoozedUntil(moved.item, now)).toBe("2026-10-09T09:00:00.000Z")
   })
 
-  test("Schedule refuses an update, an answered item and a time that has passed", async () => {
+  test("Schedule refuses an update already done, an answered item and a time that has passed", async () => {
     const at = "2026-10-08T09:00:00.000Z"
     const update = await post({
       from: "builder",
@@ -3214,6 +3566,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       preview: { outcome: "merged" },
       title: "Merged",
     })
+    await store.dismissItems(db, [update.id])
     expect((await store.scheduleItem(db, update.id, at)).ok).toBe(false)
     const posted = await post(decision(PREVIEWS.ask))
     const answered = await store.answerItem(db, posted.id, { action: "approve" }, { actor })
@@ -3439,6 +3792,62 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         await everyRow(),
       ])
         expect(kept).not.toContain(VALUE)
+    })
+
+    test("a saved secret whose telling failed keeps its saved result, and its Retry tells the poster again without running the sink (PG-880)", async () => {
+      const posted = await post({
+        ...decision({
+          key: "YARD_TOKEN",
+          sink: { item: "yard", type: "keychain" },
+          type: "secret",
+        }),
+        from: "dispatcher",
+      })
+      const saves: string[] = []
+      const keychainSink = async (_item: string, value: string) => void saves.push(value)
+      const sink = stub()
+      const provided = await store.provideSecret(
+        db,
+        posted.id,
+        { value: `yard_${VALUE}` },
+        {
+          actor,
+          deliver: async () => ({
+            code: "CMUX_FAILED",
+            ok: false,
+            reason:
+              "The sessions read was cut short (a herdr server or pane did not answer whole), so dispatcher was not found; nothing was typed.",
+          }),
+          keychain: keychainSink,
+          run: sink.run,
+        },
+      )
+      expect(provided.ok && provided.item.delivery).toMatchObject({
+        code: "CMUX_FAILED",
+        status: "failed",
+      })
+      const saved = provided.ok ? provided.item.answer : null
+      expect(saved).toMatchObject({
+        results: [{ environment: "Keychain", exitCode: 0, line: "saved" }],
+      })
+      const sent: Delivery[] = []
+      const retried = await store.retryDelivery(db, posted.id, {
+        actor,
+        deliver: async (delivery) => {
+          sent.push(delivery)
+          return { at: new Date().toISOString(), ok: true, sessionId: "s1" }
+        },
+      })
+      expect(saves).toEqual([`yard_${VALUE}`])
+      expect(sink.calls).toHaveLength(0)
+      expect(sent).toHaveLength(1)
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        results: [{ environment: "Keychain", exitCode: 0, line: "saved" }],
+        verb: "submit",
+      })
+      expect(sent[0]?.text).not.toContain(VALUE)
+      expect(retried.ok && retried.item.answer).toEqual(saved)
+      expect(retried.ok && retried.item.delivery).toMatchObject({ status: "delivered" })
     })
 
     test("a keychain save that fails keeps the refusal's first line, with the value cut out", async () => {

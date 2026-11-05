@@ -27,7 +27,7 @@ import {
 } from "../../../../../packages/scripts/src/playground/rm"
 import type { Proc } from "../../../../../scripts/hooks/session-state"
 
-test("rm takes one path, or --worktree's with an optional --discard, with an optional reason", () => {
+test("rm takes one path, or --worktree's with an optional --discard and --pr, with an optional reason", () => {
   expect(rmArgs(["old"])).toEqual({
     discard: false,
     path: "old",
@@ -53,6 +53,13 @@ test("rm takes one path, or --worktree's with an optional --discard, with an opt
     reason: "playground rm",
     worktree: true,
   })
+  expect(rmArgs(["--worktree", "wt", "--pr", "https://github.com/o/r/pull/1"])).toEqual({
+    discard: false,
+    path: "wt",
+    pr: "https://github.com/o/r/pull/1",
+    reason: "playground rm",
+    worktree: true,
+  })
 })
 
 test("rm takes --list or --restore <id> alone", () => {
@@ -71,6 +78,8 @@ test.each([
   [["--worktree", "wt", "--discard", "--discard"]],
   [["--worktree", "wt", "--decision", "#i9"]],
   [["--worktree", "wt", "--discard", "--decision"]],
+  [["a", "--pr", "https://github.com/o/r/pull/1"]],
+  [["--worktree", "wt", "--pr"]],
 ])("rm refuses %j with its usage", (words) => {
   expect(rmArgs(words)).toEqual({ error: RM_USAGE })
 })
@@ -162,7 +171,13 @@ test("runRm --worktree checks the holders, moves the worktree and prunes it from
   const held = { command: "zsh", cwd: wt, pid: 7, sockets: [] }
   expect(await runRm(["--worktree", wt], { ...deps, procs: () => [held] })).toBe(1)
   expect(existsSync(wt)).toBe(true)
-  expect(await runRm(["--worktree", wt], deps)).toBe(0)
+  const url = "https://github.com/o/r/pull/1"
+  const merging = { name: "abc123-worker", pr: url, status: "working" }
+  writeFileSync(join(deps.data, "roster.json"), JSON.stringify({ agents: [merging] }))
+  expect(await runRm(["--worktree", wt], deps)).toBe(1)
+  expect(await runRm(["--worktree", wt, "--pr", `${url}0`], deps)).toBe(1)
+  expect(existsSync(wt)).toBe(true)
+  expect(await runRm(["--worktree", wt, "--pr", url], deps)).toBe(0)
   expect(existsSync(wt)).toBe(false)
   expect(git(main, "worktree", "list")).not.toContain("pg-1")
 })

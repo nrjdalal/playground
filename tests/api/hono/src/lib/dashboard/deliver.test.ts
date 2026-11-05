@@ -505,6 +505,26 @@ describe("deliver", () => {
     }
   })
 
+  test("a read cut short that misses the session is read once more, and still missing it is a failed read, never NOT_FOUND (PG-880)", async () => {
+    const cut: Live = { ...live([], {}), partial: true }
+    const { deps, recorded, typed } = fakes(cut)
+    let reads = 0
+    deps.board = async () => (reads++, cut)
+    const refused = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
+    expect(refused).toMatchObject({ code: "CMUX_FAILED", ok: false })
+    expect(refused.ok ? "" : refused.reason).not.toContain("No live session is named")
+    expect(reads).toBe(2)
+    expect(typed).toEqual([])
+    expect(recorded).toEqual([])
+
+    const second = fakes(board())
+    const reads2: Live[] = [cut, board()]
+    second.deps.board = async () => reads2.shift() ?? board()
+    expect(await deliver({ actor, text: "hi", to: "dispatcher" }, second.deps)).toMatchObject({
+      ok: true,
+    })
+  })
+
   test("refuses to type into an input that already holds something, which the message would join", async () => {
     for (const box of ["❯\u00a0a draft", "!", "❯\u00a0/"]) {
       const { deps, recorded, typed } = fakes(board())
