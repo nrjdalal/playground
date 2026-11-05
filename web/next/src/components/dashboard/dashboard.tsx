@@ -32,6 +32,7 @@ import {
 import { inboxPosters, useInbox } from "@/lib/inbox"
 import type { Activity } from "@/lib/live-activity"
 import { waitingSessions } from "@/lib/needs-you"
+import { useGroupOpen } from "@/lib/sidebar-groups"
 
 // One stream the dashboard reads: its session's spinner line, sent while its chat is open and it works (null when it shows none), whether its steps are loading, its older steps, and why its steps could not be read, which its stream says where its steps would be.
 export type DashboardStream = {
@@ -180,10 +181,10 @@ export function DashboardProvider({
   )
   // after a roll serves a new build, an open tab reloads onto it once (the production build has no dev socket)
   useBuildReload(outbox.messages)
-  // The Other group's two toggles, here for the same reason as the inbox: the group leaves the sidebar with its last session, and the sidebar unmounts on a narrow screen, so state kept there would reset. The sidebar and the dashboard's table share them, as they show the one group.
-  const [otherOpen, setOtherOpen] = useState(false)
+  // The Other group's two toggles, here for the same reason as the inbox: the group leaves the sidebar with its last session, and the sidebar unmounts on a narrow screen, so state kept there would reset. The sidebar and the dashboard's table share them, as they show the one group. Other and Scripts open or close as every sidebar group does, kept across reloads.
+  const [otherOpen, setOtherOpen] = useGroupOpen("Other", false)
   const [otherShowIdle, setOtherShowIdle] = useState(false)
-  const [scriptsOpen, setScriptsOpen] = useState(false)
+  const [scriptsOpen, setScriptsOpen] = useGroupOpen("Scripts", false)
   // Each row starts collapsed, and stays as you left it while the dashboard is open, for the same reason.
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(() => new Set())
   const open = useMemo(

@@ -175,6 +175,17 @@ describe("playground sweep", () => {
     expect(await sweep(dir)).toEqual(["quiet"])
   })
 
+  test("focus goes to the ops lead while it stands, by its session and reason", async () => {
+    const dir = folder()
+    writeFileSync(
+      join(dir, "ops", "run-slot.focus"),
+      "worker-f 2026-10-23T12:00:00Z 2026-10-23T14:00:00Z a timed demo\n",
+    )
+    expect(await runSweep("ops", dir, NOW, 4)).toEqual([
+      "switch on: run-slot.focus for 0h0m, until 2026-10-23T14:00:00Z, by worker-f: a timed demo",
+    ])
+  })
+
   test("the switches and their default hours are run-slot.sh's", async () => {
     const script = readFileSync(
       join(import.meta.dir, "../../../../../scripts/ops/run-slot.sh"),

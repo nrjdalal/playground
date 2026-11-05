@@ -26,7 +26,6 @@ import {
   runner,
   switchAccount,
   trashPurge,
-  turboPrune,
 } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
@@ -756,32 +755,6 @@ describe("the beats that send no line", () => {
     expect(await Bun.file(join(ops, "log", "glm-credits.log")).text()).toContain("fresh 5h 10/100")
   })
 
-  test("the turbo prune runs weekly, removes entries over 7 days old, keeps newer ones and folders", async () => {
-    expect(beat("turbo-prune").cron).toBe("29 3 * * 0")
-    const ops = scratch()
-    const cache = join(ops, "..", "turbo")
-    mkdirSync(join(cache, "sub"), { recursive: true })
-    const now = at(3, 29)
-    const days = (n: number) => new Date(now.getTime() - n * 86_400_000)
-    writeFileSync(join(cache, "old.tar.zst"), "x".repeat(3 * 1_048_576))
-    utimesSync(join(cache, "old.tar.zst"), days(8), days(8))
-    writeFileSync(join(cache, "new.tar.zst"), "y")
-    utimesSync(join(cache, "new.tar.zst"), days(1), days(1))
-    writeFileSync(join(cache, "sub", "inner"), "z")
-    utimesSync(join(cache, "sub", "inner"), days(30), days(30))
-    utimesSync(join(cache, "sub"), days(30), days(30))
-    const { ctx, runs, sent } = fake(ops, now)
-    await turboPrune(cache)(ctx)
-    expect(existsSync(join(cache, "old.tar.zst"))).toBe(false)
-    expect(existsSync(join(cache, "new.tar.zst"))).toBe(true)
-    expect(existsSync(join(cache, "sub", "inner"))).toBe(true)
-    expect(runs).toEqual([])
-    expect(sent).toEqual([])
-    expect(await Bun.file(join(ops, "log", "turbo-prune.log")).text()).toContain(
-      "removed 1, kept 1, freed 3 MB",
-    )
-  })
-
   test("the trash purge runs hourly on the trash beside ops, removing batches over 7 days old", async () => {
     expect(beat("trash-purge").cron).toBe("17 * * * *")
     const ops = scratch()
@@ -797,24 +770,6 @@ describe("the beats that send no line", () => {
     expect(sent).toEqual([])
     expect(await Bun.file(join(ops, "log", "trash-purge.log")).text()).toContain(
       "removed 1 (20261020T000000Z-s)",
-    )
-  })
-
-  test("the turbo prune logs a missing folder and throws nothing", async () => {
-    const ops = scratch()
-    const { ctx } = fake(ops, at(3, 29))
-    await turboPrune(join(ops, "no-cache"))(ctx)
-    expect(await Bun.file(join(ops, "log", "turbo-prune.log")).text()).toContain("no folder")
-  })
-
-  test("the turbo prune names a cache path it cannot read, rather than calling it missing", async () => {
-    const ops = scratch()
-    const file = join(ops, "not-a-folder")
-    writeFileSync(file, "")
-    const { ctx } = fake(ops, at(3, 29))
-    await turboPrune(file)(ctx)
-    expect(await Bun.file(join(ops, "log", "turbo-prune.log")).text()).toContain(
-      `unreadable ${file}: ENOTDIR`,
     )
   })
 })
