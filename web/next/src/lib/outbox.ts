@@ -183,8 +183,8 @@ export function failWithFiles(
 // The state each move starts from: a move that finds its message anywhere else is stale (a reply after a cancel, a release after the send began) and changes nothing.
 const FROM: Record<Exclude<OutboxAction["type"], "add">, readonly OutboxState[]> = {
   cancel: ["queued"],
-  // a request that went unanswered may still have landed, and its transcript then says so, a message still waiting to be sent again included
-  delivered: ["typed", "failed", "queued"],
+  // a request that went unanswered may still have landed, and its transcript then says so, a message still waiting to be sent again included; one still sending lands before its answer, which comes once the box settles
+  delivered: ["typed", "failed", "queued", "sending"],
   dismiss: ["typed"],
   fail: ["sending"],
   release: ["queued"],
@@ -205,6 +205,17 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
   }
   return messages.map((m): OutboxMessage => {
     if (m !== target) return m
+    // its line has landed, so the answer to its request, whatever it says, makes it delivered
+    if (
+      m.entryId !== null &&
+      (action.type === "typed" || action.type === "fail" || action.type === "wait")
+    ) {
+      return {
+        ...m,
+        ...(action.type === "typed" && { sessionId: action.sessionId, typedAt: action.at }),
+        state: "delivered",
+      }
+    }
     switch (action.type) {
       // A picker answered starts the count over: its wait, however long, is not a failure.
       case "release":
@@ -260,8 +271,14 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
           state: "failed",
           unanswered: m.unanswered || UNANSWERED.has(action.code),
         }
+      // one still sending keeps its state, so the next message waits for its answer, while its line stands in for its pending copy
       case "delivered":
-        return { ...m, deliveredAt: action.at, entryId: action.entryId, state: "delivered" }
+        return {
+          ...m,
+          deliveredAt: action.at,
+          entryId: action.entryId,
+          state: m.state === "sending" ? "sending" : "delivered",
+        }
     }
   })
 }
@@ -331,9 +348,9 @@ export const sameText = (
 // A message cut off while typing may still have gone whole (a 30-line paste read failed after it landed), so the transcript can show it delivered too.
 const CUT_OFF = "INTERRUPTED"
 
-// When a message could have reached its session, if the transcript may hold it: from when it was written, for a typed message, one whose request went unanswered and one cut off while typing alike. Its entry never precedes that, while typedAt comes after the Enter, herdr's answer, the box's settle and the row's commit, which on a loaded machine run past the Enter's own stamp on a message queued mid-turn.
+// When a message could have reached its session, if the transcript may hold it: from when it was written, for a typed message, one still sending, one whose request went unanswered and one cut off while typing alike. Its entry never precedes that, while typedAt comes after the Enter, herdr's answer, the box's settle and the row's commit, which on a loaded machine run past the Enter's own stamp on a message queued mid-turn.
 const reachableSince = (m: OutboxMessage): number | null => {
-  if (m.state === "typed") return Date.parse(m.at)
+  if (m.state === "typed" || m.state === "sending") return Date.parse(m.at)
   // still waiting to be sent again after a try that got no answer, which may have landed
   if (m.state === "queued" && m.unanswered) return Date.parse(m.at)
   if (
@@ -404,7 +421,7 @@ export function findDelivery(
   )
 }
 
-// The messages the loaded entries show delivered, oldest first so two sends of the same text claim their entries in order. The entries are one session's: a typed message is matched against them when that session took it, and one whose request went unanswered (no session named in a reply) when it was sent to that session's name. Typed messages claim first, since an unanswered one may never have landed and must not take the entry of a later send of the same text.
+// The messages the loaded entries show delivered, oldest first so two sends of the same text claim their entries in order. The entries are one session's: a typed message is matched against them when that session took it, and one still sending or whose request went unanswered (no session named in a reply) when it was sent to that session's name. Typed messages claim first, since an unanswered one may never have landed and must not take the entry of a later send of the same text.
 export function matchDeliveries(
   messages: OutboxMessage[],
   entries: Entry[],
@@ -414,11 +431,15 @@ export function matchDeliveries(
   const claimed = new Set(messages.flatMap((m) => (m.entryId ? [m.entryId] : [])))
   const found: { at: string; entryId: string; id: string }[] = []
   const typed = messages.filter((m) => m.state === "typed" && m.sessionId === session.id)
+  // one still sending names no session yet, so it is read in the session it went to by name, as an unanswered one is
+  const sending = messages.filter(
+    (m) => m.state === "sending" && m.entryId === null && m.to === session.name,
+  )
   const unanswered = messages.filter(
     (m) =>
       (m.state === "failed" || (m.state === "queued" && m.unanswered)) && m.to === session.name,
   )
-  for (const m of [...typed, ...unanswered]) {
+  for (const m of [...typed, ...sending, ...unanswered]) {
     const entry = findDelivery(m, entries, claimed)
     if (!entry) continue
     claimed.add(entry.id)
@@ -575,9 +596,12 @@ export const deliveredAt = ({
   sent: OutboxMessage | null
 }): string | null => sent?.deliveredAt ?? at
 
+// Whether the transcript holds a message: delivered, or still sending with its line already landed.
+export const landed = (m: OutboxMessage): boolean => m.state === "delivered" || m.entryId !== null
+
 // Whether a message of his to the session is still on its way: anything the transcript does not hold yet, a failed one included, since one whose fate is unknown may still land. Undo's own markers are not counted.
 export const othersWaiting = (messages: OutboxMessage[]): boolean =>
-  messages.some((m) => m.state !== "delivered" && !isUnsentMarker(m.text))
+  messages.some((m) => !landed(m) && !isUnsentMarker(m.text))
 
 // The undo sent for a delivered message: the newest marker sent while it was his last to have arrived.
 export function undoOf(messages: OutboxMessage[], sent: OutboxMessage): OutboxMessage | null {
