@@ -8,20 +8,20 @@ export type TargetDeps = {
   worktrees: string | null
 }
 
-// Pure: each word of a delete's what, stripped of the quotes and punctuation around it, as playground rm reads it.
+// Pure: each word of a delete's what, stripped of the quotes and punctuation around it: the one reader ask and playground rm --decision share.
 export const targetWords = (what: string): string[] =>
   what
     .split(/\s+/)
     .map((word) => word.replace(/^[`'"(]+|[`'",.;:)]+$/g, "").replace(/(.)\/$/, "$1"))
     .filter((word) => word !== "")
 
-// The targets a delete's what names by a short name, each with the full path to write: a relative or ~ path that is there, or a worktree's bare folder name, unless that full path stands in the what beside it, since playground rm --decision matches the full path alone.
+// The targets a delete's what names by a short name, each with the full path to write: a relative or ~ path that is there, or a worktree's bare folder name (a word of dots alone, as a stray ./, is prose), unless that full path stands in the what beside it, since playground rm --decision matches the full path alone.
 export function shortTargets(what: string, deps: TargetDeps): { full: string; word: string }[] {
   const words = targetWords(what)
   const named = new Set(words.filter((word) => word.startsWith("/")))
   const short: { full: string; word: string }[] = []
   for (const word of words) {
-    if (word.startsWith("/") || /^[a-z][a-z\d+.-]*:/i.test(word)) continue
+    if (word.startsWith("/") || /^\.+$/.test(word) || /^[a-z][a-z\d+.-]*:/i.test(word)) continue
     const full =
       word === "~" || word.startsWith("~/")
         ? join(deps.home, word.slice(1))

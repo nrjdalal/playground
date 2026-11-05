@@ -45,10 +45,10 @@ describe("a delete names its targets by full path", () => {
     ).toEqual([])
   })
 
-  test("words that name nothing there pass: prose, a URL, a branch with no worktree, and/or", () => {
+  test("words that name nothing there pass: prose, a URL, a branch with no worktree, and/or, a stray ./", () => {
     expect(
       shortTargets(
-        "the old branch PG-9-gone and/or https://github.com/acme/app/pull/1 for good",
+        "the old branch PG-9-gone and/or https://github.com/acme/app/pull/1 for good, in ./ or ../",
         MACHINE,
       ),
     ).toEqual([])
