@@ -15,9 +15,9 @@ import {
 import { authMiddleware, guardWrites, requireConsoleRole } from "@/middlewares"
 
 const templateSchema = z.object({
-  id: z.string(),
   backend: z.enum(["claude", "glm"]),
   effort: z.string().nullable(),
+  id: z.string(),
   kind: z.string(),
   label: z.string(),
   model: z.string().nullable(),
@@ -55,7 +55,7 @@ export const templatesRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Start a session from a template: a dispatcher template starts the second dispatcher, any other kind a new lead reporting to the dispatcher, its roster row written first, each through spawn.sh's manager mode. Refused while a session holds the name. A fixture stack starts nothing: it brings back or makes the made-up session.",
+        "Start a session from a template: a dispatcher template starts the second dispatcher, any other kind a new lead reporting to the dispatcher, its roster row written first, each through spawn.sh's manager mode. Refused while a session holds the name, or, for a kind with a seat, while a live session holds its seat. A fixture stack starts nothing: it brings back or makes the made-up session.",
       responses: {
         200: {
           content: {

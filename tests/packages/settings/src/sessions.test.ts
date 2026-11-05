@@ -71,11 +71,22 @@ describe("sessions.templates", () => {
     )
   })
 
-  test("the schema refuses an id listed twice, and a GLM template with an account", () => {
+  test("the schema refuses an id listed twice, and a GLM template with an account or an effort", () => {
     const [assistant, , , glm] = defaults()
     expect(sessionTemplates.safeParse([assistant, assistant]).success).toBe(false)
     expect(sessionTemplates.safeParse([{ ...glm!, account: "someone@example.com" }]).success).toBe(
       false,
     )
+    expect(sessionTemplates.safeParse([{ ...glm!, effort: "low" }]).success).toBe(false)
+  })
+
+  test("the Orchestrator is the seatless orchestrator kind, and the second dispatchers take their own brief", () => {
+    const byId = new Map(defaults().map((t) => [t.id, t]))
+    expect(byId.get("orchestrator")).toMatchObject({
+      brief: "orchestrator.md",
+      kind: "orchestrator",
+    })
+    expect(byId.get("second-dispatcher-claude")?.brief).toBe("dispatcher-2.md")
+    expect(byId.get("second-dispatcher-glm")?.brief).toBe("dispatcher-2.md")
   })
 })

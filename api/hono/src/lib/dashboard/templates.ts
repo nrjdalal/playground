@@ -1,17 +1,18 @@
 import { copyFileSync, existsSync } from "node:fs"
 import { join } from "node:path"
 
-import { ID_ALPHABET } from "@packages/config/kinds"
+import { ID_ALPHABET, seatOf } from "@packages/config/kinds"
 import { BRIEF_NAME, readSessionTemplates, type SessionTemplate } from "@packages/settings"
 
 import { readConfigAccount } from "@/lib/dashboard/account"
 import { checkoutRoot, fixtureStart, readsLive } from "@/lib/dashboard/fixture"
 import { readRegistry, registeredSessionsOf } from "@/lib/dashboard/peers"
+import { readRoster } from "@/lib/dashboard/roster"
 import { DISPATCHER, DISPATCHER_SECONDARY } from "@/lib/dashboard/workers"
 import { dataDir } from "@/lib/sessions/paths"
 import { listAccounts } from "@/lib/store/accounts"
 
-// The sidebar's plus: a session started from one of sessions.templates, through spawn.sh's manager mode, so its capacity gate and its second-dispatcher rule hold unchanged. A dispatcher template starts the second dispatcher; any other kind a new <id>-<kind> lead, reporting to the dispatcher, its roster row written first. A fixture stack runs nothing and brings back or makes the made-up session.
+// The sidebar's plus: a session started from one of sessions.templates, through spawn.sh's manager mode, so its capacity gate and its second-dispatcher rule hold unchanged. A dispatcher template starts the second dispatcher; any other kind a new <id>-<kind> lead, reporting to the dispatcher, its roster row written first, and a kind with a seat only while no live session holds it. A fixture stack runs nothing and brings back or makes the made-up session.
 
 export type Run = (argv: string[]) => Promise<{ code: number; stderr: string; stdout: string }>
 
@@ -103,6 +104,10 @@ const pickName = async (root: string, kind: string, runCli: Run): Promise<string
 const held = async (name: string): Promise<boolean> =>
   registeredSessionsOf(await readRegistry()).some((session) => session.name === name)
 
+// The live session holding a kind's seat in the roster (seatOf), so a second Builder or Assistant never takes the running one's; none for an orchestrator, which holds no seat.
+const seatHolder = async (kind: SessionTemplate["kind"]): Promise<string | undefined> =>
+  seatOf((await readRoster()).roster?.agents, kind)
+
 // The brief a template names, found where a start fills a session's own brief from: the data folder's file of that name first, else scripts/briefs'.
 const briefSource = (data: string, root: string, brief: string): string | undefined =>
   [join(data, brief), join(root, "scripts/briefs", brief)].find((path) => existsSync(path))
@@ -150,9 +155,9 @@ const refusalIn = (template: SessionTemplate, { account, data, root }: Context) 
   })
 
 export type TemplateRow = {
-  id: string
   backend: "claude" | "glm"
   effort: string | null
+  id: string
   kind: string
   label: string
   model: string | null
@@ -173,9 +178,9 @@ export async function listTemplates({
 } = {}): Promise<TemplateRow[]> {
   const context = await contextOf(data, root, login)
   return templates.map((template) => ({
-    id: template.id,
     backend: template.backend,
     effort: template.effort ?? null,
+    id: template.id,
     kind: template.kind,
     label: template.label,
     model: template.model ?? null,
@@ -193,6 +198,7 @@ export async function startTemplate(
     login,
     root = checkoutRoot(),
     run: runCli = run,
+    seat = seatHolder,
     templates = readSessionTemplates(data),
   }: {
     data?: string
@@ -202,6 +208,7 @@ export async function startTemplate(
     login?: string | null
     root?: string | null
     run?: Run
+    seat?: (kind: SessionTemplate["kind"]) => Promise<string | undefined>
     templates?: SessionTemplate[]
   } = {},
 ): Promise<TemplateStarted> {
@@ -218,6 +225,8 @@ export async function startTemplate(
   }
   if (!root)
     return { detail: "This API has no checkout to start it from", name: unnamed, status: "failed" }
+  const holder = dispatcher ? undefined : await seat(template.kind)
+  if (holder) return { name: holder, status: "running" }
   const name = dispatcher ? DISPATCHER_SECONDARY : await pickName(root, template.kind, runCli)
   if (!name) return { detail: "The name picker gave no name", name: unnamed, status: "failed" }
   if (await isHeld(name)) return { name, status: "running" }
@@ -232,9 +241,11 @@ export async function startTemplate(
   const target = join(data, briefOf(name))
   const source = briefSource(data, root, template.brief)
   if (!existsSync(target) && source) copyFileSync(source, target)
-  for (const step of argv.steps) {
+  for (const [index, step] of argv.steps.entries()) {
     const result = await runCli(step)
     if (result.code === 0) continue
+    // The roster row an orchestrator's first step wrote ends with the start, so no row waits at starting for a session that never ran.
+    if (index > 0) await runCli([...argv.steps[0]!.slice(0, 4), "status=ended"])
     const detail = said(result.stderr) || said(result.stdout) || `exit ${result.code}`
     return { detail, name, status: result.code === 1 ? "refused" : "failed" }
   }

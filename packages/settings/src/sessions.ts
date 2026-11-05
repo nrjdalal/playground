@@ -16,6 +16,7 @@ export const TEMPLATE_KINDS = [
   "dispatcher",
   "ops",
   "optimizer",
+  "orchestrator",
   "planner",
 ] as const satisfies readonly RosterKind[]
 
@@ -43,10 +44,15 @@ export const sessionTemplate = z
       .regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id")
       .optional(),
   })
-  .refine((t) => t.backend === "claude" || (t.account === undefined && t.model === undefined), {
-    message:
-      "a GLM template runs on models.glm and its first GLM row, so it takes no account or model",
-  })
+  .refine(
+    (t) =>
+      t.backend === "claude" ||
+      (t.account === undefined && t.effort === undefined && t.model === undefined),
+    {
+      message:
+        "a GLM template runs on models.glm and its first GLM row, so it takes no account, effort or model",
+    },
+  )
 
 export type SessionTemplate = z.infer<typeof sessionTemplate>
 
@@ -83,21 +89,21 @@ export const sessionSettings = defineSettings({
       },
       {
         backend: "claude",
-        brief: "builder.md",
+        brief: "orchestrator.md",
         id: "orchestrator",
-        kind: "builder",
+        kind: "orchestrator",
         label: "Orchestrator",
       },
       {
         backend: "claude",
-        brief: "dispatcher.md",
+        brief: "dispatcher-2.md",
         id: "second-dispatcher-claude",
         kind: "dispatcher",
         label: "Second dispatcher on Claude",
       },
       {
         backend: "glm",
-        brief: "dispatcher.md",
+        brief: "dispatcher-2.md",
         id: "second-dispatcher-glm",
         kind: "dispatcher",
         label: "Second dispatcher on GLM",

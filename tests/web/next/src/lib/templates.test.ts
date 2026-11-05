@@ -3,10 +3,10 @@ import { describe, expect, test } from "bun:test"
 import { type TemplateRow, templateRowView } from "../../../../../web/next/src/lib/templates"
 
 const row = (over: Partial<TemplateRow>): TemplateRow => ({
-  id: "orchestrator",
   backend: "claude",
   effort: null,
-  kind: "builder",
+  id: "orchestrator",
+  kind: "orchestrator",
   label: "Orchestrator",
   model: null,
   refusal: null,

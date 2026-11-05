@@ -45,21 +45,26 @@ describe("templateArgv, each default template", () => {
     })
   })
 
-  test("Orchestrator writes a manager kind's roster row first, then starts", () => {
-    expect(argv("orchestrator", "c8m3nr-builder")).toEqual({
+  test("Orchestrator writes a seatless orchestrator's roster row first, then starts", () => {
+    expect(argv("orchestrator", "c8m3nr-orchestrator")).toEqual({
       steps: [
         [
           "bun",
           `${ROOT}/scripts/roster.ts`,
           "set",
-          "c8m3nr-builder",
-          "kind=builder",
+          "c8m3nr-orchestrator",
+          "kind=orchestrator",
           "reportsTo=dispatcher",
           "task=Orchestrator",
         ],
-        [SPAWN, "manager", "c8m3nr-builder", "brief-c8m3nr-builder.md"],
+        [SPAWN, "manager", "c8m3nr-orchestrator", "brief-c8m3nr-orchestrator.md"],
       ],
     })
+  })
+
+  test("every default's brief ships in scripts/briefs, so each default starts on a fresh install", () => {
+    const repo = new URL("../../../../../../", import.meta.url).pathname
+    expect(DEFAULTS.filter((t) => !existsSync(join(repo, "scripts/briefs", t.brief)))).toEqual([])
   })
 
   test("Second dispatcher on Claude starts on the account it is given, and with none is refused with the owner's next step", () => {
@@ -127,13 +132,14 @@ describe("the account and the refusal a template reads", () => {
   })
 })
 
-// The process boundary as a script: each argv recorded, the name picker answering a name, every other step the answer given.
+// The process boundary as a script: each argv recorded, the name picker answering a name of the kind asked, a roster write passing, every other step the answer given.
 const cli = (answer: { code: number; stderr?: string }) => {
   const calls: string[][] = []
   const run: Run = async (argv) => {
     calls.push(argv)
     if (argv[1]?.endsWith("name/index.ts"))
-      return { code: 0, stderr: "", stdout: "c8m3nr-builder\n" }
+      return { code: 0, stderr: "", stdout: `c8m3nr-${argv[2]}\n` }
+    if (argv[1]?.endsWith("roster.ts")) return { code: 0, stderr: "", stdout: "" }
     return { stderr: "", stdout: "", ...answer }
   }
   return { calls, run }
@@ -143,37 +149,100 @@ describe("startTemplate on a stack reading its own machine", () => {
   const root = mkdtempSync(join(scratch, "root-"))
   const data = mkdtempSync(join(scratch, "data-"))
   mkdirSync(join(root, "scripts/briefs"), { recursive: true })
-  writeFileSync(join(root, "scripts/briefs/builder.md"), "the builder's brief\n")
-  const start = (id: string, run: Run, isHeld = async () => false) =>
-    startTemplate(id, { data, isHeld, live: true, login: null, root, run })
+  writeFileSync(join(root, "scripts/briefs/orchestrator.md"), "the orchestrator's brief\n")
+  writeFileSync(join(root, "scripts/briefs/dispatcher-2.md"), "the second dispatcher's brief\n")
+  const NO_SEAT = async () => undefined
+  const start = (
+    id: string,
+    run: Run,
+    isHeld = async () => false,
+    seat: (kind: string) => Promise<string | undefined> = NO_SEAT,
+    templates?: SessionTemplate[],
+  ) => startTemplate(id, { data, isHeld, live: true, login: null, root, run, seat, templates })
 
   test("an orchestrator gets its roster row, then spawn.sh, its brief filled from scripts/briefs", async () => {
     const { calls, run } = cli({ code: 0 })
-    expect(await start("orchestrator", run)).toEqual({ name: "c8m3nr-builder", status: "started" })
+    expect(await start("orchestrator", run)).toEqual({
+      name: "c8m3nr-orchestrator",
+      status: "started",
+    })
     expect(calls.map((argv) => (argv[1] === "manager" ? argv[0] : argv[1]))).toEqual([
       `${root}/packages/scripts/src/name/index.ts`,
       `${root}/scripts/roster.ts`,
       `${root}/scripts/spawn.sh`,
     ])
-    expect(readFileSync(join(data, "brief-c8m3nr-builder.md"), "utf8")).toBe(
-      "the builder's brief\n",
+    expect(readFileSync(join(data, "brief-c8m3nr-orchestrator.md"), "utf8")).toBe(
+      "the orchestrator's brief\n",
     )
   })
 
-  test("spawn.sh's refusal comes back as its last line, whole", async () => {
-    const reason = `spawn.sh refuses c8m3nr-builder: the capacity gate reads 9 of 8 ${"x".repeat(300)}`
-    const answer = await start(
-      "orchestrator",
-      cli({ code: 1, stderr: `checking\n${reason}\n` }).run,
+  test("a fresh data folder's brief-dispatcher-2.md is filled from scripts/briefs/dispatcher-2.md, the second dispatcher's own brief", async () => {
+    const fresh = mkdtempSync(join(scratch, "fresh-"))
+    const { run } = cli({ code: 0 })
+    const answer = await startTemplate("second-dispatcher-glm", {
+      data: fresh,
+      isHeld: async () => false,
+      live: true,
+      login: null,
+      root,
+      run,
+      seat: NO_SEAT,
+    })
+    expect(answer.status).toBe("started")
+    expect(readFileSync(join(fresh, "brief-dispatcher-2.md"), "utf8")).toBe(
+      "the second dispatcher's brief\n",
     )
-    expect(answer).toEqual({ detail: reason, name: "c8m3nr-builder", status: "refused" })
+  })
+
+  test("a kind with a seat answers running, naming the holder, while a live session holds its seat, and runs no step", async () => {
+    // briefs this scratch checkout holds, so the seat is all that stops each start
+    const assistant = { ...byId("assistant"), brief: "orchestrator.md" }
+    const lead = { ...byId("orchestrator"), id: "lead", kind: "builder" as const, label: "Lead" }
+    const holders: Record<string, string> = { assistant: "r4qmq4-assistant", builder: "builder" }
+    const seat = async (kind: string) => holders[kind]
+    const { calls, run } = cli({ code: 0 })
+    expect(await start("assistant", run, undefined, seat, [assistant])).toEqual({
+      name: "r4qmq4-assistant",
+      status: "running",
+    })
+    expect(await start("lead", run, undefined, seat, [lead])).toEqual({
+      name: "builder",
+      status: "running",
+    })
+    expect(calls).toEqual([])
+  })
+
+  test("an orchestrator holds no seat, so a running Builder leaves its start alone", async () => {
+    const asked: string[] = []
+    const seat = async (kind: string) => (
+      asked.push(kind),
+      kind === "builder" ? "builder" : undefined
+    )
+    expect((await start("orchestrator", cli({ code: 0 }).run, undefined, seat)).status).toBe(
+      "started",
+    )
+    expect(asked).toEqual(["orchestrator"])
+  })
+
+  test("spawn.sh's refusal comes back as its last line, whole", async () => {
+    const reason = `spawn.sh refuses c8m3nr-orchestrator: the capacity gate reads 9 of 8 ${"x".repeat(300)}`
+    const refused = cli({ code: 1, stderr: `checking\n${reason}\n` })
+    const answer = await start("orchestrator", refused.run)
+    expect(answer).toEqual({ detail: reason, name: "c8m3nr-orchestrator", status: "refused" })
     expect((await start("orchestrator", cli({ code: 2 }).run)).status).toBe("failed")
+    expect(refused.calls.at(-1)).toEqual([
+      "bun",
+      `${root}/scripts/roster.ts`,
+      "set",
+      "c8m3nr-orchestrator",
+      "status=ended",
+    ])
   })
 
   test("a held name answers running and runs no step past the name picker", async () => {
     const { calls, run } = cli({ code: 0 })
     expect(await start("orchestrator", run, async () => true)).toEqual({
-      name: "c8m3nr-builder",
+      name: "c8m3nr-orchestrator",
       status: "running",
     })
     expect(calls).toHaveLength(1)

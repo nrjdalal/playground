@@ -1,5 +1,5 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -103,7 +103,7 @@ describe("the owner's start", () => {
     const response = await start("orchestrator", ...here())
     expect(response.status).toBe(200)
     const body = (await response.json()) as { data: { name: string; started: boolean } }
-    expect(body.data.name).toMatch(/^[2-9b-z]{6}-builder$/)
+    expect(body.data.name).toMatch(/^[2-9b-z]{6}-orchestrator$/)
     expect(body.data.started).toBe(true)
     expect(spawned).not.toHaveBeenCalled()
   })
@@ -135,7 +135,7 @@ describe("the owner's start", () => {
     process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(scratch, "claude-"))
     process.env.PLAYGROUND_DATA_DIR = mkdtempSync(join(scratch, "data-"))
     process.env.PLAYGROUND_LIVE_READS = "1"
-    const reason = "spawn.sh refuses c8m3nr-builder: the capacity gate reads 9 of 8 sessions"
+    const reason = "spawn.sh refuses c8m3nr-orchestrator: the capacity gate reads 9 of 8 sessions"
     const argvs: string[][] = []
     const spawned = spyOn(Bun, "spawn").mockImplementation(((argv: string[]) => {
       argvs.push(argv)
@@ -144,7 +144,7 @@ describe("the owner's start", () => {
       return {
         exited: Promise.resolve(refused ? 1 : 0),
         stderr: new Response(refused ? `checking\n${reason}\n` : "").body,
-        stdout: new Response(named ? "c8m3nr-builder\n" : "").body,
+        stdout: new Response(named ? "c8m3nr-orchestrator\n" : "").body,
       }
     }) as never)
     spies.push(spawned)
@@ -155,8 +155,45 @@ describe("the owner's start", () => {
     expect(((await response.json()) as { error: { message: string } }).error.message).toBe(reason)
     expect(
       argvs.map((argv) =>
-        argv.at(-1) === "task=Orchestrator" ? "roster" : argv[1] === "manager" ? "spawn" : "name",
+        argv.at(-1) === "task=Orchestrator"
+          ? "roster"
+          : argv.at(-1) === "status=ended"
+            ? "ended"
+            : argv[1] === "manager"
+              ? "spawn"
+              : "name",
       ),
-    ).toEqual(["name", "roster", "spawn"])
+    ).toEqual(["name", "roster", "spawn", "ended"])
+  })
+
+  test("the Assistant answers 409 naming the session that holds its seat, and runs no process", async () => {
+    spies.push(signedIn("owner"))
+    process.env.CLAUDE_CONFIG_DIR = mkdtempSync(join(scratch, "claude-"))
+    const data = mkdtempSync(join(scratch, "data-"))
+    process.env.PLAYGROUND_DATA_DIR = data
+    process.env.PLAYGROUND_LIVE_READS = "1"
+    const agents = [
+      {
+        kind: "assistant",
+        name: "r4qmq4-assistant",
+        role: "manager",
+        status: "working",
+        task: "errands",
+      },
+    ]
+    writeFileSync(
+      join(data, "roster.json"),
+      JSON.stringify({ agents, updatedAt: "2026-11-05T00:00:00Z" }),
+    )
+    const spawned = spyOn(Bun, "spawn").mockImplementation((() => {
+      throw new Error("no process may run")
+    }) as never)
+    spies.push(spawned)
+    const response = await start("assistant", ...here())
+    expect(response.status).toBe(409)
+    expect(((await response.json()) as { error: { message: string } }).error.message).toContain(
+      "r4qmq4-assistant",
+    )
+    expect(spawned).not.toHaveBeenCalled()
   })
 })

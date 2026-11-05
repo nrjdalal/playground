@@ -10,6 +10,7 @@ import {
   managerKindOfName,
   managerOf,
   roleOfName,
+  seatOf,
   setSessionNames,
   slotOfName,
 } from "../../../../packages/config/src/kinds"
@@ -70,6 +71,20 @@ describe("managerOf", () => {
         "builder",
       ),
     ).toBe("x7mh4d-builder")
+  })
+})
+
+describe("seatOf", () => {
+  test("an orchestrator holds no seat, however many run, and a running Builder keeps its own", () => {
+    const agents = [
+      agent("builder", "working", "builder"),
+      agent("c8m3nr-orchestrator", "working", "orchestrator"),
+      agent("d9p4qs-orchestrator", "working"),
+    ]
+    expect(seatOf(agents, "orchestrator")).toBeUndefined()
+    expect(seatOf(agents, "builder")).toBe("builder")
+    expect(kindOfName("c8m3nr-orchestrator")).toBe("orchestrator")
+    expect(factoryRoleOf("c8m3nr-orchestrator", "orchestrator")).toBe("lead")
   })
 })
 
