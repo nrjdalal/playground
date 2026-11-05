@@ -437,6 +437,25 @@ describe("inboxView", () => {
     expect(done.map((i) => i.ref)).toEqual([32, 30])
   })
 
+  test("a read update woken from Snooze stays in the list until he presses Done or Dismiss, as one never put off does", () => {
+    const after = (ms: number) => new Date(Date.parse(CLOCKS_STOPPED_AT) + ms).toISOString()
+    const woken = item({
+      answer: { snoozedUntil: after(2 * 60_000) },
+      kind: "update",
+      readAt: after(60_000),
+      ref: 33,
+    })
+    const dismissed = item({
+      answer: { dismissed: true, dismissedAt: after(3 * 60_000), snoozedUntil: after(2 * 60_000) },
+      kind: "update",
+      readAt: after(60_000),
+      ref: 34,
+    })
+    const { done, shown } = inboxView([woken, dismissed])
+    expect(shown.map((i) => i.ref)).toEqual([33])
+    expect(done.map((i) => i.ref)).toEqual([34])
+  })
+
   test("a no-go goes to Done once answered, and Done lists the newest settled first while an open item or an unread update stays", () => {
     const denied = (ref: number, at: string) =>
       item({ answer: { at, choice: "deny" }, kind: "decision", ref, status: "denied" })
