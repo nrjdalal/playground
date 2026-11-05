@@ -274,7 +274,7 @@ export function procOf(pid: number): Proc | undefined {
   return { comm, env, ppid: Number(ps("ppid").trim()) || 0 }
 }
 
-// The claude process a Bash call runs under, the nearest at or above `pid` whose executable is claude: the role it was started with, and the session id Claude Code's registry holds for it (<config>/sessions/<pid>.json, whose pid is that process's), the config folder named by that process's own CLAUDE_CONFIG_DIR, else its own HOME's .claude, so a prefix that drops PLAYGROUND_ROLE or moves CLAUDE_CONFIG_DIR or HOME changes nothing it reads. A claude process whose environment reads back empty names no session, so a failed read refuses.
+// The claude process a Bash call runs under, the nearest at or above `pid` whose executable is claude: the role it was started with, and the session id Claude Code's registry holds for it (<config>/sessions/<pid>.json, whose pid is that process's), the config folder named by that process's own CLAUDE_CONFIG_DIR, else its own HOME's .claude, so a prefix that drops PLAYGROUND_ROLE or moves CLAUDE_CONFIG_DIR or HOME changes nothing it reads. A claude process whose environment reads back empty is returned with no role and no session id, so callerRefusal refuses it and rm still reads a session. Two readers: callerRefusal, below, refuses when it finds none, and playground rm --discard (callerOf in packages/scripts/src/playground/rm.ts) reads none as a terminal's own call.
 export async function sessionAbove(
   pid: number = process.ppid,
   procs: (pid: number) => Proc | undefined = procOf,
@@ -283,7 +283,7 @@ export async function sessionAbove(
     const proc = procs(at)
     if (!proc) return undefined
     if (isClaude(proc.comm)) {
-      if (!Object.keys(proc.env).length) return undefined
+      if (!Object.keys(proc.env).length) return { pid: at, role: "" }
       const config =
         proc.env.CLAUDE_CONFIG_DIR || (proc.env.HOME ? join(proc.env.HOME, ".claude") : "")
       const entry = (

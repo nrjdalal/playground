@@ -494,10 +494,11 @@ Only the first reading moves the folder, sets variables and records files for th
   Where the reader names no one folder ([The folder a hook reads](#the-folder-a-hook-reads)), it judges the command in every folder the shell may be in, and in the folder the line started in when a `cd`'s landing folder is unread: a build, a test run, a commit, a git move, a tool and a write by a path that lands in the main checkout in any of those folders is refused,
   and the refusal names the fix, naming the folder (`git -C <your worktree>`, `bun --cwd <your worktree>`) or a `cd` to a literal path that is there.
   So a line that starts in a worktree is refused too where a `cd` of its own may reach the main checkout, and one that starts in the main checkout runs where every folder its `cd` steps may reach is a worktree.
-  It reads the shell a pipeline feeds (`<reader> | sh`, `<reader> | sudo -s`, `<reader> | xargs sh -c`, `<reader> | . /dev/stdin`, a loop's output piped into one) as the shell's own command line: a script it cannot read is refused where that shell may run in the main checkout.
-  A root shell there is one as [no-extensions-write](#no-extensions-write) reads it (`<reader> | sudo '-s'`, `<reader> | sudo --sh`).
-  A script it reads is judged command by command wherever the shell's stdin comes from, since the shared reader runs a shell's script itself.
-  Two forms keep canary's reading: a privilege wrapper's shell fed by a here-string or a heredoc (`sudo -s <<< '<command>'`), whose script this hook does not read, and a heredoc holding a value it cannot read (`sh <<EOF` around a substitution).
+  It reads the script a pipeline, a here-string, a heredoc, a file or a process substitution feeds a shell (`<reader> | sh`, `<reader> | xargs sh -c`, `<reader> | . /dev/stdin`, a loop's output piped into one, `sudo -s <<< '<command>'`, `sh <<EOF`, `sudo -s < <(<reader>)`) as the shell's own command line: a script it cannot read is refused where that shell may run in the main checkout.
+  A root shell there is one as [no-extensions-write](#no-extensions-write) reads it (`<reader> | sudo '-s'`, `<reader> | sudo --sh`), or `su` not handed a command (`sudo su`, `su root`).
+  `su` reads as handed one only by `-c` or `--command` with its command, after option words of `-f`, `-l`, `-m` and `-` alone, so any other option word, one taking a value included, and any word before the `-c` it cannot read (a variable, a substitution, a glob) reads as a root shell.
+  A line that runs its own command after another option (`su -lc <cmd>`) is then judged by the script fed to it, a false refusal the hook accepts so an option's value never hides a `-c`.
+  A script it reads is judged command by command, a root shell's by this hook and a plain shell's by the shared reader, which runs it itself.
   It fails open on a call it cannot read.
   Its tests are in `bun run test:file tests/scripts/hooks`.
   The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).
@@ -628,6 +629,8 @@ Only the first reading moves the folder, sets variables and records files for th
   herdr, as cmux does, restores a session without its `--settings` (measured on herdr 0.9.5), so a restored session outside the factory's checkout writes no state and its file goes stale; a reader takes a record as about the moment it was written, never as the session now.
   The file also holds the shell-pane launcher's caller check (`procOf`, `sessionAbove`, `callerRefusal`): `run` and `login` refuse a call whose `PLAYGROUND_ROLE` or `CLAUDE_CODE_SESSION_ID` is not its claude process's own;
   [the shell-pane docs page](../../docs/playground/shell-pane.md#where-it-fits) says what the check reads and the gaps it leaves open.
+  `playground rm --discard` reads the same lookup (`sessionAbove`) the other way (`callerOf` in `packages/scripts/src/playground/rm.ts`): a claude process above the call makes it a session's, which needs an approved delete decision, and none makes it a terminal's.
+  Before the lookup, rm refuses a call whose parent is pid 1 or one the system cannot read without that decision, since a detached call's climb would find no claude process.
   When it writes `stuck` or `failed` for a factory session, it also queues one line in the ops outbox (`ops-stuck-alert.jsonl`, which the relay sends by SendMessage) for the session's manager alone, by `managerFor()` in `packages/scripts/src/stuck-alert.ts`: the session, its roster task, the reason, the command or question, and its last message (playbook's **unstick**);
   An orchestrator's manager, the Assistant's for one, is the session its roster row reports to.
   The dispatcher's own and a session outside the factory queue nothing.

@@ -20,36 +20,14 @@ import { getSessionNames } from "../../../../../../packages/config/src/kinds"
 // The cases hold real timers, and a loaded machine can take a case past bun's 5s default, which equals until's own deadline; 20s leaves the deadline the only clock that decides.
 setDefaultTimeout(20_000)
 
-const event = (name: string, payload: Record<string, unknown> = {}) =>
-  JSON.stringify({ type: "event", category: name.split(".")[0], name, payload })
-
 describe("movesTheBoard", () => {
-  test("a plain tool call, as a hook or as Feed telemetry, does not move the board", () => {
-    expect(movesTheBoard(event("agent.hook.PreToolUse", { tool_name: "Bash" }))).toBe(false)
-    expect(movesTheBoard(event("agent.hook.PostToolUse", { tool_name: "Read" }))).toBe(false)
-    expect(
-      movesTheBoard(
-        event("feed.item.received", { hook_event_name: "PreToolUse", tool_name: "Bash" }),
-      ),
-    ).toBe(false)
-  })
-
-  test("a picker, a prompt, a stop or a notification does", () => {
-    expect(
-      movesTheBoard(
-        event("feed.item.received", {
-          hook_event_name: "PreToolUse",
-          tool_name: "AskUserQuestion",
-        }),
-      ),
-    ).toBe(true)
-    expect(movesTheBoard(event("agent.hook.UserPromptSubmit"))).toBe(true)
-    expect(movesTheBoard(event("agent.hook.Stop"))).toBe(true)
-    expect(movesTheBoard(event("agent.hook.Notification"))).toBe(true)
-  })
-
-  test("a message sent with SendMessage does, so its sender moves up as soon as it reports", () => {
-    expect(movesTheBoard(event("agent.hook.PostToolUse", { tool_name: "SendMessage" }))).toBe(true)
+  test("every herdr event does", () => {
+    for (const name of [
+      "herdr.pane.created",
+      "herdr.pane.exited",
+      "herdr.pane.agent_status_changed",
+    ])
+      expect(movesTheBoard(JSON.stringify({ name, type: "event" }))).toBe(true)
   })
 
   test("a (re)connect ack does; heartbeats and junk do not", () => {

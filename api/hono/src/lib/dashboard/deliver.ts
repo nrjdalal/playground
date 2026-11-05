@@ -19,20 +19,12 @@ import {
   withAttachments,
   type Attachment,
 } from "@/lib/dashboard/attachments"
-import {
-  canForce,
-  CmuxTimedOut,
-  runJson,
-  write,
-  type Write,
-  type WriteKey,
-} from "@/lib/dashboard/cmux"
 import { configDir, readsLive } from "@/lib/dashboard/fixture"
-import { isHerdrSurface, pressEnter, prompt, promptOutcome } from "@/lib/dashboard/herdr"
+import { pressEnter, prompt, promptOutcome } from "@/lib/dashboard/herdr"
 import { settingCommand, settingSummary, type SessionSetting } from "@/lib/dashboard/setting"
 import { readScreen } from "@/lib/dashboard/terminal"
 import { readTail, type Entry } from "@/lib/dashboard/transcript"
-import { feedBySession, listLive, type Live, type Worker } from "@/lib/dashboard/workers"
+import { listLive, type Live, type Worker } from "@/lib/dashboard/workers"
 import type { ErrorCode } from "@/lib/error"
 
 // What to deliver: `to` is the session's name as the dashboard lists it (Worker.name), `text` is what to say, `attachments` the stored files it carries (findAttachment's, so each path is one the dashboard made), and `actor` is who says it, the signed-in person for a route. `id`, the composer's own for the message, becomes its activity row's id, so a retry of a request that went unanswered finds the message delivered rather than typing it again.
@@ -88,7 +80,7 @@ export const deliveryEvent = (
         ),
       }
 
-// Why a delivery did not happen, or has not yet. CMUX_FAILED, INPUT_NOT_EMPTY, NOT_FOUND and ON_PICKER come before anything is typed (CMUX_FAILED includes a send cmux refused before its first text, tried twice here), so they can succeed on a retry once the session or cmux changes, but for an INPUT_NOT_EMPTY marked `pasted`, whose message sits unsent in the box for its retry to press Enter on; AMBIGUOUS, COMMAND, EMPTY and TOO_LONG cannot until the text or the names change. INTERRUPTED means typing began and did not finish, or a held message left the screen with a transcript that cannot be read back to when it was queued: some or all of the message may be in the session's input or already sent, so it is never retried unseen. QUEUED means Claude Code holds a herdr session's message, in its box while it compacts or in its queue while it works, and takes it on its own: a retry under the same id types nothing and reads it again, and LOST is that retry finding it neither on the screen nor in the transcript QUEUED_MS after it was queued, so Retry sends it again.
+// Why a delivery did not happen, or has not yet. CMUX_FAILED, INPUT_NOT_EMPTY, NOT_FOUND and ON_PICKER come before anything is typed (CMUX_FAILED includes a send herdr refused before sending anything, tried twice here), so they can succeed on a retry once the session or herdr changes, but for an INPUT_NOT_EMPTY marked `pasted`, whose message sits unsent in the box for its retry to press Enter on; AMBIGUOUS, COMMAND, EMPTY and TOO_LONG cannot until the text or the names change. INTERRUPTED means typing began and did not finish, or a held message left the screen with a transcript that cannot be read back to when it was queued: some or all of the message may be in the session's input or already sent, so it is never retried unseen. QUEUED means Claude Code holds a herdr session's message, in its box while it compacts or in its queue while it works, and takes it on its own: a retry under the same id types nothing and reads it again, and LOST is that retry finding it neither on the screen nor in the transcript QUEUED_MS after it was queued, so Retry sends it again.
 export const DELIVERY_FAILURES = [
   "AMBIGUOUS",
   "CMUX_FAILED",
@@ -130,11 +122,6 @@ export type DeliveryResult =
 
 export const MAX_CHARS = 8000
 export const MAX_LINES = 100
-// Every keystroke is one cmux call of about 30ms inside an open transaction, and a text dense with \n, \r or \t splits into many, so the count is capped as well as the size.
-export const MAX_KEYSTROKES = 400
-
-type Step = { key: WriteKey } | { text: string }
-
 // A tab would autocomplete and a control character is a keystroke, so the text arrives with tabs as four spaces, line ends as \n and no other control character (C0, DEL or C1), trimmed.
 export const normalize = (text: string): string =>
   [...text.replace(/\r\n?/g, "\n").replaceAll("\t", "    ")]
@@ -222,34 +209,9 @@ export const skillDirs = (cwd: string, config: string, live: boolean): string[] 
 export const sessionSkills = (cwd: string): Promise<Set<string>> =>
   readSkills(skillDirs(cwd, configDir(), readsLive()))
 
-// `cmux send` reads \n, \r and \t inside its text as keystrokes, so a line is cut after every backslash that precedes one of those letters: sent apart, each half arrives literally.
-export const pieces = (line: string): string[] => {
-  const out: string[] = []
-  let start = 0
-  for (let i = 0; i < line.length - 1; i++) {
-    if (line[i] === "\\" && /[nrt]/.test(line[i + 1] ?? "")) {
-      out.push(line.slice(start, i + 1))
-      start = i + 1
-    }
-  }
-  if (start < line.length) out.push(line.slice(start))
-  return out
-}
-
-// Typed the way Claude Code's input takes a message: each line's text, Shift+Enter between lines for a newline that does not submit, then Enter. cmux 0.64's send has no paste, so a newline in its text would submit.
-export const keystrokes = (text: string): Step[] => [
-  ...text
-    .split("\n")
-    .flatMap((line, i): Step[] => [
-      ...(i > 0 ? [{ key: "shift+enter" as const }] : []),
-      ...pieces(line).map((piece) => ({ text: piece })),
-    ]),
-  { key: "enter" },
-]
-
 const RULE = /^─+$/
 const NAMED_RULE = /^─.*─$/
-// While messages wait in its queue, Claude Code fills its empty box with one of these dim hints (its prompt input's placeholder, 2.1.309) and draws the messages themselves above the box; read-screen drops the dimming, so a hint is matched whole.
+// While messages wait in its queue, Claude Code fills its empty box with one of these dim hints (its prompt input's placeholder, 2.1.309) and draws the messages themselves above the box; the screen read drops the dimming, so a hint is matched whole.
 const QUEUED_HINTS = new Set([
   "Press up to edit queued messages",
   "Press up to edit queued messages, Enter to send them immediately",
@@ -271,7 +233,7 @@ const cutHint = (box: string[], words: string): boolean =>
   words.endsWith("…") &&
   [...QUEUED_HINTS].some((hint) => hint.startsWith(words.slice(0, -1).trimEnd()))
 
-// What a session's input box holds, as read-screen shows it between the last two rules on the screen: only its ❯ prompt or a queue hint (empty), anything more (a draft, which would be sent with the message, a ! or an open / menu, which would run it, or a picker framed by rules, which ON_PICKER normally catches first), or no rules to frame a box at all (missing: a Claude Code whose layout has changed).
+// What a session's input box holds, as the screen read shows it between the last two rules on the screen: only its ❯ prompt or a queue hint (empty), anything more (a draft, which would be sent with the message, a ! or an open / menu, which would run it, or a picker framed by rules, which ON_PICKER normally catches first), or no rules to frame a box at all (missing: a Claude Code whose layout has changed).
 export const inputState = (screen: string): "empty" | "holds" | "missing" => {
   const box = inputBox(screen)
   if (!box) return "missing"
@@ -362,25 +324,22 @@ export const holdsQueued = (screen: string, text: string): boolean => {
   )
 }
 
-// `board` finds the session a name names, from the board the dashboard already streams; `readSession` reads the board again before the session is typed into, and before the Enter. `canForce` says whether cmux's send takes --force, and `prompts` lists the requests the session has pending in cmux's Feed. `prompt` sends a herdr session its whole message in one call, and `pressEnter` one Enter when that call's own did not land (herdr.ts); `wait` sleeps between the reads of its box after the send, and `said` reads a session's transcript, its tail as readTail bounds it.
+// `board` finds the session a name names, from the board the dashboard already streams; `readSession` reads the board again before the session is typed into, and before the Enter. `prompt` sends a herdr session its whole message in one call, and `pressEnter` one Enter when that call's own did not land (herdr.ts); `wait` sleeps between the reads of its box after the send, and `said` reads a session's transcript, its tail as readTail bounds it.
 export type DeliverDeps = {
   board: () => Promise<Live>
-  canForce: () => Promise<boolean>
   delivered: (id: string) => Promise<Date | null>
   now: () => Date
   pressEnter: (surface: string) => Promise<void>
   prompt: (surface: string, text: string) => Promise<void>
-  prompts: (sessionId: string) => Promise<string[]>
   readScreen: (surface: string) => Promise<string>
   readSession: (worker: Worker) => Promise<Live>
   record: (event: ActivityEvent, typing: () => Promise<void>) => Promise<void>
   said: (worker: Worker) => Promise<Entry[]>
   skills: (cwd: string) => Promise<ReadonlySet<string>>
   wait: (ms: number) => Promise<void>
-  write: (step: Write) => Promise<void>
 }
 
-// The record and the typing share a transaction: a keystroke cmux refuses rolls the record back, and a record that cannot be inserted means nothing is typed.
+// The record and the send share a transaction: a send herdr refuses rolls the record back, and a record that cannot be inserted means nothing is typed.
 const recordWhileTyping: DeliverDeps["record"] = (event, typing) =>
   db.transaction(async (tx) => {
     await recordActivity(tx, event)
@@ -407,16 +366,10 @@ export const deliverDeps: DeliverDeps = {
     const shown = (await import("@/lib/dashboard/hub")).dashboardHub.snapshot
     return shown && !shown.partial ? shown : listLive()
   },
-  canForce,
   delivered: deliveredAt,
   now: () => new Date(),
   pressEnter,
   prompt,
-  prompts: async (sessionId) =>
-    (
-      feedBySession(await runJson(["rpc", "feed.list", '{"pending_only":true}'])).get(sessionId) ??
-      []
-    ).map((item) => item.requestId),
   readScreen: (surface) => readScreen(surface, 40),
   readSession: listLive,
   record: recordWhileTyping,
@@ -426,42 +379,38 @@ export const deliverDeps: DeliverDeps = {
   },
   skills: sessionSkills,
   wait: (ms) => Bun.sleep(ms),
-  write,
 }
 
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error)
 
-// `timedOut`: a send of the message was killed at cmux's timeout, so its text may have landed although it reported failure. A read of the Feed that times out typed nothing, so it does not count (`sent` is false for it).
+// A send that failed: `typed` 0 with no Enter means herdr sent nothing, and `atEnter` that it failed at or after the Enter, so the message may have gone.
 class TypingFailed extends Error {
-  readonly timedOut: boolean
   constructor(
     readonly typed: number,
     readonly atEnter: boolean,
     cause: unknown,
-    sent: boolean,
   ) {
     super(messageOf(cause))
-    this.timedOut = sent && cause instanceof CmuxTimedOut
   }
 }
 
-// Where typing stood when it stopped: `nothing` before the first text, or `held` when the refusal's reason already says where the message stands (both stand as they are), `part` after some of the message was typed, `typed` once all of it was but not the Enter.
+// Where typing stood when it stopped: `nothing` before the first text, or `held` when the refusal's reason already says where the message stands (both stand as they are), `typed` once all of it was but not the Enter.
 class TypingStopped extends Error {
   constructor(
     readonly result: Refusal,
-    readonly stood: "held" | "nothing" | "part" | "typed" = "typed",
+    readonly stood: "held" | "nothing" | "typed" = "typed",
   ) {
     super(result.reason)
   }
 }
 
-// A first send failed without being killed at cmux's timeout, so nothing was typed, and a later try can pass.
+// herdr refused a first send before sending anything, so nothing was typed, and a later try can pass.
 class BeforeTyping {
   constructor(readonly message: string) {}
 }
 
-// Two deliveries to one session would interleave their keystrokes, so each session's deliveries run one at a time, from reading it to its Enter. The queue is this process's own: a second dashboard stack (a worktree's test stack beside the live dashboard) types into the same surface independently.
+// Two deliveries to one session would each pass the screen check before either sends, so each session's deliveries run one at a time, from reading its screen to its send. The queue is this process's own: a second dashboard stack (a worktree's test stack beside the live dashboard) sends to the same pane independently.
 const typingLines = new Map<string, Promise<unknown>>()
 
 // The dashboard's own last pastes into each herdr session, newest last: a later try that finds one unsent in the box (its Enter lost, though its own settle read the box empty before the paste was drawn) presses Enter on it rather than reading it as a draft. `unsent` holds the ids a try left pasted and unsent until one is delivered, so their retry that finds the box empty never pastes them twice. Both are this process's own, as typingLines is, so a restart forgets them.
@@ -564,13 +513,13 @@ async function target(to: string, read: () => Promise<Live>): Promise<Refusal | 
   return { surface, worker }
 }
 
-// The one way the dashboard tells a live session something, as if the owner typed it into the session's own terminal: the composer and the inbox's answers call it, and nothing else may, since nothing sends a message on the owner's behalf. It returns a refusal or a failure rather than throwing. It throws only when the activity row cannot be written: almost always on the insert, before anything is typed, but a failure at the commit comes after the Enter, so the message has gone with no row to record it. It sees a prompt cmux's Feed shows raised between two sends, but neither it nor any check here can see one raised during a single send, a key the owner presses in that terminal, or another dashboard stack typing.
+// The one way the dashboard tells a live session something, as if the owner typed it into the session's own terminal: the composer and the inbox's answers call it, and nothing else may, since nothing sends a message on the owner's behalf. It returns a refusal or a failure rather than throwing. It throws only when the activity row cannot be written: almost always on the insert, before anything is typed, but a failure at the commit comes after the Enter, so the message has gone with no row to record it. herdr refuses a send while the session waits on a prompt, but nothing here can see a key the owner presses in that terminal, or another dashboard stack typing.
 export async function deliver(
   delivery: Delivery,
   deps: DeliverDeps = deliverDeps,
 ): Promise<DeliveryResult> {
   const attachments = delivery.attachments ?? []
-  // The person's own words are judged, so a leading / or ! is a command whether or not files come with it, and the caps count only what they wrote; the files' Attached lines come on top, at most MAX_ATTACHMENTS of them, and the keystroke cap below still bounds the whole. A skill's command waits for the session's own skills, read once it is found.
+  // The person's own words are judged, so a leading / or ! is a command whether or not files come with it, and the caps count only what they wrote; the files' Attached lines come on top, at most MAX_ATTACHMENTS of them. A skill's command waits for the session's own skills, read once it is found.
   const { refused: refusedText, skill, words } = deliveryWords(delivery, true)
   if (refusedText) return refusedText
   const text = withAttachments(words, attachments)
@@ -578,38 +527,17 @@ export async function deliver(
   // A paste is this message's when it carries this id, or, for a message with none, these words.
   const isThis = (paste: Paste): boolean =>
     paste.id === delivery.id && (paste.id !== undefined || paste.text === text)
-  const steps = keystrokes(text)
-  if (steps.length > MAX_KEYSTROKES) {
-    return refused(
-      "TOO_LONG",
-      "The message has too many lines and backslashes before n, r or t to type in one go.",
-    )
-  }
   const answered = await recorded(delivery, deps)
   if (answered) return answered
   const first = await target(delivery.to, deps.board)
   if (!("worker" in first)) return first
   const { sessionId } = first.worker
-  const herdr = isHerdrSurface(first.surface)
   // The board is read again, and only the session found decides, since the board it was found on may be a moment old.
   const own = () => deps.readSession(first.worker)
   return oneAtATime(sessionId, async () => {
     // Behind the session's line, so a retry that arrives while its first try is still typing reads the row that try commits.
     const at = delivery.id ? await deps.delivered(delivery.id) : null
     if (at) return { at: at.toISOString(), ok: true, replayed: true, sessionId }
-    // cmux 0.65's draft guard can refuse a send whose input deliver's own screen read just proved holds no draft (Claude Code's queued-messages hint and a mid-turn prompt line read as empty by design), so every text send passes --force where this cmux has it, the first included. --force skips the guard's dialog check too, so the session's Feed is read first of all, before the session and its screen, and kept across every try: a prompt raised after it, in any gap, stops the typing. A cmux with no --force reads the Feed only for a message of several sends, as before, since a later line could land in a prompt raised meanwhile.
-    let force: boolean
-    let watching: boolean
-    let pending: Set<string>
-    const several = steps.filter((step) => "text" in step).length > 1
-    try {
-      // herdr sends a message as one call that it refuses while the session waits on a prompt (agent_blocked), so it needs neither cmux's --force nor its Feed
-      force = herdr ? false : await deps.canForce()
-      watching = !herdr && (force || several)
-      pending = watching ? new Set(await deps.prompts(sessionId)) : new Set()
-    } catch (error) {
-      return refused("CMUX_FAILED", `Could not read cmux: ${messageOf(error)}`)
-    }
     const found = await target(delivery.to, own)
     if (!("worker" in found)) return found
     if (found.worker.sessionId !== sessionId) {
@@ -618,7 +546,7 @@ export async function deliver(
     const { surface, worker } = found
     if (skill && !(await deps.skills(worker.cwd)).has(skill)) return commandRefusal(skill)
     const event = deliveryEvent(delivery, worker.name, words)
-    // One try, from reading the screen to the Enter. A first send that fails without being killed at cmux's timeout typed nothing and comes back as BeforeTyping, which the loop below tries once more at once, since the screen is read again and finds anything that landed after all.
+    // One try, from reading the screen to the Enter. A first send herdr refused before sending anything typed nothing and comes back as BeforeTyping, which the loop below tries once more at once, since the screen is read again and finds anything that landed after all.
     const attempt = async (): Promise<DeliveryResult | BeforeTyping> => {
       let screen: string
       try {
@@ -679,7 +607,7 @@ export async function deliver(
       }
       // A paste of the dashboard's own that its Enter left in the box, this message's or an earlier one's, gets that Enter rather than reading as a draft, this held message's first, even with no paste remembered after a restart; any other text in the box is someone's. Claude Code folds a long paste into [Pasted text #n +k lines], which is taken as a paste whose line breaks k counts.
       const held =
-        herdr && input === "holds"
+        input === "holds"
           ? queuedAt !== undefined && holdsMessage(screen, text)
             ? { at: queuedAt, id: delivery.id, images, text }
             : (pastes.get(sessionId) ?? []).findLast((paste) =>
@@ -716,7 +644,7 @@ export async function deliver(
           try {
             after = await deps.readScreen(at)
           } catch (error) {
-            throw new TypingFailed(1, true, lost ?? error, false)
+            throw new TypingFailed(1, true, lost ?? error)
           }
           if (inputState(after) === "empty") break
         }
@@ -754,14 +682,14 @@ export async function deliver(
         const first = await settled(at, lost)
         if (own && delivery.id && holdsQueued(first, sent)) throw queueIt()
         if (inputState(first) === "empty") {
-          if (lost) throw new TypingFailed(1, true, lost, false)
+          if (lost) throw new TypingFailed(1, true, lost)
           return
         }
         if (!holdsMessage(first, sent)) throw unseen(first)
         try {
           await deps.pressEnter(at)
         } catch (error) {
-          throw new TypingFailed(1, true, error, false)
+          throw new TypingFailed(1, true, error)
         }
         const second = await settled(at, lost)
         if (own && delivery.id && holdsQueued(second, sent)) throw queueIt()
@@ -791,136 +719,98 @@ export async function deliver(
       }
       try {
         await deps.record(event, async () => {
-          if (herdr) {
-            // read once more before the send: a herdr pane's id changes when it moves, so this read names where the session is now
-            const again = await target(delivery.to, own)
-            if (!("worker" in again)) throw new TypingStopped(again, "nothing")
-            if (again.worker.sessionId !== sessionId) {
+          // read once more before the send: a herdr pane's id changes when it moves, so this read names where the session is now
+          const again = await target(delivery.to, own)
+          if (!("worker" in again)) throw new TypingStopped(again, "nothing")
+          if (again.worker.sessionId !== sessionId) {
+            throw new TypingStopped(
+              refused("NOT_FOUND", `${delivery.to} now names another session. Send it again.`),
+              "nothing",
+            )
+          }
+          if (stuck && isThis(stuck)) {
+            pastedAt = stuck.at
+            await submitted(again.surface, null)
+            pastes.set(
+              sessionId,
+              (pastes.get(sessionId) ?? []).filter((paste) => paste !== stuck),
+            )
+            return
+          }
+          if (stuck) {
+            try {
+              await submitted(again.surface, null, stuck.text, false)
+            } catch (error) {
+              if (!(error instanceof TypingStopped || error instanceof TypingFailed)) throw error
               throw new TypingStopped(
-                refused("NOT_FOUND", `${delivery.to} now names another session. Send it again.`),
+                refused(
+                  "INPUT_NOT_EMPTY",
+                  `${worker.name}'s input still holds an earlier message from here after its Enter, so this one waits.`,
+                ),
                 "nothing",
               )
             }
-            if (stuck && isThis(stuck)) {
-              pastedAt = stuck.at
-              await submitted(again.surface, null)
-              pastes.set(
-                sessionId,
-                (pastes.get(sessionId) ?? []).filter((paste) => paste !== stuck),
+            const left = (pastes.get(sessionId) ?? []).filter((paste) => paste !== stuck)
+            pastes.set(sessionId, left)
+          }
+          const at = deps.now().getTime()
+          pastedAt = at
+          let lost: unknown = null
+          try {
+            await deps.prompt(again.surface, text)
+          } catch (error) {
+            const outcome = promptOutcome(error)
+            if (outcome === "picker") {
+              throw new TypingStopped(
+                refused(
+                  "ON_PICKER",
+                  `${worker.name} is waiting on a picker or a prompt, and herdr sent nothing. Answer that first.`,
+                ),
+                "nothing",
               )
-              return
             }
-            if (stuck) {
-              try {
-                await submitted(again.surface, null, stuck.text, false)
-              } catch (error) {
-                if (!(error instanceof TypingStopped || error instanceof TypingFailed)) throw error
-                throw new TypingStopped(
-                  refused(
-                    "INPUT_NOT_EMPTY",
-                    `${worker.name}'s input still holds an earlier message from here after its Enter, so this one waits.`,
-                  ),
-                  "nothing",
-                )
-              }
-              const left = (pastes.get(sessionId) ?? []).filter((paste) => paste !== stuck)
-              pastes.set(sessionId, left)
+            if (outcome === "gone") {
+              throw new TypingStopped(
+                refused(
+                  "NOT_FOUND",
+                  `${worker.name}'s Claude is not running in its pane any more.`,
+                ),
+                "nothing",
+              )
             }
-            const at = deps.now().getTime()
-            pastedAt = at
-            let lost: unknown = null
-            try {
-              await deps.prompt(again.surface, text)
-            } catch (error) {
-              const outcome = promptOutcome(error)
-              if (outcome === "picker") {
-                throw new TypingStopped(
-                  refused(
-                    "ON_PICKER",
-                    `${worker.name} is waiting on a picker or a prompt, and herdr sent nothing. Answer that first.`,
-                  ),
-                  "nothing",
-                )
-              }
-              if (outcome === "gone") {
-                throw new TypingStopped(
-                  refused(
-                    "NOT_FOUND",
-                    `${worker.name}'s Claude is not running in its pane any more.`,
-                  ),
-                  "nothing",
-                )
-              }
-              // typed: herdr may have pasted it, or pasted it and pressed Enter, before the answer was lost, so the box decides below; unsent: herdr refused before sending anything
-              if (outcome !== "typed") throw new TypingFailed(0, false, error, false)
-              lost = error
-            }
-            // herdr took the paste, or may have, so it is remembered for a later try to find
-            const kept = (pastes.get(sessionId) ?? []).filter((paste) => !isThis(paste))
-            pastes.set(
-              sessionId,
-              [...kept, { at, id: delivery.id, images, text }].slice(-PASTES_KEPT),
-            )
-            await submitted(again.surface, lost)
-            return
+            // typed: herdr may have pasted it, or pasted it and pressed Enter, before the answer was lost, so the box decides below; unsent: herdr refused before sending anything
+            if (outcome !== "typed") throw new TypingFailed(0, false, error)
+            lost = error
           }
-          let begun = false
-          for (const [i, step] of steps.entries()) {
-            const atEnter = i === steps.length - 1
-            // Enter is the keystroke that would confirm a picker, so the session is read once more before it.
-            if (atEnter) {
-              const again = await target(delivery.to, own)
-              if (!("worker" in again)) throw new TypingStopped(again)
-            }
-            const text = "text" in step
-            try {
-              // A prompt raised since the Feed was read would take the next send; the first send of a cmux with no --force has no dialog check to skip, so it is not held for one.
-              if (text && watching && (force || begun)) {
-                let raised: boolean
-                try {
-                  raised = (await deps.prompts(sessionId)).some((id) => !pending.has(id))
-                } catch (error) {
-                  throw new TypingFailed(i, atEnter, error, false)
-                }
-                if (raised) {
-                  const reason = begun
-                    ? `${worker.name} raised a prompt while the message was typed, and the rest would have gone into it.`
-                    : `${worker.name} raised a prompt, and the message would have gone into it. Nothing was typed.`
-                  throw new TypingStopped(refused("ON_PICKER", reason), begun ? "part" : "nothing")
-                }
-              }
-              await deps.write(text && force ? { ...step, force, surface } : { ...step, surface })
-            } catch (error) {
-              if (error instanceof TypingStopped || error instanceof TypingFailed) throw error
-              throw new TypingFailed(i, atEnter, error, true)
-            }
-            begun ||= text
-          }
+          // herdr took the paste, or may have, so it is remembered for a later try to find
+          const kept = (pastes.get(sessionId) ?? []).filter((paste) => !isThis(paste))
+          pastes.set(
+            sessionId,
+            [...kept, { at, id: delivery.id, images, text }].slice(-PASTES_KEPT),
+          )
+          await submitted(again.surface, lost)
         })
       } catch (error) {
         if (error instanceof TypingStopped) {
           if (error.stood === "nothing" || error.stood === "held") return error.result
-          const left =
-            error.stood === "part"
-              ? `Part of it sits unsent in ${worker.name}'s input.`
-              : `The message is typed but not sent: it sits in ${worker.name}'s input.`
-          return refused("INTERRUPTED", `${error.result.reason} ${left}`)
+          return refused(
+            "INTERRUPTED",
+            `${error.result.reason} The message is typed but not sent: it sits in ${worker.name}'s input.`,
+          )
         }
         if (!(error instanceof TypingFailed)) throw error
-        // Any first send that fails without being killed at cmux's timeout typed nothing and is tried again: a send killed at its timeout may have landed after all, so it stays INTERRUPTED, which no client retries unseen.
-        if (error.typed === 0 && !error.atEnter && !error.timedOut) {
+        // A first send herdr refused before sending anything typed nothing and is tried again; one that may have sent stays INTERRUPTED, which no client retries unseen.
+        if (error.typed === 0 && !error.atEnter) {
           return new BeforeTyping(error.message)
         }
         const left = error.atEnter
           ? ` The Enter may have gone through anyway: it reads Delivered once its transcript shows it.`
-          : error.typed > 0
-            ? ` Part of it may sit unsent in ${worker.name}'s input.`
-            : ""
+          : ""
         return refused("INTERRUPTED", `The message did not go through: ${error.message}${left}`)
       }
       return { at: deps.now().toISOString(), ok: true, sessionId: worker.sessionId }
     }
-    // A message can get lost: a first send that fails without being killed at cmux's timeout typed nothing, so deliver tries it once more at once and then the outbox retries it, on its own schedule for CMUX_FAILED, so it reaches the red bubble only after both; each such try is logged with the failure's own words. A timeout is never retried here and is not logged (INTERRUPTED), since the text may have landed.
+    // A message can get lost: a first send herdr refused before sending anything typed nothing, so deliver tries it once more at once and then the outbox retries it, on its own schedule for CMUX_FAILED, so it reaches the red bubble only after both; each such try is logged with the failure's own words. A send that may have landed is never retried here and is not logged (INTERRUPTED).
     let refusedBeforeTyping = ""
     for (const i of [0, 1]) {
       const result = await attempt()
@@ -930,7 +820,7 @@ export async function deliver(
       }
       refusedBeforeTyping = result.message
       console.warn(
-        `Dashboard message to ${worker.name} not sent (try ${i + 1} of 2): ${herdr ? "herdr" : "the terminal"} failed before anything was typed: ${result.message}${i === 0 ? "; trying again" : ""}`,
+        `Dashboard message to ${worker.name} not sent (try ${i + 1} of 2): herdr failed before anything was typed: ${result.message}${i === 0 ? "; trying again" : ""}`,
       )
     }
     return refused("CMUX_FAILED", `The message did not go through: ${refusedBeforeTyping}`)
