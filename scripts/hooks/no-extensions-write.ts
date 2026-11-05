@@ -119,7 +119,7 @@ function reads(parsed: Parsed, env: Env): boolean {
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value)
   return (
     !!sub &&
-    GIT_READS.has(sub) &&
+    (GIT_READS.has(sub) || (sub === "worktree" && rest[0] === "list")) &&
     !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) &&
     !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w))
   )

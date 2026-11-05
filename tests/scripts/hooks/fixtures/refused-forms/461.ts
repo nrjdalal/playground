@@ -81,6 +81,14 @@ export const groups: Group[] = [
         "git log \"$REV\" | awk '/^a(b)/'",
       ],
       [
+        "git worktree prune, which writes, before an awk whose regex reads as a glob",
+        "git worktree prune | awk '/^worktree /{print $2}' | grep ...",
+      ],
+      [
+        "a git worktree list read by an awk whose regex reads as a glob",
+        "git worktree list --porcelain | awk '/^worktree /{print $2}' | grep ...",
+      ],
+      [
         "perl's output redirected into the root",
         "perl -ne 'print if /a/' notes.md > ~/.playground/extensions/.no-such-folder/x",
         "process home",
@@ -88,3 +96,5 @@ export const groups: Group[] = [
     ],
   },
 ]
+
+export const allowed: string[] = ["a git worktree list read by an awk whose regex reads as a glob"]
