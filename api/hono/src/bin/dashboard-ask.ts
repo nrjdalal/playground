@@ -201,7 +201,7 @@ if (command === "new" || command === "edit") {
   for (const hint of shapeHints(input)) {
     console.error(
       hint.kind === "prose"
-        ? "ask: this ask is one block of prose; lead with a picture of the point (an ASCII flow or a diff in a code block), then short bullets, then its options in its options and deny labels. bun run ask example code|decision|ui prints a template (.agents/dashboard/asks.md, The ask's shape)"
+        ? "ask: this ask is one block of prose; lead with a picture of the point (an ASCII flow or a diff in a code block), then short bullets, then its options, in its `options` and `deny` labels. bun run ask example code|decision|ui prints a template (.agents/dashboard/asks.md, The ask's shape)"
         : hint.kind === "unlabelled"
           ? 'ask: this ask labels no options, so its card shows a bare Approve and Deny; for a yes or no, label one option, "options": [{"label": "..."}], with "deny"; for real alternatives, label 2 to 5 (.agents/dashboard/asks.md, The ask\'s shape)'
           : `ask: a code or ASCII line runs ${hint.longest} characters, past the ${ASK_CODE_COLUMNS} the narrowest Inbox card shows on one line; break or shorten it (.agents/dashboard/asks.md, The ask's shape)`,

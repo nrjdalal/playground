@@ -100,9 +100,9 @@ export type ChoicePreview =
   | { app: string; change: "add" | "remove"; type: "apps" }
   | { amount: string; type: "budget" }
   | { type: "delete" }
+  | { permission: string; type: "grant" }
   | { type: "schema" }
   | { type: "secret" }
-  | { permission: string; type: "grant" }
   | { sha: string; type: "ship" }
   | { to: string; type: "slack" }
   | { team: string; type: "ticket" }
