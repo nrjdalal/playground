@@ -56,3 +56,4 @@ A whole patch can ride along as a file: a `.diff` or `.patch` attachment (`git d
 Every factory session uses it under [playbook](./playbook.md)'s **ask** rule, which decides when an item goes to the owner; `to-inbox` decides how it reads.
 Before it posts, `playground ask open` lists the items already open, so a session names one on the same thing rather than posting it twice.
 `playground ask new` checks the shape and prints a hint when the text runs long with no list, code block or attachment, or when a line in a code block other than a `diff` one runs past the card's width (`ASK_CODE_COLUMNS`), since a `diff` block wraps.
+Once you answer, the session that posted gets your answer as one `[inbox-answer]` line: it does what the line's `next` says, the way its `verb` names, then runs its `close` ([asks.md](../../.agents/dashboard/asks.md)).

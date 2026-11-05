@@ -8,12 +8,14 @@ license: Complete terms in the repository's NOTICE
 
 Every message to the owner is read in seconds, an Inbox card in the aside's narrow column most of all, and the **talk** rule gives each one this skill's shape. This skill makes each message **glanceable**: the owner sees the point first, then the facts, then what Approve does. The item's shape (its picture, its bullets and its two choices, in that order), its width rule and the `bun run ask` commands live in asks.md's "The ask's shape" ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)); this skill picks the picture and writes the words.
 
-An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 6. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps, step 1 always first:
+An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 6 and 9. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps, step 1 always first:
 
 - An update with no `text`, or a `ship` or `schema` decision, carries only its fields, which the card lays out itself: its title takes step 4, then steps 7 and 8.
 - An `accept`, `apps`, `budget`, `delete` or `grant` decision's `why` is free text, shown as written: it takes steps 3 and 4 as plain lines, one fact each, then steps 7 and 8.
 - A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 4, 7 and 8. A draft or a `slack` decision may carry `attachments`, such as an issue's before and after shots, which its card shows under the words and Send leaves out of Slack.
 - A `secret` ask carries only its key and sink, which the card words itself: its title takes step 4, then step 8; the value itself is the owner's to type into the card, so it appears nowhere in the item.
+
+Every decision and draft then takes step 9 once the owner answers; an update gets no answer, so it ends at step 8.
 
 A message outside the Inbox, a dispatcher's reply in chat or a Slack or Yard DM, takes steps 2 to 5 and 7, since Choices and Post belong to a card alone; a relay in chat, the dispatcher passing a session's message on to the owner, is one such message, its picture and bullets the session's point in the owner's words.
 In chat, step 2's picture is a fenced block (an ASCII flow or a diff; a work status block lives in its card, which chat names by its `#iN`), since no-chat-question sends a table, or three or more numbered steps, to one Inbox card instead (`scripts/hooks/README.md`).
