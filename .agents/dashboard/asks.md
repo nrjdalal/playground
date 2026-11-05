@@ -63,7 +63,7 @@
   Each item sits flat, led by one muted band the pane's full width (`KindBand`, `bg-muted` with square corners bleeding over the pane's `--pane-x` padding, which `dashboard-aside.tsx` sets on each scroll pane, its words lined up with the card's),
   which gives its kind as an icon and a word,
   its id `#i<ref>` (`ref` is an identity column, so an id is stable and never reused) and who posted it (Alpha's name `text-info`, Bravo's `text-bravo`, the theme's purple), then at its right end one time and a tick: `posted <time>`,
-  or `updated <time>` once a decision or draft changed (its `updatedAt` a second or more after its `createdAt`: an answer, a delivery, an ack, a settle, an edit or a Later, `scheduleItem` setting it too), or once its poster edited an update (`bun run ask edit`; an update's read, Dismiss or resolve leaves it `posted`;
+  or `updated <time>` once a decision or draft changed (its `updatedAt`, stamped by the API's clock as its `createdAt` is, a second or more after its `createdAt`: an answer, a delivery, an ack, a settle, an edit or a Later, `scheduleItem` setting it too), or once its poster edited an update (`bun run ask edit`; an update's read, Dismiss or resolve leaves it `posted`;
   `changedAt` in `web/next/src/lib/inbox.ts`), reading `read <time>` on hover once read, and a blue `Updated` when it changed after the owner's look before this one and by the time this one began (`updatedSince`; the inbox's look mark, `inboxMark` in `web/next/src/lib/tab-dot.ts`, takes in changes too), so a change made as the owner looks shows in place, with the change's own time beside it,
   since a relative minute alone can hide an update that landed after the last look.
   Colour says what an item is and where it stands, as the sidebar's lights do: its kind's on its icon alone (a decision `warning`, a draft `info`, an update `success`, an alert `destructive`), the card's own edges plain, no thick coloured border,
@@ -78,6 +78,7 @@
   An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
   A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
   `ASK_CODE_COLUMNS` (`@packages/config/inbox`) is the widest drawing line that fits the narrowest card at 12px.
+  A `delete` decision's `why` renders the same, so a link it holds opens, while its `what` stays plain text, the paths Approve removes.
   Every other preview's words, a Slack message's included, stay plain text, since they go out exactly as written, marked as quoted by a `border-l-2` rule rather than a background, and no card's body, a Done one's included, sits on gray, the band alone muted.
   The card's header is one `minmax(0,1fr)` column and a card's table cells wrap, so a wide table or drawing stays inside the card.
   A decision previews exactly what Approve does, then its options as shadcn's questionnaire choices, except a secret ask (below), and no card offers Edit: a change goes in the comment box, while the API still reads `edit` on an older row.
@@ -151,6 +152,8 @@
   His comment rides as `comment`, a changed draft's words as `text`, a Slack draft's link command as `linkConverter`, what the dashboard ran on Approve as `accepted` (an accept),
   `listed` (an apps change) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
   A comment alone (the card's Reply or a chat reply, `re #iN`) stays his own words, typed as he wrote them.
+  In every chat the line reads as one answer chip in his bubble, an outline badge holding the item's `ref` and the option's `label`, else the `verb`, with the `comment` as the bubble's words after it (`answerChipOf` in `web/next/src/lib/answer-chip.ts`, `TranscriptBubble`), and a line `payloadOf` cannot parse shows as written.
+  A click on the chip opens that card in the aside's Inbox, opening the shelf that holds it first.
   A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `textsOf`).
   Any other `NOT_FOUND` (`now names another session`, `has no terminal to type into`) comes from a live session and stays failed, so the go is never carried out twice.
   A sessions read that was cut short (`Live.partial`, cmux.md) that misses the poster is read once more, fresh rather than the hub's board, and still missing it reads `CMUX_FAILED`, never `NOT_FOUND`, so a live poster's answer is never relayed (`target()` in `deliver.ts`).
@@ -215,7 +218,8 @@
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with its options labelled one line each, `options`, 1 to 5 rows of `{label, description?}`, one row for a yes or no and 2 or more for lettered choices, or the older `approve` alone, never both, and an optional `deny` naming the no-go row (Deny, or None of these past one option),
   and optional `attachments`, below), `slack` (`to`, `text`, optional `attachments`),
-  `ship` (`sha`, `prs` of `{number, title}`), `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below) or `secret` (`key`, `sink`); a decision with none is refused.
+  `ship` (`sha`, `prs` of `{number, title, url?}`, where `bun run ask new` and `edit` fill each `url` into the factory's repo, `factory.repo` else the checkout's origin, so the card links each PR),
+  `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below) or `secret` (`key`, `sink`); a decision with none is refused.
   A `delete`'s `what` names each target by its full path, the one `playground rm --decision` matches, so one approval is enough: `bun run ask new` refuses a short name that is there (a relative or `~` path, a worktree's bare folder name), naming the full path to write, unless that full path stands beside it (`deleteRefusal` in `api/hono/src/lib/dashboard/delete-targets.ts`).
   An `ask`'s `attachments`, a draft's, a `slack` decision's and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
@@ -384,7 +388,9 @@
   A job of several steps leads with to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`).
 
   `bun run ask example code|decision|slack|ui` prints each worked example as an item to fill in, the three asks below and the slack decision above.
-  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options, or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
+  `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
+  a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
+  or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
   The three, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown

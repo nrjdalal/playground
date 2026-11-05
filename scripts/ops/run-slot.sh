@@ -52,6 +52,24 @@ alive() {
   local err
   err=$(LC_ALL=C kill -0 "$1" 2>&1) || case "$err" in *"not permitted"*) true ;; *) false ;; esac
 }
+# whether focus for session $1 spares session $2's runs, neither holding nor preempting them: its own, its own reviewer's and tester's (by name or by the roster row's worker), and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov)
+focus_spares() {
+  case "$2" in "$1" | ops-dashboard | ops-tick) return 0 ;; esac
+  case "$2" in "${1%-worker}-reviewer" | "${1%-worker}-tester") return 0 ;; *-reviewer | *-tester | reviewer-* | tester-*) ;; *) return 1 ;; esac
+  # a checker with an id of its own is the focused session's when its roster row names it as the worker, the key spawn.sh writes and size_of reads
+  python3 -I - "$2" "$1" <<'PY'
+import json, os, sys
+
+data = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
+try:
+    with open(os.path.join(data, "roster.json")) as f:
+        agents = json.load(f).get("agents") or []
+except (OSError, ValueError, AttributeError):
+    agents = []
+row = next((a for a in agents if isinstance(a, dict) and a.get("name") == sys.argv[1]), {})
+sys.exit(0 if row.get("worker") == sys.argv[2] else 1)
+PY
+}
 # whether slot directory $1, whose holder line is $2, is stale: its pid has died, or a line with no pid (or no line, read by the directory's
 # own mtime) has aged 2 hours; a run killed between free()'s rm of its holder and its rmdir leaves a directory with no line
 stale() {
@@ -162,6 +180,22 @@ if [ "${1:-}" = clear-stale ]; then
     line=$(cat "$h" 2>/dev/null)
     [ -d "$OPS/$s" ] && rmdir "$OPS/$s" 2>/dev/null
     rm -f "$h" && echo "$s: cleared a stale holder ($line)"
+  done
+  exit 0
+fi
+# run-slot.sh preempt: while run-slot.focus stands, TERM the process group of each <slot>.child that focus does not spare, only while it is still its holder's child leading its own group, so an urgent ticket's fix goes first (scripts/ops/README.md)
+if [ "${1:-}" = preempt ]; then
+  [ $# -eq 1 ] || { echo "usage: run-slot.sh preempt" >&2; exit 2; }
+  switch_on run-slot.focus || { echo "run-slot.sh: no focus stands (run-slot.focus), so preempt stops nothing" >&2; exit 2; }
+  h=$(cut -d' ' -f1 "$OPS/run-slot.focus")
+  for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone run-slot-quick $(ls "$OPS" 2>/dev/null | sed -n 's/^\(run-slot-model-[0-9]*\)\.holder$/\1/p' | sort -u); do
+    [ -f "$OPS/$s.holder" ] && read -r who pid _ < "$OPS/$s.holder" || continue
+    child=$(cat "$OPS/$s.child" 2>/dev/null)
+    printf '%s' "$pid$child" | grep -Eq '^[0-9]+$' || continue
+    focus_spares "$h" "$who" && continue
+    [ "$(ps -o ppid=,pgid= -p "$child" 2>/dev/null | awk '{print $1, $2}')" = "$pid $child" ] || { echo "$s: $who's run has no child of its holder leading its own group; left alone"; continue; }
+    echo "$child" > "$OPS/$s.preempted"
+    kill -TERM -- "-$child" 2>/dev/null && echo "$(date -u +%FT%TZ) preempt $who $pid child=$child slot=$s focus=$h" >> "$OPS/run-slot.runs.log" && echo "$s: preempted $who's run (pid $child) for $h's focus"
   done
   exit 0
 fi
@@ -677,7 +711,7 @@ focus_holder() {
 focus_holds() {
   local h
   h=$(focus_holder) || return 1
-  case "$WHO" in "$h" | ops-tick | ops-dashboard) return 1 ;; esac
+  ! focus_spares "$h" "$WHO"
 }
 focus_wait() {
   [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for $(focus_holder)'s focus to end (run-slot.focus, until $(cut -d' ' -f3 "$OPS/run-slot.focus" 2>/dev/null))" >&2
@@ -700,7 +734,7 @@ free() {
   # give the slot back only while its holder line is still ours
   if [ -n "$SLOT" ] && [ "$(cut -d' ' -f2 "$SLOT.holder" 2>/dev/null)" = "$$" ]; then
     # the holder line goes first, so a waiter whose mkdir loses to the next taker never reads our dead pid and reclaims that taker's slot (reviewer-ops-load-units, 19 Oct)
-    rm -f "$SLOT.holder"
+    rm -f "$SLOT.holder" "$SLOT.child" "$SLOT.preempted"
     rmdir "$SLOT" 2>/dev/null
   fi
   SLOT=""
@@ -797,8 +831,11 @@ for step, call in (("its own process group", os.setsid), ("nice " + os.environ.g
         print(f"run-slot.sh: runs the command without {step} ({error.strerror})", file=sys.stderr)
 os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
   CHILD=$!
+  # the child's record, the one handle preempt signals
+  [ -n "$SLOT" ] && echo "$CHILD" > "$SLOT.child"
   wait "$CHILD"
   code=$?
+  [ -n "$SLOT" ] && [ "$(cat "$SLOT.preempted" 2>/dev/null)" = "$CHILD" ] && echo "run-slot.sh: focus preempted this run for $(focus_holder || echo a session that has since ended); ask again once its focus ends" >&2
   reap "$CHILD"
   CHILD=""
   rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
