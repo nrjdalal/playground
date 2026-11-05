@@ -993,7 +993,7 @@ gauges_lock() {
 # macOS's memory reading $1: level (the free share) or vm_pressure_level (1 normal, 2 warn, 4 critical)
 memstat() { sysctl -n "kern.memorystatus_$1" 2>/dev/null | tr -cd 0-9; }
 # memory room for a second suite: macOS's free share at 40% or more, its pressure level normal (1; 2 is warn, 4 critical) and swap-ins under SWAPINS_MAX a
-# second in this reading or the last, since a one-second sample spikes and falls back (5 Nov, 06:19 to 07:45Z: all 24 memory shuts came at pressure 1
+# second in this reading or the last, since a one-second sample spikes and falls back (5 Nov, 06:19 to 07:45Z: 17 of the 24 memory shuts came at pressure 1
 # with 70 to 80% free, from readings such as 128, 242 and 1116 between 0, 8, 20 and 44); an unread reading (Claude Code's sandbox refuses the first two) leaves no room, said once a run on stderr
 MEM_TOLD="${TMPDIR:-/tmp}/run-slot-mem-told.$$"
 # says line $2 once a run on stderr, a file per kind ($1) marking it, since a look reads the gauges in a subshell

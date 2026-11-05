@@ -125,7 +125,7 @@ describe("memory shuts slots 2 to 4 as mem_ok reads it", () => {
     expect(look(after({ swapins: 99 }, 100)).slots).toBe("4\n")
   })
 
-  // 5 Nov, 06:19 to 07:45Z: all 24 memory shuts came at pressure 1 with 70 to 80% free, from one-second samples such as 128, 242 and 1116 between 0, 8, 20 and 44
+  // 5 Nov, 06:19 to 07:45Z: 17 of the 24 memory shuts came at pressure 1 with 70 to 80% free, from one-second samples such as 128, 242 and 1116 between 0, 8, 20 and 44
   test("a reading of 128 swap-ins then one under 100 leave them open on both, and two in a row over 100 shut them with why=mem", async () => {
     const m = machine({ swapins: 128 })
     expect(look(m).slots).toBe("4\n")
