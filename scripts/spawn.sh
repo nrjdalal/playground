@@ -1436,7 +1436,7 @@ FF_TRIGGER=
 if [ -n "$FIREFIGHTING" ]; then
   FF_TRIGGER=$(firefighting_trigger) || refuse "--firefighting starts only while a firefighting trigger file stands in $DATA (firefighting-stop.json or firefighting-headstart.json), and none does"
 fi
-# While focus stands (playground focus), one session has the Mac, so a start waits for its end; a move closes the copy it replaces, so it goes on.
+# While focus stands (playground focus), one session has the Mac, so a start waits for its end; a move closes the copy it replaces, so it goes on, as do that session's own reviewer and tester and a --firefighting start (below).
 if [ -z "$MOVE_PID" ] && FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
 import datetime, json, sys
 try:
