@@ -5,8 +5,6 @@ export const MESSAGE_MAX_CHARS = 8000
 export const MESSAGE_MAX_LINES = 100
 // A paste longer than this goes as a file even when the message would fit.
 export const PASTE_MAX_CHARS = 2000
-// Room for what is added to the box's words at send: a picked inbox reply's "re #iN: " tag.
-const REPLY_ROOM = 16
 
 // The control characters a text file holds (tab, line feed, form feed, carriage return and escape), the ones the API's isText() keeps; asText drops every other control character, DEL and C1 included, which deliver() would drop as well.
 export const TEXT_CONTROLS = "\t\n\f\r\u001b"
@@ -28,7 +26,7 @@ export function pastedFile(pasted: string, before: string, after = ""): File | n
     .replace(/(?!\n)\p{Cc}/gu, "")
   if (
     pasted.length <= PASTE_MAX_CHARS &&
-    whole.length + REPLY_ROOM <= MESSAGE_MAX_CHARS &&
+    whole.length <= MESSAGE_MAX_CHARS &&
     whole.split("\n").length <= MESSAGE_MAX_LINES
   ) {
     return null

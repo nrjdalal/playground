@@ -6,7 +6,7 @@ license: Complete terms in the repository's NOTICE
 
 # to-inbox
 
-Every message to the owner is read in seconds, an Inbox card in the aside's narrow column most of all, and the **talk** rule gives each one this skill's shape. This skill makes each message **glanceable**: the owner sees the point first, then the facts, then what Approve does. The item's shape (its picture, its bullets and its two choices, in that order), its width rule and the `bun run ask` commands live in asks.md's "The ask's shape" ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)); this skill picks the picture and writes the words.
+Every message to the owner is read in seconds, an Inbox card in the aside's narrow column most of all, and the **talk** rule gives each one this skill's shape. This skill makes each message **glanceable**: the owner sees the point first, then the facts, then what Approve does. The item's shape (its picture, its bullets and its options, in that order), its width rule and the `bun run ask` commands live in asks.md's "The ask's shape" ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)); this skill picks the picture and writes the words.
 
 An `ask` decision renders its text as markdown, with its attachments under it: every step applies. The read-only card, an update carrying an ask's `text` and `attachments`, renders the same with no Approve or Deny: post it for something the owner only looks at (a table, a preview), and it takes every step but 6 and 9. Every other kind shows plain text, exactly as it goes out, so it takes fewer steps, step 1 always first:
 
@@ -24,7 +24,7 @@ In chat, step 2's picture is a fenced block (an ASCII flow or a diff; a work sta
 Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, and you resolve an alert update that has fixed itself.
 Every other update stays editable until the owner presses Done or Dismiss, as an ask stays editable, answered or not, until it closes, so a card you will replace (a mock's first version) or a progress you carry takes `bun run ask edit` before that.
 
-Beside its choices, every card offers the owner five verbs (asks.md's footer line): ✓ Seen, Snooze and Archive change only his view, so your item keeps waiting and nothing is typed to you; ✓✓ Done sends an update or an answered card to Done; and Dismiss sends any card to Done, typing you `set-aside` while it still waits, so you hold only its new step, and `dismiss`, drop it, once answered.
+Beside its choices, every card offers the owner five verbs (asks.md's footer line): ✓ Seen, Later and Archive change only his view, so your item keeps waiting and nothing is typed to you; ✓✓ Done sends an update or an answered card to Done; and Dismiss sends any card to Done, typing you `set-aside` while it still waits, so you hold only its new step, and `dismiss`, drop it, once answered.
 On an update, Done types you `done` and Dismiss `dismiss`: post a new card for more, since `ask edit` refuses this one.
 
 ## Steps
@@ -76,13 +76,13 @@ On an update, Done types you `done` and Dismiss `dismiss`: post a new card for m
    | `> [!NOTE]`      | context the choice depends on             |
    | `> [!TIP]`       | a faster way the owner may like           |
 
-6. **Choices.** Write asks.md's `approve` and `deny` labels in the same plain words. Done when each label starts with a verb.
+6. **Choices.** Pick the shape, then label each option in the same plain words (asks.md's `options` and `deny`). A true yes or no takes one `options` row, what Approve does, and `deny`, what Deny means; a choice between real alternatives takes 2 to 5 rows, lettered A to E on the card, each a `label` and an optional `description`, with None of these after them. Done when the shape fits the question and each label starts with a verb.
 
 7. **Fake data.** Read the text and every attachment once more. Done when no part holds a token, a customer detail or a real database row, and a demo's or screenshot's names and rows are made up.
 
 8. **Post.** Post it with `bun run ask new`, as asks.md says, and read stderr. Done when `bun run ask` prints the item's id and no shape hint; on a hint, the item has already posted, so fix what the hint names and replace it in place with `bun run ask edit <id> < item.json`, until edit prints no hint.
 
-9. **Answer.** The owner's answer comes back as one line, `[inbox-answer] {json}` (asks.md): do what its `next` says, the way its `verb` names, then run its `close`. The line names its item by `ref` and carries none of its text, so when you no longer hold what you asked, as after a compaction, read the item with `bun run ask get <ref>` first. A `send` sends the message (its `text` when he changed it), a `draft` saves it with `slack_send_message_draft` and leaves it unsent, and a `pick` carrying `opened` rechecks the grant; a step the dashboard ran (`accepted`, `listed`, `opened`) whose `exitCode` is not 0 takes the follow-up asks.md names for it before the close. A reply in his own words (`re #iN`) asks for changes to the item. Done when `bun run ask get <id>` shows the item closed, or edited for his reply.
+9. **Answer.** The owner's answer comes back as one line, `[inbox-answer] {json}` (asks.md): do what its `next` says, the way its `verb` names, then run its `close`. The line names its item by `ref` and carries none of its text, so when you no longer hold what you asked, as after a compaction, read the item with `bun run ask get <ref>` first. A `send` sends the message (its `text` when he changed it), a `draft` saves it with `slack_send_message_draft` and leaves it unsent, and a `pick` carrying `opened` rechecks the grant; a step the dashboard ran (`accepted`, `listed`, `opened`) whose `exitCode` is not 0 takes the follow-up asks.md names for it before the close. A reply in his own words (`re #iN: <words>`, from the card's Reply or his chat) asks for changes to the item: make them with `bun run ask edit <id>`, which puts the card back before him marked Updated, or carry it out and close it with `bun run ask ack <ref>`. Done when `bun run ask get <id>` shows the item closed, or edited for his reply.
 
 ## Fit the card
 
@@ -111,7 +111,7 @@ Ops ships 3 PRs
 > I need your yes before 10:00 pm UTC.
 ````
 
-Approve: `Ship canary to main at 10:00 pm UTC`; Deny: `Hold the ship until tomorrow`.
+Options: `Ship canary to main at 10:00 pm UTC`; Deny: `Hold the ship until tomorrow`.
 
 ## Keep the skills learning
 

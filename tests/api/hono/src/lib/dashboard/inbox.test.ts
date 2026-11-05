@@ -74,6 +74,12 @@ const PREVIEWS = {
 
 const decision = (preview: object) => ({ from: "ops", preview, title: "Ship canary to main?" })
 
+const OPTIONS = [
+  { description: "Staging first, a day of soak", label: "Port to staging, then main" },
+  { label: "Hotfix main" },
+  { label: "Wait for the next ship" },
+]
+
 describe("what bun run ask takes", () => {
   test("a decision for each kind of approval, a decision being the kind when none is named", () => {
     for (const [type, preview] of Object.entries(PREVIEWS)) {
@@ -105,6 +111,30 @@ describe("what bun run ask takes", () => {
     expect(
       inboxInputSchema.safeParse(decision({ ...PREVIEWS.ask, deny: "x".repeat(201) })).success,
     ).toBe(false)
+  })
+
+  test("an ask offers 1 to 5 labelled options, and labels its go row in options or approve alone (#873)", () => {
+    const ask = (over: object) => inboxInputSchema.safeParse(decision({ ...PREVIEWS.ask, ...over }))
+    expect(ask({ options: OPTIONS }).success).toBe(true)
+    expect(ask({ deny: "Leave it", options: [{ label: "Port it" }] }).success).toBe(true)
+    const five = Array.from({ length: 5 }, (_, at) => ({ label: `Way ${at + 1}` }))
+    expect(ask({ options: five }).success).toBe(true)
+    // none, six or an unlabelled row is refused, naming the shape
+    for (const options of [
+      [],
+      [...five, { label: "Way 6" }],
+      [{ label: " " }],
+      [{ description: "no label" }],
+    ]) {
+      const parsed = ask({ options })
+      expect(parsed.success).toBe(false)
+    }
+    expect(JSON.stringify(ask({ options: [] }).error?.issues)).toContain(
+      "An ask offers 1 to 5 options",
+    )
+    expect(ask({ approve: "Port it", options: OPTIONS }).error?.issues[0]?.message).toBe(
+      "An ask labels its go row in options or in approve, not both",
+    )
   })
 
   test("a draft is a recipient and the words, and an update an outcome with an optional link", () => {
@@ -574,6 +604,43 @@ describe("an answer", () => {
     expect(checkAnswer(open, { action: "send" })).toHaveProperty("message")
   })
 
+  test("a lettered decision's go picks one of its options, and a yes or no takes none or its one (#873)", () => {
+    const lettered = item({
+      kind: "decision",
+      preview: { ...PREVIEWS.ask, options: OPTIONS } as never,
+    })
+    expect(checkAnswer(lettered, { action: "approve", option: 2 })).toEqual({
+      answer: { choice: "approve", option: 2 },
+      status: "approved",
+    })
+    expect(checkAnswer(lettered, { action: "deny" })).toEqual({
+      answer: { choice: "deny" },
+      status: "denied",
+    })
+    for (const input of [
+      { action: "approve" },
+      { action: "approve", option: 3 },
+      { action: "edit", text: "B, but tomorrow" },
+    ] as const) {
+      expect(checkAnswer(lettered, input)).toEqual({ message: "Pick one of its 3 options, 0 to 2" })
+    }
+    const open = item({ kind: "decision" })
+    expect(checkAnswer(open, { action: "approve", option: 0 })).toEqual({
+      answer: { choice: "approve", option: 0 },
+      status: "approved",
+    })
+    expect(checkAnswer(open, { action: "approve", option: 1 })).toEqual({
+      message: "A yes or no has one option, 0",
+    })
+    expect(checkAnswer(open, { action: "deny", option: 0 })).toEqual({
+      message: "Only a decision's go picks an option",
+    })
+    expect(checkAnswer(item({ kind: "draft" }), { action: "send", option: 0 })).toEqual({
+      message: "Only a decision's go picks an option",
+    })
+    expect(answerInputSchema.safeParse({ action: "approve", option: 5 }).success).toBe(false)
+  })
+
   test("sends a draft as written or as changed, or discards it", () => {
     const draft = item({ kind: "draft" })
     expect(checkAnswer(draft, { action: "send", text: "hi" })).toEqual({
@@ -752,6 +819,13 @@ describe("an answer", () => {
       ref: 46,
       title: "Port it?",
     })
+    const lettered = item({
+      id: "stu",
+      kind: "decision",
+      preview: { ...PREVIEWS.ask, options: OPTIONS } as never,
+      ref: 47,
+      title: "Which way?",
+    })
     const cases: [InboxItem, Parameters<typeof answerPayload>[1], Record<string, unknown>][] = [
       [
         decided,
@@ -760,7 +834,7 @@ describe("an answer", () => {
           close: ack(41),
           go: true,
           next: "carry-out",
-          option: { index: 0, label: "Approve", letter: "A" },
+          option: { index: 0, label: "Send it to @Merritt", letter: "A" },
           type: "slack",
           verb: "pick",
         },
@@ -785,6 +859,17 @@ describe("an answer", () => {
         { at: AT, choice: "deny" },
         { option: { index: 1, label: "Keep it on main", letter: "B" }, verb: "pick" },
       ],
+      // a lettered ask's pick names the go row its option points at, and its deny the None of these after the last
+      [
+        lettered,
+        { at: AT, choice: "approve", option: 1 },
+        { go: true, option: { index: 1, label: "Hotfix main", letter: "B" }, verb: "pick" },
+      ],
+      [
+        lettered,
+        { at: AT, choice: "deny" },
+        { go: false, option: { index: 3, label: "None of these", letter: "D" }, verb: "pick" },
+      ],
       [
         decided,
         { at: AT, choice: "edit", editedText: "Wait for #299" },
@@ -798,7 +883,7 @@ describe("an answer", () => {
           comment: "ask again next week",
           go: false,
           next: "close",
-          option: { index: 1, label: "Deny", letter: "B" },
+          option: { index: 1, label: "Do not send it", letter: "B" },
           verb: "pick",
         },
       ],
@@ -1933,7 +2018,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(answered).toMatchObject({ item: { status: "approved" }, ok: true })
   })
 
-  test("an item put away with Snooze edits as an open one, and so does one replied to in chat (PG-2547, #903)", async () => {
+  test("an item put away with Later edits as an open one, and so does one replied to in chat (PG-2547, #903)", async () => {
     const snoozed = await post(decision(SLACK))
     const scheduled = await store.scheduleItem(
       db,
@@ -2117,7 +2202,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(dismissed(await store.getItem(db, read.id))).toBeUndefined()
     const waiting = await answered(PREVIEWS.ask, "approve")
     expect(dismissed(await store.getItem(db, waiting.id))).toBeUndefined()
-    // one he set aside stays on the Archived shelf, its read closing it without a Dismiss
+    // one he set aside stays on the Archive shelf, its read closing it without a Dismiss
     const aside = await post(decision(PREVIEWS.ship))
     await store.answerItem(db, aside.id, { action: "clear" }, { actor })
     await store.readAnswer(db, (await store.getItem(db, aside.id))!, at)
@@ -2238,7 +2323,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       )
     })
 
-    test("Move back returns an archived item to the list as it was, and Later takes it off Archived until its time", async () => {
+    test("Move back returns an archived item to the list as it was, and Later takes it off Archive until its time", async () => {
       const posted = await post(decision(PREVIEWS.ship))
       await store.answerItem(db, posted.id, { action: "archive" }, { actor })
       const back = await store.answerItem(db, posted.id, { action: "unarchive" }, { actor })
@@ -2831,6 +2916,114 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(store.deliveryFailed(answered.item)).toBe(false)
   })
 
+  describe("a card's Reply, his comment alone (ib-7)", () => {
+    const capture = () => {
+      const sent: Delivery[] = []
+      const deliver = async (delivery: Delivery) => {
+        sent.push(delivery)
+        return afterPoster(delivery)
+      }
+      return { deliver, sent }
+    }
+    const reached = async () =>
+      ({ at: "2026-10-26T06:00:00.000Z", ok: true, sessionId: "s1" }) as const
+
+    test("types re #iN: <words> into its poster and keeps an open card waiting on the poster, as a chat reply does", async () => {
+      const posted = await post({ ...decision(PREVIEWS.delete), from: "ops" })
+      const { deliver, sent } = capture()
+      const replied = await store.replyItem(
+        db,
+        posted.id,
+        { text: " Split it in two " },
+        { actor, deliver, dispatcher: "dispatcher" },
+      )
+      if (!replied.ok) throw new Error(replied.message)
+      expect(sent.map((d) => [d.to, d.text])).toEqual([
+        ["ops", `re #i${posted.ref}: Split it in two`],
+      ])
+      expect(replied.item).toMatchObject({
+        answer: { choice: "replied", said: "Split it in two" },
+        delivery: null,
+        status: "open",
+      })
+      await store.settleItem(db, posted.id)
+    })
+
+    test("on an answered card or an update, types the comment and keeps the card's answer and delivery", async () => {
+      const answered = await post({ ...decision(PREVIEWS.delete), from: "ops" })
+      await store.answerItem(db, answered.id, { action: "approve" }, { actor, deliver: reached })
+      const before = await store.getItem(db, answered.id)
+      const update = await post({
+        from: "builder",
+        kind: "update",
+        preview: { outcome: "merged" },
+        title: "Merged",
+      })
+      for (const item of [answered, update]) {
+        const { deliver, sent } = capture()
+        const replied = await store.replyItem(
+          db,
+          item.id,
+          { text: "Thanks" },
+          { actor, deliver, dispatcher: "dispatcher" },
+        )
+        if (!replied.ok) throw new Error(replied.message)
+        expect(sent.map((d) => d.text)).toEqual([`re #i${item.ref}: Thanks`])
+      }
+      expect(await store.getItem(db, answered.id)).toEqual(before)
+      expect((await store.getItem(db, update.id))?.answer).toBeNull()
+      await store.dismissItems(db, [answered.id, update.id])
+    })
+
+    test("goes to the dispatcher once its poster has ended, and one that reaches no session is refused, recording nothing", async () => {
+      const posted = await post({ ...decision(PREVIEWS.delete), from: "worker-eod" })
+      const { deliver, sent } = capture()
+      const relayed = await store.replyItem(
+        db,
+        posted.id,
+        { text: "Hold it" },
+        { actor, deliver, dispatcher: "dispatcher" },
+      )
+      expect(relayed.ok).toBe(true)
+      expect(sent.map((d) => [d.to, d.text])).toEqual([
+        ["worker-eod", `re #i${posted.ref}: Hold it`],
+        ["dispatcher", `re #i${posted.ref}: Hold it`],
+      ])
+      const lone = await post({ ...decision(PREVIEWS.delete), from: "worker-eod" })
+      expect(
+        await store.replyItem(db, lone.id, { text: "Hold it" }, { actor, deliver: gone }),
+      ).toMatchObject({ code: "UNDELIVERED", ok: false })
+      expect((await store.getItem(db, lone.id))?.answer).toBeNull()
+      expect(
+        await store.replyItem(db, lone.id, { text: "  " }, { actor, deliver: reached }),
+      ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      expect(
+        await store.replyItem(db, "#i999999", { text: "Hi" }, { actor, deliver: reached }),
+      ).toMatchObject({ code: "NOT_FOUND", ok: false })
+      await store.settleItem(db, posted.id)
+      await store.settleItem(db, lone.id)
+    })
+
+    test("its poster's edit after the comment returns the card to waiting on him", async () => {
+      const posted = await post({ ...decision(PREVIEWS.delete), from: "ops" })
+      await store.replyItem(
+        db,
+        posted.id,
+        { text: "Name the folders" },
+        { actor, deliver: reached },
+      )
+      const edited = await store.editItem(db, posted.id, {
+        ...decision(PREVIEWS.delete),
+        from: "ops",
+        title: "Delete these 47 worktrees?",
+      })
+      if (!edited.ok) throw new Error(edited.message)
+      expect(edited.item).toMatchObject({ answer: null, status: "open" })
+      expect(Date.parse(edited.item.updatedAt)).toBeGreaterThan(Date.parse(posted.updatedAt))
+      await store.settleItem(db, posted.id)
+    })
+  })
+
   test("an answer to a poster that is live goes to the poster alone", async () => {
     const posted = await post({
       from: "worker-eod",
@@ -3064,7 +3257,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect((await store.listItems(db, later)).items.map((i) => i.id)).not.toContain(posted.id)
   })
 
-  test("a set-aside item stays in the list past a week, for the Archived shelf, and never counts", async () => {
+  test("a set-aside item stays in the list past a week, for the Archive shelf, and never counts", async () => {
     const posted = await post(decision(PREVIEWS.ship))
     const delivered = async () => ({
       at: new Date().toISOString(),
@@ -3524,7 +3717,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       old.items.every(
         (i) =>
           i.status === "open" ||
-          // a set-aside item stays, however old, for the Archived shelf
+          // a set-aside item stays, however old, for the Archive shelf
           i.status === "cleared" ||
           (i.kind === "update" && i.readAt === null) ||
           store.deliveryFailed(i) ||
@@ -3546,7 +3739,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const held = await store.listItems(db, now)
     expect(held.items.map((i) => i.id)).not.toContain(posted.id)
     expect(held.count).toBe(base.count - 1)
-    // asleep, it comes apart from items, for the Snoozed shelf alone, so no reader of items takes it as waiting
+    // asleep, it comes apart from items, for the Later shelf alone, so no reader of items takes it as waiting
     expect(held.snoozed.map((i) => i.id)).toContain(posted.id)
     const awake = await store.listItems(db, new Date("2026-10-08T09:00:00.000Z"))
     expect(awake.items.map((i) => i.id)).toContain(posted.id)
