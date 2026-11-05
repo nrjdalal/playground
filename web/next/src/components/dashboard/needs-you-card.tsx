@@ -36,6 +36,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/ui/toast"
+import { useYardWrites } from "@/hooks/use-yard-writes"
 import { agentLabel } from "@/lib/agent-label"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
 import { config } from "@/lib/config"
@@ -51,7 +52,7 @@ import {
   type OnAnswer,
   submitWhy,
 } from "@/lib/needs-you"
-import { READ_ONLY_LINE } from "@/lib/relay"
+import { ON_THE_MAC_LINE, READ_ONLY_LINE } from "@/lib/relay"
 import { relativeTime } from "@/lib/time"
 
 // An answered card, collapsed to one line: what the owner chose and what became of it.
@@ -113,11 +114,11 @@ function Body({ body, label }: { body: NeedsYouBody; label: string }) {
   )
 }
 
-// Where a card that cannot be answered here is answered: through the chat, by the session's manager, or in its terminal for a dispatcher's own card, since a dispatcher has no manager.
-function readOnlyFooter(item: NeedsYou): string {
+// Where a card that cannot be answered here is answered: on the Mac from a hosted page (sends: a paired one, whose chat still sends), through the chat, by the session's manager, or in its terminal for a dispatcher's own card, since a dispatcher has no manager.
+function readOnlyFooter(item: NeedsYou, sends: boolean): string {
   const label = agentLabel(item.from)
   const approving = item.kind === "permission" || item.kind === "plan"
-  if (config.hosted) return READ_ONLY_LINE
+  if (config.hosted) return sends ? ON_THE_MAC_LINE : READ_ONLY_LINE
   if (item.hosted)
     return `Approving a ${item.kind} here is off for now, so it is refused after 10 minutes.`
   if (item.dispatcher) {
@@ -146,6 +147,7 @@ export function NeedsYouCard({
   onAnswer: OnAnswer | null
   resolution: NeedsYouResolution | null
 }) {
+  const writes = useYardWrites()
   const send = useMutation({
     mutationFn: async (given: NeedsYouGiven[]) => {
       if (!onAnswer) throw new Error("This can only be answered in the session's terminal")
@@ -388,7 +390,9 @@ export function NeedsYouCard({
         )}
       </CardContent>
       {readOnly && (
-        <CardFooter className="text-muted-foreground text-xs">{readOnlyFooter(item)}</CardFooter>
+        <CardFooter className="text-muted-foreground text-xs">
+          {readOnlyFooter(item, writes.send)}
+        </CardFooter>
       )}
     </Card>
   )

@@ -109,7 +109,7 @@ function Thread({ id }: { id: string }) {
     setOpened({ at: Date.now(), since: read.data.thread.lastReadAt })
   const unread = read.data?.thread.unread ?? 0
   useEffect(() => {
-    // the hosted build's relay carries no write, so it leaves the read mark to this Mac
+    // the hosted build's relay carries no read mark, so it leaves it to this Mac
     if (unread === 0 || config.hosted) return
     void patchThread(id, { read: true })
       .catch(() => undefined)

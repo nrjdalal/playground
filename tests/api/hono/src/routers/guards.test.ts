@@ -6,6 +6,8 @@ process.env.BETTER_AUTH_SECRET ||= "guards-test-secret-not-for-use-anywhere"
 const { guardWrites, requireTrustedOrigin } =
   await import("../../../../../api/hono/src/middlewares/dashboard")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
+const { markRelayed } = await import("../../../../../api/hono/src/lib/relay/relayed")
+const { Hono } = await import("../../../../../api/hono/node_modules/hono")
 
 const ROUTERS = join(import.meta.dir, "../../../../../api/hono/src/routers")
 const READS = new Set(["GET", "HEAD", "OPTIONS"])
@@ -187,4 +189,43 @@ describe("Yard's writes take a trusted origin and no loopback", () => {
       expect((await send(yard.router, route, trusted(), peer("203.0.113.9"))).status).toBe(401)
     },
   )
+})
+
+// stack.md's relay rule: a write from Yard runs here only as the request answerRelay builds in process once requireSignedWrite passes it, marked in memory, never by anything a request carries.
+describe("a relayed write passes the guards by the in-process mark alone", () => {
+  const guarded = new Hono().use("/*", guardWrites).post("/api/v1/messages", (c) => c.text("ran"))
+  const post = (headers: Record<string, string> = {}) =>
+    new Request("http://127.0.0.1/api/v1/messages?relayed=1", {
+      body: "{}",
+      headers: { "content-type": "application/json", ...headers },
+      method: "POST",
+    })
+
+  test("a network request carrying the mark's name, by header or query, is refused", async () => {
+    const marks: Record<string, string>[] = [
+      {},
+      { relayed: "1" },
+      { "x-relayed": "1" },
+      { "x-playground-relayed": "1" },
+    ]
+    for (const headers of marks) {
+      const offMachine = await guarded.request(post(headers), undefined, peer("192.168.1.20"))
+      expect(offMachine.status).toBe(403)
+      const noOrigin = await guarded.request(post(headers), undefined, peer("127.0.0.1"))
+      expect(noOrigin.status).toBe(403)
+    }
+  })
+
+  test("the request answerRelay marks passes with no origin and no peer, as app.fetch hands it in process", async () => {
+    const response = await guarded.fetch(markRelayed(post()))
+    expect([response.status, await response.text()]).toEqual([200, "ran"])
+  })
+
+  test("only answerRelay marks a request", async () => {
+    const callers: string[] = []
+    const API = join(ROUTERS, "..")
+    for await (const file of new Bun.Glob("**/*.ts").scan({ cwd: API }))
+      if ((await Bun.file(join(API, file)).text()).includes("markRelayed(")) callers.push(file)
+    expect(callers.toSorted()).toEqual(["lib/relay/mac.ts"])
+  })
 })
