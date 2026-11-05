@@ -141,7 +141,7 @@ describe("a secret ask (PG-59)", () => {
     expect(itemState(provided())).toBe("sending")
   })
 
-  test("a saved secret its poster was not told of still reads saved, with the failed telling as a note of its own that offers Retry (PG-880)", () => {
+  test("a saved secret its poster was not told of still reads provided, with the failed telling as a note of its own that offers Retry (PG-880)", () => {
     const untold = {
       ...provided([{ environment: "Keychain", exitCode: 0, line: "saved" } as never]),
       delivery: {
@@ -154,7 +154,7 @@ describe("a secret ask (PG-59)", () => {
     } as InboxItem
     expect(itemState(untold)).toBe("done")
     expect(inboxLight(untold)).toBe("done")
-    expect(outcomeLine(untold)).toEndWith(" · Keychain: saved")
+    expect(outcomeLine(untold)).toBe("Provided · Keychain ✓")
     expect(deliveryNote(untold)).toStartWith("Not told to ")
     expect(deliveryNote(untold)).toContain("cut short")
     expect(retryable(untold)).toBe(true)

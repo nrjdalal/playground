@@ -125,8 +125,9 @@ describe("a queued answer's poster", () => {
   test("is the session that took the answer when the poster had ended, with its raw name on hover", () => {
     const html = render(false, {
       ...answered,
-      delivery: { ...answered.delivery, to: "dispatcher" },
+      delivery: { at: "2026-10-12T10:05:01.000Z", status: "queued", to: "dispatcher" },
     } as InboxItem)
+    expect(html).toContain("Queued for")
     expect(html).toContain('aria-description="dispatcher"')
   })
 })
