@@ -34,7 +34,6 @@ import {
   inboxWaiting,
   itemState,
   kindWord,
-  lifecycle,
   MOVED_PAUSE_MS,
   movedRows,
   movedStep,
@@ -60,6 +59,7 @@ import {
   upfrontLink,
   slackPlaced,
   uploadsOn,
+  verbs,
 } from "../../../../../web/next/src/lib/inbox"
 import { QUEUED_POLL_MS } from "../../../../../web/next/src/lib/outbox"
 import { statusIcon } from "../../../../../web/next/src/lib/status-icons"
@@ -1523,59 +1523,103 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
   })
 })
 
-describe("a card's lifecycle buttons on each shelf (PG-654)", () => {
-  const decision = item({ kind: "decision", ref: 1 })
-  const draft = item({ kind: "draft", ref: 2 })
-  const update = item({ kind: "update", ref: 3 })
-  const answered = item({
-    answer: { at: "x", choice: "approve" },
-    kind: "decision",
-    ref: 4,
-    status: "approved",
-  })
-  const snoozed = item({
-    answer: { snoozedUntil: "2026-11-04T10:00:00.000Z" },
-    kind: "draft",
-    ref: 5,
-  })
-  const archived = (kind: "decision" | "draft") =>
-    item({ answer: { at: "x", choice: "clear" }, kind, ref: 6, status: "cleared" })
-  const secret = item({
-    kind: "decision",
-    preview: {
-      key: "API_KEY",
-      sink: { environments: ["production"], project: "p", scope: "s", type: "vercel" },
-      type: "secret",
-    },
-    ref: 7,
-  } as never)
+// #882's table: each state's verbs, Seen while unread, a folded row keeping them all
+describe("a card's verbs on each state (#882)", () => {
+  const READ = "2026-10-07T11:00:00.000Z"
+  const secret = (over: Partial<InboxItem> = {}) =>
+    item({
+      kind: "decision",
+      preview: {
+        key: "API_KEY",
+        sink: { environments: ["production"], project: "p", scope: "s", type: "vercel" },
+        type: "secret",
+      },
+      ref: 7,
+      ...over,
+    } as never)
+  const answered = (over: Partial<InboxItem> = {}) =>
+    item({
+      answer: { at: "x", choice: "approve" },
+      kind: "decision",
+      readAt: READ,
+      ref: 4,
+      status: "approved",
+      ...over,
+    } as never)
 
-  test("an open decision or draft in the Inbox offers Archive and Snooze", () => {
-    expect(lifecycle(decision, "inbox")).toEqual(["archive", "snooze"])
-    expect(lifecycle(draft, "inbox")).toEqual(["archive", "snooze"])
-  })
-
-  test("a snoozed one offers Snooze again, for a new time, and Archive", () => {
-    expect(lifecycle(snoozed, "snoozed")).toEqual(["archive", "snooze"])
-  })
-
-  test("an archived decision or draft offers Move to Inbox and Done", () => {
-    expect(lifecycle(archived("decision"), "archived")).toEqual(["unarchive", "done"])
-    expect(lifecycle(archived("draft"), "archived")).toEqual(["unarchive", "done"])
+  test("a waiting ask, draft or secret takes Later, Archive and Dismiss, and Seen while unread", () => {
+    for (const card of [item({ kind: "decision" }), item({ kind: "draft" }), secret()]) {
+      expect(verbs(card, "inbox")).toEqual(["seen", "later", "archive", "dismiss"])
+      expect(verbs({ ...card, readAt: READ } as InboxItem, "inbox")).toEqual([
+        "later",
+        "archive",
+        "dismiss",
+      ])
+    }
   })
 
-  test("an update and an answered item keep Dismiss straight to Done, with nothing to set aside", () => {
-    expect(lifecycle(update, "inbox")).toEqual(["dismiss"])
-    expect(lifecycle(answered, "inbox")).toEqual(["dismiss"])
+  test("a waiting one put off until a time keeps the same verbs on Snoozed", () => {
+    const snoozed = item({ answer: { snoozedUntil: "2026-11-04T10:00:00.000Z" }, kind: "draft" })
+    expect(verbs(snoozed, "snoozed")).toEqual(["seen", "later", "archive", "dismiss"])
   })
 
-  test("a card on Done offers none, since it reads as history", () => {
-    for (const card of [decision, draft, update, answered, archived("draft")])
-      expect(lifecycle(card, "done")).toEqual([])
+  test("an update in the list takes Done, Later, Archive and Dismiss, and Seen while unread", () => {
+    expect(verbs(item({ kind: "update" }), "inbox")).toEqual([
+      "seen",
+      "done",
+      "later",
+      "archive",
+      "dismiss",
+    ])
+    expect(verbs(item({ kind: "update", readAt: READ }), "inbox")).toEqual([
+      "done",
+      "later",
+      "archive",
+      "dismiss",
+    ])
   })
 
-  test("a secret ask is snoozed, never archived, since its value comes through Submit alone", () => {
-    expect(lifecycle(secret, "inbox")).toEqual(["snooze"])
+  test("an answered, working or failed card takes Done and Dismiss, with no Later or Archive", () => {
+    const failed = answered({
+      delivery: { code: "LOST", reason: "lost", status: "failed" },
+    } as never)
+    const denied = answered({ answer: { at: "x", choice: "deny" }, status: "denied" } as never)
+    const replied = item({ answer: { at: "x", choice: "replied" }, kind: "decision", readAt: READ })
+    for (const card of [answered(), failed, denied, replied]) {
+      expect(verbs(card, "inbox")).toEqual(["done", "dismiss"])
+      expect(verbs(card, "progress")).toEqual(["done", "dismiss"])
+    }
+    expect(verbs(answered({ readAt: null }), "inbox")).toEqual(["seen", "done", "dismiss"])
+  })
+
+  test("an archived card takes Later, Move back and Dismiss, and one set aside before Archive kept it open Move back and Dismiss", () => {
+    const archived = item({ answer: { archivedAt: READ }, kind: "decision" } as never)
+    expect(verbs(archived, "archived")).toEqual(["later", "moveBack", "dismiss"])
+    const cleared = item({ answer: { at: "x", choice: "clear" }, kind: "draft", status: "cleared" })
+    expect(verbs(cleared, "archived")).toEqual(["moveBack", "dismiss"])
+  })
+
+  test("a card on Done keeps Dismiss until dismissed, and one dismissed while it waited takes Move back", () => {
+    const done = answered({ answer: { at: "x", choice: "approve", dismissedAt: READ } } as never)
+    expect(verbs(done, "done")).toEqual(["dismiss"])
+    const dismissed = answered({
+      answer: { at: "x", choice: "approve", dismissed: true, dismissedAt: READ },
+    } as never)
+    expect(verbs(dismissed, "done")).toEqual([])
+    const setAside = item({
+      answer: { at: "x", choice: "clear", dismissed: true, dismissedAt: READ },
+      kind: "decision",
+      status: "cleared",
+    } as never)
+    expect(verbs(setAside, "done")).toEqual(["moveBack"])
+  })
+
+  test("an archived card waits on him moving it back, so it no longer needs him", () => {
+    const archived = (kind: "decision" | "update") =>
+      item({ answer: { archivedAt: READ }, kind } as never)
+    expect(needsYou(archived("decision"))).toBe(false)
+    expect(needsYou(archived("update"))).toBe(false)
+    expect(needsYou(item({ kind: "decision" }))).toBe(true)
   })
 })
 

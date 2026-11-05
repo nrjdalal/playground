@@ -15,7 +15,10 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 - A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 4, 7 and 8. A draft or a `slack` decision may carry `attachments`, such as an issue's before and after shots, which its card shows under the words and Send leaves out of Slack.
 - A `secret` ask carries only its key and sink, which the card words itself: its title takes step 4, then step 8; the value itself is the owner's to type into the card, so it appears nowhere in the item.
 
-Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, you resolve an alert update that has fixed itself, and every other update stays editable until the owner dismisses it, so a card you will replace (a mock's first version) takes `bun run ask edit` before that.
+Pick the kind by how its card closes (asks.md's `settle` and `resolve` lines): you settle a decision or a draft you decided another way, and you resolve an alert update that has fixed itself.
+Every other update stays editable until the owner presses Done or Dismiss, as an ask stays editable, answered or not, until it closes, so a card you will replace (a mock's first version) or a progress you carry takes `bun run ask edit` before that.
+
+Beside its choices, every card offers the owner five verbs (asks.md's footer line): ✓ Seen, Later and Archive change only his view, so your item keeps waiting and nothing is typed to you; ✓✓ Done sends an update or an answered card to Done; and Dismiss sends any card to Done, typing you "Cleared for now" while it still waits, so you hold only its new step.
 
 ## Steps
 

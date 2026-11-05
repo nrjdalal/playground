@@ -67,7 +67,7 @@ export async function dismissItems(ids: string[]) {
   return data
 }
 
-// Puts an open decision or draft away until a time, when it asks again; it leaves the list and the count until then.
+// Later: puts an open decision or draft, or an update, away until a time, when it asks again; it leaves the list and the count until then, and the Archived shelf when it was there.
 export async function scheduleItem(id: string, at: string) {
   const { data, error } = await unwrap(
     apiClient.v1.inbox[":id"].schedule.$post({ json: { at }, param: { id } }),
@@ -303,11 +303,17 @@ export function pickedAt(day: Date | undefined, time: string, now: Date): Date |
   return at.getTime() > now.getTime() ? at : null
 }
 
-// Pure: whether an item asks something of the owner now: an open decision or draft, an answer that failed to send, or an update not read yet. A chat reply took an item off his hands, so it waits on its poster alone.
+// Pure: whether he archived an item and has not dismissed it since.
+const isArchived = (item: InboxItem): boolean =>
+  item.answer !== null && "archivedAt" in item.answer && !("dismissedAt" in item.answer)
+
+// Pure: whether an item asks something of the owner now: an open decision or draft, an answer that failed to send, or an update not read yet. A chat reply took an item off his hands, so it waits on its poster alone, and one he archived waits on him moving it back.
 export const needsYou = (item: InboxItem): boolean =>
-  item.kind === "update"
-    ? item.readAt === null
-    : (item.status === "open" && chosen(item)?.choice !== "replied") || sendFailed(item)
+  isArchived(item)
+    ? false
+    : item.kind === "update"
+      ? item.readAt === null
+      : (item.status === "open" && chosen(item)?.choice !== "replied") || sendFailed(item)
 
 // Pure: whether a card shows folded until he opens it: every card but one that needs an answer now, so a snoozed ask folds until its time and a card that rises to needing him shows open.
 export const foldsByDefault = (item: InboxItem, now: number): boolean =>
@@ -320,20 +326,33 @@ export const foldsByDefault = (item: InboxItem, now: number): boolean =>
 // The shelf a card sits on: the list, or one of the rows under it.
 export type Shelf = "archived" | "done" | "inbox" | "progress" | "snoozed"
 
-// A card's lifecycle buttons, beside its own answers and Reply: Done is Dismiss renamed on an archived card, and unarchive is Move to Inbox.
-export type Lifecycle = "archive" | "dismiss" | "done" | "snooze" | "unarchive"
+// A card's verbs, beside its own answers and Reply: Seen marks it read, Done sends it to Done, Later puts it off until a time, Archive takes it off his list unanswered and Move back returns it, and Dismiss sends it to Done marked dismissed.
+export type Verb = "archive" | "dismiss" | "done" | "later" | "moveBack" | "seen"
 
-// Pure: the lifecycle buttons a card offers on its shelf: Archive and Snooze while it asks something (a secret ask takes no Archive), Dismiss straight to Done for an update or an answered item, Move to Inbox and Done once archived, and none on Done, which is history.
-export function lifecycle(item: InboxItem, shelf: Shelf): Lifecycle[] {
-  if (shelf === "done") return []
-  if (shelf === "archived") return ["unarchive", "done"]
-  const secret = item.kind === "decision" && item.preview.type === "secret"
-  const asks = schedulable(item)
-  return [
-    ...(asks && !secret ? (["archive"] as const) : []),
-    ...(asks ? (["snooze"] as const) : []),
-    ...(dismissable(item) ? (["dismiss"] as const) : []),
-  ]
+// Pure: whether an item still waits on his answer: an open decision, draft or secret ask he has not replied to in chat.
+export const waiting = (item: InboxItem): boolean =>
+  item.kind !== "update" && item.status === "open" && chosen(item)?.choice !== "replied"
+
+// Pure: whether his Dismiss marked an item, rather than his Done or its poster's close.
+const dismissedMark = (item: InboxItem): boolean =>
+  item.answer !== null && "dismissed" in item.answer && item.answer.dismissed === true
+
+// Pure: the verbs a card offers on its shelf, by its state: Seen while unread; what waits takes Later, Archive and Dismiss; an update in the list takes Done too; an answered, working or failed one takes Done and Dismiss; an archived one Later, Move back and Dismiss; and one on Done its Dismiss until dismissed, with Move back on one set aside while it waited.
+export function verbs(item: InboxItem, shelf: Shelf): Verb[] {
+  if (shelf === "done") {
+    return [
+      ...(item.status === "cleared" ? (["moveBack"] as const) : []),
+      ...(dismissedMark(item) ? [] : (["dismiss"] as const)),
+    ]
+  }
+  // a set-aside one from before Archive kept items open has no Later, since it is no longer open
+  if (shelf === "archived") {
+    return item.status === "cleared" ? ["moveBack", "dismiss"] : ["later", "moveBack", "dismiss"]
+  }
+  const seen = item.readAt === null ? (["seen"] as const) : []
+  if (waiting(item)) return [...seen, "later", "archive", "dismiss"]
+  if (item.kind === "update") return [...seen, "done", "later", "archive", "dismiss"]
+  return [...seen, "done", "dismiss"]
 }
 
 // Pure: the ids of what waits on the owner in the Inbox, in the list's order, so Playground's row's link reaches the first.
