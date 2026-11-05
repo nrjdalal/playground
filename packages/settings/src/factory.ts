@@ -1,6 +1,7 @@
 import { z } from "zod"
 
-import { defineSettings } from "@/settings"
+// By relative path, as owner.ts imports, so a test outside the package type-checks it.
+import { defineSettings } from "./settings"
 
 const repo = z
   .string()
