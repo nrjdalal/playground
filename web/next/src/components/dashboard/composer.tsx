@@ -269,7 +269,7 @@ function WritableComposer({ threadId, worker }: { threadId?: string; worker: Wor
   // every Cmd+V and paste on the page, and each insert into the box but plain typing, goes to the browser's paste log (lib/paste-log.ts), lengths only, and a miss to this machine's API
   useEffect(() => watchPastes(() => box.current), [])
 
-  // A failed message's Edit puts its text and files back here to fix and send again, after anything already there, taken once so coming back to the page does not put it back again; a thread's box beside the session's own leaves it to that one.
+  // A failed message's Edit puts its text and files back here to fix and send again, after anything already there, and an Inbox card's Reply puts re #iN: before it, each taken once so coming back to the page does not put it back again, with focus in the box and the caret at the end; a thread's box beside the session's own leaves it to that one.
   const { clearDraft, draft } = outbox
   const { restore } = attachments
   const taken = useRef<typeof draft>(null)
@@ -282,6 +282,7 @@ function WritableComposer({ threadId, worker }: { threadId?: string; worker: Wor
     restore(draft.attachments)
     clearDraft()
     box.current?.focus()
+    requestAnimationFrame(() => box.current?.setSelectionRange(text.length, text.length))
   }, [clearDraft, draft, form, restore, threadId, worker.name])
 
   return (

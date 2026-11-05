@@ -547,11 +547,13 @@ export type Outbox = {
   discard: (id: string) => void
   // Drops a typed message that will not be matched (its session ended, it was pulled back out of the queue): it may still arrive, and the transcript would show it.
   dismiss: (id: string) => void
-  // Words handed to the composer, a failed message's by Edit, cleared once the composer takes it.
-  draft: { attachments: OutboxAttachment[]; text: string; to: string } | null
+  // Words handed to the composer, a failed message's by Edit, or an Inbox card's ref by Reply, cleared once the composer takes it.
+  draft: { attachments: OutboxAttachment[]; ref?: number; text: string; to: string } | null
   edit: (id: string) => void
   // Every message on its way or sent from here, across sessions, read from the chats.
   messages: OutboxMessage[]
+  // Hands an Inbox card's ref to the composer of the session `to`, which puts re #iN: before its words.
+  reply: (to: string, ref: number) => void
   retry: (id: string) => void
   send: (
     to: string,
@@ -634,6 +636,7 @@ export function useDashboardChats(
         setDraft({ attachments: message.attachments, text: message.text, to: message.to })
       },
       messages,
+      reply: (to, ref) => setDraft({ attachments: [], ref, text: "", to }),
       retry: (id) => {
         const to = toOf(id)
         if (to) chats.retry(to, id)
