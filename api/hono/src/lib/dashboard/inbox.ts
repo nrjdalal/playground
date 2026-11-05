@@ -1197,7 +1197,7 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
       ),
     ),
   )
-  // what needs him and what waits on a verb are never capped, so a pile of unread updates cannot push a decision or a card in hand out of the list or the count; the snoozed, the archived and every set-aside (cleared) item not dismissed, however old, come too, for the Inbox's shelves
+  // what needs him and what waits on a verb are never capped, so a pile of unread updates cannot push a decision or a card in hand out of the list or the count; what is put away with Later, the archived and every set-aside (cleared) item not dismissed, however old, come too, for the Inbox's shelves
   const [open, waiting, rest, shelved] = await Promise.all([
     db.select().from(inboxItem).where(needsYou),
     db.select().from(inboxItem).where(pending),
