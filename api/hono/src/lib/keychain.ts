@@ -1,8 +1,8 @@
 import { userInfo } from "node:os"
 
-import { KEYCHAIN_ITEMS, type KeychainItemName } from "./keychain-items"
+import { keychainSpec } from "./keychain-items"
 
-// One allowlisted generic password in the macOS Keychain (keychain-items.ts), as the signed-in user, through `security`.
+// One allowlisted generic password in the macOS Keychain (keychainSpec in keychain-items.ts), as the signed-in user, through `security`.
 
 // input goes to the command's stdin, so a secret travels there and never in an argv another process can read
 export type Run = (
@@ -25,10 +25,12 @@ const spawnRun: Run = async (argv, input) => {
 }
 
 export function keychainItem(
-  name: KeychainItemName,
+  name: string,
   { account = userInfo().username, run = spawnRun }: { account?: string; run?: Run } = {},
 ) {
-  const { invalid, service, valid } = KEYCHAIN_ITEMS[name]
+  const spec = keychainSpec(name)
+  if (!spec) throw new Error(`${name} is not a Keychain item Playground may use`)
+  const { invalid, service, valid } = spec
   const item = ["-s", service, "-a", account]
   return {
     read: async (): Promise<string | null> => {

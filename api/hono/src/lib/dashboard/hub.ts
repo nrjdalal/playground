@@ -387,7 +387,7 @@ export const dashboardHub = new DashboardHub()
 // How long the board stays subscribed after the last read, so the hosted relay's read every 5 s takes the newest frame rather than starting the hub's feed and a full refresh each time.
 export const BOARD_HOLD_MS = 30_000
 
-// The board as the socket sends it, for a client with no socket (the hosted relay, which carries reads alone): the newest board frame while it holds a subscription, held holdMs past the last read; null when none comes within timeoutMs.
+// The board as the socket sends it, for a client with no socket (the hosted relay, which carries requests and no live frames): the newest board frame while it holds a subscription, held holdMs past the last read; null when none comes within timeoutMs.
 export function boardReader(
   hub: Pick<DashboardHub, "subscribe"> = dashboardHub,
   { holdMs = BOARD_HOLD_MS, timeoutMs = 10_000 }: { holdMs?: number; timeoutMs?: number } = {},

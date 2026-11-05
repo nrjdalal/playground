@@ -1154,6 +1154,48 @@ describe("ops-unstick's slot alerts", () => {
     expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toHaveLength(1)
   })
 
+  // precommit:light's tree as ps shows it: bun run, the script, then trace-count's test:file, its sandbox and bun test
+  const precommitLight = [
+    "  999451      1 bun run precommit:light /x/msg.txt",
+    "  999452 999451 bun packages/scripts/src/precommit-light.ts /x/msg.txt",
+    "  999453 999452 bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
+    "  999454 999453 bun packages/scripts/src/test-sandbox.ts tests/packages/scripts/src/trace-count/count.test.ts",
+    "  999455 999454 bun test tests/packages/scripts/src/trace-count/count.test.ts",
+  ]
+  // the same tree with bun test straight under the script, the form before trace-count ran through test:file
+  const precommitLightBare = [
+    ...precommitLight.slice(0, 2),
+    precommitLight[4]!.replace("999454", "999452"),
+  ]
+
+  for (const [form, rows] of [
+    ["bun run test:file", precommitLight],
+    ["bun test tests", precommitLightBare],
+  ] as const)
+    test(`precommit:light's ${form}, which runs outside the slots by rule, is no job and raises no outside-slot`, async () => {
+      const jobs = await call(scratch(), "heavy_jobs", rows)
+      expect(jobs).toEqual([])
+      expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([])
+    })
+
+  for (const [form, row, pid] of [
+    ["bun run test:file", precommitLight[2]!.replace("999452", "     1"), "999453"],
+    ["bun test tests", precommitLight[4]!.replace("999454", "     1"), "999455"],
+  ] as const)
+    test(`a bare ${form} with no precommit:light above it and no holder still raises outside-slot`, async () => {
+      const jobs = await call(scratch(), "heavy_jobs", [row])
+      expect(jobs).toEqual([{ inside: false, kind: "suite", pid, where: "?" }])
+      expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([
+        {
+          at,
+          kind: "outside-slot",
+          line: `a suite runs outside the run slots (pid ${pid}); use run-slot.sh`,
+          name: "?",
+          since: at,
+        },
+      ])
+    })
+
   test("the slots read are run-slot.sh's own, each model slot by its name", async () => {
     const script = readFileSync(
       join(import.meta.dir, "../../../../scripts/ops/run-slot.sh"),
@@ -1209,8 +1251,8 @@ describe("ops-unstick's slot alerts", () => {
     expect(new Set(alerts.map((a) => a.kind))).toEqual(new Set(["slot-idle"]))
   })
 
-  // run-slot's holder on run-slot-3 with the given ps rows under it, its saved baseline at cpu seconds, idle since `ago` seconds
-  const idleCheck = async (rows: string[], cpu: number, ago: number) => {
+  // run-slot's holder on run-slot-3 with the given ps rows under it, its saved baseline at cpu seconds over the pids it saw, idle since `ago` seconds
+  const idleCheck = async (rows: string[], cpu: number, ago: number, pids?: string[]) => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
     const bin = join(config, "bin")
@@ -1224,7 +1266,9 @@ describe("ops-unstick's slot alerts", () => {
     chmodSync(join(bin, "ps"), 0o755)
     const now = Date.now() / 1000
     const key = `run-slot-3:${process.pid}`
-    const state = { slot_idle: { [key]: { cpu, since: now - ago, told: true } } }
+    const state = {
+      slot_idle: { [key]: { cpu, since: now - ago, told: true, ...(pids && { pids }) } },
+    }
     const alerts = (await callWith(
       { PATH: `${bin}:${process.env.PATH}` },
       config,
@@ -1246,6 +1290,22 @@ describe("ops-unstick's slot alerts", () => {
     ]
     expect(await idleCheck(rows, 600, 1000)).toEqual([])
     expect(await idleCheck(rows, 0.04, 1000)).toEqual([])
+  })
+
+  test("a tree holding a pid the last check did not see restarts its wait, so a step started since raises no slot-idle (#1043)", async () => {
+    const rows = [
+      `  999478 ${process.pid} 0:00.00 bash -c batch`,
+      "  999479 999478 0:00.50 bun test",
+    ]
+    expect(await idleCheck(rows, 0, 1000, ["999478"])).toEqual([])
+  })
+
+  test("a tree of the pids the last check saw, at flat CPU past SLOT_IDLE, still raises slot-idle, its times summed in hundredths (#1043)", async () => {
+    const rows = [
+      `  999478 ${process.pid} 0:00.04 bash -c batch`,
+      "  999479 999478 0:00.30 bun test",
+    ]
+    expect(await idleCheck(rows, 0.34, 1000, ["999478", "999479"])).toEqual(["slot-idle"])
   })
 
   test("a bun install process at near 0% CPU waits SLOT_IDLE_INSTALL, then still raises slot-idle, and a wrapper naming one in its argv waits SLOT_IDLE", async () => {

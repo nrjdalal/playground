@@ -30,6 +30,9 @@ export const stop = async (p: Subprocess) => {
   await p.exited
 }
 
+// Ubuntu 26.04's default mkdir, uutils 0.10.0, reports success when another process made the folder between its own check and its mkdir (fixed in uutils 0.11.0), so two looks could each take one of run-slot.sh's mkdir locks; the image keeps GNU's as gnumkdir, which fails there as the Mac's mkdir does, so a machine's fake bin runs that one where it exists
+const GNU_MKDIR = Bun.which("gnumkdir")
+
 export const dirs: string[] = []
 afterAll(() => {
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
@@ -143,6 +146,10 @@ esac
   }
   // SLOW_CHILD puts a slowed python3 in the fake bin folder, which PATH reads first
   slowChild("python3", bin)
+  if (GNU_MKDIR) {
+    writeFileSync(join(bin, "mkdir"), `#!/bin/bash\nexec ${GNU_MKDIR} "$@"\n`)
+    chmodSync(join(bin, "mkdir"), 0o755)
+  }
   const env = (extra: Record<string, string> = {}) => ({
     CLAUDE_CONFIG_DIR: config,
     PLAYGROUND_DATA_DIR: join(config, "playground"),
@@ -175,16 +182,17 @@ esac
   const tickets = () =>
     existsSync(join(ops, "run-slot.waiters")) ? readdirSync(join(ops, "run-slot.waiters")) : []
   // Starts `touch <marker>` through run-slot (or the copy at `script`) in the background, reading its stderr as it comes. Each check waits on an event (the run's exit, a line it prints), never a wall-clock budget, so a loaded runner only makes it slower.
-  // command: the words before the marker, which a fake bin in the machine's bin folder touches; touch by default
+  // command: the words before the marker, which a fake bin in the machine's bin folder touches; touch by default; cwd: the folder it runs from, the scratch root by default
   const start = (
     who: string,
     extra: Record<string, string> = {},
     script = SCRIPT,
     command = ["touch"],
+    cwd = root,
   ) => {
     const marker = join(root, `ran-${who}-${Math.random()}`)
     const p = Bun.spawn(["bash", script, who, "--", ...command, marker], {
-      cwd: root,
+      cwd,
       env: env(extra),
       stderr: "pipe",
     })

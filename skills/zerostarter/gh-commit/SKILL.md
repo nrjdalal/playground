@@ -70,7 +70,7 @@ docs(readme): update installation steps
 build(deps): bump dependencies to latest versions
 ```
 
-A merge keeps git's own message, which commitlint passes: `git merge origin/canary --no-edit`, and `git commit --no-edit` to finish a merge you resolved by hand. Merge canary with git's default strategy and resolve each conflict yourself: the ours strategy (`-s ours`) and the ours option (`-X ours`) drop what canary added while canary still reads as merged in, so the PR's squash deletes it with every gate green. The factory's no-ours-merge hook refuses both, and pr:merge's keeps canary gate (`packages/scripts/src/pr-merge/README.md`) refuses a head whose canary merge dropped canary's lines. Work you set aside is typed like any other commit: `chore(<scope>): wip <what>`.
+A merge keeps git's own message, which commitlint passes: `git merge origin/canary --no-edit`, and `git commit --no-edit` to finish a merge you resolved by hand. Merge canary with git's default strategy and resolve each conflict yourself: the ours strategy (`-s ours`) and the ours option (`-X ours`) drop what canary added while canary still reads as merged in, so the PR's squash deletes it with every gate green. The factory's no-ours-merge hook refuses both, and pr:merge's keeps canary gate (`packages/scripts/src/pr-merge/README.md`) refuses a head whose canary merge dropped canary's lines, as lefthook's pre-push `keeps-canary` does before the push lands. Work you set aside is typed like any other commit: `chore(<scope>): wip <what>`.
 
 ### Resolving a merge conflict
 

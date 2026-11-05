@@ -123,8 +123,8 @@ export const pendingIn = (
 ): OutboxMessage[] =>
   messages.filter((message) => {
     if (message.threadId !== threadId) return false
-    if (message.state === "failed" || message.state === "queued" || message.state === "sending")
-      return true
+    if (message.state === "sending") return message.entryId === null
+    if (message.state === "failed" || message.state === "queued") return true
     if (message.state !== "typed" || !message.typedAt) return false
     if (now - Date.parse(message.typedAt) > FILING_MS) return false
     return !findDelivery(message, entries, new Set())

@@ -13,9 +13,9 @@ set -euo pipefail
 #      half its item's load units (small 1, medium 2, big 3: --size, else small
 #      for a reviewer or tester, else what `ops/run-slot.sh size <name>` reads),
 #      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
-#      a small worker keeping an eighth in its place for the reviewers and testers; a load over that
-#      line reads the CPU's busy cores (top -l 2 -n 0) too, and refuses only when they and the starts
-#      are over it as well, or when top cannot be read
+#      a small worker keeping an eighth in its place for the reviewers and testers; a load at or over
+#      that line refuses whatever the CPU's idle share, so the load stays under the cores, but for a
+#      --firefighting start while its trigger file stands (FF_TRIGGER), logged as readings.firefighting
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
@@ -54,6 +54,7 @@ set -euo pipefail
 #   spawn.sh move      <name>                           takes the live cmux session holding <name> to herdr: every check and the usage gate run but the load and memory gates, since the copy it closes frees what the new one takes; only then it closes the session's cmux surface (its workspace when that was the last surface), waits up to 30s (PLAYGROUND_MOVE_WAIT seconds) for its process to exit, and resumes it in herdr by its session id. It takes --model, --effort, --account and --brief as a resume does, --backend for a session with no pin, and --runtime herdr alone; a session cmux holds no record of at its pid is left alone, and a session cannot move itself: its lead moves it
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" ("can move" for a move) and start or close nothing
+#   --firefighting     with any mode but restore or close, anywhere among its words: the start passes focus's refusal and the load gate (the memory gate still reads it) while a firefighting trigger file stands in the data folder (firefighting-stop.json or firefighting-headstart.json), and is refused while none does
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
@@ -94,6 +95,14 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 # The roster's manager kinds (kinds.ts' ROSTER_ROLE_OF_KIND), so a kind role_of_kind does not list runs as a lead: an orchestrator. A read that fails leaves the named kinds alone, so an orchestrator is refused rather than guessed.
 MANAGER_KINDS=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { ROSTER_ROLE_OF_KIND as r } from '$REPO/packages/config/src/kinds.ts'; console.log(Object.keys(r).filter((k) => r[k] === 'manager').join(' '))" 2>/dev/null) || MANAGER_KINDS=
+# The firefighting trigger file standing in the data folder, the first of the two that exists; exit 1 when neither does. Its content is not read.
+firefighting_trigger() {
+  local f
+  for f in "$DATA/firefighting-stop.json" "$DATA/firefighting-headstart.json"; do
+    [ -e "$f" ] && { echo "$f"; return 0; }
+  done
+  return 1
+}
 [[ $DATA == "$HOME"/* ]] && SHOWN="~${DATA#"$HOME"}" || SHOWN=$DATA
 SETTINGS="$DATA/factory-settings.json"
 HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
@@ -261,7 +270,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${FF_TRIGGER:-}" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -271,7 +280,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role, room, first = sys.argv[1:14]
+data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role, room, first, firefighting = sys.argv[1:15]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -439,32 +448,17 @@ else:
         share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
         keep = cap * share
         readings["reserve"] = keep
-        # the load average counts the sessions' many short-lived processes (load 24 on 15 cores at 55% idle, 22 Oct), so a load over the line reads the CPU's busy cores too, against the same line held at the cores' count, and refuses only when both are over
-        if readings["load5"] + starts >= cap - keep:
-            idle = None
-            try:
-                out = subprocess.run(["top", "-l", "2", "-n", "0"], capture_output=True, text=True, timeout=10).stdout
-                idle = float([line for line in out.splitlines() if line.startswith("CPU usage:")][-1].split(",")[-1].split("%")[0])
-            except (IndexError, OSError, subprocess.TimeoutExpired, ValueError):
-                pass
-            readings["cpu_idle"] = idle
-            cpu_cap = min(cap, cores)
-            cpu_line = cpu_cap - cpu_cap * share
-            if idle is not None:
-                readings["cpu_busy"] = round(cores * (100 - idle) / 100, 2)
-            if idle is None or readings["cpu_busy"] + starts >= cpu_line:
-                at = (
-                    f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
-                    if mult != 1
-                    else f"the {cores} cores"
-                )
-                at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
-                cpu = (
-                    "it cannot read the CPU use (top), so the load alone decides"
-                    if idle is None
-                    else f"the CPU is {100 - idle:g}% busy (top), {readings['cpu_busy']:g} of the {cores} cores, which with the starts is at or over {cpu_line:g} too"
-                )
-                refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}; {cpu}. Wait for it to fall, or close a session that is done, and run it again.")
+        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --firefighting start passes while its trigger file stands (FF_TRIGGER), since firefighting comes first, and the memory gate still reads it
+        if firefighting:
+            readings["firefighting"] = firefighting
+        elif readings["load5"] + starts >= cap - keep:
+            at = (
+                f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
+                if mult != 1
+                else f"the {cores} cores"
+            )
+            at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
+            refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}. Wait for it to fall, or close a session that is done, and run it again.")
     except Skip:
         pass
 
@@ -523,6 +517,26 @@ try:
             if isinstance(week_pct, (int, float)) and not isinstance(week_pct, bool) and week_pct >= 100 and resets > now:
                 readings["week"] = week_pct
                 refuse("usage", f"--account {account}: its week reads {fmt(week_pct)}% ({name} seven_day.used_percentage) until {resets:%a %H:%M} UTC. Name another account, or, for a session that may run on this machine's login, none, so it starts on the login with the most room")
+        # usage.json's accounts map holds every account's week as login-flip reads it, a week past its weekReset read as 0, so a full one refuses too, naming the account with the most room as most_room() in ops/unstick/run.py picks it: the lowest week under 100.
+        own_usage, own_detail = load("usage.json")
+        accounts = own_usage.get("accounts") if not own_detail and isinstance(own_usage, dict) else None
+        weeks = {}
+        for acct, entry in accounts.items() if isinstance(accounts, dict) else []:
+            acct_week = entry.get("week") if isinstance(entry, dict) else None
+            if not isinstance(acct_week, (int, float)) or isinstance(acct_week, bool):
+                continue
+            try:
+                acct_reset = from_iso(entry.get("weekReset"))
+            except (TypeError, ValueError):
+                acct_reset = None
+            weeks[str(acct).lower()] = (str(acct), 0 if acct_reset and acct_reset <= now else acct_week, acct_reset)
+        if account.lower() in weeks:
+            _, week_pct, resets = weeks[account.lower()]
+            if week_pct >= 100 and resets:
+                readings["week"] = week_pct
+                roomiest = min(((acct, week) for key, (acct, week, _) in weeks.items() if key != account.lower() and week < 100), key=lambda pair: pair[1], default=None)
+                hint = f"Name {roomiest[0]}, the account with the most room (its week reads {fmt(roomiest[1])}%), or, for a session that may run on this machine's login, none" if roomiest else "No account in usage.json's accounts has room; wait for a week to reset"
+                refuse("usage", f"--account {account}: its week reads {fmt(week_pct)}% (usage.json accounts) until {resets:%a %H:%M} UTC. {hint}")
         readings["usage"] = f"skipped (--account {account}, whose usage this machine does not read)"
     elif backend == "glm":
         beat = read("ops/ops-zai-usage.json")
@@ -762,7 +776,7 @@ PY
   esac
 }
 
-# --account, --backend, --model, --effort, --brief, --reports-to, --title, --in and --check may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --model, --effort, --brief, --reports-to, --title, --in, --check and --firefighting may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -789,6 +803,7 @@ REPORTS_TO=
 TITLE_ARG=
 IN_DIR=
 CHECK=
+FIREFIGHTING=
 SIZE=
 RUNTIME=
 MOVE_PID=
@@ -845,6 +860,9 @@ while [ $# -gt 0 ]; do
     shift 2
   elif [ "$1" = --check ]; then
     CHECK=1
+    shift
+  elif [ "$1" = --firefighting ]; then
+    FIREFIGHTING=1
     shift
   elif [ "$1" = --brief ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RESUME_BRIEF" ] || usage
@@ -1399,7 +1417,11 @@ case "$SIZE" in
   *) ITEM=$(bash "$REPO/scripts/ops/run-slot.sh" size "$NAME" 2>/dev/null) || ITEM= ;;
 esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
-# While focus stands (playground focus), one session has the Mac, so a start waits for its end; a move closes the copy it replaces, so it goes on.
+FF_TRIGGER=
+if [ -n "$FIREFIGHTING" ]; then
+  FF_TRIGGER=$(firefighting_trigger) || refuse "--firefighting starts only while a firefighting trigger file stands in $DATA (firefighting-stop.json or firefighting-headstart.json), and none does"
+fi
+# While focus stands (playground focus), one session has the Mac, so a start waits for its end; a move closes the copy it replaces, so it goes on, as do that session's own reviewer and tester and a --firefighting start (below).
 if [ -z "$MOVE_PID" ] && FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
 import datetime, json, sys
 try:
@@ -1412,7 +1434,9 @@ if until <= datetime.datetime.now(datetime.timezone.utc):
 print(f"{f.get('session')} until {f['until']}")
 PY
 ); then
-  refuse "focus stands for $FOCUS, so no new session starts until it ends (playground focus off ends it)"
+  # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --firefighting start goes on while its trigger file stands
+  [ -n "$FF_TRIGGER" ] || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
+    refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
 fi
 gate_capacity
 if [ "$RUNTIME" = herdr ]; then

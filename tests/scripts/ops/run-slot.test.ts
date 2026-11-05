@@ -371,4 +371,45 @@ describe("the queue's order", () => {
   test("but not before the run-slot.priority pick", async () => {
     expect(await order("worker-lm")).toEqual(["worker-lm", "reviewer-lw"])
   })
+
+  // 4 Nov: a commit's build queued as commit-<worktree> waited 2 h while the priority named the session committing in that worktree
+  const commitOrder = async (from: string) => {
+    const m = machine({ idle: 30 })
+    writeFileSync(join(m.ops, "run-slot.priority"), "worker-p\n")
+    const tree = join(m.root, ".claude", "worktrees", from)
+    mkdirSync(tree, { recursive: true })
+    expect(await m.start("worker-p", {}, undefined, ["touch"], tree).ran()).toBe(true)
+    m.hold("run-slot", 1, "small")
+    const other = m.start("worker-o", { RUN_SLOT_SIZE: "small" })
+    expect(await other.saw(WAITING)).toBe(true)
+    const commit = m.start("commit-wt-p", { RUN_SLOT_SIZE: "small" })
+    expect(await commit.saw(WAITING)).toBe(true)
+    m.release("run-slot")
+    expect(await other.ran()).toBe(true)
+    expect(await commit.ran()).toBe(true)
+    return readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
+      .split("\n")
+      .filter((l) => l.split(" ")[1] === "start")
+      .map((l) => l.split(" ")[2])
+      .slice(1)
+  }
+
+  test("and the pick's commit step, from a worktree the picked session last ran from, takes the slot before an older waiter", async () => {
+    expect(await commitOrder("wt-p")).toEqual(["commit-wt-p", "worker-o"])
+  })
+
+  test("while a commit step from a worktree the pick never ran from keeps its place", async () => {
+    expect(await commitOrder("wt-q")).toEqual(["worker-o", "commit-wt-p"])
+  })
+
+  // 4 Nov: with the pick on one session, its merge asked later took a slot before its older one
+  test("the pick's own runs go oldest first, so a newer one waits while its older ticket waits", async () => {
+    const m = machine()
+    writeFileSync(join(m.ops, "run-slot.priority"), "worker-p\n")
+    m.ticket(1, "worker-p", "s2 22 2 medium")
+    const newer = m.start("worker-p", { RUN_SLOT_SIZE: "small" })
+    expect(await newer.saw(WAITING)).toBe(true)
+    await stop(newer.p)
+    expect(existsSync(newer.marker)).toBe(false)
+  })
 })

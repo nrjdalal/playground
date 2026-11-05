@@ -249,7 +249,7 @@ export function Pages({ all, session }: { all: boolean; session: string }) {
         <PageList
           apiUrl={config.api.url}
           now={now}
-          onDelete={setDeleting}
+          onDelete={config.hosted ? undefined : setDeleting}
           onOpen={(page) => openInAside?.(pageDoc(config.api.url, page.name, pageTitle(page)))}
           pages={data.previews}
         />
