@@ -278,6 +278,26 @@ const worktree = (): string => {
   return dir
 }
 
+// prebuild.ts and what it imports, into a made-up checkout: its verify folder, which this returns.
+const copyPrebuild = (dir: string): string => {
+  const verify = join(dir, "packages/scripts/src/verify")
+  mkdirSync(verify, { recursive: true })
+  cpSync(join(ROOT, "packages/scripts/src/verify/prebuild.ts"), join(verify, "prebuild.ts"))
+  cpSync(
+    join(ROOT, "packages/scripts/src/shebang.ts"),
+    join(dir, "packages/scripts/src/shebang.ts"),
+  )
+  symlinkSync(
+    join(ROOT, "packages/scripts/node_modules"),
+    join(dir, "packages/scripts/node_modules"),
+  )
+  mkdirSync(join(dir, "api/hono/src/lib/dev"), { recursive: true })
+  cpSync(join(ROOT, "api/hono/src/lib/dev/stop.ts"), join(dir, "api/hono/src/lib/dev/stop.ts"))
+  mkdirSync(join(dir, "node_modules/@packages"), { recursive: true })
+  symlinkSync(join(ROOT, "packages/safe-delete"), join(dir, "node_modules/@packages/safe-delete"))
+  return verify
+}
+
 // On 2 Nov pr:merge, run from a worktree installed before canary added @packages/safe-delete, stopped on "tsdown: command not found" partway through its build.
 test("staleInstall refuses a worktree whose install predates a package its bun.lock added, naming the package and the install that fixes it", () => {
   const dir = worktree()
@@ -342,19 +362,9 @@ test("prebuildStep adds no install and no refusal on an install that matches, bu
 test("bun run pr:merge's prebuild stops on a stale install even with every dist built, and passes once it is installed", () => {
   const dir = worktree()
   try {
-    const verify = join(dir, "packages/scripts/src/verify")
-    mkdirSync(verify, { recursive: true })
+    const verify = copyPrebuild(dir)
     mkdirSync(join(dir, "packages/scripts/src/pr-merge"))
-    cpSync(join(ROOT, "packages/scripts/src/verify/prebuild.ts"), join(verify, "prebuild.ts"))
-    cpSync(
-      join(ROOT, "packages/scripts/src/shebang.ts"),
-      join(dir, "packages/scripts/src/shebang.ts"),
-    )
     writeFileSync(join(dir, "packages/scripts/src/pr-merge/cli.ts"), "export const x = 1\n")
-    symlinkSync(
-      join(ROOT, "packages/scripts/node_modules"),
-      join(dir, "packages/scripts/node_modules"),
-    )
     const { PLAYGROUND_REPO: _, ...env } = process.env
     const run = () =>
       Bun.spawnSync(["bun", join(verify, "prebuild.ts"), "pr-merge"], { cwd: dir, env })
@@ -403,21 +413,7 @@ const clone = (): {
     join(dir, "packages/plain/package.json"),
     JSON.stringify({ name: "@packages/plain" }),
   )
-  const verify = join(dir, "packages/scripts/src/verify")
-  mkdirSync(verify, { recursive: true })
-  cpSync(join(ROOT, "packages/scripts/src/verify/prebuild.ts"), join(verify, "prebuild.ts"))
-  cpSync(
-    join(ROOT, "packages/scripts/src/shebang.ts"),
-    join(dir, "packages/scripts/src/shebang.ts"),
-  )
-  symlinkSync(
-    join(ROOT, "packages/scripts/node_modules"),
-    join(dir, "packages/scripts/node_modules"),
-  )
-  mkdirSync(join(dir, "api/hono/src/lib/dev"), { recursive: true })
-  cpSync(join(ROOT, "api/hono/src/lib/dev/stop.ts"), join(dir, "api/hono/src/lib/dev/stop.ts"))
-  mkdirSync(join(dir, "node_modules/@packages"), { recursive: true })
-  symlinkSync(join(ROOT, "packages/safe-delete"), join(dir, "node_modules/@packages/safe-delete"))
+  const verify = copyPrebuild(dir)
   writeFileSync(
     join(dir, "packages/scripts/src/data-table-metrics.ts"),
     `import { appendFileSync, mkdirSync, writeFileSync } from "node:fs"\nmkdirSync(${JSON.stringify(join(dir, ".generated"))}, { recursive: true })\nwriteFileSync(${JSON.stringify(join(dir, ".generated/data-table-metrics.json"))}, "{}")\nappendFileSync(${JSON.stringify(log)}, "metrics\\n")\n`,
