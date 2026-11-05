@@ -4,6 +4,7 @@
     {
       "api": [
         "WS /api/v1/ws",
+        "GET /api/v1/board",
         "GET /api/v1/agents",
         "GET /api/v1/ops",
         "GET /api/v1/system",
@@ -273,6 +274,7 @@
     {
       "api": [
         "WS /api/v1/ws",
+        "GET /api/v1/board",
         "GET /api/v1/agents",
         "GET /api/v1/ops",
         "GET /api/v1/system",

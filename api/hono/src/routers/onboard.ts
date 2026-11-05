@@ -36,7 +36,7 @@ export type OnboardDeps = {
 }
 
 // Every owner but the agent route's LocalAgent, by id.
-const owners = async (): Promise<string[]> =>
+export const owners = async (): Promise<string[]> =>
   (
     await db
       .select({ id: userTable.id })
