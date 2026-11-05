@@ -1,9 +1,10 @@
 // auto_end.ts: ends a worker, reviewer or tester once its work is done, by SESSIONS.md#end (spawn.sh close, then its roster report), so no finished session sits idle.
 // Two callers: ops-tick's auto-end beat every 5 minutes (sweep, over idle_sessions.ts's flags), and pr:merge and the train's land right after a merge (endMerged, over the PR's roster rows).
 // Guards: only a worker, reviewer or tester is ever ended, never a manager, the dispatcher, a runner, the optimizer or a probe; it must be not busy for 10+ minutes; uncommitted or unpushed work in a worktree it used keeps it open, told to its lead.
-// Every end and every refusal is one line for its lead; it signals nothing itself.
+// After a close, each worktree the session used is cleaned (cleanWorktree): its dev stack stopped, the worktree moved to the trash, its containers and branch removed, or kept with the reason.
+// Every end and every refusal is one line for its lead; it signals nothing itself but through bun run dev:stop, which signals only the process groups that worktree's stack recorded.
 
-import { join } from "node:path"
+import { basename, dirname, join } from "node:path"
 
 import { kindOf, managerKindOfName } from "../../../packages/config/src/kinds"
 import {
@@ -34,6 +35,7 @@ export type Target = {
 export type Line = { text: string; to: string }
 
 export type EndDeps = {
+  cleanup?: (target: Target) => Promise<string[]>
   close: (name: string) => Promise<{ ok: boolean; out: string }>
   report: (name: string, text: string) => Promise<void>
   unsaved: (target: Target) => Promise<string | null>
@@ -66,8 +68,11 @@ export async function endOne(target: Target, why: string, deps: EndDeps): Promis
       { text: `Not ended ${target.name} (${why}): spawn.sh close refused: ${closed.out}`, to },
     ]
   await deps.report(target.name, `ended automatically: ${why}`)
-  if (!why.startsWith("checker-nothing")) return [{ text: `Ended ${target.name}: ${why}`, to }]
-  const text = `Ended ${target.name}: ${why}; resume it on the next push: scripts/spawn.sh resume ${target.name} <dir>`
+  const cleaned = deps.cleanup ? await deps.cleanup(target) : []
+  const after = cleaned.length ? `; cleanup: ${cleaned.join("; ")}` : ""
+  if (!why.startsWith("checker-nothing"))
+    return [{ text: `Ended ${target.name}: ${why}${after}`, to }]
+  const text = `Ended ${target.name}: ${why}${after}; resume it on the next push: scripts/spawn.sh resume ${target.name} <dir>`
   return target.worker && target.worker !== to
     ? [
         { text, to },
@@ -173,11 +178,11 @@ async function cwdsOf(sessionId: string, projectsDir: string): Promise<string[] 
   return [...cwds]
 }
 
-// The worktrees a session used: each linked worktree its transcript ran in, and for a worker each worktree on its PRs' branches; why the work in one is not saved, or null.
-export async function unsavedLive(target: Target, projectsDir: string): Promise<string | null> {
+// The worktrees a session used: each linked worktree its transcript ran in, and for a worker each worktree on its PRs' branches; null when its transcript cannot be read.
+export async function worktreesOf(target: Target, projectsDir: string): Promise<string[] | null> {
   const dirs = new Set<string>()
   const cwds = target.sessionId ? await cwdsOf(target.sessionId, projectsDir) : []
-  if (!cwds) return `could not check its transcript in ${projectsDir}`
+  if (!cwds) return null
   for (const cwd of cwds) {
     const top = await git(cwd, ["rev-parse", "--show-toplevel"])
     if (!top) continue
@@ -195,6 +200,13 @@ export async function unsavedLive(target: Target, projectsDir: string): Promise<
       if (path && branch && target.refs.includes(branch)) dirs.add(path)
     }
   }
+  return [...dirs]
+}
+
+// Why the work in a worktree the session used is not saved, or null.
+export async function unsavedLive(target: Target, projectsDir: string): Promise<string | null> {
+  const dirs = await worktreesOf(target, projectsDir)
+  if (!dirs) return `could not check its transcript in ${projectsDir}`
   // A failed read is no proof the work is saved, so it holds the end too.
   for (const dir of dirs) {
     const status = await git(dir, ["status", "--porcelain"])
@@ -207,7 +219,112 @@ export async function unsavedLive(target: Target, projectsDir: string): Promise<
   return null
 }
 
+// What one worktree's cleanup reads and runs, so a test hands it fakes: git in a folder, the main checkout, its dev stack's stop, playground rm --worktree, the containers docker lists and its remove, and whether a name is the live dashboard's database.
+export type CleanupDeps = {
+  containers: () => Promise<string[] | null>
+  devStop: (dir: string) => Promise<void>
+  git: (dir: string, args: string[]) => Promise<string | null>
+  live: (container: string) => boolean
+  main: string
+  removeContainer: (name: string) => Promise<boolean>
+  rm: (path: string, reason: string) => Promise<{ ok: boolean; out: string }>
+}
+
+// Pure: the containers a worktree's cleanup may remove, playground-<worktree>-db and -redis as AGENTS.md names a worktree's own, for a folder directly in <main>/.claude/worktrees alone and never the live dashboard's database.
+export const containersFor = (
+  path: string,
+  main: string,
+  live: (container: string) => boolean,
+): string[] => {
+  if (dirname(path) !== join(main, ".claude", "worktrees")) return []
+  const name = basename(path).replace(/[^a-zA-Z0-9_.-]/g, "-")
+  return [`playground-${name}-db`, `playground-${name}-redis`].filter((c) => !live(c))
+}
+
+// One worktree a closed session used, cleaned once its work is saved: a Playground worktree's dev stack stopped, the worktree moved to the trash by playground rm (which refuses one a live session or a process holds), then its containers removed by exact name; another repo's worktree removed by git with no --force, then pruned; then its branch deleted. The line saying what went, or why it stayed.
+export async function cleanWorktree(
+  path: string,
+  reason: string,
+  deps: CleanupDeps,
+): Promise<string> {
+  const status = await deps.git(path, ["status", "--porcelain"])
+  if (status === null) return `kept ${path}: could not read its git status`
+  if (status) return `kept ${path}: uncommitted work`
+  const ahead = await deps.git(path, ["rev-list", "--count", "HEAD", "--not", "--remotes"])
+  if (ahead === null) return `kept ${path}: could not count its unpushed commits`
+  if (Number(ahead) > 0) return `kept ${path}: unpushed commits`
+  const [gitDir, commonDir] = (
+    (await deps.git(path, [
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-dir",
+      "--git-common-dir",
+    ])) ?? ""
+  ).split("\n")
+  if (!gitDir || !commonDir || gitDir === commonDir) return `kept ${path}: not a linked worktree`
+  const repo = dirname(commonDir)
+  const branch = await deps.git(path, ["symbolic-ref", "--short", "-q", "HEAD"])
+  const gone: string[] = []
+  if (repo === deps.main) {
+    const own = containersFor(path, deps.main, deps.live)
+    if (!own.length)
+      return `kept ${path}: not a worktree in ${join(deps.main, ".claude", "worktrees")}`
+    await deps.devStop(path)
+    const moved = await deps.rm(path, reason)
+    if (!moved.ok) return `kept ${path}: ${moved.out}`
+    const listed = (await deps.containers()) ?? []
+    for (const name of own)
+      if (listed.includes(name) && (await deps.removeContainer(name))) gone.push(name)
+  } else {
+    if ((await deps.git(repo, ["worktree", "remove", path])) === null)
+      return `kept ${path}: git worktree remove refused it`
+    await deps.git(repo, ["worktree", "prune"])
+  }
+  const deleted = branch ? (await deps.git(repo, ["branch", "-D", branch])) !== null : false
+  return `removed ${path}${gone.length ? `, containers ${gone.join(", ")}` : ""}${deleted ? `, branch ${branch}` : ""}`
+}
+
+// This machine's cleanup deps: git, the main checkout this one belongs to, bun run dev:stop in the worktree, playground rm --worktree from this checkout, docker ps -a and docker rm -fv, and the live dashboard's database name.
+async function cleanupDeps(): Promise<CleanupDeps | null> {
+  const common = await git(REPO, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+  if (!common) return null
+  const { isLiveDatabase, livePair } = await import("../../../api/hono/src/lib/dev/live-dashboard")
+  const pair = livePair()
+  return {
+    containers: async () => {
+      const { code, out } = await runIn(["docker", "ps", "-a", "--format", "{{.Names}}"])
+      return code === 0 ? out.split("\n").filter(Boolean) : null
+    },
+    devStop: async (dir) => void (await runIn(["bun", "run", "--cwd", dir, "dev:stop"])),
+    git,
+    live: (container) => isLiveDatabase(container, pair),
+    main: dirname(common),
+    removeContainer: async (name) => (await runIn(["docker", "rm", "-fv", name])).code === 0,
+    rm: async (path, reason) => {
+      const cli = join(REPO, "packages", "scripts", "src", "playground", "cli.ts")
+      const argv = [process.execPath, "--no-env-file", cli, "rm", "--worktree", path]
+      const { code, out } = await runIn([...argv, "--reason", reason])
+      return { ok: code === 0, out: out.split("\n").at(-1) ?? "" }
+    },
+  }
+}
+
+// After a session closes, each worktree it used, one at a time.
+export const cleanupLive =
+  (projectsDir: string) =>
+  async (target: Target): Promise<string[]> => {
+    const dirs = await worktreesOf(target, projectsDir)
+    if (!dirs) return [`could not read its transcript in ${projectsDir}, so nothing was cleaned`]
+    if (!dirs.length) return []
+    const deps = await cleanupDeps()
+    if (!deps) return ["could not find the main checkout, so nothing was cleaned"]
+    const lines: string[] = []
+    for (const dir of dirs) lines.push(await cleanWorktree(dir, `${target.name} ended`, deps))
+    return lines
+  }
+
 export const liveDeps = (projectsDir: string): EndDeps => ({
+  cleanup: cleanupLive(projectsDir),
   close: async (name) => {
     const { code, out } = await runIn(["bash", join(REPO, "scripts", "spawn.sh"), "close", name])
     return { ok: code === 0, out: out.split("\n").at(-1) ?? "" }
