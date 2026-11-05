@@ -1251,8 +1251,8 @@ describe("ops-unstick's slot alerts", () => {
     expect(new Set(alerts.map((a) => a.kind))).toEqual(new Set(["slot-idle"]))
   })
 
-  // run-slot's holder on run-slot-3 with the given ps rows under it, its saved baseline at cpu seconds, idle since `ago` seconds
-  const idleCheck = async (rows: string[], cpu: number, ago: number) => {
+  // run-slot's holder on run-slot-3 with the given ps rows under it, its saved baseline at cpu seconds over the pids it saw, idle since `ago` seconds
+  const idleCheck = async (rows: string[], cpu: number, ago: number, pids?: string[]) => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
     const bin = join(config, "bin")
@@ -1266,7 +1266,9 @@ describe("ops-unstick's slot alerts", () => {
     chmodSync(join(bin, "ps"), 0o755)
     const now = Date.now() / 1000
     const key = `run-slot-3:${process.pid}`
-    const state = { slot_idle: { [key]: { cpu, since: now - ago, told: true } } }
+    const state = {
+      slot_idle: { [key]: { cpu, since: now - ago, told: true, ...(pids && { pids }) } },
+    }
     const alerts = (await callWith(
       { PATH: `${bin}:${process.env.PATH}` },
       config,
@@ -1288,6 +1290,22 @@ describe("ops-unstick's slot alerts", () => {
     ]
     expect(await idleCheck(rows, 600, 1000)).toEqual([])
     expect(await idleCheck(rows, 0.04, 1000)).toEqual([])
+  })
+
+  test("a tree holding a pid the last check did not see restarts its wait, so a step started since raises no slot-idle (#1043)", async () => {
+    const rows = [
+      `  999478 ${process.pid} 0:00.04 bash -c batch`,
+      "  999479 999478 0:00.30 bun test",
+    ]
+    expect(await idleCheck(rows, 0.04, 1000, ["999478"])).toEqual([])
+  })
+
+  test("a tree of the pids the last check saw, at flat CPU past SLOT_IDLE, still raises slot-idle (#1043)", async () => {
+    const rows = [
+      `  999478 ${process.pid} 0:00.04 bash -c batch`,
+      "  999479 999478 0:00.30 bun test",
+    ]
+    expect(await idleCheck(rows, 0.34, 1000, ["999478", "999479"])).toEqual(["slot-idle"])
   })
 
   test("a bun install process at near 0% CPU waits SLOT_IDLE_INSTALL, then still raises slot-idle, and a wrapper naming one in its argv waits SLOT_IDLE", async () => {
