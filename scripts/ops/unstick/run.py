@@ -28,7 +28,7 @@ HERE = os.path.join(OPS, "unstick")
 CYCLE = 120
 QUIET_READ = 60
 REALERT = 600
-LIMIT_SUMMARY = 3600  # retro 31: a limit block's alert goes once, then one summary an hour while any holds (1,664 lines in one night at REALERT)
+LIMIT_SUMMARY = 3600  # a limit block's alert goes once, then one summary an hour while any holds
 LIMIT_KINDS = ("usage-limit", "usage-limit-stuck")  # a session at its usage limit, or one still showing it past its reset
 STALL = 600
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -369,7 +369,7 @@ def room(name):
     u = readings().get(acct)
     if not u:
         week = ((own_accounts().get(acct) or {}) if acct else {}).get("week")
-        return False, f"{acct}: 7d {week}% (usage.json's accounts)" if isinstance(week, (int, float)) else "no usage file reads " + (acct or "this machine's own login")
+        return False, f"no fresh usage file reads {acct} (usage.json's accounts: 7d {week}%)" if isinstance(week, (int, float)) else "no usage file reads " + (acct or "this machine's own login")
     try:
         fresh = time.time() - calendar.timegm(time.strptime(u["writtenAt"], "%Y-%m-%dT%H:%M:%SZ")) < 900
         used = {label: (u["rate_limits"].get(w) or {}).get("used_percentage") for label, w in (("5h", "five_hour"), ("7d", "seven_day"))}

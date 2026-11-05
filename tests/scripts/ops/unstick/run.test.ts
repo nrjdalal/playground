@@ -1442,6 +1442,7 @@ run.time.sleep = lambda s: None
 sent = []
 run.notify = lambda text, to="dispatcher": sent.append([to, text])
 run.log = lambda line: None
+run.alert_to = lambda name, transcript: "lead"
 session = {"session_id": "s-1", "surface_id": "w1:p1", "workspace_id": "w1", "transcript_path": ""}
 run.herdr_sessions = lambda: [session]
 run.name_of = lambda s: "worker-a"
@@ -1452,7 +1453,7 @@ run.manager_kind_of_name = lambda name: None
 run.named_kind = lambda name: None
 run.quiet_for = lambda path, now_t: 3600
 run.screen = lambda s: ["You've hit your weekly limit"]
-run.read_block = lambda lines, s: ("usage-limit", "You've hit your weekly limit", None)
+run.read_block = lambda lines, s: (sys.argv[2], "You've hit your weekly limit", None)
 run.session_account = lambda name: "acct-spent"
 run.moving = lambda now_t=None: None
 for fn in ("stall",):
@@ -1469,13 +1470,13 @@ for _ in range(8 * 3600 // 120 + 1):
     clock[0] += 120
 print(json.dumps(sent))
 `
-  const replay = async (accounts: object): Promise<[string, string][]> => {
+  const replay = async (accounts: object, kind = "usage-limit"): Promise<[string, string][]> => {
     const config = scratch()
     writeFileSync(
       join(config, "playground", "usage.json"),
       JSON.stringify({ account: "acct-spent", accounts, writtenAt: "2027-01-15T08:00:00Z" }),
     )
-    const proc = Bun.spawn([...PYTHON, "-I", "-c", REPLAY, RUN_PY], {
+    const proc = Bun.spawn([...PYTHON, "-I", "-c", REPLAY, RUN_PY, kind], {
       env: {
         CLAUDE_CONFIG_DIR: config,
         HOME: process.env.HOME,
@@ -1519,11 +1520,32 @@ print(json.dumps(sent))
 
   test("says so when no account has room", async () => {
     const sent = await replay({
-      "acct-spent": { week: 100 },
       "acct-also": { week: 100 },
+      "acct-spent": { week: 100 },
     })
     expect(sent.find(([, text]) => text.includes("is at its usage limit"))?.[1]).toContain(
       "No account in usage.json's accounts has room",
+    )
+  })
+  test("names a week past its reset as 0 and never the session's own account", async () => {
+    const most = async (accounts: object) =>
+      (await replay(accounts)).find(([, text]) => text.includes("is at its usage limit"))?.[1]
+    expect(await most({ "acct-roomy": { week: 20 }, "acct-spent": { week: 5 } })).toContain(
+      "Most room: acct-roomy (week 20%)",
+    )
+    expect(
+      await most({
+        "acct-reset": { week: 100, weekReset: 1_700_000_000 },
+        "acct-roomy": { week: 20 },
+        "acct-spent": { week: 100 },
+      }),
+    ).toContain("Most room: acct-reset (week 0%)")
+  })
+
+  test("any other block still alerts every 10 minutes", async () => {
+    const sent = await replay({ "acct-roomy": { week: 20 } }, "picker")
+    expect(sent.filter(([, text]) => text.includes("is blocked on a picker prompt"))).toHaveLength(
+      49,
     )
   })
 })
