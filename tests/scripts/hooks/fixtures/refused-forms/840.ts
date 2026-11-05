@@ -32,6 +32,22 @@ export const groups: Group[] = [
         `node -e 'require("child_process").execFile("rmdir ~/.play*", { shell: true })'`,
       ],
       [
+        "an inline node program removing a data-folder glob through spawnSync with a quoted shell key",
+        `node -e 'require("child_process").spawnSync("rmdir ~/.play*", { "shell": true })'`,
+      ],
+      [
+        "an inline node program removing a data-folder glob through spawnSync with a shorthand shell property",
+        `node -e 'const shell = true; require("child_process").spawnSync("rmdir ~/.play*", { shell })'`,
+      ],
+      [
+        "an inline node program removing a data-folder glob through spawnSync with a spread of shell options",
+        `node -e 'const o = { shell: true }; require("child_process").spawnSync("rmdir ~/.play*", { ...o })'`,
+      ],
+      [
+        "an inline node program removing a data-folder glob through spawnSync with shell options passed by name",
+        `node -e 'const o = { shell: true }; require("child_process").spawnSync("rmdir ~/.play*", o)'`,
+      ],
+      [
         "an inline node program removing a data-folder glob through execSync beside an unrelated shell variable",
         `node -e 'require("child_process").execSync("rmdir ~/.play* $1")'`,
       ],

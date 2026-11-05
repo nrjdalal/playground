@@ -539,7 +539,7 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
     ],
     [
       "a data-folder glob removed through spawnSync with shell true",
-      `bun -e 'Bun.spawnSync("rmdir ~/.play*", { shell: true })'`,
+      `node -e 'require("child_process").spawnSync("rmdir ~/.play*", { shell: true })'`,
     ],
     [
       "a data-folder glob removed through execSync beside an unrelated shell variable",
