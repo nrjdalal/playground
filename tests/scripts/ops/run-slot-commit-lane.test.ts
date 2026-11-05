@@ -356,6 +356,10 @@ describe("a sh -c chain of git steps", () => {
     // zsh runs the command after |& or &|
     "cd ROOT && git commit -m x |& bun run build",
     "cd ROOT && git commit -m x &| bun run build",
+    // review round 7: a cd beside |, &, || or in a subshell does not carry to the next step
+    "cd ROOT | git commit -m x",
+    "cd ROOT & git commit -m x",
+    "(cd ROOT); git commit -m x",
   ])
     test(`a chain that commits with a step off the list counts as a build: ${steps}`, async () => {
       const m = repo({ idle: 30 }, ["docs/notes.md"])
@@ -363,6 +367,17 @@ describe("a sh -c chain of git steps", () => {
       expect(await start(m, steps).waits()).toBe(true)
       expect(log(m)).not.toContain("run-slot-commit")
     })
+
+  // review round 7: an env word before the shell, such as BASH_ENV or PATH, changes what the shell runs
+  test("a chain behind an env word counts as a build", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    const outside = join(m.root, "outside")
+    mkdirSync(outside, { recursive: true })
+    const argv = ["env", "BASH_ENV=/dev/null", "sh", "-c", `cd ${m.root} && git commit -m x`]
+    expect(await m.start("worker-x", {}, undefined, argv, outside).waits()).toBe(true)
+    expect(log(m)).not.toContain("run-slot-commit")
+  })
 
   // builder, 5 Nov: from the repo too, where a bare git step alone is on the list, one after a cd - or a relative cd still counts as a build
   for (const steps of [

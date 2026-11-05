@@ -382,32 +382,40 @@ if [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" 
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
 # a `sh -c`, `bash -c` or `zsh -c` chain's steps, one a line, each step's words joined by the unit separator, as python's shlex splits the script at
-# each run of &, |, ;, <, > and parentheses, zsh's |& and &| among them (a newline counts as ;); nothing for any other command, or a script shlex cannot split
+# each run of &, |, ;, <, > and parentheses, zsh's |& and &| among them (a newline counts as ;); a cd beside any other separator than && or ; keeps
+# it as a word, since that cd does not carry to the next step, and env words before the shell (a BASH_ENV or PATH changes what it runs) are a step
+# of their own; nothing for any other command, or a script shlex cannot split
 chain_steps() {
-  local a first="" script="" next=""
+  local a first="" script="" next="" lead=""
   for a in "$@"; do
     [ -n "$next" ] && { script=$a; break; }
-    case "$a" in env|*=*) [ -z "$first" ] && continue ;; esac
+    case "$a" in env|*=*) [ -z "$first" ] && { lead+=$a$'\x1f'; continue; } ;; esac
     if [ -z "$first" ]; then first=$(basename -- "$a"); case "$first" in sh|bash|zsh) continue ;; *) return ;; esac; fi
     case "$a" in -c | -[!-]*c) next=1 ;; -*) ;; *) return ;; esac
   done
   [ -n "$script" ] || return
-  python3 -I - "$script" <<'PY'
+  python3 -I - "$script" "${lead%$'\x1f'}" <<'PY'
 import shlex, sys
 
 try:
     lex = shlex.shlex(sys.argv[1].replace("\n", ";"), posix=True, punctuation_chars=True)
     lex.whitespace_split = True
     lex.commenters = ""
-    steps = [[]]
+    steps, seps = [[]], [""]
     for tok in lex:
         if tok and not tok.strip("&|;<>()"):
             steps.append([])
+            seps.append(tok)
         else:
             steps[-1].append(tok)
 except ValueError:
     sys.exit(1)
-for step in steps:
+seps.append("")
+if sys.argv[2]:
+    print(sys.argv[2])
+for i, step in enumerate(steps):
+    if step[:1] == ["cd"]:
+        step += [s for s in (seps[i], seps[i + 1]) if s not in ("", "&&", ";")]
     if step:
         print("\x1f".join(step))
 PY
