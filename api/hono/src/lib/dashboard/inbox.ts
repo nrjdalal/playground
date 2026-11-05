@@ -332,7 +332,16 @@ export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     ...place,
     prs: z
-      .array(z.strictObject({ number: z.number().int().positive(), title: oneLine(LIMITS.line) }))
+      .array(
+        z.strictObject({
+          number: z.number().int().positive(),
+          title: oneLine(LIMITS.line),
+          url: z
+            .url({ protocol: /^https$/ })
+            .max(2000)
+            .optional(),
+        }),
+      )
       .min(1)
       .max(LIMITS.prs),
     sha: z.string().regex(/^[0-9a-f]{7,40}$/, "Must be a commit SHA"),

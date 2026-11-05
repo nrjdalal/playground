@@ -514,7 +514,19 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           <ul className="text-foreground list-disc pl-5">
             {preview.prs.map((pr) => (
               <li key={pr.number}>
-                #{pr.number} {pr.title}
+                {pr.url ? (
+                  <a
+                    href={pr.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary font-medium underline"
+                  >
+                    #{pr.number}
+                  </a>
+                ) : (
+                  `#${pr.number}`
+                )}{" "}
+                {pr.title}
               </li>
             ))}
           </ul>
@@ -538,7 +550,7 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
         <>
           <p>On Approve, this is deleted:</p>
           <p className={QUOTE}>{preview.what}</p>
-          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+          <TranscriptMarkdown card>{`Why: ${preview.why}`}</TranscriptMarkdown>
         </>
       )
     case "schema":
