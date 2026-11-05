@@ -75,10 +75,6 @@ export const herdrSurface = (server: string, pane: string): string => `herdr:${s
 
 export const isHerdrSurface = (surface: string): boolean => SURFACE.test(surface)
 
-// A herdr workspace's ref on the board, `herdr:<server>:<workspace id>` (herdrWorkspaces()).
-export const isHerdrWorkspace = (ref: string): boolean =>
-  /^herdr:[a-z0-9][a-z0-9_-]*:w[0-9A-Za-z]+$/.test(ref)
-
 const paneAt = (surface: string): { pane: string; server: HerdrServer } => {
   const [, name, pane] = SURFACE.exec(surface) ?? []
   const server = herdrServers().find((s) => s.name === name)
@@ -274,8 +270,10 @@ const each = <T>(schema: z.ZodType<T>, values: unknown[]): T[] =>
   })
 
 export type Pane = z.infer<typeof paneSchema> & { processes: z.infer<typeof processSchema>[] }
+// partial: a pane's processes, or the whole server, did not answer whole, so a session missing from this read may still be live.
 export type ServerRead = {
   panes: Pane[]
+  partial?: true
   server: string
   workspaces: z.infer<typeof workspaceSchema>[]
 }
@@ -298,6 +296,7 @@ export async function readServer(
   )
   if (!parsed.success) throw new HerdrRefused("session.snapshot", "malformed", "no snapshot")
   const panes: Pane[] = []
+  let partial = false
   for (const pane of each(paneSchema, parsed.data.snapshot.panes)) {
     const info = await request(
       server.socket,
@@ -307,11 +306,13 @@ export async function readServer(
     )
       .then((result) => processInfoSchema.safeParse(result))
       .catch(() => null)
+    if (!info?.success) partial = true
     const listed = info?.success ? (info.data.process_info.foreground_processes ?? []) : []
     panes.push({ ...pane, processes: each(processSchema, listed) })
   }
   return {
     panes,
+    ...(partial && { partial: true }),
     server: server.name,
     workspaces: each(workspaceSchema, parsed.data.snapshot.workspaces),
   }
@@ -338,7 +339,14 @@ export async function readHerdr(
       ? [`herdr's ${r.server.name} server could not be read: ${(r.error as Error).message}`]
       : [],
   )
-  return reads.flatMap((r) => ("read" in r ? [r.read] : []))
+  // a server that is up but did not answer stays in the list, empty and partial, so a reader can tell its sessions from ended ones
+  return reads.flatMap((r) =>
+    "read" in r
+      ? [r.read]
+      : r.error instanceof HerdrDown
+        ? []
+        : [{ panes: [], partial: true as const, server: r.server.name, workspaces: [] }],
+  )
 }
 
 // herdr's agent status as the lifecycle words lightOf() reads: blocked waits on a person, working runs, idle and done wait for input (the dashboard never tells done from idle, so it never calls focus, the one call that turns done into idle).
@@ -404,10 +412,10 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
       ]
     }),
   )
-  // a board that did not read a server (a failed read) keeps that server's times
-  const servers = new Set(reads.map((read) => read.server))
+  // a board that did not read a server whole (a failed or partial read) keeps that server's times for every session it did not see
+  const whole = new Set(reads.filter((read) => !read.partial).map((read) => read.server))
   for (const [key, change] of state.changed)
-    if (!servers.has(change.server)) changes.set(key, change)
+    if (!whole.has(change.server) && !changes.has(key)) changes.set(key, change)
   state.changed = changes
   return records
 }
