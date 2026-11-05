@@ -347,6 +347,10 @@ describe("a sh -c chain of git steps", () => {
     "cd `echo ROOT` && git commit -m x",
     "git -c user.name=x -C ROOT commit -m x",
     "cd ROOT && bun run test && git commit -m x",
+    // review round 5: a # that sh reads as a comment, and a brace sh expands
+    "cd ROOT && git commit -m z#1 && bun run build",
+    "cd ROOT && git add . && git commit -m x\n# c\nbun run build",
+    "cd ROOT && git add web/next/src/app/{a,b}.tsx && git commit -m x",
   ])
     test(`a chain that commits with a step off the list counts as a build: ${steps}`, async () => {
       const m = repo({ idle: 30 }, ["docs/notes.md"])
