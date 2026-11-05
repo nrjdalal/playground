@@ -57,6 +57,10 @@ export const groups: Group[] = [
         "a commit after a function named with a slash whose cd climbs, called three times",
         "a/b() { cd ..; }; a/b; a/b; a/b; git commit -m x",
       ],
+      [
+        "a commit after a climb that follows a while loop an && joins",
+        "false && while cd /tmp && false; do :; done; cd ../../..; git commit -m x",
+      ],
       // a call the line does not spell as the function's bare name
       [
         "a commit after a function whose cd climbs, called again through ANSI-C quoting",
@@ -120,5 +124,28 @@ export const groups: Group[] = [
         ],
       ]
     },
+  },
+  // a loop an `&&` joins may not run at all, so its condition's cd leaves the main checkout a folder the shell may still be in
+  {
+    folders: ["main checkout"],
+    guards: ["no-main-checkout"],
+    rows: () => [
+      [
+        "a commit after a while loop an && joins, whose condition cds out",
+        "false && while cd /tmp && false; do :; done; git commit -m x",
+      ],
+      [
+        "a commit after an until loop an && joins, whose condition cds out",
+        "false && until cd /tmp; do :; done; git commit -m x",
+      ],
+      [
+        "a test run after a while loop an && joins, whose condition cds out",
+        "[ -e /nope ] && while cd /tmp && false; do :; done; bun run test",
+      ],
+      [
+        "a write after a while loop an && joins, whose condition cds out",
+        "false && while cd /tmp && false; do :; done; echo x > f",
+      ],
+    ],
   },
 ]
