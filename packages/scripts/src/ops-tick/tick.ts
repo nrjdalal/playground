@@ -608,9 +608,18 @@ const relayMovedAt = async (outbox: string): Promise<number> => {
   return Math.max(...times)
 }
 
+// Whether this machine runs the relay at all, by its roster row or its resume record; with neither, the Ops sweep relays the outbox (playbook SWEEP.md step 2), so no relay is down.
+const hasRelay = async (ctx: Context): Promise<boolean> => {
+  if (await Bun.file(join(ctx.ops, "..", "resume", `${RELAY}.sh`)).exists()) return true
+  const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+    agents?: unknown
+  } | null
+  return Array.isArray(roster?.agents) && roster.agents.some((a: Agent) => a?.name === RELAY)
+}
+
 type RelayWatch = { at?: string; by?: string; id?: string; pendingSince?: string }
 
-// The ops relay's watch from outside it: drain.ts's pending peek (which moves nothing) is timed from the first cycle it reads pending, and one Inbox alert update is posted straight to the dashboard with bun run ask, under the ops manager's name, once a line has waited two cycles with no cursor of the relay's moving since, since the relay rewrites its cursors only when a line is pending; the alert is resolved once a cursor moves after it, or when its item is gone; its id is kept in tick/relay-watch.json, so it is posted once a stop.
+// The ops relay's watch from outside it: drain.ts's pending peek (which moves nothing) is timed from the first cycle it reads pending, and one Inbox alert update is posted straight to the dashboard with bun run ask, under the ops manager's name, once a line has waited two cycles with no cursor of the relay's moving since, since the relay rewrites its cursors only when a line is pending; the alert is resolved once a cursor moves after it, or when its item is gone; its id is kept in tick/relay-watch.json, so it is posted once a stop; a machine with no relay (hasRelay) posts nothing.
 const relayWatch = async (ctx: Context) => {
   const outbox = join(ctx.ops, "outbox")
   const statePath = join(ctx.ops, "tick", "relay-watch.json")
@@ -636,7 +645,7 @@ const relayWatch = async (ctx: Context) => {
     await unlink(statePath)
     return
   }
-  if ((await pending(outbox)).length === 0) {
+  if (!(await hasRelay(ctx)) || (await pending(outbox)).length === 0) {
     if (state) await unlink(statePath)
     return
   }
