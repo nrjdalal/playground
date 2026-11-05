@@ -3,7 +3,7 @@ import { env } from "@packages/env/api-hono"
 
 import { baseApp } from "@/lib/base-app"
 import { healthBody } from "@/lib/db-health"
-import { createServer } from "@/lib/server"
+import { createServer, refusedUpgradeCloses, upgradeWebSocket } from "@/lib/server"
 import { sweepOnceADay } from "@/lib/yard/limits"
 import { authRouter } from "@/routers/auth"
 import { yardRouter } from "@/routers/yard"
@@ -15,6 +15,9 @@ if (!env.PLAYGROUND_HOSTED) {
 }
 
 export const app = baseApp()
+
+// a refused WebSocket upgrade, which Vercel never answers, reads as a close code
+app.use("*", refusedUpgradeCloses(upgradeWebSocket))
 
 // Yard forgets on time with no cron: each UTC day's first request of any kind, a read, a sign-in or a post, runs the retention sweep, and a sweep that fails never fails the request.
 app.use("*", async (_, next) => {
