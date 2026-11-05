@@ -1018,6 +1018,12 @@ describe("a draft saved in Slack", () => {
     expect(outcomeLine(acked)).toBe("Saved as a Slack draft")
   })
 
+  test("a discarded draft reads Discarded, a word of the card's own", () => {
+    expect(
+      outcomeLine(drafted({ answer: { at: "x", choice: "discard" }, status: "discarded" })),
+    ).toBe("Discarded")
+  })
+
   test("reads as not saved, gray, when Slack refused it and its poster closed it with why", () => {
     const refused = drafted({
       answer: {
