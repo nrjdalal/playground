@@ -1,10 +1,11 @@
 import "@packages/env/aliases"
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, statSync, utimesSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 
+import { stackIn } from "../../../../api/hono/src/lib/dev/stop"
 import { withoutShebang } from "../shebang"
 
-// verify, pr:merge, the dev launcher, test:file and check-types:tests reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow by adding an export; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists but lacks a name the target's sources import from it, those it reaches through relative and `@/` imports included, counts as unbuilt; any other stale dist is left as it is.
+// verify, pr:merge, the dev launcher, test:file and check-types:tests reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists counts as unbuilt when a file under its package's `src` is newer than it while no stack runs in this worktree (since `bun run verify` runs beside this worktree's stack, and a rebuild under it hangs it), or when it lacks a name the target's sources import from it, those it reaches through relative and `@/` imports included.
 const VERIFY = import.meta.dir
 const SRC = join(VERIFY, "..")
 const ROOT = join(VERIFY, "../../../..")
@@ -102,12 +103,40 @@ export const importedNames = (sources: string[]): Record<string, string[]> => {
   )
 }
 
-// The imports that resolve to nothing yet, an exports target whose file is missing among them, and those whose file lacks a name the sources import from it; a file that re-exports with `export *` is taken as exporting every name.
+// The newest mtime among the files under a folder, 0 for none, read once per folder a run.
+const newestTimes = new Map<string, number>()
+const newestUnder = (dir: string): number => {
+  const known = newestTimes.get(dir)
+  if (known !== undefined) return known
+  let newest = 0
+  for (const name of new Bun.Glob("**/*").scanSync(dir))
+    newest = Math.max(newest, statSync(join(dir, name)).mtimeMs)
+  newestTimes.set(dir, newest)
+  return newest
+}
+
+// A file of a package's dist older than a file under its src, as a pull leaves it; the dist folder reads by its newest file, since its own mtime moves only when an entry is added or removed, and any other file (one its package serves from src, a config at its root) or a package with no src reads as current, since no build rewrites it.
+const outgrown = (file: string): boolean => {
+  const real = realpathSync(file)
+  let pkg = dirname(real)
+  while (!existsSync(join(pkg, "package.json"))) {
+    if (dirname(pkg) === pkg) return false
+    pkg = dirname(pkg)
+  }
+  const src = join(pkg, "src")
+  const dist = join(pkg, "dist")
+  if (!existsSync(src) || (real !== dist && !real.startsWith(`${dist}/`))) return false
+  const built = statSync(real).isDirectory() ? newestUnder(real) : statSync(real).mtimeMs
+  return newestUnder(src) > built
+}
+
+// The imports that resolve to nothing yet, an exports target whose file is missing among them, those older than a file under their package's src while no stack runs in this worktree, and those whose file lacks a name the sources import from it; a file that re-exports with `export *` is taken as exporting every name.
 export const unbuilt = (
   specifiers: string[],
   from: string,
   names: Record<string, string[]> = {},
   resolve: (specifier: string, from: string) => string = Bun.resolveSync,
+  stackUp: boolean = Boolean(stackIn(ROOT)),
 ): string[] =>
   specifiers.filter((specifier) => {
     let file: string
@@ -116,6 +145,7 @@ export const unbuilt = (
     } catch {
       return true
     }
+    if (!stackUp && outgrown(file)) return true
     const wanted = names[specifier] || []
     if (wanted.length === 0) return false
     const code = readFileSync(file, "utf8")
@@ -270,6 +300,20 @@ export const prebuildStep = (
   return stale ? { refused: stale } : { build: missing }
 }
 
+// The folders of the given workspace packages and of every workspace package they depend on, which turbo builds first.
+const builtWith = (names: string[]): string[] => {
+  const all = workspaces(ROOT)
+  const seen = new Set<string>()
+  for (const queue = [...names]; queue.length > 0;) {
+    const name = queue.pop()!
+    if (seen.has(name)) continue
+    seen.add(name)
+    const pkg = all.find((workspace) => workspace.pkg.name === name)?.pkg
+    queue.push(...Object.keys({ ...pkg?.dependencies, ...pkg?.devDependencies }))
+  }
+  return all.filter(({ pkg }) => pkg.name && seen.has(pkg.name)).map(({ path }) => path)
+}
+
 // Runs prebuildStep and builds what it names: each package by name (turbo builds its dependencies first) under the flags a worktree with no .env needs, then the data table's metrics when they are missing; the exit code.
 const prebuild = (target: string, missing: string[]): number => {
   const step = prebuildStep(target, missing, ROOT, process.env.PLAYGROUND_REPO)
@@ -302,9 +346,17 @@ const prebuild = (target: string, missing: string[]): number => {
       ? [[process.execPath, join(SRC, "data-table-metrics.ts")]]
       : []),
   ]
+  const started = new Date()
   for (const argv of steps) {
     const run = Bun.spawnSync(argv, { cwd: ROOT, env, stdio: ["ignore", 2, "inherit"] })
     if (run.exitCode !== 0) return run.exitCode ?? 1
+  }
+  // a turbo cache hit leaves a dist at the mtime it had, older than the src that sent it here, though its inputs' hash says it matches that src; so each dist the build covered takes the build's start, which reads current on the next run while a src saved during the build still reads newer
+  for (const path of builtWith(packages)) {
+    const dist = join(path, "dist")
+    if (!existsSync(dist)) continue
+    for (const name of new Bun.Glob("**/*").scanSync(dist))
+      utimesSync(join(dist, name), started, started)
   }
   return 0
 }
