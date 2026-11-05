@@ -37,9 +37,10 @@ An org is a set of rules, guard lists and skills for the repos of one GitHub org
 A skill resolves by its folder's name, from the first scope that holds it, and only that copy loads:
 
 1. each scope in `ext.order`'s order, your login's first when the list leaves it out, an extension kept only when `ext.links` links it to the repo's GitHub owner or to every repo (`*`), so an org can override a skill in its own repos;
-2. core: `skills/playground`, then `skills/zerostarter`, then `extensions/core/skills`.
+2. each bundled extension `ext.bundled` turns on, from `extensions/<name>/skills` in the checkout, unless an installed extension already has that name; one that is off loads no skill;
+3. core: `skills/playground`, then `skills/zerostarter`, then `extensions/core/skills`.
 
-By default, with no `ext.order` set, that is your login's scope, then the linked extensions, then core.
+By default, with no `ext.order` set and no bundled extension on, that is your login's scope, then the linked extensions, then core.
 
 A skill takes a built-in command's name over the built-in, but never an alias's: a skill named `review` never runs, since `/review` is the alias of `/code-review`. A test refuses a skill in `skills/playground` or `skills/zerostarter` named after an alias, and a session's set leaves out an extension's skill named after one, naming it.
 

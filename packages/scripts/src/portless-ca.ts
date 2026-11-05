@@ -1,10 +1,9 @@
 import { existsSync } from "node:fs"
-import { homedir } from "node:os"
 import { join } from "node:path"
 
-// portless's state folder: PORTLESS_STATE_DIR, else ~/.portless, as portless names it.
-export const portlessDir = (env: NodeJS.ProcessEnv = process.env): string =>
-  env.PORTLESS_STATE_DIR || join(homedir(), ".portless")
+import { portlessDir } from "../../../api/hono/src/lib/dev/proxy"
+
+export { portlessDir }
 
 // portless's CA, in its state folder, when this process was started without an extra CA of its own.
 export const portlessCa = (env: NodeJS.ProcessEnv = process.env): string | null => {

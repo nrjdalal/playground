@@ -14,6 +14,7 @@ import { join } from "node:path"
 
 import { CARVE_OUTS } from "../../../../../packages/safe-delete/src"
 import {
+  callerOf,
   clonesOf,
   processesOf,
   RM_USAGE,
@@ -24,6 +25,7 @@ import {
   rmDeps,
   runRm,
 } from "../../../../../packages/scripts/src/playground/rm"
+import type { Proc } from "../../../../../scripts/hooks/session-state"
 
 test("rm takes one path, or --worktree's with an optional --discard, with an optional reason", () => {
   expect(rmArgs(["old"])).toEqual({
@@ -96,6 +98,7 @@ const machine = () => {
   writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
   const told: string[] = []
   const deps: RmDeps = {
+    caller: async () => undefined,
     clones: () => [],
     procs: () => [],
     data,
@@ -104,7 +107,6 @@ const machine = () => {
     main,
     merged: () => false,
     notify: (text) => void told.push(text),
-    role: undefined,
     session: async () => "j6rjgy-worker",
   }
   return { deps, home, main, root, told }
@@ -165,7 +167,7 @@ test("runRm --worktree checks the holders, moves the worktree and prunes it from
   expect(git(main, "worktree", "list")).not.toContain("pg-1")
 })
 
-test("runRm --worktree refuses a worktree with uncommitted work, naming --discard, which a session with a role passes only with an approved delete decision", async () => {
+test("runRm --worktree refuses a worktree with uncommitted work, naming --discard, which a session passes only with an approved delete decision", async () => {
   const { deps, main, root } = machine()
   git(root, "init", "--bare", "-q", join(root, "remote.git"))
   git(main, "init", "-q", "-b", "canary")
@@ -190,7 +192,7 @@ test("runRm --worktree refuses a worktree with uncommitted work, naming --discar
   ])
   expect(existsSync(wt)).toBe(true)
   said.length = 0
-  const session = { ...deps, role: "worker" }
+  const session = { ...deps, caller: async () => "a session (role worker)" }
   console.error = (line: string) => void said.push(line)
   try {
     expect(await runRm(["--worktree", wt, "--discard"], session)).toBe(1)
@@ -198,7 +200,7 @@ test("runRm --worktree refuses a worktree with uncommitted work, naming --discar
     console.error = error
   }
   expect(said).toEqual([
-    `playground: a session with a role (worker) passes --discard only with --decision <id>: post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`,
+    `playground: a session (role worker) passes --discard only with --decision <id>: post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`,
   ])
   expect(existsSync(wt)).toBe(true)
   const approved = async (id: string): Promise<Decision | null> =>
@@ -230,7 +232,7 @@ test("a session's --discard passes only on an approved delete decision whose wha
     status,
   })
   const refusal = (found: Decision | null) =>
-    discardRefusal(wt, "#i9", { decision: async () => found, role: "worker" })
+    discardRefusal(wt, "#i9", "a session (role worker)", { decision: async () => found })
   const route = `post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`
   expect(await refusal(item("approved"))).toBeNull()
   expect(await refusal(item("denied"))).toBe(`--decision #i9 is denied, not approved: ${route}`)
@@ -245,8 +247,127 @@ test("a session's --discard passes only on an approved delete decision whose wha
     `--decision #i9 is not a delete decision: ${route}`,
   )
   expect(
-    await discardRefusal(wt, undefined, { decision: async () => item("approved"), role: "worker" }),
-  ).toBe(`a session with a role (worker) passes --discard only with --decision <id>: ${route}`)
+    await discardRefusal(wt, undefined, "a session (role worker)", {
+      decision: async () => item("approved"),
+    }),
+  ).toBe(`a session (role worker) passes --discard only with --decision <id>: ${route}`)
+})
+
+// A mkdtemp Claude Code registry naming session s-1 for the claude process at pid 300, started with it as its CLAUDE_CONFIG_DIR, and a process chain 100 -> 200 -> 300 -> 1 to climb; pid 400 is gone.
+const registry = (root: string) => {
+  const config = join(root, "claude")
+  mkdirSync(join(config, "sessions"), { recursive: true })
+  writeFileSync(
+    join(config, "sessions", "300.json"),
+    JSON.stringify({ pid: 300, sessionId: "s-1" }),
+  )
+  const chain: Record<number, Proc> = {
+    1: { comm: "/sbin/launchd", env: {}, ppid: 0 },
+    100: { comm: "bun", env: {}, ppid: 200 },
+    200: { comm: "/bin/zsh", env: {}, ppid: 300 },
+    300: { comm: "/opt/bin/claude", env: { CLAUDE_CONFIG_DIR: config, HOME: root }, ppid: 1 },
+  }
+  return { config, procs: (pid: number): Proc | undefined => chain[pid] }
+}
+
+// A main checkout on canary with worktree pg-1 holding one uncommitted file, and the route a --discard refusal names for it.
+const dirtyWorktree = (main: string) => {
+  git(main, "init", "-q", "-b", "canary")
+  writeFileSync(join(main, "README.md"), "x")
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  const wt = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+  writeFileSync(join(wt, "wip.txt"), "x")
+  const route = `post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`
+  return { route, wt }
+}
+
+// runRm's exit and what it printed to stderr.
+const discardBy = async (wt: string, deps: RmDeps) => {
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    return { code: await runRm(["--worktree", wt, "--discard"], deps), said }
+  } finally {
+    console.error = error
+  }
+}
+
+// PG-825: a Bash prefix drops PLAYGROUND_ROLE, but not the claude process above the call
+test("a caller with no role, or whose role a prefix dropped, is still a session when a claude process runs above it, and --discard needs its decision", async () => {
+  const { deps, main, root } = machine()
+  const { procs } = registry(root)
+  expect(await callerOf({}, 100, procs)).toBe("a session (session s-1)")
+  expect(await callerOf({ PLAYGROUND_ROLE: "" }, 100, procs)).toBe("a session (session s-1)")
+  expect(await callerOf({ PLAYGROUND_ROLE: "worker" }, 100, procs)).toBe("a session (role worker)")
+  const { route, wt } = dirtyWorktree(main)
+  for (const environment of [{}, { PLAYGROUND_ROLE: "" }]) {
+    const caller = () => callerOf(environment, 100, procs)
+    expect(await discardBy(wt, { ...deps, caller })).toEqual({
+      code: 1,
+      said: [
+        `playground: a session (session s-1) passes --discard only with --decision <id>: ${route}`,
+      ],
+    })
+    expect(existsSync(wt)).toBe(true)
+  }
+})
+
+// A session's call detached from it is adopted by pid 1 before rm reads its parent, so its climb would find no session
+test("a detached call, or one whose parent the system cannot read, needs the decision too", async () => {
+  const { deps, main, root } = machine()
+  const { procs } = registry(root)
+  expect(await callerOf({}, 1, procs)).toBe("a detached call (its parent is pid 1)")
+  expect(await callerOf({}, 400, procs)).toBe(
+    "a call whose parent the system cannot read (pid 400)",
+  )
+  const { route, wt } = dirtyWorktree(main)
+  const caller = () => callerOf({}, 1, procs)
+  expect(await discardBy(wt, { ...deps, caller })).toEqual({
+    code: 1,
+    said: [
+      `playground: a detached call (its parent is pid 1) passes --discard only with --decision <id>: ${route}`,
+    ],
+  })
+  expect(existsSync(wt)).toBe(true)
+})
+
+// PG-828 flipped the residual this pinned: the registry is found through the claude process's own environment, so a prefix that moves CLAUDE_CONFIG_DIR or HOME hides nothing
+test("a caller whose prefix moved the registry still reads as the session above it, and a claude process the registry does not name, or whose environment reads back empty, is a session too", async () => {
+  const { deps, main, root } = machine()
+  const { procs } = registry(root)
+  const moved = { CLAUDE_CONFIG_DIR: join(root, "elsewhere"), HOME: join(root, "elsewhere") }
+  expect(await callerOf(moved, 100, procs)).toBe("a session (session s-1)")
+  const unnamed = (pid: number): Proc | undefined =>
+    pid === 300 ? { comm: "claude", env: { HOME: join(root, "elsewhere") }, ppid: 1 } : procs(pid)
+  expect(await callerOf({}, 100, unnamed)).toBe("a session (claude pid 300)")
+  const unread = (pid: number): Proc | undefined =>
+    pid === 300 ? { comm: "claude", env: {}, ppid: 1 } : procs(pid)
+  expect(await callerOf({}, 100, unread)).toBe("a session (claude pid 300)")
+  const { route, wt } = dirtyWorktree(main)
+  const caller = () => callerOf(moved, 100, procs)
+  expect(await discardBy(wt, { ...deps, caller })).toEqual({
+    code: 1,
+    said: [
+      `playground: a session (session s-1) passes --discard only with --decision <id>: ${route}`,
+    ],
+  })
+  expect(existsSync(wt)).toBe(true)
+})
+
+// The owner's own terminal: no claude process anywhere up its chain, so --discard passes alone
+test("a terminal no claude process runs above passes --discard without a decision", async () => {
+  const { deps, main, root } = machine()
+  const { procs } = registry(root)
+  const terminal = (pid: number): Proc | undefined =>
+    pid === 200 ? { comm: "/bin/zsh", env: {}, ppid: 1 } : procs(pid)
+  expect(await callerOf({}, 100, terminal)).toBeUndefined()
+  const { wt } = dirtyWorktree(main)
+  const caller = () => callerOf({}, 100, terminal)
+  expect(await discardBy(wt, { ...deps, caller })).toEqual({ code: 0, said: [] })
+  expect(existsSync(wt)).toBe(false)
 })
 
 // run-slot's clone lane copies <source>/node_modules from its caller's folder, so only its holder record names the source (PG-699)
