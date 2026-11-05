@@ -14,14 +14,15 @@ import {
   slackPlace as API_slackPlace,
   STUCK_QUEUED_MS as API_STUCK_QUEUED_MS,
 } from "../../../../../api/hono/src/lib/dashboard/inbox"
+import { CLOCKS_STOPPED_AT } from "../../../../../packages/config/src/inbox"
 import {
   ACKS_STAMPED_FROM,
   canDraft,
   checkAnswerNote,
+  deliveryNote,
   cardKey,
   changedAt,
   dismissable,
-  DONE_AFTER_MS,
   focusAfterTake,
   foldsByDefault,
   GO_CHOICES,
@@ -44,7 +45,6 @@ import {
   pickedAt,
   pinnedView,
   PLACED_TYPES,
-  PROGRESS_AFTER_MS,
   resultLink,
   RETRY_CODES,
   retryable,
@@ -139,6 +139,32 @@ describe("a secret ask (PG-59)", () => {
     expect(itemState(provided([{ environment: "production", exitCode: 1 }]))).toBe("failed")
     expect(itemState(provided())).toBe("sending")
   })
+
+  test("a saved secret its poster was not told of still reads saved, with the failed telling as a note of its own that offers Retry (PG-880)", () => {
+    const untold = {
+      ...provided([{ environment: "Keychain", exitCode: 0, line: "saved" } as never]),
+      delivery: {
+        code: "CMUX_FAILED",
+        reason:
+          "The sessions read was cut short (a herdr server or pane did not answer whole), so dispatcher was not found; nothing was typed.",
+        status: "failed",
+      },
+      from: "dispatcher",
+    } as InboxItem
+    expect(itemState(untold)).toBe("done")
+    expect(inboxLight(untold)).toBe("done")
+    expect(outcomeLine(untold)).toEndWith(" · Keychain: saved")
+    expect(deliveryNote(untold)).toStartWith("Not told to ")
+    expect(deliveryNote(untold)).toContain("cut short")
+    expect(retryable(untold)).toBe(true)
+    expect(
+      itemState({
+        ...untold,
+        answer: { ...untold.answer, results: [{ environment: "Keychain", exitCode: 1 }] },
+      } as InboxItem),
+    ).toBe("failed")
+    expect(deliveryNote(provided([{ environment: "production", exitCode: 0 }]))).toBeNull()
+  })
 })
 
 describe("an accept decision (PG-658)", () => {
@@ -185,6 +211,64 @@ describe("an accept decision (PG-658)", () => {
       "You approved it · Accepted: rev 9b8c7d6 is accepted · Send failed: cmux is not running",
     )
     expect(itemState(unsent)).toBe("failed")
+  })
+})
+
+describe("an apps decision and a grant decision (PG-658)", () => {
+  const apps = { app: "Notes", change: "add", type: "apps", why: "It holds your notes" }
+  const grant = { permission: "accessibility", type: "grant", why: "It drives Notes" }
+  const approved = (preview: object, step: object, rest: object = {}) =>
+    item({
+      answer: { at: "2026-11-03T20:00:00.000Z", choice: "approve", ...step },
+      delivery: { at: "x", status: "delivered", via: "session" },
+      kind: "decision",
+      preview,
+      status: "approved",
+      ...rest,
+    } as never)
+
+  test("each needs you while open, and reads by what Approve does", () => {
+    const asked = item({ kind: "decision", preview: apps } as never)
+    expect(kindWord(asked)).toBe("Your apps")
+    expect(needsYou(asked)).toBe(true)
+    expect(kindWord(item({ kind: "decision", preview: grant } as never))).toBe("Permission")
+  })
+
+  test("an apps change reads the list the dashboard wrote, done or failed by its exit code", () => {
+    const ran = approved(apps, {
+      listed: { exitCode: 0, line: "added Notes; your apps are Notes" },
+    })
+    expect(outcomeLine(ran)).toBe("You approved it · Your apps: added Notes; your apps are Notes")
+    expect(itemState(ran)).toBe("done")
+    const refused = approved(apps, {
+      listed: { exitCode: 1, line: "Notes is not on your own apps list, so nothing changed" },
+    })
+    expect(outcomeLine(refused)).toBe(
+      "You approved it · Apps change failed (exit 1): Notes is not on your own apps list, so nothing changed",
+    )
+    expect(itemState(refused)).toBe("failed")
+  })
+
+  test("a grant that opened its pane waits on its poster's recheck, and one that opened nothing failed", () => {
+    const opened = {
+      opened: { exitCode: 0, line: "opened System Settings at Privacy & Security > Accessibility" },
+    }
+    const waiting = approved(grant, opened)
+    expect(outcomeLine(waiting)).toBe(
+      "You approved it · Opened System Settings at Privacy & Security > Accessibility · Being carried out by Ops…",
+    )
+    expect(itemState(waiting)).toBe("sending")
+    const rechecked = approved(grant, {
+      ...opened,
+      ackedAt: "2026-11-03T20:02:00.000Z",
+      noLink: "granted",
+    })
+    expect(itemState(rechecked)).toBe("done")
+    const failed = approved(grant, { opened: { exitCode: 1, line: "LSOpenURLsWithRole() failed" } })
+    expect(outcomeLine(failed)).toBe(
+      "You approved it · Opening System Settings failed (exit 1): LSOpenURLsWithRole() failed",
+    )
+    expect(itemState(failed)).toBe("failed")
   })
 })
 
@@ -311,28 +395,59 @@ describe("inboxView", () => {
     item({ answer: { at, choice: "approve" }, kind: "decision", ref, status: "approved" })
   const read = (ref: number, at: string) => item({ kind: "update", readAt: at, ref })
 
-  test("an answered or read item stays in the list for ten minutes, then leaves it for Done", () => {
-    const list = [
-      item({ kind: "decision", ref: 41 }),
-      answered(12, ago(DONE_AFTER_MS - 1000)),
-      answered(11, ago(DONE_AFTER_MS)),
-      read(31, ago(60_000)),
-      read(30, ago(DONE_AFTER_MS + 60_000)),
-    ]
-    const { done, shown } = inboxView(list, NOW)
-    expect(shown.map((i) => i.ref)).toEqual([41, 12, 31])
-    expect(done.map((i) => i.ref)).toEqual([11, 30])
+  // the owner's ask on the new Inbox: a card moves when a verb moves it, never by a clock
+  test("an approved card its poster has not closed stays In progress past ten minutes, until its ack moves it to Done", () => {
+    const go = answered(12, ago(60 * 60_000))
+    expect(inboxView([go])).toEqual({ archived: [], done: [], progress: [go], shown: [] })
+    const acked = item({
+      answer: {
+        ackedAt: ago(1_000),
+        at: ago(60 * 60_000),
+        choice: "approve",
+        dismissedAt: ago(1_000),
+      },
+      kind: "decision",
+      ref: 12,
+      status: "approved",
+    })
+    expect(inboxView([acked])).toEqual({ archived: [], done: [acked], progress: [], shown: [] })
   })
 
-  test("Done lists the newest settled first, and an open item or an unread update never leaves", () => {
+  test("a card he only commented on stays waiting in the list past five minutes, until its poster closes it", () => {
+    const replied = item({
+      answer: { at: ago(60 * 60_000), choice: "replied" },
+      kind: "decision",
+      ref: 42,
+    })
+    expect(inboxView([replied])).toEqual({ archived: [], done: [], progress: [], shown: [replied] })
+  })
+
+  test("a read update stays in the list until he dismisses it, and one read before the clocks stopped is in Done", () => {
+    const after = (ms: number) => new Date(Date.parse(CLOCKS_STOPPED_AT) + ms).toISOString()
+    const before = read(30, after(-60_000))
+    const since = read(31, after(60 * 60_000))
+    const dismissed = item({
+      answer: { dismissedAt: after(2 * 60 * 60_000) },
+      kind: "update",
+      readAt: after(60_000),
+      ref: 32,
+    })
+    const { done, shown } = inboxView([before, since, dismissed])
+    expect(shown.map((i) => i.ref)).toEqual([31])
+    expect(done.map((i) => i.ref)).toEqual([32, 30])
+  })
+
+  test("a no-go goes to Done once answered, and Done lists the newest settled first while an open item or an unread update stays", () => {
+    const denied = (ref: number, at: string) =>
+      item({ answer: { at, choice: "deny" }, kind: "decision", ref, status: "denied" })
     const list = [
-      answered(5, ago(3 * 60 * 60_000)),
-      read(6, ago(20 * 60_000)),
-      answered(7, ago(60 * 60_000)),
+      denied(5, ago(3 * 60 * 60_000)),
+      denied(6, ago(60_000)),
+      denied(7, ago(60 * 60_000)),
       item({ kind: "update", ref: 8, updatedAt: ago(9 * 60 * 60_000) }),
       item({ kind: "draft", ref: 9, createdAt: ago(9 * 60 * 60_000) }),
     ]
-    const { done, shown } = inboxView(list, NOW)
+    const { done, shown } = inboxView(list)
     expect(done.map((i) => i.ref)).toEqual([6, 7, 5])
     expect(shown.map((i) => i.ref)).toEqual([8, 9])
   })
@@ -345,15 +460,17 @@ describe("inboxView", () => {
         ref,
         status: "cleared",
       })
-    const { archived, done, shown } = inboxView(
-      [
-        cleared(3),
-        item({ kind: "decision", ref: 50 }),
-        cleared(7),
-        answered(11, ago(DONE_AFTER_MS * 3)),
-      ],
-      NOW,
-    )
+    const { archived, done, shown } = inboxView([
+      cleared(3),
+      item({ kind: "decision", ref: 50 }),
+      cleared(7),
+      item({
+        answer: { at: ago(30 * 60_000), choice: "deny" },
+        kind: "decision",
+        ref: 11,
+        status: "denied",
+      }),
+    ])
     expect(archived.map((i) => i.ref)).toEqual([7, 3])
     expect(shown.map((i) => i.ref)).toEqual([50])
     expect(done.map((i) => i.ref)).toEqual([11])
@@ -366,7 +483,7 @@ describe("inboxView", () => {
       ref: 4,
       status: "cleared",
     })
-    const { archived, done } = inboxView([dismissed], NOW)
+    const { archived, done } = inboxView([dismissed])
     expect(archived).toEqual([])
     expect(done.map((i) => i.ref)).toEqual([4])
   })
@@ -381,16 +498,21 @@ describe("inboxView", () => {
       status: "cleared",
     })
     expect(sendFailed(failedClear)).toBe(true)
-    const { archived, shown } = inboxView([failedClear], NOW)
+    const { archived, shown } = inboxView([failedClear])
     expect(archived).toEqual([])
     expect(shown.map((i) => i.ref)).toEqual([5])
   })
 
   test("a new item arriving goes above Done, in the list", () => {
-    const { done, shown } = inboxView(
-      [answered(11, ago(DONE_AFTER_MS * 3)), item({ kind: "decision", ref: 50 })],
-      NOW,
-    )
+    const { done, shown } = inboxView([
+      item({
+        answer: { at: ago(30 * 60_000), choice: "deny" },
+        kind: "decision",
+        ref: 11,
+        status: "denied",
+      }),
+      item({ kind: "decision", ref: 50 }),
+    ])
     expect(shown.map((i) => i.ref)).toEqual([50])
     expect(done.map((i) => i.ref)).toEqual([11])
   })
@@ -411,13 +533,14 @@ describe("Dismiss", () => {
       status: "approved",
     })
 
-  test("a dismissed item goes to Done at once, newest dismissed first, without waiting ten minutes", () => {
-    const { done, shown } = inboxView(
-      [answered(23), answered(22, ago(120_000)), answered(21, ago(30_000))],
-      NOW,
-    )
+  test("a dismissed item goes to Done at once, newest dismissed first", () => {
+    const { done, progress } = inboxView([
+      answered(23),
+      answered(22, ago(120_000)),
+      answered(21, ago(30_000)),
+    ])
     expect(done.map((i) => i.ref)).toEqual([21, 22])
-    expect(shown.map((i) => i.ref)).toEqual([23])
+    expect(progress.map((i) => i.ref)).toEqual([23])
   })
 
   test("is offered on an answered decision or draft and on any update still in the list, never on an open decision or draft", () => {
@@ -453,7 +576,7 @@ describe("Dismiss", () => {
       kind: "decision",
       ref: 32,
     })
-    const { done, shown } = inboxView([dismissed, waiting], NOW)
+    const { done, shown } = inboxView([dismissed, waiting])
     expect(done.map((i) => i.ref)).toEqual([31])
     expect(shown.map((i) => i.ref)).toEqual([32])
   })
@@ -465,15 +588,15 @@ describe("Dismiss", () => {
       readAt: ago(1_000),
       ref: 9,
     })
-    expect(inboxView([update], NOW).done.map((i) => i.ref)).toEqual([9])
+    expect(inboxView([update]).done.map((i) => i.ref)).toEqual([9])
     expect(outcomeLine(update)).toBeNull()
     expect(resultLink(update)).toBeNull()
   })
 
   // Mark as read keeps the message as it is and drops the double tick.
   test("an open ask marked read stays in the list as it is, still waiting on an answer, however long ago", () => {
-    const seen = item({ kind: "decision", readAt: ago(DONE_AFTER_MS * 6), ref: 8 })
-    expect(inboxView([seen], NOW).shown).toEqual([seen])
+    const seen = item({ kind: "decision", readAt: ago(6 * 60 * 60_000), ref: 8 })
+    expect(inboxView([seen]).shown).toEqual([seen])
     expect(needsYou(seen)).toBe(true)
     expect(outcomeLine(seen)).toBeNull()
   })
@@ -587,23 +710,10 @@ describe("an item he replied to in chat", () => {
     })
   })
 
-  test("sits on In progress while its poster works, and moves to Done only once it is closed", () => {
-    // ten minutes after the reply it is still being worked on, on its own shelf out of the list, In progress above Snoozed and below the Inbox
-    // under five minutes after the reply it stays in the list, so he sees it taken
-    expect(
-      inboxView([replied], Date.parse("2026-10-07T11:34:59.000Z")).shown.map((i) => i.ref),
-    ).toEqual([42])
-    const working = inboxView([replied], Date.parse("2026-10-07T11:40:00.000Z"))
-    expect(working.progress.map((i) => i.ref)).toEqual([42])
-    expect(working.shown).toEqual([])
-    expect(inboxView([replied], Date.parse("2026-10-07T11:40:00.000Z")).done).toEqual([])
-    // the close settles it, Done ten minutes after
-    expect(
-      inboxView([acked], Date.parse("2026-10-07T12:39:00.000Z")).shown.map((i) => i.ref),
-    ).toEqual([42])
-    expect(
-      inboxView([acked], Date.parse("2026-10-07T12:40:00.000Z")).done.map((i) => i.ref),
-    ).toEqual([42])
+  test("stays in the list, still waiting on his answer, while its poster works, and moves to Done once it is closed", () => {
+    expect(inboxView([replied]).shown.map((i) => i.ref)).toEqual([42])
+    expect(inboxView([replied]).progress).toEqual([])
+    expect(inboxView([acked]).done.map((i) => i.ref)).toEqual([42])
   })
 })
 
@@ -725,7 +835,7 @@ describe("an answer that failed to send", () => {
   const failed = (ref: number, dismissed?: string) =>
     item({
       answer: {
-        at: ago(DONE_AFTER_MS * 6),
+        at: ago(60 * 60_000),
         choice: "send",
         ...(dismissed ? { dismissedAt: dismissed } : {}),
       },
@@ -735,11 +845,11 @@ describe("an answer that failed to send", () => {
       status: "sent",
     })
 
-  test("stays in the list as needing you, past the ten minutes, saying the send failed", () => {
+  test("stays in the list as needing you, however long ago, saying the send failed", () => {
     const item = failed(76)
     expect(sendFailed(item)).toBe(true)
     expect(needsYou(item)).toBe(true)
-    expect(inboxView([item], NOW)).toEqual({ archived: [], done: [], progress: [], shown: [item] })
+    expect(inboxView([item])).toEqual({ archived: [], done: [], progress: [], shown: [item] })
     expect(outcomeLine(item)).toBe("You sent it · Send failed: no answer from cmux")
     expect(inboxSummary([item])).toBe("1 failed to send")
   })
@@ -769,7 +879,7 @@ describe("an answer that failed to send", () => {
     const item = failed(76, ago(1_000))
     expect(sendFailed(item)).toBe(false)
     expect(needsYou(item)).toBe(false)
-    expect(inboxView([item], NOW).done.map((i) => i.ref)).toEqual([76])
+    expect(inboxView([item]).done.map((i) => i.ref)).toEqual([76])
   })
 })
 
@@ -1462,7 +1572,7 @@ describe("a card a chat reply collapsed opens again", () => {
 })
 
 describe("a card folds by priority, the ones needing an answer staying open", () => {
-  const NOW = Date.parse("2026-11-03T10:00:00.000Z")
+  const NOW = Date.parse("2026-11-06T10:00:00.000Z")
   const ago = (ms: number) => new Date(NOW - ms).toISOString()
   const decision = item({ kind: "decision", ref: 1 })
   const draft = item({ kind: "draft", ref: 2 })
@@ -1480,16 +1590,19 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
     for (const card of [decision, draft, unread]) expect(foldsByDefault(card, NOW)).toBe(false)
   })
 
-  test("a read update, an answered decision and a chat reply waiting on its poster fold in the list", () => {
-    expect(inboxView([read, answered, replied], NOW).shown).toEqual([read, answered, replied])
+  test("a read update and a chat reply waiting on its poster fold in the list, and an answered decision on In progress", () => {
+    const view = inboxView([read, answered, replied])
+    expect(view.shown).toEqual([read, replied])
+    expect(view.progress).toEqual([answered])
     for (const card of [read, answered, replied]) expect(foldsByDefault(card, NOW)).toBe(true)
   })
 
   test("every card on the In progress, Archived and Done shelves folds", () => {
     const working = item({
-      answer: { at: ago(PROGRESS_AFTER_MS), choice: "replied" },
+      answer: { at: ago(60_000), choice: "approve" },
       kind: "decision",
       ref: 7,
+      status: "approved",
     })
     const archived = item({
       answer: { at: ago(60_000), choice: "clear" },
@@ -1497,8 +1610,13 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
       ref: 8,
       status: "cleared",
     })
-    const settled = item({ kind: "update", readAt: ago(DONE_AFTER_MS), ref: 9 })
-    const view = inboxView([working, archived, settled], NOW)
+    const settled = item({
+      answer: { dismissedAt: ago(60_000) },
+      kind: "update",
+      readAt: ago(60_000),
+      ref: 9,
+    })
+    const view = inboxView([working, archived, settled])
     expect([view.progress, view.archived, view.done]).toEqual([[working], [archived], [settled]])
     for (const card of [working, archived, settled]) expect(foldsByDefault(card, NOW)).toBe(true)
   })

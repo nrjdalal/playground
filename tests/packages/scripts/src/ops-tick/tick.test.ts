@@ -603,9 +603,14 @@ describe("sweep", () => {
 })
 
 describe("switch watch, in the tick", () => {
-  // usage.json reading that account, in a data folder whose policy sets usage.switchAccount to switch@.
-  const usage = (ops: string, account: string, used: number) => {
+  // usage.json reading that account, in a data folder whose policy sets usage.switchAccount to switch@, and a roster seating both dispatchers unless `second` is false.
+  const usage = (ops: string, account: string, used: number, second = true) => {
     storeWith(join(ops, ".."), {}, { "usage.switchAccount": "switch@example.test" })
+    const agents = [
+      { kind: "dispatcher", name: OLD.dispatcher, status: "working" },
+      { kind: "dispatcher", name: `${OLD.dispatcher}-2`, status: second ? "working" : "ended" },
+    ]
+    writeFileSync(join(ops, "..", "roster.json"), JSON.stringify({ agents }))
     writeFileSync(
       join(ops, "..", "usage.json"),
       JSON.stringify({
@@ -634,6 +639,20 @@ describe("switch watch, in the tick", () => {
       "ops",
     ])
     expect(sent[1]!.text).toContain(`"to":"${OLD.dispatcher}-2"`)
+    const again = fake(ops, at(13, 33), QUIET_LOAD)
+    await beat("tick").run(again.ctx)
+    expect(again.sent).toEqual([])
+  })
+
+  // the move hands the factory to the second dispatcher, which resumes every stopped session; with none running, ops-unstick's own alerts carry on
+  test("at 100% with no second dispatcher seated, writes no move file and tells the first and both leads", async () => {
+    const ops = scratch()
+    usage(ops, "switch@example.test", 100, false)
+    const { ctx, sent } = fake(ops, at(13, 18), QUIET_LOAD)
+    await beat("tick").run(ctx)
+    expect(existsSync(join(ops, "unstick", "move.json"))).toBe(false)
+    expect(sent.slice(1).map((m) => m.to)).toEqual([OLD.dispatcher, "builder", "ops"])
+    expect(sent[1]!.text).toBe("switch@ week at 100%: no second dispatcher is seated, so no move")
     const again = fake(ops, at(13, 33), QUIET_LOAD)
     await beat("tick").run(again.ctx)
     expect(again.sent).toEqual([])
@@ -1232,17 +1251,18 @@ describe("canary pull", () => {
 describe("relay watch", () => {
   const ID = "f167b6b9-f570-4f15-a4b4-eb15b8c4876f"
 
-  // The relay's outbox with its three cursors last moved at moved, and the ops manager in the roster.
-  const outbox = (ops: string, moved: Date) => {
+  // The relay's outbox with its three cursors last moved at moved, and the ops manager in the roster, beside the relay's own row unless the machine has no relay.
+  const outbox = (ops: string, moved: Date, relay = true) => {
     mkdirSync(join(ops, "outbox"), { recursive: true })
     for (const file of ["cursor.json", "dm-cursor.json", "linear-cursor.json"]) {
       writeFileSync(join(ops, "outbox", file), "{}")
       utimesSync(join(ops, "outbox", file), moved, moved)
     }
-    writeFileSync(
-      join(ops, "..", "roster.json"),
-      JSON.stringify({ agents: [{ kind: "ops", name: OLD.ops, role: "manager" }] }),
-    )
+    const agents: { kind: string; name: string; role: string }[] = [
+      { kind: "ops", name: OLD.ops, role: "manager" },
+    ]
+    if (relay) agents.push({ kind: "runner", name: "runner-plain-relay", role: "runner" })
+    writeFileSync(join(ops, "..", "roster.json"), JSON.stringify({ agents }))
   }
 
   // A context whose runs answer bun run ask, recording each call with its stdin; a "pending" peek leaves a line in a queue past cursor.json's offset for drain.ts's peek to read, any other leaves none.
@@ -1301,6 +1321,24 @@ describe("relay watch", () => {
       ],
     ])
     expect(existsSync(join(ops, "tick", "relay-watch.json"))).toBe(false)
+  })
+
+  test("a machine with no relay, neither its roster row nor its resume record, posts nothing however long a line waits, since the Ops sweep relays there", async () => {
+    const ops = scratch()
+    outbox(ops, at(14, 7), false)
+    const asks: unknown[] = []
+    for (const minute of [20, 25, 30, 45]) {
+      const tick = watch(ops, at(14, minute), "pending: ops-session-resume.jsonl")
+      await beat("relay-watch").run(tick.ctx)
+      asks.push(...tick.asks)
+    }
+    expect(asks).toEqual([])
+    mkdirSync(join(ops, "..", "resume"), { recursive: true })
+    writeFileSync(join(ops, "..", "resume", "runner-plain-relay.sh"), "exit 0\n")
+    await beat("relay-watch").run(watch(ops, at(14, 50), "pending: ops-session-resume.jsonl").ctx)
+    const recorded = watch(ops, at(15, 0), "pending: ops-session-resume.jsonl")
+    await beat("relay-watch").run(recorded.ctx)
+    expect(recorded.asks).toHaveLength(1)
   })
 
   test("posts nothing while nothing waits, and times the wait itself, not the cursors' age", async () => {

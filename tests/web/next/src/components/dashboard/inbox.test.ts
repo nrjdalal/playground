@@ -7,6 +7,7 @@ import { DashboardContext } from "../../../../../../web/next/src/components/dash
 import {
   AskChoices,
   FOLDS_OPEN,
+  Inbox,
   InboxCard,
   NewPill,
   ShelfDismiss,
@@ -916,10 +917,16 @@ describe("the Inbox as one accordion: the open items, then Snoozed, Archived and
     expect(note).toContain('className={cn("min-h-14 py-2", BOX)}')
   })
 
-  test("inbox.tsx draws no Marker of its own and no second fold: the accordion is its one", () => {
+  test("inbox.tsx draws no Marker of its own and no second fold: the accordion is its one, the first load's disabled row aside", () => {
+    const loading = source.slice(
+      source.indexOf("function InboxLoading"),
+      source.indexOf("export function Inbox("),
+    )
+    expect(loading.match(/<Accordion\b/g)?.length).toBe(1)
+    expect(loading).toContain('<AccordionItem value="open" disabled')
     expect(source).not.toContain("<Marker")
     expect(source).not.toContain("<Collapsible")
-    expect(source.match(/<Accordion\b/g)?.length).toBe(1)
+    expect(source.replace(loading, "").match(/<Accordion\b/g)?.length).toBe(1)
   })
 })
 
@@ -1350,5 +1357,33 @@ describe("a held Yard post's card", () => {
     expect(html).toMatch(
       /<a [^>]*href="https:\/\/yard.example\/yard\/approve\/m1"[^>]*target="_blank"[^>]*>.*?Approve<\/a>/,
     )
+  })
+})
+
+// The aside's first load drew a Spinner in the pane's middle, then swapped it for the whole Inbox at once (PG-875).
+describe("the Inbox before its first read lands", () => {
+  // a dashboard the owner may not read keeps the read pending, as a first load is
+  const html = renderToStaticMarkup(
+    createElement(
+      QueryClientProvider,
+      { client: new QueryClient() },
+      createElement(
+        DashboardContext,
+        { value: { allowed: false, workers: [] } as unknown as DashboardContext },
+        createElement(Inbox, { viewing: true }),
+      ),
+    ),
+  )
+  test("draws its open row where it will sit, a blank fixed-width count and the Mark all as read room kept", () => {
+    expect(html).toMatch(/<section aria-busy="true" aria-label="Inbox"/)
+    const row = html.split("<h3")[1]!.split("</h3>")[0]!
+    expect(row).toContain(">Inbox</span>")
+    expect(row).toContain("pr-10")
+    expect(row).toMatch(/data-slot="badge"[^>]*class="[^"]*\bw-5\b/)
+  })
+  test("shows the Spinner under the row and no shelf until the read lands", () => {
+    expect(html.indexOf('data-slot="spinner"')).toBeGreaterThan(html.indexOf("</h3>"))
+    expect(html.match(/<h3/g)).toHaveLength(1)
+    expect(html).not.toContain("absolute inset-0")
   })
 })

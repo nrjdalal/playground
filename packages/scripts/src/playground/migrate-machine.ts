@@ -189,7 +189,10 @@ export function moveMachine(
       ...new Set(text.match(new RegExp(`\\b${escape(table.envPrefix.from)}[A-Z0-9_]+`, "g"))),
     ]
     for (const name of names.filter((each) => table.droppedEnv.includes(each)))
-      say(true, `! ${file} sets ${name}, which nothing reads now: move its words into its list`)
+      say(
+        true,
+        `* to do: ${file} sets ${name}, which nothing reads now: delete that line from it, and send your lead the words it held, so the owner can add them to the list that replaced it`,
+      )
     const changes = [
       ...names
         .filter((name) => !table.droppedEnv.includes(name))

@@ -45,7 +45,7 @@ const ALWAYS = [
   "Keep the dashboard on the",
   "Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`:",
   "Read an organisation's own values",
-  "Route every cmux call through",
+  "Keep every cmux call inside",
   "Route every herdr call through",
   "Count a session record as",
   "Run the System panel's commands",

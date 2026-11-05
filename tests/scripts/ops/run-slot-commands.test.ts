@@ -167,6 +167,62 @@ describe("a slot folder with no holder line", () => {
   })
 })
 
+// the dispatcher, 4 Nov: a slot with no pid in its holder line, whose mtime read back empty, printed "<epoch> -  : syntax error: operand expected"
+test("a slot with no holder pid and no readable mtime reads as young, with no error line", async () => {
+  const m = machine()
+  mkdirSync(join(m.ops, "run-slot"))
+  writeFileSync(
+    join(m.bin, "stat"),
+    `#!/bin/bash\ncase "\${@: -1}" in */run-slot|*/run-slot.holder) exit 0 ;; esac\nexec /usr/bin/stat "$@"\n`,
+  )
+  chmodSync(join(m.bin, "stat"), 0o755)
+  const p = Bun.spawn(["bash", SCRIPT, "clear-stale"], { env: m.env(), stderr: "pipe" })
+  const [code, err] = await Promise.all([p.exited, new Response(p.stderr).text()])
+  expect(err).toBe("")
+  expect(code).toBe(0)
+  expect(existsSync(join(m.ops, "run-slot"))).toBe(true)
+})
+
+// #884's reviewer: the set file's expiry and prio_holder did the same arithmetic as stale, unguarded, so an empty mtime printed the syntax error there too
+describe("an ops file whose mtime reads back empty reads as gone, with no error line", () => {
+  // a machine whose stat prints nothing, and succeeds, for the ops file named
+  const blind = (file: string, text: string) => {
+    const m = machine()
+    writeFileSync(join(m.ops, file), text)
+    writeFileSync(
+      join(m.bin, "stat"),
+      `#!/bin/bash\ncase "\${@: -1}" in */${file}) exit 0 ;; esac\nexec /usr/bin/stat "$@"\n`,
+    )
+    chmodSync(join(m.bin, "stat"), 0o755)
+    return m
+  }
+
+  test("a set file with no expiry line leaves its slot open", async () => {
+    const m = blind("run-slot.3-off", "")
+    const p = Bun.spawn(["bash", SCRIPT, "slots"], { env: m.env(), stderr: "pipe", stdout: "pipe" })
+    const [code, out, err] = await Promise.all([
+      p.exited,
+      new Response(p.stdout).text(),
+      new Response(p.stderr).text(),
+    ])
+    expect(err).toBe("")
+    expect(code).toBe(0)
+    expect(out).toBe("4\n")
+  })
+
+  test("run-slot.priority names no holder, so a run takes its slot", async () => {
+    const m = blind("run-slot.priority", "worker-p\n")
+    const p = Bun.spawn(["bash", SCRIPT, "worker-m", "--", "true"], {
+      cwd: m.root,
+      env: m.env({ RUN_SLOT_SIZE: "medium" }),
+      stderr: "pipe",
+    })
+    const [code, err] = await Promise.all([p.exited, new Response(p.stderr).text()])
+    expect(err).not.toContain("syntax error")
+    expect(code).toBe(0)
+  })
+})
+
 // dispatcher, 19 Oct: a tester's `bun run dev` held run-slot.single with 7 waiters
 describe("a dev stack is refused", () => {
   for (const argv of [

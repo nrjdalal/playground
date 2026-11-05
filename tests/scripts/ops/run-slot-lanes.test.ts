@@ -136,17 +136,42 @@ describe("the gauges", () => {
     expect(await m.runs("worker-x")).toBe(true)
     expect(await m.runs("worker-x")).toBe(true)
     expect(lanes(m)).toEqual([
-      expect.stringMatching(/^\S+Z lanes worker-x \d+ open idle=52\.9% load1=18\.60 swapins=0$/),
+      expect.stringMatching(
+        /^\S+Z lanes worker-x \d+ open idle=52\.9% load1=18\.60 swapins=0 disk0_tps=120 disk0_mbs=3\.50$/,
+      ),
     ])
     writeFileSync(
       join(m.bin, "top"),
       '#!/bin/bash\necho "CPU usage: 1.00% user, 1.00% sys, 98.00% idle "\necho "CPU usage: 40.00% user, 30.00% sys, 30.00% idle "\n',
     )
     // a reading taken at the epoch is past its 10 s, so the next look reads top again
-    writeFileSync(join(m.ops, "run-slot.gauges"), "0 52.9 0\n")
+    writeFileSync(join(m.ops, "run-slot.gauges"), "0 52.9 0 120 3.50\n")
     expect(await m.runs("worker-x")).toBe(true)
     expect(lanes(m)).toHaveLength(2)
-    expect(lanes(m)[1]).toMatch(/ lanes worker-x \d+ shut idle=30\.00% load1=18\.60 swapins=0$/)
+    expect(lanes(m)[1]).toMatch(
+      / lanes worker-x \d+ shut idle=30\.00% load1=18\.60 swapins=0 disk0_tps=120 disk0_mbs=3\.50$/,
+    )
+  })
+
+  // a bound on disk load needs a day of disk readings first, so each lanes line carries disk0's, and the verdict reads none of them
+  test("a lanes line carries disk0's transfers/s and MB/s, and a busy disk changes no verdict", async () => {
+    const m = machine({ disk: [9000, 400], idle: 52.9, load1: 18.6 })
+    expect(await m.runs("worker-x")).toBe(true)
+    expect(lanes(m)).toEqual([
+      expect.stringMatching(
+        /^\S+Z lanes worker-x \d+ open idle=52\.9% load1=18\.60 swapins=0 disk0_tps=9000 disk0_mbs=400\.00$/,
+      ),
+    ])
+    expect(slots({ disk: [9000, 400], idle: 52.9, load1: 18.6 })).toBe("4\n")
+  })
+
+  test("an unread iostat logs disk0 as -, and the lanes still open", async () => {
+    const m = machine({ idle: 52.9, load1: 18.6 })
+    writeFileSync(join(m.bin, "iostat"), "#!/bin/bash\nexit 1\n")
+    expect(await m.runs("worker-x")).toBe(true)
+    expect(lanes(m)).toEqual([
+      expect.stringMatching(/ open idle=52\.9% load1=18\.60 swapins=0 disk0_tps=- disk0_mbs=-$/),
+    ])
   })
 
   test("a read subcommand records no lanes line", () => {

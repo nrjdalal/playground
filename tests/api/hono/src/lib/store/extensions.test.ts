@@ -11,11 +11,13 @@ import {
   type CliRun,
   extensionsOf,
   linkOf,
+  ownerApps,
   runCli,
   setUpSettings,
   syncExtension,
   whySkill,
 } from "../../../../../../api/hono/src/lib/store/extensions"
+import { putItem } from "../../../../../../packages/settings/src/items"
 import { loginPath } from "../../../../../../packages/settings/src/rendered"
 import { setSetting } from "../../../../../../packages/settings/src/settings-folder"
 
@@ -164,6 +166,32 @@ test("why reads the resolver's answer, and a skill no extension holds is a 404",
   const none = fake({ code: 1, err: "playground ext: no scope holds the skill nope" })
   expect(await whySkill("nope", undefined, none.cli, data)).toMatchObject({ status: 404 })
   expect(none.calls).toEqual([["why", "nope"]])
+})
+
+test("runCli hands its stdin to the CLI when given one, and an empty input when not", async () => {
+  const cli = join(scratch, "echo-cli.ts")
+  writeFileSync(cli, "console.log(JSON.stringify(await Bun.stdin.text()))\n")
+  expect((await runCli(cli)(["put"], '["Notes"]')).out).toBe(JSON.stringify('["Notes"]'))
+  expect((await runCli(cli)(["put"])).out).toBe('""')
+})
+
+test("ownerApps reads the login's own desktop-owner-apps as accepted, none before ext init", () => {
+  const data = folder()
+  const apps = ownerApps(data, async () => ({ code: 0, err: "", out: "" }))
+  expect(apps?.login).toBe(ME)
+  expect(apps?.read()).toEqual([])
+  const ref = { kind: "list" as const, key: "desktop-owner-apps", scope: ME }
+  expect(
+    putItem(data, ref, { attachments: [], body: null, files: null, value: ["Notes"] }, WHO, true)
+      .ok,
+  ).toBe(true)
+  expect(apps?.read()).toEqual(["Notes"])
+  expect(
+    putItem(data, ref, { attachments: [], body: null, files: null, value: { Notes: 1 } }, WHO, true)
+      .ok,
+  ).toBe(true)
+  expect(apps?.read()).toBeNull()
+  expect(ownerApps(folder(false))).toBeUndefined()
 })
 
 test("runCli runs the CLI it is given by its path with a fixed argv and no shell, and only HOME, PATH and the data folder", async () => {

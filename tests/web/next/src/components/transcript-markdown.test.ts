@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
+import { ASK_CODE_COLUMNS } from "../../../../../packages/config/src/inbox"
 import { DashboardContext } from "../../../../../web/next/src/components/dashboard/dashboard"
 import {
   TranscriptMarkdown,
+  fitWidth,
   overlaysIn,
   untitle,
 } from "../../../../../web/next/src/components/transcript-markdown"
@@ -348,6 +350,16 @@ describe("code blocks and tables", () => {
     expect(html).not.toContain('data-streamdown="table-wrapper"')
     expect(html).not.toMatch(/aria-label="(Copy|Download|Fullscreen|View fullscreen)[^"]*table/i)
     expect(html).not.toContain(" node=")
+  })
+})
+
+describe("a drawing on a card", () => {
+  test("its font shrinks from the card's 12px code size to fit its widest line, down to 10px", () => {
+    expect(fitWidth(37)).toBe("clamp(10px, calc((100cqi - 1.25rem) / 37), 12px)")
+  })
+
+  test("the widest line an ask's drawing runs is the one the narrowest card shows at 12px", () => {
+    expect(ASK_CODE_COLUMNS).toBe(37)
   })
 })
 

@@ -1,7 +1,7 @@
 ## What it does
 
 `playbook` holds the operating rules of Playground's factory, the Claude Code sessions cmux or herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
-and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, signal, main, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings).
+and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, signal, main, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings, talk).
 It lives in the repo rather than in one session's memory, so every session loads the same rules.
 
 ## When to reach for it
@@ -53,6 +53,7 @@ An org's work skips it too and stays outside the planner's lanes.
 An issue goes in the repo where its work lives: this repo for the factory's own, an org's extension repo for that org's, and a person's login extension for their own tools ([ADR 0016](../../.agents/adr/0016-playground-is-generic-with-a-small-core.md)).
 As it routes an ask, the dispatcher routes it to a thread of its own, so the Dashboard can show his chat grouped by what he asked: a message that opens with a thread's marker, `[thread:<id>]`, routes there as it is read, so the dispatcher opens each reply and update about that ask with the same marker and asks a peer to open its report with it,
 and an ask with no marker gets a thread through `playground thread` (each Inbox item about it goes to the same one).
+Before a fix gets a plan row or a worker, the manager greps the open PRs' diffs for the bug's file and function, and hands the fix to the PR that already holds it or drops it, so two PRs never fix one thing in parallel.
 Work goes out in bundles: the Planner groups the issues that touch one surface, such as the sidebar or the chat, into one bundle, and a bundle is one worker, one PR, one review loop and one tester pass per head, its tester driving only the pages and files the bundle touches.
 Two pieces of work that depend on each other in meaning stack only for no line overlap: the test is a merge-tree of the two heads against the parent's merge base with canary, and the child holds behind its parent until the parent merges.
 A stacked child merges its parent's branch in once, when the parent scores 5/5 or merges, taking the parent's final head, the head the parent merges at (DISPATCH.md's bundles), since every merge is a head its reviewer scores again.
@@ -156,6 +157,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused, one that never got its first message included,
   on the account its start named, else the login with the most room, the model it started with and an effort other than high, and skips any still running.
+  It prints one line for each session it brings back, leaves down or cannot bring back, naming the reason, so a session the busy-machine check held back is named with the check's words.
   A factory session can only read from herdr: the `no-raw-spawn` hook refuses any herdr call that types into, closes or speaks for another pane, since herdr lets anything on the machine control it.
   The one exception is a scratch herdr server the session starts for a test, its socket in the session's own temporary folder, which it can drive through that socket alone, but never to start Claude.
   So a herdr session ends through `spawn.sh close <name>`, which closes only the pane spawn.sh opened under that name, never the caller's own, and marks the session ended on the roster.
@@ -167,7 +169,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - A suggestion, from anyone, is tested before a session acts on it or repeats it, and a decision that claims no change for this machine or the owner's setup cites the command and output that measured it.
 - No worker is spawned while the System panel reads No room, and the panel's idle line stays empty: no worker's dev stack idles 15 minutes.
 - Of the choices the factory could make itself, only the one-way doors reach the owner's Inbox as decisions: a Slack message to anyone but a developer (a collaborator writing code in an org's repo, about that work), a new ticket, an irreversible delete or another breaking change, a breaking schema change, an org's database change on one environment, and budget.
-  A production bug's port, a request for work from a session outside the chain and a step only he can take (plug in the Mac, log in, add a key; Approve means done and Deny means he can't, and a secret value he holds goes to a Vercel project through a secret ask, whose card hands it straight to its sink, or anywhere else where the item says, 1Password or a file,
+  A production bug's port, a request for work from a session outside the chain and a step only he can take (plug in the Mac, log in, add a key; Approve means done and Deny means he can't, and a secret value he holds goes to a Vercel project or a Keychain item through a secret ask, whose card hands it straight to its sink, or anywhere else where the item says, 1Password or a file,
   never into chat or a stored row) go to him as a plain ask, its words saying exactly what Approve does,
   and ships to `main` run on his standing yes.
   Every two-way door, a design, an order or the scope inside an ask he approved, the factory picks itself and records in an ADR or on the issue, and a grilling sends him only the questions nothing in the repo or his past words settles, batched as one plain ask.
@@ -175,6 +177,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   The inbox gate, a hook on Playground and the leads, refuses to end a turn whose last reply asks him to decide (any question mark outside code, quotes and lines to other agents, rhetorical ones and headings included, or words such as "say yes", "your call" or "should I") until that reply names an item open in his Inbox, so the session names the one already open on the same thing,
   or else posts it there and says so; a pointer he is free to skip ("if you want to look") is no ask.
   It refuses a request for his own action the same way, such as "you need to", "please", "when you can" or "the owner, plug in the Mac", so a step only he can take goes to his Inbox too.
+  Steps he comes back to (3 or more numbered lines, or a table) go in one Inbox card whose progress is edited in place, since chat scrolls; a lead sends them to the dispatcher as a draft instead, so the card is posted once.
   A question quoted from someone else, or put to another agent, passes.
   Anything promised to him for later, and any later outcome of something he asked, reaches him as an Inbox update; chat answers only what he is asking now.
 - Every Slack link in the Inbox opens in Slack's app: `playground ask` refuses an archives-style link, and an org extension's link script rewrites one from the org's workspace (another workspace's is named on stderr, left as it is).

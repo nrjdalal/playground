@@ -32,11 +32,14 @@ const put = (path: string, text: string) => {
   writeFileSync(path, text)
 }
 
-// The core scope's folders in a checkout: ask, tdd and xyz in playground's beside an in-progress one no session gets, dev in zerostarter's, and upstream's tdd and grill-me in extensions/core's.
+// The core scope's folders in a checkout: ask, tdd and xyz in playground's beside an in-progress one no session gets, dev in zerostarter's, and upstream's tdd and grill-me in extensions/core's; and the bundled slack extension's ask, slack-dm and tdd, which load only once ext.bundled turns it on.
 const checkout = join(scratch, "checkout")
 for (const [path, text] of Object.entries({
   "extensions/core/skills/grill-me/SKILL.md": "GRILL",
   "extensions/core/skills/tdd/SKILL.md": "UPSTREAM-TDD",
+  "extensions/slack/skills/ask/SKILL.md": "SLACK-ASK",
+  "extensions/slack/skills/slack-dm/SKILL.md": "SLACK-DM",
+  "extensions/slack/skills/tdd/SKILL.md": "SLACK-TDD",
   "skills/playground/ask/SKILL.md": "CORE-ASK",
   "skills/playground/in-progress/draft/SKILL.md": "DRAFT",
   "skills/playground/tdd/SKILL.md": "CORE-TDD",
@@ -207,10 +210,60 @@ test("the owner comes from a GitHub origin in either form, and links case-blind"
   expect(ownerOf("https://github.com/acme-inc/web")).toBe("acme-inc")
   expect(ownerOf("https://gitlab.com/acme-inc/web")).toBeUndefined()
   expect(planFor("acme-inc", policy, "me")).toEqual({
+    bundled: [],
     chain: ["me", "acme", "corp", "core"],
     own: "acme",
   })
-  expect(planFor(undefined, policy)).toEqual({ chain: ["corp", "core"], own: undefined })
+  expect(planFor(undefined, policy)).toEqual({
+    bundled: [],
+    chain: ["corp", "core"],
+    own: undefined,
+  })
+})
+
+// a bundled extension ships in the checkout and loads only once ext.bundled turns it on (#849)
+test("with ext.bundled empty the bundled slack extension loads no skill", async () => {
+  const session = await resolve(extensionsWith("bundled-off", policy), "/repos/acme")
+  expect(session.skills).toEqual(acmeSet)
+  expect(session.body("tdd")).toBe("CORE-TDD")
+})
+
+test("slack in ext.bundled resolves its skills after the installed extensions and before core", async () => {
+  const data = extensionsWith("bundled-on", { ...policy, "ext.bundled": ["slack"] })
+  const session = await resolve(data, "/repos/acme")
+  expect(session.skills).toEqual([...acmeSet, "slack-dm"].sort())
+  expect(session.body("slack-dm")).toBe("SLACK-DM")
+  expect(session.body("ask")).toBe("ACME-ASK")
+  expect(session.body("tdd")).toBe("SLACK-TDD")
+  const resolved = await resolveFor(ioOf(data).io, "/repos/acme")
+  if (resolved.refusal !== undefined) throw new Error(resolved.refusal)
+  expect(resolved.shadowed.get("ask")).toEqual(["corp", "slack", "core"])
+  expect(new Set(resolved.shadowed.get("tdd"))).toEqual(new Set(["core"]))
+  expect(resolved.winners.find((winner) => winner.name === "slack-dm")).toEqual({
+    dir: join(checkout, "extensions", "slack", "skills", "slack-dm"),
+    from: "slack",
+    name: "slack-dm",
+  })
+})
+
+test("a bundled name an installed extension holds stays that extension's, and a value ext.bundled refuses reads as none", () => {
+  expect(planFor(undefined, { ...policy, "ext.bundled": ["slack"] }, "me")).toEqual({
+    bundled: ["slack"],
+    chain: ["me", "corp", "slack", "core"],
+    own: undefined,
+  })
+  const installed = {
+    "ext.bundled": ["slack"],
+    "ext.links": { slack: ["*"] },
+    "ext.order": ["slack"],
+  }
+  expect(planFor(undefined, installed)).toEqual({
+    bundled: [],
+    chain: ["slack", "core"],
+    own: undefined,
+  })
+  for (const bad of ["slack", ["vault"], 3])
+    expect(planFor(undefined, { "ext.bundled": bad }).chain).toEqual(["core"])
 })
 
 // A fake claude: each call's words, a plugin list that names ws-home@ws once installed, and a failure for the words given.

@@ -3,9 +3,11 @@ import { stat } from "node:fs/promises"
 import { folderName } from "@packages/config/console"
 import {
   getSessionNames,
+  isEndedStatus,
   kindOfName,
   managerKindOfName,
   type RosterKind,
+  seatOf,
   setSessionNames,
 } from "@packages/config/kinds"
 import { env } from "@packages/env/api-hono"
@@ -104,17 +106,17 @@ export const DISPATCHER = env.PLAYGROUND_DISPATCHER || getSessionNames().names.d
 // Pure: the second dispatcher's name, the one set, else the primary's with -2, so a test stack that names only its probe as the primary never reaches the real second dispatcher.
 export const secondaryOf = (primary: string, set?: string): string => set || `${primary}-2`
 
-// The second dispatcher, running beside the first on another model, with its own chat (#i520); PLAYGROUND_DISPATCHER_SECONDARY renames it.
+// The second dispatcher, which, when started, runs beside the first on another model, with its own chat (#i520); PLAYGROUND_DISPATCHER_SECONDARY renames it.
 export const DISPATCHER_SECONDARY = secondaryOf(DISPATCHER, env.PLAYGROUND_DISPATCHER_SECONDARY)
 
 // Every name the dispatcher role goes to, the primary first, whose chat is the Dashboard's home and holds the Inbox; a secondary that repeats the primary adds none.
 export const DISPATCHERS: readonly string[] = [...new Set([DISPATCHER, DISPATCHER_SECONDARY])]
 
-// Pure: how many dispatcher rows the sidebar's header draws, by the web's dispatchersOf rule: the primary's always, each other one's while a session of its name is shown (registered or on the roster). /api/health carries it, so a stored sidebar's header holds that many rows and the board's arrival moves nothing below it (verify cls).
+// Pure: how many dispatcher rows the sidebar's header draws, by the web's dispatchersOf rule: the primary's always, each other one's while a session of its name is shown (registered, or on the roster in a status that has not ended). /api/health carries it, so a stored sidebar's header holds that many rows and the board's arrival moves nothing below it (verify cls).
 export const dispatcherSlots = (names: readonly string[], shown: ReadonlySet<string>): number =>
   names.filter((name, i) => i === 0 || shown.has(name)).length
 
-// The header's dispatcher slot count from Claude's registry and the roster, two file reads, so /api/health never asks cmux; a crashed session's leftover file can count one row the board then drops. A stack that reads this machine without the opt-in to every session (own.ts) counts the roster's alone, where every session Playground starts lands, since the registry names every session on the machine; one that opts in reads the registry even while the launcher keeps it on herdr alone.
+// The header's dispatcher slot count from Claude's registry and the roster, two file reads, so /api/health never asks cmux; a crashed session's leftover file can count one row the board then drops. A stack that reads this machine without the opt-in to every session (own.ts) counts the roster's alone, where every session Playground starts lands, since the registry names every session on the machine; one that opts in reads the registry.
 export const readDispatcherSlots = async (): Promise<number> => {
   const [files, { roster }] = await Promise.all([
     everySession() ? readRegistry() : null,
@@ -122,7 +124,9 @@ export const readDispatcherSlots = async (): Promise<number> => {
   ])
   const shown = [
     ...registeredSessionsOf(files).map((session) => session.name),
-    ...(roster?.agents ?? []).map((agent) => agent.name),
+    ...(roster?.agents ?? [])
+      .filter((agent) => !isEndedStatus(agent.status))
+      .map((agent) => agent.name),
   ]
   return dispatcherSlots(DISPATCHERS, new Set(shown))
 }
@@ -191,6 +195,8 @@ const rankOf = (worker: { name: string; role: Role }): number => {
 }
 
 export type Worker = {
+  // Set on the session the roster seats as the assistant (rosterFacts), whose view gets a chat as a dispatcher's does.
+  assistant?: true
   cwd: string
   // The reasoning effort its newest reply ran with, as its transcript records it (low, medium, high, xhigh, max); null when none is known.
   effort: string | null
@@ -479,7 +485,9 @@ export function unansweredFeed(feed: unknown, pickersOf: (sessionId: string) => 
   return { ...feed, items: feed.items.filter((item) => !(isRecord(item) && gone.has(item))) }
 }
 
+// partial: some herdr server's read was partial (ServerRead.partial).
 export type Live = {
+  partial?: true
   surfaces: Map<string, string>
   transcripts: Map<string, string>
   workers: Worker[]
@@ -487,6 +495,8 @@ export type Live = {
 
 // What the roster says about each agent, by its full session name (worker-greed, runner-pride, the dispatcher's): its ETA, its kind and role, and its triaged title.
 export type RosterFacts = {
+  // The session in the assistant seat (seatOf), the one manager the composer writes to; unset while none holds it.
+  assistant?: string
   etas: Map<string, string>
   roles: Map<string, RosterPlace>
   titles: Map<string, string>
@@ -494,7 +504,21 @@ export type RosterFacts = {
 
 const NO_ROSTER: RosterFacts = { etas: new Map(), roles: new Map(), titles: new Map() }
 
-export const rosterFacts = (roster: Roster | null): RosterFacts => ({
+// The session the roster seats as the assistant (seatOf), none on a stack whose PLAYGROUND_DISPATCHER points the composer at a throwaway probe, so the real assistant stays out of a test's reach as the real second dispatcher does; `redirected` defaults to reading that env.
+export const assistantOf = (
+  agents: unknown,
+  redirected = Boolean(env.PLAYGROUND_DISPATCHER),
+): string | undefined => (redirected ? undefined : seatOf(agents, "assistant"))
+
+// The session in the assistant seat as the roster reads now, for a send to check its name against; undefined while none holds it or the roster cannot be read.
+export const assistantSeat = async (): Promise<string | undefined> =>
+  assistantOf((await readRoster().catch(() => null))?.roster?.agents)
+
+export const rosterFacts = (
+  roster: Roster | null,
+  redirected = Boolean(env.PLAYGROUND_DISPATCHER),
+): RosterFacts => ({
+  assistant: assistantOf(roster?.agents, redirected),
   etas: new Map(
     (roster?.agents ?? []).flatMap((agent) =>
       agent.eta ? [[agent.name, agent.eta] as const] : [],
@@ -641,6 +665,7 @@ export function composeWorkers(
         .find(Boolean) ?? `session ${sessionId.slice(0, 8)}`
     const role = roleOf(name, rosterRoleOf(roster.roles, name))
     workers.push({
+      ...(name === roster.assistant && { assistant: true as const }),
       cwd: str(record.cwd),
       effort: read.effort,
       eta: roster.etas.get(name) ?? null,
@@ -840,7 +865,8 @@ export async function listLive(): Promise<Live> {
   }))
   const marked = blockedSessions(blocked, held)
   unstickConflicts = { at: Date.now(), lines: marked.conflicts }
-  return withHosted(withBlocked(live, marked.sessions, usage), hosted())
+  const shown = withHosted(withBlocked(live, marked.sessions, usage), hosted())
+  return servers.some((read) => read.partial) ? { ...shown, partial: true } : shown
 }
 
 // Pure: a session ops-unstick finds stuck on a dialog waits on the owner, as one on a picker does, so it reads Waiting on you wherever its light shows and deliver() types nothing into it. One the usage limit alone holds, with no prompt of its own, also carries usageLimit, so its light reads paused rather than stuck. A probe's dialogs are its spawner's, as its pickers are, so it never does.

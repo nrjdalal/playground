@@ -20,6 +20,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path"
 import { configDirOf, dataDir } from "@packages/env/data-dir"
 import { MARKER, makeScratch, removeScratch } from "@packages/safe-delete"
 import {
+  BUNDLED_EXTENSIONS,
   CORE,
   extChain,
   extLinksSchema,
@@ -31,6 +32,9 @@ import {
 
 // The core scope's skill folders in the checkout, read in this order; the last holds core's own skills beside upstream's, vendored as published.
 export const CORE_SKILLS = ["skills/playground", "skills/zerostarter", "extensions/core/skills"]
+
+// Where the checkout ships its bundled extensions, each <name>/skills a scope of its own once ext.bundled turns it on.
+export const BUNDLED_ROOT = "extensions"
 
 // Claude Code's aliases of its built-in commands and bundled skills, A to Z (code.claude.com/docs/en/commands): a skill takes a built-in's own name over it, never an alias, so a skill named after one never runs: CI refuses one in the core scope, and the resolver leaves one out of any other.
 export const BUILT_IN_ALIASES = [
@@ -83,18 +87,26 @@ export const skillsIn = (root: string): Map<string, string> => {
 export const ownerOf = (origin: string): string | undefined =>
   origin.match(/github\.com[:/]([^/]+)\//)?.[1]?.toLowerCase()
 
-// The extensions a session reads, first wins, core last, and the one linked to the repo's org by name, whose set the plugin is named for.
-export type Plan = { chain: string[]; own?: string }
+// The extensions a session reads, first wins, core last, the bundled ones turned on just before core, and the one linked to the repo's org by name, whose set the plugin is named for.
+export type Plan = { bundled: string[]; chain: string[]; own?: string }
 
-// The plan for a repo of owner (the home set with none) from the policy's ext.order and ext.links.
+// The plan for a repo of owner (the home set with none) from the policy's ext.order, ext.links and ext.bundled; a bundled name an installed extension already holds stays that extension's, and a value ext.bundled's schema refuses reads as none.
 export const planFor = (
   owner: string | undefined,
   values: Record<string, unknown>,
   login = "",
 ): Plan => {
-  const chain = extChain(values, login, owner)
+  const installed = extChain(values, login, owner).filter((name) => name !== CORE)
+  const on = values["ext.bundled"]
+  const bundled = BUNDLED_EXTENSIONS.filter(
+    (name) => Array.isArray(on) && on.includes(name) && !installed.includes(name),
+  )
   const links = extLinksSchema.safeParse(values["ext.links"]).data ?? {}
-  return { chain, own: owner ? chain.find((name) => links[name]?.includes(owner)) : undefined }
+  return {
+    bundled,
+    chain: [...installed, ...bundled, CORE],
+    own: owner ? installed.find((name) => links[name]?.includes(owner)) : undefined,
+  }
 }
 
 export type Resolved = {
@@ -181,7 +193,7 @@ export type OrgsIo = {
   personal: string
 }
 
-// What a session in repo, or in a repo of org, resolves to (the home set with neither): ext.order and ext.links from the extensions' policy (their defaults until a first setting writes it), each skill from the first scope that has it; a root ext init stopped in, holding no scope's folder yet, resolves with no login; a refusal when the policy does not parse, or when scopes are there and no login names whose they are.
+// What a session in repo, or in a repo of org, resolves to (the home set with neither): ext.order and ext.links from the extensions' policy (their defaults until a first setting writes it), each skill from the first scope that has it, each bundled extension ext.bundled turns on read after the installed extensions and before core; a root ext init stopped in, holding no scope's folder yet, resolves with no login; a refusal when the policy does not parse, or when scopes are there and no login names whose they are.
 export const resolveFor = async (
   io: OrgsIo,
   repo?: string,
@@ -206,9 +218,11 @@ export const resolveFor = async (
   const resolved = resolveSkills(plan, (scope) =>
     scope === CORE
       ? CORE_SKILLS.map((folder) => join(io.checkout, folder))
-      : extensions
-        ? [join(scopeDir(io.data, scope), "skills")]
-        : [],
+      : plan.bundled.includes(scope)
+        ? [join(io.checkout, BUNDLED_ROOT, scope, "skills")]
+        : extensions
+          ? [join(scopeDir(io.data, scope), "skills")]
+          : [],
   )
   return { plan, ...resolved }
 }
@@ -300,6 +314,9 @@ const installHome = (io: OrgsIo, plugin: string): number => {
   return code
 }
 
+// whichSkill's refusal when no scope holds name: installed.ts matches it, and api/hono/src/lib/store/extensions.ts reads its words from the CLI's output.
+export const noScopeHolds = (name: string): string => `no scope holds the skill ${name}`
+
 // The folder of the copy of name a session in repo (or a repo of org) loads, the scope it is from and each lower scope whose copy it shadows, or why there is none: a job that runs a skill's script reaches it here, wherever its scope keeps it, through `ext which <skill>`, and `ext why <skill>` prints it.
 export const whichSkill = async (
   io: OrgsIo,
@@ -315,7 +332,7 @@ export const whichSkill = async (
   const winner = resolved.winners.find((w) => w.name === name)
   return winner
     ? { dir: winner.dir, from: winner.from, shadowed: resolved.shadowed.get(name) ?? [] }
-    : { refusal: `no scope holds the skill ${name}` }
+    : { refusal: noScopeHolds(name) }
 }
 
 // playground orgs resolve prints the plugin's folder for spawn.sh; playground orgs home installs the home set; exit 2 on a wrong word or a refusal.

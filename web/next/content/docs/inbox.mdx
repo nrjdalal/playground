@@ -16,7 +16,7 @@ Untick **Auto-hide tab bar** at the top of the user menu to keep it shown, with 
 
 Each item is a card of one of three kinds:
 
-- **Decision**: something a session will do only with your yes, such as a question only you can answer, a Slack message, a ship to main, a new Linear ticket, a delete, a database change, a spend, or accepting an extension proposal.
+- **Decision**: something a session will do only with your yes, such as a question only you can answer, a Slack message, a ship to main, a new Linear ticket, a delete, a database change, a spend, accepting an extension proposal, adding an app to your apps or taking one off, or opening System Settings for a permission agent-desktop needs.
   The card shows exactly what happens when you approve it, except a secret ask, which takes a value instead (see Give a secret).
   On an accept, your **Approve** has the dashboard accept the proposal itself, and the card then shows what that gave ([Extensions](/docs/extensions#review)).
 - **Draft**: a Slack message or a Linear comment, ready to send in your name.
@@ -26,13 +26,13 @@ Each item is a card of one of three kinds:
   One says someone mentioned you, with the sender and their words in a quoted block whose links do not open.
   The other says Yard holds one of your posts for your approval, and its **Approve** opens Yard's approve page in a new tab, since only your signed-in browser can approve there.
 
-The list shows what needs you first, then unread updates, then the rest from the last week, each part newest first.
+The list shows what needs you first, then unread updates, then the rest: whatever still waits on you or on its session, however old, and anything else from the last week, each part newest first.
 The Inbox square counts what needs you and came since you last looked at the Inbox, so opening the Inbox clears it.
 
 The Inbox is six rows, each opened or closed by a click:
 
 - **Inbox** holds the list and shows how many it holds, and reads gray when it is empty. It starts open.
-- **In progress** holds what you answered in chat, five minutes on, while the session carries it out.
+- **In progress** holds what you approved or sent, from the moment you answer it until the session that posted it says it is done.
 - **Snoozed** holds what you put away until a time.
 - **Archived** holds what you set aside for later.
 - **Done** holds what is settled.
@@ -95,15 +95,17 @@ An HTML page that is the only file shows live in the card, with buttons in its c
 A page runs only inside the view: its own keys work there, the arrows included, so a slide deck moves through its slides, Esc still closes the view, and a link in it opens in a new tab.
 An arrow the page does nothing with moves on to the next file.
 A markdown file reads like a chat message, code shows highlighted, a `.diff` or `.patch` file shows as a patch view (each changed file side by side, or one column on a phone), and a PDF opens in the browser's own viewer.
+A file the dashboard no longer keeps, such as one past its week, reads Missing in its place.
 
 ## Give a secret
 
 A session that needs a value only you hold, such as a client secret or an API key, asks for it as a **Secret** card.
-The card names the variable and where the value goes: a Vercel project and its environments.
+The card names the variable and where the value goes: a Vercel project and its environments, or an item in this Mac's Keychain, such as your Slack or Yard token.
 Paste the value into the masked box, then press **Submit** or Enter.
 
-The value goes straight to that project, once for each environment, and is kept nowhere: not in the Inbox, the chat, a log or the session.
-The card then shows only when you gave it and how each environment went, green when every one took it and red when one did not.
+The value goes straight to that project, once for each environment, or into the Keychain, and is kept nowhere else: not in the Inbox, the chat, a log or the session.
+The card then shows only when you gave it and how each environment went, or that the Keychain saved it, green when every one took it and red when one did not.
+When the value was saved but the session that asked was not told yet, the card stays green and says so in a gray line underneath, with **Retry**, which tells the session again and never saves the value a second time.
 A secret card has no comment box, no Archive and no Reply, so the value never lands in a chat.
 
 ## Send a draft
@@ -158,7 +160,7 @@ An update you dismiss counts as read.
 **Mark all as read**, the check at the right of the first row, marks everything on screen you have not read as seen, answering nothing; each stays in the list as it is, and the check turns into a gray double check, All read.
 
 An item you answered moves to Done as soon as the session that posted it says it is done, unless you archived it.
-An answer still being carried out, or an update you read, moves to Done by itself after ten minutes.
+Nothing moves by itself: what you deny or discard goes to Done at once, a card you only replied to stays in the list until its session says it is done, and an update you read stays until you dismiss it.
 
 ## Preview
 
@@ -184,7 +186,7 @@ Your chat opens with Replying to #i41 above the box, and the message you send ca
 Typing `re #i41` anywhere in a message does the same.
 
 A reply counts as acting on the item.
-It leaves the list and the count at once, and its card reads You replied, with your words, and that the session is on it, until the session closes it.
+It leaves the Inbox square's count at once and stays in the list, its card reading You replied, with your words, and that the session is on it, until the session closes it.
 
 ## While you look
 

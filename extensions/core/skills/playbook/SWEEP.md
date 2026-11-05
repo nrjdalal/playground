@@ -43,6 +43,8 @@ For every agent of yours that `ListAgents` lists, or the roster shows with a sta
 - **Done**: its roster entry reads `ended`, or its PR has merged and its final report is in, and its session is still live.
   Ending is automatic ([End](SESSIONS.md#end)); act on its `Not ended` line, then close it by hand, its checkers first.
 
+Before you staff a fix this step turns up (an off-scope bug, a down worker's chore), run DISPATCH.md's **open-PR check** on it.
+
 When spawn.sh's load gate refuses a worker's new checker, give that PR to a reviewer already running (a done worker's, before you close it) as another PR in its own rounds, reporting to that PR's worker, since a running reviewer adds no load.
 Move its roster row in the same step, by [ROSTER.md](ROSTER.md)'s `A checker takes another PR` row, so the sidebar nests it under its new worker and run-slot ranks its runs by that worker's size (a stale row once queued a reviewer's install 1,211 s for a 0 s run).
 With no reviewer running, that PR's checker is **held**: the worker reports the refusal to you, and you hold the PR on your list, since a refused start leaves only a `capacity.jsonl` row that names no session.
@@ -79,7 +81,7 @@ act on each whose `status` is no longer `open` (`approved`, `denied`, `sent`, `d
 and take its id off the list once it is closed: a go with `bun run ask ack <id> --link <url>` or `--no-link "<why>"` after you carry it out, a deny, a clear, a discard or a provided secret by that read.
 Ops also checks the `asks` on the dispatcher's entry and sends the dispatcher any answer it missed.
 ops-sweep chases an answer of the owner's its poster has not acked (`bun run ask stale`; on 9 Oct, 11 answers failed unseen and #i76's Send never went out), reminding each live poster once, then at most every 4 hours, so a lead hears only `stale-poster-down` findings: an answer whose poster is down, which Ops passes to the Builder to carry out or re-dispatch.
-An answer the dashboard relayed to the dispatcher because its poster had ended (its text says so, `relayText`) is the dispatcher's to carry out and ack, so the Builder asks the dispatcher before it carries out any `stale-poster-down` answer, and takes only the ones the dispatcher did not receive.
+An answer the dashboard relayed to the dispatcher because its poster had ended (its `[inbox-answer]` line carries `relay`, `textsOf` in `inbox.ts`) is the dispatcher's to carry out and ack, so the Builder asks the dispatcher before it carries out any `stale-poster-down` answer, and takes only the ones the dispatcher did not receive.
 Anything only the owner can answer becomes an Inbox decision (**ask**).
 
 Done when no Inbox decision your roster entry lists has left `open` unacted on, and, for the Builder, every `stale-poster-down` finding is acted on.

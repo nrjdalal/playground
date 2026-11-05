@@ -133,9 +133,11 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    With no `--runtime`, every start and resume opens in herdr, from any terminal; spawn.sh starts nothing in cmux, so it refuses `--runtime cmux` and a column anchored on a cmux `surface:N`.
    After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
    each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with and an `--effort` other than high,
-   in the pane holding its label, printing `restored <name>`, `skipped <name>: live` or `not restored:` with the refusal; it is safe to run again, one at a time: while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
+   in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, no runtime pin, a runtime other than herdr, or an exec line that does not parse or that it does not run) or `not restored <name>: <reason>`, a gate's refusal included; it is safe to run again, one at a time:
+   while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
+   A readable record on another server gets no line, since that server's own restore reads it.
    A session that never took its first turn has no transcript, so its resume starts it afresh under its own id and name, with the prompt its start recorded in `resume/<name>.prompt`.
-   Done when every session it names reads `restored` or `skipped`, or its refusal is one you act on (a full gate: run it again once a session closes).
+   Done when each line reads `restored`, `skipped <name>: live` or a roster row's down status, or you have acted on it (a full gate: run it again once a session closes; a broken record or a missing pin: resume the session by hand).
 
    `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" move <name>` takes a live cmux session to herdr, so every session moves to herdr.
    A close followed by `resume --runtime herdr` leaves the session down while the capacity gate refuses (memory pressure with under 8% free, or load over the cores), and a move swaps one copy for another, so it adds neither: it runs every check a resume runs and the usage gate, with the load and memory gates set aside and its capacity row naming the pid it moves.
@@ -340,6 +342,11 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
 - ops-tick's auto-end beat, every 5 minutes, ends a checker whose PRs are all merged or closed or whose worker is gone, a worker whose PRs are all merged or closed, and a reviewer idle 30+ minutes whose every head carries its verdict.
   A session's PRs are its roster `pr` and `prs` list, its open branch PRs, its worker's, and every PR its own or its worker's transcript links, so one still open keeps it.
 - Each end runs `spawn.sh close <name>`, then `roster.ts report <name> "ended automatically: <why>" status=ended`, the merged sha in the why, and sends its lead one line: its roster `lead`, else its worker's.
+- Then it cleans each worktree the session used, one at a time (`cleanWorktree`), and the lead's line names what went and what stayed, with why; a reviewer ended idle keeps its worktrees for its resume.
+  A worktree with uncommitted work or unpushed commits stays, and so does the live dashboard's checkout, by its branch.
+  A Playground worktree in `.claude/worktrees/` that a live session or a clone holds stays, where a hold by the merged PR's number alone, from the worker still merging it, does not count.
+  Any other has its dev stack stopped (`bun run dev:stop` there, whose refusal keeps it), goes to the 7-day trash through `playground rm --worktree` (`--pr <url>` at a merge), which keeps one a process holds, and then loses its `playground-<worktree>-db` and `-redis` containers (`docker rm -fv`, each name matched whole, never the live dashboard's database) and its local branch.
+  Another repo's worktree goes through `git -C <repo> worktree remove <path>` with no force flag, then `git worktree prune` and `git branch -D`; the main checkout is never one.
 - Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one); otherwise its lead gets a `Not ended` line saying why, and the session waits.
   A cmux session's close is refused the same way, so its lead closes it by hand below.
 - A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir>`; its `Ended` line goes to its worker too.
