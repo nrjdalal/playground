@@ -8,6 +8,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## spawn.sh
 
+- While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start but a move, naming focus's session and its end.
 - A factory session starts another only through `scripts/spawn.sh` (playbook's SESSIONS.md, Spawn), which runs a capacity gate that refuses, failing closed, unless four checks pass in order, the first failure naming its gate and its reading,
   and counts no live sessions or workers (no count is capped; Ops watches the live board for the risk of cmux no longer answering, as it once stopped at 49 live sessions and load5 97): the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`) in its own `capacity.jsonl` and in each `slots.peers` folder's,
   each weighing half its item's load units (small 1, medium 2, big 3; `--size`, else small for a reviewer or tester, else what `scripts/ops/run-slot.sh size <name>` reads from the roster and plan.json), under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
@@ -162,6 +163,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 - A new worktree can take `node_modules` as an APFS clone of a sibling worktree's with the same `bun.lock` (`~/.playground/ops/run-slot.sh <your name> -- cp -cR <sibling>/node_modules <worktree>/`, through run-slot since a clone is a heavy run: three load spikes on 13 Oct, fseventsd near 100%, came from clones),
   and once that clone succeeds, run-slot clones each workspace's own `node_modules` from the sibling with the same flags (`CLONE_WORKSPACES` in `scripts/ops/run-slot.sh`, run in the clone's own process group), so the worktree is ready for its checks with no install.
+  The clone has no `dist` folders and no data table metrics: `bun run test:file` and `bun run check-types:tests` build the unbuilt packages their files import, and write the metrics when missing, before they run (`prebuildTests` in `packages/scripts/src/verify/prebuild.ts`), so a clone runs either one directly.
   While the clone runs, its holder line (`run-slot-clone.holder` in the ops folder) names the sibling it reads from and the worktree it copies into, so `playground rm --worktree` refuses either one, naming the clone, until the clone ends (`clone_ends` in `scripts/ops/run-slot.sh`, `clonesOf` in `packages/scripts/src/playground/rm.ts`).
   rm reads the line again right before its move, so a clone that starts while rm counts the worktree's files still keeps it.
   When the copy prints any error, run `~/.playground/ops/run-slot.sh <your name> -- bun install --force --ignore-scripts --cwd <worktree>`, since a plain install then looks healthy while check-types fails on a missing module.

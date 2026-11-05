@@ -170,7 +170,7 @@ Its work has landed when each file HEAD changed since its merge-base with `origi
 The owner's Approve is the authority for it: a session passes `--discard` only with `--decision <id>`, naming an Inbox `delete` decision the owner has approved whose `what` names that worktree's path, read through `bun run ask get` in the Dashboard's checkout.
 A caller is a session when `PLAYGROUND_ROLE` is set, or when a claude process runs above it (the shell-pane launcher's caller check, which reads each process from the system, so no prefix on the call changes it); a call detached from its parent (its parent is pid 1), or whose parent the system cannot read, needs the decision too, and a terminal no session runs in passes `--discard` alone.
 Known residual, read as a terminal's: a call a session moves outside its own process tree, through a long-lived daemon (a `tmux` server, `at`) or a detached shell between it and pid 1, or a chain rm cannot climb to its end, finds no claude process above it.
-So a session posts the `delete` decision with `bun run ask new`, naming the path and why, and once it reads approved runs `playground rm --worktree <path> --discard --decision <id>`; an open, denied or missing decision, another kind, or one naming another path is refused.
+So a session posts the `delete` decision with `bun run ask new`, naming the full path and why (it refuses a short name, such as a worktree's folder name alone, and names the full path to write), and once it reads approved runs `playground rm --worktree <path> --discard --decision <id>`; an open, denied or missing decision, another kind, or one naming another path is refused.
 Discarded work goes into the trash with the worktree, so it comes back with it.
 A worktree restored from the trash has its files back, but git no longer lists it as a worktree.
 Ops empties the trash every hour: each delete over 7 days old goes, and the oldest go sooner while the disk has under 50 GB free.
@@ -233,7 +233,7 @@ Each runs the package script of the same name in the Dashboard's checkout, the o
 - `playground changelog` adds rows to the Changelog from GitHub's merges and versions, or a line by hand.
 - `playground dm send <file>` posts the reply in the file, named by its absolute path, to your own Slack DM in Slack mode, framed, and records each post so the DM watch tells it from your messages.
 - `playground dm upload <item id>` shares a Slack send's files into its channel and thread, read from the answered Inbox item that id names; the Inbox runs it on Send or Approve.
-  On a Mac with no Slack set up (`slack.dmChannel` and `slack.dmOwner`), `dm send` posts nothing and says `Slack is not set up here`, pointing you to the Inbox; with no vault skill this Mac reads, either one says `the vault is not installed` and how to install one.
+  Both run the bundled Slack extension's scripts, which read the Slack token from the Keychain; with that extension off in Settings, either one says `Slack is not set up here` and runs nothing, and so does `dm send` with no DM set up (`slack.dmChannel` and `slack.dmOwner`), pointing you to the Inbox.
 - `playground ingest` reads every Claude Code session Playground has run (every one on this machine with `PLAYGROUND_ALL_SESSIONS=true`) into the Dashboard's database; `--follow` keeps reading, and `status` says how far it is.
 - `playground queues` prints the merge queue and the work queue.
 - `playground thread` opens, routes, renames and lists the Inbox's threads.

@@ -1,0 +1,15 @@
+// Type-checks the tests of the bundled slack extension and, through their imports, its scripts, which no package's config reaches.
+// @/ resolves as packages/settings resolves it, since the scripts import that package's source, the one they reach that uses @/.
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "types": ["bun"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "paths": { "@/*": ["../../../packages/settings/src/*"] }
+  },
+  "include": ["**/*.ts"]
+}

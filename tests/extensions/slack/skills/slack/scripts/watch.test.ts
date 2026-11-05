@@ -3,15 +3,21 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { PLAYGROUND, recordSent, USER } from "../../../../../packages/scripts/src/dm/slack"
+import {
+  NO_TOKEN,
+  PLAYGROUND,
+  recordSent,
+  USER,
+} from "../../../../../../extensions/slack/skills/slack/scripts/slack"
 import {
   assistantOf,
   busyOf,
   type Stuck,
   stuckOf,
   watch,
-} from "../../../../../packages/scripts/src/ops-dm-watch/watch"
-import { DM, fakeDm, OWNER } from "../dm/fake-dm"
+} from "../../../../../../extensions/slack/skills/slack/scripts/watch"
+import { DM, fakeDm, OWNER } from "./fake-dm"
+import { fakeKeychain } from "./fake-keychain"
 
 const dirs: string[] = []
 afterAll(() => {
@@ -281,16 +287,13 @@ describe("busyOf", () => {
 })
 
 describe("watch.ts as the beat runs it", () => {
-  test("with no token, as when vault cannot read 1Password, one pass exits 1 with one plain error line and calls nothing", async () => {
+  test("with no token in the Keychain, one pass exits 1 with one plain error line and calls nothing", async () => {
     const script = join(
       import.meta.dir,
-      "../../../../../packages/scripts/src/ops-dm-watch/watch.ts",
+      "../../../../../../extensions/slack/skills/slack/scripts/watch.ts",
     )
-    const env: Record<string, string | undefined> = {
-      ...process.env,
-      PLAYGROUND_DATA_DIR: scratch(),
-    }
-    delete env.SLACK_TOKEN
+    const data = scratch()
+    const env = { ...process.env, PATH: fakeKeychain(data), PLAYGROUND_DATA_DIR: data }
     const child = Bun.spawn([process.execPath, script], { env, stderr: "pipe", stdout: "pipe" })
     const [out, err, code] = await Promise.all([
       new Response(child.stdout).text(),
@@ -299,6 +302,6 @@ describe("watch.ts as the beat runs it", () => {
     ])
     expect(code).toBe(1)
     expect(out).toBe("")
-    expect(err).toBe("error: SLACK_TOKEN is unset: run it through vault.py run -e\n")
+    expect(err).toBe(`error: ${NO_TOKEN}\n`)
   })
 })

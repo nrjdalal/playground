@@ -1,21 +1,24 @@
 import { mkdir, readdir } from "node:fs/promises"
 import { join } from "node:path"
 
-import { seatOf } from "@packages/config/kinds"
+import { seatOf } from "../../../../../packages/config/src/kinds"
 import {
   parseSessionState,
   type SessionState,
   type SessionStateName,
   sessionStateDir,
   stateNow,
-} from "@packages/config/session-state"
-import { configDirOf, dataDirOf } from "@packages/env/data-dir"
-import { readPolicy, slackSettings } from "@packages/settings"
-
-import { history, ownerMessages, PLAYGROUND, readSent, type Slack, slackOf } from "../dm/slack"
-import { sendAs } from "../ops-job/job"
-import { liveSessions, newestTurnAt, transcriptTail } from "../ops-session-resume/resume"
-import { writeAtomic } from "../write-atomic"
+} from "../../../../../packages/config/src/session-state"
+import { configDirOf, dataDirOf } from "../../../../../packages/env/src/data-dir"
+import { sendAs } from "../../../../../packages/scripts/src/ops-job/job"
+import {
+  liveSessions,
+  newestTurnAt,
+  transcriptTail,
+} from "../../../../../packages/scripts/src/ops-session-resume/resume"
+import { writeAtomic } from "../../../../../packages/scripts/src/write-atomic"
+import { readPolicy, slackSettings } from "../../../../../packages/settings/src"
+import { history, ownerMessages, PLAYGROUND, readSent, type Slack, slackOf, tokenOf } from "./slack"
 
 const STATE = "dm-watch.json"
 // How long an owner message waits for our reply, and a dispatcher's stuck or failed record stands, before the assistant hears it too.
@@ -148,8 +151,7 @@ export async function busyOf(
 
 // one pass, no retry: its errors as one plain line, which the beat's failure alert reads
 const main = async () => {
-  const token = process.env.SLACK_TOKEN
-  if (!token) throw new Error("SLACK_TOKEN is unset: run it through vault.py run -e")
+  const token = await tokenOf()
   const dir = dataDirOf(process.env)
   const policy = await readPolicy(dir)
   if (policy.refusal !== undefined) throw new Error(`the settings refuse: ${policy.refusal}`)
