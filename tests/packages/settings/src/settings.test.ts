@@ -81,6 +81,7 @@ describe("defineSettings", () => {
       "release.merges",
       "sessions.aliases",
       "sessions.names",
+      "sessions.templates",
       "slack.dmChannel",
       "slack.dmOwner",
       "slack.linkConverter",
