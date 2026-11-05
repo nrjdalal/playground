@@ -58,23 +58,23 @@ export const groups: Group[] = [
       const W = `${MAIN}/.claude/worktrees/a`
       return [
         [
-          "a commit after a function whose cd climbs, called three times",
+          "a commit after a function whose cd climbs, called three times, from the home",
           `cd ${W}; f() { cd ..; }; f; f; f; git commit -m x`,
         ],
         [
-          "a commit after a while loop whose condition climbs",
+          "a commit after a while loop whose condition climbs, from the home",
           `cd ${W}; i=0; while cd .. && [ $i -lt 2 ]; do i=$((i+1)); done; git commit -m x`,
         ],
         [
-          "a commit after an eval of a climb in a for loop",
+          "a commit after an eval of a climb in a for loop, from the home",
           `cd ${W}; for i in 1 2 3; do eval 'cd ..'; done; git commit -m x`,
         ],
         [
-          "a commit after a climb through a variable in a for loop",
+          "a commit after a climb through a variable in a for loop, from the home",
           `cd ${W}; U=..; for i in 1 2 3; do cd $U; done; git commit -m x`,
         ],
         [
-          "a commit after a cd through a variable that names the main checkout",
+          "a commit after a cd through a variable that names the main checkout, from the home",
           `U=${MAIN}; cd "$U" && git commit -m x`,
         ],
       ]
