@@ -187,7 +187,7 @@ import {
   type UsageRow,
 } from "@/lib/system"
 import {
-  holdsForThreads,
+  holdsForFirstTry,
   isPlainClick,
   pageAfterEmpty,
   patchThread,
@@ -200,7 +200,7 @@ import {
   THREADS_QUERY_KEY,
   useThreads,
 } from "@/lib/threads"
-import { useYardChannels } from "@/lib/yard-api"
+import { holdsForYard, useYardChannels, useYardLate } from "@/lib/yard-api"
 
 const HEALTH_LABELS: Record<Health, string> = {
   amber: "Worth a look",
@@ -1341,6 +1341,10 @@ function SortableManager({
 }
 
 // The Orchestrators group, each row by its role word (Builder, Planner): A to Z by roster title until a row is dragged, Move up and Move down in each row's menu, and Space then the arrows then Space on a focused row; a drop is its own confirmation and saves the whole order, and Reset order in the label's menu forgets it. A stored sidebar, muted until the live one is read, drags nothing.
+// Pure: whether a closed group keeps a nested row: its lead or any member under it keeps (keepsOther), so a checker waiting under an idle manager still shows.
+export const keepsNested = <T,>(lead: T, members: T[], keep: (item: T) => boolean): boolean =>
+  [lead, ...members].some(keep)
+
 function ManagersGroup({
   count,
   keep,
@@ -1420,8 +1424,10 @@ function ManagersGroup({
         className={cn("space-y-0.5", muted && "opacity-60")}
       >
         {!open ? (
-          // closed, only the rows kept as Other keeps them, unsorted, so no drag reorders a part of the list
-          sessions.filter(keep).map((worker) => row(worker, membersOf(worker)))
+          // closed, only the rows kept as Other keeps them, a manager's for itself or a checker under it, unsorted, so no drag reorders a part of the list
+          sessions
+            .filter((worker) => keepsNested(worker, membersOf(worker), keep))
+            .map((worker) => row(worker, membersOf(worker)))
         ) : sessions.length === 0 ? (
           // Hidden in the icon rail, where a row with no icon would show as a clipped word.
           <SidebarMenuItem className="group-data-[collapsible=icon]:hidden">
@@ -2178,7 +2184,7 @@ function useThreadRows(enabled: boolean) {
     }
     await queryClient.invalidateQueries({ queryKey: THREADS_QUERY_KEY })
   }
-  return { data: query.data, holds: holdsForThreads(query), patch, setPage }
+  return { data: query.data, holds: holdsForFirstTry(query), patch, setPage }
 }
 
 // The dispatcher slots a stored sidebar lacks: an empty row in a session row's own box for each, busy, so the rows that replace them move nothing, open or on the collapsed rail, and nothing shimmers.
@@ -2220,9 +2226,11 @@ export function DashboardNav() {
   const { close, memberOf, now, placed, row, still, waitingOf } = useSessionRows(source)
   const threads = useThreadRows(allowed)
   const yard = useYardChannels(allowed)
+  const yardLate = useYardLate()
 
-  // held for the threads' and Yard's first tries too, so neither pushes the rows below it down as it arrives
-  if (!allowed || source.kind === "pending" || threads.holds || holdsForThreads(yard)) return null
+  // held for the threads' and Yard's first tries too, so neither pushes the rows below it down as it arrives; Yard's only up to YARD_HOLD_MS
+  if (!allowed || source.kind === "pending" || threads.holds || holdsForYard(yard, yardLate))
+    return null
   const workers = "workers" in source ? source.workers : []
   const groupOf = (lead: NestItem): GroupLabel =>
     lead.kind === "roster" ? "Subagents" : GROUP_OF[lead.worker.role]
@@ -2260,7 +2268,7 @@ export function DashboardNav() {
   const keep = (worker: Worker) =>
     keepsOther(worker.light, waitingOf(worker).length > 0, worker.sessionId === selected?.sessionId)
   const keepsItem = ({ lead, members }: Nested<NestItem>) =>
-    [lead, ...members].some((item) => item.kind === "session" && keep(item.worker))
+    keepsNested(lead, members, (item) => item.kind === "session" && keep(item.worker))
   // Orchestrators and Subagents count the sessions their rows hold, a manager's tester under its manager; the rest their own sessions
   const count = (label: GroupLabel, sessions: Worker[]) =>
     label === "Orchestrators" || label === "Subagents"

@@ -5,6 +5,7 @@ import { join } from "node:path"
 import {
   groupEmpty,
   dispatcherRowLabel,
+  keepsNested,
   navGroups,
   OpsJobRow,
   SessionRow,
@@ -549,6 +550,20 @@ describe("SessionRow", () => {
     expect(dispatcherRowLabel({ name: "glm-dispatcher" }, false)).toBe("GlmDispatcher")
     expect(dispatcherRowLabel(null, true)).toBe("Alpha")
     expect(dispatcherRowLabel(null, false)).toBe("Bravo")
+  })
+})
+
+describe("keepsNested", () => {
+  const waiting = new Set(["checker"])
+  const keep = (name: string) => waiting.has(name)
+
+  test("a closed group keeps a row whose nested member waits on you or is open, its lead idle", () => {
+    expect(keepsNested("manager", ["checker"], keep)).toBe(true)
+  })
+
+  test("and keeps a row whose lead keeps, and drops one where nothing does", () => {
+    expect(keepsNested("checker", [], keep)).toBe(true)
+    expect(keepsNested("manager", ["tester"], keep)).toBe(false)
   })
 })
 

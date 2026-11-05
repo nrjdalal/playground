@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test"
 
 import {
-  holdsForThreads,
+  holdsForFirstTry,
   isPlainClick,
   pageAfterEmpty,
   patchThread,
@@ -304,20 +304,20 @@ describe("renameSchema", () => {
   })
 })
 
-describe("holdsForThreads", () => {
+describe("holdsForFirstTry", () => {
   test("holds the nav for the first read alone", () => {
-    expect(holdsForThreads({ errorUpdateCount: 0, failureCount: 0, isPending: true })).toBe(true)
+    expect(holdsForFirstTry({ errorUpdateCount: 0, failureCount: 0, isPending: true })).toBe(true)
   })
 
   test("a failed read, retrying or given up, holds nothing, and neither does a read done", () => {
-    expect(holdsForThreads({ errorUpdateCount: 0, failureCount: 1, isPending: true })).toBe(false)
-    expect(holdsForThreads({ errorUpdateCount: 1, failureCount: 4, isPending: false })).toBe(false)
-    expect(holdsForThreads({ errorUpdateCount: 0, failureCount: 0, isPending: false })).toBe(false)
+    expect(holdsForFirstTry({ errorUpdateCount: 0, failureCount: 1, isPending: true })).toBe(false)
+    expect(holdsForFirstTry({ errorUpdateCount: 1, failureCount: 4, isPending: false })).toBe(false)
+    expect(holdsForFirstTry({ errorUpdateCount: 0, failureCount: 0, isPending: false })).toBe(false)
   })
 
   // A read that failed with no data turns pending again on its next try, failureCount back to 0, as when a group that reads the same query mounts once the nav draws: held again, the nav would unmount that group and fetch in a loop.
   test("a read again after a failure holds nothing", () => {
-    expect(holdsForThreads({ errorUpdateCount: 1, failureCount: 0, isPending: true })).toBe(false)
+    expect(holdsForFirstTry({ errorUpdateCount: 1, failureCount: 0, isPending: true })).toBe(false)
   })
 })
 

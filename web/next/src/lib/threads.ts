@@ -63,7 +63,7 @@ export const useThreads = (enabled: boolean, page: number) =>
   })
 
 // Pure: whether the sidebar waits on a read (the threads', Yard's channels) before it draws, so a group arriving never pushes the rows below it: the first try alone, so a read that fails and retries, or reads again after a failure with no data, never keeps the sessions off the page.
-export const holdsForThreads = (read: {
+export const holdsForFirstTry = (read: {
   errorUpdateCount: number
   failureCount: number
   isPending: boolean
