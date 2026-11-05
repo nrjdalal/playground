@@ -13,6 +13,8 @@ import { join } from "node:path"
 
 import {
   type Focus,
+  focusCard,
+  type FocusCard,
   focusPath,
   runFocus,
   standing,
@@ -98,7 +100,7 @@ describe("playground focus", () => {
     expect(printed.join("\n")).toContain("focus stands for worker-f")
   })
 
-  test("off ends each part: the merge hold goes, run-slot.focus is lifted and focus.json is set aside", async () => {
+  test("off ends each part: the merge hold goes, run-slot.focus is lifted and focus.json ends now, for the focus-card beat to post its card", async () => {
     const m = machine()
     await on(m.deps)
     expect(await runFocus(["off"], m.deps)).toBe(0)
@@ -107,7 +109,7 @@ describe("playground focus", () => {
     expect(ops).not.toContain("run-slot.focus")
     expect(ops.some((f) => f.startsWith("run-slot.focus.lifted-"))).toBe(true)
     expect(await standing(m.data, NOW)).toBeUndefined()
-    expect(readdirSync(m.data).some((f) => f.startsWith("focus.json.ended-"))).toBe(true)
+    expect(JSON.parse(readFileSync(focusPath(m.data), "utf8")).until).toBe(NOW.toISOString())
   })
 
   test("on with an unreadable held-prs.json fails and leaves no part standing", async () => {
@@ -119,7 +121,7 @@ describe("playground focus", () => {
     expect(existsSync(focusPath(m.data))).toBe(false)
   })
 
-  test("off with an unreadable held-prs.json still lifts the switch and sets focus.json aside, and says the hold stays", async () => {
+  test("off with an unreadable held-prs.json still lifts the switch and ends focus.json, and says the hold stays", async () => {
     const m = machine()
     await on(m.deps)
     writeFileSync(m.deps.heldPath, "not json")
@@ -135,6 +137,91 @@ describe("playground focus", () => {
     await startFreeze(m.deps.heldPath, "v1.2.3", NOW)
     expect(await runFocus(["off"], m.deps)).toBe(0)
     expect(printed.join("\n")).toContain('merges stay held by another "*" line')
+  })
+
+  test("the focus-card beat posts one card once focus has ended, by off or at its end, and sets focus.json aside", async () => {
+    const m = machine()
+    const cards: FocusCard[] = []
+    const post = async (card: FocusCard) => void cards.push(card)
+    expect(await focusCard(m.data, NOW, post)).toBe("none")
+    await on(m.deps)
+    expect(await focusCard(m.data, new Date(NOW.getTime() + 29 * MIN), post)).toBe("standing")
+    expect(cards).toEqual([])
+    const end = new Date(NOW.getTime() + 30 * MIN)
+    expect(await focusCard(m.data, end, post)).toBe("posted")
+    expect(await focusCard(m.data, end, post)).toBe("none")
+    expect(cards).toEqual([
+      {
+        kind: "update",
+        preview: {
+          outcome: "finding",
+          text: "Focus was for: a timed demo\nMeasured from run-slot.runs.log.\nWhat came into the Inbox while it stood counts again.",
+        },
+        title: "Focus for worker-f ended: 0 runs queued while it stood, 0m0s in all",
+      },
+    ])
+    expect(readdirSync(m.data).some((f) => f.startsWith("focus.json.ended-"))).toBe(true)
+
+    const early = machine()
+    await on(early.deps)
+    await runFocus(["off"], { ...early.deps, now: () => new Date(NOW.getTime() + 5 * MIN) })
+    expect(await focusCard(early.data, new Date(NOW.getTime() + 6 * MIN), post)).toBe("posted")
+    expect(cards).toHaveLength(2)
+  })
+
+  test("an on before the beat has carded a lapsed focus keeps that focus's card, posted before the new one's", async () => {
+    const m = machine()
+    const at = (minutes: number) => ({
+      ...m.deps,
+      now: () => new Date(NOW.getTime() + minutes * MIN),
+    })
+    await runFocus(["on", "--session", "worker-a", "--for", "30", "--reason", "first"], m.deps)
+    await runFocus(["off"], at(10))
+    expect(
+      await runFocus(
+        ["on", "--session", "worker-b", "--for", "30", "--reason", "second"],
+        at(10.3),
+      ),
+    ).toBe(0)
+    const cards: FocusCard[] = []
+    const post = async (card: FocusCard) => void cards.push(card)
+    expect(await focusCard(m.data, new Date(NOW.getTime() + 10.6 * MIN), post)).toBe("posted")
+    expect(cards.map((card) => card.title)).toEqual([
+      "Focus for worker-a ended: 0 runs queued while it stood, 0m0s in all",
+    ])
+    expect(await standing(m.data, new Date(NOW.getTime() + 11 * MIN))).toMatchObject({
+      session: "worker-b",
+    })
+    expect(await focusCard(m.data, new Date(NOW.getTime() + 41 * MIN), post)).toBe("posted")
+    expect(cards.map((card) => card.title)).toEqual([
+      "Focus for worker-a ended: 0 runs queued while it stood, 0m0s in all",
+      "Focus for worker-b ended: 0 runs queued while it stood, 0m0s in all",
+    ])
+    expect(await focusCard(m.data, new Date(NOW.getTime() + 42 * MIN), post)).toBe("none")
+  })
+
+  test("the same session's on while its focus stands keeps since, so what came in earlier stays quiet", async () => {
+    const m = machine()
+    await on(m.deps)
+    expect(await on({ ...m.deps, now: () => new Date(NOW.getTime() + 20 * MIN) }, "60")).toBe(0)
+    expect(await standing(m.data, new Date(NOW.getTime() + 70 * MIN))).toEqual({
+      reason: "a timed demo",
+      session: "worker-f",
+      since: NOW.toISOString(),
+      until: new Date(NOW.getTime() + 80 * MIN).toISOString(),
+    })
+  })
+
+  test("a card that fails to post leaves focus.json for the next beat", async () => {
+    const m = machine()
+    await on(m.deps)
+    const end = new Date(NOW.getTime() + 30 * MIN)
+    await expect(
+      focusCard(m.data, end, async () => {
+        throw new Error("bun run ask new: refused")
+      }),
+    ).rejects.toThrow("refused")
+    expect(existsSync(focusPath(m.data))).toBe(true)
   })
 
   test("lapsed at its end, the merge hold and the standing focus hold nothing, with no off", async () => {
@@ -176,6 +263,11 @@ describe("playground focus", () => {
     expect(printed.at(-1)).toBe(
       "focus ended for worker-f: 3 runs queued while it stood, 12m0s in all (measured from run-slot.runs.log)",
     )
+    const cards: FocusCard[] = []
+    expect(await focusCard(m.data, end, async (card) => void cards.push(card))).toBe("posted")
+    expect(cards.map((card) => card.title)).toEqual([
+      "Focus for worker-f ended: 3 runs queued while it stood, 12m0s in all",
+    ])
   })
 })
 
