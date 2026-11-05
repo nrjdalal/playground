@@ -17,6 +17,7 @@ import {
   run,
   slotWords,
   stdinOf,
+  stdinShell,
   type Text,
   type Visit,
   type Word,
