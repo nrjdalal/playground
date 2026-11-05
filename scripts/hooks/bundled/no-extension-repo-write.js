@@ -5719,7 +5719,7 @@ var slackSettings = defineSettings({
   },
   "slack.gatedSends": {
     default: "",
-    description: "An org's Slack gate, set in that org's extension: the MCP servers its workspace posts through, its self-DM and the send path every other post takes, as {path, selfDm, servers}; no-playground-leak then refuses every Slack MCP write on those servers but a post to the self-DM, and any curl write to Slack's API. None when empty.",
+    description: "An org's Slack gate, set in that org's extension: the MCP servers its workspace posts through, its self-DM and the send path every other post takes, as {path, selfDm, servers}; no-playground-leak then refuses every Slack MCP write on those servers but a post to the self-DM, and any curl to a Slack URL but an /api/ read. None when empty.",
     schema: union([literal(""), gatedSendsSchema])
   },
   "slack.linkConverter": {

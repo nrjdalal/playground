@@ -404,7 +404,7 @@ let startCwd: string | undefined
 let builtins: Set<string> | undefined
 const MCP_TOOL = /^mcp__(.+?)__(.+)$/
 const READ_TOOL =
-  /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$/
+  /^(?:download|extract|fetch|get|list|read|search)_|_(?:history|info|list|read|replies|search|unreads)$|^(?:usergroups_me|users_conversations)$/
 const INNER = new Set(["curl", "gh", "git"])
 // A Bash command naming none of these is left alone before any parsing; $'...' can spell any word, so it always counts.
 const MAYBE = /curl|gh|git/i

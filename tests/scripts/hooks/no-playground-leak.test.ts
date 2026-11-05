@@ -1337,6 +1337,8 @@ describe("an org whose extension gates its Slack sends", () => {
     for (const [tool, input] of [
       ["mcp__slack-acme__conversations_replies", { channel: "C0OTHER001", ts: "1.2" }],
       ["mcp__slack-acme__users_search", { query: "a" }],
+      ["mcp__slack-acme__users_conversations", { limit: 100 }],
+      ["mcp__slack-acme__usergroups_me", {}],
       ["mcp__claude_ai_Slack__slack_read_channel", { channel_id: "C0OTHER001" }],
       ["mcp__claude_ai_Slack__slack_search_public", { query: "the fix" }],
     ] as const)
