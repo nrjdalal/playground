@@ -1581,9 +1581,10 @@ const sureToRun = (cmd: Command, parsed: Parsed): boolean =>
   !cmd.repeated &&
   (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
 
-// Whether the shell runs a command at least once and may run it again: a while's or an until's condition, sure to run as `sureToRun` reads it but for `repeated`, so a count in front of it (`repeat 0`) or a body kept for a later call keeps it out
+// Whether the shell runs a command at least once and may run it again: a while's or an until's condition, sure to run as `sureToRun` reads it but for `repeated`, so a count in front of it (`repeat 0`), a body kept for a later call, or an `&&` before the loop (`false && while …`, which may skip it) keeps it out
 const onceOrMore = (cmd: Command, parsed: Parsed): boolean =>
   !!cmd.atLeastOnce &&
+  !cmd.chained &&
   !cmd.detached &&
   !cmd.kept &&
   !cmd.unsure &&
