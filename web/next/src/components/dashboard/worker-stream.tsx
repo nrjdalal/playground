@@ -160,6 +160,7 @@ import {
   deliveredAt,
   isNext,
   isUnsentMarker,
+  landed,
   othersWaiting,
   pendingAction,
   retryNote,
@@ -977,7 +978,7 @@ export function WorkerStream({
     steps.map((message) => ({ at: message.metadata?.at ?? "", message })),
     needs,
   )
-  const pending = records.filter((m) => m.state !== "delivered")
+  const pending = records.filter((m) => !landed(m))
   const sent = new Map(records.flatMap((m) => (m.entryId ? [[m.entryId, m] as const] : [])))
   // this view is keyed by its session, so this is when its session opened here
   const [openedAt] = useState(() => new Date().toISOString())
