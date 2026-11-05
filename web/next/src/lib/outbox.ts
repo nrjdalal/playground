@@ -569,13 +569,11 @@ export function undoState({
 // When his message reached the session: its outbox record's time, else its transcript time, since a reload keeps only unsent records and the transcript holds only what arrived.
 export const deliveredAt = ({
   at,
-  peer,
   sent,
 }: {
   at: string | null
-  peer: boolean
   sent: OutboxMessage | null
-}): string | null => (peer ? null : (sent?.deliveredAt ?? at))
+}): string | null => sent?.deliveredAt ?? at
 
 // Whether a message of his to the session is still on its way: anything the transcript does not hold yet, a failed one included, since one whose fate is unknown may still land. Undo's own markers are not counted.
 export const othersWaiting = (messages: OutboxMessage[]): boolean =>

@@ -9,12 +9,16 @@ import { z } from "zod"
 import { apiReference, serveScalarBundle } from "@/lib/api-reference"
 import { baseApp } from "@/lib/base-app"
 import { keepSweeping } from "@/lib/dashboard/attachments"
+import { readsLive } from "@/lib/dashboard/fixture"
 import { startSdkProbe } from "@/lib/dashboard/sdk"
 import { globalErrorResponses } from "@/lib/error"
 import { DB_TIMEOUT_MS, healthData } from "@/lib/health"
+import { startRelay } from "@/lib/relay/mac"
 import { createServer, upgradeWebSocket } from "@/lib/server"
+import { sessionCookie } from "@/lib/sign-in"
 import { yardClient } from "@/lib/yard/client"
 import { startYardPoll } from "@/lib/yard/inbound"
+import { keychain } from "@/lib/yard/keychain"
 import { requireFeature } from "@/middlewares"
 import {
   accountsRouter,
@@ -35,6 +39,7 @@ import {
   waitlistRouter,
 } from "@/routers"
 import { mountOldPaths, OLD_PATHS_DOC } from "@/routers/old-paths"
+import { owners } from "@/routers/onboard"
 
 const BUILD_VERSION = getBuildVersion()
 
@@ -247,6 +252,7 @@ export type * from "@/plugins/registry"
 export type { BatchAnswer, BatchOutcome, BatchRefusalCode } from "@/lib/batch"
 export type { AttachmentKind, EntryAttachment } from "@/lib/dashboard/attachments"
 export type { DashboardFrame } from "@/lib/dashboard/hub"
+export type { RelayStatus } from "@/lib/relay/protocol"
 export type {
   InboxAction,
   InboxAnswer,
@@ -283,6 +289,34 @@ startSdkProbe()
 
 // Yard's mentions of the owner into the Inbox, once a minute, when YARD_API_URL names a hosted Yard.
 startYardPoll(db, yardClient)
+
+// The relay to the hosted Yard, on a stack that reads this Mac alone, never a fixture's: with YARD_API_URL set and the Keychain token, the owner's browser on Yard reads this dashboard through one socket this API dials out, each read run here as the one local owner.
+if (env.YARD_API_URL && readsLive()) {
+  const api = env.YARD_API_URL
+  let made: Promise<string> | null = null
+  const cookie = () =>
+    (made ??= (async () => {
+      const found = await owners()
+      if (found.length !== 1) throw new Error("the relay needs this Mac's one owner")
+      const { name, value } = await sessionCookie(found[0]!)
+      return `${name}=${value}`
+    })().catch((error: unknown) => {
+      made = null
+      throw error
+    }))
+  startRelay({
+    api,
+    cookie,
+    // a session the API refuses (expired) is made again for the next read
+    dispatch: async (request) => {
+      const response = await app.fetch(request)
+      if (response.status === 401) made = null
+      return response
+    },
+    login: async (token) => (await yardClient(api, token).me()).login,
+    token: () => keychain().read(),
+  })
+}
 
 mountOldPaths(routes, {
   apps: appsRouter,
