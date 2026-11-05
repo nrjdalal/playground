@@ -491,7 +491,7 @@ function Shown({ preview }: { preview: Pick<InboxUpdate, "attachments" | "text">
 }
 
 // How long a shown value stays on screen before it hides itself.
-export const REVEAL_SHOWN_MS = 30_000
+const REVEAL_SHOWN_MS = 30_000
 
 // A reveal card's value: masked until Show, which fetches it and hides it again after REVEAL_SHOWN_MS, on Hide or when the card folds; Copy fetches it straight to the clipboard and never draws it. It lives in this state alone.
 function RevealField({ id }: { id: string }) {
@@ -685,7 +685,9 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
             or Copy. It is kept nowhere else.
           </p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
-          {item.status === "open" && !isArchived(item) && <RevealField id={item.id} />}
+          {item.status === "open" && !isArchived(item) && !config.hosted && (
+            <RevealField id={item.id} />
+          )}
         </>
       )
     case "grant":

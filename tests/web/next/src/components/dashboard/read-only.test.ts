@@ -41,6 +41,10 @@ describe("the hosted dashboard is read-only", () => {
         "const settle = async (write: () => Promise<unknown>) => {\n    if (config.hosted) return false",
       ],
       ["inbox.tsx", ") : secretAsk && !config.hosted ? ("],
+      [
+        "inbox.tsx",
+        "!isArchived(item) && !config.hosted && (\n            <RevealField id={item.id} />",
+      ],
       ["inbox.tsx", '{config.hosted ? (\n          <p className="whitespace-pre-wrap">{draft}</p>'],
       [
         "inbox.tsx",
