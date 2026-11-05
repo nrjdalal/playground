@@ -598,7 +598,7 @@ const QUESTION = "item"
 
 type Answer = (action: InboxAction, text?: string) => Promise<void>
 
-// Opens a folded card to its full self, a chat reply's its answers and Snooze back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
+// Opens a folded card to its full self, a reply's its answers and Snooze back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
 function Reopen({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
   const label = open ? "Collapse" : "Expand"
   return (
@@ -777,10 +777,6 @@ export function InboxCard({
       setPending(false)
     }
   }
-  // an answer takes his comment as its note, so the box empties once it is in
-  const onAnswer: Answer = async (action, text) => {
-    if (await settle(() => answerItem(item, action, text, note.trim() || undefined))) setNote("")
-  }
   const onProvide = () => {
     const value = secret
     setSecret("")
@@ -798,7 +794,7 @@ export function InboxCard({
     setDay(undefined)
     setTime(PICKED_TIME)
   }
-  // every card opens and folds by its chevron, a click on a folded one or E; one that folds by default (all but one that needs an answer now) starts folded, and a chat reply's card opens to its answers and Later
+  // every card opens and folds by its chevron, a click on a folded one or E; one that folds by default (all but one that needs an answer now) starts folded, and a reply's card opens to its answers and Later
   const [toggled, setToggled] = useState<boolean | null>(defaultOpen ? true : null)
   const folds = foldsByDefault(item, now)
   const open = toggled ?? !folds
@@ -823,12 +819,18 @@ export function InboxCard({
   const quiet = (outcome !== null && !failed) || (item.kind === "update" && item.readAt !== null)
   // the comment rides an answer as its note where the card still takes one, a secret's Submit aside, so its value travels alone
   const noted = outcome === null && item.kind !== "update" && !secretAsk
+  // an answer takes his comment as its note, so the box empties once it is in; Archive and Move back, and any verb on a card that takes no answer, carry none, so his words stay
+  const onAnswer: Answer = async (action, text) => {
+    const sent = await settle(() => answerItem(item, action, text, note.trim() || undefined))
+    if (sent && noted && action !== "archive" && action !== "unarchive") setNote("")
+  }
   const commentId = useId()
   // Reply opens a folded card, or an empty box, to its comment box, focused in the click's own frame so a paste sent at once lands there; with words in the box it sends them alone
   const onReply = () => {
     const text = note.trim()
     if (folded || text === "") {
-      flushSync(() => setToggled(true))
+      // only a folded card is opened, so one open by default still folds once answered
+      if (folded) flushSync(() => setToggled(true))
       document.getElementById(commentId)?.focus()
       return
     }

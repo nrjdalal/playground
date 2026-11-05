@@ -1834,7 +1834,7 @@ async function recordDelivery(
   return row ? toItem(row) : getItem(db, id)
 }
 
-// Later: pushes an open decision or draft, or an update in his list, out of it until a time, recorded in its answer's snoozedUntil, which answering or a reply replaces at once; the poster waits as before, and an archived one leaves the Archived shelf for it. A chat reply its poster has not closed is replaced in turn, since he puts away an item he opened again from its card.
+// Later: pushes an open decision or draft, or an update in his list, out of it until a time, recorded in its answer's snoozedUntil, which answering or a reply replaces at once; the poster waits as before, and an archived one leaves the Archived shelf for it. A reply its poster has not closed is replaced in turn, since he puts away an item he opened again from its card.
 export async function scheduleItem(
   db: Database,
   id: string,
@@ -1876,7 +1876,7 @@ export async function scheduleItem(
   return { item: toItem(row), ok: true }
 }
 
-// A chat reply he sent naming the item (`re #iN`, recorded by routers/dashboard.ts once the message is out): the time and his words (saidOf). Nothing else changes: the item waits on its poster closing it, which the sweep keeps chasing.
+// A reply he sent naming the item (`re #iN`, recorded once it is out, by routers/dashboard.ts for a chat message and by replyItem for a card's Reply): the time and his words (saidOf). Nothing else changes: the item waits on its poster closing it, which the sweep keeps chasing.
 export async function recordReply(
   db: Database,
   ref: number,

@@ -30,6 +30,7 @@ import {
   ApiError,
   authErrorResponses,
   conflictErrorResponses,
+  errorResponse,
   forbiddenErrorResponses,
   notFoundErrorResponses,
   validationErrorResponses,
@@ -188,6 +189,10 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         ...authErrorResponses,
         ...forbiddenErrorResponses,
         ...notFoundErrorResponses,
+        502: errorResponse(
+          "CMUX_FAILED",
+          "The comment reached no session: neither its poster nor, once the poster has ended, the dispatcher took it, with why; nothing is recorded",
+        ),
       },
     }),
     sValidator("json", replyInputSchema, invalid),
