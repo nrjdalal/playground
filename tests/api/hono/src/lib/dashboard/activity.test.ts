@@ -12,7 +12,7 @@ import {
 import { DashboardHub } from "../../../../../../api/hono/src/lib/dashboard/hub"
 import type { Live, Worker } from "../../../../../../api/hono/src/lib/dashboard/workers"
 
-// A working session's screen as read-screen gives it: the transcript, the spinner line, its tip, then the input box between two rules.
+// A working session's screen as the screen read gives it: the transcript, the spinner line, its tip, then the input box between two rules.
 const screen = (spinner: string | null) =>
   [
     "⏺ Read(api/hono/src/lib/dashboard/hub.ts)",

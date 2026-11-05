@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-// What a working session is doing right now, read from Claude Code's spinner line as `cmux read-screen` shows it above the input box: a cycling glyph, one verb ending in "…", then in parentheses its parts split by " · " (the elapsed time, the tokens with their arrow, and sometimes "thought for Ns" or "esc to interrupt"):
+// What a working session is doing right now, read from Claude Code's spinner line as the session's herdr pane shows it above the input box: a cycling glyph, one verb ending in "…", then in parentheses its parts split by " · " (the elapsed time, the tokens with their arrow, and sometimes "thought for Ns" or "esc to interrupt"):
 //   ✻ Whisking… (1m 11s · ↓ 2.1k tokens · thought for 4s)
 // Only these parsed values ever leave the dashboard, never the screen's text, which can hold anything the session showed: the verb is letters alone and the rest are numbers.
 export type Activity = {
@@ -91,7 +91,7 @@ export type ActivityFrame = { activity: Activity | null; sessionId: string; type
 export type ActivitySend = (frame: ActivityFrame) => void
 
 export type ActivityDeps = {
-  // Reads one surface's screen; the hub passes cmux's read-screen through run(), so no new cmux command.
+  // Reads one surface's screen; the hub passes terminal.ts's herdr read.
   read: (surface: string) => Promise<string>
   // Calls tick every ms until the returned stop is called.
   every: (ms: number, tick: () => void) => () => void

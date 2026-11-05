@@ -1188,7 +1188,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   let verdict;
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name);
   if (followed && builtins && cmd.redirects.length > 0) {
-    const bare = { ...cmd, words: [] };
+    const bare = { ...cmd, bareOf: cmd, words: [] };
     verdict = await visit(bare, parse(bare), here);
     if (verdict)
       return verdict;
@@ -1962,6 +1962,40 @@ async function unreadScript(shell, here, sure, inMain) {
     return;
   return refuse(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor(sure));
 }
+var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
+var suCommand = (args) => {
+  for (const [at, word] of args.entries()) {
+    const { value } = word;
+    if (word.unknown !== undefined || word.glob || marked(value))
+      return false;
+    if (value === "-c" || value === "--command")
+      return at + 1 < args.length;
+    if (value.startsWith("--command="))
+      return true;
+    if (value.startsWith("-") && !SU_PLAIN.has(value))
+      return false;
+  }
+  return false;
+};
+var suShell = ({ args, name }) => name === "su" && !suCommand(args);
+var EXPORTS2 = new Set(["declare", "export", "local", "readonly", "typeset"]);
+async function fedScript(cmd, here, sure, inMain, visit, parsed) {
+  const shell = cmd.bareOf ?? cmd;
+  const input = shell.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
+  const fed = input !== undefined || shell.stdin !== undefined;
+  const kind = !fed ? undefined : stdinShell(shell) ?? (parsed && suShell(parsed) ? "root" : undefined);
+  if (!kind)
+    return;
+  const script = await stdinOf(shell, here);
+  const unread = script.unknown ?? (marked(script.value) ? "a value it cannot read" : undefined);
+  if (unread) {
+    if (!inMain(here.cwd))
+      return;
+    return refuse(`a shell whose script (${unread}) the hook cannot read`, fixFor(sure));
+  }
+  if (kind === "root" && !cmd.bareOf)
+    return run(lex(script.value, here.known), { ...here, vars: new Map }, visit, true);
+}
 function inspect(raw, environment, main) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
   const input = toolInput ?? {};
@@ -1987,6 +2021,15 @@ function inspect(raw, environment, main) {
     if (cmd.stdin && stdinShell(cmd))
       fed.set(cmd.stdin, cmd);
   const visit = async (cmd, parsed, env) => {
+    if (parsed.name === "" && !cmd.feedsShell || EXPORTS2.has(parsed.name)) {
+      for (const here of places(env, directory)) {
+        const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure;
+        const verdict = await fedScript(cmd, here, sure, inMain, visit);
+        if (verdict)
+          return verdict;
+      }
+      return;
+    }
     const slot = slotWords(parsed);
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
@@ -2011,6 +2054,9 @@ function inspect(raw, environment, main) {
         if (verdict)
           return verdict;
       }
+      const script = await fedScript(cmd, here, sure, inMain, visit, parsed);
+      if (script)
+        return script;
       const ran = runs(name, args, local, here);
       if (ran && inMain(ran.cwd))
         return refuse(ran.what, fixFor(sure, ran.fix));
@@ -2028,7 +2074,7 @@ function inspect(raw, environment, main) {
     process: environment,
     vars: new Map
   };
-  return run(lexed, env, visit);
+  return run(lexed, env, visit, true);
 }
 async function check(raw, environment = process.env, main = mainCheckout(resolve3(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {

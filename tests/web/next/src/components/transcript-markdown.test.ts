@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { DashboardContext } from "../../../../../web/next/src/components/dashboard/dashboard"
 import {
   TranscriptMarkdown,
+  fitWidth,
   overlaysIn,
   untitle,
 } from "../../../../../web/next/src/components/transcript-markdown"
@@ -348,6 +349,12 @@ describe("code blocks and tables", () => {
     expect(html).not.toContain('data-streamdown="table-wrapper"')
     expect(html).not.toMatch(/aria-label="(Copy|Download|Fullscreen|View fullscreen)[^"]*table/i)
     expect(html).not.toContain(" node=")
+  })
+})
+
+describe("a drawing on a card", () => {
+  test("its font fits the card's width, from 7px on a narrow card up to 16px on a wide one", () => {
+    expect(fitWidth(60)).toBe("clamp(7px, calc((100cqi - 1.25rem) / 60), 16px)")
   })
 })
 
