@@ -19,6 +19,26 @@ export const groups: Group[] = [
         "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env --split-string='sudo -s'",
       ],
       [
+        "a removal echoed to sudo's shell split from its option by an underscore escape inside env's split string",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env -S 'sudo\\_-s'",
+      ],
+      [
+        "a removal echoed to sudo's shell split from its option by a tab escape inside env's split string",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env -S 'sudo\\t-s'",
+      ],
+      [
+        "a removal echoed to sudo running a braced variable inside env's split string",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env -S 'sudo ${X}'",
+      ],
+      [
+        "a removal echoed to sudo's shell inside the split string of a quoted env",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'env' -S 'sudo -s'",
+      ],
+      [
+        "a removal echoed to sudo's shell inside the split string of a second env behind nice",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env nice env -S 'sudo -s'",
+      ],
+      [
         "a removal echoed to a shell told by a lone dash to read stdin",
         "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sh -",
       ],

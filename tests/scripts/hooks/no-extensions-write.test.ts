@@ -726,6 +726,38 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a shell given a script named by a lone dash after `--`",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sh -- -",
     ],
+    [
+      "a shell given a script named after a lone dash",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sh - script.sh",
+    ],
+    [
+      "nice running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice ls",
+    ],
+    [
+      "time running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | time ls",
+    ],
+    [
+      "timeout running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | timeout 5 ls",
+    ],
+    [
+      "stdbuf running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | stdbuf -o0 ls",
+    ],
+    [
+      "command running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | command ls",
+    ],
+    [
+      "a quoted env's split string naming sudo and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'env' -S 'sudo ls'",
+    ],
+    [
+      "a second env behind nice whose split string names sudo and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env nice env -S 'sudo ls'",
+    ],
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
