@@ -63,14 +63,15 @@
   Colour says what an item is and where it stands, as the sidebar's lights do: its kind's on its icon alone (a decision `warning`, a draft `info`, an update `success`, an alert `destructive`), the card's own edges plain, no thick coloured border,
   and its state as the sidebar's Worker Lights draw the state that means the same, beside its title and in its result line's colour (`itemState`, `inboxLight` in `web/next/src/lib/inbox.ts`, its icon and tone read from `statusIcon` in `web/next/src/lib/status-icons.ts`, the one table),
   the kind icon sitting in the band and that light in a leading column centred on the title's first line (`LEAD` in `components/dashboard/inbox.tsx`):
-  the orange eye while a decision or draft waits on the owner, the blue spinner while a go is being carried out (turning only where motion is allowed), the green check once its poster closed it, the result link green too, or once every environment took a secret, the red error when it failed to send, until the owner dismisses it, or when a secret's sink refused it, which stays as its record,
+  the orange eye while a decision or draft waits on the owner, the blue spinner while a go is being carried out (turning only where motion is allowed), the green check once its poster closed it, the result link green too, or once every environment took a secret, whether or not its poster was told,
+  the red error when any other answer failed to send, until the owner dismisses it, or when a secret's sink refused it, which stays as its record,
   and the gray circle once denied,
   discarded, set aside (`cleared`), settled or read,
   or a failed send dismissed;
   an unread update keeps its dot.
   An `ask`'s text, and a read-only update's, renders as a chat message's does, through `TranscriptMarkdown card` with its line breaks kept, so a fenced block (`ts`, `sql`, `diff`, `text`) shows highlighted with its copy button, at text-xs and wrapping at any character, a `diff` block's added and removed lines tinted as a chat message's are (`messages.md`).
-  A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font sized so its widest line, measured with pretext, fills the block: up to 16px on a wide card, down to 7px on a narrow one, and only then does it scroll sideways.
-  `ASK_CODE_COLUMNS` (`@packages/config/inbox`) is the widest drawing line the narrowest card shows whole, so a session fits the card by drawing up to it.
+  A drawing (a `text`, `txt` or `ascii` block, or one with no language) keeps its lines whole, its font shrinking from 12px to fit its widest line, measured with pretext, down to 10px before it scrolls sideways.
+  `ASK_CODE_COLUMNS` (`@packages/config/inbox`) is the widest drawing line that fits the narrowest card at 12px.
   Every other preview's words, a Slack message's included, stay plain text, since they go out exactly as written, marked as quoted by a `border-l-2` rule rather than a background, and no card's body, a Done one's included, sits on gray, the band alone muted, but the card a reply is about (Chat about it, below).
   The card's header is one `minmax(0,1fr)` column and a card's table cells wrap, so a wide table or drawing stays inside the card.
   A decision previews exactly what Approve does, then Approve and Deny, except a secret ask (below), and no card offers Edit: a change goes in the comment box, while the API still reads `edit` on an older row; an `ask` whose poster labelled both sides is shadcn's questionnaire card instead:
@@ -129,6 +130,7 @@
   A comment alone (a chat reply, `re #iN`) stays his own words, typed as he wrote them.
   A poster that has ended (the delivery reads `NOT_FOUND` with deliver.ts's reason `No live session is named <poster>.` or `<poster>'s Claude is not running in its pane any more.`; `posterGone` in `inbox.ts`) hands the answer to the dispatcher instead (`DISPATCHER`, which the router passes to `answerItem` and `retryDelivery`; `textsOf`).
   Any other `NOT_FOUND` (`now names another session`, `has no terminal to type into`) comes from a live session and stays failed, so the go is never carried out twice.
+  A sessions read that was cut short (`Live.partial`, cmux.md) that misses the poster is read once more, fresh rather than the hub's board, and still missing it reads `CMUX_FAILED`, never `NOT_FOUND`, so a live poster's answer is never relayed (`target()` in `deliver.ts`).
   The dispatcher is typed the same line with `relay: {for: <poster>, why: "poster-ended"}`, and reads the preview with `bun run ask get`: a `next` of `carry-out` it carries out in the poster's place, a sent message through the MCP server `slack.sendServer` names (else its Slack tool), then runs `close`; `close` or `nothing` has nothing to carry out, only the `close` to run.
   That delivery records `delivered` with `to`, the session that took it: the dispatcher here, the poster otherwise.
   A row from before `to` was recorded has none and reads as its poster (`takenBy` in `web/next/src/lib/inbox.ts`).
@@ -284,7 +286,9 @@
   A keychain sink instead hands the value to `keychainItem(<item>).write` (`api/hono/src/lib/keychain.ts`), which checks it against the item's shape and writes it through `security -i` on stdin, so no argv holds it; its one result is `{environment: "Keychain", exitCode, line}`, `line` reading `saved` or the refusal's first line with the value cut out.
   Only a stack that reads the live machine runs the sink; a fixture or test stack runs nothing and records exit 0 (`runSink`, `saveToKeychain`).
   The item turns `provided`, its answer `{at, choice: "provided", results: [{environment, exitCode, line?}]}` (`exitCode` null once stopped by a signal, 127 when `vercel` could not start), and its poster gets the `submit` verb with each environment's result and the `bun run ask get --ack` that closes it, which `bun run ask stale` chases until it does.
-  The card reads `Provided at <time>` with each exit status (a result's `line` in its place), green once every environment took it, red while any did not; a value the sink refused takes a new ask, and so does one whose card still reads sending after the sink's minute an environment, since the API restarted mid-run and no exit status came back.
+  The card reads `Provided at <time>` with each exit status (a result's `line` in its place), green once every environment took it, red while any did not, whether or not its poster was told; a value the sink refused takes a new ask, and so does one whose card still reads sending after the sink's minute an environment, since the API restarted mid-run and no exit status came back.
+  A telling that failed leaves that colour as it is and draws `Not told to <taker> yet: <reason>` muted under the result (`deliveryNote`), with a Retry that types the same line again and runs no sink (`retryDelivery`).
+  Until it is told or dismissed it still counts as failed to send and shows open (`needsYou`, `inboxSummary`), so its Retry stays in view.
 
   ```bash
   bun run ask new <<'EOF'
@@ -341,7 +345,7 @@
 - The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
      Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
-     Fit the card: draw up to that width, since the card grows a narrower drawing's font to fill it, and a wider one still posts and shrinks to 7px, then scrolls, so the limit is a writing guide.
+     A wider drawing still posts and shrinks to 10px, then scrolls, so the limit is a writing guide.
   2. Short bullets, one fact each, an emoji as each one's marker.
   3. What Approve does, in the `approve` label, with `deny` beside it: the card shows the two as its choices under the text, in place of its On Approve line.
 

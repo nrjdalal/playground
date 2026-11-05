@@ -114,6 +114,7 @@ import {
   type CardKey,
   changedAt,
   checkAnswerNote,
+  deliveryNote,
   dismissable,
   dismissItems,
   filesCount,
@@ -820,7 +821,8 @@ export function InboxCard({
   const who = agentLabel(takenBy(item))
   const at = outcome === null ? -1 : outcome.indexOf(who)
   const linked = resultLink(item)
-  const failed = sendFailed(item)
+  const untold = deliveryNote(item)
+  const failed = sendFailed(item) && !untold
   const light = inboxLight(item)
   // an update, or an ask or draft still open, that he has not marked read; reading answers nothing
   const unread = item.readAt === null && (item.kind === "update" || item.status === "open")
@@ -944,6 +946,7 @@ export function InboxCard({
               Your note: {item.answer.note}
             </span>
           )}
+        {untold && <span className="text-muted-foreground mt-1 block">{untold}</span>}
         {linked && (
           <>
             {" · "}
