@@ -1,6 +1,6 @@
 "use client"
 
-import { RiCloseLine, RiFileLine, RiHtml5Line } from "@remixicon/react"
+import { RiCloseLine, RiDownloadLine, RiFileLine, RiHtml5Line } from "@remixicon/react"
 import { useQuery } from "@tanstack/react-query"
 import { cn } from "cn"
 import { createContext, useContext } from "react"
@@ -56,13 +56,25 @@ export function AsideDocsIcon({ doc }: { doc: AsideDoc }) {
   return <Icon />
 }
 
-// An open document's pane: a card's file, or a kept page, through the viewer's own renderer (a page in the HTML view's sandboxed frame, its links opening in a browser tab and a page that leaves put back), filling the pane in a bordered box, with a floating bar in its corner that saves a card's file and closes the tab, the look and size of a card's live page.
+// An open document's pane: a card's file, or a kept page, through the viewer's own renderer (a page in the HTML view's sandboxed frame, its links opening in a browser tab and a page that leaves put back), filling the pane in a bordered box, with a floating bar in its corner that saves the file or the page and closes the tab, the look and size of a card's live page.
 export function AsideDocsPane({ doc, onClose }: { doc: AsideDoc; onClose: () => void }) {
   return (
     <div className="relative flex h-full min-h-0 items-center justify-center overflow-hidden rounded-md border">
       {"item" in doc ? <FileBody item={doc.item} /> : <PageBody doc={doc} />}
       <div className={cn(FLOATING_BAR, "absolute top-2 right-2")}>
-        {"item" in doc && <Download className={SQUARE} item={doc.item} />}
+        {"item" in doc ? (
+          <Download className={SQUARE} item={doc.item} />
+        ) : (
+          <Button
+            aria-label={`Download ${doc.name}`}
+            className={SQUARE}
+            render={<a href={doc.download} />}
+            size="icon-sm"
+            variant="ghost"
+          >
+            <RiDownloadLine />
+          </Button>
+        )}
         <Button
           aria-label={`Close ${doc.name}`}
           className={SQUARE}

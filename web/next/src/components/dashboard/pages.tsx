@@ -33,13 +33,7 @@ import { agentLabel } from "@/lib/agent-label"
 import { pageDoc } from "@/lib/aside-docs"
 import { config } from "@/lib/config"
 import { useNow } from "@/lib/dashboard"
-import {
-  deletePage,
-  fetchPages,
-  PREVIEWS_QUERY_KEY,
-  previewDownloadUrl,
-  previewUrl,
-} from "@/lib/previews"
+import { deletePage, fetchPages, PREVIEWS_QUERY_KEY, previewDownloadUrl } from "@/lib/previews"
 import { fullTime, relativeTime } from "@/lib/time"
 
 const keptAt = (preview: Preview) => preview.page?.at ?? preview.modifiedAt
@@ -256,11 +250,7 @@ export function Pages({ all, session }: { all: boolean; session: string }) {
           apiUrl={config.api.url}
           now={now}
           onDelete={setDeleting}
-          onOpen={(page) =>
-            openInAside?.(
-              pageDoc(page.name, pageTitle(page), previewUrl(config.api.url, page.name)),
-            )
-          }
+          onOpen={(page) => openInAside?.(pageDoc(config.api.url, page.name, pageTitle(page)))}
           pages={data.previews}
         />
       ) : (

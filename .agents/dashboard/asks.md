@@ -226,7 +226,7 @@
   the grid a group whose Left and Right move focus a tile and Up and Down a row, Home and End to its ends (`focusTarget`), stepping the tiles alone (`button[data-tile]`), never a tile's Download;
   a click, Enter or Space on a page, a markdown document or a PDF in the aside opens it in an aside tab of its own (`opensInAside` in `web/next/src/lib/aside-docs.ts`), as a Pages row's click opens its page (`.agents/dashboard/dashboard.md`):
   the tab, focused as it opens, is one square after the session's tabs named for its file, whose pane draws the file through its kind's renderer below (`AsideDocsPane` in `web/next/src/components/dashboard/aside-docs.tsx`), a kept page through the HTML view below as a card's page is, fetched with the owner's cookie into a blob URL (`pageQuery`),
-  in a bordered box with a floating bar in its corner holding Download for a card's file and Close, the live page's look and size;
+  in a bordered box with a floating bar in its corner holding Download, of the card's file or the kept page, and Close, the live page's look and size;
   opening a file whose tab is open focuses that tab and adds none (`openDoc`), and the tabs last for the page's life.
   A click, Enter or Space on any other file (a picture, a before/after pair, a code file) opens the viewer (`Viewer` in `viewer.tsx`), full screen over the page, its own colours dark whatever the theme, on a see-through stage, the stock Dialog overlay's dim and blur, the file edge to edge, on the stock Dialog and Carousel, in Slider mode:
   one file a slide, Left and Up back, Right and Down on, past either end wrapping to the other with a jump (`wrapStep`), a swipe, the ‹ › buttons, Esc or X to close, a jump in place of the slide where motion is reduced.

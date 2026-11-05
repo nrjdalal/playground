@@ -10,7 +10,7 @@ import {
 } from "../../../../../web/next/src/lib/aside-docs"
 
 const plan = fileDoc({ id: "a1", kind: "doc", name: "plan.md" })
-const report = pageDoc("report-2.html", "Fixture report", "https://api.test/report-2.html")
+const report = pageDoc("https://api.test", "report-2.html", "Fixture report")
 
 describe("a page or a document opened in the aside", () => {
   test("opens in a tab of its own: two opens make two tabs, the second focused", () => {
@@ -38,10 +38,16 @@ describe("a page or a document opened in the aside", () => {
     expect(opensInAside("code")).toBe(false)
   })
 
+  test("as a kept page, is read and saved through Previews' route by its file's name", () => {
+    expect(report).toMatchObject({
+      download: "https://api.test/api/v1/apps/previews/report-2.html?download=1",
+      name: "Fixture report",
+      url: "https://api.test/api/v1/apps/previews/report-2.html",
+    })
+  })
+
   test("is keyed by its file's id or its page's name, so a page's title never splits it", () => {
     expect(docTab(report)).toBe("doc:page-report-2.html")
-    expect(pageDoc("report-2.html", "Renamed", "https://api.test/report-2.html").key).toBe(
-      report.key,
-    )
+    expect(pageDoc("https://api.test", "report-2.html", "Renamed").key).toBe(report.key)
   })
 })

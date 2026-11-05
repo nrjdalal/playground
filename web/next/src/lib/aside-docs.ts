@@ -1,7 +1,12 @@
 import type { InboxAttachment, InboxAttachmentKind } from "@api/hono"
 
-// A page or a document opened in the aside: an Inbox card's file, or a kept page from Previews by its address.
-export type AsideDoc = { key: string; name: string } & ({ item: InboxAttachment } | { url: string })
+import { previewDownloadUrl, previewUrl } from "@/lib/previews"
+
+// A page or a document opened in the aside: an Inbox card's file, or a kept page from Previews by its address and the address that saves it.
+export type AsideDoc = { key: string; name: string } & (
+  | { item: InboxAttachment }
+  | { download: string; url: string }
+)
 
 // An open document's aside tab, by its key.
 export type DocTab = `doc:${string}`
@@ -19,10 +24,11 @@ export const fileDoc = (item: InboxAttachment): AsideDoc => ({
   name: item.name,
 })
 
-export const pageDoc = (name: string, title: string, url: string): AsideDoc => ({
+export const pageDoc = (apiUrl: string, name: string, title: string): AsideDoc => ({
+  download: previewDownloadUrl(apiUrl, name),
   key: `page-${name}`,
   name: title,
-  url,
+  url: previewUrl(apiUrl, name),
 })
 
 // Pure: the open documents after one more opens, and the tab to focus; a document already open keeps its one tab, which takes the focus.
