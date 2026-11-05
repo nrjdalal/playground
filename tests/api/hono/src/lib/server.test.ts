@@ -25,6 +25,7 @@ app.get(
     const auth = c.req.header("authorization")
     if (auth === "Bearer member")
       throw new ApiError(403, "FORBIDDEN", "Only the owner's Mac holds the relay")
+    if (auth === "Bearer long") throw new ApiError(401, "UNAUTHORIZED", "é".repeat(100))
     if (auth !== "Bearer owner") throw new ApiError(401, "UNAUTHORIZED", "Unauthorized")
     return next()
   },
@@ -70,6 +71,10 @@ describe("refusedUpgradeCloses, the hosted API's refused WebSocket upgrade", () 
 
   test("a forbidden caller's upgrade is closed with 4403 and the refusal's message", async () => {
     expect(await dial("member")).toBe("close 4403 Only the owner's Mac holds the relay")
+  })
+
+  test("a refusal whose message passes a close reason's 123 bytes is cut at a whole character", async () => {
+    expect(await dial("long")).toBe(`close 4401 ${"é".repeat(61)}`)
   })
 
   test("an allowed upgrade opens and reaches the route's own handler", async () => {

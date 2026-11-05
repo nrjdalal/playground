@@ -24,8 +24,10 @@ export const refusedUpgradeCloses =
       !(refused instanceof HTTPException)
     )
       return
-    // a close reason holds 123 bytes at most
-    const reason = Buffer.from(refused.message).subarray(0, 123).toString()
+    // a close reason holds 123 bytes at most, cut at a whole character, since ws's close throws past them
+    const chars = [...refused.message]
+    while (Buffer.byteLength(chars.join("")) > 123) chars.pop()
+    const reason = chars.join("")
     // the helper upgrades by its own hand to the adapter, whatever response c already holds
     await upgrade(() => ({ onOpen: (_, socket) => socket.close(4000 + refused.status, reason) }))(
       c,
