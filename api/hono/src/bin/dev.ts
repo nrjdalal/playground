@@ -40,7 +40,7 @@ import {
   recordPath,
   startOf,
 } from "@/lib/dev/stop"
-import { trashRoots } from "@/lib/trash"
+import { discard, trashRoots } from "@/lib/trash"
 
 // `bun run dev` runs this with --no-env-file, so it sees the shell's environment as turbo did before it; the apps still read .env themselves. Arguments pass through to `turbo run dev` (`bun run dev --ui stream`). DEV_TURBO_BIN lets a test stand in for turbo's dev run.
 const ROOT = join(import.meta.dir, "../../../..")
@@ -138,7 +138,13 @@ if (!dry) {
   const down = await proxyDown(env, portlessOwn)
   if (down !== null) {
     const state = fallbackDir(portlessOwn)
-    const shared = shareCa(portlessOwn, state)
+    const shared = shareCa(portlessOwn, state, (path) =>
+      discard(
+        path,
+        { reason: "the 1355 proxy's leaves of a CA it replaced", session: "dev" },
+        trashRoots(ROOT),
+      ),
+    )
     const failed = await startFallback(join(ROOT, "node_modules/.bin/portless"), {
       ...env,
       PORTLESS_STATE_DIR: state,

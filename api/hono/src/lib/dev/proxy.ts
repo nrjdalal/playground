@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, join } from "node:path"
 
@@ -59,17 +59,28 @@ const readOrNull = (path: string): Buffer | null => {
   }
 }
 
-// Copies portless's own CA into the fallback folder when it holds one and the fallback holds none, the key at mode 600, so the 1355 proxy serves under the CA the owner trusted for 443; answers whether the fallback's CA is that one. Trusting a CA stays the owner's click.
-export const shareCa = (own: string, fallback: string): boolean => {
+// The fallback's CA and the leaf portless signed with it, by name, since portless renews a leaf only on its expiry.
+const FALLBACK_CERTS = ["ca.pem", "ca-key.pem", "server.pem", "server-key.pem"]
+
+// Copies portless's own CA into the fallback folder when it holds one, the key at mode 600, so the 1355 proxy serves under the CA the owner trusted for 443; a fallback CA that differs goes with its leaves, host-certs through discard (the trash), as portless's own generateCA clears them; reads portless's folder alone; answers whether the fallback's CA is that one. Trusting a CA stays the owner's click.
+export const shareCa = (
+  own: string,
+  fallback: string,
+  discard: (path: string) => string | null,
+): boolean => {
   const cert = readOrNull(join(own, "ca.pem"))
   const key = readOrNull(join(own, "ca-key.pem"))
   if (!cert || !key) return false
   try {
-    if (!existsSync(join(fallback, "ca.pem"))) {
-      mkdirSync(fallback, { recursive: true })
-      writeFileSync(join(fallback, "ca-key.pem"), key, { flag: "wx", mode: 0o600 })
-      writeFileSync(join(fallback, "ca.pem"), cert, { flag: "wx", mode: 0o644 })
+    const held = readOrNull(join(fallback, "ca.pem"))
+    if (held?.equals(cert)) return true
+    if (held || existsSync(join(fallback, "ca-key.pem"))) {
+      if (discard(join(fallback, "host-certs")) !== null) return false
+      for (const name of FALLBACK_CERTS) rmSync(join(fallback, name), { force: true })
     }
+    mkdirSync(fallback, { recursive: true })
+    writeFileSync(join(fallback, "ca-key.pem"), key, { flag: "wx", mode: 0o600 })
+    writeFileSync(join(fallback, "ca.pem"), cert, { flag: "wx", mode: 0o644 })
   } catch {
     return false
   }

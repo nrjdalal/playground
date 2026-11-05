@@ -22,6 +22,7 @@ import {
   shareCa,
   startFallback,
 } from "../../../../../../api/hono/src/lib/dev/proxy"
+import { discard } from "../../../../../../api/hono/src/lib/trash"
 
 describe("proxyDown", () => {
   const dir = mkdtempSync(join(tmpdir(), "dev-proxy-"))
@@ -84,27 +85,83 @@ describe("proxyDown", () => {
     expect(portlessDir({ HOME: home, PORTLESS_STATE_DIR: "/set" })).toBe("/set")
   })
 
-  // one CA for both proxies: the 1355 proxy serves under the CA the owner trusted for 443, and a fallback that holds its own keeps it
-  test("shareCa copies portless's own CA into an empty fallback folder, the key at mode 600, and leaves one there alone", () => {
+  const never = (path: string): string => {
+    throw new Error(`discard ran on ${path}`)
+  }
+
+  // one CA for both proxies: the 1355 proxy serves under the CA the owner trusted for 443
+  test("shareCa copies portless's own CA into an empty fallback folder, the key at mode 600", () => {
     const own = join(dir, "share-own")
     mkdirSync(own)
     writeFileSync(join(own, "ca.pem"), "own cert")
     writeFileSync(join(own, "ca-key.pem"), "own key", { mode: 0o600 })
     const fresh = fallbackDir(own)
-    expect(shareCa(own, fresh)).toBe(true)
+    expect(shareCa(own, fresh, never)).toBe(true)
     expect(readFileSync(join(fresh, "ca.pem"), "utf8")).toBe("own cert")
     expect(readFileSync(join(fresh, "ca-key.pem"), "utf8")).toBe("own key")
     expect(statSync(join(fresh, "ca-key.pem")).mode & 0o777).toBe(0o600)
-    expect(shareCa(own, fresh)).toBe(true)
-    const kept = join(dir, "share-kept")
-    mkdirSync(kept)
-    writeFileSync(join(kept, "ca.pem"), "its own cert")
-    expect(shareCa(own, kept)).toBe(false)
-    expect(readFileSync(join(kept, "ca.pem"), "utf8")).toBe("its own cert")
-    expect(existsSync(join(kept, "ca-key.pem"))).toBe(false)
+    writeFileSync(join(fresh, "server.pem"), "leaf")
+    expect(shareCa(own, fresh, never)).toBe(true)
+    expect(readFileSync(join(fresh, "server.pem"), "utf8")).toBe("leaf")
     const none = join(dir, "share-none")
-    expect(shareCa(none, fallbackDir(none))).toBe(false)
+    expect(shareCa(none, fallbackDir(none), never)).toBe(false)
     expect(existsSync(fallbackDir(none))).toBe(false)
+  })
+
+  // a Mac that ran on 1355 under a CA of the fallback's own, then set 443 up by the click, then lost 443: 1355 moves to the trusted CA
+  test("shareCa replaces a fallback CA that differs, its leaves going to the trash, and leaves portless's own folder as it was", () => {
+    const own = join(dir, "replace-own")
+    mkdirSync(own)
+    writeFileSync(join(own, "ca.pem"), "trusted cert")
+    writeFileSync(join(own, "ca-key.pem"), "trusted key", { mode: 0o600 })
+    writeFileSync(join(own, "server.pem"), "443 leaf")
+    const fallback = fallbackDir(own)
+    mkdirSync(join(fallback, "host-certs"), { recursive: true })
+    const planted: [string, string][] = [
+      ["ca.pem", "old cert"],
+      ["ca-key.pem", "old key"],
+      ["server.pem", "old leaf"],
+      ["server-key.pem", "old leaf key"],
+      ["host-certs/web_localhost.pem", "old host leaf"],
+      ["routes.json", "[]"],
+    ]
+    for (const [name, words] of planted) writeFileSync(join(fallback, name), words)
+    const before = ["ca.pem", "ca-key.pem", "server.pem"].map((name) =>
+      readFileSync(join(own, name), "utf8"),
+    )
+    const roots = { home: dir, main: join(dir, "main"), trash: join(dir, "data", "trash") }
+    const sent: string[] = []
+    const toTrash = (path: string) => (
+      sent.push(path),
+      discard(path, { reason: "test", session: "test" }, roots)
+    )
+    expect(shareCa(own, fallback, toTrash)).toBe(true)
+    expect(sent).toEqual([join(fallback, "host-certs")])
+    expect(existsSync(join(fallback, "host-certs"))).toBe(false)
+    expect(readFileSync(join(fallback, "ca.pem"), "utf8")).toBe("trusted cert")
+    expect(readFileSync(join(fallback, "ca-key.pem"), "utf8")).toBe("trusted key")
+    expect(statSync(join(fallback, "ca-key.pem")).mode & 0o777).toBe(0o600)
+    expect(existsSync(join(fallback, "server.pem"))).toBe(false)
+    expect(existsSync(join(fallback, "server-key.pem"))).toBe(false)
+    expect(readFileSync(join(fallback, "routes.json"), "utf8")).toBe("[]")
+    expect(
+      ["ca.pem", "ca-key.pem", "server.pem"].map((name) => readFileSync(join(own, name), "utf8")),
+    ).toEqual(before)
+    expect(shareCa(own, fallback, never)).toBe(true)
+  })
+
+  test("shareCa keeps a fallback CA that differs, and answers false, when the trash refuses its leaves", () => {
+    const own = join(dir, "refused-own")
+    mkdirSync(own)
+    writeFileSync(join(own, "ca.pem"), "trusted cert")
+    writeFileSync(join(own, "ca-key.pem"), "trusted key", { mode: 0o600 })
+    const fallback = fallbackDir(own)
+    mkdirSync(fallback)
+    writeFileSync(join(fallback, "ca.pem"), "old cert")
+    writeFileSync(join(fallback, "server.pem"), "old leaf")
+    expect(shareCa(own, fallback, () => "refused")).toBe(false)
+    expect(readFileSync(join(fallback, "ca.pem"), "utf8")).toBe("old cert")
+    expect(readFileSync(join(fallback, "server.pem"), "utf8")).toBe("old leaf")
   })
 
   test("passes a stack that skips portless", async () => {
