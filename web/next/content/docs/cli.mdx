@@ -232,7 +232,7 @@ Each runs the package script of the same name in the Dashboard's checkout, the o
 - `playground changelog` adds rows to the Changelog from GitHub's merges and versions, or a line by hand.
 - `playground dm send <file>` posts the reply in the file, named by its absolute path, to your own Slack DM in Slack mode, framed, and records each post so the DM watch tells it from your messages.
 - `playground dm upload <item id>` shares a Slack send's files into its channel and thread, read from the answered Inbox item that id names; the Inbox runs it on Send or Approve.
-  On a Mac with no Slack set up (`slack.dmChannel` and `slack.dmOwner`), `dm send` posts nothing and says `Slack is not set up here`, pointing you to the Inbox; with no vault skill this Mac reads, either one says `the vault is not installed` and how to install one.
+  Both run the bundled Slack extension's scripts, which read the Slack token from the Keychain; with that extension off in Settings, either one says `Slack is not set up here` and runs nothing, and so does `dm send` with no DM set up (`slack.dmChannel` and `slack.dmOwner`), pointing you to the Inbox.
 - `playground ingest` reads every Claude Code session Playground has run (every one on this machine with `PLAYGROUND_ALL_SESSIONS=true`) into the Dashboard's database; `--follow` keeps reading, and `status` says how far it is.
 - `playground queues` prints the merge queue and the work queue.
 - `playground thread` opens, routes, renames and lists the Inbox's threads.
