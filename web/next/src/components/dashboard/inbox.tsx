@@ -1626,8 +1626,8 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   // the ids in the order he sees them, set on the first read and when he takes what waits behind the pill
   const [order, setOrder] = useState<string[] | null>(null)
   const items = data?.items ?? []
-  // answered and read items leave the list for Done ten minutes after they settle, one dismissed or closed by its poster at once
-  const { archived: setAside, done, progress, shown } = inboxView(items, now)
+  // a card moves by a verb alone: an answer its poster carries out goes to In progress, and one he dismissed or its poster closed to Done
+  const { archived: setAside, done, progress, shown } = inboxView(items)
   // Archived holds what he archived, kept out of items, and what was set aside before Archive kept items open
   const archived = [...(data?.archived ?? []), ...setAside].sort((a, b) => b.ref - a.ref)
   const snoozed = data?.snoozed ?? []

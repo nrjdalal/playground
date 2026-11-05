@@ -1,4 +1,5 @@
 import type { InboxAction, InboxAnswer, InboxItem } from "@api/hono"
+import { CLOCKS_STOPPED_AT } from "@packages/config/inbox"
 import { useQuery } from "@tanstack/react-query"
 
 import { agentLabel } from "@/lib/agent-label"
@@ -368,58 +369,48 @@ export function verbs(item: InboxItem, shelf: Shelf): Verb[] {
 export const inboxWaiting = (items: InboxItem[]): string[] =>
   items.filter(needsYou).map((item) => item.id)
 
-// An answered decision or draft its poster has not closed, or a read update, stays in the list as its result this long, so he sees it land, then moves to Done.
-export const DONE_AFTER_MS = 10 * 60 * 1000
+// Pure: whether a card is In progress: an answer its poster is carrying out (itemState's sending, the light's working), not dismissed.
+const working = (item: InboxItem): boolean =>
+  !answeredDismissedAt(item) && itemState(item) === "sending"
 
-// A chat reply stays in the list this long, so he sees it taken, then moves to In progress while its poster carries it out.
-export const PROGRESS_AFTER_MS = 5 * 60 * 1000
+// Pure: whether a card stays in the list: it asks something of him; he only commented on it, so he still owes its answer while its poster reads the comment; or it is an update he read and has not dismissed or seen resolved, read since CLOCKS_STOPPED_AT.
+const listed = (item: InboxItem): boolean =>
+  needsYou(item) ||
+  (reopenable(item) && !answeredDismissedAt(item)) ||
+  (item.kind === "update" &&
+    item.answer === null &&
+    Date.parse(item.readAt ?? item.updatedAt) >= Date.parse(CLOCKS_STOPPED_AT))
 
-// Pure: when an item was settled: answered, for an update read, and for a chat reply once its poster closed it or he dismissed it; null while it still asks something of him, or while its poster is still carrying a reply out.
-const settledAt = (item: InboxItem): number | null => {
-  if (needsYou(item)) return null
-  const answer = chosen(item)
-  if (item.kind !== "update" && answer?.choice === "replied") {
-    const closed = answer.ackedAt ?? answer.dismissedAt
-    return closed ? Date.parse(closed) : null
-  }
-  return Date.parse(
-    item.kind === "update" ? (item.readAt ?? item.updatedAt) : (answer?.at ?? item.updatedAt),
-  )
-}
-
-// Pure: the time Done orders an item by: when he dismissed it or its poster closed it, else when it settled, once that is DONE_AFTER_MS ago; null while it is still in the list at now.
-const doneAt = (item: InboxItem, now: number): number | null => {
-  const at = settledAt(item)
-  if (at === null) return null
+// Pure: the time Done orders an item by: when he dismissed it or its poster closed it, else when it was answered, resolved or read.
+const doneAt = (item: InboxItem): number => {
   const dismissed = answeredDismissedAt(item)
   if (dismissed) return Date.parse(dismissed)
-  return now - at >= DONE_AFTER_MS ? at : null
+  if (item.kind === "update") {
+    const answer = item.answer
+    return Date.parse(answer && "at" in answer ? answer.at : (item.readAt ?? item.updatedAt))
+  }
+  return Date.parse(chosen(item)?.at ?? item.updatedAt)
 }
 
-// Pure: the list as shown at now: the items still in it, in the API's order; Archived, what he set aside to talk about later (Archive's `cleared`) and has not dismissed, newest first, out of the list at once, a dismissed one going to Done; and Done, those he dismissed or their poster closed, or that settled over DONE_AFTER_MS ago, the newest first. Nothing is deleted.
-export function inboxView(
-  items: InboxItem[],
-  now: number,
-): { archived: InboxItem[]; done: InboxItem[]; progress: InboxItem[]; shown: InboxItem[] } {
+// Pure: the list as shown, moved by a verb alone, never a clock: the items that ask something of him, the cards he only commented on and the updates he has not dismissed, in the API's order; In progress, the answers their posters are carrying out, newest first; Archived, what he set aside to talk about later (Archive's `cleared`) and has not dismissed, newest first; and Done, the rest, the newest first. Nothing is deleted.
+export function inboxView(items: InboxItem[]): {
+  archived: InboxItem[]
+  done: InboxItem[]
+  progress: InboxItem[]
+  shown: InboxItem[]
+} {
   // a set-aside whose send failed stays in the list and its count, offering Retry, until it reaches its poster or he dismisses it
   const shelved = (item: InboxItem) =>
     item.status === "cleared" && !answeredDismissedAt(item) && !sendFailed(item)
-  const archived = items.filter(shelved).sort((a, b) => b.ref - a.ref)
+  const newest = (a: InboxItem, b: InboxItem) => b.ref - a.ref
   const rest = items.filter((item) => !shelved(item))
-  const done = rest
-    .filter((item) => doneAt(item, now) !== null)
-    .sort((a, b) => (doneAt(b, now) ?? 0) - (doneAt(a, now) ?? 0) || b.ref - a.ref)
-  const open = rest.filter((item) => doneAt(item, now) === null)
-  // a chat reply its poster is still carrying out waits on the poster alone, so five minutes on it leaves the list for its own shelf
-  const working = (item: InboxItem) => {
-    const answer = chosen(item)
-    return reopenable(item) && answer !== null && now - Date.parse(answer.at) >= PROGRESS_AFTER_MS
-  }
   return {
-    archived,
-    done,
-    progress: open.filter(working).sort((a, b) => b.ref - a.ref),
-    shown: open.filter((item) => !working(item)),
+    archived: items.filter(shelved).sort(newest),
+    done: rest
+      .filter((item) => !listed(item) && !working(item))
+      .sort((a, b) => doneAt(b) - doneAt(a) || newest(a, b)),
+    progress: rest.filter((item) => !listed(item) && working(item)).sort(newest),
+    shown: rest.filter(listed),
   }
 }
 

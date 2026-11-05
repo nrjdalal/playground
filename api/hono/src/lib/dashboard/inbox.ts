@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs"
 import { extname, join } from "node:path"
 
-import { ANSWER_LEAD, type AnswerPayload, answerPayloadSchema } from "@packages/config/inbox"
+import {
+  ANSWER_LEAD,
+  type AnswerPayload,
+  answerPayloadSchema,
+  CLOCKS_STOPPED_AT,
+} from "@packages/config/inbox"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
@@ -1154,7 +1159,7 @@ export async function attachmentDownloadName(db: Database, id: string): Promise<
   return fileNameOf(title, extname(id).slice(1))
 }
 
-// Everything still waiting, and whatever else moved in the last week.
+// Everything still waiting on him or on a verb, and whatever else moved in the last week.
 export async function listItems(db: Database, now = new Date()): Promise<InboxList> {
   const since = new Date(now.getTime() - KEEP_MS)
   // a scheduled item is out of the list and the count until its time, and an archived one until he moves it back or dismisses it
@@ -1170,9 +1175,32 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
     // coalesced, since a null here would make the rest's not (...) null too and drop every row with no delivery
     sql`coalesce(${inboxItem.delivery} ->> 'status', '') = 'failed' and ${inboxItem.answer} ->> 'dismissedAt' is null`,
   )
-  // what needs him is never capped, so a pile of unread updates cannot push a decision out of the list or the count; the snoozed, the archived and every set-aside (cleared) item not dismissed, however old, come too, for the Inbox's shelves
-  const [open, rest, shelved] = await Promise.all([
+  const stopped = CLOCKS_STOPPED_AT
+  // since the clocks stopped, a card moves by a verb alone: one answered that its poster has not closed (a go it carries out, a comment it reads) and an update he read and has not sent to Done or dismissed, awake, stay at any age, where one from before keeps the week
+  const pending = and(
+    sql`not (${needsYou})`,
+    sql`${inboxItem.status} <> 'cleared'`,
+    or(
+      and(
+        sql`${inboxItem.kind} <> 'update'`,
+        sql`(${inboxItem.answer} ->> 'at')::timestamptz >= ${stopped}::timestamptz`,
+        sql`${inboxItem.answer} ->> 'choice' <> 'settled'`,
+        sql`${inboxItem.answer} ->> 'ackedAt' is null`,
+        sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
+      ),
+      and(
+        eq(inboxItem.kind, "update"),
+        sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
+        sql`${inboxItem.answer} ->> 'choice' is null`,
+        awakeSql,
+        sql`${inboxItem.readAt} >= ${stopped}::timestamptz`,
+      ),
+    ),
+  )
+  // what needs him and what waits on a verb are never capped, so a pile of unread updates cannot push a decision or a card in hand out of the list or the count; the snoozed, the archived and every set-aside (cleared) item not dismissed, however old, come too, for the Inbox's shelves
+  const [open, waiting, rest, shelved] = await Promise.all([
     db.select().from(inboxItem).where(needsYou),
+    db.select().from(inboxItem).where(pending),
     db
       .select()
       .from(inboxItem)
@@ -1198,9 +1226,11 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
       .orderBy(desc(inboxItem.ref))
       .limit(MAX_SHOWN),
   ])
-  const seen = new Set([...open, ...rest].map((row) => row.id))
+  const seen = new Set([...open, ...waiting].map((row) => row.id))
+  const recent = rest.filter((row) => !seen.has(row.id))
+  for (const row of recent) seen.add(row.id)
   const cleared = shelved.filter((row) => row.status === "cleared" && !seen.has(row.id))
-  const items = inboxOrder([...open, ...rest, ...cleared].map(toItem), now)
+  const items = inboxOrder([...open, ...waiting, ...recent, ...cleared].map(toItem), now)
   const asleep = shelved.filter((row) => row.status !== "cleared").map(toItem)
   const archived = asleep.filter((item) => archivedAt(item) !== null)
   const snoozed = asleep.filter((item) => archivedAt(item) === null)

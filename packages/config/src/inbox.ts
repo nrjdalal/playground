@@ -72,3 +72,6 @@ export const payloadOf = (line: string): AnswerPayload | null => {
     return null
   }
 }
+
+// When the Inbox stopped moving cards by the clock, set at this change's last code commit before the live dashboard took it: the old clock had already moved every card answered or read before then to Done, so those keep the list's week, while each one since stays in the Inbox until a verb moves it (inboxView in the web, listItems in the API).
+export const CLOCKS_STOPPED_AT = "2026-11-05T03:44:00.000Z"
