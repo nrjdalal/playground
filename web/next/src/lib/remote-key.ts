@@ -40,6 +40,25 @@ export async function readBrowserKey(): Promise<BrowserKey | null> {
   return stored ? named(stored) : null
 }
 
+// Sends this browser's key to the Mac as a pair request, making one only while it keeps none, so a request sent again carries the same key. The fingerprint it gives is this browser's own, never the one the hosted hub passed back, and a Mac that received another key is refused, so a key the hosted side swapped in never reads as this one.
+export async function pairBrowser({
+  make = makeBrowserKey,
+  read = readBrowserKey,
+  send,
+}: {
+  make?: () => Promise<BrowserKey>
+  read?: () => Promise<BrowserKey | null>
+  send: (publicKey: PairKey) => Promise<string>
+}): Promise<BrowserKey> {
+  const key = (await read()) ?? (await make())
+  const received = await send(key.publicKey)
+  if (received !== key.fingerprint)
+    throw new Error(
+      `Your Mac received another key (${received}, not this browser's ${key.fingerprint}). Approve nothing, and pair again.`,
+    )
+  return key
+}
+
 // Makes this browser's key, in place of any it kept, and keeps it.
 export async function makeBrowserKey(): Promise<BrowserKey> {
   const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [

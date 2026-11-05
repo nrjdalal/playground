@@ -21,7 +21,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { config } from "@/lib/config"
-import { makeBrowserKey, readBrowserKey } from "@/lib/remote-key"
+import { type BrowserKey, pairBrowser, readBrowserKey } from "@/lib/remote-key"
 import { relativeTime } from "@/lib/time"
 
 const REMOTE_KEY = ["remote"] as const
@@ -100,7 +100,9 @@ function MacRemote() {
                 <RiShieldKeyholeLine />
               </ItemMedia>
               <ItemContent>
-                <ItemTitle>Pair request from @{pending.login}</ItemTitle>
+                <ItemTitle>
+                  Pair request from <span className="whitespace-nowrap">@{pending.login}</span>
+                </ItemTitle>
                 <ItemDescription>
                   <span className="font-mono">{pending.fingerprint}</span> · asked{" "}
                   {relativeTime(pending.at, now)}. Approve only if your browser shows this
@@ -128,7 +130,8 @@ function MacRemote() {
               <ItemContent>
                 <ItemTitle>Paired browser key</ItemTitle>
                 <ItemDescription>
-                  <span className="font-mono">{key.fingerprint}</span> · @{key.login} · paired{" "}
+                  <span className="font-mono">{key.fingerprint}</span> ·{" "}
+                  <span className="whitespace-nowrap">@{key.login}</span> · paired{" "}
                   {relativeTime(key.pairedAt, now)}
                 </ItemDescription>
               </ItemContent>
@@ -166,7 +169,7 @@ function MacRemote() {
 }
 
 // the pair request goes to the hosted relay itself, which apiClient points past
-async function sendPair(publicKey: unknown): Promise<string> {
+async function sendPair(publicKey: BrowserKey["publicKey"]): Promise<string> {
   const response = await fetch(`${config.api.url}${RELAY_PREFIX}/pair`, {
     body: JSON.stringify({ key: publicKey }),
     credentials: "include",
@@ -181,16 +184,23 @@ async function sendPair(publicKey: unknown): Promise<string> {
   return body.data.fingerprint
 }
 
+const BROWSER_KEY = ["remote", "browser"] as const
+
 function PairThisBrowser() {
+  const queryClient = useQueryClient()
   const { data: browserKey, isPending } = useQuery({
     queryFn: readBrowserKey,
-    queryKey: ["remote", "browser"],
+    queryKey: BROWSER_KEY,
   })
   const [sent, setSent] = React.useState<string | null>(null)
   const pair = useMutation({
-    mutationFn: async () => sendPair((browserKey ?? (await makeBrowserKey())).publicKey),
-    onError: (error) => toast.add({ title: error.message, type: "error" }),
-    onSuccess: setSent,
+    mutationFn: () => pairBrowser({ send: sendPair }),
+    onError: (error) => {
+      setSent(null)
+      toast.add({ title: error.message, type: "error" })
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: BROWSER_KEY }),
+    onSuccess: (key) => setSent(key.fingerprint),
   })
   if (isPending) return <div aria-busy="true" className="h-14" />
   return (
