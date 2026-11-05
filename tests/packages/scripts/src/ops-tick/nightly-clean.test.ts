@@ -393,12 +393,26 @@ describe("one night's run against a fixture data folder", () => {
   })
 
   test("last night's approved decision is carried out and acked; a denied one's targets are not asked again", async () => {
-    const approved = night({ "ask get": JSON.stringify({ status: "approved" }) }, () => ({
-      decision: { id: OLD, targets: [{ kind: "container", name: "playground-x-db" }] },
+    const approved = night({ "ask get": JSON.stringify({ status: "approved" }) }, (wt) => ({
+      decision: {
+        id: OLD,
+        targets: [
+          { kind: "branch", name: "PG-7-old" },
+          { kind: "container", name: "playground-x-db" },
+          { kind: "volume", name: "big-unused" },
+          { kind: "worktree", name: wt("pg-2") },
+        ],
+      },
     }))
     await nightlyClean(approved.deps)(approved.ctx)
     const ran = approved.runs.map((r) => r.join(" "))
+    const repo = approved.ctx.repo
+    expect(ran).toContain(`git -C ${repo} branch -D PG-7-old`)
     expect(ran).toContain("docker rm -fv playground-x-db")
+    expect(ran).toContain("docker volume rm big-unused")
+    expect(ran).toContain(
+      `bun --no-env-file ${join(repo, "packages", "scripts", "src", "playground", "cli.ts")} rm --worktree ${approved.wt("pg-2")} --discard --decision ${OLD} --reason nightly-clean, approved`,
+    )
     expect(ran.some((r) => r.includes(`ask ack ${OLD} --no-link`))).toBe(true)
     const denied = night({ "ask get": JSON.stringify({ status: "denied" }) }, (wt) => ({
       decision: { id: OLD, targets: [{ kind: "worktree", name: wt("pg-2") }] },
