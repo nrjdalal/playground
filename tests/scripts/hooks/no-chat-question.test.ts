@@ -413,13 +413,16 @@ describe("what passes", () => {
 
 describe("a manager's reply that keeps steps or a table for Quilla goes in one Inbox card", () => {
   const STEPS = "Next:\n1. Rotate the key.\n2. Restart the API.\n3. Check /api/health."
-  const TABLE = "| PR | State |\n|---|---|\n| #500 | merged |"
+  const TABLE = "| Step | State |\n|---|---|\n| Rotate the key | done |"
 
   test.each([
     ["3 numbered steps", STEPS],
     ["3 steps numbered with a paren", "1) Pull canary\n2) Build it\n3) Restart it"],
     ["a table", TABLE],
-    ["a table with aligned columns", "| PR | State |\n| :--- | ---: |\n| #500 | merged |"],
+    [
+      "a table with aligned columns",
+      "| Step | State |\n| :--- | ---: |\n| Rotate the key | done |",
+    ],
   ])("refused with no #iN: %s", async (_name, last) => {
     expect(await stop(last)).toBe(STEPS_REASON)
   })
@@ -517,6 +520,45 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
         role: "lead",
       }),
     ).toBe(LEAD_REASON)
+  })
+
+  // progress on work tracked elsewhere stays in chat, since the Inbox holds decisions and alerts: every numbered line or table body row names an issue or PR
+  test.each([
+    [
+      "3 numbered lines that each name a #<n>",
+      "Merge order:\n1. #1089 merged at c88ae1b8\n2. #1094 in review\n3. #1095 next",
+    ],
+    [
+      "3 numbered lines that each link an issue or PR",
+      "1. https://github.com/acme/app/pull/12 merged\n2. https://github.com/acme/app/issues/13 open\n3. https://github.com/acme/app/pull/14 in review",
+    ],
+    [
+      "a table whose every body row names a #<n>",
+      "| PR | ETA |\n|---|---|\n| #1089 | merged |\n| #1094 | 03:40Z |",
+    ],
+  ])("passed: progress on tracked work, %s", async (_name, last) => {
+    expect(await stop(last)).toBeUndefined()
+    expect(await stop(last, { role: "lead" })).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "3 numbered lines, one naming no #<n>",
+      "1. #1089 merged\n2. #1094 in review\n3. Restart the API.",
+    ],
+    [
+      "3 numbered lines naming only Inbox items",
+      "1. #i40 drafted\n2. #i41 drafted\n3. #i42 drafted",
+    ],
+    [
+      "a table with one body row naming no #<n>",
+      "| PR | ETA |\n|---|---|\n| #1089 | merged |\n| Restart the API | next |",
+    ],
+    ["a table with no body rows", "| PR | ETA |\n|---|---|"],
+  ])("refused: steps that are not all tracked work, %s", async (_name, last) => {
+    const statuses = { "#i40": "approved", "#i41": "approved", "#i42": "approved" }
+    expect(await stop(last, { statuses })).toStartWith(STEPS_REASON)
+    expect(await stop(last, { role: "lead", statuses })).toStartWith(DRAFT_REASON)
   })
 
   test("passed: a worker's steps, which go to its lead", async () => {
