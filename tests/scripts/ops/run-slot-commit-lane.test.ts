@@ -941,12 +941,37 @@ describe("commit-lane forms that cost no build", () => {
     expect(existsSync(join(m.root, "pushed"))).toBe(false)
   })
 
-  test("while a merge that ends clean runs its push", async () => {
+  test("while a chain whose merge ends clean takes run-slot-commit and pushes", async () => {
     const m = repo({ idle: 30 }, ["docs/notes.md"])
     m.hold("run-slot", 3, "big")
     const steps = "cd ROOT && git merge --no-edit clean && git push origin pushed"
     expect(await takes(m, chain(m, steps))).toBe("run-slot-commit")
     expect(existsSync(join(m.root, "pushed"))).toBe(true)
+  })
+
+  // dash -c and ksh -c chains read as sh -c does, so the merge form and its add-or-commit rule hold there too, and a wrapper before the shell is a step off the list
+  for (const [shell, steps, lane] of [
+    [
+      "dash",
+      "cd ROOT && git merge --no-edit origin/canary && git push origin x",
+      "run-slot-commit",
+    ],
+    ["ksh", "cd ROOT && git merge --no-edit origin/canary; git add -A; git commit -m x", "waited"],
+  ] as const)
+    test(`${shell} -c with ${steps} ${lane === "waited" ? "waits off the commit lane" : "takes run-slot-commit"}`, async () => {
+      const m = repo({ idle: 30 }, ["docs/notes.md"])
+      m.hold("run-slot", 3, "big")
+      expect(await takes(m, chain(m, steps, shell))).toBe(lane)
+    })
+
+  test("nice sh -c with a merge and its push waits off the commit lane", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    const argv = [
+      "nice",
+      ...chain(m, "cd ROOT && git merge --no-edit origin/canary && git push origin x"),
+    ]
+    expect(await takes(m, argv)).toBe("waited")
   })
 
   // 8: bash -c reads -e, -u, -x, -v and -o pipefail as options before its script, which zsh -c runs as sh does
