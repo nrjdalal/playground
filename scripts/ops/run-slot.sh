@@ -954,9 +954,15 @@ CHILD=""
 # seconds between a waiter's looks, and a held clone's (the tests shorten both)
 POLL=${RUN_SLOT_POLL:-15}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
-# the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake's line it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
+# the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake (clone_brake) it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
 CLONE_GAP=180
 CLONE_MARGIN=4
+# the clones' brake, the owner's load rule of 5 Nov (load5 under 15, the owner's Mac's core count), one per core: hw.ncpu as spawn.sh's load gate reads it, else 15; never load_line, whose cap shuts run-slot-2 (6 Nov, 06:52Z to 07:03Z: a cap of 1 held every clone)
+clone_brake() {
+  local n
+  n=$(sysctl -n hw.ncpu 2>/dev/null | tr -cd 0-9)
+  if [ "${n:-0}" -gt 0 ]; then echo "$n"; else echo 15; fi
+}
 
 # Waiters take slots oldest first (builder, 12 Oct: a request queued at 13:28Z lost three slots in a row to later ones): each waiter leaves a
 # ticket, run-slot.waiters/<ns>-<pid>-<who>, and only the oldest ticket whose pid is alive may take a slot; a ticket goes once its slot is taken
@@ -1559,10 +1565,10 @@ if [ -n "$KIND" ]; then
     ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
   while clone_held; do reread; sleep "$CLONE_POLL"; done
-  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of load_line's brake line, and while a big run holds a CPU slot, whatever clone-allow names; an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
+  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of the brake, one per core, and while a big run holds a CPU slot, whatever clone-allow names; an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
   clone_spaced() {
     local brake l s last
-    brake=$(load_line)
+    brake=$(clone_brake)
     l=$(load5)
     [ -n "$l" ] && [ "$l" -ge $((brake - CLONE_MARGIN)) ] && { echo "for load5 under $((brake - CLONE_MARGIN)), $CLONE_MARGIN under the brake's $brake"; return; }
     for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
