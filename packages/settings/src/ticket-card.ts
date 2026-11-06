@@ -21,7 +21,7 @@ export const ticketCardSettings = defineSettings({
   "ticketCard.linesFile": {
     default: "",
     description:
-      "The file of the day's watched tickets the card reads, a JSON object whose lines record holds each ticket's line; none until set, so the job keeps no card.",
+      "The file of the day's watched tickets the card reads, a JSON object whose lines record holds each ticket's line and whose clock record names the tickets the card shows; none until set, so the job keeps no card.",
     schema: file,
   },
   "ticketCard.linkBase": {

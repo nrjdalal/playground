@@ -33,12 +33,14 @@ const pathIn = (data: string, path: string) => (!path || isAbsolute(path) ? path
 
 export const statePath = (ops: string) => join(ops, "ops-ticket-card.state.json")
 
-// The lines file's lines, each read into the card's Line, kept to the prefixes the settings name (none, every prefix).
+// The lines file's lines, each read into the card's Line, kept to the tickets its `clock` record names (the ones the watched channels' digest registered, so a line a mention elsewhere raised stays off) and to the prefixes the settings name (none, every prefix); a file with no `clock` record shows none.
 export const linesIn = (file: any, prefixes: string[]): Line[] =>
   Object.values((file?.lines ?? {}) as Record<string, any>)
     .filter(
       (l) =>
-        typeof l?.id === "string" && (!prefixes.length || prefixes.includes(l.id.split("-")[0])),
+        typeof l?.id === "string" &&
+        Object.hasOwn(file?.clock ?? {}, l.id) &&
+        (!prefixes.length || prefixes.includes(l.id.split("-")[0])),
     )
     .map((l) => ({
       id: l.id,

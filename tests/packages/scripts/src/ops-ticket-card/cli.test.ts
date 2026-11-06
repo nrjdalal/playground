@@ -47,7 +47,10 @@ const world = (name: string) => {
   const ran: { argv: string[]; stdin?: string }[] = []
   const answers = { closed: false, id: 0 }
   const lines = (l: Record<string, unknown>) =>
-    writeFileSync(join(data, "lines.json"), JSON.stringify({ lines: l }))
+    writeFileSync(
+      join(data, "lines.json"),
+      JSON.stringify({ clock: Object.fromEntries(Object.keys(l).map((id) => [id, {}])), lines: l }),
+    )
   lines({
     "ABC-1": {
       id: "ABC-1",
@@ -165,6 +168,7 @@ describe("the beat", () => {
 describe("its readers", () => {
   test("the lines file's lines, kept to the prefixes named, none meaning every prefix", () => {
     const file = {
+      clock: { "ABC-1": {}, "XYZ-2": {} },
       lines: {
         "ABC-1": { id: "ABC-1", open: true, shownAt: 1 },
         "XYZ-2": { id: "XYZ-2", open: false, shownAt: 2, theirs: true },
@@ -175,6 +179,17 @@ describe("its readers", () => {
       { id: "ABC-1", mine: false, open: true, shownAt: 1 },
       { id: "XYZ-2", mine: false, open: false, shownAt: 2, theirs: true },
     ])
+  })
+
+  test("only a ticket the file's clock record names shows: a line a mention elsewhere raised stays off, and a file with no clock record shows none", () => {
+    const lines = {
+      "ABC-1": { id: "ABC-1", open: true, shownAt: 1 },
+      "ABC-2": { id: "ABC-2", open: true, shownAt: 2 },
+    }
+    expect(
+      linesIn({ clock: { "ABC-1": { urgency: "High" } }, lines }, []).map((l) => l.id),
+    ).toEqual(["ABC-1"])
+    expect(linesIn({ lines }, [])).toEqual([])
   })
 
   test("a sent record's skip keys name each skipped ticket's area, and its other keys none", () => {
