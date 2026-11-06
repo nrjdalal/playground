@@ -399,7 +399,7 @@ var LEADS = new Set([
 function sources(joined) {
   let command = true;
   for (const [word] of joined.matchAll(/[;&|(){}\n]|[^\s;&|(){}]+/g)) {
-    if (/^[;&|(){}\n]$/.test(word))
+    if (/^[;&|(){}\n]$/.test(word) || word === "]]")
       command = true;
     else if (!command)
       continue;

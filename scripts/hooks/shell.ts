@@ -560,11 +560,11 @@ const LEADS = new Set([
   "until",
   "while",
 ])
-// Whether a line runs another file or string as zsh code, which may set an option or make an array: source, `.` or eval as a command, after a separator, a parenthesis or brace (a case pattern's `)` included), a `LEADS` word or an assignment prefix; one pass over the line's words, read with quotes and backslashes removed, since zsh runs `'source'` and `\source` as source
+// Whether a line runs another file or string as zsh code, which may set an option or make an array: source, `.` or eval as a command, after a separator, a parenthesis or brace (a case pattern's `)` included), a `]]` (zsh reads then, do or a short body right after one), a `LEADS` word or an assignment prefix; one pass over the line's words, read with quotes and backslashes removed, since zsh runs `'source'` and `\source` as source
 function sources(joined: string): boolean {
   let command = true
   for (const [word] of joined.matchAll(/[;&|(){}\n]|[^\s;&|(){}]+/g)) {
-    if (/^[;&|(){}\n]$/.test(word)) command = true
+    if (/^[;&|(){}\n]$/.test(word) || word === "]]") command = true
     else if (!command) continue
     else if (word === "source" || word === "." || word === "eval") return true
     else if (!LEADS.has(word) && !/^\w+=/.test(word)) command = false
