@@ -369,7 +369,7 @@
   Approve is claimed in `answerItem`'s one versioned write, so a double click runs once, then runs `ext accept <scope> <kind> <key> <rev> --reason "the owner approved it in the Inbox (#iN)"` for each proposal in order through `runCli()` (`api/hono/src/lib/store/extensions.ts`):
   one fixed argv a proposal (`acceptArgs`), no shell, no `PLAYGROUND_ROLE`, against the stack's data folder, a fixture stack's own.
   A list stops at its first failed accept and leaves the rest untried (`acceptAll`).
-  The answer keeps `accepted: {exitCode, line}`: for one proposal the CLI's first line or its error; for a list `accepted <kind> <key>, …`, or on a failure the ones accepted, the failed one with its reason, then `not tried:` and the rest.
+  The answer keeps `accepted: {exitCode, line}`: for one proposal the CLI's first line or its error; for a list `accepted <kind> <key> in <scope>, …`, or on a failure the ones accepted, the failed one with its reason, then `not tried:` and the rest.
   The card reads `Accepted: <line>` green or `Accept failed (exit N): <line>` red, and the poster, or the dispatcher in an ended poster's place, is typed that result with nothing left to carry out, closing it with `bun run ask ack #iN --no-link "<why>"`.
   Deny, Archive and Dismiss run nothing; a failed accept takes a new decision for the proposals still unaccepted, each at its current rev.
 

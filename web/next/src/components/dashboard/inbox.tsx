@@ -668,8 +668,8 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
               that fails:
             </p>
             <ol className="list-decimal pl-5">
-              {[preview, ...preview.more].map((proposal) => (
-                <li key={`${proposal.scope} ${proposal.kind} ${proposal.key}`}>
+              {[preview, ...preview.more].map((proposal, at) => (
+                <li key={at}>
                   the proposed {proposal.kind} <code className="font-mono">{proposal.key}</code> in{" "}
                   {proposal.scope}, as it reads at{" "}
                   <code className="font-mono">{proposal.rev.slice(0, 7)}</code>

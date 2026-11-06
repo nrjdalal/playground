@@ -231,7 +231,7 @@ export const proposalsOf = (preview: InboxAccept): InboxProposal[] => [
 async function acceptAll(accept: ExtRun, preview: InboxAccept, ref: number): Promise<RunResult> {
   const proposals = proposalsOf(preview)
   if (proposals.length === 1) return runResult(await accept(acceptArgs(proposals[0]!, ref)))
-  const name = (proposal: InboxProposal) => `${proposal.kind} ${proposal.key}`
+  const name = (proposal: InboxProposal) => `${proposal.kind} ${proposal.key} in ${proposal.scope}`
   const accepted: string[] = []
   for (const [at, proposal] of proposals.entries()) {
     const ran = await accept(acceptArgs(proposal, ref))

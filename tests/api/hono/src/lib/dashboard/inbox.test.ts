@@ -4639,14 +4639,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(answered.ok && answered.item.answer).toMatchObject({
         accepted: {
           exitCode: 1,
-          line: "accepted skill end-of-day, doc handover; rule quiet-hours failed: playground ext: 400 the revision holds a token; not tried: rule late-reply",
+          line: "accepted skill end-of-day in acme, doc handover in acme; rule quiet-hours in acme failed: playground ext: 400 the revision holds a token; not tried: rule late-reply in acme",
         },
       })
       const all = await post(decision({ ...ACCEPT, more: [MORE_B] }))
       const ok = async (args: string[]) => ({ code: 0, err: "", out: `rev ${args[4]} is accepted` })
       const done = await store.answerItem(db, all.id, { action: "approve" }, { accept: ok, actor })
       expect(done.ok && done.item.answer).toMatchObject({
-        accepted: { exitCode: 0, line: "accepted skill end-of-day, doc handover" },
+        accepted: { exitCode: 0, line: "accepted skill end-of-day in acme, doc handover in acme" },
       })
     })
 
@@ -4752,7 +4752,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
             exitCode: 1,
             line: expect.stringMatching(
               new RegExp(
-                `^accepted script relay-a; script relay-b failed: playground ext: 409 the proposal is at ${newer.slice(0, 12)}, not ${moved.rev}; read it again; not tried: script relay-c$`,
+                `^accepted script relay-a in made-up-me; script relay-b in made-up-me failed: playground ext: 409 the proposal is at ${newer.slice(0, 12)}, not ${moved.rev}; read it again; not tried: script relay-c in made-up-me$`,
               ),
             ),
           },
