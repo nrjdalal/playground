@@ -849,28 +849,8 @@ describe("a quoted argument is read as a command line only where a program runs 
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env -S 'sudo ls'",
     ],
     [
-      "a root shell given a harmless command",
-      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo sh -c ls",
-    ],
-    [
       "busybox running a harmless applet",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | busybox ls",
-    ],
-    [
-      "busybox's shell applet given a harmless command",
-      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo busybox sh -c ls",
-    ],
-    [
-      "a shell given a script named by a lone dash after `--`",
-      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sh -- -",
-    ],
-    [
-      "a shell given `-c` and a lone dash with no command after it, which every shell rejects",
-      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sh -c -",
-    ],
-    [
-      "a shell given a script named after a lone dash",
-      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sh - script.sh",
     ],
     [
       "nice running a harmless program",

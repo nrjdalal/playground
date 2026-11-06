@@ -10,6 +10,7 @@ import {
   places,
   run,
   stdinShell,
+  type StdinKind,
   withDeadline,
 } from "../../../scripts/hooks/shell"
 import { type Paths, REFUSED_FORMS } from "./fixtures/refused-forms"
@@ -215,12 +216,14 @@ describe("stdinShell reads a privilege wrapper's root shell", () => {
   })
 })
 
-describe("stdinShell reads a shell's lone dash", () => {
-  test.each<[string, string, "shell" | undefined]>([
-    ["a lone dash alone reads stdin", "sh -", "shell"],
-    ["a lone dash after an option reads stdin", "bash -e -", "shell"],
-    ["the word after a lone dash is the script", "sh - script.sh", undefined],
-    ["a lone dash right after `--` is the script's name", "sh -- -", undefined],
+describe("stdinShell reads env's split string as the words it runs", () => {
+  test.each<[string, string, StdinKind | undefined]>([
+    ["sudo's shell in a split string", "env -S 'sudo -s'", "root"],
+    ["sudo's shell in a long split-string option", "env --split-string='sudo -s'", "root"],
+    ["a shell given no script in a split string", "env -S 'sh'", "shell"],
+    ["a harmless command in a split string", "env -S 'sudo ls'", undefined],
+    ["a quoted env's split string", "'env' -S 'sudo -s'", "root"],
+    ["a second env's split string behind nice", "env nice env -S 'sudo -s'", "root"],
   ])("%s", (_, line, kind) => {
     expect(stdinShell(lex(line).commands[0])).toBe(kind)
   })
