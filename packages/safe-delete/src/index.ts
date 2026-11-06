@@ -113,6 +113,12 @@ const inside = (path: string, root: string): boolean =>
 
 const worktreesOf = (roots: Roots): string => join(real(roots.main), ".claude", "worktrees")
 
+// Whether a path sits directly in the main checkout's .claude/worktrees, the one folder playground rm --worktree takes.
+export const inWorktrees = (path: string, roots: Roots): boolean => {
+  const abs = resolve(path)
+  return dirname(join(real(dirname(abs)), basename(abs))) === worktreesOf(roots)
+}
+
 // The folders under HOME that are protected whole, and the trash's parent.
 const subtreesOf = (home: string, trash: string): string[] => [
   ...HOME_DIRS.map((dir) => real(join(home, dir))),
@@ -262,11 +268,13 @@ export function quarantine(
   if (!lstat(abs)) return refused(`no such path ${abs}`)
   const carve = carveOutOf(abs, opts.carveOut, roots, io.carveOuts ?? CARVE_OUTS)
   if (carve && "refused" in carve) return carve
-  const isWorktree = dirname(join(real(dirname(abs)), basename(abs))) === worktreesOf(roots)
+  const isWorktree = inWorktrees(abs, roots)
   if (isWorktree && !opts.worktree)
     return refused(`${abs} is a worktree: playground rm --worktree removes it`)
   if (!isWorktree && opts.worktree)
-    return refused(`--worktree takes a folder in ${worktreesOf(roots)}, not ${abs}`)
+    return refused(
+      `--worktree takes a folder in ${worktreesOf(roots)}, not ${abs}: playground rm ${abs} moves a folder outside it to the trash, with no --worktree or --discard, up to ${LIMITS.files.toLocaleString("en-US")} files or ${LIMITS.bytes / 1024 ** 3} GB; leave a bigger tree in place for your lead's cleanup`,
+    )
   const held = opts.worktree && worktreeRefusal(abs, roots, opts.worktree)
   if (held) return refused(held)
   const now = io.now ?? new Date()
