@@ -300,38 +300,74 @@ var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
 var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
-var SPLITTERS = new Set(["bash", "csh", "dash", "ksh", "sh", "tcsh"]);
+var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
 var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
 var ZSH_ARRAYS = new Set([
+  "aliases",
   "argv",
+  "builtins",
   "cdpath",
+  "commands",
   "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
   "fignore",
   "fpath",
   "funcfiletrace",
   "funcsourcetrace",
   "funcstack",
+  "functions",
+  "functions_source",
   "functrace",
+  "galiases",
+  "history",
   "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "langinfo",
   "mailpath",
   "manpath",
   "match",
   "mbegin",
   "mend",
   "module_path",
+  "modules",
+  "nameddirs",
+  "options",
+  "parameters",
+  "patchars",
   "path",
   "pipestatus",
   "psvar",
   "reply",
+  "reswords",
+  "saliases",
   "signals",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
   "watch",
-  "zsh_eval_context"
+  "widgets",
+  "zsh_eval_context",
+  "zsh_scheduled_events"
 ]);
 var oneWord = (written) => {
   const plain = ONE_WORD.exec(written);
   return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "");
 };
-var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?:(?::?[-+=?]|[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
+var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);

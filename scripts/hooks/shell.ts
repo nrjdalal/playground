@@ -96,7 +96,7 @@ export type Env = {
   // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
   oldFrom?: string[]
   process: Record<string, string | undefined>
-  // Set where an unquoted plain parameter may split into words (`Word.splits`'s `sh`): a script bash, csh, dash, ksh, sh or tcsh runs, a zsh line or run that may set an option, make an array or name a parameter it expands (`zshSplits`), and every line a runner the hook cannot name may hand to sh
+  // Set where an unquoted plain parameter may split into words (`Word.splits`'s `sh`): a script bash, csh, dash, fish, ksh, sh or tcsh runs, a zsh line or run that may set an option, make an array or name a parameter it expands (`zshSplits`), and every line a runner the hook cannot name may hand to sh
   splits?: boolean
   vars: Map<string, Text>
 }
@@ -538,8 +538,8 @@ export function codeFed(commands: Command[]): Map<Command, Fed> {
 // Wrappers that take one positional argument (a count or a duration) before the command.
 export const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"])
-// The shells that split an unquoted parameter into words; zsh keeps one word unless the line may change that (`ZSH_SPLITS`)
-const SPLITTERS = new Set(["bash", "csh", "dash", "ksh", "sh", "tcsh"])
+// The shells that make an unquoted parameter several words (fish a list's elements, the rest by splitting); zsh keeps one word unless the line may change that (`ZSH_SPLITS`)
+const SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"])
 // A zsh line that may make an unquoted plain parameter several words: one that sets an option (setopt, unsetopt, emulate, the options array, set's -o, +o, -y or -A) or makes an array (an `X=(` or `X+=(` assignment, read's or a declaring builtin's -a or -A, mapfile, readarray, zparseopts)
 const ZSH_SPLITS =
   /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|\bread\b[^;&|\n]*\s-[A-Za-z]*[aA]|\b(?:declare|export|float|integer|local|readonly|typeset)\b[^;&|\n]*\s[-+][A-Za-z]*[aA]/
@@ -555,40 +555,76 @@ export const zshSplits = (line: string): boolean => {
 }
 // An unquoted expansion zsh reads as one word unless the line splits it (`Text.splits`'s `sh`): a plain parameter by name or digit, braced or not, but one of zsh's own arrays (`ZSH_ARRAYS`)
 const ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/
-// The arrays zsh sets or ties itself, each several words unquoted (zsh 5.9's zshparam(1) and zshmodules(1)'s zsh/parameter)
+// The arrays and hashes zsh sets, ties or fills itself, each several words unquoted (zsh 5.9's zshparam(1), and zshmodules(1)'s zsh/datetime, zsh/langinfo, zsh/parameter, zsh/sched, zsh/system, zsh/termcap, zsh/terminfo and zsh/zleparameter)
 const ZSH_ARRAYS = new Set([
+  "aliases",
   "argv",
+  "builtins",
   "cdpath",
+  "commands",
   "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
   "fignore",
   "fpath",
   "funcfiletrace",
   "funcsourcetrace",
   "funcstack",
+  "functions",
+  "functions_source",
   "functrace",
+  "galiases",
+  "history",
   "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "langinfo",
   "mailpath",
   "manpath",
   "match",
   "mbegin",
   "mend",
   "module_path",
+  "modules",
+  "nameddirs",
+  "options",
+  "parameters",
+  "patchars",
   "path",
   "pipestatus",
   "psvar",
   "reply",
+  "reswords",
+  "saliases",
   "signals",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
   "watch",
+  "widgets",
   "zsh_eval_context",
+  "zsh_scheduled_events",
 ])
 // Whether zsh reads an unquoted expansion as one word: a plain parameter that is none of its own arrays
 const oneWord = (written: string): boolean => {
   const plain = ONE_WORD.exec(written)
   return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "")
 }
-// A double-quoted expansion every shell reads as one word: a plain parameter, one with an operator after its name (a default, a pattern cut, a replacement), arithmetic, a command substitution or a backtick; a zsh flag, a subscript, `$@` or `$*` is none
+// A double-quoted expansion every shell reads as one word: a plain parameter, one with an operator after its name (a default, a pattern cut, a replacement), arithmetic, a command substitution or a backtick; a zsh flag, a subscript, `$@`, `$*` or a default's or alternate's text holding an `@` is none
 const QUOTED_ONE_WORD =
-  /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?:(?::?[-+=?]|[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/
+  /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/
 // The script names a shell or a source reads stdin through
 const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
