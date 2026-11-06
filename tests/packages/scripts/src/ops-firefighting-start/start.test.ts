@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -28,6 +36,7 @@ const MINUTE = 60_000
 
 type Line = {
   busy?: boolean
+  from?: string
   id: string
   open?: boolean
   shownAt?: number
@@ -44,17 +53,32 @@ const line = (
   [id]: { id, open: true, shownAt, urgency, urgent: urgency === "Urgent", ...extra },
 })
 
+// firefighting.json as the relay writes it: its lines, and its clock map, which holds each ticket the tracker's digest lists (every line's unless `listed` says).
+const relayFile = (lines: Record<string, Line>, lastTry: number, listed = Object.keys(lines)) =>
+  JSON.stringify({
+    clock: Object.fromEntries(
+      listed.map((id) => [
+        id,
+        { firstReported: NOW.toISOString(), urgency: lines[id]?.urgency ?? "High" },
+      ]),
+    ),
+    lastTry,
+    lines,
+  })
+
 // A data folder holding the relay's firefighting.json (written a minute before NOW unless `wrote` says), the standing brief and the files given; a ctx whose runs and lines are recorded, spawn.sh answering with `spawned`, and Linear reading `linear`.
 const setup = (
   lines: Record<string, Line>,
   files: Record<string, unknown> = {},
   {
     linear = {},
+    listed,
     spawned = { code: 0, out: "" },
     wrote = NOW.getTime() - MINUTE,
   }: {
     linear?: Record<string, string>
-    spawned?: { code: number; out: string }
+    listed?: string[]
+    spawned?: { code: number; out: string } | ((argv: string[]) => { code: number; out: string })
     wrote?: number
   } = {},
 ) => {
@@ -62,7 +86,7 @@ const setup = (
   dirs.push(data)
   mkdirSync(join(data, "ops"))
   writeFileSync(join(data, "brief-ff.md"), "Work {TICKET} as {NAME}.\n")
-  writeFileSync(join(data, "firefighting.json"), JSON.stringify({ lastTry: wrote, lines }))
+  writeFileSync(join(data, "firefighting.json"), relayFile(lines, wrote, listed))
   for (const [file, body] of Object.entries(files))
     writeFileSync(join(data, file), JSON.stringify(body))
   const runs: string[][] = []
@@ -96,7 +120,8 @@ const setup = (
     run: async (argv) => {
       runs.push(argv)
       if (argv.includes("focus")) focusCli(argv.slice(argv.indexOf("focus") + 1))
-      return argv[0]!.endsWith("spawn.sh") ? spawned : { code: 0, out: "" }
+      if (!argv[0]!.endsWith("spawn.sh")) return { code: 0, out: "" }
+      return typeof spawned === "function" ? spawned(argv) : spawned
     },
     send: async (_, text) => (sent.push(text), true),
   })
@@ -128,6 +153,9 @@ const setup = (
   const state = () => JSON.parse(readFileSync(statePath(join(data, "ops")), "utf8"))
   return { asked, data, focus, later, pass, runs, sent, spawns, startFile, state, titles }
 }
+
+// A running job's state, with nothing started yet, so a line seen closed now closed while it ran.
+const RUNNING = { closedSeen: {}, reopened: {}, started: {}, told: {} }
 
 // The job's state once it has started ff-first-worker for MADE-1.
 const FIRST = { closedSeen: {}, reopened: {}, started: { "MADE-1": "ff-first-worker" }, told: {} }
@@ -260,6 +288,31 @@ describe("ops-firefighting-start", () => {
     expect(s.sent).toEqual(["Skipped MADE-1: someone else took it"])
   })
 
+  test("only a ticket the tracker's digest lists starts: a line another channel's thread named, with no clock entry, never does, and is told once; a file with no clock map starts nothing (#1150)", async () => {
+    const s = setup(
+      {
+        ...line("MADE-1", "Urgent", 1, { from: "C-OTHER-THREAD" }),
+        ...line("MADE-2", "Medium", 2),
+      },
+      {},
+      { listed: ["MADE-2"] },
+    )
+    await s.pass()
+    await s.pass()
+    expect(s.titles()).toEqual(["MADE-2 firefight"])
+    expect(s.sent.filter((t) => t.includes("MADE-1"))).toEqual([
+      "Skipped MADE-1: no digest of the tracker lists it",
+    ])
+    expect(s.focus()).toEqual([])
+    const bare = setup(line("MADE-1", "High", 1))
+    writeFileSync(
+      join(bare.data, "firefighting.json"),
+      JSON.stringify({ lastTry: NOW.getTime() - MINUTE, lines: line("MADE-1", "High", 1) }),
+    )
+    await bare.pass()
+    expect(bare.spawns()).toEqual([])
+  })
+
   test("a line the owner holds (mine) starts like any other", async () => {
     const s = setup(line("MADE-1", "Medium", 1, { mine: true } as Partial<Line>))
     await s.pass()
@@ -283,7 +336,7 @@ describe("ops-firefighting-start", () => {
     ])
     writeFileSync(
       join(s.data, "firefighting.json"),
-      JSON.stringify({ lastTry: NOW.getTime(), lines: line("MADE-1", "Medium", 1) }),
+      relayFile(line("MADE-1", "Medium", 1), NOW.getTime()),
     )
     await s.pass()
     expect(s.spawns()).toHaveLength(1)
@@ -297,10 +350,7 @@ describe("ops-firefighting-start", () => {
     expect(s.startFile()?.ids).toEqual(["MADE-1"])
     writeFileSync(
       join(s.data, "firefighting.json"),
-      JSON.stringify({
-        lastTry: NOW.getTime(),
-        lines: line("MADE-1", "Medium", 1, { open: false }),
-      }),
+      relayFile(line("MADE-1", "Medium", 1, { open: false }), NOW.getTime()),
     )
     await s.pass()
     expect(s.startFile()).toBeUndefined()
@@ -312,7 +362,7 @@ describe("ops-firefighting-start", () => {
         ...line("MADE-1", "High", 1, { open: false }),
         ...line("MADE-2", "High", 2, { open: false, theirs: true }),
       },
-      {},
+      { "ops/ops-firefighting-start.state.json": RUNNING },
       { linear: { "MADE-1": "started", "MADE-2": "started" } },
     )
     await s.pass()
@@ -325,7 +375,7 @@ describe("ops-firefighting-start", () => {
   test("a closed line Linear still reads done starts nothing, and one first seen closed over 3 days ago is not asked", async () => {
     const s = setup(
       line("MADE-1", "High", 1, { open: false }),
-      {},
+      { "ops/ops-firefighting-start.state.json": RUNNING },
       { linear: { "MADE-1": "completed" } },
     )
     await s.pass()
@@ -333,13 +383,26 @@ describe("ops-firefighting-start", () => {
     s.later(3 * 24 * 60 + 1)
     writeFileSync(
       join(s.data, "firefighting.json"),
-      JSON.stringify({
-        lastTry: NOW.getTime() + (3 * 24 * 60 + 1) * MINUTE,
-        lines: line("MADE-1", "High", 1, { open: false }),
-      }),
+      relayFile(
+        line("MADE-1", "High", 1, { open: false }),
+        NOW.getTime() + (3 * 24 * 60 + 1) * MINUTE,
+      ),
     )
     await s.pass()
     expect(s.asked).toEqual([["MADE-1"]])
+  })
+
+  test("on its first beat, with no state file, the lines already closed count as closed before it ran and are not asked (#1160)", async () => {
+    const s = setup(
+      line("MADE-1", "High", 1, { open: false }),
+      {},
+      { linear: { "MADE-1": "backlog" } },
+    )
+    await s.pass()
+    s.later(10)
+    await s.pass()
+    expect(s.asked).toEqual([])
+    expect(s.spawns()).toEqual([])
   })
 
   test("with no folder set it starts none and tells the Builder once, naming the setting", async () => {
@@ -357,20 +420,38 @@ describe("ops-firefighting-start", () => {
     expect(s.spawns()[0]!.slice(-2)).toEqual(["--account", "made-up@example.com"])
   })
 
-  test("a refused start is told once with spawn.sh's last line, and tried again on the next pass", async () => {
+  test("a refused start is told once without its session name, leaves no brief, and is tried again on the next pass (#1160)", async () => {
     const s = setup(
       line("MADE-1", "Medium", 1),
       {},
       {
-        spawned: { code: 1, out: "spawn.sh refuses worker-made-up-1: the memory gate holds it\n" },
+        spawned: (argv) => ({
+          code: 1,
+          out: `spawn.sh refuses ${argv[2]}: the memory gate holds it\n`,
+        }),
       },
     )
     await s.pass()
     await s.pass()
-    expect(s.spawns()).toHaveLength(2)
-    expect(s.sent).toEqual([
-      "Not started for MADE-1: spawn.sh refuses worker-made-up-1: the memory gate holds it",
-    ])
+    expect(s.spawns().map((argv) => argv[2])).toEqual(["worker-made-up-1", "worker-made-up-2"])
+    expect(s.sent).toEqual(["Not started for MADE-1: the memory gate holds it"])
+    expect(readdirSync(s.data).filter((file) => file.startsWith("brief-worker-"))).toEqual([])
+  })
+
+  test("a High, Medium or Low line waits while any focus stands, with no name or brief, told once, and starts once it lifts (#1160)", async () => {
+    for (const reason of [`${REASON} MADE-9 open`, "the owner's demo"]) {
+      const s = setup(line("MADE-1", "Medium", 1), {
+        "focus.json": focusFile(reason, 60, "ff-first-worker"),
+      })
+      await s.pass()
+      await s.pass()
+      expect(s.spawns()).toEqual([])
+      expect(s.sent).toEqual(["Waiting on MADE-1 (Medium): focus stands for ff-first-worker"])
+      expect(readdirSync(s.data).filter((file) => file.startsWith("brief-worker-"))).toEqual([])
+      s.later(61)
+      await s.pass()
+      expect(s.titles()).toEqual(["MADE-1 firefight"])
+    }
   })
 
   test("a second Urgent starts past this job's own focus, which stands again for the session that held it", async () => {
@@ -400,7 +481,7 @@ describe("ops-firefighting-start", () => {
     ])
   })
 
-  test("its own focus is re-armed under 10 minutes left and lowered once no Urgent is open; a hand-set one is left alone", async () => {
+  test("its own focus is re-armed under 10 minutes left by an on that extends it and lowered once no Urgent is open; a hand-set one is left alone", async () => {
     const ours = setup(line("MADE-1", "Urgent", 1), {
       "focus.json": focusFile(`${REASON} MADE-1 open`, 5, "ff-first-worker"),
       "ops/ops-firefighting-start.state.json": FIRST,
@@ -408,7 +489,7 @@ describe("ops-firefighting-start", () => {
     })
     await ours.pass()
     expect(ours.spawns()).toEqual([])
-    expect(ours.focus().map((args) => args[0])).toEqual(["off", "on"])
+    expect(ours.focus().map((args) => args[0])).toEqual(["on"])
     const cleared = setup(line("MADE-1", "Urgent", 1, { open: false }), {
       "focus.json": focusFile(`${REASON} MADE-1 open`, 60),
     })

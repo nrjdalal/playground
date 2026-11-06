@@ -18,11 +18,12 @@ afterAll(() => {
 const BUSY = { FAKE_CPU_IDLE: "80", FAKE_LOAD5: "25.00" }
 const FULL = slots(4, 7)
 
-// One ticket's line as the relay writes firefighting.json, with made-up IDs; the relay's own pass() writing it is the org's test.
+// One ticket's line as the relay writes firefighting.json, with made-up IDs, its clock entry the tracker's digest listing it; the relay's own pass() writing it is the org's test.
 const relayWrites = (data: string, id: string, urgency: string) =>
   writeFileSync(
     join(data, "firefighting.json"),
     JSON.stringify({
+      clock: { [id]: { firstReported: new Date().toISOString(), urgency } },
       lastTry: Date.now(),
       lines: {
         [id]: { id, open: true, shownAt: Date.now(), urgency, urgent: urgency === "Urgent" },
@@ -30,15 +31,21 @@ const relayWrites = (data: string, id: string, urgency: string) =>
     }),
   )
 
-// The job's data folder and its ctx: spawn.sh runs on spawn-fake's machine, whose ~/.playground takes the job's start file and the case's focus, as one data folder holds both on a real Mac.
+// The job's data folder and its ctx: spawn.sh runs on spawn-fake's machine, whose ~/.playground takes the job's start file, the case's focus and the relay's stop file, as one data folder holds them all on a real Mac.
 const job = () => {
   const data = mkdtempSync(join(scratch, "ff-path-"))
   dirs.push(data)
   mkdirSync(join(data, "ops"))
   writeFileSync(join(data, "brief-ff.md"), "Work {TICKET} as {NAME}.\n")
   const spawned: Spawned[] = []
+  const sent: string[] = []
   const placed: number[] = []
-  const machine: { focus?: object; stop?: boolean } = {}
+  const machine: { stop?: boolean } = {}
+  // focus.json in the job's data folder, which the job reads and spawn.sh reads from its own copy
+  const focus = (f?: object) =>
+    f
+      ? writeFileSync(join(data, "focus.json"), JSON.stringify(f))
+      : rmSync(join(data, "focus.json"), { force: true })
   const ctx: Context = {
     now: new Date(),
     ops: join(data, "ops"),
@@ -55,14 +62,14 @@ const job = () => {
             join(home, ".playground", "firefighting-stop.json"),
             JSON.stringify({ ids: ["MADE-1"] }),
           )
-        if (machine.focus)
-          writeFileSync(join(home, ".playground", "focus.json"), JSON.stringify(machine.focus))
+        if (existsSync(join(data, "focus.json")))
+          copyFileSync(join(data, "focus.json"), join(home, ".playground", "focus.json"))
       })
       spawned.push(r)
       placed.push(Date.now())
       return { code: r.code, out: r.err }
     },
-    send: async () => true,
+    send: async (_, text) => (sent.push(text), true),
   }
   let n = 0
   const pass = () =>
@@ -73,7 +80,7 @@ const job = () => {
       linearStates: async () => ({}),
       name: async () => `bcdfg${++n + 1}-worker`,
     })
-  return { data, machine, pass, placed, spawned }
+  return { data, focus, machine, pass, placed, sent, spawned }
 }
 
 describe("a ticket's firefighting start on a busy machine (#1150)", () => {
@@ -101,35 +108,37 @@ describe("a ticket's firefighting start on a busy machine (#1150)", () => {
     },
   )
 
-  test("an Urgent focus standing holds a Medium line's start, which starts on the beat after the focus lifts", async () => {
-    const j = job()
-    const until = new Date(Date.now() + 60 * 60_000).toISOString()
-    j.machine.focus = {
-      reason: "Urgent SLA MADE-9 open",
-      session: "bcdfg9-worker",
-      since: new Date().toISOString(),
-      until,
-    }
-    relayWrites(j.data, "MADE-1", "Medium")
-    await j.pass()
-    expect(j.spawned[0]?.code).not.toBe(0)
-    expect(j.spawned[0]?.err).toContain("focus stands for bcdfg9-worker")
-    expect(placing(j.spawned[0]!)).toEqual([])
-    delete j.machine.focus
-    await j.pass()
-    expect(j.spawned[1]?.code).toBe(0)
-    expect(placing(j.spawned[1]!)).not.toEqual([])
-  })
+  test.each([false, true])(
+    "an Urgent focus holds a Medium line's start, with the relay's stop file standing: %p, and the Medium starts on the beat after it lifts (#1160)",
+    async (stop) => {
+      const j = job()
+      j.machine.stop = stop
+      j.focus({
+        reason: "Urgent SLA MADE-9 open",
+        session: "bcdfg9-worker",
+        since: new Date().toISOString(),
+        until: new Date(Date.now() + 60 * 60_000).toISOString(),
+      })
+      relayWrites(j.data, "MADE-1", "Medium")
+      await j.pass()
+      expect(j.spawned).toEqual([])
+      expect(j.sent).toEqual(["Waiting on MADE-1 (Medium): focus stands for bcdfg9-worker"])
+      j.focus()
+      await j.pass()
+      expect(j.spawned[0]?.code).toBe(0)
+      expect(placing(j.spawned[0]!)).not.toEqual([])
+    },
+  )
 
   test("a second Urgent starts under a standing focus, hand-set or not, while the relay's stop file stands", async () => {
     const j = job()
     const until = new Date(Date.now() + 60 * 60_000).toISOString()
-    j.machine.focus = {
+    j.focus({
       reason: "the owner's demo",
       session: "bcdfg9-worker",
       since: new Date().toISOString(),
       until,
-    }
+    })
     j.machine.stop = true
     relayWrites(j.data, "MADE-1", "Urgent")
     await j.pass()
