@@ -616,6 +616,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
         const r = Bun.spawnSync(["git", "-C", dir, ...args], { env: ENV })
         return r.exitCode === 0 ? r.stdout.toString().trim() : null
       },
+      finished: async () => false,
       held: async () => null,
       live,
       liveBranch: "live/dashboard",
@@ -722,6 +723,32 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       `removed ${wt}, branch PG-1-thing`,
     )
     expect(asked).toEqual([url, url])
+  })
+
+  // PG-1165
+  test("a merged or closed PR's worktree goes through playground rm --discard whatever it holds, while one whose PR is open or unreadable keeps its work", async () => {
+    const { main, wt } = machine()
+    const url = "https://github.com/o/r/pull/1"
+    const asked: (string | undefined)[] = []
+    const open = fakes(main, [], undefined, {
+      finished: async (path, pr) => (asked.push(`${path} ${pr}`), false),
+    })
+    writeFileSync(join(wt, "wip.txt"), "x\n")
+    expect(await cleanWorktree(wt, "r ended", open.deps, { pr: url })).toBe(
+      `kept ${wt}: uncommitted work`,
+    )
+    expect(open.calls).toEqual([])
+    const moved: string[] = []
+    const done = fakes(main, [], undefined, {
+      finished: async (path, pr) => (asked.push(`${path} ${pr}`), true),
+      rm: async (path, reason, pr, discard) => {
+        moved.push(`rm ${path} (${reason}) ${pr} discard=${discard}`)
+        return { ok: true, out: "" }
+      },
+    })
+    expect(await cleanWorktree(wt, "r ended", done.deps, { pr: url })).toBe(`removed ${wt}`)
+    expect(moved).toEqual([`rm ${wt} (r ended) ${url} discard=true`])
+    expect(asked).toEqual([`${wt} ${url}`, `${wt} ${url}`])
   })
 
   test("a dev:stop refusal keeps the worktree, while no recorded stack lets it go", async () => {

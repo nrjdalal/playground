@@ -21,6 +21,7 @@ import {
   RM_USAGE,
   type Decision,
   discardRefusal,
+  type PrState,
   type RmDeps,
   rmArgs,
   rmDeps,
@@ -118,6 +119,7 @@ const machine = () => {
     merged: () => false,
     notify: (text) => void told.push(text),
     places: () => [],
+    prState: async () => null,
     session: async () => "j6rjgy-worker",
   }
   return { deps, home, main, root, told }
@@ -249,7 +251,10 @@ test("a session's --discard passes only on an approved delete decision whose wha
     status,
   })
   const refusal = (found: Decision | null) =>
-    discardRefusal(wt, "#i9", "a session (role worker)", { decision: async () => found })
+    discardRefusal(wt, "#i9", "a session (role worker)", {
+      decision: async () => found,
+      prState: async () => null,
+    })
   const route = `post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`
   expect(await refusal(item("approved"))).toBeNull()
   expect(await refusal(item("denied"))).toBe(`--decision #i9 is denied, not approved: ${route}`)
@@ -266,6 +271,7 @@ test("a session's --discard passes only on an approved delete decision whose wha
   expect(
     await discardRefusal(wt, undefined, "a session (role worker)", {
       decision: async () => item("approved"),
+      prState: async () => null,
     }),
   ).toBe(`a session (role worker) passes --discard only with --decision <id>: ${route}`)
 })
@@ -311,6 +317,79 @@ const discardBy = async (wt: string, deps: RmDeps) => {
     console.error = error
   }
 }
+
+// A session's --discard with the worktree's PR state stubbed, and each (path, pr) it was asked for.
+const statedSession = (deps: RmDeps, state: PrState | null) => {
+  const asked: [string, string | undefined][] = []
+  const session: RmDeps = {
+    ...deps,
+    caller: async () => "a session (role worker)",
+    prState: async (path, pr) => (asked.push([path, pr]), state),
+  }
+  return { asked, session }
+}
+
+// PG-1165: a merged or closed PR's worktree goes to the trash with no Inbox delete decision
+test("a session's --discard passes with no --decision on a worktree whose PR merged or closed", async () => {
+  for (const state of ["MERGED", "CLOSED"] as const) {
+    const { deps, main } = machine()
+    const { wt } = dirtyWorktree(main)
+    const { asked, session } = statedSession(deps, state)
+    expect(await discardBy(wt, session)).toEqual({ code: 0, said: [] })
+    expect(existsSync(wt)).toBe(false)
+    expect(asked).toEqual([[wt, undefined]])
+  }
+  const { deps, main } = machine()
+  const { wt } = dirtyWorktree(main)
+  const { asked, session } = statedSession(deps, "MERGED")
+  const url = "https://github.com/o/r/pull/1"
+  expect(await runRm(["--worktree", wt, "--discard", "--pr", url], session)).toBe(0)
+  expect(asked).toEqual([[wt, url]])
+})
+
+test("a session's --discard on an OPEN PR's worktree, or one whose PR state reads as none (no PR, or GitHub unreadable), keeps today's route", async () => {
+  for (const state of ["OPEN", null] as const) {
+    const { deps, main } = machine()
+    const { route, wt } = dirtyWorktree(main)
+    const { asked, session } = statedSession(deps, state)
+    expect(await discardBy(wt, session)).toEqual({
+      code: 1,
+      said: [
+        `playground: a session (role worker) passes --discard only with --decision <id>: ${route}`,
+      ],
+    })
+    expect(asked).toEqual([[wt, undefined]])
+    expect(existsSync(wt)).toBe(true)
+  }
+})
+
+test("a worktree a live session holds is refused whatever its PR state, an approved decision's too", async () => {
+  for (const state of ["MERGED", "CLOSED", "OPEN", null] as const) {
+    const { deps, main } = machine()
+    const { wt } = dirtyWorktree(main)
+    const holder = { branch: "PG-1-thing", name: "abc123-worker", status: "working" }
+    writeFileSync(join(deps.data, "roster.json"), JSON.stringify({ agents: [holder] }))
+    const { session } = statedSession(deps, state)
+    const decision = async (): Promise<Decision> => ({
+      kind: "decision",
+      preview: { type: "delete", what: `the worktree ${wt}` },
+      status: "approved",
+    })
+    const said: string[] = []
+    const error = console.error
+    console.error = (line: string) => void said.push(line)
+    try {
+      const words = ["--worktree", wt, "--discard", "--decision", "#i9"]
+      expect(await runRm(words, { ...session, decision })).toBe(1)
+    } finally {
+      console.error = error
+    }
+    expect(said).toEqual([
+      `playground: ${wt} is held by abc123-worker, which the roster lists as working`,
+    ])
+    expect(existsSync(wt)).toBe(true)
+  }
+})
 
 // PG-825: a Bash prefix drops PLAYGROUND_ROLE, but not the claude process above the call
 test("a caller with no role, or whose role a prefix dropped, is still a session when a claude process runs above it, and --discard needs its decision", async () => {
