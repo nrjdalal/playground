@@ -751,6 +751,28 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(asked).toEqual([`${wt} ${url}`, `${wt} ${url}`])
   })
 
+  test("a clean worktree rm refuses for work not on canary goes through --discard once its PR merged or closed, and stays while it is open", async () => {
+    const { main, wt } = machine()
+    const unlanded = `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway`
+    for (const finished of [false, true]) {
+      const moved: string[] = []
+      const { deps } = fakes(main, [], undefined, {
+        finished: async () => finished,
+        rm: async (path, _reason, _pr, discard) => {
+          moved.push(`rm ${path} discard=${discard}`)
+          return discard ? { ok: true, out: "" } : { ok: false, out: unlanded }
+        },
+      })
+      expect(await cleanWorktree(wt, "r ended", deps)).toBe(
+        finished ? `removed ${wt}` : `kept ${wt}: ${unlanded}`,
+      )
+      expect(moved).toEqual([
+        `rm ${wt} discard=false`,
+        ...(finished ? [`rm ${wt} discard=true`] : []),
+      ])
+    }
+  })
+
   test("a dev:stop refusal keeps the worktree, while no recorded stack lets it go", async () => {
     const { main, wt } = machine()
     const refusal = "dev:stop: the stack's process groups also hold pid 9, so nothing is signalled"

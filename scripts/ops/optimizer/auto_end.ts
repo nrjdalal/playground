@@ -221,17 +221,23 @@ export async function unsavedLive(target: Target, projectsDir: string): Promise<
   return null
 }
 
-// What one worktree's cleanup reads and runs, so a test hands it fakes: git in a folder, the main checkout, the live dashboard's branch, the live session or clone holding a worktree, its dev stack's stop, playground rm --worktree, the containers docker lists and its remove, and whether a name is the live dashboard's database.
+// What one worktree's cleanup reads and runs, so a test hands it fakes: git in a folder, the main checkout, the live dashboard's branch, whether a worktree's PR has merged or closed, the live session or clone holding a worktree, its dev stack's stop, playground rm --worktree with or without --discard, the containers docker lists and its remove, and whether a name is the live dashboard's database.
 export type CleanupDeps = {
   containers: () => Promise<string[] | null>
   devStop: (dir: string) => Promise<{ ok: boolean; out: string }>
+  finished: (path: string, pr?: string) => Promise<boolean>
   git: (dir: string, args: string[]) => Promise<string | null>
   held: (path: string, pr?: string) => Promise<string | null>
   live: (container: string) => boolean
   liveBranch: string
   main: string
   removeContainer: (name: string) => Promise<boolean>
-  rm: (path: string, reason: string, pr?: string) => Promise<{ ok: boolean; out: string }>
+  rm: (
+    path: string,
+    reason: string,
+    pr?: string,
+    discard?: boolean,
+  ) => Promise<{ ok: boolean; out: string }>
 }
 
 // Pure: the containers a worktree's cleanup may remove, playground-<worktree>-db and -redis as AGENTS.md names a worktree's own, for a folder directly in <main>/.claude/worktrees alone and never the live dashboard's database.
@@ -245,7 +251,7 @@ export const containersFor = (
   return [`playground-${name}-db`, `playground-${name}-redis`].filter((c) => !live(c))
 }
 
-// One worktree a closed session used, cleaned once its work is saved, a hold by its PR's number alone from another session of that PR (the merging worker, a sibling checker) not counting, and a commit pushed counts as saved (a PR's head GitHub keeps after its branch is deleted on merge): a Playground worktree's dev stack stopped, the worktree moved to the trash by playground rm (which refuses one a live session or a process holds), then its containers removed by exact name; another repo's worktree removed by git with no force flag, then pruned; then its branch deleted. The line saying what went, or why it stayed.
+// One worktree a closed session used, cleaned once its work is saved or its PR has merged or closed (then through --discard, whatever it holds), a hold by its PR's number alone from another session of that PR (the merging worker, a sibling checker) not counting, and a commit pushed counts as saved (a PR's head GitHub keeps after its branch is deleted on merge): a Playground worktree's dev stack stopped, the worktree moved to the trash by playground rm (which refuses one a live session or a process holds), then its containers removed by exact name; another repo's worktree removed by git with no force flag, then pruned; then its branch deleted. The line saying what went, or why it stayed.
 export async function cleanWorktree(
   path: string,
   reason: string,
@@ -265,17 +271,20 @@ export async function cleanWorktree(
   if (branch === deps.liveBranch) return `kept ${path}: the live dashboard's checkout`
   const status = await deps.git(path, ["status", "--porcelain"])
   if (status === null) return `kept ${path}: could not read its git status`
-  if (status) return `kept ${path}: uncommitted work`
-  const ahead = await deps.git(path, [
-    "rev-list",
-    "--count",
-    "HEAD",
-    "--not",
-    "--remotes",
-    ...(pushed ? [pushed] : []),
-  ])
-  if (ahead === null) return `kept ${path}: could not count its unpushed commits`
-  if (Number(ahead) > 0) return `kept ${path}: unpushed commits`
+  const ahead = status
+    ? null
+    : await deps.git(path, [
+        "rev-list",
+        "--count",
+        "HEAD",
+        "--not",
+        "--remotes",
+        ...(pushed ? [pushed] : []),
+      ])
+  if (!status && ahead === null) return `kept ${path}: could not count its unpushed commits`
+  const unsaved = status ? "uncommitted work" : Number(ahead) > 0 ? "unpushed commits" : null
+  const discard = unsaved !== null && (await deps.finished(path, pr))
+  if (unsaved && !discard) return `kept ${path}: ${unsaved}`
   const repo = dirname(commonDir)
   const gone: string[] = []
   let listed: string[] | null = []
@@ -288,7 +297,10 @@ export async function cleanWorktree(
     const stopped = await deps.devStop(path)
     if (!stopped.ok && !stopped.out.includes("no stack is recorded"))
       return `kept ${path}: ${stopped.out}`
-    const moved = await deps.rm(path, reason, pr)
+    let moved = await deps.rm(path, reason, pr, discard)
+    // rm's refusal of work not landed on canary names --discard, which a finished PR's worktree takes
+    if (!moved.ok && !discard && moved.out.includes("--discard removes it anyway"))
+      if (await deps.finished(path, pr)) moved = await deps.rm(path, reason, pr, true)
     if (!moved.ok) return `kept ${path}: ${moved.out}`
     listed = await deps.containers()
     if (listed)
@@ -308,7 +320,7 @@ export async function cleanWorktree(
   return `removed ${path}${containers}${deleted ? `, branch ${branch}` : ""}`
 }
 
-// This machine's cleanup deps: git, the main checkout this one belongs to, bun run dev:stop in the worktree, playground rm --worktree from this checkout, docker ps -a and docker rm -fv, and the live dashboard's database name.
+// This machine's cleanup deps: git, the main checkout this one belongs to, bun run dev:stop in the worktree, playground rm's PR state, playground rm --worktree from this checkout, docker ps -a and docker rm -fv, and the live dashboard's database name.
 export async function cleanupDeps(): Promise<CleanupDeps | null> {
   const common = await git(REPO, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
   if (!common) return null
@@ -327,6 +339,10 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
       const { code, out } = await runIn(["bun", "run", "--cwd", dir, "dev:stop"])
       const lines = out.split("\n")
       return { ok: code === 0, out: lines.find((l) => l.startsWith("dev:stop:")) ?? lines.at(-1)! }
+    },
+    finished: async (path, pr) => {
+      const state = await rm.prState(path, pr)
+      return state === "MERGED" || state === "CLOSED"
     },
     git,
     // rm's roster, clone and link holders alone: its process check would see the stack dev:stop is about to stop, and its saved-work checks run after the stop
@@ -349,10 +365,11 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
     liveBranch: pair.branch,
     main: dirname(common),
     removeContainer: async (name) => (await runIn(["docker", "rm", "-fv", name])).code === 0,
-    rm: async (path, reason, pr) => {
+    rm: async (path, reason, pr, discard) => {
       const cli = join(REPO, "packages", "scripts", "src", "playground", "cli.ts")
       const argv = [process.execPath, "--no-env-file", cli, "rm", "--worktree", path]
-      const { code, out } = await runIn([...argv, ...(pr ? ["--pr", pr] : []), "--reason", reason])
+      const flags = [...(discard ? ["--discard"] : []), ...(pr ? ["--pr", pr] : [])]
+      const { code, out } = await runIn([...argv, ...flags, "--reason", reason])
       return { ok: code === 0, out: out.split("\n").at(-1) ?? "" }
     },
   }

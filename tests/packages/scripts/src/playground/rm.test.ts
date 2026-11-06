@@ -22,6 +22,7 @@ import {
   type Decision,
   discardRefusal,
   type PrState,
+  prStateOf,
   type RmDeps,
   rmArgs,
   rmDeps,
@@ -207,7 +208,7 @@ test("runRm --worktree refuses a worktree with uncommitted work, naming --discar
     console.error = error
   }
   expect(said).toEqual([
-    `playground: ${wt} holds 1 uncommitted change (wip.txt): playground rm --worktree ${wt} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`,
+    `playground: ${wt} holds 1 uncommitted change (wip.txt): playground rm --worktree ${wt} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`,
   ])
   expect(existsSync(wt)).toBe(true)
   said.length = 0
@@ -391,6 +392,19 @@ test("a worktree a live session holds is refused whatever its PR state, an appro
   }
 })
 
+test("a worktree's PR state counts only when exactly one PR answers, as a branch used twice finds two, and its head is the worktree's HEAD or an ancestor of it", () => {
+  const holds = (sha: string) => sha === "head" || sha === "older"
+  expect(prStateOf([{ headRefOid: "head", state: "MERGED" }], holds)).toBe("MERGED")
+  expect(prStateOf([{ headRefOid: "older", state: "CLOSED" }], holds)).toBe("CLOSED")
+  expect(prStateOf([{ headRefOid: "other", state: "MERGED" }], holds)).toBeNull()
+  const twice = [
+    { headRefOid: "head", state: "MERGED" },
+    { headRefOid: "older", state: "OPEN" },
+  ] as const
+  expect(prStateOf([...twice], holds)).toBeNull()
+  expect(prStateOf([], holds)).toBeNull()
+  expect(prStateOf(null, holds)).toBeNull()
+})
 // PG-825: a Bash prefix drops PLAYGROUND_ROLE, but not the claude process above the call
 test("a caller with no role, or whose role a prefix dropped, is still a session when a claude process runs above it, and --discard needs its decision", async () => {
   const { deps, main, root } = machine()

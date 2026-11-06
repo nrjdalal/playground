@@ -81,7 +81,9 @@ export type Decision = {
   status?: string
 }
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, the session the caller is (callerOf), and the session's name.
+export type PrState = "CLOSED" | "MERGED" | "OPEN"
+
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, a worktree's PR state by its --pr or else its branch (null when none reads), the session the caller is (callerOf), and the session's name.
 export type RmDeps = {
   caller: () => Promise<string | undefined>
   clones: () => Clone[]
@@ -92,6 +94,7 @@ export type RmDeps = {
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
   places: () => string[]
+  prState: (path: string, pr?: string) => Promise<PrState | null>
   procs: () => Proc[] | null
   session: () => Promise<string>
 }
@@ -201,6 +204,33 @@ const merged = (sha: string, at: string): boolean | null => {
   return run.exitCode === 0 && (out === "true" || out === "false") ? out === "true" : null
 }
 
+// Pure: a worktree's PR state, counted only when exactly one PR answers, since a branch name used twice can find another's, and that PR's head is the worktree's HEAD or an ancestor of it; else null.
+export const prStateOf = (
+  prs: { headRefOid: string; state: PrState }[] | null,
+  holds: (sha: string) => boolean,
+): PrState | null => (prs?.length === 1 && holds(prs[0]!.headRefOid) ? prs[0]!.state : null)
+
+// A worktree's PR state from gh in it, the --pr URL's else its branch's, by prStateOf, or null when gh or git cannot answer.
+const prState = async (path: string, pr?: string): Promise<PrState | null> => {
+  const gh = (args: string[]) => {
+    try {
+      const run = Bun.spawnSync(["gh", ...args], { cwd: path, stderr: "ignore", stdout: "pipe" })
+      return run.exitCode === 0 ? JSON.parse(run.stdout.toString()) : null
+    } catch {
+      return null
+    }
+  }
+  const fields = ["--json", "headRefOid,state"]
+  const branch = pr ? null : gitIn(path, "symbolic-ref", "--quiet", "--short", "HEAD")
+  if (branch && !branch.ok) return null
+  const list = branch
+    ? gh(["pr", "list", "--head", branch.out, "--state", "all", "--limit", "2", ...fields])
+    : gh(["pr", "view", pr!, ...fields, "--jq", "[.]"])
+  const states = new Set(["CLOSED", "MERGED", "OPEN"])
+  const prs = Array.isArray(list) && list.every((p) => states.has(p?.state)) ? list : null
+  return prStateOf(prs, (sha) => gitIn(path, "merge-base", "--is-ancestor", sha, "HEAD").ok)
+}
+
 // An Inbox item from bun run ask get in the Dashboard's checkout, which holds the Inbox's database, or null when none reads.
 const decisionOf =
   (repo: string) =>
@@ -236,19 +266,25 @@ export const rmDeps = (repo: string): RmDeps => ({
       stdout: "ignore",
     }),
   places: linkPlaces,
+  prState,
   procs: processes,
   session: sessionName,
 })
 
-// Why a caller callerOf names may not pass --discard here, or null: it names with --decision an approved Inbox delete decision whose what names this path, so the owner's Approve is the authority and the session runs it.
+// Why a caller callerOf names may not pass --discard here, or null: the worktree's PR has merged or closed, so its work is done with, or it names with --decision an approved Inbox delete decision whose what names this path, so the owner's Approve is the authority and the session runs it; a PR state that cannot be read keeps the decision's gate.
 export const discardRefusal = async (
   path: string,
   id: string | undefined,
   caller: string,
-  deps: Pick<RmDeps, "decision">,
+  deps: Pick<RmDeps, "decision" | "prState">,
+  pr?: string,
 ): Promise<string | null> => {
   const route = `post an Inbox delete decision with bun run ask new naming ${resolve(path)} and why, then run playground rm --worktree ${path} --discard --decision <id> once it is approved`
-  if (id === undefined) return `${caller} passes --discard only with --decision <id>: ${route}`
+  if (id === undefined) {
+    const state = await deps.prState(path, pr)
+    if (state === "MERGED" || state === "CLOSED") return null
+    return `${caller} passes --discard only with --decision <id>: ${route}`
+  }
   const item = await deps.decision(id)
   if (!item)
     return `--decision ${id} names no Inbox item the Dashboard's checkout can read: ${route}`
@@ -325,7 +361,9 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   }
   if ("discard" in args && args.discard) {
     const caller = await deps.caller()
-    const refusal = caller ? await discardRefusal(args.path, args.decision, caller, deps) : null
+    const refusal = caller
+      ? await discardRefusal(args.path, args.decision, caller, deps, args.pr)
+      : null
     if (refusal) {
       console.error(`playground: ${refusal}`)
       return 1

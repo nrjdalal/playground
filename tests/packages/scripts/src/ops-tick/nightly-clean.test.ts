@@ -107,7 +107,7 @@ describe("worktrees", () => {
     expect(discardable("kept /w: could not count its unpushed commits")).toBe(false)
     expect(
       discardable(
-        "kept /w: /w's HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree /w --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved",
+        "kept /w: /w's HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree /w --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved",
       ),
     ).toBe(true)
     expect(

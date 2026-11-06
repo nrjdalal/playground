@@ -327,7 +327,8 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
   A session's PRs are its roster `pr` and `prs` list, its open branch PRs, its worker's, and every PR its own or its worker's transcript links, so one still open keeps it.
 - Each end runs `spawn.sh close <name>`, then `roster.ts report <name> "ended automatically: <why>" status=ended`, the merged sha in the why, and sends its lead one line: its roster `lead`, else its worker's.
 - Then it cleans each worktree the session used, one at a time (`cleanWorktree`), and the lead's line names what went and what stayed, with why; a reviewer ended idle keeps its worktrees for its resume.
-  A worktree with uncommitted work or unpushed commits stays, and so does the live dashboard's checkout, by its branch.
+  A worktree with uncommitted work, unpushed commits or work not on canary stays while its PR is open or its state cannot be read; once its PR has merged or closed it goes through `playground rm --worktree <path> --discard` whatever it holds, with no Inbox decision.
+  The live dashboard's checkout stays, by its branch.
   A Playground worktree in `.claude/worktrees/` that a live session or a clone holds stays, where a hold by the merged PR's number alone, from the worker still merging it, does not count.
   So does one a symlink outside it points into (another worktree's, a marked scratch folder's or a session scratchpad's, at its top level or one level into its `node_modules`), and its line names the first three links.
   Any other has its dev stack stopped (`bun run dev:stop` there, whose refusal keeps it), goes to the 7-day trash through `playground rm --worktree` (`--pr <url>` at a merge), which keeps one a process holds, and then loses its `playground-<worktree>-db` and `-redis` containers (`docker rm -fv`, each name matched whole, never the live dashboard's database) and its local branch.
