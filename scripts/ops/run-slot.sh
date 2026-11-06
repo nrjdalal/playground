@@ -567,7 +567,7 @@ set_flags() { local w; for w in "$@"; do case "$w" in pipefail) ;; [-+] | [-+]*[
 bare_dir() { local d=$1; while [ ${#d} -gt 1 ] && [ "${d%/}" != "$d" ]; do d=${d%/}; done; printf '%s' "$d"; }
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
-# Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form a reading of cd, ~ or env let through): a git add, commit, merge or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add, commit or push after it or as `git -C <that kind of folder>`, `bun run precommit:light` in run-slot's own repo, and a script's `set` of shell options, each word plain. CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
+# Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form a reading of cd, ~ or env let through): a git add, commit, merge or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add, commit, merge or push after it or as `git -C <that kind of folder>`, `bun run precommit:light` in run-slot's own repo, and a script's `set` of shell options, each word plain. CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
 CHAIN_SAFE="" CHAIN_BAD=""
 chain_safe() {
   local line words cdir="" folder verb rest=()
@@ -616,7 +616,7 @@ merge_words() {
   done
   [ -n "$refs" ]
 }
-# a chain's lane: `commit` when it commits, merges or pushes and chain_safe takes every step, so it ends in seconds as a bare commit does (4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue); `general <step>` for one that commits or pushes with a step outside that list, which run-slot says, so its worker can run the commit on its own; else nothing
+# a chain's lane: `commit` when it commits, merges or pushes and chain_safe takes every step, so it ends in seconds as a bare commit does (4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue); `general <step>` for one that commits, merges or pushes with a step outside that list, which run-slot says, so its worker can run the commit on its own; else nothing
 chain_lane() {
   local line words commits=""
   while IFS= read -r line; do
