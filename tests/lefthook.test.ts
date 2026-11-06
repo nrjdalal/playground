@@ -436,6 +436,9 @@ test("the pre-push marker check refuses a pushed conflict marker a hooks-off com
     expect(refused.out).toContain(
       "scripts/hooks/bundled/guard.js:2, scripts/hooks/bundled/guard.js:6",
     )
+    // a remote branch that already holds the marker, pushed again with a clean commit on top: read from the remote sha, the push adds no marker
+    const after = await commit("notes.md", "one\ntwo\nthree\n")
+    expect(push(after, marked)).toMatchObject({ code: 0 })
     const branch = push(marked, ZERO)
     expect(branch.code).not.toBe(0)
     expect(branch.out).toContain("scripts/hooks/bundled/guard.js:2")
