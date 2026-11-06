@@ -1,4 +1,4 @@
-// PreToolUse hook: refuses a Claude Code session not started through scripts/spawn.sh, since only spawn.sh holds the factory to its capacity gate (load, memory, slots for a new worker, and usage). It reads each cmux call by the commands of cmux 0.65.1's Start & Resume and Agents help groups and the terminal openers: a command it runs that starts claude (`--command`, `--shell`, `--layout`, respawn-pane's trailing words, the words after `--` for `surface`), an agent or saved session it opens, forks, restores or wakes that is or may be Claude (omc and recover --session among them); a `claude --resume` or `--continue`; and every herdr call but its reads and a scratch world of the session's own, herdr by any path or a program it cannot read followed by a herdr group, since herdr's socket has no access control.
+// PreToolUse hook: refuses a Claude Code session not started through scripts/spawn.sh, since only spawn.sh holds the factory to its capacity gate (load, memory, slots for a new worker, and usage). It refuses every cmux call but its help and version, cmux by any path or a program it cannot read followed by one of cmux's session commands, since every session runs in herdr and no factory session calls cmux; a `claude --resume` or `--continue`; and every herdr call but its reads and a scratch world of the session's own, herdr by any path or a program it cannot read followed by a herdr group, since herdr's socket has no access control.
 import "../../packages/env/src/aliases"
 import { join, resolve, sep } from "node:path"
 
@@ -10,7 +10,6 @@ import {
   marked,
   pathOf,
   run,
-  slice,
   type Text,
   unreadable,
   type Visit,
@@ -40,17 +39,12 @@ const HEADS = new Set([
   "tmux",
   "vault",
 ])
-// Agents cmux knows besides Claude: a fork or restore that names one of these, and no Claude, opens no Claude session.
-const OTHER_AGENTS = new Set(["codex", "opencode", "pi"])
 // cmux's global options that take a value, which come before its command.
 const GLOBAL_TAKES = new Set(["--id-format", "--password", "--socket", "--window"])
-// agent's subcommands that talk to a session rather than open one.
-const AGENT_TALK = new Set(["hibernate", "inbox", "message", "messages"])
-// respawn-pane's flags that take a value; any other word after it is the command it runs.
-const RESPAWN_TAKES = new Set(["--command", "--surface", "--window", "--workspace"])
 const REOPENS = new Set(["-c", "-r", "--continue", "--resume"])
-// cmux's program, by its name.
+// cmux's program, by its name, and the words that alone print its help or version and open nothing.
 const TERMINAL = /^cmux$/
+const CMUX_READS = new Set(["--help", "-h", "--version", "version"])
 
 // herdr 0.9.5's command groups; a program the hook cannot read is judged as herdr when one of these follows it.
 const HERDR_HEADS = new Set([
@@ -130,46 +124,6 @@ const beforeDashes = (args: Word[]) => {
 const reopens = (args: Word[]) =>
   beforeDashes(args).some((a) => REOPENS.has(a.value) || /^--(?:resume|continue)=/.test(a.value))
 
-// claude, or a program the hook cannot read, which could be claude.
-const findsClaude: Visit = async (_cmd, { first, name }) =>
-  name === "claude" || (first && (first.unknown || marked(first.value))) ? "claude" : undefined
-
-// A flag's values, as `--flag <value>` or `--flag=<value>`.
-function flagValues(args: Word[], flag: string): Word[] {
-  const found: Word[] = []
-  args.forEach((a, k) => {
-    if (a.value === flag && args[k + 1]) found.push(args[k + 1])
-    else if (a.value.startsWith(`${flag}=`)) found.push(slice(a, flag.length + 1))
-  })
-  return found
-}
-
-// Words joined as the shell hands them on, as one command line.
-function joined(words: Word[]): Word[] {
-  if (words.length === 0) return []
-  const unknown = words.find((w) => unreadable(w)) ? "a word it cannot read" : undefined
-  return [{ quoted: true, unknown, value: words.map((w) => w.value).join(" ") }]
-}
-
-// The command respawn-pane runs from its trailing words.
-function trailing(args: Word[], from: number): Word[] {
-  const words: Word[] = []
-  for (let k = from; k < args.length; k++) {
-    const v = args[k].value
-    if (RESPAWN_TAKES.has(v)) k++
-    else if (!v.startsWith("--")) words.push(args[k])
-  }
-  return joined(words)
-}
-
-const namesClaude = (w: Word) =>
-  w.value === "claude" || /^--(?:agent|provider)=claude$/.test(w.value)
-
-// Whether a call that opens an agent opens Claude, or may: it names claude, holds a word the hook cannot read, or names no other agent (`fork --surface` forks whatever the surface held).
-const mayOpenClaude = (words: Word[]) =>
-  words.some((w) => namesClaude(w) || unreadable(w)) ||
-  !words.some((w) => OTHER_AGENTS.has(w.value) || /^--agent=(?!claude$)/.test(w.value))
-
 // The words that are not flags, skipping the values of cmux's global options, so `--id-format both restore-session` names restore-session.
 function positionals(words: Word[]): string[] {
   const found: string[] = []
@@ -181,56 +135,13 @@ function positionals(words: Word[]): string[] {
   return found
 }
 
-function judgeOpener(head: string, second: string | undefined, words: Word[]): string | undefined {
-  const what = `a cmux ${head}`
-  if (head === "claude-teams" || head === "omc" || head === "restore-session")
-    return refuse(`${what}, which starts or restores Claude sessions`)
-  if (head === "recover" && flagValues(words, "--session").length > 0)
-    return refuse("a cmux recover --session, which opens a saved session")
-  if (head === "session" && second === "restore")
-    return refuse("a cmux session restore, which restores saved sessions")
-  if ((head === "restore" || head === "fork") && mayOpenClaude(words))
-    return refuse(`${what} that may open a Claude session`)
-  if (head === "vault" && second === "fork" && mayOpenClaude(words))
-    return refuse("a cmux vault fork that may open a Claude session")
-  if ((head === "agent" || head === "agent-hibernation") && second === "wake")
-    return refuse(`${what} wake, which resumes a session`)
-  if (head === "agent" && !AGENT_TALK.has(second ?? "") && mayOpenClaude(words))
-    return refuse("a cmux agent that may open a Claude session")
-  if (head === "new-surface") {
-    const provider = flagValues(words, "--provider")
-    if (provider.some((p) => unreadable(p) || p.value === "claude"))
-      return refuse("a cmux new-surface that opens a Claude agent session")
-  }
-}
-
-async function judgeCmux(args: Word[], env: Env): Promise<string | undefined> {
-  const words = beforeDashes(args)
-  if (words.some((w) => w.value === "--help" || w.value === "-h")) return
-  const [head, second] = positionals(words)
-  if (!head) return
-  const opened = judgeOpener(head, second, words)
-  if (opened) return opened
-  const what = `a cmux ${head}`
-  // A layout's surfaces each run their own command or open an agent session, so any mention of claude in it counts.
-  for (const layout of flagValues(words, "--layout")) {
-    if (unreadable(layout)) return refuse(`${what} whose layout it cannot read`)
-    if (/\bclaude\b/i.test(layout.value)) return refuse(`${what} whose layout starts claude`)
-  }
-  const commands = [
-    ...flagValues(words, "--command"),
-    ...flagValues(words, "--shell"),
-    ...(head === "surface" ? joined(args.slice(words.length + 1)) : []),
-    ...(head === "respawn-pane"
-      ? trailing(words, words.findIndex((w) => w.value === head) + 1)
-      : []),
-  ]
-  for (const command of commands) {
-    if (unreadable(command)) return refuse(`${what} whose command it cannot read`)
-    const inner: Env = { ...env, files: new Map(), vars: new Map() }
-    if (await run(lex(command.value, env.known), inner, findsClaude))
-      return refuse(`${what} that starts claude`)
-  }
+// Every cmux call but its help or version alone: no factory code calls cmux, and every session runs in herdr.
+function judgeCmux(args: Word[]): string | undefined {
+  if (args.length === 1 && CMUX_READS.has(args[0].value)) return
+  const [head] = positionals(beforeDashes(args))
+  return refuse(
+    `a cmux ${head ?? "call"}, since every session runs in herdr and no factory session calls cmux (only \`cmux --help\`, \`-h\`, \`--version\` and \`version\` run)`,
+  )
 }
 
 // herdr's words up to any `--`, skipping its global options and their values.
@@ -355,13 +266,13 @@ const visit: Visit = async (cmd, { args, first, local, name }, env) => {
     )
   if (args.some((a) => a.value === "herdrdev/herdr"))
     return refuseHerdr("herdr's agent skill, which teaches typing into other panes")
-  if (TERMINAL.test(name)) return judgeCmux(args, env)
+  if (TERMINAL.test(name)) return judgeCmux(args)
   // herdr sets HERDR_BIN_PATH in every pane it opens, so a program word expanding it is herdr whatever follows.
   if (name === "herdr" || first?.variable === "HERDR_BIN_PATH") return judgeHerdr(args, local, env)
   if (first && (first.unknown || marked(first.value))) {
     if (HERDR_HEADS.has(herdrWords(args)[0] ?? "")) return judgeHerdr(args, local, env, first)
     const [head] = positionals(beforeDashes(args))
-    return head && HEADS.has(head) ? judgeCmux(args, env) : undefined
+    return head && HEADS.has(head) ? judgeCmux(args) : undefined
   }
   if (name === "claude" && reopens(args)) return refuse("a claude --resume or --continue")
 }

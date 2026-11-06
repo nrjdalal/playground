@@ -106,14 +106,24 @@ describe("everything else runs", () => {
       "spawn.sh by its home path",
       "~/.claude/skills/playbook/../../../scripts/spawn.sh runner runner-x b.md",
     ],
-    ["a split with a plain shell", "cmux new-split right --command zsh --focus false"],
-    ["a split with no command", "cmux new-split right --workspace workspace:3"],
-    ["cmux reads", "cmux tree --workspace workspace:3"],
-    ["closing a surface", "cmux close-surface --surface surface:4"],
     ["a headless trial", "claude -p 'read the skill' < /dev/null"],
     ["claude's version", "claude --version"],
     ["text that names a spawn", "echo 'cmux new-workspace --command claude'"],
     ["a grep for it", "grep -rn 'claude --resume' docs"],
+    ["another program behind a variable", "$EDITOR -- $FILE"],
+    ["an MCP server whose command follows --", 'claude mcp add foo -- bash -c "echo hi"'],
+  ])("%s", async (_name, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+})
+
+// #665's D4 (a): every session runs in herdr and no factory session calls cmux, so every cmux call but its help or version alone is refused, by any path, behind env or a global option, and as a program it cannot read followed by one of cmux's session commands.
+describe("cmux runs only for its help or version", () => {
+  test.each([
+    ["a split with a plain shell", "cmux new-split right --command zsh --focus false"],
+    ["a split with no command", "cmux new-split right --workspace workspace:3"],
+    ["cmux reads", "cmux tree --workspace workspace:3"],
+    ["closing a surface", "cmux close-surface --surface surface:4"],
     ["a codex agent-session surface", "cmux new-surface --type agent-session --provider codex"],
     ["a browser surface", "cmux new-surface --type browser --url https://example.com"],
     ["a pane with a plain shell", "cmux new-pane --direction right"],
@@ -124,7 +134,6 @@ describe("everything else runs", () => {
     ["a vault search for Claude sessions", "cmux vault sessions --agent claude"],
     ["an agent put to sleep", "cmux agent-hibernation hibernate surface:3"],
     ["a screen read with a variable", "cmux read-screen --surface $S --lines 40"],
-    ["another program behind a variable", "$EDITOR -- $FILE"],
     ["a restore of a Codex session", "cmux restore codex 0f1e2d"],
     ["a cloud Codex agent", "cmux agent codex -- fix the bug"],
     ["keystrokes after --", 'cmux send --surface surface:2 -- "hello $USER"'],
@@ -134,14 +143,36 @@ describe("everything else runs", () => {
     ["fork's help", "cmux fork -h"],
     ["a search for sessions to recover", "cmux recover --query export"],
     ["a read behind --id-format", "cmux --id-format both tree --all"],
-    ["an MCP server whose command follows --", 'claude mcp add foo -- bash -c "echo hi"'],
     [
       "a layout of shells",
       `cmux new-workspace --layout '{"pane":{"surfaces":[{"type":"terminal","command":"vim"}]}}'`,
     ],
     ["a respawned pane with a shell", "cmux respawn-pane --surface surface:3 zsh"],
-  ])("%s", async (_name, command) => {
+    ["cmux by its path", "/Applications/cmux.app/Contents/Resources/bin/cmux tree --all"],
+    ["cmux behind env", "env CMUX_QUIET=1 cmux tree --all"],
+    ["a bare cmux", "cmux"],
+    ["help with more words", "cmux --help tree"],
+  ])("%s is refused", async (_name, command) => {
+    const reason = await bash(command)
+    expect(reason).toContain("no-raw-spawn hook refuses a cmux")
+    expect(reason).toContain("no factory session calls cmux")
+  })
+
+  test.each([
+    ["cmux --help"],
+    ["cmux -h"],
+    ["cmux --version"],
+    ["cmux version"],
+    ["/Applications/cmux.app/Contents/Resources/bin/cmux --version"],
+  ])("%s runs", async (command) => {
     expect(await bash(command)).toBeUndefined()
+  })
+
+  // D4's form 12: a call the hook cannot read that names cmux beside a word that opens or restores a session is refused, and any other runs.
+  test("a call it cannot read is refused when it names cmux and a restore", async () => {
+    const deep = "$(".repeat(200_000)
+    expect(await bash(`cmux --version && echo ${deep}`)).toBeUndefined()
+    expect(await bash(`cmux restore x && echo ${deep}`)).toContain("could not read this call")
   })
 })
 
@@ -596,7 +627,7 @@ describe("it fails open", () => {
     const refused = await run("cmux new-workspace --command 'claude -n x'")
     expect(refused.code).toBe(2)
     expect(refused.err).toContain("no-raw-spawn hook refuses")
-    expect((await run("cmux tree --all")).code).toBe(0)
+    expect((await run("cmux --version")).code).toBe(0)
   })
 })
 
