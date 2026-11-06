@@ -12,6 +12,15 @@ export const groups: Group[] = [
       ["dd of zsh's completion words array", "dd if=$words"],
       ["dd of zsh's compstate hash", "dd if=$compstate"],
       ["dd of zsh's killring array", "dd if=$killring"],
+      ["ln -s of zsh's registers hash", "ln -s $registers"],
+      [
+        "read -A split from its builtin by a line continuation, then ln of a variable",
+        "read \\\n-A \"$(printf '\\x58')\" <<< 'a b'; ln -s $X",
+      ],
+      [
+        "typeset -a split from its builtin by a line continuation, then ln of a variable",
+        "typeset \\\n-a \"$(printf '\\x58')\"; ln -s $X",
+      ],
     ],
   },
   {

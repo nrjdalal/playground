@@ -253,6 +253,7 @@ describe("zshSplits reads a long line in linear time (PG-1222)", () => {
     ["read words", "read ".repeat(40_000)],
     ["declaring builtins", "declare ".repeat(25_000)],
     ["expansions", Array.from({ length: 25_000 }, (_, i) => `$v${i}`).join(" ")],
+    ["newlines", "\n".repeat(200_000)],
   ])("200 KB of %s", (_, line) => {
     const start = performance.now()
     zshSplits(line)
