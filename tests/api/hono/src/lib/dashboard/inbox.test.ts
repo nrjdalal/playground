@@ -4420,6 +4420,23 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       ])
     })
 
+    test("a reveal card's value under 8 characters refuses no comment, since a substring match would find it in most words (#1102)", async () => {
+      const posted = await post({ ...decision(REVEAL), from: "dispatcher" })
+      const sent: Delivery[] = []
+      const deliver = async (delivery: Delivery) => {
+        sent.push(delivery)
+        return { at: "2026-11-05T22:00:00.000Z", ok: true as const, sessionId: "s1" }
+      }
+      const replied = await store.replyItem(
+        db,
+        posted.id,
+        { text: "about the tab" },
+        { actor, deliver, reveal: async () => "ab" },
+      )
+      expect(replied.ok).toBe(true)
+      expect(sent.map((delivery) => delivery.text)).toEqual([`re #i${posted.ref}: about the tab`])
+    })
+
     test("a comment on any other card never reads the Keychain", async () => {
       const posted = await post(decision(PREVIEWS.ask))
       const asked: string[] = []
