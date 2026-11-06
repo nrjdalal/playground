@@ -152,9 +152,10 @@ export function Templates() {
       return `${template.label} added`
     },
     onError: (error) => toast.add({ title: error.message, type: "error" }),
+    // Add stays pending until the list is read again, so a second quick Add writes over the list with the first in it.
     onSuccess: (title) => {
       toast.add({ title, type: "success" })
-      void refresh()
+      return refresh()
     },
   })
 
@@ -194,71 +195,69 @@ export function Templates() {
         </Empty>
       ) : entries.length ? (
         <ItemGroup className="gap-2">
-          {entries.map(({ state, template }) => {
-            return (
-              <Item key={template.id} variant="outline" size="sm">
-                <ItemContent>
-                  <ItemTitle>{template.label}</ItemTitle>
-                  <ItemDescription>
-                    {[TEMPLATE_STATE_WORDS[state], templateWords(template)].join(" · ")}
-                  </ItemDescription>
-                </ItemContent>
-                <ItemActions>
-                  {state === "edited" && (
-                    <Hint content="Reset to default">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Reset ${template.label}`}
-                        disabled={!writable}
-                        onClick={() => setPending({ action: "reset", template })}
-                      >
-                        <RiArrowGoBackLine />
-                      </Button>
-                    </Hint>
-                  )}
-                  {state === "new" ? (
-                    <Hint content="Add to your templates">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Add ${template.label}`}
-                        disabled={!writable || add.isPending}
-                        onClick={() => add.mutate(template)}
-                      >
-                        <RiAddLine />
-                      </Button>
-                    </Hint>
-                  ) : (
-                    <Hint content="Edit">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Edit ${template.label}`}
-                        disabled={!writable}
-                        onClick={() => setEditing({ template })}
-                      >
-                        <RiPencilLine />
-                      </Button>
-                    </Hint>
-                  )}
-                  {state === "added" && (
-                    <Hint content="Remove">
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Remove ${template.label}`}
-                        disabled={!writable}
-                        onClick={() => setPending({ action: "remove", template })}
-                      >
-                        <RiDeleteBinLine />
-                      </Button>
-                    </Hint>
-                  )}
-                </ItemActions>
-              </Item>
-            )
-          })}
+          {entries.map(({ state, template }) => (
+            <Item key={template.id} variant="outline" size="sm">
+              <ItemContent>
+                <ItemTitle>{template.label}</ItemTitle>
+                <ItemDescription>
+                  {[TEMPLATE_STATE_WORDS[state], templateWords(template)].join(" · ")}
+                </ItemDescription>
+              </ItemContent>
+              <ItemActions>
+                {state === "edited" && (
+                  <Hint content="Reset to default">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Reset ${template.label}`}
+                      disabled={!writable}
+                      onClick={() => setPending({ action: "reset", template })}
+                    >
+                      <RiArrowGoBackLine />
+                    </Button>
+                  </Hint>
+                )}
+                {state === "new" ? (
+                  <Hint content="Add to your templates">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Add ${template.label}`}
+                      disabled={!writable || add.isPending}
+                      onClick={() => add.mutate(template)}
+                    >
+                      <RiAddLine />
+                    </Button>
+                  </Hint>
+                ) : (
+                  <Hint content="Edit">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Edit ${template.label}`}
+                      disabled={!writable}
+                      onClick={() => setEditing({ template })}
+                    >
+                      <RiPencilLine />
+                    </Button>
+                  </Hint>
+                )}
+                {state === "added" && (
+                  <Hint content="Remove">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`Remove ${template.label}`}
+                      disabled={!writable}
+                      onClick={() => setPending({ action: "remove", template })}
+                    >
+                      <RiDeleteBinLine />
+                    </Button>
+                  </Hint>
+                )}
+              </ItemActions>
+            </Item>
+          ))}
         </ItemGroup>
       ) : (
         <Empty>
