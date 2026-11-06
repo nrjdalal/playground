@@ -665,11 +665,16 @@ def can_be(w, names):
 
 reserved = {"!", "{", "if", "then", "else", "elif", "while", "until", "do"}
 unread = any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3])
-for step in steps:
+cases = 0
+for k, step in enumerate(steps):
     # past VAR=x and the reserved words that lead a command (if, then, do, ! and the rest)
     i = 0
     while i < len(step) and (re.match(r"[A-Za-z_][A-Za-z0-9_]*=", step[i]) or step[i] in reserved):
         i += 1
+    cases += (step[i : i + 1] == ["case"]) - (step[i : i + 1] == ["esac"])
+    # inside a case, a pattern (a word before ) or | that follows a ;, ;;, ;&, ;;& or |) names no program, so `*)` reads as no glob of a program
+    if cases > 0 and seps[k + 1] in (")", "|") and seps[k] in ("", ";", ";;", ";&", ";;&", "|"):
+        continue
     hidden = lambda w: w == "eval" or "$" in w
     if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
         unread = True
