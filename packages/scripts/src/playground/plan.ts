@@ -28,6 +28,8 @@ playground planner | builder | ops | optimizer
 playground status     one line each for the terminal, the Dashboard, the follower, each dispatcher, GLM and each herdr server
 playground sweep <lead>
                       what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs), or quiet
+playground focus [on --session <name> --reason "<why>" [--for <minutes>] | off]
+                      give one session the Mac for up to 180 minutes (120 by default): every merge, every other session's heavy run and every new session but its own reviewer and tester and a firefighting start waits until off or its end, and the Inbox holds what comes in quiet but an alert; off prints how many runs queued while it stood and how long they waited, the line the Inbox's card carries once focus ends; bare, it prints the focus standing
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
                       keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, and print the copy's path for an Inbox card's html attachment (bun run ask new), opening nothing; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground update [--to <tag>]
@@ -139,6 +141,9 @@ export const WORDS: Record<string, number | "rest"> = {
   "ext unlink": 2,
   "ext which": 1,
   "ext why": 3,
+  focus: 0,
+  "focus off": 0,
+  "focus on": 0,
   "herdr pin": "rest",
   "herdr stop": 0,
   migrate: 0,

@@ -1,7 +1,7 @@
 import { afterAll, afterEach, describe, expect, spyOn, test } from "bun:test"
 
 import {
-  holdsForThreads,
+  holdsForFirstTry,
   isPlainClick,
   pageAfterEmpty,
   patchThread,
@@ -194,6 +194,11 @@ describe("pendingIn (a thread view's messages on their way)", () => {
     expect(pendingIn([], messages, "k7mq", now).map((m) => m.id)).toEqual(["q", "s", "f"])
   })
 
+  test("a sending message whose line has landed shows no more, though its answer is still on its way", () => {
+    const landedOne = message({ entryId: "e", id: "s", state: "sending" })
+    expect(pendingIn([], [landedOne], "k7mq", now)).toEqual([])
+  })
+
   test("a typed message shows until the thread holds it", () => {
     const typed = message({ state: "typed", typedAt: "2026-10-23T10:00:01.000Z" })
     expect(pendingIn([], [typed], "k7mq", now)).toEqual([typed])
@@ -304,15 +309,20 @@ describe("renameSchema", () => {
   })
 })
 
-describe("holdsForThreads", () => {
+describe("holdsForFirstTry", () => {
   test("holds the nav for the first read alone", () => {
-    expect(holdsForThreads({ failureCount: 0, isPending: true })).toBe(true)
+    expect(holdsForFirstTry({ errorUpdateCount: 0, failureCount: 0, isPending: true })).toBe(true)
   })
 
   test("a failed read, retrying or given up, holds nothing, and neither does a read done", () => {
-    expect(holdsForThreads({ failureCount: 1, isPending: true })).toBe(false)
-    expect(holdsForThreads({ failureCount: 4, isPending: false })).toBe(false)
-    expect(holdsForThreads({ failureCount: 0, isPending: false })).toBe(false)
+    expect(holdsForFirstTry({ errorUpdateCount: 0, failureCount: 1, isPending: true })).toBe(false)
+    expect(holdsForFirstTry({ errorUpdateCount: 1, failureCount: 4, isPending: false })).toBe(false)
+    expect(holdsForFirstTry({ errorUpdateCount: 0, failureCount: 0, isPending: false })).toBe(false)
+  })
+
+  // A read that failed with no data turns pending again on its next try, failureCount back to 0, as when a group that reads the same query mounts once the nav draws: held again, the nav would unmount that group and fetch in a loop.
+  test("a read again after a failure holds nothing", () => {
+    expect(holdsForFirstTry({ errorUpdateCount: 1, failureCount: 0, isPending: true })).toBe(false)
   })
 })
 

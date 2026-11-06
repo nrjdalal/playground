@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test"
-import { mkdtempSync, readdirSync, rmSync } from "node:fs"
+import { mkdtempSync, readdirSync, rmdirSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { dirname, join, relative } from "node:path"
 
 import { SQL } from "bun"
 
@@ -89,7 +89,7 @@ test("bun run ask example prints each template, and the usage for a kind it has 
 describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
   let container = ""
   let url = ""
-  let answer: (id: string) => Promise<void>
+  let answer: (id: string, input?: { action: "approve" | "deny"; option?: number }) => Promise<void>
   let dismiss: (id: string) => Promise<void>
   let answerRelayed: (id: string) => Promise<{ delivery: unknown }>
   let reply: (tag: string) => Promise<void>
@@ -137,8 +137,8 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     const { answerItem, dismissItems, recordReply, scheduleItem } =
       await import("../../../../../api/hono/src/lib/dashboard/inbox")
     const db = (await import("../../../../../packages/db/dist/index.mjs")).createDatabase(url)
-    answer = async (id) => {
-      const answered = await answerItem(db, id, { action: "approve" }, { actor: { label: "test" } })
+    answer = async (id, input = { action: "approve" }) => {
+      const answered = await answerItem(db, id, input, { actor: { label: "test" } })
       if (!answered.ok) throw new Error(answered.message)
     }
     answerRelayed = async (id) => {
@@ -220,6 +220,32 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
         status: "open",
         title: DECISION.title,
       })
+    }
+  })
+
+  // playground rm --decision matches a delete's what against the full path alone, so a short name there would take the owner a second approval
+  test("refuses a delete decision that names its target by a short name, naming the full path, and posts one that names the full path", async () => {
+    const target = mkdtempSync(join(tmpdir(), "ask-delete-"))
+    try {
+      const remove = (what: string) => ({
+        from: "worker-envy",
+        kind: "decision",
+        preview: { type: "delete", what, why: "a made-up scratch folder" },
+        title: "Delete the scratch folder?",
+      })
+      const short = relative(process.cwd(), target)
+      const refused = await cli(["new"], JSON.stringify(remove(`the folder ${short}`)))
+      expect(refused.code).toBe(1)
+      expect(refused.stderr).toContain(`write ${target} for ${short}`)
+      expect(refused.stdout).toBe("")
+      const { id } = await post(remove(`the folder ${target}`))
+      const got = await cli(["get", id])
+      expect(JSON.parse(got.stdout)).toMatchObject({
+        preview: { type: "delete", what: `the folder ${target}` },
+        status: "open",
+      })
+    } finally {
+      rmdirSync(target)
     }
   })
 
@@ -311,6 +337,37 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(answered.status).toBe("approved")
     expect(answered.answer.choice).toBe("approve")
     expect(answered.delivery).toMatchObject({ status: "delivered", via: "cli" })
+  })
+
+  test("new hints at an ask that labels no options, and get prints the option the owner picked on stderr (#873)", async () => {
+    const bare = await cli(
+      ["new"],
+      JSON.stringify({
+        from: "worker-envy",
+        preview: { text: "Port it?", type: "ask" },
+        title: "Port it?",
+      }),
+    )
+    expect(bare.code).toBe(0)
+    expect(bare.stderr).toContain("ask: this ask labels no options")
+    const lettered = {
+      from: "worker-envy",
+      preview: {
+        options: [{ label: "Port to staging, then main" }, { label: "Hotfix main" }],
+        text: "Which way does the fix go?",
+        type: "ask",
+      },
+      title: "Which way?",
+    }
+    const picked = await post(lettered)
+    expect((await cli(["get", picked.id])).stderr).not.toContain("ask: picked")
+    await answer(picked.id, { action: "approve", option: 1 })
+    const got = await cli(["get", picked.tag])
+    expect(got.stderr).toContain("ask: picked B: Hotfix main")
+    expect(JSON.parse(got.stdout).answer).toMatchObject({ choice: "approve", option: 1 })
+    const none = await post(lettered)
+    await answer(none.id, { action: "deny" })
+    expect((await cli(["get", none.id])).stderr).toContain("ask: picked C: None of these")
   })
 
   test("get --ack prints a dismissed update as it is, since an update takes no answer to mark read", async () => {
@@ -478,11 +535,11 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
   })
 
   // a chat-replied item the owner had moved to Done kept its open status, so it still listed as open
-  test("open lists a snoozed item and one replied to in chat until it moves to Done, and never an update", async () => {
+  test("open lists an item put away with Later and one replied to in chat until it moves to Done, and never an update", async () => {
     const snoozed = await post({
       ...DECISION,
       from: "worker-open-c",
-      title: "Ship the snoozed one?",
+      title: "Ship the one put away?",
     })
     const replied = await post({
       ...DECISION,

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 
 import { config } from "../../../../../web/next/src/lib/config"
-import { channelsEvery, yardApi } from "../../../../../web/next/src/lib/yard-api"
+import { channelsEvery, holdsForYard, yardApi } from "../../../../../web/next/src/lib/yard-api"
 
 const real = globalThis.fetch
 afterEach(() => {
@@ -50,6 +50,23 @@ describe("the sidebar's channel reads", () => {
     expect(channelsEvery(false, { code: "UPSTREAM_ERROR" })).toBe(30_000)
     expect(channelsEvery(false, { code: "NOT_FOUND" })).toBe(false)
     expect(channelsEvery(true, null)).toBe(false)
+  })
+})
+
+describe("the nav's wait on Yard", () => {
+  const first = { errorUpdateCount: 0, failureCount: 0, isPending: true }
+
+  test("holds for Yard's first read while its deadline has not passed", () => {
+    expect(holdsForYard(first, false)).toBe(true)
+  })
+
+  test("holds nothing once the deadline passes, so a slow Yard leaves the session groups drawn", () => {
+    expect(holdsForYard(first, true)).toBe(false)
+  })
+
+  test("holds nothing once the read answered or failed", () => {
+    expect(holdsForYard({ ...first, isPending: false }, false)).toBe(false)
+    expect(holdsForYard({ ...first, errorUpdateCount: 1 }, false)).toBe(false)
   })
 })
 

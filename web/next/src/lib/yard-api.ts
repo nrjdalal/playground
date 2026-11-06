@@ -3,11 +3,12 @@
 import { env } from "@packages/env/web-next"
 import type { MESSAGE_KINDS } from "@packages/message"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 
 import { unwrap } from "@/lib/api/client"
 import { config } from "@/lib/config"
 import { queryRetry } from "@/lib/query"
+import { holdsForFirstTry } from "@/lib/threads"
 import {
   catchUp,
   messagesKey,
@@ -101,14 +102,35 @@ export const channelsEvery = (hosted: boolean, error: unknown): number | false =
   hosted || (error as { code?: string } | null)?.code === "NOT_FOUND" ? false : 30_000
 
 // The sidebar's channels and DMs; a stack with no Yard (the local routes absent) reads an error, and the groups stay away.
-export const useYardChannels = () =>
+export const useYardChannels = (enabled = true) =>
   useQuery({
+    enabled,
     queryFn: async () => (await yardApi.channels()).channels ?? [],
     queryKey: CHANNELS_KEY,
     refetchInterval: (query) => channelsEvery(config.hosted, query.state.error),
     retry: (count, error) =>
       (error as { code?: string }).code !== "NOT_FOUND" && queryRetry(count, error),
   })
+
+// How long the sidebar's nav waits on Yard's first read before it draws without Yard's groups, which then arrive above Orchestrators: a hosted Yard read can run to its 15s timeout.
+export const YARD_HOLD_MS = 1_000
+
+// Pure: whether the nav waits on Yard's channels read: its first try alone (holdsForFirstTry), and never once YARD_HOLD_MS has passed (late).
+export const holdsForYard = (
+  read: Parameters<typeof holdsForFirstTry>[0],
+  late: boolean,
+): boolean => !late && holdsForFirstTry(read)
+
+// Whether YARD_HOLD_MS has passed since Yard's read was let start (started, the owner rung read), so a session that answers late still gives the read its full second.
+export function useYardLate(started: boolean): boolean {
+  const [late, setLate] = useState(false)
+  useEffect(() => {
+    if (!started) return
+    const timer = setTimeout(() => setLate(true), YARD_HOLD_MS)
+    return () => clearTimeout(timer)
+  }, [started])
+  return late
+}
 
 export const useYardMessages = (channel: string) =>
   useQuery(messagesQuery(channel, async () => (await yardApi.messages(channel)).messages ?? []))

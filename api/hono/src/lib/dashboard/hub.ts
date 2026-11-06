@@ -383,3 +383,45 @@ export class DashboardHub {
 }
 
 export const dashboardHub = new DashboardHub()
+
+// How long the board stays subscribed after the last read, so the hosted relay's read every 5 s takes the newest frame rather than starting the hub's feed and a full refresh each time.
+export const BOARD_HOLD_MS = 30_000
+
+// The board as the socket sends it, for a client with no socket (the hosted relay, which carries requests and no live frames): the newest board frame while it holds a subscription, held holdMs past the last read; null when none comes within timeoutMs.
+export function boardReader(
+  hub: Pick<DashboardHub, "subscribe"> = dashboardHub,
+  { holdMs = BOARD_HOLD_MS, timeoutMs = 10_000 }: { holdMs?: number; timeoutMs?: number } = {},
+): () => Promise<DashboardFrame | null> {
+  let latest: DashboardFrame | null = null
+  let leave: (() => void) | null = null
+  let idle: ReturnType<typeof setTimeout> | null = null
+  const waiters = new Set<(frame: DashboardFrame | null) => void>()
+  const stop = () => {
+    leave?.()
+    leave = null
+    latest = null
+  }
+  return () => {
+    if (idle) clearTimeout(idle)
+    idle = setTimeout(stop, holdMs)
+    idle.unref?.()
+    leave ??= hub.subscribe((frame) => {
+      if (frame.type === "entries") return
+      latest = frame
+      for (const waiter of waiters) waiter(frame)
+    })
+    if (latest) return Promise.resolve(latest)
+    return new Promise((resolve) => {
+      const done = (frame: DashboardFrame | null) => {
+        waiters.delete(done)
+        clearTimeout(timer)
+        resolve(frame)
+      }
+      const timer = setTimeout(() => done(null), timeoutMs)
+      waiters.add(done)
+    })
+  }
+}
+
+// The dashboard's one reader, for GET /api/v1/board.
+export const boardFrame = boardReader()

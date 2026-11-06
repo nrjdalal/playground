@@ -4,7 +4,15 @@ import { useEffect, useState } from "react"
 
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { useInbox } from "@/lib/inbox"
-import { DOT, newInInbox, showsDot, TAB_DOT_POLLING, useMark, type DotSources } from "@/lib/tab-dot"
+import {
+  DOT,
+  loudItems,
+  newInInbox,
+  showsDot,
+  TAB_DOT_POLLING,
+  useMark,
+  type DotSources,
+} from "@/lib/tab-dot"
 import { useAppUnread } from "@/plugins/registry"
 
 // The plain favicon with the red dot in its top right corner (DOT), drawn once from the icon the page links, in the theme's destructive red; null when the icon cannot be drawn.
@@ -40,7 +48,8 @@ export function useDotSources(): DotSources {
   const { allowed } = useDashboard()
   // a hidden tab is when the dot matters most, so its reads poll there too
   const changelog = useAppUnread(allowed, TAB_DOT_POLLING.background)("changelog")
-  const items = useInbox(allowed, TAB_DOT_POLLING).data?.items ?? []
+  const list = useInbox(allowed, TAB_DOT_POLLING).data
+  const items = list ? loudItems(list) : []
   const inboxSeenAt = useMark("inbox")
   return {
     changelog: allowed && changelog > 0,
