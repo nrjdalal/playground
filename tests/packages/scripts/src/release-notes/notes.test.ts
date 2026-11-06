@@ -75,7 +75,7 @@ const COMMITS = [
 describe("renderNotes (PG-1213)", () => {
   const notes = renderNotes({ commits: COMMITS, from: "v0.0.1", repo: REPO, to: "v0.0.2" })
 
-  test("renders ZeroStarter's shape: the compare link, emoji sections in changelogen's order, then the contributors' logins", () => {
+  test("renders ZeroStarter's shape: the compare link, emoji sections in changelogen's order, then each contributor's name and handle", () => {
     expect(notes).toBe(
       [
         `[compare changes](${URL}/compare/v0.0.1...v0.0.2)`,
