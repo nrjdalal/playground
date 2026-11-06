@@ -280,6 +280,21 @@ describe("a docker build outside run-slot is refused from any folder, naming the
     ["docker compose up --build", "docker compose up --build", "up --no-build"],
     ["docker compose up, which builds a missing image", "docker compose up -d", "up --no-build"],
     ["docker compose run --build", "docker compose run --build api", "up --no-build"],
+    [
+      "docker compose run whose command takes -h",
+      "docker compose run --rm api df -h",
+      "up --no-build",
+    ],
+    [
+      "docker compose run whose command takes --help",
+      "docker compose run api node --help",
+      "up --no-build",
+    ],
+    [
+      "docker compose run whose command holds --no-build",
+      "docker compose run api echo --no-build",
+      "up --no-build",
+    ],
     ["docker compose create --build", "docker compose create --build", "up --no-build"],
     ["docker compose watch, which builds and rebuilds", "docker compose watch", "up --no-build"],
     [
@@ -315,6 +330,11 @@ describe("a docker build outside run-slot is refused from any folder, naming the
     ["docker builder f --help", "docker builder f --help"],
     ["docker compose watch --help", "docker compose watch --help"],
     ["docker compose up --no-build", "docker compose up --no-build -d"],
+    [
+      "docker compose run --no-build before its service",
+      "docker compose run --no-build --rm api df -h",
+    ],
+    ["docker compose run --help", "docker compose run --help"],
     ["docker run", "docker run --rm alpine true"],
     ["portless get", "bunx portless get api"],
     ["portless's compose up --no-build", "bunx portless compose up --no-build -d"],
