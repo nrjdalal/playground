@@ -836,7 +836,7 @@ describe("a resume with no id finds its session by name in its folder (#1201)", 
     const refused = await spawn(["resume", "worker-x", root], [], NONE, undefined, claude)
     expect(refused.code).toBe(1)
     expect(refused.err).toContain(`no session named worker-x ran in ${root}`)
-    expect(verdicts(refused)).not.toContain("pass")
+    expect(verdicts(refused)).toEqual(["check"])
     const passed = await spawn(["resume", "worker-x", root], [], NONE, undefined, claude, ranHere)
     expect(passed.code).toBe(0)
     expect(verdicts(passed).filter((v) => v === "pass")).toHaveLength(1)
