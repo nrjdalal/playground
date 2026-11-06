@@ -406,7 +406,7 @@ boot() {
   roll_up START
 }
 
-# a prebuild step that queues or runs in run-slot is this script's child, stopped with it by its pid, so run-slot ends its own command
+# the clone's prebuild step, a job of this shell, is stopped by its pid, so run-slot ends its own command; the install and the build run in a subshell, which this trap waits out (bash defers it), while run.sh's group stop reaches the build's
 trap 'say "supervisor stopping"; [ ! -s "$S/prebuild.pid" ] || kill -TERM "$(cat "$S/prebuild.pid")" 2>/dev/null; stop_all; exit 0' TERM INT HUP
 rm -f "$S/prebuild.pid"
 

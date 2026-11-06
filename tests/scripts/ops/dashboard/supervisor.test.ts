@@ -12,6 +12,8 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { SCRIPT as RUN_SLOT, machine as slotMachine } from "../run-slot-fake"
+
 const root = join(import.meta.dir, "..", "..", "..", "..")
 const script = await Bun.file(join(root, "scripts", "ops", "dashboard", "supervisor.sh")).text()
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "supervisor-urls-")))
@@ -1269,6 +1271,28 @@ describe("the supervisor's build before the stop queues in run-slot (#1099)", ()
       "say prebuild build queued 7s",
     ])
     expect(existsSync(stage)).toBe(false)
+  })
+
+  // the stand-in takes every argv, so the head's run-slot reads the lane each one takes, on a data folder of its own with no runs.log history to steer quick
+  test("the head's run-slot sends the clone to the clone lane, the install to the quick lane and the build to the queue", async () => {
+    const m = slotMachine()
+    const kind = async (line: string) => {
+      const p = Bun.spawn(
+        ["bash", RUN_SLOT, "kind", "--", ...line.replace(/^slot /, "").split(" ")],
+        {
+          cwd: m.root,
+          env: m.env(),
+          stdout: "pipe",
+        },
+      )
+      expect(await p.exited).toBe(0)
+      return (await new Response(p.stdout).text()).trim()
+    }
+    expect([await kind(steps[0]), await kind(steps[1]), await kind(steps[2])]).toEqual([
+      "clone",
+      "quick",
+      "",
+    ])
   })
 
   test("a step queued past PREBUILD_SLOW logs once that it still waits, and keeps waiting rather than building bare", async () => {
