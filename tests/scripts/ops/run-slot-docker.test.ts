@@ -252,6 +252,162 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     })
   })
 
+  // chain_steps read only a chain whose first word was sh, bash or zsh, so a chain behind a wrapper word, in another POSIX shell, or built by eval or a variable gave no steps, and its docker build skipped the lane
+  describe("a chain behind a wrapper word or in another shell is read for docker", () => {
+    const run = async (argv: string[]) => {
+      const m = dockerMachine()
+      const marker = join(m.root, "ran")
+      const p = Bun.spawn(["bash", SCRIPT, "worker-d", "--", ...argv], {
+        cwd: m.root,
+        env: m.env({ MARKER: marker }),
+        stderr: "pipe",
+      })
+      const code = await p.exited
+      return {
+        calls: m.dockerCalls(),
+        code,
+        err: await new Response(p.stderr).text(),
+        ran: existsSync(marker),
+      }
+    }
+    const CHAIN = "refuses a chain that builds a docker image"
+    const CANNOT = "cannot read this chain's steps, so it refuses one that names docker or portless"
+
+    test("a wrapper with an option value before sh -c", async () => {
+      const r = await run(["nice", "-n", "5", "sh", "-c", "docker build ."])
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CHAIN)
+    })
+
+    test("a wrapper with a positional value before bash -c", async () => {
+      const r = await run(["timeout", "600", "bash", "-c", "docker compose build web"])
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CHAIN)
+    })
+
+    for (const shell of ["dash", "ksh"])
+      test(`a ${shell} chain`, async () => {
+        const r = await run([shell, "-c", "docker build ."])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CHAIN)
+      })
+
+    test("an unplaced first word before a shell's -c", async () => {
+      const r = await run(["launcher", "sh", "-c", "docker build ."])
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CANNOT)
+    })
+
+    test("an eval step", async () => {
+      const r = await run(["sh", "-c", "eval docker build ."])
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CANNOT)
+    })
+
+    test("a step run through a variable", async () => {
+      const r = await run(["sh", "-c", "x=docker; $x build ."])
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CANNOT)
+    })
+
+    // review round 1: a wrapper option's value is never its program, so a docker word there leaves the shell after it to be read
+    for (const argv of [
+      ["sudo", "-g", "docker", "sh", "-c", "docker build ."],
+      ["sudo", "-u", "docker", "bash", "-c", "docker compose build web"],
+      ["env", "-u", "docker", "sh", "-c", "docker build ."],
+      ["timeout", "-k", "docker", "600", "sh", "-c", "docker build ."],
+      ["xargs", "-I", "docker", "sh", "-c", "docker build ."],
+    ])
+      test(`a docker word as a wrapper option's value: ${argv.slice(0, 3).join(" ")}`, async () => {
+        const r = await run(argv)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CHAIN)
+      })
+
+    // review round 1: a $ word behind a wrapper word, and a command substitution in any word, name their program only when the shell runs them
+    for (const script of [
+      "D=docker; command $D build .",
+      "D=docker; time $D build .",
+      'echo "$(docker build .)"',
+      "x=`docker build .`",
+      "echo `docker build .`",
+      "`echo docker` build .",
+    ])
+      test(`a step it cannot read: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CANNOT)
+      })
+
+    // review round 2: a backquote's inner script splits at ;, so its program's name is read over the whole chain and the words before the shell, not its own step's words
+    for (const argv of [
+      ["sh", "-c", "echo docker; `printf dock; printf er` build ."],
+      ["env", "X=docker", "sh", "-c", "`printf dock; printf er` build ."],
+    ])
+      test(`a substitution whose name sits in another step: ${argv.join(" ")}`, async () => {
+        const r = await run(argv)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CANNOT)
+      })
+
+    // a command substitution that reads portless's URL starts no container, so it keeps its lane
+    test("while a portless URL read in a substitution keeps its lane", async () => {
+      const m = dockerMachine()
+      const p = Bun.spawn(
+        [
+          "bash",
+          SCRIPT,
+          "kind",
+          "--",
+          "sh",
+          "-c",
+          'curl -s "$(bunx portless get api.playground)/api/health"',
+        ],
+        { cwd: m.root, env: m.env(), stdout: "pipe" },
+      )
+      expect(await p.exited).toBe(0)
+      expect((await new Response(p.stdout).text()).trim()).toBe("")
+    })
+
+    test("while a wrapped chain that names no docker runs as before", async () => {
+      const r = await run(["nice", "sh", "-c", 'echo hi && touch "$MARKER"'])
+      expect(r.code).toBe(0)
+      expect(r.ran).toBe(true)
+    })
+
+    // the 3 docker runs the runs log held on 3 and 4 Nov, each a container whose own shell runs -c, which is no build on this machine
+    for (const argv of [
+      [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "bash:5",
+        "bash",
+        "-c",
+        'echo "$BASH_VERSION"',
+      ],
+      ["docker", "run", "--rm", "--network", "none", "bash:5", "bash", "-c", "XY=; N=X; echo ok"],
+      [
+        "docker",
+        "run",
+        "--rm",
+        "-v",
+        "/scratch/probe:/m:ro",
+        "bash:5",
+        "sh",
+        "-c",
+        "bash sp.sh; bash ansi.sh",
+      ],
+    ])
+      test(`and a docker run whose container shell runs -c passes: ${argv.slice(0, 6).join(" ")}`, async () => {
+        const r = await run(argv)
+        expect(r.err).not.toContain("refuses")
+        expect(r.calls.some((c) => c.includes(" run --rm "))).toBe(true)
+      })
+  })
+
   test("a docker build runs in the capped builder, made when missing at half the VM's memory, and stopped after", async () => {
     const m = dockerMachine()
     expect(await m.start("worker-d", {}, SCRIPT, ["docker", "build", "."]).ran()).toBe(true)
