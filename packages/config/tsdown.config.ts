@@ -2,6 +2,7 @@ import { defineConfig } from "tsdown"
 
 export default defineConfig({
   entry: [
+    "src/accounts.ts",
     "src/console.ts",
     "src/inbox.ts",
     "src/kinds.ts",

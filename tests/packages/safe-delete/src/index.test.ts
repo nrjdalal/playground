@@ -217,6 +217,30 @@ describe("quarantine, listTrash and restore", () => {
     }
     expect(quarantine(plain, { ...opts, worktree: holders }, roots)).toHaveProperty("refused")
   })
+
+  // PG-1066: the route the refusal names is the one a big tree still takes: the lead's cleanup, past what plain rm moves
+  test("--worktree on a plain folder past the tripwire names its cap and the lead's cleanup, as plain rm then refuses it", () => {
+    const roots = machine()
+    const big = join(roots.home, "scratch", "big")
+    mkdirSync(big, { recursive: true })
+    for (let i = 0; i <= 5000; i++) writeFileSync(join(big, String(i)), "")
+    const holders = {
+      clones: () => [],
+      discard: true,
+      live: ["working"],
+      merged: () => true,
+      places: () => [],
+      procs: [],
+      roster: join(roots.root, "roster.json"),
+    }
+    const worktrees = join(roots.main, ".claude", "worktrees")
+    expect(quarantine(big, { ...opts, worktree: holders }, roots, { now: NOW })).toEqual({
+      kind: "refused",
+      refused: `--worktree takes a folder in ${worktrees}, not ${big}: playground rm ${big} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
+    })
+    expect(quarantine(big, opts, roots, { now: NOW })).toMatchObject({ kind: "tripwire" })
+    expect(existsSync(big)).toBe(true)
+  })
 })
 
 describe("the tripwire", () => {
