@@ -893,6 +893,22 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a lone dash ahead of a split string naming sudo and a harmless command",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'env' - -S 'sudo ls'",
     ],
+    [
+      "su given a harmless command of its own",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | su -c ls",
+    ],
+    [
+      "su with a user given a harmless command of its own",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | su root -c 'ls -la'",
+    ],
+    [
+      "busybox's su applet given a harmless command of its own",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | busybox su -c ls",
+    ],
+    [
+      "busybox running another harmless applet",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | busybox cat",
+    ],
     ["a quoted ~- used as a literal folder name", "mkdir '~-' && touch '~-/f'"],
     ["a write under ~+, the worktree itself", "touch ~+/f"],
     ["a write under ~- after a cd out of the worktree", "cd /usr; touch ~-/f"],
