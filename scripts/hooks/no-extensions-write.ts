@@ -115,7 +115,7 @@ const RSYNC_FLAGS = new Set(["backup", "partial"])
 const RSYNC_TEMP = /^-[^-@BefMT]*T/
 // Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
 const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
-// Homebrew's GNU coreutils and findutils under their g prefix (gcp, grm, gfind), each read as the remover, writer or wrapper it names
+// Homebrew's GNU coreutils and findutils under their g prefix (gcp, grm, gfind): a coreutils name reads as the remover or writer it names, and gfind and gxargs are examined again as find and xargs, so the tool lookup never yields either
 const GNU_NAMED = /^g(cp|dd|find|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink|xargs)$/
 // A writer's options that take a value rather than name a target, by short letter (`gnu` for a GNU build alone, `bsd` for macOS's alone) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner, strip program, and macOS's destdir, hash, link flags, metalog and tags, mkdir's mode, mv's suffix, touch's adjustment, date, reference file and stamp; cp's, install's, ln's and mv's -t names their target folder, and macOS install's -M its metalog, read apart
 const WRITER_TAKES: Record<
@@ -826,13 +826,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // findutils' g names are read again as find and xargs, so every check those two take reads them; the words swap in place, keeping the Command steadyAt knows and the program's path
     const findutils = GNU_NAMED.exec(name)?.[1]
     if (first && (findutils === "find" || findutils === "xargs")) {
-      // a g name env -S splits out of its string is no word of the command, so there is no word to swap
-      if (!cmd.words.includes(first))
+      const value = first.value.replace(new RegExp(`g${findutils}$`, "i"), findutils)
+      // a g name env -S splits out of its string is no word of the command, and one written so its name is not the word's end (a trailing slash) has none to swap, so either would be examined as itself again
+      if (!cmd.words.includes(first) || value === first.value)
         return refuse(
-          `${name} inside env -S's string, which the hook reads as find or xargs only as a word of its own; run it without env -S`,
+          `${name} written where the hook cannot read it as ${findutils}, inside env -S's string or with more after its name; run it as a word of its own, ${name} or ${findutils}`,
         )
       const { words } = cmd
-      const value = first.value.replace(/g(find|xargs)$/i, "$1")
       cmd.words = words.map((word) => (word === first ? { ...word, value } : word))
       try {
         return await examine(cmd, env, visit, false)

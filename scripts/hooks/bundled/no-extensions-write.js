@@ -3196,10 +3196,10 @@ async function inspect(raw, environment, unknown = false) {
     const { args, first, name, xargs } = parsed;
     const findutils = GNU_NAMED.exec(name)?.[1];
     if (first && (findutils === "find" || findutils === "xargs")) {
-      if (!cmd.words.includes(first))
-        return refuse(`${name} inside env -S's string, which the hook reads as find or xargs only as a word of its own; run it without env -S`);
+      const value = first.value.replace(new RegExp(`g${findutils}$`, "i"), findutils);
+      if (!cmd.words.includes(first) || value === first.value)
+        return refuse(`${name} written where the hook cannot read it as ${findutils}, inside env -S's string or with more after its name; run it as a word of its own, ${name} or ${findutils}`);
       const { words } = cmd;
-      const value = first.value.replace(/g(find|xargs)$/i, "$1");
       cmd.words = words.map((word) => word === first ? { ...word, value } : word);
       try {
         return await examine(cmd, env, visit, false);
