@@ -99,6 +99,18 @@ export const groups: Group[] = [
         "true # don't\nsource /tmp/f; ln -s $X\necho 'x'",
       ],
       [
+        "ln of a variable after a file sourced in repeat's do",
+        "repeat 1 do source /tmp/f; done; ln -s $X",
+      ],
+      [
+        "ln of a variable after a file sourced in the do of a for with no in",
+        "for x do source /tmp/f; done; ln -s $X",
+      ],
+      [
+        "ln of a variable after a file sourced in the do of a select with no in",
+        "select x do source /tmp/f; done; ln -s $X",
+      ],
+      [
         "ln of a variable after a file sourced as if's condition in zsh -c",
         `zsh -c 'if source /tmp/f; then :; fi; ln -s $X'`,
       ],
