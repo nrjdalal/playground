@@ -459,6 +459,9 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       // round 2 of #1209: a case pattern names no program, so `*)` reads as no glob of one
       'case "$1" in a|doc?er) exit 1 ;; *) touch "$MARKER" ;; esac',
       'case x in a) case y in *) :;; esac;; *) touch "$MARKER";; esac',
+      // round 3 of #1219: a substitution in single quotes runs nothing, and one whose glob can be no docker or shell reads as before
+      "echo '$(/usr/local/bin/doc?er build .)'; touch \"$MARKER\"",
+      'echo $(ls /bin/s*.none 2> /dev/null); touch "$MARKER"',
     ])
       test(`while a glob that is no program word runs as before: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
@@ -519,6 +522,14 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       ["launcher", "sh", "-c", "/usr/local/bin/doc?er build ."],
       ["sh", "-c", "echo /usr/local/bin/doc\\?er build . | sh"],
       ["sh", "-c", "eval /usr/local/bin/doc\\?er build ."],
+      // review round 3 of #1219: a command substitution's script, in a case word or pattern or in a word it does not lead
+      ["sh", "-c", "case x in $(/usr/local/bin/doc?er build .)) ;; esac"],
+      ["sh", "-c", "case $(/usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["sh", "-c", "case x in `/usr/local/bin/doc?er build .`) ;; esac"],
+      ["sh", "-c", "echo `/usr/local/bin/doc?er build .`"],
+      ["sh", "-c", "x=`/usr/local/bin/doc?er build .`"],
+      ["sh", "-c", 'echo "$(/usr/local/bin/doc?er build .)"'],
+      ["sh", "-c", 'case x in $(/bin/s? -c "/usr/local/bin/doc?er build .")) ;; esac'],
     ])
       test(`a docker glob in a script run-slot does not open: ${argv.join(" ")}`, async () => {
         const r = await run(argv)
