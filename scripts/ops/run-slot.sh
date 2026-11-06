@@ -513,19 +513,6 @@ git_verb() {
     esac
   done
 }
-# a git run's -C folder before its subcommand, read as git_verb reads, each -C after the first joined to it as git joins them; nothing for none
-git_dir() {
-  local a state=lead d=""
-  for a in "$@"; do
-    case "$state" in
-      lead) case "$a" in env|*=*) continue ;; esac; [ "$(basename -- "$a")" = git ] || return; state=git ;;
-      git) case "$a" in -C) state=dir ;; -c | --git-dir | --work-tree | --namespace | --config-env) state=value ;; -*) ;; *) break ;; esac ;;
-      dir) case "$a" in /*) d=$a ;; *) d=${d:+$d/}$a ;; esac; state=git ;;
-      value) state=git ;;
-    esac
-  done
-  printf '%s' "$d"
-}
 # a word sh would leave as written, with no $, backquote, ~, glob, brace or # (a comment to sh, which shlex keeps as a word), quoted or not, so the word run-slot reads is the word the command gets; a ( stays, since chain_steps splits at each unquoted one (a type(scope): message)
 plain() { local a; said "$@" || return 1; for a in "$@"; do case "$a" in *[$'\x02\x03\x04\x05\x06\x07']*) return 1 ;; esac; done; }
 # a commit message word: as plain, but a ?, *, [, {, # or ~ that chain_steps found quoted is the message's own text (a `closes` line naming an issue), which no git step reads as a path
@@ -727,16 +714,18 @@ chain_add() {
   [ -z "$tracked" ] || CHAIN_ADD_TRACKED=1
   CHAIN_ADD+=(${paths[@]+"${paths[@]}"})
 }
-# whether a git verb is an alias in that folder's config, which may run a commit (`git ci`); git ignores an alias that names one of its own commands
-aliased() {
+# whether a verb is one of git's own commands, which no alias can replace
+git_builtin() {
   case "$1" in
     add | am | apply | archive | bisect | blame | branch | bundle | checkout | cherry | cherry-pick | clean | clone | commit | config | describe | diff \
       | difftool | fetch | format-patch | fsck | gc | grep | help | init | log | ls-files | ls-remote | ls-tree | merge | mergetool | mv | notes | pull \
       | push | range-diff | rebase | reflog | remote | repack | replace | reset | restore | revert | rev-list | rev-parse | rm | shortlog | show \
-      | show-ref | sparse-checkout | stash | status | submodule | switch | tag | version | whatchanged | worktree) return 1 ;;
+      | show-ref | sparse-checkout | stash | status | submodule | switch | tag | version | whatchanged | worktree) return 0 ;;
   esac
-  git ${2:+-C "$2"} config --get "alias.$1" >/dev/null 2>&1
+  return 1
 }
+# whether a git verb is an alias in that folder's config, which may run a commit (`git ci`); git ignores an alias that names one of its own commands
+aliased() { ! git_builtin "$1" && git ${2:+-C "$2"} config --get "alias.$1" >/dev/null 2>&1; }
 # the first word past env and VAR=x, the command box_fits finds
 first_word() { local a; for a in "$@"; do case "$a" in env | *=*) continue ;; esac; printf '%s' "$a"; return; done; }
 # a git -c key that runs a program or a hook (core.hooksPath, an alias, an include), which counts as a build for any verb
@@ -749,7 +738,7 @@ runs_program() {
 }
 # a commit whose pre-commit build runs next build goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56): a git commit but -n, in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every one is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one; and, failing closed, a git run with a word outside these lists, or a verb that is an alias
 heavy_build() {
-  local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir="" cdir="" gdir
+  local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with what its git add steps stage, and when an add runs in another folder than a commit, whose paths it would misread
   first=$(first_word "$@")
   case "$(basename -- "$first")" in
@@ -757,12 +746,9 @@ heavy_build() {
       while IFS= read -r line; do
         IFS=$'\x1f' read -ra words <<< "$line"
         [ ${#words[@]} -gt 0 ] || continue
-        [ "${words[0]}" = cd ] && { cdir=${words[1]:-}; continue; }
-        # an alias reads the config of the step's own folder, its -C or the cd before it
-        gdir=$(git_dir "${words[@]}")
-        case "$gdir" in /*) ;; "") gdir=$cdir ;; *) gdir=${cdir:+$cdir/}$gdir ;; esac
+        # a verb git does not ship may be an alias in any folder's or -c's config, so a chain counts it as a commit, failing closed
         verb=$(git_verb "${words[@]}")
-        { [ "$verb" = commit ] || { [ -n "$verb" ] && aliased "$verb" "$gdir"; }; } && commit=1
+        { [ "$verb" = commit ] || { [ -n "$verb" ] && ! git_builtin "$verb"; }; } && commit=1
       done < <(chain_steps "$@")
       if [ -n "$commit" ]; then
         chain_safe "$@" || return 0

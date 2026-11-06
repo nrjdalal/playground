@@ -1015,6 +1015,17 @@ describe("commit-lane forms that cost no build", () => {
       expect(await takes(m, chain(m, steps), outside(m), medium)).toBe("waited")
     })
 
+  // review round 2: a verb git does not ship counts as a commit in a chain, whatever config names it, so no alias read can miss one
+  for (const steps of [
+    "git -c alias.zz=commit zz -m x",
+    "git --git-dir ROOT/.git ci -m x",
+    "false && cd ROOT ; git ci -m x",
+  ])
+    test(`a chain with ${steps}, ci and zz in no config, counts as a build`, async () => {
+      const m = lanes()
+      expect(await takes(m, chain(m, steps), outside(m), medium)).toBe("waited")
+    })
+
   // 13j: git_verb reads past --git-dir to the commit, which chain_safe takes off the list
   test("a chain with git --git-dir <d> commit counts as a build", async () => {
     const m = lanes()
