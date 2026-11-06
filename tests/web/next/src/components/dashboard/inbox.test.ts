@@ -132,6 +132,36 @@ describe("a queued answer's poster", () => {
   })
 })
 
+describe("a multi-question ask (#1250)", () => {
+  const multi = {
+    ...decision,
+    id: "id-48",
+    preview: {
+      questions: [
+        {
+          options: [{ description: "a day of soak", label: "staging" }, { label: "main" }],
+          question: "Which base?",
+          recommended: 0,
+        },
+        { options: [{ label: "now" }, { label: "later" }], question: "When?" },
+      ],
+      text: "Pick for each.",
+      type: "ask",
+    },
+    ref: 48,
+    title: "Port it, and when?",
+  } as InboxItem
+
+  test("shows its first question lettered, the recommended one badged in place, with Next and Send in the footer", () => {
+    const html = opened(multi)
+    expect(html).toContain("Which base?")
+    expect(html).toContain("A. staging")
+    expect(html).toContain("Recommended")
+    expect(named(html, "Next")).not.toBe("")
+    expect(named(html, "Send")).not.toBe("")
+  })
+})
+
 describe("a card that just moved under him", () => {
   test("pauses Send and Archive, still focusable and saying why, and dims its options", () => {
     const html = render(true)
@@ -272,8 +302,10 @@ describe("one action where two overlapped, and Draft where the app has a draft A
   test("a card's answer names the updatedAt it showed, so the API refuses one to words its poster edited since", () => {
     const card = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
     const client = readFileSync(join(web, "src/lib/inbox.ts"), "utf8")
-    expect(card).toContain("answerItem(item, action, text, note.trim() || undefined, option)")
-    expect(client).toContain("json: { action, note, option, seen: updatedAt, text }")
+    expect(card).toContain(
+      "answerItem(item, action, text, note.trim() || undefined, option, options)",
+    )
+    expect(client).toContain("json: { action, note, option, options, seen: updatedAt, text }")
   })
 
   test("an unread update's line ends in a single tick, Mark as read; once read, a muted double tick named Read, folded, its row keeping Dismiss (#882)", () => {
