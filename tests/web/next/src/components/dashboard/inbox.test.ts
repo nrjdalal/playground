@@ -1613,6 +1613,37 @@ describe("a guard decision's card (PG-1090)", () => {
   })
 })
 
+describe("an own decision's card (PG-1162)", () => {
+  const own = (preview: object) =>
+    render(false, {
+      ...decision,
+      preview: {
+        key: "pat@example.com",
+        own: true,
+        scope: "made-up-me",
+        type: "own",
+        why: "A made-up reason",
+        ...preview,
+      },
+      title: "Mark pat@example.com as your own?",
+    } as InboxItem)
+
+  test("shows the email, the scope and the change Approve makes", () => {
+    const html = own({})
+    expect(html).toContain("the dashboard marks")
+    expect(html).toContain(">pat@example.com</code>")
+    expect(html).toContain(">made-up-me</code>")
+    expect(html).toContain("off → on")
+    expect(html).toContain("Why: A made-up reason")
+  })
+
+  test("a clear reads unmarks, on to off", () => {
+    const html = own({ own: false })
+    expect(html).toContain("the dashboard unmarks")
+    expect(html).toContain("on → off")
+  })
+})
+
 describe("a held Yard post's card", () => {
   test("its Approve is a link that opens Yard's approve page in a new tab, never an answer", () => {
     const html = render(false, {

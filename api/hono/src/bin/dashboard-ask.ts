@@ -43,6 +43,9 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 a secret ask names a key and a sink (a Vercel project, or a Keychain
                                                 item such as yard); the owner's value goes to the sink, and get shows
                                                 only when and each exit status, or saved
+                                                an own decision names one Claude account's email in usage.accounts
+                                                at a scope and the own flag Approve leaves it with; a key that names
+                                                no Claude row there (a GLM label included) is refused
                                                 an accept decision names one proposal (scope, kind, key, rev), and
                                                 more lists up to 20 further ones, accepted after it in that order;
                                                 Approve stops at the first that fails
@@ -233,8 +236,8 @@ if (command === "new" || command === "edit") {
   if (!kept.ok) fail(kept.message)
   const result =
     command === "edit"
-      ? await editItem(db, key as string, kept.ok ? kept.input : input)
-      : await postItem(db, kept.ok ? kept.input : input, flags?.thread)
+      ? await editItem(db, key as string, kept.ok ? kept.input : input, undefined, dataDir())
+      : await postItem(db, kept.ok ? kept.input : input, flags?.thread, undefined, dataDir())
   if (!result.ok)
     fail(
       command === "edit" && result.code === "NOT_FOUND" ? `no inbox item ${key}` : result.message,
