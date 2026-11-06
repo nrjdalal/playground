@@ -263,7 +263,7 @@ if [ "${1:-}" = slots ]; then
   set -- ops-unstick -- true
 fi
 # run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many a medium run could take now (the open, unheld ones while its load units fit beside the held runs' and slots.peers', less the reserve), and the live tickets in the queue, which spawn.sh's slots gate reads
-# run-slot.sh kind -- <command>: print the lane run-slot picks for that command (refuse or docker for a docker run, else quick_kind's clone, commit, quick, or nothing for the queue) and exit, with no ask line, ticket or holder and nothing run, so a lane question reads run-slot's own pick
+# run-slot.sh kind -- <command>: print the lane run-slot picks for that command (refuse for a run it refuses, docker for a docker build, else quick_kind's clone, commit, quick, or nothing for the queue) and exit, with no ask line, ticket or holder and nothing run, so a lane question reads run-slot's own pick
 KIND_ONLY=
 if [ "${1:-}" = kind ]; then
   [ $# -ge 3 ] && [ "$2" = -- ] || { echo "usage: run-slot.sh kind -- <command> [args...]" >&2; exit 2; }
@@ -304,10 +304,11 @@ case "$WHO" in *[!A-Za-z0-9._#-]*|"") echo "run-slot.sh: <who> is a session name
 [ -n "$KIND_ONLY" ] || for s in $SWITCHES; do switch_on "$s"; done
 # a dev stack never ends, so it would hold a slot for hours (dispatcher, 19 Oct: a tester's `bun run dev` held run-slot.single with 7 waiters)
 for a in "$@"; do
-  case "$a" in dev|dev:*) echo "run-slot.sh: a dev stack runs as a background task under the load gate, not through run-slot" >&2; exit 2 ;; esac
+  case "$a" in dev|dev:*) [ -z "$KIND_ONLY" ] || { echo refuse; exit 0; }; echo "run-slot.sh: a dev stack runs as a background task under the load gate, not through run-slot" >&2; exit 2 ;; esac
 done
 # dispatcher, 18 Oct: a command that never exits holds its slot until it is stopped (keen-ledger's dev stack held one from 21:13Z to 21:58Z)
 if printf ' %s' "$@" | grep -qE ' (bun|npm|pnpm|yarn) run dev( |$)| next dev( |$)| ingest .*--follow| --watch(=| |$)'; then
+  [ -z "$KIND_ONLY" ] || { echo refuse; exit 0; }
   echo "run-slot.sh: $* never exits, so it would hold a slot until stopped (slots): start a fixture stack outside run-slot, only while you take shots" >&2
   exit 2
 fi
@@ -430,12 +431,53 @@ if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell's -c), and its steps with exit 1 for a chain with a step that eval or a $ word runs
-# the wrapper words chain_steps reads past to the shell they run, A to Z, as scripts/hooks/shell.ts's WRAPPER_NAMES lists them (a test holds the two equal), and the shells it reads
-CHAIN_WRAPPERS="builtin busybox caffeinate command doas env exec nice nocorrect noglob nohup repeat stdbuf sudo time timeout xargs"
+# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell's -c), and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, or with a command substitution beside docker, podman or a portless compose
+# the wrappers chain_steps reads past to the program they run, A to Z, each as <name>|<flags>|<options that take a value>, and the ones that take one count or duration before it: scripts/hooks/shell.ts's WRAPPERS and COUNTED, with the env and xargs options its parse reads by hand, which a test holds equal
+CHAIN_WRAPPER_OPTIONS="builtin||
+busybox||
+caffeinate|-d -i -m -s -u|-t -w
+command|-p -V -v|
+doas|-L -n -s|-a -C -u
+env|-0 -i -v --debug --ignore-environment --null|-C -P -S -u --chdir --unset
+exec|-c -l|-a
+nice||-n --adjustment
+nocorrect||
+noglob||
+nohup||
+repeat||
+stdbuf||-e -i -o --error --input --output
+sudo|-A -B -b -E -e -H -i -K -k -l -N -n -P -S -s -V -v --askpass --background --bell --edit --help --list --login --non-interactive --preserve-env --preserve-groups --remove-timestamp --reset-timestamp --set-home --shell --stdin --validate --version|-C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user
+time|-a -h -l -p -q -V -v --append --portability --quiet --verbose|-f -o --format --output
+timeout|-f -p -v --foreground --preserve-status --verbose|-k -s --kill-after --signal
+xargs|-0 -i -o -p -r -t -x --exit --interactive --no-run-if-empty --null --open-tty --replace --show-limits --verbose|-a -d -E -I -J -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-lines --max-procs --process-slot-var
+"
+CHAIN_COUNTED="repeat timeout"
+CHAIN_WRAPPERS=
+while IFS='|' read -r CHAIN_NAME _; do [ -n "$CHAIN_NAME" ] && CHAIN_WRAPPERS+="$CHAIN_NAME "; done <<< "$CHAIN_WRAPPER_OPTIONS"
 CHAIN_SHELLS="sh bash zsh dash ksh"
+# where a wrapper's option word leaves its value, as shell.ts's optionValue reads it: own when it takes none or carries it, next when the next word is its value, end for --, and nothing for an option the wrapper's list lacks
+wrapper_option() {
+  local w=$2 flags values k c n
+  [ "$w" = -- ] && { echo end; return; }
+  while IFS='|' read -r n flags values; do [ "$n" = "$1" ] && break; done <<< "$CHAIN_WRAPPER_OPTIONS"
+  flags=" $flags " values=" $values "
+  if [ "${w#--}" != "$w" ]; then
+    n=${w%%=*}
+    case "$values" in *" $n "*) if [ "$n" = "$w" ]; then echo next; else echo own; fi; return ;; esac
+    case "$flags" in *" $n "*) echo own ;; esac
+    return
+  fi
+  # nice's own -<number> is its adjustment
+  if [ "$1" = nice ] && [[ "$w" =~ ^-[0-9]+$ ]]; then echo own; return; fi
+  for ((k = 1; k < ${#w}; k++)); do
+    c=-${w:k:1}
+    case "$values" in *" $c "*) if [ "$k" -eq $((${#w} - 1)) ]; then echo next; else echo own; fi; return ;; esac
+    case "$flags" in *" $c "*) ;; *) return ;; esac
+  done
+  echo own
+}
 chain_steps() {
-  local a b first="" script="" next="" file="" opt="" lead="" oval="" wrapped="" unplaced="" shell=""
+  local a b first="" script="" next="" file="" opt="" lead="" oval="" wrapped="" unplaced="" shell="" value="" ended="" count=""
   for a in "$@"; do
     if [ -n "$next" ]; then
       if [ -n "$oval" ]; then [ "$a" = pipefail ] || return 1; oval=""; continue; fi
@@ -450,16 +492,31 @@ chain_steps() {
       continue
     fi
     if [ -z "$first" ]; then
+      # a wrapper's options, their values, its count and VAR=x words sit before its program, and come out as a step of their own, as env words do; a wrapper option's value is never its program
+      if [ -n "$value" ]; then value=""; lead+=$a$'\x1f'; continue; fi
+      if [ -n "$wrapped" ] && [ -z "$ended" ] && [ "${a#-}" != "$a" ] && [ "$a" != - ]; then
+        # env's split string holds its program inside one word
+        if [ "$wrapped" = env ]; then case "$a" in -S* | -[0iv]*S* | --split-string | --split-string=*) return 1 ;; esac; fi
+        case "$(wrapper_option "$wrapped" "$a")" in
+          own) ;;
+          next) value=1 ;;
+          end) ended=1 ;;
+          # an option the wrapper's list lacks may take the next word, so the program after it is one this cannot place
+          *) unplaced=1; continue ;;
+        esac
+        lead+=$a$'\x1f'; continue
+      fi
+      if [[ "$a" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then lead+=$a$'\x1f'; continue; fi
+      if [ -n "$count" ]; then count=""; lead+=$a$'\x1f'; continue; fi
       b=$(basename -- "$a")
       case " $CHAIN_SHELLS " in *" $b "*) first=$b; continue ;; esac
       # docker and podman are judged by docker_reader on their own argv, so a container's shell is no chain of this machine's
       case "$b" in docker|podman) return 0 ;; esac
-      # env's split string holds its program inside one word
-      [ "$wrapped" = env ] && case "$a" in -S* | --split-string | --split-string=*) return 1 ;; esac
-      case " $CHAIN_WRAPPERS " in *" $b "*) wrapped=$b; lead+=$a$'\x1f'; continue ;; esac
-      # a wrapper's options and values, and VAR=x words, sit before its program, and come out as a step of their own, as env words do
-      case "$a" in *=* | -*) [ -n "$wrapped$lead" ] || [ "${a#*=}" != "$a" ] && { lead+=$a$'\x1f'; continue; } ;; esac
-      [ -n "$wrapped" ] && { lead+=$a$'\x1f'; continue; }
+      if [[ " $CHAIN_WRAPPERS " == *" $b "* ]]; then
+        wrapped=$b ended=""
+        case " $CHAIN_COUNTED " in *" $b "*) count=1 ;; esac
+        lead+=$a$'\x1f'; continue
+      fi
       unplaced=1; continue
     fi
     case "$a" in -c | -[!-]*c) next=1 ;; -*) opt=1 ;; *) [ -z "$opt" ] || return 1; file=$a ;; esac
@@ -467,8 +524,8 @@ chain_steps() {
   [ -n "$first" ] || return 0
   if [ -n "$file" ]; then plain "$file" && [ -f "$file" ] && [ -r "$file" ] || return 1; fi
   [ -n "$script$file" ] || return 1
-  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" <<'PY'
-import re, shlex, sys
+  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" "$CHAIN_WRAPPERS" <<'PY'
+import os, re, shlex, sys
 
 try:
     text = sys.argv[2]
@@ -528,12 +585,16 @@ for i, step in enumerate(steps):
             step += [seps[i], later[0]]
     if step:
         print("\x1f".join(step))
-# a step that eval or a $ word runs names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
+# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, or that a command substitution beside docker, podman or a portless compose builds, names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
+wrappers = set(sys.argv[4].split())
 for step in steps:
     i = 0
     while i < len(step) and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", step[i]):
         i += 1
-    if i < len(step) and (step[i] == "eval" or "$" in step[i]):
+    hidden = lambda w: w == "eval" or "$" in w
+    if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
+        sys.exit(1)
+    if any("$(" in w or "`" in w for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", " ".join(step)):
         sys.exit(1)
 PY
 }
@@ -655,7 +716,7 @@ quick_rule() {
   case "$WHO" in commit-*) [ "${RUN_SLOT_COMMIT_STEP:-}" = 1 ] && { echo commit; return; } ;; esac
   # the command's first word past env and VAR=x, as box_fits finds it (optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue)
   first=$(first_word "$@")
-  case "$(basename -- "$first")" in sh|bash|zsh) [ "$(chain_lane "$@")" = commit ] && echo commit; return ;; esac
+  case " $CHAIN_SHELLS " in *" $(basename -- "$first") "*) [ "$(chain_lane "$@")" = commit ] && echo commit; return ;; esac
   if [ "$(basename -- "$first")" = git ]; then
     # a merge or pull runs no pre-commit build (lefthook.yml has no merge hook), so it ends in seconds (optimizer, 20 Oct: a 1s git merge waited 26.6 min behind suites)
     # a push runs only the pre-push hook's seconds (retro 2, 31 Oct: git push queued 205 min in a day)
@@ -776,8 +837,8 @@ heavy_build() {
   local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with what its git add steps stage, and when an add runs in another folder than a commit, whose paths it would misread
   first=$(first_word "$@")
-  case "$(basename -- "$first")" in
-    sh|bash|zsh)
+  case " $CHAIN_SHELLS " in
+    *" $(basename -- "$first") "*)
       while IFS= read -r line; do
         IFS=$'\x1f' read -ra words <<< "$line"
         [ ${#words[@]} -gt 0 ] || continue
