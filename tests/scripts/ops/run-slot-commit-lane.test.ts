@@ -9,7 +9,7 @@ setDefaultTimeout(60_000)
 
 // Playground's own lefthook.yml, whose pre-commit runs the build
 const LEFTHOOK = readFileSync(join(import.meta.dir, "../../../lefthook.yml"), "utf8")
-// A machine whose fake git fails on a `-C` folder that is not one, answers `git config --get alias.<verb>` by whether the root's `aliases` file lists that key, answers `git rev-parse --show-toplevel` with its folder's physical path, as git does (the root's, from `docs`, `web` or a folder under it), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths (each pathspec read from the `-C` folder, `.` included), `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, every one for `:/`, as git prints them), and touches its last argument for anything else, as a commit's marker
+// A machine whose fake git fails on a `-C` folder that is not one, answers `git config --get alias.<verb>` from a folder whose top level is the root by whether the root's `aliases` file lists that key, answers `git rev-parse --show-toplevel` with its folder's physical path, as git does (the root's, from `docs`, `web` or a folder under it), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths (each pathspec read from the `-C` folder, `.` included), `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, every one for `:/`, as git prints them), and touches its last argument for anything else, as a commit's marker
 const repo = (
   setup: Setup,
   staged: string[],
@@ -24,8 +24,9 @@ const repo = (
     `#!/bin/bash
 [ "$1" = -C ] && { [ -d "$2" ] || exit 128; }
 d=$PWD; [ "$1" = -C ] && d=$2
-case " $* " in *" config --get "*) grep -qxF -- "\${@: -1}" ${m.root}/aliases 2>/dev/null; exit ;; esac
-case " $* " in *" rev-parse --show-toplevel "*) case "$d" in ${m.root}/web | ${m.root}/web/* | ${m.root}/docs) cd ${m.root} ;; *) cd "$d" ;; esac; pwd -P; exit 0 ;; esac
+top() { (case "$1" in ${m.root}/web | ${m.root}/web/* | ${m.root}/docs) cd ${m.root} ;; *) cd "$1" ;; esac; pwd -P); }
+case " $* " in *" config --get "*) [ "$(top "$d")" = "$(top ${m.root})" ] && grep -qxF -- "\${@: -1}" ${m.root}/aliases 2>/dev/null; exit ;; esac
+case " $* " in *" rev-parse --show-toplevel "*) top "$d"; exit 0 ;; esac
 pre=""; case "$d" in ${m.root}/*) pre=\${d#${m.root}/}/ ;; esac
 full=""; case " $* " in *" --full-name "*) full=1 ;; esac
 case " $* " in *" :/ "*) pre="" ;; esac
@@ -426,9 +427,7 @@ commit-msg:
 })
 
 // 4 Nov: a commit inside a sh -c chain counts as the bare commit would, so one that runs next build still waits as a big run
-// builder, 5 Nov: three review rounds each found one more form that a reading of cd, ~ or env let through, so a chain takes the commit lane only
-// when every step is a form on a closed list, and any other form in a chain that commits counts as a build; a chain starts outside the repo
-// unless it is given the repo, where a bare git step runs in run-slot's own folder
+// builder, 5 Nov: three review rounds each found one more form that a reading of cd, ~ or env let through, so a chain takes the commit lane only when every step is a form on a closed list, and any other form in a chain that commits counts as a build; a chain starts outside the repo unless it is given the repo, where a bare git step runs in run-slot's own folder
 describe("a sh -c chain of git steps", () => {
   const start = (m: ReturnType<typeof repo>, steps: string, inRepo = false) => {
     const outside = join(m.root, "outside")
@@ -827,8 +826,42 @@ describe("commit-lane forms that cost no build", () => {
     ["bash -c -O <opt>", "-O", [], []],
     // 13: a glued a(b) splits at its (, and b is off the list
     ["a glued a(b)", "cd ROOT && git commit -m a(b)", [], []],
+    // review round 1: an option's value or a word after -- is a path, never a message, so a quoted glob there is off the list
+    [
+      "git commit --trailer -m <a quoted glob>",
+      "cd ROOT && git commit --trailer -m 'web/*'",
+      [PAGE],
+      [],
+    ],
+    [
+      "git commit --trailer --message <a quoted glob>",
+      "cd ROOT && git commit --trailer --message 'web/*'",
+      [PAGE],
+      [],
+    ],
+    ["git commit -- -m <a quoted glob>", "cd ROOT && git commit -m x -- -m 'web/*'", [PAGE], []],
+    // review round 1: a cd after && may not have run when any later step joined by ; or || does
+    [
+      "a cd after && whose later step joins by ;",
+      "git -C ROOT add docs/notes.md && cd ROOT && git add . ; git commit -m x",
+      [],
+      [],
+    ],
+    [
+      "a cd after && whose later step joins by ||",
+      "bun run precommit:light && cd ROOT && git add . || git commit -m x",
+      [],
+      [],
+    ],
+    // review round 1: git add reads every word after -- as a path, -n included
+    [
+      "git add -- -n <a web/next file>",
+      `cd ROOT && git add -- -n ${PAGE} && git commit -m x`,
+      [PAGE],
+      [],
+    ],
   ] as const)
-    test(`a chain with ${what} still waits as a big run`, async () => {
+    test(`a chain with ${what} still waits off the commit lane`, async () => {
       const m = repo({ idle: 30 }, ["docs/notes.md"], [...unstaged], LEFTHOOK, [...untracked])
       m.hold("run-slot", 3, "big")
       const argv =
@@ -934,6 +967,18 @@ describe("commit-lane forms that cost no build", () => {
     expect(await takes(m, argv)).toBe("run-slot-commit")
   })
 
+  // review round 1: --icase-pathspecs and --glob-pathspecs widen what a commit's paths match past the diff run-slot reads
+  for (const [opt, path] of [
+    ["--icase-pathspecs", "WEB/NEXT/src/app/page.tsx"],
+    ["--glob-pathspecs", "web/next/**/page.tsx"],
+  ])
+    test(`git ${opt} commit -- <a web/next path> still waits as a big run`, async () => {
+      const m = repo({ idle: 30 }, ["docs/notes.md"], [PAGE])
+      m.hold("run-slot", 3, "big")
+      const argv = ["git", opt, "-C", m.root, "commit", "-m", "x", "--", path]
+      expect(await takes(m, argv)).toBe("waited")
+    })
+
   test("git -c core.hooksPath=<dir> push still waits as a big run", async () => {
     const m = repo({ idle: 30 }, ["docs/notes.md"])
     m.hold("run-slot", 3, "big")
@@ -961,6 +1006,20 @@ describe("commit-lane forms that cost no build", () => {
   test("git ci, an alias in the repo's config, counts as a build", async () => {
     const m = lanes("alias.ci\n")
     expect(await takes(m, ["git", "-C", m.root, "ci", "-m", "x"], m.root, medium)).toBe("waited")
+  })
+
+  // review round 1: an alias in the folder a chain's step names by -C or cds into counts as a build
+  for (const steps of ["git -C ROOT ci -m x", "cd ROOT && git ci -m x"])
+    test(`a chain with ${steps}, ci an alias in that repo's config, counts as a build`, async () => {
+      const m = lanes("alias.ci\n")
+      expect(await takes(m, chain(m, steps), outside(m), medium)).toBe("waited")
+    })
+
+  // 13j: git_verb reads past --git-dir to the commit, which chain_safe takes off the list
+  test("a chain with git --git-dir <d> commit counts as a build", async () => {
+    const m = lanes()
+    const steps = "cd ROOT && git --git-dir ROOT/.git commit -m x"
+    expect(await takes(m, chain(m, steps), outside(m), medium)).toBe("waited")
   })
 
   test("while git frob, which no alias names, runs as a medium run", async () => {
