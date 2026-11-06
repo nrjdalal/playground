@@ -87,9 +87,11 @@ function singleQuotesOut(command: string): string {
 }
 
 // the characters that end a heredoc's delimiter word
-const META = /[\s;&|<>()]/
+const DELIMITER_END = /[\s;&|<>()]/
+// the openers of a parameter expansion and of bash's and zsh's $[ ] arithmetic
+const OPAQUE = /^\$[{[]/
 
-// The line with each body of a heredoc whose delimiter is quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) put as an empty line, since the shell expands nothing in it, so its text reads as no evaluation, subscript or qualifier; the line as written whenever the scan cannot be sure where a body starts and ends: a `$'…'`, a substitution or backtick inside double quotes, a backtick, a heredoc inside parentheses, unbalanced parentheses, a body line that starts with its delimiter and a `)`, or a heredoc left open
+// The line with each body of a heredoc whose delimiter is quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) put as an empty line, since the shell expands nothing in it, so its text reads as no evaluation, subscript or qualifier; the line as written wherever the scan cannot place a body as the shell does, each case a `return command` below and a fallback scripts/hooks/README.md's held rule lists
 function quotedBodiesOut(command: string): string {
   if (command.includes("$'")) return command
   let out = ""
@@ -98,7 +100,12 @@ function quotedBodiesOut(command: string): string {
   const docs: { delim: string; quoted: boolean; strip: boolean }[] = []
   for (let i = 0; i < command.length; i++) {
     const c = command[i]
+    // a parameter expansion with an operator, or zsh's and bash's $[ ], holds words the shell reads its own way, a `<<` or a ` #` among them
+    if (OPAQUE.test(command.slice(i, i + 2)) && !/^\$\{[A-Za-z_]\w*\}/.test(command.slice(i)))
+      return command
     if (c === "\\") {
+      // the shell joins a backslash-newline before it reads an operator, so `<` and `<` across one are a heredoc's `<<`
+      if (command[i + 1] === "\n" && command[i - 1] === "<") return command
       out += command.slice(i, i + 2)
       i++
     } else if (double) {
@@ -114,6 +121,9 @@ function quotedBodiesOut(command: string): string {
       if (end === -1) return command
       out += command.slice(i, end + 1)
       i = end
+    } else if (c === "#" && /[)<>]/.test(command[i - 1] ?? "")) {
+      // a `#` after a closing parenthesis or a redirection starts a comment in one shell and a word in another
+      return command
     } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
       const end = command.indexOf("\n", i)
       const stop = end === -1 ? command.length : end
@@ -135,12 +145,7 @@ function quotedBodiesOut(command: string): string {
       const doc = command
         .slice(i)
         .match(/^<<(-?)[ \t]*((?:[\w.-]|'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])+)/)
-      if (
-        !doc ||
-        (doc[2].length < command.length - i - doc[0].length &&
-          !META.test(command[i + doc[0].length] ?? " "))
-      )
-        return command
+      if (!doc || !DELIMITER_END.test(command[i + doc[0].length] ?? " ")) return command
       const word = doc[2]
       docs.push({
         delim: word.replace(/\\(.)/g, "$1").replace(/["']/g, ""),
@@ -150,6 +155,8 @@ function quotedBodiesOut(command: string): string {
       out += doc[0]
       i += doc[0].length - 1
     } else if (c === "\n" && docs.length) {
+      // a newline inside a substitution's parentheses ends no command line, so the shell reads the bodies after the line that closes it
+      if (depth > 0) return command
       out += c
       let at = i + 1
       for (const { delim, quoted, strip } of docs) {
@@ -160,6 +167,8 @@ function quotedBodiesOut(command: string): string {
           const line = command.slice(at, stop)
           const bare = strip ? line.replace(/^\t+/, "") : line
           if (bare.startsWith(`${delim})`)) return command
+          // an unquoted body joins a line that ends in a backslash to the next, which moves where it ends
+          if (!quoted && line.endsWith("\\")) return command
           const last = bare === delim
           out += (quoted && !last ? "" : line) + (end === -1 ? "" : "\n")
           at = stop + 1

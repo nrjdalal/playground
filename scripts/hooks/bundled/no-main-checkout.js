@@ -1980,7 +1980,8 @@ function singleQuotesOut(command) {
   }
   return double || docs.length ? command : out;
 }
-var META = /[\s;&|<>()]/;
+var DELIMITER_END = /[\s;&|<>()]/;
+var OPAQUE = /^\$[{[]/;
 function quotedBodiesOut(command) {
   if (command.includes("$'"))
     return command;
@@ -1990,7 +1991,12 @@ function quotedBodiesOut(command) {
   const docs = [];
   for (let i = 0;i < command.length; i++) {
     const c = command[i];
+    if (OPAQUE.test(command.slice(i, i + 2)) && !/^\$\{[A-Za-z_]\w*\}/.test(command.slice(i)))
+      return command;
     if (c === "\\") {
+      if (command[i + 1] === `
+` && command[i - 1] === "<")
+        return command;
       out += command.slice(i, i + 2);
       i++;
     } else if (double) {
@@ -2008,6 +2014,8 @@ function quotedBodiesOut(command) {
         return command;
       out += command.slice(i, end + 1);
       i = end;
+    } else if (c === "#" && /[)<>]/.test(command[i - 1] ?? "")) {
+      return command;
     } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
       const end = command.indexOf(`
 `, i);
@@ -2030,7 +2038,7 @@ function quotedBodiesOut(command) {
       if (depth > 0)
         return command;
       const doc = command.slice(i).match(/^<<(-?)[ \t]*((?:[\w.-]|'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])+)/);
-      if (!doc || doc[2].length < command.length - i - doc[0].length && !META.test(command[i + doc[0].length] ?? " "))
+      if (!doc || !DELIMITER_END.test(command[i + doc[0].length] ?? " "))
         return command;
       const word = doc[2];
       docs.push({
@@ -2042,6 +2050,8 @@ function quotedBodiesOut(command) {
       i += doc[0].length - 1;
     } else if (c === `
 ` && docs.length) {
+      if (depth > 0)
+        return command;
       out += c;
       let at = i + 1;
       for (const { delim, quoted, strip } of docs) {
@@ -2054,6 +2064,8 @@ function quotedBodiesOut(command) {
           const line = command.slice(at, stop);
           const bare = strip ? line.replace(/^\t+/, "") : line;
           if (bare.startsWith(`${delim})`))
+            return command;
+          if (!quoted && line.endsWith("\\"))
             return command;
           const last = bare === delim;
           out += (quoted && !last ? "" : line) + (end === -1 ? "" : `
