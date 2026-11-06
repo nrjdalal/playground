@@ -467,14 +467,16 @@ function feedBodies(commands) {
     const inputs = close.redirects.filter((r) => r.op.startsWith("<") || dupOnto0(r));
     if (inputs.length === 0)
       continue;
-    const body = close.inner ? close.inner() : CLOSES.has(markers(close.words)[0] ?? "") ? bodyOf(commands, k) : [];
+    const region = CLOSES.has(markers(close.words)[0] ?? "") ? bodyOf(commands, k) : undefined;
+    const body = close.inner ? close.inner() : region ?? [];
+    const ownPipe = (cmd) => !!cmd.stdin && (region ? region.includes(cmd.stdin) : cmd.stdin.scope > close.scope);
     const fed = inputs.map((r) => ({ ...r, bodyFed: r.bodyFed ?? r }));
     const origins = new Set(fed.map((r) => r.bodyFed));
     for (const cmd of body) {
       if (cmd === close)
         continue;
       const own = cmd.redirects.filter((r) => !r.bodyFed || !origins.has(r.bodyFed));
-      cmd.redirects.splice(0, cmd.redirects.length, ...cmd.stdin ? fed.filter((r) => fdOf(r) !== "0") : fed, ...own);
+      cmd.redirects.splice(0, cmd.redirects.length, ...ownPipe(cmd) ? fed.filter((r) => fdOf(r) !== "0") : fed, ...own);
     }
   }
 }
@@ -1821,19 +1823,19 @@ async function stdinText(cmd, env) {
     return cmd.stdin ? outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see");
   return redirectText(input, env, true);
 }
-async function redirectText(input, env, fed) {
+async function redirectText(input, env, shells) {
   if (input.target?.procs)
     return outputs(input.target.procs, env);
   if (input.op === "<" || input.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect");
   if (!input.body)
     return unknown("a heredoc the hook could not read");
-  const set = fed && input.body.variable ? env.vars.get(input.body.variable) : undefined;
+  const set = shells && input.body.variable ? env.vars.get(input.body.variable) : undefined;
   if (input.body.unknown && input.body.value === `${UNKNOWN}
 ` && set && !set.unknown)
     return resolveText({ ...set, value: `${set.value}
 ` }, env);
-  return resolveText(fed && hereStringEchoed(input, env) || input.body, env);
+  return resolveText(shells && hereStringEchoed(input, env) || input.body, env);
 }
 function hereStringEchoed(input, env) {
   const source = input.target?.source;
@@ -2182,7 +2184,7 @@ async function inspect(raw, environment) {
     }
     if (QUEUES.has(name)) {
       const file = args.findIndex((a) => a.value === "-f");
-      const fed = file !== -1 || cmd.stdin !== undefined || cmd.redirects.some((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"));
+      const fed = file !== -1 || cmd.stdin !== undefined || cmd.redirects.some((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<")) || stdinFed(cmd);
       if (fed) {
         const script = await (file === -1 ? stdinOf(cmd, at) : readPath(args[file + 1] ?? { value: "" }, at)).catch((error) => ({ unknown: `a read that failed: ${error}`, value: "" }));
         if (script.unknown)

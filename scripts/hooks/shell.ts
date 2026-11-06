@@ -543,21 +543,21 @@ function feedBodies(commands: Command[]): void {
     const close = commands[k]
     const inputs = close.redirects.filter((r) => r.op.startsWith("<") || dupOnto0(r))
     if (inputs.length === 0) continue
-    const body = close.inner
-      ? close.inner()
-      : CLOSES.has(markers(close.words)[0] ?? "")
-        ? bodyOf(commands, k)
-        : []
+    const region = CLOSES.has(markers(close.words)[0] ?? "") ? bodyOf(commands, k) : undefined
+    const body = close.inner ? close.inner() : (region ?? [])
+    // a pipe from a command inside the body, or inside the subshell, is the body command's own; one into the group from outside gives way to the group's redirect, as the shell applies it after
+    const ownPipe = (cmd: Command): boolean =>
+      !!cmd.stdin && (region ? region.includes(cmd.stdin) : cmd.stdin.scope > close.scope)
     const fed = inputs.map((r) => ({ ...r, bodyFed: r.bodyFed ?? r }))
     const origins = new Set(fed.map((r) => r.bodyFed))
     for (const cmd of body) {
       if (cmd === close) continue
-      // the group's redirects apply before the command's own, so its own stdin, a pipe included, wins; an outer group's copy already there gives way to the inner group's, which carries it first
+      // the group's redirects apply before the command's own, so its own stdin, its own pipe included, wins; an outer group's copy already there gives way to the inner group's, which carries it first
       const own = cmd.redirects.filter((r) => !r.bodyFed || !origins.has(r.bodyFed))
       cmd.redirects.splice(
         0,
         cmd.redirects.length,
-        ...(cmd.stdin ? fed.filter((r) => fdOf(r) !== "0") : fed),
+        ...(ownPipe(cmd) ? fed.filter((r) => fdOf(r) !== "0") : fed),
         ...own,
       )
     }
@@ -2230,17 +2230,17 @@ async function stdinText(cmd: Command, env: Env): Promise<Text> {
   return redirectText(input, env, true)
 }
 
-// stdin's text from one redirect; the shell's own reading (`fed`) also reads a here-string's `$(echo …)` and a here-string of one variable the line set, which stdinOf leaves unknown as canary did
-async function redirectText(input: Redirect, env: Env, fed: boolean): Promise<Text> {
+// stdin's text from one redirect; the shell's own reading (`shells`) also reads a here-string's `$(echo …)` and a here-string of one variable the line set, which stdinOf leaves unknown as canary did
+async function redirectText(input: Redirect, env: Env, shells: boolean): Promise<Text> {
   if (input.target?.procs) return outputs(input.target.procs, env)
   if (input.op === "<" || input.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect")
   if (!input.body) return unknown("a heredoc the hook could not read")
   // a here-string of one variable the line set earlier (`S=x; sh <<< "$S"`) is that variable's value
-  const set = fed && input.body.variable ? env.vars.get(input.body.variable) : undefined
+  const set = shells && input.body.variable ? env.vars.get(input.body.variable) : undefined
   if (input.body.unknown && input.body.value === `${UNKNOWN}\n` && set && !set.unknown)
     return resolveText({ ...set, value: `${set.value}\n` }, env)
-  return resolveText((fed && hereStringEchoed(input, env)) || input.body, env)
+  return resolveText((shells && hereStringEchoed(input, env)) || input.body, env)
 }
 
 // A here-string's text with each `$(echo …)` read as its words, lexed again from its source, when its own text holds a part it cannot read

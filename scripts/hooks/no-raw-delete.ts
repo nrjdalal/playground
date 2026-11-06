@@ -22,6 +22,7 @@ import {
   run,
   scriptStdin,
   slotWords,
+  stdinFed,
   stdinOf,
   UNKNOWN,
   unreadable,
@@ -391,7 +392,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const fed =
         file !== -1 ||
         cmd.stdin !== undefined ||
-        cmd.redirects.some((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"))
+        cmd.redirects.some((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<")) ||
+        stdinFed(cmd)
       if (fed) {
         const script = await (
           file === -1 ? stdinOf(cmd, at) : readPath(args[file + 1] ?? { value: "" }, at)
