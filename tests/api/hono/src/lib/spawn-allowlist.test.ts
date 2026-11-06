@@ -73,7 +73,7 @@ describe("who starts a process under api/hono/src/lib", () => {
       "aliased-dollar.ts": 'import { $ as sh } from "bun"\nexport const t = () => sh`true`',
     }
     const clear = {
-      "prose.ts": "// Bun.spawnSync would run cmux here; spawns stay in cmux.ts",
+      "prose.ts": "// Bun.spawnSync would run herdr here; spawns stay in herdr.ts",
       "method.ts": 're.exec(text); opts.execFile;\nBun.spawnmock(["x"])',
       "suffix.ts": "respawn(cmd); fastspawnSync(cmd)",
       "glob.ts": 'import { Glob } from "bun"\nexport const scan = () => new Glob("**/*.ts")',

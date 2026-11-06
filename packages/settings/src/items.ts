@@ -297,27 +297,25 @@ export const showItem = (data: string, ref: Ref, rev?: string) => {
   }
   const [path] = candidates(ref.kind, ref.key)
   const proposed = join(PROPOSED, path!)
-  // the revision's own state from its trailers when it wrote or judged this item: a proposal reads from proposed/, a reject from proposed/ just before it removed it
-  const told = extGit(dir, [
+  // a revision that wrote or judged this item reads in the state its trailers say it was written in: a proposal from proposed/, a reject from proposed/ just before it removed it
+  const trailers = extGit(dir, [
     "log",
     "-1",
     "--format=%(trailers:key=Item,valueonly)%x00%(trailers:key=State,valueonly)",
     "--end-of-options",
     rev,
   ])
-  const [item, own] = told.out.split("\0").map((part) => part.trim())
-  const order =
-    item !== `${ref.kind} ${ref.key}`
-      ? ([
-          ["accepted", path!, rev],
-          ["proposed", proposed, rev],
-        ] as const)
-      : own === "accepted"
-        ? ([["accepted", path!, rev]] as const)
-        : own === "rejected"
-          ? ([["rejected", proposed, `${rev}^`]] as const)
-          : ([["proposed", proposed, rev]] as const)
-  for (const [state, at, tree] of order) {
+  const [item, written] = trailers.out.split("\0").map((part) => part.trim())
+  const ownRead = {
+    accepted: ["accepted", path!, rev],
+    proposed: ["proposed", proposed, rev],
+    rejected: ["rejected", proposed, `${rev}^`],
+  } as const
+  const reads =
+    item === `${ref.kind} ${ref.key}`
+      ? [ownRead[written === "accepted" || written === "rejected" ? written : "proposed"]]
+      : [ownRead.accepted, ownRead.proposed]
+  for (const [state, at, tree] of reads) {
     const listed = extGit(dir, ["ls-tree", "-r", "--name-only", tree, "--", at])
     if (listed.code !== 0) return null
     const names = listed.out.split("\n").filter(Boolean)

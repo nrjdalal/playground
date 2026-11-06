@@ -466,6 +466,7 @@ describe("playground ext", () => {
       state: "accepted",
     })
   })
+
   test("search finds the words in accepted items, and diff shows an item's change between two commits", async () => {
     const at = folder("search")
     writeFileSync(join(scratch, "one.json"), '["first"]')

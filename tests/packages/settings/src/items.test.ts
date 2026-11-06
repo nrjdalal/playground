@@ -52,3 +52,18 @@ test("show --rev prints the revision's own files and state, a proposal beside an
   expect(shown(v2.slice(0, 12))).toEqual({ files: files("v2").files, state: "proposed" })
   expect(showItem(scratch, { ...ref, key: "other" }, v2)).toBeNull()
 })
+
+// a guard row: no code before or after #1111 reads it red; it holds that another item's trailers never pick this item's side
+test("show --rev of a revision that wrote another item prints this item as that revision's tree held it", () => {
+  const mine = { ...ref, key: "mine" }
+  const theirs = { ...ref, key: "theirs" }
+  setSetting(scratch, { key: "clock.ownerZone", scope: ME, value: "Europe/Lisbon" }, OWNER)
+  revOf(putItem(scratch, mine, files("mine accepted"), OWNER, true))
+  revOf(putItem(scratch, mine, files("mine proposed"), WORKER, false))
+  const other = revOf(putItem(scratch, theirs, files("theirs proposed"), WORKER, false))
+  const item = showItem(scratch, mine, other)
+  expect(item && { files: item.content.files, state: item.state }).toEqual({
+    files: files("mine accepted").files,
+    state: "accepted",
+  })
+})
