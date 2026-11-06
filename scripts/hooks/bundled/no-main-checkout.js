@@ -564,14 +564,20 @@ function codeFed(commands) {
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|\bread\b[^;&|\n]*\s-[A-Za-z]*[aA]|\b(?:declare|export|float|integer|local|readonly|typeset)\b[^;&|\n]*\s[-+][A-Za-z]*[aA]/;
+var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/;
+var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
 var zshSplits = (line) => {
   if (ZSH_SPLITS.test(line))
     return true;
+  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
+    const at = command.search(ARRAY_MAKERS);
+    if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at)))
+      return true;
+  }
   const joined = line.replace(/[\\'"]/g, "");
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
-  const rest = joined.replace(expansion, " ");
-  return [...joined.matchAll(expansion)].some(([, name]) => new RegExp(`(?<![\\w$])${name}(?!\\w)`).test(rest));
+  const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
+  return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
 };
 var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
 var ZSH_ARRAYS = new Set([
@@ -580,6 +586,9 @@ var ZSH_ARRAYS = new Set([
   "builtins",
   "cdpath",
   "commands",
+  "comppostfuncs",
+  "compprefuncs",
+  "compstate",
   "dirstack",
   "dis_aliases",
   "dis_builtins",
@@ -606,6 +615,7 @@ var ZSH_ARRAYS = new Set([
   "jobstates",
   "jobtexts",
   "keymaps",
+  "killring",
   "langinfo",
   "mailpath",
   "manpath",
@@ -621,6 +631,8 @@ var ZSH_ARRAYS = new Set([
   "path",
   "pipestatus",
   "psvar",
+  "region_highlight",
+  "registers",
   "reply",
   "reswords",
   "saliases",
@@ -632,6 +644,9 @@ var ZSH_ARRAYS = new Set([
   "usergroups",
   "watch",
   "widgets",
+  "words",
+  "zle_bracketed_paste",
+  "zle_highlight",
   "zsh_eval_context",
   "zsh_scheduled_events"
 ]);
@@ -2112,12 +2127,98 @@ function singleQuotesOut(command) {
   }
   return double || docs.length ? command : out;
 }
+var READ2 = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(?!\[)/.source;
+var TEXT = /[^"$`\\]/.source;
+var WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ2})+|'[^']*'|"(?:${TEXT}|${READ2})*")`);
+var REDIRECT2 = /^(?:[<>]&(?:\d+|-)|<<<|&>>?|>>?\|?|<>?)/;
+var KEEPS_PROGRAM = /^(?:builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/;
+var PROMPT_PARAM = /^(?:PS[0-4]|PROMPT[2-4]?|RPROMPT2?|RPS[12]|SPROMPT)(?!\w)/;
+var QUOTED_DOC = /^<<(-?)[ \t]*((?:[\w.-]*(?:'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])[\w.-]*)+)(?=[\s;&|<>]|$)/;
+function quotedBodiesOut(command) {
+  let out = "";
+  const docs = [];
+  let program = true;
+  let target = false;
+  let word = "";
+  const endWord = () => {
+    if (word && target)
+      target = false;
+    else if (word && !/^[A-Za-z_]\w*=/.test(word) && !KEEPS_PROGRAM.test(word))
+      program = false;
+    word = "";
+  };
+  for (let i = 0;i < command.length; ) {
+    const rest = command.slice(i);
+    let token;
+    let doc = null;
+    if (rest[0] === `
+`) {
+      endWord();
+      out += `
+`;
+      i++;
+      for (const { delim, strip } of docs)
+        for (;; ) {
+          if (i >= command.length)
+            return command;
+          const end = command.indexOf(`
+`, i);
+          const stop = end === -1 ? command.length : end;
+          const line = command.slice(i, stop);
+          const last = (strip ? line.replace(/^\t+/, "") : line) === delim;
+          out += (last ? line : "") + (end === -1 ? "" : `
+`);
+          i = stop + 1;
+          if (last)
+            break;
+        }
+      docs.length = 0;
+      program = true;
+      continue;
+    } else if (token = rest.match(/^[ \t]+/)?.[0])
+      endWord();
+    else if (token = rest.match(/^(?:&&|\|\||[;|])/)?.[0]) {
+      endWord();
+      program = true;
+    } else if (rest.startsWith("<<") && !rest.startsWith("<<<")) {
+      doc = rest.match(QUOTED_DOC);
+      if (!doc)
+        return command;
+      if (/^\d+$/.test(word))
+        word = "";
+      endWord();
+      token = doc[0];
+      docs.push({
+        delim: doc[2].replace(/\\(.)/g, "$1").replace(/["']/g, ""),
+        strip: doc[1] === "-"
+      });
+    } else if (token = rest.match(REDIRECT2)?.[0]) {
+      if (/^\d+$/.test(word))
+        word = "";
+      endWord();
+      target = !/&(?:\d+|-)$/.test(token);
+    } else if (token = rest.match(WORD)?.[0]) {
+      word += token;
+      if (program && !target && token.includes("$") && !/^[A-Za-z_]\w*=/.test(word))
+        return command;
+      if (PROMPT_PARAM.test(word))
+        return command;
+    }
+    if (!token || docs.length && token.includes(`
+`))
+      return command;
+    out += token;
+    i += token.length;
+  }
+  return docs.length ? command : out;
+}
 function namings(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
-  let blind = EVALUATES.some((evaluates) => evaluates.test(command)) || SUBSCRIPT.test(command) || SUBSCRIPT.test(unquoted(command)) || QUALIFIER.test(singleQuotesOut(command)) || INDIRECTS.test(command);
-  for (const [, flags, closed] of command.matchAll(/\$\{\(([^)]*)(\)?)/g))
+  const text = quotedBodiesOut(command);
+  let blind = EVALUATES.some((evaluates) => evaluates.test(text)) || SUBSCRIPT.test(text) || SUBSCRIPT.test(unquoted(text)) || QUALIFIER.test(singleQuotesOut(text)) || INDIRECTS.test(text);
+  for (const [, flags, closed] of text.matchAll(/\$\{\(([^)]*)(\)?)/g))
     if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags))
       blind = true;
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {

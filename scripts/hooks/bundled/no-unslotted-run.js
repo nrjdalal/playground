@@ -382,14 +382,20 @@ function codeFed(commands) {
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|\bread\b[^;&|\n]*\s-[A-Za-z]*[aA]|\b(?:declare|export|float|integer|local|readonly|typeset)\b[^;&|\n]*\s[-+][A-Za-z]*[aA]/;
+var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/;
+var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
 var zshSplits = (line) => {
   if (ZSH_SPLITS.test(line))
     return true;
+  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
+    const at = command.search(ARRAY_MAKERS);
+    if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at)))
+      return true;
+  }
   const joined = line.replace(/[\\'"]/g, "");
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
-  const rest = joined.replace(expansion, " ");
-  return [...joined.matchAll(expansion)].some(([, name]) => new RegExp(`(?<![\\w$])${name}(?!\\w)`).test(rest));
+  const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
+  return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
 };
 var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
 var ZSH_ARRAYS = new Set([
@@ -398,6 +404,9 @@ var ZSH_ARRAYS = new Set([
   "builtins",
   "cdpath",
   "commands",
+  "comppostfuncs",
+  "compprefuncs",
+  "compstate",
   "dirstack",
   "dis_aliases",
   "dis_builtins",
@@ -424,6 +433,7 @@ var ZSH_ARRAYS = new Set([
   "jobstates",
   "jobtexts",
   "keymaps",
+  "killring",
   "langinfo",
   "mailpath",
   "manpath",
@@ -439,6 +449,8 @@ var ZSH_ARRAYS = new Set([
   "path",
   "pipestatus",
   "psvar",
+  "region_highlight",
+  "registers",
   "reply",
   "reswords",
   "saliases",
@@ -450,6 +462,9 @@ var ZSH_ARRAYS = new Set([
   "usergroups",
   "watch",
   "widgets",
+  "words",
+  "zle_bracketed_paste",
+  "zle_highlight",
   "zsh_eval_context",
   "zsh_scheduled_events"
 ]);
@@ -2186,6 +2201,9 @@ function sessionOf(raw) {
 }
 
 // scripts/hooks/steady.ts
+var READ2 = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(?!\[)/.source;
+var TEXT = /[^"$`\\]/.source;
+var WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ2})+|'[^']*'|"(?:${TEXT}|${READ2})*")`);
 var SHELL_SETS = new Set([
   "ARGC",
   "BASH",

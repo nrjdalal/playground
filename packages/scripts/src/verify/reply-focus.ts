@@ -21,15 +21,15 @@ export const focusResult = (check: string, active: string | null): Result =>
 const lastLine = (bytes: Uint8Array) =>
   new TextDecoder().decode(bytes).trim().split("\n").at(-1) ?? ""
 
-// Posts one decision into this checkout's own database for the card to show, and returns its id and #iN tag, or the reason bun run ask gave for refusing.
-const postCard = (): { id: string; tag: string } | { refused: string } => {
+// Posts one decision named by its title into this checkout's own database for the card to show, and returns its id and #iN tag, or the reason bun run ask gave for refusing.
+export const postCard = (title: string): { id: string; tag: string } | { refused: string } => {
   const run = Bun.spawnSync(["bun", "run", "ask", "new"], {
     cwd: ROOT,
     stdin: new TextEncoder().encode(
       JSON.stringify({
         from: "dispatcher",
-        preview: { text: "Nothing happens: verify reply-focus posted it.", type: "ask" },
-        title: "verify reply-focus",
+        preview: { text: `Nothing happens: ${title} posted it.`, type: "ask" },
+        title,
       }),
     ),
   })
@@ -40,9 +40,9 @@ const postCard = (): { id: string; tag: string } | { refused: string } => {
     : { refused: lastLine(run.stderr) || `exit ${run.exitCode}` }
 }
 
-// Settles the card it posted, sending nothing, and returns why a settle failed, else null, so a card left open is reported.
-const settleCard = (id: string): string | null => {
-  const run = Bun.spawnSync(["bun", "run", "ask", "settle", id, "--note", "verify reply-focus"], {
+// Settles a card a check posted, sending nothing, and returns why a settle failed, else null, so a card left open is reported.
+export const settleCard = (id: string, note: string): string | null => {
+  const run = Bun.spawnSync(["bun", "run", "ask", "settle", id, "--note", note], {
     cwd: ROOT,
     stdout: "ignore",
   })
@@ -78,7 +78,7 @@ export const clickFocus = async (
 // At 1280x800, posts a card, clicks its Reply on /dashboard and reads where focus is at once; it then empties the composer and settles the card, sending nothing, and fails when the card is left open.
 export const replyFocus = async (browser: Browser, { web }: Target): Promise<Result> => {
   const check = "reply-focus 1280"
-  const card = postCard()
+  const card = postCard("verify reply-focus")
   if ("refused" in card)
     return {
       check,
@@ -87,7 +87,7 @@ export const replyFocus = async (browser: Browser, { web }: Target): Promise<Res
     }
   try {
     const result = await clickFocus(browser, web, check, card.tag)
-    const unsettled = settleCard(card.id)
+    const unsettled = settleCard(card.id, "verify reply-focus")
     return unsettled
       ? {
           ...result,
@@ -96,7 +96,7 @@ export const replyFocus = async (browser: Browser, { web }: Target): Promise<Res
         }
       : result
   } catch (error) {
-    settleCard(card.id)
+    settleCard(card.id, "verify reply-focus")
     throw error
   }
 }

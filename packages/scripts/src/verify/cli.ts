@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { parseArgs } from "node:util"
 
 import { withPortlessCa } from "../portless-ca"
-import { asideBar } from "./aside-bar"
+import { asideBar, asideDrift } from "./aside-bar"
 import { changelogEntry } from "./changelog-entry"
 import {
   Browser,
@@ -47,7 +47,7 @@ import { facets } from "./facets"
 import { FOCUS_PAGES, focusMarksPage } from "./focus-marks"
 import { DASHBOARD_MAP } from "./map"
 import { RAIL_PAGES, rail } from "./rail"
-import { replyFocus } from "./reply-focus"
+import { postCard, replyFocus, settleCard } from "./reply-focus"
 import { rowsFit } from "./row-fit"
 import { sendFocus } from "./send-focus"
 import { sendTop } from "./send-top"
@@ -65,7 +65,11 @@ Checks (default: all)
                 to its end, keep their last line above the tab bar floating over the aside's
                 bottom, and no layer of a pane paints over it; at 390x844 that bar, in its own row, holds Menu as its last square and clears
                 the composer; at both, every square has a name and Tab reaches the bar before
-                the panes
+                the panes; at 1440x900, with the bar hidden, a row jump to a card low in the Inbox
+                and a focus on a hidden square leave the aside unscrolled and the bar's handle on
+                its bottom edge (the row jump posts 3 cards, only on this checkout's own fixture
+                stack, and settles them; it fails when the jump leaves the Inbox pane short of
+                its end, which tests nothing, or a card stays open)
   health        /api/health answers ok and reports the expected version
   problems      /api/health flags nothing: today, a database it cannot reach, named with
                 the route's own error
@@ -202,7 +206,8 @@ Options
   --json           print the results as JSON
 
 Beyond the agent sign-in, which it signs out of again, and send-top, send-focus, slash-menu,
-reply-focus, typing-lag and upload-keep, which a stack that reads live data refuses, it only reads, so it is safe against the live dashboard.`
+reply-focus, typing-lag and upload-keep, which a stack that reads live data refuses, and
+aside-bar's row jump, which skips one, it only reads, so it is safe against the live dashboard.`
 
 const parse = () => {
   try {
@@ -553,21 +558,64 @@ const uploadKeeps = (at: Target) =>
   })
 
 // A wide screen, where the bar floats over the panes, and a phone, where it keeps a row of its own.
-const ASIDE_VIEWPORTS = [
-  { height: 900, width: 1440 },
-  { height: 844, width: 390 },
-]
+const ASIDE_WIDE = { height: 900, width: 1440 }
+const ASIDE_VIEWPORTS = [ASIDE_WIDE, { height: 844, width: 390 }]
+
+// Cards the drift probe's row jump needs, enough to fill the Inbox past its pane at 1440x900 so the oldest sits low in the list, posted only into this checkout's own fixture stack and settled after.
+const ASIDE_CARDS = 3
 
 const asideBars = (at: Target) =>
-  guard("aside-bar", async () =>
-    browse(at, "aside-bar", async (browser) => {
-      await browser.signIn(at)
-      const results: Result[] = []
-      for (const viewport of ASIDE_VIEWPORTS)
-        results.push(...(await asideBar(browser, at, viewport)))
-      return results
-    }),
-  )
+  guard("aside-bar", async () => {
+    const own = fixture !== null && (await fixtureOnly(at, "aside-bar")).ok
+    const posted = own
+      ? Array.from({ length: ASIDE_CARDS }, (_, n) => postCard(`verify aside-bar ${n + 1}`))
+      : []
+    const ids = posted.flatMap((card) => ("id" in card ? [card.id] : []))
+    const refused = posted.find((card) => "refused" in card)
+    // each card left open, named with why its settle failed, so it never sits below the next run's cards unseen
+    let settled = false
+    const settle = () => {
+      settled = true
+      return ids.flatMap((id) => {
+        const why = settleCard(id, "verify aside-bar")
+        return why ? [`${id}: ${why}`] : []
+      })
+    }
+    try {
+      return await browse(at, "aside-bar", async (browser) => {
+        await browser.signIn(at)
+        const results: Result[] = []
+        for (const viewport of ASIDE_VIEWPORTS)
+          results.push(...(await asideBar(browser, at, viewport)))
+        if (refused && "refused" in refused)
+          results.push({
+            check: `aside-bar ${ASIDE_WIDE.width} row jump`,
+            detail: `bun run ask new posted no card in this checkout: ${refused.refused}`,
+            ok: false,
+          })
+        else if (!own)
+          results.push({
+            check: `aside-bar ${ASIDE_WIDE.width} row jump`,
+            detail:
+              "skipped: the row jump posts cards, so it needs this checkout's own fixture stack",
+            ok: true,
+          })
+        results.push(
+          ...(await asideDrift(browser, at, ASIDE_WIDE, refused ? null : (ids[0] ?? null))),
+        )
+        const open = settle()
+        if (open.length)
+          results.push({
+            check: `aside-bar ${ASIDE_WIDE.width} row jump`,
+            detail: `left open: ${open.join("; ")}`,
+            ok: false,
+          })
+        return results
+      })
+    } finally {
+      if (!settled) settle()
+    }
+  })
 
 const changelogEntries = (at: Target) =>
   guard("changelog-entry", async () =>
