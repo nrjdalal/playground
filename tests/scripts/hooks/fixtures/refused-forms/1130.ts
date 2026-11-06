@@ -1,6 +1,6 @@
 import { type Group, NEVER_MADE } from "./_shared"
 
-// #1130: BSD env and GNU env both read a lone `-` as -i and keep reading their options after it, so the program comes after them; rows are data, as refused-forms.ts says.
+// #1130: a lone `-` is env's -i, and BSD env keeps reading its options after it, so the program comes after them, where GNU env ends its options there; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
     folders: ["process home", "process data folder", "process worktree"],
