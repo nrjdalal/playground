@@ -96,13 +96,19 @@ const GIT_READS = new Set([
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
+// Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
+const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
+// A writer's options whose next word is a value rather than a target: mkdir's mode, touch's date, reference file and stamp
+const WRITER_TAKES: Record<string, string[]> = { mkdir: ["-m"], touch: ["-d", "-r", "-t"] }
 const DUPLICATE = /^(?:\d+|-)$/
 // Whether a redirect writes a file: >, >>, >|, <> or >& to a name, not an fd
 const writer = ({ op, target }: { op: string; target?: Word }): boolean =>
   [">", ">>", ">|", "<>"].includes(op) || (op === ">&" && !DUPLICATE.test(target?.value ?? ""))
 const GLOB = /[*?[{(]/
 // Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
-const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
+const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|LESSOPEN|PAGER|VISUAL)$/
+// git's variables that only name an author or a committer, text git never runs
+const GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
 
 // Whether a scope's variables set one that makes git or a pager run a program, each name read once.
@@ -178,6 +184,23 @@ function gitConfigs(args: Word[]): Word[] {
     else if (!value.startsWith("-")) break
   }
   return configs
+}
+
+// The words a writer writes to: dd's of= operand, the -t folder of cp, install and ln or else their last operand, and every operand of mkdir, tee and touch
+function writeTargets(name: string, args: Word[]): Word[] {
+  if (name === "dd") return args.filter((word) => word.value.startsWith("of="))
+  const into = name === "cp" || name === "install" || name === "ln"
+  const operands: Word[] = []
+  let folder: Word | undefined
+  for (let k = 0, options = true; k < args.length; k++) {
+    const { value } = args[k]
+    if (!options || value === "-" || !value.startsWith("-")) operands.push(args[k])
+    else if (value === "--") options = false
+    else if (WRITER_TAKES[name]?.includes(value)) k++
+    else if (into && /^(?:-[A-Za-z]*t|--target-directory)$/.test(value)) folder = args[++k]
+    else if (into && /^(?:-t.|--target-directory=)/.test(value)) folder = args[k]
+  }
+  return into ? (folder ? [folder] : operands.slice(-1)) : operands
 }
 
 // The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from.
@@ -680,6 +703,14 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
+  // whether the hook places a write's path with no folder of the shell's: absolute, under ~, or through a variable the call holds; dd's of= and a -t folder by their value
+  const placed = (word: Word, env: Env, steady: Steady) =>
+    pathOf(texts(heldWord(word, env, steady) ?? word).at(-1) as Text, {
+      ...env,
+      cwd: undefined,
+    }) !== undefined
+  const afterUnreadCd = (write: string) =>
+    `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`
   const seen = new Set<string>()
   let steadyAt: (cmd: Command) => Steady = () => NONE
   let whole = false
@@ -725,6 +756,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       return refuse(
         `a write to ${blind.target.value} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`,
       )
+    // after a cd to a folder the hook cannot read (`Env.cwdUnread`), the shell may be in the root, so a writing redirect the hook can place only by the shell's own folder is refused
+    const unplaced = env.cwdUnread
+      ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd)))
+      : undefined
+    if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
@@ -791,8 +827,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (inRoot(here.cwd)) return refuse(`${verb} run inside ${root}`)
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`)
-      // a value the hook cannot read under a remover, or in git's -c, could name the root, so it is refused unless the call holds it
-      const unheld = remover ? args.find((word) => !held(word, here, steady)) : undefined
+      // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
+      const unheld = (remover ? args : WRITERS.has(name) ? writeTargets(name, args) : []).find(
+        (word) => !held(word, here, steady),
+      )
       if (unheld)
         return refuse(
           `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
@@ -802,6 +840,29 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         if (config)
           return refuse(
             `git ${/^-c./.test(config.raw ?? config.value) ? "" : "-c "}${shown(config)}, a value built from a variable or a substitution; write the value literally in the call`,
+          )
+        // git takes --config-env's value from a variable, and a git variable other than an author's or a committer's, or a pager or editor variable, can make git run a program or write, so either from a value the hook does not hold is refused
+        const { rest } = gitCall(args, here)
+        const fromEnv = args
+          .slice(0, args.length - rest.length - 1)
+          .find((word) => /^--config-env(?:=|$)/.test(word.value))
+        if (fromEnv)
+          return refuse(
+            `git ${shown(fromEnv)}, which takes a config value from a variable the hook cannot read; write the value literally with git -c`,
+          )
+        const scoped = runsVariable(here.vars) ? [...here.vars] : []
+        const variable = [
+          ...parsed.local,
+          ...scoped.filter(([key]) => !parsed.local.has(key)),
+        ].find(
+          ([key, value]) =>
+            RUNS.test(key) &&
+            !GIT_TEXT.test(key) &&
+            !held({ ...value, quoted: false }, here, steady),
+        )
+        if (variable)
+          return refuse(
+            `git with ${variable[0]} set to a value the hook does not hold, which git may run or read as config; write the value literally in the call`,
           )
       }
       const scope = since(varsJudged, here.vars, `${here.cwd}\0${remover}`)
@@ -834,6 +895,14 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         if (named) return refuse(`${verb} under xargs on ${named}`)
       }
     }
+    // after a cd the hook cannot read, a remover's operand or a writer's target the hook can place only by the shell's own folder may be in the root
+    const operands = remover
+      ? args.filter((word) => !word.value.startsWith("-"))
+      : WRITERS.has(name)
+        ? writeTargets(name, args)
+        : []
+    const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
+    if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
   }
   const named = namings(command)
   const known = knownVariables(command, environment, directory)
