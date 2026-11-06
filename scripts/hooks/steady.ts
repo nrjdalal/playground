@@ -344,8 +344,8 @@ const PRINTS = new Set(["print", "printf"])
 const NUMERIC = new Set(["float", "integer"])
 // the builtins that give a name an attribute: n makes a bash nameref, a name whose every later write sets the variable its value names, and i (zsh's E and F too) makes every later assignment to it an arithmetic evaluation
 const TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"])
-// the builtins that run text as the line's own shell, which can set any variable
-const RUNS_TEXT = new Set([".", "eval", "source"])
+// the builtins that run text as the line's own shell, which can set any variable: a trap's text runs there (a DEBUG trap's before each command), as does zsh's sched's and an autoloaded function's file
+const RUNS_TEXT = new Set([".", "autoload", "eval", "sched", "source", "trap"])
 // the tests whose -v reads its operand as a name, evaluating any subscript it holds; test and [ take their operators after expansion, so a word that expands may be a -v or split into one and its operand, while [[ reads its operators as written
 const TESTS = new Set(["[", "[[", "test"])
 // the -v operand that names no subscript: a plain unquoted name, as written
@@ -386,14 +386,14 @@ const OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"])
 const CLOSES = new Set(["done", "esac", "fi", "}"])
 const LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"])
 
-// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs eval or source, sets a variable by a name the hook cannot read whole (a name-indirection assignment, a bash nameref, an integer attribute or text the shell evaluates among them), or names IFS, holds none, and holdable() is the rest of the allow-list
+// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs text in its own shell (eval, source, trap, sched, autoload, or a command whose name the hook cannot read, which may be any of them or a builtin that sets a variable), sets a variable by a name the hook cannot read whole (a name-indirection assignment, a bash nameref, an integer attribute or text the shell evaluates among them), or names IFS, holds none, and holdable() is the rest of the allow-list
 export function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Steady {
   if (named.blind || named.counts.has("IFS")) return () => NONE
   const counts = new Map(named.counts)
   const parses = commands.map((cmd) => parse(cmd))
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at]
-    if (RUNS_TEXT.has(name)) return () => NONE
+    if (RUNS_TEXT.has(name) || marked(name)) return () => NONE
     const flagged = (letters: RegExp) =>
       cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value))
     if (NUMERIC.has(name) || (TYPESETS.has(name) && flagged(/[EFin]/))) return () => NONE
