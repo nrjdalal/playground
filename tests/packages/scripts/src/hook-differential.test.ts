@@ -508,6 +508,69 @@ describe("a stored result", () => {
     expect(readFileSync(join(at, "tickets"), "utf8")).toContain(`-- bun ${SCRIPT} sweep`)
   })
 
+  // a repo whose hook x refused every form at canary (HEAD~1) and allows every form at its head, with a forms module of n made-up forms, so each form changes once from each of its three places
+  const flipped = (name: string, n: number) => {
+    const { root } = repo(name)
+    writeFileSync(join(root, "scripts", "hooks", "x.ts"), `export const check = () => "refused"\n`)
+    git(root, "commit", "-qam", "canary refuses all")
+    writeFileSync(join(root, "scripts", "hooks", "x.ts"), `export const check = () => undefined\n`)
+    git(root, "commit", "-qam", "head allows all")
+    const forms = join(DIR, `${name}-forms.ts`)
+    const list = Array.from({ length: n }, (_, i) => ({
+      command: `ls made-up-${i}`,
+      inClass: false,
+    }))
+    writeFileSync(forms, `export const forms = ${JSON.stringify(list)}\n`)
+    const argv = (...more: string[]) => [
+      "sweep",
+      "--forms",
+      forms,
+      "--canary",
+      "HEAD~1",
+      "--hook",
+      "x",
+      ...more,
+    ]
+    return { argv, forms, root, sha: git(root, "rev-parse", "HEAD~1") }
+  }
+
+  const changedOf = (stderr: string) => stderr.split("\n").filter((l) => l.startsWith("x: "))
+
+  test("past 20 changed lines a hook prints one line naming how many more it cut, and --all prints and stores every one", async () => {
+    const at = home("cut")
+    const { argv, root, sha } = flipped("cut-repo", 9)
+    const cut = run(at, root, argv(), { RUN_SLOT_NICE: "10" })
+    expect(cut.exitCode).toBe(0)
+    expect(changedOf(cut.stderr.toString())).toHaveLength(21)
+    expect(changedOf(cut.stderr.toString()).at(-1)).toBe(
+      "x: 7 more changed lines not shown (--all prints them)",
+    )
+    const all = run(at, root, argv("--all"), { RUN_SLOT_NICE: "10" })
+    expect(all.exitCode).toBe(0)
+    expect(all.stdout.toString()).not.toContain("reused:")
+    const lines = changedOf(all.stderr.toString())
+    expect([lines.length, lines.some((l) => l.includes("more changed lines"))]).toEqual([27, false])
+    const key = keyOf({
+      canary: sha,
+      options: parse(argv("--all"))!,
+      projects: join(at, ".claude", "projects"),
+      root,
+    })!
+    expect((await stored(join(at, ".playground"), key.key))?.changed).toEqual(lines)
+  })
+
+  test("a hook with 20 or fewer changed lines prints them all and no line about a cut", () => {
+    const at = home("uncut")
+    const { argv, root } = flipped("uncut-repo", 6)
+    const lines = changedOf(run(at, root, argv(), { RUN_SLOT_NICE: "10" }).stderr.toString())
+    expect([lines.length, lines.some((l) => l.includes("more changed lines"))]).toEqual([18, false])
+  })
+
+  test("--all moves the key, so a cut result is never reused for it", () => {
+    const { argv, root, sha } = flipped("all-key-repo", 1)
+    expect(keyAt(root, argv("--all"), sha)).not.toBe(keyAt(root, argv(), sha))
+  })
+
   test("a result is read back while it is under a day old", async () => {
     const data = join(DIR, "data")
     await store(
