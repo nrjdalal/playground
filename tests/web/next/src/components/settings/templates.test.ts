@@ -89,4 +89,39 @@ describe("Settings > Templates", () => {
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>\s*Add template/)
     expect(html).toMatch(/<button(?=[^>]*aria-label="Edit Night shift")(?=[^>]*disabled="")/)
   })
+
+  test("a default missing from a list saved before it was added shows as a new default with Add, and no Edit until it is in", () => {
+    const html = render([ASSISTANT])
+    expect(html).toContain("New default · Orchestrator · Claude · orchestrator.md")
+    expect(html).toContain('aria-label="Add Orchestrator"')
+    expect(html).not.toContain('aria-label="Edit Orchestrator"')
+    expect(html).toContain('aria-label="Edit Assistant"')
+  })
+
+  test("a list holding every default shows no new default", () => {
+    const html = render([ASSISTANT, NIGHT, ORCHESTRATOR])
+    expect(html).not.toContain("New default")
+    expect(html).not.toContain('aria-label="Add ')
+  })
+
+  test("before a scope is named, a new default's Add is disabled too", () => {
+    const html = render([ASSISTANT], null)
+    expect(html).toMatch(/<button(?=[^>]*aria-label="Add Orchestrator")(?=[^>]*disabled="")/)
+  })
+})
+
+describe("how a new default appears, in the dialog and the docs", () => {
+  const read = (path: string) => Bun.file(join(import.meta.dir, "../../../../../..", path)).text()
+
+  test("the dialog's description and the settings docs say a default added later shows as New default, with Add", async () => {
+    const dialog = await read("web/next/src/components/settings/templates.tsx")
+    const docs = await read("web/next/content/docs/settings.mdx")
+    expect(dialog).toContain(
+      "A default Playground adds later shows in the list as New default, and Add puts it in.",
+    )
+    expect(docs).toContain(
+      "a default Playground adds later shows as **New default**, and **Add** puts it in your list with your edits kept",
+    )
+    for (const text of [dialog, docs]) expect(text).not.toContain("back to the defaults alone")
+  })
 })

@@ -79,12 +79,13 @@ export type TemplateForm = {
   model: string
 }
 
-export type TemplateState = "added" | "default" | "edited"
+export type TemplateState = "added" | "default" | "edited" | "new"
 
 export const TEMPLATE_STATE_WORDS: Record<TemplateState, string> = {
   added: "Added",
   default: "Default",
   edited: "Edited default",
+  new: "New default",
 }
 
 const same = (a: Template, b: Template) => stableJson(a) === stableJson(b)
@@ -99,6 +100,10 @@ export const templateState = (template: Template, defaults: Template[]): Templat
   const original = defaults.find((row) => row.id === template.id)
   return !original ? "added" : same(original, template) ? "default" : "edited"
 }
+
+// Pure: the defaults a list saved before Playground added them lacks, since a save keeps the whole list and a default is never removed from it.
+export const newDefaults = (rows: Template[], defaults: Template[]): Template[] =>
+  defaults.filter((original) => !rows.some((row) => row.id === original.id))
 
 const byLabel = (rows: Template[]) => [...rows].sort((a, b) => a.label.localeCompare(b.label))
 

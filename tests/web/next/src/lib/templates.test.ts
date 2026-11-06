@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  newDefaults,
   newTemplateId,
   resetTemplate,
   type Template,
   TEMPLATE_KINDS,
+  TEMPLATE_STATE_WORDS,
   templateForm,
   templateOf,
   templateRefusal,
@@ -199,5 +201,39 @@ describe("the template editor", () => {
       "orchestrator",
       "planner",
     ])
+  })
+})
+
+describe("a default added after a save", () => {
+  const glm = DEFAULTS[3]!
+  const savedBefore = DEFAULTS.filter((row) => row.id !== glm.id)
+
+  test("a list saved before a default was added lists it as new, and Add puts it in with the other edits kept", () => {
+    const stored = withTemplate(savedBefore, { ...orchestrator, effort: "high" })
+    expect(newDefaults(stored, DEFAULTS)).toEqual([glm])
+    expect(TEMPLATE_STATE_WORDS.new).toBe("New default")
+    const added = withTemplate(stored, glm)
+    expect(added).toContainEqual({ ...orchestrator, effort: "high" })
+    expect(added).toContainEqual(glm)
+    expect(newDefaults(added, DEFAULTS)).toEqual([])
+    expect(templateState(glm, DEFAULTS)).toBe("default")
+    expect(templatesWrite(added, stored, DEFAULTS)).toEqual({ value: added })
+  })
+
+  test("Add on a list with no edits brings it back to the defaults alone, so the setting resets", () => {
+    expect(templatesWrite(withTemplate(savedBefore, glm), savedBefore, DEFAULTS)).toEqual({
+      reset: true,
+    })
+  })
+
+  test("a list of the defaults, or the defaults and one you added, has no new default", () => {
+    expect(newDefaults(DEFAULTS, DEFAULTS)).toEqual([])
+    const night: Template = {
+      ...orchestrator,
+      brief: "night.md",
+      id: "night-shift",
+      label: "Night shift",
+    }
+    expect(newDefaults(withTemplate(DEFAULTS, night), DEFAULTS)).toEqual([])
   })
 })
