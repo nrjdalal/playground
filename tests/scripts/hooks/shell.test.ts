@@ -272,6 +272,7 @@ describe("zshSplits finds a sourcing command in linear time (PG-1231)", () => {
     ["unclosed double quotes", 'a"'.repeat(100_000)],
     ["dollar quotes", "$'".repeat(100_000)],
     ["test closers", "]] ".repeat(70_000)],
+    ["reserved words in argument position", "then x ".repeat(30_000)],
   ])("200 KB of %s", async (_, line) => {
     expect(await overBaseline(async (c) => zshSplits(c), line)).toBeLessThan(50)
   })

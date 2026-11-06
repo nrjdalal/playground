@@ -6108,14 +6108,11 @@ var LEADS = new Set([
   "-",
   "builtin",
   "command",
-  "do",
   "elif",
-  "else",
   "exec",
   "if",
   "nocorrect",
   "noglob",
-  "then",
   "time",
   "until",
   "while"
@@ -6124,7 +6121,7 @@ function sources(line) {
   let command = true;
   for (const [raw] of line.replace(/\\\n/g, "").matchAll(/[;&|(){}\n]|(?:\$'(?:[^'\\]|\\[\s\S])*'?|'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]|[^\s;&|(){}'"\\])+/g)) {
     const word = raw.replace(/\$'/g, "'").replace(/['"\\]/g, "");
-    if (/^[;&|(){}\n]$/.test(raw) || word === "]]")
+    if (/^[;&|(){}\n]$/.test(raw) || /^(?:\]\]|do|else|then)$/.test(word))
       command = true;
     else if (!command)
       continue;

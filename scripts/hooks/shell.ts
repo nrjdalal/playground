@@ -549,19 +549,16 @@ const LEADS = new Set([
   "-",
   "builtin",
   "command",
-  "do",
   "elif",
-  "else",
   "exec",
   "if",
   "nocorrect",
   "noglob",
-  "then",
   "time",
   "until",
   "while",
 ])
-// Whether a line runs another file or string as zsh code, which may set an option or make an array: source, `.` or eval as a command, after a separator, a parenthesis or brace (a case pattern's `)` included), a `]]` (zsh reads then, do or a short body right after one), a `LEADS` word or an assignment prefix (`X=`, `X+=`, `X[…]=`); one pass over the line's words, each kept whole across its quotes and escapes, then read with them removed, since zsh runs `'source'`, `$'source'` and `\source` as source
+// Whether a line runs another file or string as zsh code, which may set an option or make an array: source, `.` or eval as a command, after a separator, a parenthesis or brace (a case pattern's `)` included), a `]]` (zsh reads then, do or a short body right after one), a then, do or else anywhere (zsh reads do as reserved after `repeat N` and after a for or select with no in), a `LEADS` word or an assignment prefix (`X=`, `X+=`, `X[…]=`); one pass over the line's words, each kept whole across its quotes and escapes, then read with them removed, since zsh runs `'source'`, `$'source'` and `\source` as source
 function sources(line: string): boolean {
   let command = true
   for (const [raw] of line
@@ -570,7 +567,7 @@ function sources(line: string): boolean {
       /[;&|(){}\n]|(?:\$'(?:[^'\\]|\\[\s\S])*'?|'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]|[^\s;&|(){}'"\\])+/g,
     )) {
     const word = raw.replace(/\$'/g, "'").replace(/['"\\]/g, "")
-    if (/^[;&|(){}\n]$/.test(raw) || word === "]]") command = true
+    if (/^[;&|(){}\n]$/.test(raw) || /^(?:\]\]|do|else|then)$/.test(word)) command = true
     else if (!command) continue
     else if (word === "source" || word === "." || word === "eval") return true
     else if (!LEADS.has(word) && !/^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(word)) command = false
