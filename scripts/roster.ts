@@ -21,7 +21,7 @@ import { writeAtomic } from "../packages/scripts/src/write-atomic"
 import STATUSES from "./roster-statuses.json"
 
 export const USAGE = `Usage:
-  roster.ts set <name> key=value [key=value ...]    (creates the agent if missing, its role from kind= or its name; a new one needs task=)
+  roster.ts set <name> key=value [key=value ...]    (creates the agent if missing, its role from kind= or its name; a new one needs task=; status=parked needs hold=)
   roster.ts report <name> <text> [key=value ...]    (sets lastReport, stamps lastReportAt; a new one needs task=)
   roster.ts assign <name> <title> <task> [k=v ...]  (new task, or a checker's next PR with worker= pr=, which joins its prs list; clears pr/branch/repo/owner/lastReport)
   roster.ts backlog <text>
@@ -203,12 +203,39 @@ function checkOwner(pairs: [string, string][]): void {
     )
 }
 
+// hold= names what a parked row waits on, which playground sweep reads to tell its lead once it closes: an issue or PR, an Inbox item, or a decision for a wait on no item (a lane turn, a load hold). An empty hold= clears it.
+const HOLD_REF = /^(?:#i?\d+|d-\d+)$/
+
+function checkHold(pairs: [string, string][]): void {
+  const hold = pairs.find(([k, v]) => k === "hold" && v !== "" && !HOLD_REF.test(v))
+  if (hold)
+    throw new Refusal(
+      `roster.ts: hold takes #<n> (an issue or PR), #i<n> (an Inbox item) or d-<n> (a decision), not ${hold[1]}`,
+      2,
+    )
+}
+
 // Every key=value check set, report and assign share.
 function checkPairs(name: string, pairs: [string, string][]): void {
   checkKind(pairs)
   checkStatus(name, pairs)
   checkEta(pairs)
   checkOwner(pairs)
+  checkHold(pairs)
+}
+
+// a call that parks a row, or clears a parked row's hold, leaves it holding one, so the sweep can tell its lead once the wait ends; a call that moves it off parked drops its hold, so a later park names a fresh one. A row parked before this check keeps taking writes that leave its park alone.
+function parkHold(entry: Agent, pairs: [string, string][], moved: boolean): void {
+  const touched = moved || pairs.some(([k]) => k === "status" || k === "hold")
+  if (entry.status !== "parked") {
+    if (touched && !pairs.some(([k]) => k === "hold")) delete entry.hold
+    return
+  }
+  if (touched && !entry.hold)
+    throw new Refusal(
+      `roster.ts: ${entry.name} is parked, so add hold=#<n>, hold=#i<n> or hold=d-<n> (the issue, PR, Inbox item or decision the park waits on) to the same call`,
+      2,
+    )
 }
 
 // A checker moved by halves keeps its old worker or pr, and the sidebar nests it under that worker's ended row.
@@ -277,6 +304,7 @@ async function main(argv: string[]): Promise<void> {
         1,
       )
     apply(entry, pairs, factoryRepo)
+    parkHold(entry, pairs, false)
   } else if (cmd === "report") {
     const [text, ...more] = rest
     if (text === undefined) throw new Refusal(USAGE, 2)
@@ -287,6 +315,7 @@ async function main(argv: string[]): Promise<void> {
     entry.lastReport = text
     entry.lastReportAt = now()
     apply(entry, pairs, factoryRepo)
+    parkHold(entry, pairs, false)
   } else if (cmd === "assign") {
     const [title, task, ...more] = rest
     if (title === undefined || task === undefined) throw new Refusal(USAGE, 2)
@@ -311,6 +340,7 @@ async function main(argv: string[]): Promise<void> {
       delete entry[k]
     Object.assign(entry, { status: "working", task })
     apply(entry, [["title", title], ...pairs], factoryRepo)
+    parkHold(entry, pairs, true)
     if (checker && entry.pr)
       entry.prs = [
         ...new Set([...served, ...((entry.prs as string[] | undefined) ?? []), entry.pr as string]),

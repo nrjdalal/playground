@@ -22,10 +22,11 @@ export const SWITCHES = [
 ]
 export const SWITCH_HOURS = 4
 
-// What the last sweep saw, kept in the lead's own state file: the alerts and passed ETAs it printed, the queue line, which side of 15 the load was on, whether the single-slot flag was set and when it last listed the switches on.
+// What the last sweep saw, kept in the lead's own state file: the alerts and passed ETAs it printed (a parked row's as `parked <name> <eta>`), the closed and unreadable holds it printed, the queue line, which side of 15 the load was on, whether the single-slot flag was set and when it last listed the switches on.
 type SweepState = {
   alerts: string[]
   etas: string[]
+  holds?: string[]
   loadHigh: boolean
   queue: string
   single: boolean
@@ -34,8 +35,12 @@ type SweepState = {
 
 type Switch = { by: string; name: string; reason: string; set: number; until: number }
 
+// What a parked row's hold reads as: its issue, PR or Inbox item open or closed, or null when it cannot be read.
+export type HoldState = "closed" | "open" | null
+
 type Readings = {
   alerts: unknown
+  holds: Record<string, HoldState>
   load5: number
   now: Date
   queue: unknown
@@ -46,6 +51,7 @@ type Readings = {
 
 type Row = {
   eta?: unknown
+  hold?: unknown
   kind?: unknown
   lead?: unknown
   name?: unknown
@@ -94,31 +100,46 @@ function sweep(
   if (r.single !== (prev?.single ?? false)) lines.push(`single slot: ${r.single ? "on" : "off"}`)
 
   const agents = listOf(r.roster, "agents") as Row[]
-  const passed = agents.flatMap((row) => {
-    const { eta, name, status } = row
-    if (
-      typeof name !== "string" ||
-      typeof eta !== "string" ||
-      status === "ended" ||
-      status === "parked"
-    )
-      return []
+  const mine = agents.filter(
+    (row) =>
+      typeof row.name === "string" && row.status !== "ended" && ownerOf(agents, row) === lead,
+  )
+  const about = (row: Row) =>
+    typeof row.pr === "string"
+      ? ` (${row.pr})`
+      : typeof row.task === "string"
+        ? ` (${row.task})`
+        : ""
+  const passed = mine.flatMap((row) => {
+    const { eta, name } = row
+    if (typeof eta !== "string") return []
     const at = Date.parse(eta)
     if (isNaN(at) || at > r.now.getTime()) return []
-    const kind = kindOf(name, row.kind) === "probe" ? "ops" : leadOf(name, row.worker, row.kind)
-    const owner =
-      typeof row.lead === "string"
-        ? row.lead
-        : isManagerKind(kind)
-          ? managerOf(agents, kind)
-          : dispatcherOf(agents, 1)
-    if (owner !== lead) return []
-    const about = typeof row.pr === "string" ? row.pr : typeof row.task === "string" ? row.task : ""
-    return [
-      { key: `${name} ${eta}`, text: `eta passed: ${name} ${eta}${about ? ` (${about})` : ""}` },
-    ]
+    return row.status === "parked"
+      ? [{ key: `parked ${name} ${eta}`, text: `parked past eta: ${name} ${eta}${about(row)}` }]
+      : [{ key: `${name} ${eta}`, text: `eta passed: ${name} ${eta}${about(row)}` }]
   })
   for (const p of passed) if (!prev?.etas.includes(p.key)) lines.push(p.text)
+
+  // a parked row's hold that has closed, or that no read reaches, prints once a row and hold; one known closed stays in the cursor, so it is not read again
+  const holds = mine.flatMap((row) => {
+    const { hold, name } = row
+    if (row.status !== "parked" || typeof hold !== "string" || !HELD_ON.test(hold)) return []
+    const closed = `closed ${name} ${hold}`
+    if (prev?.holds?.includes(closed)) return [{ key: closed, text: "" }]
+    const state = r.holds[hold]
+    if (state === "closed")
+      return [{ key: closed, text: `parked on closed hold: ${name} ${hold}${about(row)}` }]
+    if (state === null)
+      return [
+        {
+          key: `unreadable ${name} ${hold}`,
+          text: `parked hold unreadable: ${name} ${hold}${about(row)}`,
+        },
+      ]
+    return []
+  })
+  for (const h of holds) if (h.text && !prev?.holds?.includes(h.key)) lines.push(h.text)
 
   // a hand-set switch kept the runner box idle for two days, so each one on is listed once an hour
   const now = r.now.getTime()
@@ -139,6 +160,7 @@ function sweep(
     next: {
       alerts: alerts.map((a) => a.key),
       etas: passed.map((p) => p.key),
+      holds: holds.map((h) => h.key),
       loadHigh,
       queue,
       single: r.single,
@@ -146,6 +168,46 @@ function sweep(
     },
   }
 }
+
+// The lead a row reports to: its own lead=, else every probe's is ops' and a manager kind's its seat holder, else the dispatcher.
+const ownerOf = (agents: Row[], row: Row): string => {
+  const name = row.name as string
+  const kind = kindOf(name, row.kind) === "probe" ? "ops" : leadOf(name, row.worker, row.kind)
+  if (typeof row.lead === "string") return row.lead
+  return isManagerKind(kind) ? managerOf(agents, kind) : dispatcherOf(agents, 1)
+}
+
+// A hold the sweep reads: an issue or PR (#<n>) or an Inbox item (#i<n>); a decision (d-<n>) never closes, so its row is caught by its ETA alone.
+const HELD_ON = /^#i?\d+$/
+
+// Reads each hold on this machine: an issue or PR through gh in factory.repo, an Inbox item through bun run ask get in the Dashboard's checkout, which holds the Inbox's database; null when neither reads.
+export const readHold =
+  (repo: string, factory: string) =>
+  async (hold: string): Promise<HoldState> => {
+    try {
+      if (hold.startsWith("#i")) {
+        const { dashboardCheckout } = await import("./probe")
+        const checkout = dashboardCheckout(repo)
+        if (!checkout) return null
+        const run = Bun.spawnSync(["bun", "run", "--cwd", checkout, "ask", "get", hold], {
+          stderr: "ignore",
+          stdout: "pipe",
+        })
+        const out = run.stdout.toString()
+        if (run.exitCode !== 0) return null
+        const { status } = JSON.parse(out.slice(out.indexOf("{"))) as { status?: unknown }
+        return typeof status === "string" ? (status === "open" ? "open" : "closed") : null
+      }
+      const run = Bun.spawnSync(
+        ["gh", "api", `repos/${factory}/issues/${hold.slice(1)}`, "--jq", ".state"],
+        { stderr: "ignore", stdout: "pipe" },
+      )
+      const state = run.stdout.toString().trim()
+      return run.exitCode === 0 && (state === "open" || state === "closed") ? state : null
+    } catch {
+      return null
+    }
+  }
 
 // The leads a sweep serves: whoever holds the builder's and ops' seats in the roster.
 const leadsOf = (roster: unknown): string[] =>
@@ -190,6 +252,7 @@ export async function runSweep(
   dir: string,
   now = new Date(),
   load5 = loadavg()[1],
+  hold: (hold: string) => Promise<HoldState> = async () => null,
 ): Promise<string[]> {
   const roster = readJson(join(dir, "roster.json"))
   const leads = leadsOf(roster)
@@ -199,10 +262,31 @@ export async function runSweep(
   const statePath = join(dir, "sweep", `${lead}.json`)
   const prev = isState(readJson(statePath))
   const switches = switchesOn(join(dir, "ops"), now)
+  // only the lead's own parked rows' holds are read, and none already known closed
+  const agents = listOf(roster, "agents") as Row[]
+  const holds: Record<string, HoldState> = {}
+  for (const row of agents) {
+    const held = row.hold
+    if (
+      row.status !== "parked" ||
+      typeof row.name !== "string" ||
+      typeof held !== "string" ||
+      !HELD_ON.test(held)
+    )
+      continue
+    if (
+      ownerOf(agents, row) !== lead ||
+      prev?.holds?.includes(`closed ${row.name} ${held}`) ||
+      held in holds
+    )
+      continue
+    holds[held] = await hold(held)
+  }
   const { lines, next } = sweep(
     lead,
     {
       alerts: readJson(join(dir, "ops", "alerts-pending.json")),
+      holds,
       load5,
       now,
       queue: readJson(join(dir, "merge-queue.json")),
