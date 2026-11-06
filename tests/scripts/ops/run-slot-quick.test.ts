@@ -97,7 +97,7 @@ describe("a node_modules clone waits while clone-off stands", () => {
   })
 
   test("but goes on normal pressure and load1 and load5 under 30", async () => {
-    expect(await machine({ load1: 29, off }).clones("node_modules")).toBe(true)
+    expect(await machine({ load1: 29, load5: 2, off }).clones("node_modules")).toBe(true)
   })
 
   test("and on warn pressure with 8% free", async () => {
@@ -135,6 +135,84 @@ describe("a node_modules clone waits while clone-off stands", () => {
     await stop(run.p)
     expect(await run.saw(said, 2)).toBe(false)
     expect(await run.ran()).toBe(false)
+  })
+})
+
+// 6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the load brake
+describe("a node_modules clone waits for its spacing", () => {
+  const SPACED = /^run-slot\.sh: this clone waits /gm
+  // whether the clone waited (printed its spacing line and had not run when stopped) or ran
+  const clone = async (m: ReturnType<typeof machine>, who = "worker-c") => {
+    mkdirSync(join(m.root, "node_modules"), { recursive: true })
+    const run = m.start(who, {}, SCRIPT, ["cp", "-R", "node_modules"])
+    if (await run.saw(SPACED)) {
+      await stop(run.p)
+      return existsSync(run.marker) ? "ran" : "waited"
+    }
+    return (await run.ran()) ? "ran" : "ended"
+  }
+  const iso = (ago: number) => new Date(Date.now() - ago * 1000).toISOString().slice(0, 19) + "Z"
+  // a runs log whose last clone ended `ago` seconds back, or whose run on `slot` did
+  const ended = (m: ReturnType<typeof machine>, ago: number, slot = "run-slot-clone") =>
+    writeFileSync(
+      join(m.ops, "run-slot.runs.log"),
+      `${iso(ago + 30)} start worker-a 111 ${slot} waited=0s\n${iso(ago)} end worker-a 111 rc=0 ran=30s\n`,
+    )
+
+  test("within the gap of the last clone's end", async () => {
+    const m = machine()
+    ended(m, 60)
+    expect(await clone(m)).toBe("waited")
+  })
+
+  test("but starts once the gap has passed", async () => {
+    const m = machine()
+    ended(m, 400)
+    expect(await clone(m)).toBe("ran")
+  })
+
+  test("and a run on another slot that ended within the gap holds no clone", async () => {
+    const m = machine()
+    ended(m, 60, "run-slot")
+    expect(await clone(m)).toBe("ran")
+  })
+
+  test("while load5 is within 4 of the brake's line, 22 with no cap", async () => {
+    expect(await clone(machine({ load1: 2, load5: 18 }))).toBe("waited")
+  })
+
+  test("and within 4 of run-slot.load5-cap's line", async () => {
+    const m = machine({ load1: 2, load5: 11 })
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "15\n")
+    expect(await clone(m)).toBe("waited")
+  })
+
+  test("but starts under that line", async () => {
+    const m = machine({ load1: 2, load5: 10 })
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "15\n")
+    expect(await clone(m)).toBe("ran")
+  })
+
+  test("while a big run holds a lane", async () => {
+    const m = machine()
+    m.hold("run-slot-3", 3, "big")
+    expect(await clone(m)).toBe("waited")
+  })
+
+  test("but starts beside a medium run", async () => {
+    const m = machine()
+    m.hold("run-slot-3", 2, "medium")
+    expect(await clone(m)).toBe("ran")
+  })
+
+  test("and starts at once with neither hold standing", async () => {
+    expect(await clone(machine())).toBe("ran")
+  })
+
+  test("and a session clone-allow names keeps its pass past clone-off", async () => {
+    const m = machine({ off: ["run-slot.clone-off"], pressure: 4 })
+    writeFileSync(join(m.ops, "run-slot.clone-allow"), "tester-.*\n")
+    expect(await clone(m, "tester-sloth")).toBe("ran")
   })
 })
 
@@ -501,7 +579,7 @@ describe("the quick slot runs whatever load5 reads", () => {
   })
 
   test("and so does a node_modules clone, with clone-off unset", async () => {
-    expect(await machine({ load1: 30 }).clones("node_modules")).toBe(true)
+    expect(await machine({ load1: 30, load5: 2 }).clones("node_modules")).toBe(true)
   })
 })
 
