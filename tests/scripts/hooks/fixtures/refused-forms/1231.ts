@@ -45,6 +45,26 @@ export const groups: Group[] = [
         "case a in a) source /tmp/f;; esac; ln -s $X",
       ],
       [
+        "ln of a variable after a file sourced in then right after a [[ test",
+        "if [[ -n x ]] then source /tmp/f; fi; ln -s $X",
+      ],
+      [
+        "ln of a variable after a file sourced in do right after a [[ test",
+        "while [[ -n x ]] do source /tmp/f; break; done; ln -s $X",
+      ],
+      [
+        "ln of a variable after a file sourced in until's do right after a [[ test",
+        "until [[ -z x ]] do source /tmp/f; break; done; ln -s $X",
+      ],
+      [
+        "ln of a variable after a file dot-sourced in elif's then right after a [[ test",
+        "if [[ -z x ]] then :; elif [[ -n x ]] then . /tmp/f; fi; ln -s $X",
+      ],
+      [
+        "ln of a variable after a file sourced as if's short body after a [[ test",
+        "if [[ -n x ]] source /tmp/f; ln -s $X",
+      ],
+      [
         "ln of a variable after a file sourced as if's condition in zsh -c",
         `zsh -c 'if source /tmp/f; then :; fi; ln -s $X'`,
       ],
