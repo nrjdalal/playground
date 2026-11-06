@@ -1765,6 +1765,18 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "rsync with a relative link folder it only reads after a cd to a variable",
       `cd "$X"; rsync -a --link-dest=prev /tmp/a /tmp/b`,
     ],
+    [
+      "rsync with an absolute partial folder as the next word after a cd to a variable",
+      `cd "$X"; rsync -a --partial-dir /tmp/p /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute temp folder after a cluster ending in its short option after a cd to a variable",
+      `cd "$X"; rsync -aT /tmp/t /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a dash-led block size after its short option after a cd to a variable",
+      `cd "$X"; rsync -a -B -1 /tmp/a /tmp/b`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })

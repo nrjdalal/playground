@@ -74,6 +74,42 @@ export const groups: Group[] = [
         "rsync with a relative batch-only file by a shortened long option after a cd to a variable",
         `cd "$D"; rsync -a --onl=x /tmp/a /tmp/b`,
       ],
+      [
+        "macOS rsync with a dash-led relative partial folder as the next word after a cd to a variable",
+        `cd "$D"; /usr/bin/rsync -a --partial-dir -x /tmp/a /tmp/b`,
+      ],
+      [
+        "macOS rsync with a dash-led relative temp folder as the next word after a cd to a variable",
+        `cd "$D"; /usr/bin/rsync -a --temp-dir -x /tmp/a /tmp/b`,
+      ],
+      [
+        "macOS rsync with a dash-led relative backup folder as the next word after a cd to a variable",
+        `cd "$D"; /usr/bin/rsync -a --backup-dir -x /tmp/a /tmp/b`,
+      ],
+      [
+        "macOS rsync with a dash-led relative log file as the next word after a cd to a variable",
+        `cd "$D"; /usr/bin/rsync -a --log-file -x /tmp/a /tmp/b`,
+      ],
+      [
+        "macOS rsync with a dash-led relative batch file as the next word after a cd to a variable",
+        `cd "$D"; /usr/bin/rsync -a --write-batch -x /tmp/a /tmp/b`,
+      ],
+      [
+        "macOS rsync with a dash-led relative batch-only file as the next word after a cd to a variable",
+        `cd "$D"; /usr/bin/rsync -a --only-write-batch -x /tmp/a /tmp/b`,
+      ],
+      [
+        "macOS rsync with a dash-led relative partial folder after a shortened long option after a cd to a variable",
+        `cd "$D"; /usr/bin/rsync -a --partial-d -x /tmp/a /tmp/b`,
+      ],
+      [
+        "macOS rsync with a dash-led relative temp folder after its short option after a cd to a variable",
+        `cd "$D"; /usr/bin/rsync -a -T -x /tmp/a /tmp/b`,
+      ],
+      [
+        "macOS rsync with a dash-led relative temp folder after a cluster ending in its short option after a cd to a variable",
+        `cd "$D"; /usr/bin/rsync -aT -x /tmp/a /tmp/b`,
+      ],
     ],
   },
 ]
