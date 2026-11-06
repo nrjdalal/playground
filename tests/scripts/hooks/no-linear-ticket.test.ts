@@ -82,7 +82,7 @@ describe("a new Linear ticket through an MCP tool is refused without an approval
     ["save_issue with no id", save, { team: "AI Platform", title: "Unasked title" }],
     ["save_issue with an empty id", save, { id: "", team: "AI Platform", title: "Unasked" }],
     ["save_issue on another server's name", "mcp__claude_ai_Linear__save_issue", { team: "Data" }],
-    ["a create_issue tool", "mcp__linear__create_issue", { team: "PLAT", title: "x" }],
+    ["a create_issue tool", "mcp__linear__create_issue", { team: "MADE", title: "x" }],
     [
       "a prefixed create tool",
       "mcp__linear-server__linear_create_issue",
@@ -100,7 +100,7 @@ describe("a new Linear ticket through an MCP tool is refused without an approval
   test.each([
     ["no team", { title: "Approved title" }],
     ["no title", { team: "AI Platform" }],
-    ["a team that is not text", { team: { key: "PLAT" }, title: "Approved title" }],
+    ["a team that is not text", { team: { key: "MADE" }, title: "Approved title" }],
     ["a team with no letters or digits", { team: "!!", title: "Approved title" }],
     ["no input object", null],
   ] as const)("fails closed on %s", async (_, input) => {
