@@ -37,6 +37,8 @@ export const TAKES_MAIN = ["no-main-checkout", "no-unslotted-run"]
 export const ROOT_READS: Record<string, string> = {
   "packages/scripts/src/main-checkout.ts":
     "pinned: mainCheckout() reads PLAYGROUND_REPO first, which both sides get as the head's main checkout",
+  "packages/scripts/src/playground/setting.ts":
+    "unreached: only stuck-alert's import.meta.main block imports it, and role.ts and no-chat-question run it for sessions.names and live.branch, data-folder reads that never take its checkout's origin",
   "packages/settings/src/rendered.ts":
     "its own tree: coreDir() is extensions/core, whose lists ship with each version",
   "scripts/hooks/no-chat-question.ts":
