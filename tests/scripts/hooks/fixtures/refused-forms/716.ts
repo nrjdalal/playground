@@ -105,7 +105,7 @@ export const groups: Group[] = [
     ],
   },
   {
-    folders: ["process home"],
+    folders: ["checkout", "process worktree"],
     guards: ["no-raw-delete"],
     rows: () => [
       [
