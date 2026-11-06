@@ -23,6 +23,7 @@ import {
   type Visit,
   type Word,
 } from "./shell"
+import { heldWord, namings, steadyNames } from "./steady"
 
 // The checkout a worktree's .git file points into, or the checkout itself where .git is a directory.
 export function mainCheckout(dir: string): string {
@@ -547,11 +548,14 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
       if (wrote) return refuse(`a write to ${pathOf(wrote, here)}`, fixFor(sure))
     }
   }
+  // a cd through a steady variable is read by the folder that variable names
+  const steadyAt = steadyNames(namings(command), lexed.commands)
   const env: Env = {
     cwd: directory,
     // the line starts in the folder the tool names, which the reader has proved by the payload itself
     cwdSure: directory,
     files: new Map(),
+    hold: (word, cmd, here) => heldWord(word, here, steadyAt(cmd)),
     known,
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
