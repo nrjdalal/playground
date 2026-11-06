@@ -339,6 +339,17 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
         expect(r.err).toContain(CANNOT)
       })
 
+    // review round 2: a backquote's inner script splits at ;, so its program's name is read over the whole chain and the words before the shell, not its own step's words
+    for (const argv of [
+      ["sh", "-c", "echo docker; `printf dock; printf er` build ."],
+      ["env", "X=docker", "sh", "-c", "`printf dock; printf er` build ."],
+    ])
+      test(`a substitution whose name sits in another step: ${argv.join(" ")}`, async () => {
+        const r = await run(argv)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CANNOT)
+      })
+
     // a command substitution that reads portless's URL starts no container, so it keeps its lane
     test("while a portless URL read in a substitution keeps its lane", async () => {
       const m = dockerMachine()
