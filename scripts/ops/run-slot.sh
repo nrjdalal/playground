@@ -1208,18 +1208,19 @@ lanes_open() {
   [ "$verdict" = open ]
 }
 
-# A burst of starts outruns the reading the slots open on, since load1 shows a run's load about a minute after it starts (issue 610, 2 Nov:
-# five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while run-slot.runs.log shows more runs started on
-# run-slot to run-slot-4 or the clone slot in the last minute than ended there, so the held runs grew, a medium or big run waits for the
-# reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, as does a small run,
-# and the dashboard's and the merge train's runs go on too, as they skip slot 2's lanes_open; prints how many runs the last
-# minute added when it holds
 # the UTC time $1 seconds ago as run-slot.runs.log writes it, by BSD date, else GNU date
 iso_ago() {
   local now
   now=$(date +%s)
   date -u -r $((now - $1)) +%FT%TZ 2>/dev/null || date -u -d "@$((now - $1))" +%FT%TZ 2>/dev/null
 }
+
+# A burst of starts outruns the reading the slots open on, since load1 shows a run's load about a minute after it starts (issue 610, 2 Nov:
+# five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while run-slot.runs.log shows more runs started on
+# run-slot to run-slot-4 or the clone slot in the last minute than ended there, so the held runs grew, a medium or big run waits for the
+# reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, as does a small run,
+# and the dashboard's and the merge train's runs go on too, as they skip slot 2's lanes_open; prints how many runs the last
+# minute added when it holds
 burst_held() {
   local cutoff
   [ "$SIZE" != small ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
