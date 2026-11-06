@@ -368,6 +368,40 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
         expect(r.err).toContain(CANNOT)
       })
 
+    // #1158's review: ksh reads a cluster with a dash inside it as two options (ksh -x-c runs its -c script), so the shell-word glob keeps -x-c, and the step check's -c cluster takes it too
+    test("an unplaced first word before ksh -x-c", async () => {
+      const r = await run(["launcher", "ksh", "-x-c", "docker build ."])
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CANNOT)
+    })
+
+    test("a nested ksh -x-c chain", async () => {
+      const r = await run(["sh", "-c", 'echo hi; ksh -x-c "docker build ."'])
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CANNOT)
+    })
+
+    // #1159: a chain shell given no script file, or an -s cluster, reads its script on stdin, through a pipe, a < redirect or a heredoc, which run-slot cannot see
+    for (const script of [
+      'echo "docker build ." | sh',
+      "bash < docker-build.sh",
+      "sh -s < docker-build.sh",
+      'printf "docker build .\\n" | nice dash',
+      "bash -o pipefail < docker-build.sh",
+      "ksh -- < docker-build.sh",
+    ])
+      test(`a shell fed its script on stdin: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CANNOT)
+      })
+
+    test("while a stdin-fed shell that names no docker runs as before", async () => {
+      const r = await run(["sh", "-c", `echo 'touch "$MARKER"' | sh`])
+      expect(r.code).toBe(0)
+      expect(r.ran).toBe(true)
+    })
+
     test("while a nested chain that names no docker runs as before", async () => {
       const r = await run(["sh", "-c", `echo hi; sh -c 'touch "$MARKER"'`])
       expect(r.code).toBe(0)
