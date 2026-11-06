@@ -33,6 +33,7 @@ import {
   RiReplyLine,
   RiSearchEyeLine,
   RiSendPlaneLine,
+  RiShieldCheckLine,
   RiShieldKeyholeLine,
   RiShipLine,
   RiSlackLine,
@@ -185,6 +186,7 @@ const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   budget: RiMoneyDollarCircleLine,
   delete: RiDeleteBinLine,
   grant: RiShieldKeyholeLine,
+  guard: RiShieldCheckLine,
   reveal: RiKey2Line,
   schema: RiTableLine,
   secret: RiKey2Line,
@@ -701,6 +703,25 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
             you turn it on for the app that runs {agentLabel(item.from)}, and{" "}
             {agentLabel(item.from)} checks it again.
           </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "guard":
+      // the key, scope and value exactly as Approve writes them, the value as its JSON
+      return (
+        <>
+          <p>
+            On Approve, the dashboard{" "}
+            {preview.value === undefined ? "takes the guard setting" : "sets the guard setting"}{" "}
+            <code className="font-mono">{preview.key}</code> at{" "}
+            <code className="font-mono">{preview.scope}</code>
+            {preview.value === undefined ? " back to its default." : " to:"}
+          </p>
+          {preview.value !== undefined && (
+            <pre className={`${QUOTE} font-mono text-xs`}>
+              {JSON.stringify(preview.value, null, 2)}
+            </pre>
+          )}
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
       )

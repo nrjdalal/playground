@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 import { SQL } from "bun"
 
@@ -44,6 +44,14 @@ import {
   CLOCKS_STOPPED_AT,
   payloadOf,
 } from "../../../../../../packages/config/src/inbox"
+import { RELAY_ANSWER_KINDS } from "../../../../../../packages/message/src/index"
+import { GUARD_SETTING_KEYS } from "../../../../../../packages/settings/src/guard-keys"
+import { loginPath } from "../../../../../../packages/settings/src/rendered"
+import {
+  readSetting,
+  setSetting,
+  settingHistory,
+} from "../../../../../../packages/settings/src/settings-folder"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
 const SLACK = {
@@ -1332,6 +1340,53 @@ describe("an apps decision (PG-658)", () => {
   })
 })
 
+// A made-up org's Slack gate: no real org, channel or server is named in a test.
+const GATE = { path: "/made/up/send", selfDm: "D0MADEUP1", servers: ["made-up-slack"] }
+const GUARD = {
+  key: "slack.gatedSends",
+  scope: "acme-test",
+  type: "guard",
+  value: GATE,
+  why: "Back the org's no-Slack-writes guard",
+}
+
+describe("a guard decision (PG-1090)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
+
+  test("carries a key a guard reads, its scope and a value its key's schema takes, or no value", () => {
+    expect(takes({})).toBe(true)
+    expect(takes({ scope: "made-up-me" })).toBe(true)
+    expect(takes({ value: undefined })).toBe(true)
+    expect(takes({ value: "" })).toBe(true)
+    for (const key of GUARD_SETTING_KEYS) expect(takes({ key, value: undefined }), key).toBe(true)
+  })
+
+  test("refuses any key off GUARD_SETTING_KEYS, core as its scope, and a value its key refuses", () => {
+    for (const change of [
+      { key: "slack.mode" },
+      { key: "made.up" },
+      { scope: "core" },
+      { scope: "-acme" },
+      { scope: "acme/test" },
+      { value: { ...GATE, selfDm: "C0MADEUP1" } },
+      { value: { path: "/made/up/send" } },
+      { value: 7 },
+      { why: "" },
+      { extra: "x" },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+
+  test("is approved, denied or cleared as it reads, never edited, and stays off the relay", () => {
+    const open = { kind: "decision", preview: GUARD, status: "open" } as never
+    expect(checkAnswer(open, { action: "deny" })).toMatchObject({ status: "denied" })
+    expect(checkAnswer(open, { action: "edit", text: "another value" })).toHaveProperty("message")
+    expect(RELAY_ANSWER_KINDS as readonly string[]).not.toContain("guard")
+  })
+})
+
 // The store against a throwaway Postgres in Docker published on 127.0.0.1 only, migrated as the dashboard's is, so the table's own rules hold. Skipped where Docker is not running.
 const MIGRATIONS = join(import.meta.dir, "../../../../../../packages/db/drizzle")
 // made at run time, so no password is ever written into the repo
@@ -2055,7 +2110,6 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
   })
 
   test("an answer to a card its poster edited since he read it is refused, and one to the card as it stands lands (PG-2547)", async () => {
-    // seen is compared as the stored string, so two edits inside one millisecond would read the same; negligible for a CLI write
     const posted = await post(decision(SLACK))
     const edited = await store.editItem(
       db,
@@ -4849,6 +4903,120 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       await store.answerItem(db, denied.id, { action: "deny" }, { actor, apps: run.apps })
       await store.answerItem(db, cleared.id, { action: "clear" }, { actor, apps: run.apps })
       expect(run.calls).toHaveLength(0)
+    })
+  })
+
+  describe("a guard decision's Approve (PG-1090)", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "inbox-guard-"))
+    afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+    let n = 0
+    // a data folder whose extensions have a made-up login, as ext init leaves them
+    const folder = () => {
+      const data = join(scratch, `data-${n++}`)
+      mkdirSync(dirname(loginPath(data)), { recursive: true })
+      writeFileSync(loginPath(data), "made-up-me\n")
+      return data
+    }
+    const atOrg = (data: string) =>
+      readSetting(data, "slack.gatedSends")?.rows.filter((row) => row.scope === "acme-test")
+    const approve = (id: string, seen: string | undefined, settings?: string) =>
+      store.answerItem(db, id, { action: "approve", seen }, { actor, settingsData: settings })
+
+    test("writes the card's value at its scope as the owner's act, and records the line under set", async () => {
+      const data = folder()
+      const posted = await post(decision(GUARD))
+      const sent: Delivery[] = []
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve", seen: posted.updatedAt },
+        {
+          actor,
+          deliver: async (delivery) => {
+            sent.push(delivery)
+            return { at: "2026-11-06T03:00:00.000Z", ok: true, sessionId: "s1" }
+          },
+          settingsData: data,
+        },
+      )
+      expect(answered.ok && answered.item.status).toBe("approved")
+      expect(atOrg(data)).toEqual([{ key: "slack.gatedSends", scope: "acme-test", value: GATE }])
+      const line = `set slack.gatedSends at acme-test to ${JSON.stringify(GATE)}`
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        set: { exitCode: 0, line },
+      })
+      expect(payloadOf(sent[0]?.text ?? "")).toMatchObject({
+        next: "nothing",
+        set: { exitCode: 0, line },
+        type: "guard",
+      })
+      expect(settingHistory(data, "slack.gatedSends")?.[0]?.reason).toBe(
+        `the owner approved it in the Inbox (#i${posted.ref})`,
+      )
+    })
+
+    test("a card its poster changed after the owner read it cannot be approved with the old reading", async () => {
+      const data = folder()
+      const posted = await post(decision(GUARD))
+      const other = { ...GATE, selfDm: "D0MADEUP2" }
+      // edited inside the millisecond it was posted in, as CI's fast runner once did, so only a fresh stamp tells the two readings apart
+      const edited = await store.editItem(
+        db,
+        posted.id,
+        decision({ ...GUARD, value: other }),
+        new Date(posted.updatedAt),
+      )
+      expect(edited.ok && edited.item.version).toBeGreaterThan(posted.version)
+      expect(await approve(posted.id, posted.updatedAt, data)).toMatchObject({
+        code: "CONFLICT",
+        ok: false,
+      })
+      expect(await approve(posted.id, undefined, data)).toMatchObject({
+        code: "VALIDATION_ERROR",
+        ok: false,
+      })
+      expect(atOrg(data)).toEqual([])
+      expect((await store.getItem(db, posted.id))?.status).toBe("open")
+      const now = (await store.getItem(db, posted.id))!
+      expect((await approve(posted.id, now.updatedAt, data)).ok).toBe(true)
+      expect(atOrg(data)).toEqual([{ key: "slack.gatedSends", scope: "acme-test", value: other }])
+    })
+
+    test("a card with no value takes the setting back to its default, and Deny writes nothing", async () => {
+      const data = folder()
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+      expect(
+        setSetting(data, { key: "slack.gatedSends", scope: "acme-test", value: GATE }, who).ok,
+      ).toBe(true)
+      const { value: _, ...cleared } = GUARD
+      const off = await post(decision(cleared))
+      expect((await approve(off.id, off.updatedAt, data)).ok).toBe(true)
+      expect(atOrg(data)).toEqual([])
+      expect((await store.getItem(db, off.id))?.answer).toMatchObject({
+        set: { exitCode: 0, line: "took slack.gatedSends at acme-test back to its default" },
+      })
+      const denied = await post(decision(GUARD))
+      await store.answerItem(
+        db,
+        denied.id,
+        { action: "deny", seen: denied.updatedAt },
+        {
+          actor,
+          settingsData: data,
+        },
+      )
+      const set = await post(decision(GUARD))
+      await store.answerItem(db, set.id, { action: "clear" }, { actor, settingsData: data })
+      expect(atOrg(data)).toEqual([])
+    })
+
+    test("with no data folder its Approve is refused and the item stays open", async () => {
+      const posted = await post(decision(GUARD))
+      expect(await approve(posted.id, posted.updatedAt)).toMatchObject({
+        code: "VALIDATION_ERROR",
+        ok: false,
+      })
+      expect((await store.getItem(db, posted.id))?.status).toBe("open")
     })
   })
 })

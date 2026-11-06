@@ -1595,6 +1595,39 @@ describe("a delete decision's why", () => {
   })
 })
 
+describe("a guard decision's card (PG-1090)", () => {
+  const value = { path: "/made/up/send", selfDm: "D0MADEUP1", servers: ["made-up-slack"] }
+  const guard = (preview: object) =>
+    render(false, {
+      ...decision,
+      preview: {
+        key: "slack.gatedSends",
+        scope: "acme-test",
+        type: "guard",
+        why: "A made-up gate",
+        ...preview,
+      },
+      title: "Gate acme-test's Slack sends?",
+    } as InboxItem)
+  // the markup as React writes text: quotes and ampersands as their entities
+  const escaped = (text: string) => text.replaceAll("&", "&amp;").replaceAll('"', "&quot;")
+
+  test("shows the key, the scope and the value as the JSON Approve writes", () => {
+    const html = guard({ value })
+    expect(html).toContain("sets the guard setting")
+    expect(html).toContain(">slack.gatedSends</code>")
+    expect(html).toContain(">acme-test</code>")
+    expect(html).toContain(escaped(JSON.stringify(value, null, 2)))
+  })
+
+  test("with no value, reads that Approve takes the setting back to its default, and draws no value", () => {
+    const html = guard({})
+    expect(html).toContain("takes the guard setting")
+    expect(html).toContain(" back to its default.")
+    expect(html).not.toContain("<pre")
+  })
+})
+
 describe("a held Yard post's card", () => {
   test("its Approve is a link that opens Yard's approve page in a new tab, never an answer", () => {
     const html = render(false, {
