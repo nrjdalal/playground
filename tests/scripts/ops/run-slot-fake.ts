@@ -30,34 +30,51 @@ export const stop = async (p: Subprocess) => {
   await p.exited
 }
 
+// Ubuntu 26.04's default mkdir, uutils 0.10.0, reports success when another process made the folder between its own check and its mkdir (fixed in uutils 0.11.0), so two looks could each take one of run-slot.sh's mkdir locks; the image keeps GNU's as gnumkdir, which fails there as the Mac's mkdir does, so a machine's fake bin runs that one where it exists
+const GNU_MKDIR = Bun.which("gnumkdir")
+
 export const dirs: string[] = []
 afterAll(() => {
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
 })
 
 export type Setup = {
+  // disk0's transfers/s and MB/s in iostat's second sample
+  disk?: [number, number]
   free?: number
+  idle?: number
   load1?: number
   load5?: number
   mergeQueue?: unknown
+  // the epoch second every `date` that names no time of its own reads, so a log line written seconds back keeps its age through every look; an age run-slot.sh reads from a file's real mtime (the queue's AGED pin, the switch expiry, a stale holder, the gauges cache) then reads below zero and never trips, so a test of one of those leaves it unset
+  now?: number
   off?: string[]
   peers?: string[]
   plan?: unknown
   pressure?: number
   roster?: unknown
+  sandboxed?: boolean
+  swapins?: number
+  topDelay?: number
 }
 
-// A scratch state folder and config folder, with a fake sysctl on PATH giving 15 cores, the load asked for (load5 and load15 as load1 unless given) and normal memory.
+// A scratch state folder and config folder, with a fake sysctl on PATH giving the load asked for (load5 and load15 as load1 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, a fake vm_stat whose last row reads the swap-ins asked for, and a fake iostat whose second sample reads disk0's transfers/s and MB/s asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
 export const machine = ({
+  disk = [120, 3.5],
   free = 80,
+  idle = 80,
   load1 = 2,
   load5 = load1,
   mergeQueue,
+  now,
   off = [],
   peers = [],
   plan,
   pressure = 1,
   roster,
+  sandboxed = false,
+  swapins = 0,
+  topDelay = 0,
 }: Setup = {}) => {
   const root = mkdtempSync(join(tmpdir(), "run-slot-"))
   dirs.push(root)
@@ -75,23 +92,64 @@ export const machine = ({
     join(bin, "sysctl"),
     `#!/bin/bash
 echo "$2" >> ${join(root, "sysctl.log")}
+${sandboxed ? 'echo "sysctl: sysctl fmt -1 1024 1: Operation not permitted" >&2; exit 1' : ""}
 case "$2" in
-  hw.ncpu) echo 15 ;;
-  vm.loadavg) echo "{ ${load1}.00 ${load5}.00 ${load5}.00 }" ;;
+  vm.loadavg) echo "{ ${load1.toFixed(2)} ${load5.toFixed(2)} ${load5.toFixed(2)} }" ;;
   kern.memorystatus_level) echo ${free} ;;
   kern.memorystatus_vm_pressure_level) echo ${pressure} ;;
 esac
 `,
   )
   chmodSync(join(bin, "sysctl"), 0o755)
+  writeFileSync(
+    join(bin, "uptime"),
+    `#!/bin/bash\necho "22:15  2 users, load averages: ${load1.toFixed(2)} ${load5.toFixed(2)} ${load5.toFixed(2)}"\n`,
+  )
+  chmodSync(join(bin, "uptime"), 0o755)
+  // top's first sample reads since boot and its second the last interval, as `top -l 2 -n 0` prints them, after topDelay seconds as the real one's samples take; each call is a line in top.log
+  writeFileSync(
+    join(bin, "top"),
+    `#!/bin/bash\necho "$*" >> ${join(root, "top.log")}\n${topDelay ? `sleep ${topDelay}\n` : ""}echo "CPU usage: 1.00% user, 1.00% sys, 98.00% idle "\necho "CPU usage: ${((100 - idle) / 2).toFixed(2)}% user, ${((100 - idle) / 2).toFixed(2)}% sys, ${idle}% idle "\n`,
+  )
+  chmodSync(join(bin, "top"), 0o755)
+  // vm_stat -c 2 1's first row counts since boot and its last the last second, as the real one prints them
+  writeFileSync(
+    join(bin, "vm_stat"),
+    `#!/bin/bash\necho "Mach Virtual Memory Statistics: (page size of 16384 bytes)"\necho "    free   active  pageins  pageout  swapins swapouts"\necho "  203349   476233   253407  3087181  4049933   116968"\necho "  194438   485624        0        0  ${swapins}        0"\n`,
+  )
+  chmodSync(join(bin, "vm_stat"), 0o755)
+  // iostat -d -c 2 -w 1 disk0's first row counts since boot and its second the last second, as the real one prints them
+  writeFileSync(
+    join(bin, "iostat"),
+    `#!/bin/bash\necho "              disk0 "\necho "    KB/t  tps  MB/s "\necho "   32.98 2576 82.98 "\necho "   30.00 ${disk[0]} ${disk[1].toFixed(2)} "\n`,
+  )
+  chmodSync(join(bin, "iostat"), 0o755)
+  if (sandboxed) {
+    writeFileSync(
+      join(bin, "ps"),
+      `#!/bin/bash\necho "bash: /bin/ps: Operation not permitted" >&2\nexit 126\n`,
+    )
+    chmodSync(join(bin, "ps"), 0o755)
+  }
   // the settings reader answers factory.repo, the guarded orgs and slots.peers as a store that sets them would, and every other key as the real one does
   writeFileSync(
     join(bin, "bun"),
     `#!/bin/bash\n[ "$2" = factory.repo ] && { echo '"acme/app"'; exit 0; }\n[ "$2" = --guarded-orgs ] && { echo '["acme-co"]'; exit 0; }\n[ "$2" = slots.peers ] && { echo '${JSON.stringify(peers)}'; exit 0; }\nexec ${process.execPath} "$@"\n`,
   )
   chmodSync(join(bin, "bun"), 0o755)
+  if (now !== undefined) {
+    writeFileSync(
+      join(bin, "date"),
+      `#!/bin/bash\nfor a in "$@"; do case "$a" in -r*|-d*) exec ${Bun.which("date")} "$@" ;; esac; done\nexec ${Bun.which("date")} ${process.platform === "darwin" ? `-r ${now}` : `-d @${now}`} "$@"\n`,
+    )
+    chmodSync(join(bin, "date"), 0o755)
+  }
   // SLOW_CHILD puts a slowed python3 in the fake bin folder, which PATH reads first
   slowChild("python3", bin)
+  if (GNU_MKDIR) {
+    writeFileSync(join(bin, "mkdir"), `#!/bin/bash\nexec ${GNU_MKDIR} "$@"\n`)
+    chmodSync(join(bin, "mkdir"), 0o755)
+  }
   const env = (extra: Record<string, string> = {}) => ({
     CLAUDE_CONFIG_DIR: config,
     PLAYGROUND_DATA_DIR: join(config, "playground"),
@@ -124,16 +182,17 @@ esac
   const tickets = () =>
     existsSync(join(ops, "run-slot.waiters")) ? readdirSync(join(ops, "run-slot.waiters")) : []
   // Starts `touch <marker>` through run-slot (or the copy at `script`) in the background, reading its stderr as it comes. Each check waits on an event (the run's exit, a line it prints), never a wall-clock budget, so a loaded runner only makes it slower.
-  // command: the words before the marker, which a fake bin in the machine's bin folder touches; touch by default
+  // command: the words before the marker, which a fake bin in the machine's bin folder touches; touch by default; cwd: the folder it runs from, the scratch root by default
   const start = (
     who: string,
     extra: Record<string, string> = {},
     script = SCRIPT,
     command = ["touch"],
+    cwd = root,
   ) => {
     const marker = join(root, `ran-${who}-${Math.random()}`)
     const p = Bun.spawn(["bash", script, who, "--", ...command, marker], {
-      cwd: root,
+      cwd,
       env: env(extra),
       stderr: "pipe",
     })

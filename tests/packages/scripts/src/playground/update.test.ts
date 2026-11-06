@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -29,12 +37,15 @@ describe("updateSteps", () => {
         "skills/zerostarter/ui-verify/SKILL.md",
         "skills/playground/README.md",
         "skills/playground/inbox/SKILL.md",
+        "extensions/slack/skills/slack/scripts/send.ts",
+        "extensions/slack/README.md",
         "extensions/core/rules/ci.md",
       ]).skills,
     ).toEqual([
       "extensions/core/skills/code-review-loop",
       "skills/playground/inbox",
       "extensions/core/skills/pr",
+      "extensions/slack/skills/slack",
       "skills/zerostarter/ui-verify",
     ])
     expect(updateSteps(["README.md"]).skills).toEqual([])
@@ -64,7 +75,7 @@ describe("runUpdate", () => {
   const repo = "/repo"
   const quiet = () => {}
 
-  test("nothing changed: fetch, merge, link-skills first (every later step reads the data folder it links), ops-restart, then the roll, with no install or build", async () => {
+  test("nothing changed: fetch, read the target's manifests, merge, link-skills first (every later step reads the data folder it links), ops-restart, then the roll, with no install or build", async () => {
     const { calls, run } = fakeRun({ "rev-parse": { out: "old\n" } })
     let rolled = 0
     const code = await runUpdate(repo, run, async () => (rolled++, 0), quiet)
@@ -74,6 +85,9 @@ describe("runUpdate", () => {
       ["git", "-C", repo, "rev-parse", "HEAD"],
       ["git", "-C", repo, "fetch", "-q", "origin", "main"],
       ["git", "-C", repo, "branch", "--show-current"],
+      ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
+      ["git", "-C", repo, "status", "--porcelain", "--untracked-files=all"],
+      ["git", "-C", repo, "ls-tree", "-r", "--name-only", "origin/main"],
       ["git", "-C", repo, "merge", "--ff-only", "-q", "origin/main"],
       ["bash", `${repo}/scripts/link-skills.sh`],
       ["git", "-C", repo, "diff", "--name-only", "old", "HEAD"],
@@ -196,9 +210,11 @@ describe("runUpdate", () => {
     )
     expect(code).toBe(0)
     expect(rolled).toBe(false)
-    expect(calls.slice(1, 4)).toEqual([
+    expect(calls.slice(1, 6)).toEqual([
       ["git", "-C", repo, "fetch", "-q", "--tags", "origin", "main"],
       ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
+      ["git", "-C", repo, "status", "--porcelain", "--untracked-files=all"],
+      ["git", "-C", repo, "ls-tree", "-r", "--name-only", "refs/tags/v0.0.20"],
       ["git", "-C", repo, "checkout", "-q", "-B", "main", "refs/tags/v0.0.20"],
     ])
     expect(said.at(-1)).toStartWith("playground update: at v0.0.20; the Dashboard rolls on its own")
@@ -208,6 +224,119 @@ describe("runUpdate", () => {
     const { calls, run } = fakeRun({ "merge-base": { code: 1 } })
     expect(await runUpdate(repo, run, async () => 0, quiet, "v0.0.20")).toBe(1)
     expect(calls.some((argv) => argv.includes("checkout"))).toBe(false)
+  })
+
+  // a target whose settings package declares x, which nothing in /repo links
+  const declares = {
+    "ls-tree": { out: "package.json\npackages/settings/package.json\n" },
+    show: { out: JSON.stringify({ dependencies: { x: "^1" }, workspaces: ["packages/*"] }) },
+  }
+
+  test("a target that declares an unlinked dependency checks out its changed manifests and installs before the merge", async () => {
+    const { calls, run } = fakeRun({
+      ...declares,
+      "--name-status": {
+        out: "M\tbun.lock\nM\tpackages/settings/package.json\nM\tpackages/settings/src/a.ts\n",
+      },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    const at = (argv: string[]) => calls.findIndex((call) => call.join(" ") === argv.join(" "))
+    const checkout = at([
+      "git",
+      "-C",
+      repo,
+      "checkout",
+      "origin/main",
+      "--",
+      "bun.lock",
+      "packages/settings/package.json",
+    ])
+    const install = at([
+      process.execPath,
+      "install",
+      "--frozen-lockfile",
+      "--ignore-scripts",
+      "--cwd",
+      repo,
+    ])
+    const merge = at(["git", "-C", repo, "merge", "--ff-only", "-q", "origin/main"])
+    expect(checkout).toBeGreaterThan(-1)
+    expect([checkout < install, install < merge]).toEqual([true, true])
+  })
+
+  test("a target that deletes a file that is not a manifest still installs before the merge", async () => {
+    const { calls, run } = fakeRun({
+      ...declares,
+      "--name-status": { out: "D\tdocs/old.md\nM\tpackages/settings/package.json\n" },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    const install = calls.findIndex((argv) => argv[1] === "install")
+    expect(install).toBeGreaterThan(-1)
+    expect(install).toBeLessThan(calls.findIndex((argv) => argv.includes("merge")))
+  })
+
+  test("a link already missing on a hop that changes no manifest installs before the merge and checks out nothing", async () => {
+    const { calls, run } = fakeRun({
+      ...declares,
+      "--name-status": { out: "M\tpackages/settings/src/a.ts\n" },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    expect(calls.some((argv) => argv.includes("checkout"))).toBe(false)
+    const install = calls.findIndex((argv) => argv[1] === "install")
+    expect(install).toBeGreaterThan(-1)
+    expect(install).toBeLessThan(calls.findIndex((argv) => argv.includes("merge")))
+  })
+
+  test("a tree with edits or untracked files of its own merges first as before, leaving them to the fast-forward", async () => {
+    const { calls, run } = fakeRun({ "--porcelain": { out: "?? notes.md\n" }, ...declares })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    expect(calls.some((argv) => argv.includes("ls-tree") || argv[1] === "install")).toBe(false)
+  })
+
+  test("a target that deletes a manifest merges first as before, since the old code may still read it", async () => {
+    const { calls, run } = fakeRun({
+      ...declares,
+      "--name-status": { out: "D\tpackages/old/package.json\nM\tbun.lock\n" },
+    })
+    expect(await runUpdate(repo, run, async () => 0, quiet)).toBe(0)
+    expect(calls.some((argv) => argv.includes("--") || argv.includes("install"))).toBe(false)
+  })
+
+  test("a failed install before the merge puts the old manifests back and moves first, installing after, as before", async () => {
+    const said: string[] = []
+    const fake = fakeRun({
+      ...declares,
+      "--name-status": { out: "M\tpackages/settings/package.json\n" },
+    })
+    // the first install, before the move, fails as one needing a patch file the prelink did not stage does; the one after the move passes
+    let installs = 0
+    const run: Run = async (argv, show) =>
+      argv[1] === "install" && ++installs === 1 ? { code: 1, out: "" } : fake.run(argv, show)
+    expect(
+      await runUpdate(
+        repo,
+        run,
+        async () => 0,
+        (l) => said.push(l),
+      ),
+    ).toBe(0)
+    const at = (word: string) => fake.calls.findIndex((argv) => argv.includes(word))
+    expect(fake.calls[at("restore")]).toEqual([
+      "git",
+      "-C",
+      repo,
+      "restore",
+      "-q",
+      "--source=HEAD",
+      "--staged",
+      "--worktree",
+      "--",
+      "packages/settings/package.json",
+    ])
+    expect(at("restore")).toBeLessThan(at("merge"))
+    expect(said).toContain(
+      "playground update: the install before the move failed, so the checkout's files go back as they were and it moves first, installing after, as before",
+    )
   })
 
   test("the roll's own code is the update's", async () => {
@@ -511,4 +640,129 @@ test("with no record, a checkout reset past its last fast-forward reads what cha
     `playground update: no ${done} yet, so it reads what changed since the reflog's last fast-forward onto origin/main, ${two.slice(0, 7)}`,
   )
   expect(readFileSync(done, "utf8").trim()).toBe(git(checkout, "rev-parse", "HEAD"))
+})
+
+// the hooks read the checkout's code as soon as it moves, so a commit whose code imports a workspace dependency this checkout has not linked gets that install before any of its code lands
+describe("runUpdate onto a commit that declares a dependency the checkout has not linked", () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+      .stdout.toString()
+      .trim()
+  const write = (path: string, text: string) => {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, text)
+  }
+  const FOLDER = join("packages", "settings", "src", "folder.ts")
+  const LINK = join(
+    "packages",
+    "settings",
+    "node_modules",
+    "@packages",
+    "safe-delete",
+    "package.json",
+  )
+  // an origin whose second commit makes settings import safe-delete, and a checkout of its first with every declared dependency linked
+  const setup = (name: string) => {
+    const origin = join(scratch, `${name}-origin`)
+    write(join(origin, "scripts", "link-skills.sh"), "true\n")
+    write(join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"), "\n")
+    write(join(origin, ".gitignore"), "node_modules\n")
+    write(join(origin, "package.json"), JSON.stringify({ workspaces: ["packages/*"] }))
+    write(join(origin, "bun.lock"), "one\n")
+    write(join(origin, "packages", "safe-delete", "package.json"), "{}")
+    write(
+      join(origin, "packages", "settings", "package.json"),
+      JSON.stringify({ dependencies: {} }),
+    )
+    write(join(origin, FOLDER), "export const one = 1\n")
+    git(scratch, "init", "-q", "-b", "main", origin)
+    git(origin, "add", ".")
+    git(origin, "commit", "-q", "-m", "one")
+    const checkout = join(scratch, `${name}-checkout`)
+    git(scratch, "clone", "-q", origin, checkout)
+    write(join(origin, "bun.lock"), "two\n")
+    write(
+      join(origin, "packages", "settings", "package.json"),
+      JSON.stringify({ dependencies: { "@packages/safe-delete": "workspace:*" } }),
+    )
+    write(join(origin, FOLDER), 'import "@packages/safe-delete"\n')
+    git(origin, "add", ".")
+    git(origin, "commit", "-q", "-m", "two")
+    git(origin, "tag", "v0.0.2")
+    return { checkout, two: git(origin, "rev-parse", "HEAD") }
+  }
+
+  test.each([
+    ["a plain update", undefined, "prelink"],
+    ["--to", "v0.0.2", "prelink-to"],
+    ["a plain update on a checkout left on canary", undefined, "prelink-canary"],
+  ])(
+    "%s links it before the commit's code lands, from the commit's own manifests",
+    async (_, to, name) => {
+      const { checkout, two } = setup(name)
+      if (name === "prelink-canary") git(checkout, "checkout", "-q", "-b", "canary")
+      // what a hook would read at each install: the code it loads and the manifest that declares its imports
+      const seen: string[] = []
+      // the install and the build stand in for bun's and turbo's, which the scratch checkout lacks
+      const run: Run = async (argv, show) => {
+        if (argv.includes("build")) return { code: 0, out: "" }
+        if (argv[1] !== "install") return spawnRun(argv, show)
+        seen.push(
+          `${readFileSync(join(checkout, FOLDER), "utf8").trim()} | ${readFileSync(join(checkout, "bun.lock"), "utf8").trim()}`,
+        )
+        write(join(checkout, LINK), "{}")
+        return { code: 0, out: "" }
+      }
+      const lines: string[] = []
+      expect(
+        await runUpdate(
+          checkout,
+          run,
+          async () => 0,
+          (l) => lines.push(l),
+          to,
+        ),
+      ).toBe(0)
+      expect([
+        git(checkout, "rev-parse", "HEAD"),
+        git(checkout, "branch", "--show-current"),
+      ]).toEqual([two, "main"])
+      expect(seen[0]).toBe("export const one = 1 | two")
+      expect(lines).toContain(
+        "playground update: install the new commit's dependencies before its code, since it declares packages/settings: @packages/safe-delete, which this checkout has not linked",
+      )
+      expect(git(checkout, "status", "--short")).toBe("")
+    },
+  )
+
+  test("a target that moves a package moves first as before, never staging its new manifest beside the old", async () => {
+    const { checkout } = setup("prelink-mv")
+    const origin = join(scratch, "prelink-mv-origin")
+    // the checkout at the second commit, its link still missing, so the move below is a rename git pairs whole
+    git(checkout, "fetch", "-q", "origin", "main")
+    git(checkout, "merge", "--ff-only", "-q", "origin/main")
+    git(origin, "mv", join("packages", "settings"), join("packages", "prefs"))
+    git(origin, "commit", "-q", "-m", "three")
+    const three = git(origin, "rev-parse", "HEAD")
+    // bun refuses a workspace whose name two package.json files claim, as the old and the moved one would
+    const run: Run = async (argv, show) => {
+      if (argv.includes("build")) return { code: 0, out: "" }
+      if (argv[1] !== "install") return spawnRun(argv, show)
+      const both = ["settings", "prefs"].every((name) =>
+        existsSync(join(checkout, "packages", name, "package.json")),
+      )
+      return { code: both ? 1 : 0, out: "" }
+    }
+    expect(
+      await runUpdate(
+        checkout,
+        run,
+        async () => 0,
+        () => {},
+      ),
+    ).toBe(0)
+    expect(git(checkout, "rev-parse", "HEAD")).toBe(three)
+    expect(git(checkout, "status", "--short")).toBe("")
+  })
 })

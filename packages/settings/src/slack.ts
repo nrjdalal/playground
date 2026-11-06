@@ -3,6 +3,13 @@ import { z } from "zod"
 // By relative path, as settings.ts imports, since the API's inbox, which the CLI runs from any shell, imports this file.
 import { defineSettings } from "./settings"
 
+// An org's Slack gate as its extension declares it: the MCP servers its workspace posts through, its self-DM, and the send path every other post takes, which the extension's own gate checks.
+export const gatedSendsSchema = z.strictObject({
+  path: z.string().min(1),
+  selfDm: z.string().regex(/^D[A-Z0-9]+$/, "a Slack DM id"),
+  servers: z.array(z.string().min(1)).min(1),
+})
+
 // How the factory reaches Slack: the owner's DM and Slack mode, the converter that rewrites an archives link to its app form, and the MCP server a sent message goes through; none until set, and the Inbox's instructions then name neither.
 export const slackSettings = defineSettings({
   "slack.dmChannel": {
@@ -17,6 +24,12 @@ export const slackSettings = defineSettings({
       "The owner's Slack member id: the DM watch hands on only this member's messages, and dm send posts as this member; neither runs until it is set.",
     schema: z.string().regex(/^(?:[UW][A-Z0-9]+)?$/, "a Slack member id"),
   },
+  "slack.gatedSends": {
+    default: "",
+    description:
+      "An org's Slack gate, set in that org's extension: the MCP servers its workspace posts through, its self-DM and the send path every other post takes, as {path, selfDm, servers}; no-playground-leak then refuses every Slack MCP write on those servers but a post to the self-DM, and any curl to a Slack URL but an /api/ read. None when empty.",
+    schema: z.union([z.literal(""), gatedSendsSchema]),
+  },
   "slack.linkConverter": {
     default: "",
     description:
@@ -26,7 +39,7 @@ export const slackSettings = defineSettings({
   "slack.mode": {
     default: false,
     description:
-      "Slack mode: the owner is away and the DM is the owner's remote access, so the DM watch hands each owner message to the dispatcher, nudges it for an update every 15 minutes and fails over to the second dispatcher; off until the owner turns it on, on until the owner turns it off.",
+      "Slack mode: the owner is away and the DM is the owner's remote access, so the DM watch hands each owner message to the dispatcher, nudges it for an update every 15 minutes and fails over to the session in the assistant seat; off until the owner turns it on, on until the owner turns it off.",
     schema: z.boolean(),
   },
   "slack.sendServer": {

@@ -27,19 +27,31 @@ const machine = (name: string) => {
   let pmset = ""
   let posted = 0
   const status: Record<string, string> = {}
+  // each item's other fields as ask get prints them, past its poster and status
+  const fields: Record<string, object> = {}
+  // ids deleted from the Inbox, whose get fails as dashboard-ask's does
+  const deleted = new Set<string>()
   const run = async (argv: string[], _timeout?: number, stdin?: string) => {
     if (argv[0] === "pmset") return { code: 0, out: pmset }
     const args = argv.slice(argv.indexOf("ask") + 1)
     calls.push({ args, ...(stdin ? { stdin: JSON.parse(stdin) } : {}) })
     if (args[0] === "new") return { code: 0, out: `${ID(++posted)}\n` }
-    if (args[0] === "get" && args.length === 2)
-      return { code: 0, out: JSON.stringify({ status: status[args[1]!] }) }
+    // ask's run prints its JSON on stdout, then bun's echo of the command on stderr, which the job's run() appends
+    if (args[0] === "get" && deleted.has(args[1]!))
+      return { code: 1, out: `no inbox item ${args[1]}\n` }
+    if (args[0] === "get")
+      return {
+        code: 0,
+        out: `${JSON.stringify({ from: "b7k2mq-ops", status: status[args[1]!], ...fields[args[1]!] }, null, 2)}\n$ bun api/hono/src/bin/dashboard-ask.ts ${args.join(" ")}\n$ bun --no-env-file api/hono/src/bin/dashboard-ask.ts ${args.join(" ")}\n`,
+      }
     return { code: 0, out: "" }
   }
   const check = (at = 0) => checkBattery({ now: new Date(at), ops, repo: "/r", run })
   return {
     calls,
     check,
+    deleted,
+    fields,
     ops,
     set: (text: string) => (pmset = text),
     status,
@@ -88,21 +100,90 @@ test("discharging posts the orange ask at 10% and the red alert at 5%, each once
   })
 })
 
-test("back on power, an open ask is settled, an approved one acked, and the state re-arms", async () => {
+// the ask (ID 1) is a decision, open until answered; the red alert (ID 2) is an update, posted at status done
+test("back on power, an approved ask is acked, the alert resolved by its poster, and the state re-arms", async () => {
   const mac = machine("back")
   mac.set(ON_BATTERY(4))
   await mac.check()
   mac.status[ID(1)] = "approved"
-  mac.status[ID(2)] = "open"
+  mac.status[ID(2)] = "done"
+  mac.fields[ID(2)] = { kind: "update" }
   mac.set(ON_AC)
   mac.calls.length = 0
   await mac.check()
   expect(mac.calls.map((c) => c.args)).toEqual([
-    ["get", ID(1)],
+    ["get", ID(1), "--ack"],
     ["ack", ID(1), "--no-link", "The Mac is back on power"],
-    ["get", ID(2)],
-    ["settle", ID(2), "--note", "The Mac is back on power"],
+    ["get", ID(2), "--ack"],
+    ["resolve", ID(2), "--by", "b7k2mq-ops", "--note", "The Mac is back on power"],
   ])
+  expect(JSON.parse(readFileSync(join(mac.ops, "awake", "battery-state.json"), "utf8"))).toEqual({})
+})
+
+test("back on power, an open ask is settled", async () => {
+  const mac = machine("open")
+  mac.set(ON_BATTERY(9))
+  await mac.check()
+  mac.status[ID(1)] = "open"
+  mac.set(ON_AC)
+  mac.calls.length = 0
+  await mac.check()
+  expect(mac.calls.map((c) => c.args)).toEqual([
+    ["get", ID(1), "--ack"],
+    ["settle", ID(1), "--note", "The Mac is back on power"],
+  ])
+})
+
+// retro 35: ask get's JSON, then bun's echo lines, failed the parse, so 349 "not closed" lines went to ops and the orange ask was never armed again
+test("back on power, a cleared ask and a resolved alert leave state on their read, which marks an answer read, with no further ask call", async () => {
+  const mac = machine("cleared")
+  mac.set(ON_BATTERY(4))
+  await mac.check()
+  mac.status[ID(1)] = "cleared"
+  mac.status[ID(2)] = "done"
+  mac.fields[ID(2)] = { answer: { choice: "resolved" }, kind: "update" }
+  mac.set(ON_AC)
+  mac.calls.length = 0
+  expect(await mac.check(1_000_000_000)).toBeUndefined()
+  expect(mac.calls.map((c) => c.args)).toEqual([
+    ["get", ID(1), "--ack"],
+    ["get", ID(2), "--ack"],
+  ])
+  expect(JSON.parse(readFileSync(join(mac.ops, "awake", "battery-state.json"), "utf8"))).toEqual({})
+})
+
+// a reply keeps the ask open, and its poster's ack stamps ackedAt, after which settle and ack are both refused
+test("back on power, an ask whose answer its poster acked, open or approved, leaves state on its read", async () => {
+  for (const status of ["open", "approved"]) {
+    const mac = machine(`acked-${status}`)
+    mac.set(ON_BATTERY(9))
+    await mac.check()
+    mac.status[ID(1)] = status
+    mac.fields[ID(1)] = {
+      answer: {
+        ackedAt: "2026-11-04T20:00:00Z",
+        choice: status === "open" ? "replied" : "approved",
+      },
+    }
+    mac.set(ON_AC)
+    mac.calls.length = 0
+    expect(await mac.check(1_000_000_000)).toBeUndefined()
+    expect(mac.calls.map((c) => c.args)).toEqual([["get", ID(1), "--ack"]])
+    expect(JSON.parse(readFileSync(join(mac.ops, "awake", "battery-state.json"), "utf8"))).toEqual(
+      {},
+    )
+  }
+})
+
+test("back on power, an item deleted from the Inbox leaves state with no failure line", async () => {
+  const mac = machine("deleted")
+  mac.set(ON_BATTERY(9))
+  await mac.check()
+  mac.deleted.add(ID(1))
+  mac.set(ON_AC)
+  mac.calls.length = 0
+  expect(await mac.check(1_000_000_000)).toBeUndefined()
+  expect(mac.calls.map((c) => c.args)).toEqual([["get", ID(1), "--ack"]])
   expect(JSON.parse(readFileSync(join(mac.ops, "awake", "battery-state.json"), "utf8"))).toEqual({})
 })
 

@@ -135,7 +135,7 @@ test("with no yes, add creates nothing on GitHub and writes nothing here", async
   const asked: string[] = []
   const no = async (question: string) => (asked.push(question), false)
   await expect(extAdd(data, ORG, undefined, run, no)).rejects.toThrow(
-    `${SLUG} was not created: run playground ext add in a terminal and answer y, or pass --yes`,
+    `${SLUG} was not created: run playground ext add again with --yes`,
   )
   expect(asked).toEqual([
     `playground ext add will create ${SLUG} on GitHub, private, with issues, wiki and projects off. Create it? [y/N]`,

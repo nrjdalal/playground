@@ -7,7 +7,7 @@ hooks:
     - matcher: '^(Bash|Edit|MultiEdit|NotebookEdit|Write|mcp__.+__((\w+_)?[Cc]reate_?[Ii]ssues?|[Ii]ssues?_?[Cc]reate|save_issue))$'
       hooks:
         - type: command
-          command: '[ -f "$PLAYGROUND_REPO/scripts/hooks/no-linear-ticket.ts" ] || exit 0; cd -P "$PLAYGROUND_REPO" && bun --no-env-file scripts/hooks/no-linear-ticket.ts'
+          command: '{ s=scripts/hooks/bundled/no-linear-ticket.js; [ -f "$PLAYGROUND_REPO/$s" ] || s=scripts/hooks/no-linear-ticket.ts; [ -f "$PLAYGROUND_REPO/$s" ]; } || { [ -z "$PLAYGROUND_ROLE" ] && exit 0; echo "no-linear-ticket: no guard script in the main checkout (${PLAYGROUND_REPO:-not found}); refusing. Restore it from the owner''s own window: playbook LIFECYCLE.md, Restoring the main checkout" >&2; exit 2; }; cd -P "$PLAYGROUND_REPO" && bun --no-env-file "$s"; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo "no-linear-ticket: crashed (exit $c); refusing. Fix: bun install in $PLAYGROUND_REPO" >&2; exit 2; }; exit $c'
           timeout: 15
 ---
 
@@ -27,6 +27,7 @@ The rest is reference in the files beside it, each read at the moment [Where the
 | Lead       | Builder, `builder` today       | the build side: workers from `plan.json`'s lanes, their briefs, plan review, merge order, the review and CI gates               | 1              |
 | Lead       | Ops, `ops` today               | ops: the runners, the live dashboard, the release, cleanup of probes, worktrees and caches, roster and inbox upkeep             | 1              |
 | Optimizer  | Optimizer, `optimizer` today   | retros over everything the factory did, each lesson routed as a fix through the dispatcher; the icebox; never builds            | 1              |
+| Assistant  | Assistant, `assistant`         | the owner's personal errands and the dispatcher's tracker; an orchestrator on Opus at high effort, reporting to the dispatcher  | 1              |
 | Worker     | `<id>-worker`                  | one bounded chore: a bundle, a fix, a review loop, an investigation                                                             | as room allows |
 | Checker    | `<id>-reviewer`, `<id>-tester` | its worker's PR: the reviewer scores it through code-review-loop, the tester drives it; spawned by that worker, reporting to it | 2 per worker   |
 | Runner     | `<id>-runner`                  | long-running jobs: dev servers, watch loops, the live dashboard                                                                 | as room allows |
@@ -36,10 +37,12 @@ How the Dashboard shows each role, how a session is named and when a dev stack r
 
 ## Chain
 
-- The dispatcher talks to the owner, the Planner, the Builder, Ops and the Optimizer alone; whatever another session sends it goes on to the manager it concerns.
+- The dispatcher talks to the owner, the Planner, the Builder, Ops, the Optimizer and the Assistant alone; whatever another session sends it goes on to the manager it concerns.
   A new ask runs the dispatcher, the Planner, the Builder, Ops, by [DISPATCH.md](DISPATCH.md)'s first rule.
-- Each worker reports to the Builder, each runner to Ops, each probe to the session that spawned it, and the Planner, the leads and the Optimizer to the dispatcher.
+- Each worker reports to the Builder, each runner to Ops, each probe to the session that spawned it, and the Planner, the Optimizer and the Assistant to the dispatcher.
   Your brief names yours; when `ListAgents` lists no session by that name, send to the dispatcher.
+- The Builder and Ops send merges, ETA moves, new PRs, staffing and plan updates to the Planner directly.
+  They send the dispatcher only what the owner must see or decide: the status of the owner's own asks, any org work, a blocker or slip on something the owner waits for, a decision only the owner can make, and a finding for the playbook.
 - Orders reach you from that one place (a checker also from its worker's lead, below), or from the owner typing in your own pane, which outranks it: do what he says, then send his words verbatim up the chain.
   The word from up the chain is his: act on it as his, and take any doubt up the chain (**override**).
   If the owner was asked anyway, say so up the chain, so the brief gets fixed.
@@ -61,7 +64,7 @@ Cite a rule by its name, in bold; read it whole with `playground rules <name>` w
 - [LIFECYCLE.md](LIFECYCLE.md): when each kind of session starts and ends, the ops jobs, and how Claude Code updates.
   Read it before you start, close or respawn a session, remove a worktree, or update Claude Code.
 - [DISPATCH.md](DISPATCH.md): how the dispatcher, the Planner and the leads route a new ask, bundle work and fill the slots.
-  Read it when you are one of them and an ask arrives, or when Slack mode is on and the owner's DM speaks to you.
+  Read it when you are one of them and an ask arrives; when Slack mode is on and the owner's DM speaks to you, its Slack mode section points to the `slack` skill.
 - [SWEEP.md](SWEEP.md): the leads' sweep, step by step.
   Read it at each sweep.
 - [SESSIONS.md](SESSIONS.md): the commands to spawn, brief, rename, check and end a session, and the headless run that writes Notion for a session with no Notion tools.

@@ -149,6 +149,19 @@ describe("migrate's machine half", () => {
     ])
   })
 
+  test("a stale copy whose archive copy already exists stays where it is, so nothing is overwritten", () => {
+    const data = dataWith("archived-before")
+    write(data, { "archive/ops/once.py": "kept\n" })
+    const steps = moveMachine(data, "octo-owner", homeWith("archived-before-home"), TABLE, false)
+    expect(steps).toContainEqual({
+      line: "- ops/once.py: archive/ops/once.py already exists, so it stays",
+      ok: false,
+    })
+    expect(read(join(data, "archive", "ops", "once.py"))).toBe("kept\n")
+    expect(read(join(data, "ops", "once.py"))).toBe("old once\n")
+    expect(read(join(data, "archive", "ops", "panel", "run.sh"))).toBe("old run\n")
+  })
+
   test("a run archives the stale copies, moves the state and its files, and renames the machine's variables", () => {
     const data = dataWith("run")
     const home = homeWith("home")
@@ -180,7 +193,7 @@ describe("migrate's machine half", () => {
       "export NEWCO_PLANS_DIR=~/plans\nexport NEWCO_LOAD_MULT=2\nexport NEWCO_SOURCES=x\n",
     )
     expect(steps.map((step) => step.line)).toContain(
-      `! ${join(home, ".zshrc")} sets OLDCO_SOURCES, which nothing reads now: move its words into its list`,
+      `* to do: ${join(home, ".zshrc")} sets OLDCO_SOURCES, which nothing reads now: delete that line from it, and send your lead the words it held, so the owner can add them to the list that replaced it`,
     )
     expect(read(join(home, ".zshrc.pre-migrate"))).toContain("OLDCO_PLANS_DIR")
     expect(read(join(home, "Library/LaunchAgents/com.example.ops-flow.plist"))).toBe(

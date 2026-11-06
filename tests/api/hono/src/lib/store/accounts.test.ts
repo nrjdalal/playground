@@ -10,7 +10,7 @@ import {
   listAccounts,
   removeAccount,
 } from "../../../../../../api/hono/src/lib/store/accounts"
-import { readSetting } from "../../../../../../packages/settings/src/settings-folder"
+import { readSetting, setSetting } from "../../../../../../packages/settings/src/settings-folder"
 import { liveReads } from "../../../../../live-reads"
 
 // The live branch reaches the Keychain through the fake security below; the fixture cases turn live reads off for themselves.
@@ -78,6 +78,7 @@ describe("Settings' accounts on a stack that reads this machine", () => {
         email: "made-up@example.test",
         key: "made-up@example.test",
         label: "work",
+        own: false,
         provider: "claude",
         stored: true,
       },
@@ -114,17 +115,39 @@ describe("Settings' accounts on a stack that reads this machine", () => {
     )
     writeFileSync(items, "playground-glm zai\n")
     expect(listAccounts(data)).toEqual([
-      { email: null, key: "zai", label: "zai", provider: "glm", stored: true },
+      { email: null, key: "zai", label: "zai", own: false, provider: "glm", stored: true },
       {
         email: "made-up@example.test",
         key: "made-up@example.test",
         label: null,
+        own: false,
         provider: "claude",
         stored: false,
       },
     ])
     expect(argvs()).toContain("argv find-generic-password -s playground-glm -a zai")
     expect(logged()).not.toContain(" -w playground")
+  })
+
+  test("the list says which Claude rows set own, the mark Settings' Own account switch writes", () => {
+    const data = fresh()
+    addAccount(
+      { email: "made-up@example.test", provider: "claude", token: TOKEN },
+      who("add"),
+      data,
+    )
+    addAccount({ email: "other@example.test", provider: "claude", token: TOKEN }, who("add"), data)
+    const rows = listed(data) as Record<string, unknown>[]
+    const marked = rows.map((row) =>
+      row.email === "other@example.test" ? { ...row, own: true } : row,
+    )
+    expect(
+      setSetting(data, { key: "usage.accounts", scope: "made-up-me", value: marked }, who("own")),
+    ).toMatchObject({ ok: true })
+    expect(listAccounts(data).map((row) => [row.key, row.own])).toEqual([
+      ["made-up@example.test", false],
+      ["other@example.test", true],
+    ])
   })
 
   test("hasGlmAccount reads a GLM row in usage.accounts without the Keychain", () => {
@@ -214,7 +237,11 @@ describe("Settings' accounts on a fixture stack", () => {
       const loaded = loadFixture(null)
       if (!loaded.ok) throw new Error(loaded.error)
       const dir = join(bin, `fixture-${n++}`)
-      writeFixture(loaded.fixture, dir)
+      writeFixture(loaded.fixture, dir, {
+        home: join(bin, "home"),
+        main: join(bin, "main"),
+        trash: join(bin, "data", "trash"),
+      })
       const data = join(dir, "claude", "playground")
       expect(listAccounts(data).map(({ key, provider }) => `${provider}:${key}`)).toEqual([
         "claude:pat@example.com",
@@ -227,6 +254,7 @@ describe("Settings' accounts on a fixture stack", () => {
         email: null,
         key: "zai-2",
         label: "zai-2",
+        own: false,
         provider: "glm",
         stored: true,
       })
@@ -243,7 +271,7 @@ describe("Settings' accounts on a fixture stack", () => {
       const data = fresh()
       addAccount({ label: "zai", provider: "glm", token: GLM_KEY }, who("add"), data)
       expect(listAccounts(data)).toEqual([
-        { email: null, key: "zai", label: "zai", provider: "glm", stored: true },
+        { email: null, key: "zai", label: "zai", own: false, provider: "glm", stored: true },
       ])
       const record = readFileSync(join(data, "keychain-record.json"), "utf8")
       expect(Object.keys(JSON.parse(record))).toEqual(["glm:zai"])

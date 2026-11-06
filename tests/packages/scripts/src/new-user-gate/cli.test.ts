@@ -1,12 +1,23 @@
-import { afterAll, describe, expect, test } from "bun:test"
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs"
+import { afterAll, describe, expect, spyOn, test } from "bun:test"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { basename, join } from "node:path"
 
+import { MARKER } from "../../../../../packages/safe-delete/src"
 import {
   BOX_LOAD_MULT,
   capacityRefusals,
+  dropBox,
   leftForYou,
+  makeBox,
   report,
   scriptsGroup,
   strayStandIns,
@@ -67,7 +78,7 @@ describe("a step failed on spawn.sh's capacity gate", () => {
     JSON.stringify({
       at: "2026-10-31T01:31:05Z",
       detail:
-        "max(load1, load5) is 26.90 and 0 started in the last 5 minutes, at or over 11.25: 15, the 15 cores at PLAYGROUND_LOAD_MULT 1, less the 3.75 kept for small items (this start is medium); the CPU is 80% busy (top), 12 of the 15 cores, which with the starts is at or over 11.25 too. Wait for it to fall, or close a session that is done, and run it again.",
+        "max(load1, load5) is 26.90 and 0 started in the last 5 minutes, at or over 11.25: 15, the 15 cores at PLAYGROUND_LOAD_MULT 1, less the 3.75 kept for small items (this start is medium). Wait for it to fall, or close a session that is done, and run it again.",
       gate: "load",
       readings: { load5: 26.9 },
       verdict: "refused",
@@ -96,6 +107,29 @@ describe("a step failed on spawn.sh's capacity gate", () => {
     ).toBe(
       "PASS 1. curl | bash exits 0\nINCONCLUSIVE 2. Alpha routes: spawn.sh's capacity gate refused a start (load gate: …)\n1 of 2 passed, 1 inconclusive",
     )
+  })
+})
+
+describe("the box", () => {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "gate-box-")))
+  afterAll(() => rmSync(parent, { force: true, recursive: true }))
+
+  test("is a marked scratch folder named for its sha, which dropBox removes, and dropBox leaves an unmarked folder, logging why (#545)", () => {
+    const box = makeBox("abcdef1234567890", parent)
+    expect(basename(box)).toStartWith("pg-gate-abcdef1-")
+    expect(existsSync(join(box, MARKER))).toBe(true)
+    dropBox(box)
+    expect(existsSync(box)).toBe(false)
+    const other = join(parent, "pg-gate-other")
+    mkdirSync(other)
+    const said = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      dropBox(other)
+      expect(existsSync(other)).toBe(true)
+      expect(String(said.mock.calls[0]?.[0])).toContain(`has no ${MARKER} marker`)
+    } finally {
+      said.mockRestore()
+    }
   })
 })
 

@@ -1,6 +1,6 @@
 import { ASK_CODE_COLUMNS } from "@packages/config/inbox"
 
-// An Inbox ask reads the way chat talks to the owner: a picture of the point first, then short bullets, then what Approve does, in its `approve` and `deny` labels.
+// An Inbox ask reads the way chat talks to the owner: a picture of the point first, then short bullets, then its options, in its `options` and `deny` labels.
 
 // Past this many characters, an ask's text with no picture and no bullets reads as a wall of prose.
 export const PROSE_LIMIT = 300
@@ -9,23 +9,55 @@ const FENCE = /^\s*```/m
 const LIST = /^\s*(?:[-*+]|\d+[.)])\s/m
 
 // What bun run ask says of an ask's shape: the words live in bin/dashboard-ask.ts, outside the app copy tests/web/next/src/ui-copy.test.ts reads.
-export type ShapeHint = { kind: "prose" } | { kind: "wide"; longest: number }
+export type ShapeHint =
+  | { kind: "prose" }
+  | { kind: "unlabelled" }
+  | { kind: "unlinked"; refs: string[] }
+  | { kind: "wide"; longest: number }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-// Pure: the characters in the longest line inside a text's code blocks, counted by code point, so a box-drawing character counts as one.
+// Pure: the characters in the longest line inside a text's code blocks, counted by code point, so a box-drawing character counts as one; a diff block is skipped, since the card wraps it.
 const longestCodeLine = (text: string): number => {
   let inside = false
+  let diff = false
   let longest = 0
   for (const line of text.split("\n")) {
-    if (/^\s*```/.test(line)) inside = !inside
-    else if (inside) longest = Math.max(longest, [...line].length)
+    const fence = line.match(/^\s*```\s*(\S*)/)
+    if (fence) {
+      diff = !inside && fence[1]!.toLowerCase() === "diff"
+      inside = !inside
+    } else if (inside && !diff) longest = Math.max(longest, [...line].length)
   }
   return longest
 }
 
-// Pure: the hints for an `ask` decision: one when its text runs past PROSE_LIMIT with no list, no code block and no attachments, one when a code block holds a line past ASK_CODE_COLUMNS; the wide one alone for a read-only update's text, which renders on the same card; none for any other item, which posts either way.
+// What the owner would open from a card: a PR (a number of 2 digits or more after a #, so step #1 is none, or any after PR), a tracker ID (ABC-123) or a commit sha (7 to 40 hex characters, holding a digit and a letter); an Inbox ref (#iN) is none.
+const REF =
+  /(?<![\w#/&])#\d{2,}\b|\bPR\s*#?\d+\b|(?<![\w/-])[A-Z]{2,10}-\d+(?![\w-])|(?<![\w-])[0-9a-f]{7,40}(?![\w-])/g
+// Encodings and standards that read as a team key and a number.
+const NOT_TRACKERS = new Set(["ISO", "SHA", "UTF"])
+const LINKED = /\]\([^)]+\)|https?:\/\//
+
+// Pure: the refs a text names on a line outside its code blocks with no link on that line, each once, in order.
+const unlinkedRefs = (text: string): string[] => {
+  const refs = new Set<string>()
+  let inside = false
+  for (const line of text.split("\n")) {
+    if (/^\s*```/.test(line)) inside = !inside
+    else if (!inside && !LINKED.test(line))
+      for (const [ref] of line.matchAll(REF)) {
+        const sha = /^[0-9a-f]+$/.test(ref)
+        if (sha && !(/\d/.test(ref) && /[a-f]/.test(ref))) continue
+        if (NOT_TRACKERS.has(ref.split("-")[0]!)) continue
+        refs.add(ref)
+      }
+  }
+  return [...refs]
+}
+
+// Pure: the hints for an `ask` decision: one when its text runs past PROSE_LIMIT with no list, no code block and no attachments, one when it labels no options, one when a code block other than a diff holds a line past ASK_CODE_COLUMNS, one when a line names a PR, a tracker ID or a commit with no link on it; the wide and unlinked ones alone for a read-only update's text, which renders on the same card; none for any other item, which posts either way.
 export function shapeHints(input: unknown): ShapeHint[] {
   const preview = isRecord(input) ? input.preview : undefined
   if (!isRecord(preview) || typeof preview.text !== "string") return []
@@ -37,6 +69,12 @@ export function shapeHints(input: unknown): ShapeHint[] {
   if (ask && !attached && text.length > PROSE_LIMIT && !FENCE.test(text) && !LIST.test(text)) {
     hints.push({ kind: "prose" })
   }
+  // an ask with neither options nor an approve label shows the bare Approve and Deny
+  if (ask && preview.options === undefined && preview.approve === undefined) {
+    hints.push({ kind: "unlabelled" })
+  }
+  const refs = unlinkedRefs(text)
+  if (refs.length > 0) hints.push({ kind: "unlinked", refs })
   const longest = longestCodeLine(text)
   if (longest > ASK_CODE_COLUMNS) hints.push({ kind: "wide", longest })
   return hints
@@ -47,8 +85,8 @@ export const ASK_EXAMPLES = {
   code: {
     from: "builder",
     preview: {
-      approve: "Port the fix to staging, then main",
       deny: "Keep it on dev",
+      options: [{ label: "Port the fix to staging, then main" }],
       text: [
         "```diff",
         "- const limit = 100",
@@ -66,8 +104,8 @@ export const ASK_EXAMPLES = {
   decision: {
     from: "builder",
     preview: {
-      approve: "Take the request and run the dry run",
       deny: "Turn the request down",
+      options: [{ label: "Take the request and run the dry run" }],
       text: [
         "```",
         "web-api",
@@ -107,12 +145,12 @@ export const ASK_EXAMPLES = {
   ui: {
     from: "builder",
     preview: {
-      approve: "Build the row as the after picture shows",
       attachments: [
         { group: "Inbox card", label: "before", src: "/Users/you/shots/card-before.png" },
         { group: "Inbox card", label: "after", src: "/Users/you/shots/card-after.png" },
       ],
       deny: "Keep the card as it is",
+      options: [{ label: "Build the row as the after picture shows" }],
       text: [
         "- 🖼️ The Inbox card shows its pictures as a row of thumbnails.",
         "- 👆 A click opens the picture in the viewer.",

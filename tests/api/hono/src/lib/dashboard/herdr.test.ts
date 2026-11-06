@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import {
   answerKeys,
+  FIXTURE_SOCKET,
   HerdrDown,
   herdrEvents,
   herdrProblem,
@@ -252,9 +253,20 @@ describe("readServer and herdrRecords", () => {
       "session.snapshot": () => ({ ...SNAPSHOT, snapshot: { ...SNAPSHOT.snapshot, panes } }),
     })
     const start = performance.now()
-    expect(await readHerdr([{ name: "hung", socket: s.path }], 300)).toEqual([])
+    expect(await readHerdr([{ name: "hung", socket: s.path }], 300)).toEqual([
+      { panes: [], partial: true, server: "hung", workspaces: [] },
+    ])
     expect(performance.now() - start).toBeLessThan(1500)
     expect(herdrProblem()).toContain("hung")
+  })
+
+  test("a pane whose processes did not answer marks its server's read partial, so a session missing from it is not taken for ended (PG-880)", async () => {
+    const s = stub({ "pane.process_info": () => ({ error: { code: "busy", message: "busy" } }) })
+    const [read] = await readHerdr([{ name: "slow", socket: s.path }], 1000)
+    expect(read?.partial).toBe(true)
+    expect(read?.panes.length).toBeGreaterThan(0)
+    const whole = await readHerdr([{ name: "whole", socket: stub().path }], 1000)
+    expect(whole[0]?.partial).toBeUndefined()
   })
 
   test("a pane holds a session when a foreground process has a registry file naming it, and is keyed by server and pane", async () => {
@@ -318,9 +330,21 @@ describe("readServer and herdrRecords", () => {
     ])
     herdrRecords([at("kept-a", "idle")], registry, "2026-10-18T10:00:00.000Z")
     herdrRecords([at("kept-a", "blocked")], registry, "2026-10-18T10:00:05.000Z")
-    // a cmux session's listSpace() reads no herdr server, and a failed server's read is left out
+    // a board whose every server failed reads none, and a failed server's read is left out
     herdrRecords([], registry, "2026-10-18T10:00:06.000Z")
     herdrRecords([at("kept-b", "idle")], registry, "2026-10-18T10:00:06.500Z")
+    // a server read cut short, whole or by a pane, keeps the times of the sessions it did not see (PG-880)
+    herdrRecords(
+      [{ panes: [], partial: true, server: "kept-a", workspaces: [] }],
+      registry,
+      "2026-10-18T10:00:06.700Z",
+    )
+    const cut = at("kept-a", "blocked")
+    herdrRecords(
+      [{ ...cut, panes: cut.panes.map((p) => ({ ...p, processes: [] })), partial: true }],
+      registry,
+      "2026-10-18T10:00:06.800Z",
+    )
     expect(
       herdrRecords([at("kept-a", "blocked")], registry, "2026-10-18T10:00:07.000Z")[0],
     ).toMatchObject({
@@ -759,15 +783,14 @@ describe("herdrServers and readScreen", () => {
     ])
   })
 
-  test("a stack reading a fixture names no server and connects to none, though one listens where the settings point", async () => {
+  test("a stack reading a fixture names the fixture's own server alone and connects to no socket, though one listens where the settings point", async () => {
     const s = stub()
     const env = { PLAYGROUND_HERDR_DIR: s.dir, PLAYGROUND_HERDR_SESSIONS: "s" }
     expect(herdrServers(env)).toEqual([{ name: "s", socket: s.path }])
     const live = process.env.PLAYGROUND_LIVE_READS
     delete process.env.PLAYGROUND_LIVE_READS
     try {
-      expect(herdrServers(env)).toEqual([])
-      expect(await readHerdr(herdrServers(env))).toEqual([])
+      expect(herdrServers(env)).toEqual([{ name: "playground", socket: FIXTURE_SOCKET }])
       const events = herdrEvents(herdrServers(env), 20)
       await Bun.sleep(100)
       events.kill()

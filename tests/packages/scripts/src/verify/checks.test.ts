@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import {
   Browser,
@@ -6,6 +9,7 @@ import {
   cursorResult,
   ended,
   endedResult,
+  fixtureDirOf,
   fixtureOnly,
   health,
   problems,
@@ -255,6 +259,17 @@ describe("systemResults", () => {
       },
       { check: "problems", detail: "none", ok: true },
     ])
+  })
+
+  test("the orchestrators' room follows the workers' when the body holds it", () => {
+    const orchestrators = { line: "Room for ~13 more orchestrators, by memory" }
+    expect(
+      systemResults({ capacity: { ...capacity, orchestrators }, sampledAt: SAMPLED }, NOW)[1],
+    ).toEqual({
+      check: "orchestrators",
+      detail: "Room for ~13 more orchestrators, by memory",
+      ok: true,
+    })
   })
 
   test("what did not read is printed, so a lead sees a stopped timer or a failed probe", () => {
@@ -708,5 +723,28 @@ describe("checkPage", () => {
   test("passes a page whose own half holds its words", async () => {
     const result = await checkPage(new PageBrowser("Apps"), at, "/dashboard/apps", undefined)
     expect(result.ok).toBe(true)
+  })
+})
+
+describe("fixtureDirOf", () => {
+  const root = mkdtempSync(join(tmpdir(), "verify-fixture-"))
+  afterAll(() => rmSync(root, { force: true, recursive: true }))
+
+  test("names the folder the launcher's fixtureDir names, for a worktree, a plain clone and PLAYGROUND_FIXTURE_DIR", async () => {
+    const { fixtureDir } = await import("../../../../../api/hono/src/lib/dashboard/fixture")
+    const worktree = join(root, "worktree")
+    mkdirSync(worktree)
+    writeFileSync(join(worktree, ".git"), "gitdir: /elsewhere\n")
+    const clone = join(root, "clone")
+    mkdirSync(join(clone, ".git"), { recursive: true })
+    const scratch = join(root, "tmp")
+    for (const [env, checkout] of [
+      [{}, worktree],
+      [{}, clone],
+      [{ PLAYGROUND_FIXTURE_DIR: "scratch/fx" }, clone],
+      [{ PLAYGROUND_FIXTURE_DIR: "/elsewhere/fx" }, worktree],
+    ] as const)
+      expect(fixtureDirOf(env, checkout, scratch)).toBe(fixtureDir(env, checkout, scratch))
+    expect(fixtureDirOf({}, worktree, scratch)).toBe(join(worktree, ".turbo", "dashboard-fixture"))
   })
 })

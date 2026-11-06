@@ -1,11 +1,10 @@
 import "@packages/env/aliases"
-import { homedir } from "node:os"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 
+import type { GapsRead } from "@packages/env/gaps"
 import { SQL } from "bun"
 import { RouteStore } from "portless"
 
-import { type Attachment, attachment, cmuxHeld } from "@/lib/dashboard/cmux"
 import {
   type DashboardRule,
   dashboardSource,
@@ -30,18 +29,16 @@ import {
   locate as locateOwner,
   prove as proveOwner,
 } from "@/lib/sessions/guard"
-import { cmuxSessions } from "@/lib/sessions/own"
 
 // What `bun run dev` hands turbo: the shell's environment, less what would boot the wrong stage, plus the settings and the sha the stack runs with.
 
-// The worktree commit recipe exports NODE_ENV=production and SKIP_ENV_VALIDATION=true for the pre-commit build; a stack started under them boots in the production stage on unchecked settings, so both are dropped, each for its reason, and PLAYGROUND_HERDR_ALONE, which would silence cmux on a stack cmux answers.
+// The worktree commit recipe exports NODE_ENV=production and SKIP_ENV_VALIDATION=true for the pre-commit build; a stack started under them boots in the production stage on unchecked settings, so both are dropped, each for its reason.
 export const DROPPED: Record<string, string> = {
-  PLAYGROUND_HERDR_ALONE: "so only the launcher sets it",
   NODE_ENV: "so the stage comes from .env",
   SKIP_ENV_VALIDATION: "so .env is validated",
 }
 
-// Every stack registers on portless's own proxy, https on 443 as `portless service install` keeps it, with the hosts file left alone.
+// Every stack registers on portless's own proxy, https on 443 as `portless service install` keeps it, or on 1355 while that is down (`startFallback()`), with the hosts file left alone.
 export const PORTLESS = { PORTLESS_SYNC_HOSTS: "0" }
 
 // The bare names the live dashboard takes beside its own `desk.`-prefixed names, as portless names their hosts.
@@ -149,12 +146,6 @@ export const devEnv = (shell: Record<string, string | undefined>, gitSha: string
   return { env, notes }
 }
 
-// The stack of a live dashboard that reads herdr alone: the API's cmux reads go quiet (herdrAlone in lib/dashboard/cmux.ts).
-export const herdrAloneEnv = (env: Record<string, string>): Record<string, string> => ({
-  ...env,
-  PLAYGROUND_HERDR_ALONE: "1",
-})
-
 // What a fixture stack's processes are told of the fixture the launcher wrote for them: its folder, so they read that one, and that the launcher owns it, so a process outliving the stop never writes it back (fixture.ts's ensureFixture).
 export const fixtureStackEnv = (
   env: Record<string, string>,
@@ -202,9 +193,9 @@ export const mainCheckoutOf = (root: string): string | null => {
 // The settings the API reads that decide what its stack is: where the dashboard's data comes from (fixture.ts's dashboardSource, which also reads who runs the stack: Claude Code, a factory role, a test run), the folder a fixture stack's scratch copy sits in, and the database it writes.
 export const API_SETTINGS = [
   "CLAUDECODE",
-  "PLAYGROUND_CMUX_SESSIONS",
   "PLAYGROUND_FIXTURE",
   "PLAYGROUND_FIXTURE_DIR",
+  "PLAYGROUND_HOSTED",
   "PLAYGROUND_LIVE_READS",
   "PLAYGROUND_ROLE",
   "NODE_ENV",
@@ -240,13 +231,7 @@ export const apiSettings = (
 }
 
 // The .env's gaps among the required keys, read in a fresh bun child of the API's working directory: @packages/env/gaps owns the schemas, the .env.example filter, the child and the refusal words. A module the build writes during the run is read in a fresh child process, since this process's resolver has cached the old dist for the whole package: it has already resolved other @packages/env exports, so a require or import here would miss the file the build just wrote. The caller names the built module by gapsPath, as it names apiSettings's loader. POSTGRES_URL is never a gap here, since with none the API serves its setup (SETUP_MODE, below).
-export const envGaps = (
-  root: string,
-  env: Record<string, string>,
-  gapsPath: string,
-):
-  | { error: string; ok: false }
-  | { empty: string[]; missing: string[]; ok: true; refusal: string } => {
+export const envGaps = (root: string, env: Record<string, string>, gapsPath: string): GapsRead => {
   const read = Bun.spawnSync(
     [
       process.execPath,
@@ -305,11 +290,11 @@ const FIX: Record<GuardFailure, string> = {
   vanished: "Docker is up, so run `bun run dev` again",
 }
 
-// What the stack's dashboard reads, and the rule of dashboardSource's that chose it: the live machine, or the fixture the launcher writes for it. A live dashboard reads herdr alone (`cmux: false`) unless it opts in to cmux's sessions (`reason` null), or when cmux would not answer it while cmux held no live factory session (`reason` says why).
+// What the stack's dashboard reads, and the rule of dashboardSource's that chose it: the live machine, the fixture the launcher writes for it, or, on a stack of the hosted build, nothing.
 export type Dashboard =
   | { fixture: Fixture; kind: "fixture"; rule: DashboardRule }
-  | { cmux: false; kind: "live"; reason: string | null; rule: DashboardRule }
-  | { cmux: true; kind: "live"; rule: DashboardRule }
+  | { kind: "hosted" }
+  | { kind: "live"; rule: DashboardRule }
 
 export type Preflight =
   | { dashboard: Dashboard; ok: true; proof: string }
@@ -325,16 +310,6 @@ const refuseFor = (error: unknown): Preflight =>
 const FIXTURE_FIX =
   "point PLAYGROUND_FIXTURE at a dashboard fixture file (api/hono/src/fixtures/dashboard.json is the shape), or set it to shipped for that one"
 
-// The fix for each way a stack started from here could not read cmux.
-const UNATTACHED: Record<Exclude<Attachment["state"], "attached">, (detail: string) => string> = {
-  detached: () =>
-    "this process does not descend from a cmux terminal, so cmux would refuse the stack's API every read (turbo passes it no capability token); start `bun run dev` in a cmux terminal, or as a background task of an agent session running in one, never detached with `( … &)` or `nohup`",
-  missing: () =>
-    "cmux is not installed or not on PATH, and the dashboard reads every session through it; install cmux, then start `bun run dev` in one of its terminals",
-  unreachable: (detail) =>
-    `cmux did not answer a read (${detail}); make sure cmux is running and answering, then start \`bun run dev\` in one of its terminals`,
-}
-
 // The worktree's database needs the schema the migration makes: a fresh container has none, and a stack booted on it signs nobody in, which verify only reports later as a sign-in timeout.
 export const tableCount = async (url: string): Promise<number> => {
   const sql = new SQL(url, { connectionTimeout: 5, max: 1 })
@@ -347,9 +322,24 @@ export const tableCount = async (url: string): Promise<number> => {
   }
 }
 
-// The live machine's registry, named here rather than through the dashboard's own reader, which follows this process's source: the launcher reads the API's settings, so a live-reads stack set in .env alone still reads a fixture's folder from here.
-const liveHeld = () =>
-  cmuxHeld(join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude"), "sessions"))
+const JOURNAL = join(import.meta.dir, "../../../../../packages/db/drizzle/meta/_journal.json")
+
+// The journal's migrations the database lacks, counted as drizzle's migrator picks the ones it applies: each entry newer than the last it recorded in drizzle.__drizzle_migrations, every entry when that table is missing; it reads and applies nothing.
+export const pendingMigrations = async (url: string, journal = JOURNAL): Promise<number> => {
+  const { entries } = (await Bun.file(journal).json()) as { entries: { when: number }[] }
+  const sql = new SQL(url, { connectionTimeout: 5, max: 1 })
+  try {
+    const [found] =
+      await sql`select to_regclass('drizzle.__drizzle_migrations') is not null as found`
+    if (!found?.found) return entries.length
+    const [row] =
+      await sql`select coalesce(max(created_at), 0)::text as last from drizzle.__drizzle_migrations`
+    const last = Number(row?.last ?? 0)
+    return entries.filter((entry) => entry.when > last).length
+  } finally {
+    await sql.close()
+  }
+}
 
 // Every container with its state, from `docker ps -a`; none when Docker does not answer, since first run's setup then checks again itself.
 const containerList = (): Container[] => {
@@ -358,12 +348,11 @@ const containerList = (): Container[] => {
 }
 
 export type Guard = {
-  attach?: () => Promise<Attachment>
   bare?: () => string[] | Promise<string[]>
   containers?: () => Container[]
-  held?: () => Promise<string[] | null>
   liveDashboard?: LiveDashboard
   locate?: (url: string) => Located
+  pending?: (url: string) => Promise<number>
   prove?: (url: string, located: Located) => Promise<string>
   root?: string
   tables?: (url: string) => Promise<number>
@@ -373,17 +362,16 @@ export type Guard = {
 const SETUP_MODE =
   "none yet: POSTGRES_URL is unset, so the dashboard opens on its first run, whose database check starts a local container"
 
-// Whether the stack may start here, checked before turbo runs and cheapest first: the branch, and for a checkout portless gives the bare names, whether a running stack or a live alias holds them, then the API's settings (read only once the branch passes), then where its dashboard reads from: a fixture that must load, or the live machine, read through herdr alone unless the stack opts in to cmux's sessions (PLAYGROUND_CMUX_SESSIONS), when it needs cmux to answer this process as it would the stack's API, or else no session live in cmux, read from ps and Claude's registry, when the dashboard reads herdr alone (a fixture stack never asks cmux, so it never opens the live socket); then POSTGRES_URL's container, refused by name before anything runs inside it or connects, then the proof that it is that container's own Postgres, then that its database has the schema the migration makes. The first refusal names its fix.
+// Whether the stack may start here, checked before turbo runs and cheapest first: the branch, and for a checkout portless gives the bare names, whether a running stack or a live alias holds them, then the API's settings (read only once the branch passes), then where its dashboard reads from: nothing on a hosted build, a fixture that must load, or the live machine, through herdr alone; then POSTGRES_URL's container, refused by name before anything runs inside it or connects, then the proof that it is that container's own Postgres, then that its database has the schema the migration makes and, but on the live dashboard's own checkout, whose roll migrates or holds a migration itself, every migration in the journal. The first refusal names its fix.
 export async function preflight(
   { branch, linked }: Checkout,
   readSettings: () => SettingsRead,
   {
-    attach = attachment,
     bare = heldAfterClearing,
     containers = containerList,
-    held = liveHeld,
     liveDashboard = livePair(),
     locate = locateOwner,
+    pending = pendingMigrations,
     prove = proveOwner,
     root = process.cwd(),
     tables = tableCount,
@@ -415,30 +403,12 @@ export async function preflight(
   if (!read.ok) return refuse(`the API's settings could not be read: ${read.error}`)
   const source = dashboardSource({ branch, env: read.settings, root })
   if (source.kind === "refused") return refuse(source.reason)
-  let dashboard: Dashboard = { cmux: true, kind: "live", rule: source.rule }
+  let dashboard: Dashboard =
+    source.kind === "hosted" ? { kind: "hosted" } : { kind: "live", rule: source.rule }
   if (source.kind === "fixture") {
     const loaded = loadFixture(source.file)
     if (!loaded.ok) return refuse(`${loaded.error}; ${FIXTURE_FIX}`)
     dashboard = { fixture: loaded.fixture, kind: "fixture", rule: source.rule }
-  } else if (!cmuxSessions(read.settings.PLAYGROUND_CMUX_SESSIONS)) {
-    dashboard = { cmux: false, kind: "live", reason: null, rule: source.rule }
-  } else {
-    const reach = await attach()
-    if (reach.state !== "attached") {
-      const fix = UNATTACHED[reach.state](reach.detail)
-      const sessions = await held()
-      if (sessions === null) {
-        return refuse(
-          `${fix}; whether a factory session is live in cmux could not be read from ps and Claude's registry, so the dashboard cannot read herdr alone`,
-        )
-      }
-      if (sessions.length > 0) {
-        return refuse(
-          `${fix}; the dashboard reads herdr alone only while no factory session is live in cmux, and ${sessions.length} ${sessions.length === 1 ? "is" : "are"}: ${sessions.slice(0, 5).join(", ")}${sessions.length > 5 ? ", ..." : ""}`,
-        )
-      }
-      dashboard = { cmux: false, kind: "live", reason: reach.detail, rule: source.rule }
-    }
   }
   const url = read.settings.POSTGRES_URL
   if (!url && branch === liveDashboard.branch) {
@@ -462,6 +432,12 @@ export async function preflight(
   try {
     const proof = await prove(url, located)
     if ((await tables(url)) === 0) return refuse("database has no tables: run bun run db:migrate")
+    const lacking = branch === liveDashboard.branch ? 0 : await pending(url)
+    if (lacking > 0) {
+      return refuse(
+        `database lacks ${lacking} migration${lacking === 1 ? "" : "s"}: run bun run db:migrate`,
+      )
+    }
     return { dashboard, ok: true, proof }
   } catch (error) {
     return refuseFor(error)

@@ -1,8 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test"
 import {
+  chmodSync,
+  existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -12,8 +15,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  deletePage,
   findPreview,
   isPreviewName,
+  pdfPageOf,
+  previewDownloadName,
   previewHeaders,
   previewsDir,
   readPreview,
@@ -41,6 +47,7 @@ const PNG = Buffer.from(
 )
 const GIF = Buffer.from("GIF89a\x01\x00\x01\x00\x00\x00\x00;", "latin1")
 const WEBP = Buffer.concat([Buffer.from("RIFF\x1a\x00\x00\x00WEBPVP8 ", "latin1"), Buffer.alloc(8)])
+const PDF = Buffer.from("%PDF-1.4\n%%EOF\n", "latin1")
 const HTML =
   "<style>@keyframes s{to{transform:rotate(1turn)}}div{animation:s 1s infinite}</style><div>o</div>"
 
@@ -275,7 +282,7 @@ describe("previewHeaders", () => {
     })
   })
 
-  test('an HTML page runs its own inline script in a sandbox with an opaque origin, its sandbox lifting scripts alone and nothing loading but its own inline script and styles and data: images and fonts, framed by the dashboard alone (the owner: "why navigation is not working in html")', () => {
+  test("an HTML page runs its own inline script in a sandbox with an opaque origin, its sandbox lifting scripts alone and nothing loading but its own inline script and styles and data: images and fonts, framed by the dashboard alone", () => {
     const csp = previewHeaders({ kind: "html", name: "a.html" }, origins)[
       "content-security-policy"
     ]!
@@ -293,6 +300,98 @@ describe("previewHeaders", () => {
     expect(
       previewHeaders({ kind: "html", name: "a.html" }, [])["content-security-policy"],
     ).toContain("frame-ancestors 'none'")
+  })
+})
+
+describe("a PDF beside a page (#783)", () => {
+  test("pdfPageOf names the page a PDF stands beside, and nothing for any other name", () => {
+    expect(pdfPageOf("deck.pdf")).toBe("deck.html")
+    for (const name of ["deck.html", "../deck.pdf", "a/deck.pdf", ".pdf", "-x.pdf", "deck.PDF"]) {
+      expect(pdfPageOf(name)).toBeNull()
+    }
+  })
+
+  test("readPreviews names the PDF beside an HTML page, and lists no PDF as a preview of its own", async () => {
+    const dir = folder()
+    const outside = folder()
+    put(dir, "deck.html", HTML)
+    put(dir, "deck.pdf", PDF)
+    put(dir, "plain.html", HTML)
+    put(dir, "fake.html", HTML)
+    put(dir, "fake.pdf", HTML)
+    put(dir, "pic.png", PNG)
+    put(dir, "pic.pdf", PDF)
+    put(dir, "linked.html", HTML)
+    symlinkSync(put(outside, "target.pdf", PDF), join(dir, "linked.pdf"))
+    const { previews } = await readPreviews(dir)
+    expect(Object.fromEntries(previews.map((p) => [p.name, p.pdf ?? null]))).toEqual({
+      "deck.html": "deck.pdf",
+      "fake.html": null,
+      "linked.html": null,
+      "pic.png": null,
+      "plain.html": null,
+    })
+  })
+
+  test("the serve route finds a PDF by a page's name and reads it only when its bytes are a PDF's, a name outside the folder finding nothing", async () => {
+    const dir = folder()
+    const inner = join(dir, "inner")
+    mkdirSync(inner, { mode: 0o700 })
+    put(dir, "deck.html", HTML)
+    put(dir, "deck.pdf", PDF)
+    put(dir, "fake.html", HTML)
+    put(dir, "fake.pdf", HTML)
+    expect(await findPreview("deck.pdf", dir)).toEqual({
+      kind: "pdf",
+      name: "deck.pdf",
+      path: join(dir, "deck.pdf"),
+      size: PDF.length,
+    })
+    expect((await readPreview("deck.pdf", dir))?.bytes).toEqual(Uint8Array.from(PDF))
+    expect(await readPreview("fake.pdf", dir)).toBeNull()
+    for (const name of ["../deck.pdf", "inner/../deck.pdf", `${dir}/deck.pdf`]) {
+      expect(await findPreview(name, inner)).toBeNull()
+    }
+  })
+
+  test("a PDF with no page beside it is served nothing, so a page's delete leaves no PDF to reach (#821)", async () => {
+    const dir = folder()
+    put(dir, "lone.pdf", PDF)
+    expect(await findPreview("lone.pdf", dir)).toBeNull()
+    put(dir, "lone.html", HTML)
+    expect((await findPreview("lone.pdf", dir))?.kind).toBe("pdf")
+  })
+
+  test("a PDF is saved, never shown", () => {
+    expect(previewHeaders({ kind: "pdf", name: "deck.pdf" }, [])).toMatchObject({
+      "content-disposition": "attachment",
+      "content-security-policy": "default-src 'none'; sandbox",
+      "content-type": "application/pdf",
+      "x-content-type-options": "nosniff",
+    })
+  })
+})
+
+describe("previewDownloadName (#783)", () => {
+  test("a page saves under its title from pages.jsonl, its PDF under the same title, else its caption, else its own name", async () => {
+    const dir = folder()
+    put(dir, "deck.html", HTML)
+    put(dir, "deck.txt", "The caption")
+    put(dir, "captioned.png", PNG)
+    put(dir, "captioned.txt", "Spinner: at rest")
+    put(dir, "bare-2.png", PNG)
+    const record = {
+      at: "2026-11-01T10:00:00.000Z",
+      by: "worker",
+      file: "deck.html",
+      for: null,
+      title: "Weekly plan / updated draft",
+    }
+    put(dir, "pages.jsonl", `${JSON.stringify(record)}\n`)
+    expect(await previewDownloadName("deck.html", dir)).toBe("Weekly plan updated draft.html")
+    expect(await previewDownloadName("deck.pdf", dir)).toBe("Weekly plan updated draft.pdf")
+    expect(await previewDownloadName("captioned.png", dir)).toBe("Spinner at rest.png")
+    expect(await previewDownloadName("bare-2.png", dir)).toBe("bare-2.png")
   })
 })
 
@@ -382,5 +481,121 @@ describe("readPreviews with a session (#1850)", () => {
     ])
     expect(previews[0]!.page).toBeUndefined()
     expect(previews[1]!.page?.by).toBe("k3m9px-worker")
+  })
+})
+
+// The Pages tab's delete: a page pages.jsonl names, by its plain name, its file and caption unlinked and a tombstone line appended, which the reader honours
+describe("deletePage", () => {
+  const line = (file: string, at: string) =>
+    JSON.stringify({ at, by: "planner", file, for: null, title: `Title of ${file}` })
+
+  // Two kept pages with their captions, a screenshot with no line, and a line that is not a page's record.
+  const kept = () => {
+    const dir = folder()
+    put(dir, "lookup.html", HTML, 20)
+    put(dir, "lookup.txt", "Lookup")
+    put(dir, "mock.html", HTML, 10)
+    put(dir, "mock.txt", "Mock")
+    put(dir, "shot.png", PNG)
+    writeFileSync(
+      join(dir, "pages.jsonl"),
+      `${[line("lookup.html", "2026-11-03T10:00:00.000Z"), line("mock.html", "2026-11-03T11:00:00.000Z"), "not json"].join("\n")}\n`,
+    )
+    return dir
+  }
+  const now = new Date("2026-11-03T12:00:00.000Z")
+
+  test("deletes a listed page: its file and caption leave the folder, a tombstone follows its line, and the list no longer holds it", async () => {
+    const dir = kept()
+    const before = readFileSync(join(dir, "pages.jsonl"), "utf8")
+    expect(await deletePage("lookup.html", dir, now)).toBe(true)
+    expect(existsSync(join(dir, "lookup.html"))).toBe(false)
+    expect(existsSync(join(dir, "lookup.txt"))).toBe(false)
+    expect(readFileSync(join(dir, "pages.jsonl"), "utf8")).toBe(
+      `${before}${JSON.stringify({ at: now.toISOString(), deleted: true, file: "lookup.html" })}\n`,
+    )
+    const { previews, problems } = await readPreviews(dir, {
+      dispatcher: "dispatcher",
+      session: "dispatcher",
+    })
+    expect(previews.map((p) => p.name)).toEqual(["mock.html"])
+    expect(problems).toEqual(["pages.jsonl line 3: not a page's record"])
+  })
+
+  test("takes the PDF beside the page with it, so a page kept again under the name offers none (#783)", async () => {
+    const dir = kept()
+    put(dir, "lookup.pdf", PDF)
+    put(dir, "mock.pdf", PDF)
+    expect(await deletePage("lookup.html", dir, now)).toBe(true)
+    expect(existsSync(join(dir, "lookup.pdf"))).toBe(false)
+    expect(existsSync(join(dir, "mock.pdf"))).toBe(true)
+    put(dir, "lookup.html", HTML)
+    const pdfs = (await readPreviews(dir)).previews.map((p) => [p.name, p.pdf ?? null])
+    expect(Object.fromEntries(pdfs)).toMatchObject({ "lookup.html": null, "mock.html": "mock.pdf" })
+  })
+
+  test("a page kept again under a deleted name lists again, since a later line wins", async () => {
+    const dir = kept()
+    await deletePage("lookup.html", dir, now)
+    put(dir, "lookup.html", HTML)
+    writeFileSync(
+      join(dir, "pages.jsonl"),
+      `${line("lookup.html", "2026-11-03T13:00:00.000Z")}\n`,
+      {
+        flag: "a",
+      },
+    )
+    expect(
+      (await readPreviews(dir, { dispatcher: "dispatcher", session: "planner" })).previews.map(
+        (p) => p.name,
+      ),
+    ).toEqual(["lookup.html", "mock.html"])
+  })
+
+  test("refuses a file pages.jsonl does not name, and leaves it", async () => {
+    const dir = kept()
+    expect(await deletePage("shot.png", dir, now)).toBe(false)
+    expect(await deletePage("missing.html", dir, now)).toBe(false)
+    expect(existsSync(join(dir, "shot.png"))).toBe(true)
+  })
+
+  test("refuses a name isPreviewName rejects, and a path with a separator or .., leaving every file", async () => {
+    const dir = kept()
+    const before = readFileSync(join(dir, "pages.jsonl"), "utf8")
+    for (const name of [
+      "lookup.txt",
+      "-lookup.html",
+      ".lookup.html",
+      "pages.jsonl",
+      "sub/lookup.html",
+      "../lookup.html",
+      `../${dir.split("/").pop()}/lookup.html`,
+      "lookup..html",
+      "lookup.html/..",
+      join(dir, "lookup.html"),
+      "",
+    ]) {
+      expect(await deletePage(name, dir, now)).toBe(false)
+    }
+    expect(existsSync(join(dir, "lookup.html"))).toBe(true)
+    expect(existsSync(join(dir, "lookup.txt"))).toBe(true)
+    expect(readFileSync(join(dir, "pages.jsonl"), "utf8")).toBe(before)
+  })
+
+  test("refuses a listed name that is a symlink, leaving its target", async () => {
+    const dir = kept()
+    const target = put(folder(), "elsewhere.html", HTML)
+    rmSync(join(dir, "mock.html"))
+    symlinkSync(target, join(dir, "mock.html"))
+    expect(await deletePage("mock.html", dir, now)).toBe(false)
+    expect(existsSync(target)).toBe(true)
+  })
+
+  test("a pages.jsonl it cannot append to fails the delete before anything is unlinked, so no record names a freed name", async () => {
+    const dir = kept()
+    chmodSync(join(dir, "pages.jsonl"), 0o444)
+    await expect(deletePage("lookup.html", dir, now)).rejects.toThrow()
+    expect(existsSync(join(dir, "lookup.html"))).toBe(true)
+    expect(existsSync(join(dir, "lookup.txt"))).toBe(true)
   })
 })

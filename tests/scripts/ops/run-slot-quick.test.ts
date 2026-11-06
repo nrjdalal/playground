@@ -3,6 +3,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   renameSync,
   writeFileSync,
@@ -117,22 +118,56 @@ describe("a node_modules clone waits while clone-off stands", () => {
     expect(await m.clones("node_modules", "tester-sloth")).toBe(true)
     expect(await m.clones("node_modules", "worker-c")).toBe(false)
   })
+
+  test("and under Claude Code's sandbox, whose memory reads empty, it holds and says so once a run", async () => {
+    const m = machine({ off, sandboxed: true })
+    mkdirSync(join(m.root, "node_modules"))
+    const run = m.start("worker-c", {}, SCRIPT, ["cp", "-R", "node_modules"])
+    const said =
+      /^run-slot\.sh: cannot read the memory \(sysctl kern\.memorystatus_\*\), so run-slot\.clone-off holds this clone /gm
+    expect(await run.saw(said)).toBe(true)
+    // each look reads the free share once, so five reads are four looks after the line
+    const reads = () =>
+      readFileSync(join(m.root, "sysctl.log"), "utf8")
+        .split("\n")
+        .filter((l) => l === "kern.memorystatus_level").length
+    while (reads() < 5) await Bun.sleep(20)
+    await stop(run.p)
+    expect(await run.saw(said, 2)).toBe(false)
+    expect(await run.ran()).toBe(false)
+  })
 })
 
 // A fake git and bun on PATH touch their last argument, so a run through run-slot shows whether it ran while a big run holds the queue's units.
 describe("a quick run takes its own slot past a full queue", () => {
   // Runs argv through run-slot past a full queue and says whether it ran: once it ends, or once it prints the queue's waiting line, when it is stopped (an event, never a clock, so a loaded runner only makes it slower)
   // ran: the seconds each earlier run of the same command took, oldest first, as run-slot.runs.log records them
-  // the slot the last quick() run took, from its runs log's start line
+  // the slot the last quick() run took, from its runs log's start line, and what it printed on stderr
   let took = ""
-  const quick = async (argv: string[], ran: number[] = []) => {
+  let said = ""
+  // as: the run's session name and env words, and whether a CPU-queue waiter's ticket stands ahead of it
+  const quick = async (
+    argv: string[],
+    ran: number[] = [],
+    as: { env?: Record<string, string>; waiter?: boolean; who?: string } = {},
+  ) => {
+    const who = as.who ?? "worker-q"
     const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
     m.hold("run-slot", 3, "big")
+    if (as.waiter) m.ticket(1, "worker-w", "s2 23 3 big")
+    // each fake touches its last word; git answers rev-parse, as a repo's folder does
     for (const bin of ["bun", "git"]) {
-      writeFileSync(join(m.bin, bin), '#!/bin/bash\ntouch "${@: -1}"\n')
+      writeFileSync(
+        join(m.bin, bin),
+        '#!/bin/bash\ncase " $* " in *" rev-parse "*) exit 0 ;; esac\ntouch "${@: -1}"\n',
+      )
       chmodSync(join(m.bin, bin), 0o755)
     }
-    const marker = join(m.root, "a.test.ts")
+    // ROOT in a word stands for the machine's folder
+    argv = argv.map((a) => a.replaceAll("ROOT", m.root))
+    // the marker is the line's last word, a test file under the repo's tests/ folder, since only such a word counts toward the quick rule's files
+    mkdirSync(join(m.root, "tests"))
+    const marker = "tests/a.test.ts"
     writeFileSync(
       join(m.ops, "run-slot.runs.log"),
       ran
@@ -142,9 +177,9 @@ describe("a quick run takes its own slot past a full queue", () => {
         )
         .join(""),
     )
-    const p = Bun.spawn(["bash", SCRIPT, "worker-q", "--", ...argv, marker], {
+    const p = Bun.spawn(["bash", SCRIPT, who, "--", ...argv, marker], {
       cwd: m.root,
-      env: m.env({ RUN_SLOT_SIZE: "medium" }),
+      env: m.env({ RUN_SLOT_SIZE: "medium", ...as.env }),
       stderr: "pipe",
     })
     let err = ""
@@ -156,12 +191,13 @@ describe("a quick run takes its own slot past a full queue", () => {
     })()
     while (!ended && !err.match(WAITING)) await Bun.sleep(20)
     if (!ended) await stop(p)
+    said = err
     took =
       readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
         .split("\n")
-        .find((l) => l.split(" ")[1] === "start" && l.split(" ")[2] === "worker-q")
+        .find((l) => l.split(" ")[1] === "start" && l.split(" ")[2] === who)
         ?.split(" ")[4] ?? ""
-    return existsSync(marker)
+    return existsSync(join(m.root, marker))
   }
 
   // optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue
@@ -229,18 +265,20 @@ describe("a quick run takes its own slot past a full queue", () => {
 
   // 1 Nov: a two-file test:file line ran 37, 36, 33, 39, 421 and 226 s back to back in the one quick slot, and the quick lane's waiters waited 63 min in the hour from 12:00Z
   test("a quick-rule line whose last 3 runs each took over 60 s goes to the queue", async () => {
-    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [39, 421, 226, 61])).toBe(false)
+    expect(await quick(["bun", "run", "test:file", "tests/b.test.ts"], [39, 421, 226, 61])).toBe(
+      false,
+    )
   })
 
   test("but one whose last 3 runs each took exactly 60 s still takes quick", async () => {
-    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [60, 60, 60])).toBe(true)
+    expect(await quick(["bun", "run", "test:file", "tests/b.test.ts"], [60, 60, 60])).toBe(true)
     expect(took).toBe("run-slot-quick")
   })
 
   test("but one with a short run among its last 3 still takes quick", async () => {
-    expect(await quick(["bun", "run", "test:file", "b.test.ts"], [37, 36, 33, 39, 421, 226])).toBe(
-      true,
-    )
+    expect(
+      await quick(["bun", "run", "test:file", "tests/b.test.ts"], [37, 36, 33, 39, 421, 226]),
+    ).toBe(true)
     expect(took).toBe("run-slot-quick")
   })
 
@@ -253,21 +291,94 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(took).toBe("run-slot-commit")
   })
 
+  // 3 Nov: a plain commit's build, which commit-slot.ts hands run-slot as commit-<worktree>, waited about an hour in the queue, since only git's own words took the commit slot
+  const STEP = { env: { RUN_SLOT_COMMIT_STEP: "1" }, waiter: true, who: "commit-wt-one" }
+  test("a pre-commit build commit-slot.ts marks takes run-slot-commit past a queue waiter", async () => {
+    expect(await quick(["bun", "run", "build"], [], STEP)).toBe(true)
+    expect(took).toBe("run-slot-commit")
+  })
+
+  test("and so does a type check it marks", async () => {
+    expect(await quick(["bun", "run", "check-types:tests"], [], STEP)).toBe(true)
+    expect(took).toBe("run-slot-commit")
+  })
+
+  test("but a commit- name with no mark goes through the queue", async () => {
+    expect(await quick(["bun", "run", "build"], [], { ...STEP, env: {} })).toBe(false)
+  })
+
+  test("nor does the mark under a session's own name", async () => {
+    expect(await quick(["bun", "run", "build"], [], { ...STEP, who: "worker-q" })).toBe(false)
+  })
+
+  // 4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue, while a bare git commit takes the commit lane within a minute; these read the slot each took, since a chain's own steps never touch the marker
+  test("a sh -c chain of a cd to the repo, then git add, commit and push, takes run-slot-commit", async () => {
+    await quick(
+      ["sh", "-c", `cd ROOT && git add . && git commit -m "a b" && git push origin`],
+      [],
+      {
+        waiter: true,
+      },
+    )
+    expect(took).toBe("run-slot-commit")
+  })
+
+  // a login shell's profile puts the system's git ahead of the fake one, which the slot it took does not depend on
+  test("and so does a bash -lc chain of git -C steps", async () => {
+    await quick(["bash", "-lc", `git -C ROOT commit -m x; git -C ROOT push origin`])
+    expect(took).toBe("run-slot-commit")
+  })
+
+  test("but a chain that commits beside a test goes through the queue and says why", async () => {
+    expect(await quick(["bash", "-c", `cd ROOT && bun run test && git commit -m x`])).toBe(false)
+    expect(said).toContain(
+      "run-slot.sh: this chain goes through the general queue, not the commit lane, since `bun run test` is not a form the commit lane takes",
+    )
+  })
+
+  test("while a chain with no git commit or push says nothing of the commit lane", async () => {
+    expect(await quick(["bash", "-c", 'bun run test && git add "$0"'])).toBe(false)
+    expect(said).not.toContain("commit lane")
+  })
+
   // ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites
   test("bun test naming one test file", async () => {
     expect(await quick(["env", "X=1", "bun", "test"])).toBe(true)
   })
 
   test("bun --cwd=<dir> test naming three test files", async () => {
-    expect(await quick(["bun", "--cwd=x", "test", "b.test.ts", "c.test.tsx"])).toBe(true)
+    expect(await quick(["bun", "--cwd=x", "test", "tests/b.test.ts", "tests/c.test.tsx"])).toBe(
+      true,
+    )
   })
 
   test("but not a bun test naming four", async () => {
-    expect(await quick(["bun", "test", "b.test.ts", "c.test.ts", "d.test.ts"])).toBe(false)
+    expect(
+      await quick(["bun", "test", "tests/b.test.ts", "tests/c.test.ts", "tests/d.test.ts"]),
+    ).toBe(false)
   })
 
   test("nor an end-to-end test", async () => {
-    expect(await quick(["bun", "test", "b.e2e.test.ts"])).toBe(false)
+    expect(await quick(["bun", "test", "tests/b.e2e.test.ts"])).toBe(false)
+  })
+
+  // retro 35: a sharded replay of scratch test files held the one quick slot for 30 minutes, and its waiters waited 87 minutes in all
+  test("nor a bun run test:file naming a test file outside the repo's tests/ folder", async () => {
+    expect(await quick(["bun", "run", "test:file", "/private/tmp/scratchpad/replay.test.ts"])).toBe(
+      false,
+    )
+  })
+
+  test("nor a bun test naming a test file in another folder", async () => {
+    expect(await quick(["bun", "test", "replay/b.test.ts"])).toBe(false)
+  })
+
+  test("nor one whose tests/ path climbs out of the folder", async () => {
+    expect(await quick(["bun", "test", "tests/../replay.test.ts"])).toBe(false)
+  })
+
+  test("but a bun test naming a ./tests/ file", async () => {
+    expect(await quick(["bun", "test", "./tests/b.test.ts"])).toBe(true)
   })
 
   test("nor a bun test with a word that is no test file", async () => {
@@ -288,7 +399,7 @@ describe("a quick run takes its own slot past a full queue", () => {
   })
 
   test("bun test --cwd <dir> naming two test files", async () => {
-    expect(await quick(["bun", "test", "--cwd", "x", "b.test.ts"])).toBe(true)
+    expect(await quick(["bun", "test", "--cwd", "x", "tests/b.test.ts"])).toBe(true)
   })
 
   test("bun run --cwd <dir> test:file naming one test file", async () => {
@@ -301,7 +412,7 @@ describe("a quick run takes its own slot past a full queue", () => {
 
   // a bare --cwd before the subcommand stays off the quick slot: bun misreads that shape and runs package.json's script instead (no-false-green)
   test("but not a bun --cwd <dir> test, which bun runs as package.json's test script", async () => {
-    expect(await quick(["bun", "--cwd", "x", "test", "b.test.ts"])).toBe(false)
+    expect(await quick(["bun", "--cwd", "x", "test", "tests/b.test.ts"])).toBe(false)
   })
 
   test("nor a bun --cwd <dir> run", async () => {
@@ -309,79 +420,84 @@ describe("a quick run takes its own slot past a full queue", () => {
   })
 
   test("but not a bun test --cwd <dir> naming four", async () => {
-    expect(await quick(["bun", "test", "--cwd", "x", "b.test.ts", "c.test.ts", "d.test.ts"])).toBe(
-      false,
-    )
+    expect(
+      await quick([
+        "bun",
+        "test",
+        "--cwd",
+        "x",
+        "tests/b.test.ts",
+        "tests/c.test.ts",
+        "tests/d.test.ts",
+      ]),
+    ).toBe(false)
   })
 
   test("nor a bun test --cwd <dir> end-to-end test", async () => {
-    expect(await quick(["bun", "test", "--cwd", "x", "b.e2e.test.ts"])).toBe(false)
+    expect(await quick(["bun", "test", "--cwd", "x", "tests/b.e2e.test.ts"])).toBe(false)
   })
 })
 
-// optimizer, 31 Oct: 6 quick-lane runs of 1 to 3 spawn suites took 173 to 317 s beside the CPU slots, which alone read load5
-describe("the quick slot holds while load5 is at or over the load line", () => {
-  const LOAD_WAIT = /^run-slot\.sh: waiting for load5 under \d+ for the quick slot/gm
-  // A machine whose fake bun and git touch their last argument, and whose fake sysctl reads load5 from a file the test rewrites
-  const loaded = (load5: number, setup: Parameters<typeof machine>[0] = {}) => {
-    const m = machine(setup)
+// PG-796, 3 Nov: pr:merge's types gate, holding the merge lock, waited 263 s for the quick slot on a 1 s step, and ran past its 600 s twice on a cached build
+describe("the merge train's quick run skips the quick slot's race", () => {
+  // A machine whose fake bun touches its last argument, its one quick slot held by a live session's run
+  const busy = () => {
+    const m = machine()
+    writeFileSync(join(m.bin, "bun"), '#!/bin/bash\ntouch "${@: -1}"\n')
+    chmodSync(join(m.bin, "bun"), 0o755)
+    writeFileSync(
+      join(m.ops, "run-slot-quick.holder"),
+      `worker-q ${process.pid} 2026-11-03T21:29:51Z\n`,
+    )
+    mkdirSync(join(m.ops, "run-slot-quick"))
+    return m
+  }
+
+  test("ops-merge-train's starts at once while the quick slot is held, logged bare", async () => {
+    const m = busy()
+    expect(await m.start("ops-merge-train", {}, undefined, ["bun", "run", "docs:wrap"]).ran()).toBe(
+      true,
+    )
+    expect(readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")).toMatch(
+      / start ops-merge-train \d+ bare waited=\d+s/,
+    )
+  })
+
+  test("while another session's waits for it", async () => {
+    const run = busy().start("worker-x", {}, undefined, ["bun", "run", "docs:wrap"])
+    expect(await run.saw(/waiting for the quick slot/g)).toBe(true)
+    expect(existsSync(run.marker)).toBe(false)
+    await stop(run.p)
+  })
+})
+
+// #547: load from outside run-slot kept 44 quick runs waiting 201 min for 8 min of work after the 15 s pass (2 Nov), and the one quick slot adds about a core at most, so it runs whatever load5 reads
+describe("the quick slot runs whatever load5 reads", () => {
+  // A machine whose fake bun and git touch their last argument, at the load5 asked for
+  const loaded = (load5: number) => {
+    const m = machine({ load1: 2, load5 })
     for (const bin of ["bun", "git"]) {
       writeFileSync(join(m.bin, bin), '#!/bin/bash\ntouch "${@: -1}"\n')
       chmodSync(join(m.bin, bin), 0o755)
     }
-    const file = join(m.root, "load5")
-    writeFileSync(file, `${load5}\n`)
-    writeFileSync(
-      join(m.bin, "sysctl"),
-      `#!/bin/bash\ncase "$2" in\n  hw.ncpu) echo 15 ;;\n  vm.loadavg) l=$(cat ${file}); echo "{ 2.00 $l.00 $l.00 }" ;;\n  kern.memorystatus_level) echo 80 ;;\n  kern.memorystatus_vm_pressure_level) echo 1 ;;\nesac\n`,
-    )
-    chmodSync(join(m.bin, "sysctl"), 0o755)
-    return { ...m, load: (n: number) => writeFileSync(file, `${n}\n`) }
+    return m
   }
 
-  test("a quick run waits at load5 22, and starts once it drops under", async () => {
-    const m = loaded(22)
-    const run = m.start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
-    expect(await run.saw(LOAD_WAIT)).toBe(true)
-    expect(existsSync(run.marker)).toBe(false)
-    m.load(21)
+  test("a quick-rule run with no runs on record starts at once at load5 30", async () => {
+    const run = loaded(30).start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
     expect(await run.ran()).toBe(true)
   })
 
-  test("a quick run under the line starts at once", async () => {
-    const m = loaded(21)
-    const run = m.start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
-    expect(await run.ran()).toBe(true)
-    expect(await run.saw(LOAD_WAIT)).toBe(false)
-  })
-
-  test("run-slot.load5-cap lowers the line the quick slot reads", async () => {
-    const m = loaded(12)
+  test("and so does one over run-slot.load5-cap's lower line", async () => {
+    const m = loaded(13)
     writeFileSync(join(m.ops, "run-slot.load5-cap"), "12\n")
     const run = m.start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
-    expect(await run.saw(LOAD_WAIT)).toBe(true)
-    m.load(11)
     expect(await run.ran()).toBe(true)
-  })
-
-  // bash 5.2 can drop a loop while it parses the TERM trap, so the check after the wait stops a run the loop let through over the line: here the loop's look reads 21 and the check's reads 30
-  test("a quick run the wait lets through while load5 is over the line stops unrun", async () => {
-    const m = loaded(21)
-    const reads = join(m.root, "reads")
-    writeFileSync(
-      join(m.bin, "sysctl"),
-      `#!/bin/bash\ncase "$2" in\n  hw.ncpu) echo 15 ;;\n  vm.loadavg) echo x >> ${reads}; [ "$(wc -l < ${reads})" -le 1 ] && l=21 || l=30; echo "{ 2.00 $l.00 $l.00 }" ;;\n  kern.memorystatus_level) echo 80 ;;\n  kern.memorystatus_vm_pressure_level) echo 1 ;;\nesac\n`,
-    )
-    const run = m.start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
-    expect(await run.p.exited).toBe(143)
-    expect(existsSync(run.marker)).toBe(false)
   })
 
   test("a commit takes its slot at load5 30, as before", async () => {
-    const m = loaded(30)
-    const run = m.start("worker-q", {}, undefined, ["git", "commit"])
+    const run = loaded(30).start("worker-q", {}, undefined, ["git", "commit"])
     expect(await run.ran()).toBe(true)
-    expect(await run.saw(LOAD_WAIT)).toBe(false)
   })
 
   test("and so does a node_modules clone, with clone-off unset", async () => {

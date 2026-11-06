@@ -11,6 +11,7 @@ import { FEED_LABELS } from "@/components/dashboard/app-sidebar"
 import { Composer } from "@/components/dashboard/composer"
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { OwnerOnly } from "@/components/dashboard/owner-only"
+import { ReadOnlyLine } from "@/components/dashboard/read-only-line"
 import { WorkerStream } from "@/components/dashboard/worker-stream"
 import { CheckedLine, ChecksCard, readChecks } from "@/components/first-run/checks"
 import { AddAccountDialog } from "@/components/settings/add-account-dialog"
@@ -28,7 +29,7 @@ import {
 } from "@/components/ui/empty"
 import { CenterSpinner, Spinner } from "@/components/ui/spinner"
 import { ACCOUNTS_QUERY_KEY, readAccounts } from "@/lib/accounts"
-import { chatLabel, homeTitle } from "@/lib/agent-label"
+import { chatLabel, hasChat, homeTitle } from "@/lib/agent-label"
 import { config } from "@/lib/config"
 import { liveState, type LiveState } from "@/lib/dashboard"
 import { firstRunView, type FirstRunView } from "@/lib/first-run"
@@ -172,7 +173,8 @@ function Checklist({ name }: { name: string }) {
           )
         })}
       </ol>
-      {list.start && (
+      {list.start && config.hosted && <ReadOnlyLine />}
+      {list.start && !config.hosted && (
         <Button disabled={start.isPending || start.isSuccess} onClick={() => start.mutate()}>
           {(start.isPending || start.isSuccess) && <Spinner />}
           Start {name}
@@ -219,7 +221,7 @@ function NoChat({
   )
 }
 
-// /dashboard: your chat with the dispatcher, the dashboard's home, since the owner talks to the dispatcher alone, or with ?worker= that session's own view: its steps as they happen with its Feed prompts under the latest step, and for a dispatcher or a session the dashboard hosts a composer under them. The aside window beside it (DashboardAside) holds the Inbox, Playground's chat on another session's view, and the session's Pages. A session the URL names that has ended shows your chat; every agent's status is on the System page.
+// /dashboard: your chat with the dispatcher, the dashboard's home, since the owner talks to the dispatcher alone, or with ?worker= that session's own view: its steps as they happen with its Feed prompts under the latest step, and for a dispatcher, the assistant or a session the dashboard hosts a composer under them (hasChat). The aside window beside it (DashboardAside) holds the Inbox, Playground's chat on another session's view, and the session's Pages. A session the URL names that has ended shows your chat; every agent's status is on the System page.
 export function DashboardView() {
   const { allowed, approvals, connected, dispatcher, feedProblem, problem, selected, workers } =
     useDashboard()
@@ -319,9 +321,7 @@ export function DashboardView() {
           now={new Date(inbox.dataUpdatedAt)}
           worker={selected}
         />
-        {selected.role === "dispatcher" || selected.hosted ? (
-          <Composer key={selected.name} worker={selected} />
-        ) : null}
+        {hasChat(selected) ? <Composer key={selected.name} worker={selected} /> : null}
       </div>
     </PageShell>
   )

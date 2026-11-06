@@ -14,6 +14,7 @@
         "@types/node": "catalog:",
         "@viz-js/viz": "catalog:",
         "globby": "catalog:",
+        "hono": "catalog:",
         "lefthook": "catalog:",
         "lint-staged": "catalog:",
         "oxfmt": "catalog:",
@@ -38,6 +39,8 @@
         "@packages/config": "workspace:*",
         "@packages/db": "workspace:*",
         "@packages/env": "workspace:*",
+        "@packages/message": "workspace:*",
+        "@packages/safe-delete": "workspace:*",
         "@packages/settings": "workspace:*",
         "@scalar/api-reference": "catalog:",
         "@scalar/hono-api-reference": "catalog:",
@@ -94,6 +97,7 @@
       "version": "0.0.1",
       "dependencies": {
         "@packages/env": "workspace:*",
+        "@packages/message": "workspace:*",
         "drizzle-orm": "catalog:",
       },
       "devDependencies": {
@@ -122,12 +126,37 @@
         "typescript": "catalog:",
       },
     },
+    "packages/message": {
+      "name": "@packages/message",
+      "version": "0.0.1",
+      "dependencies": {
+        "zod": "catalog:",
+      },
+      "devDependencies": {
+        "@packages/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/redis": {
       "name": "@packages/redis",
       "version": "0.0.1",
       "dependencies": {
         "@packages/env": "workspace:*",
       },
+      "devDependencies": {
+        "@packages/config": "workspace:*",
+        "@types/bun": "catalog:",
+        "@types/node": "catalog:",
+        "tsdown": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/safe-delete": {
+      "name": "@packages/safe-delete",
+      "version": "0.0.1",
       "devDependencies": {
         "@packages/config": "workspace:*",
         "@types/bun": "catalog:",
@@ -145,7 +174,9 @@
       "devDependencies": {
         "@packages/config": "workspace:*",
         "@packages/env": "workspace:*",
+        "@packages/message": "workspace:*",
         "@packages/redis": "workspace:*",
+        "@packages/safe-delete": "workspace:*",
         "@packages/settings": "workspace:*",
         "@types/bun": "catalog:",
         "@types/fontkit": "catalog:",
@@ -171,6 +202,7 @@
       "name": "@packages/settings",
       "version": "0.0.1",
       "dependencies": {
+        "@packages/safe-delete": "workspace:*",
         "zod": "catalog:",
       },
       "devDependencies": {
@@ -195,6 +227,8 @@
         "@packages/auth": "workspace:*",
         "@packages/config": "workspace:*",
         "@packages/env": "workspace:*",
+        "@packages/message": "workspace:*",
+        "@pierre/diffs": "catalog:",
         "@remixicon/react": "catalog:",
         "@shadcn/react": "catalog:",
         "@tanstack/react-form": "catalog:",
@@ -281,6 +315,7 @@
     "@hono/node-server": "^2.1.5",
     "@hono/standard-validator": "^0.4.0",
     "@octokit/rest": "^22.0.1",
+    "@pierre/diffs": "^1.6.2",
     "@remixicon/react": "^4.9.0",
     "@scalar/api-reference": "^1.73.0",
     "@scalar/hono-api-reference": "^0.12.14",
@@ -913,13 +948,25 @@
 
     "@packages/env": ["@packages/env@workspace:packages/env"],
 
+    "@packages/message": ["@packages/message@workspace:packages/message"],
+
     "@packages/redis": ["@packages/redis@workspace:packages/redis"],
+
+    "@packages/safe-delete": ["@packages/safe-delete@workspace:packages/safe-delete"],
 
     "@packages/scripts": ["@packages/scripts@workspace:packages/scripts"],
 
     "@packages/settings": ["@packages/settings@workspace:packages/settings"],
 
     "@phosphor-icons/core": ["@phosphor-icons/core@2.1.1", "", {}, "sha512-v4ARvrip4qBCImOE5rmPUylOEK4iiED9ZyKjcvzuezqMaiRASCHKcRIuvvxL/twvLpkfnEODCOJp5dM4eZilxQ=="],
+
+    "@pierre/diffs": ["@pierre/diffs@1.6.2", "", { "dependencies": { "@pierre/highlights": "0.3.0", "@pierre/theme": "2.0.0", "@pierre/theming": "1.0.2", "diff": "9.0.0", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0 || ^4.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-Hpk+HjjsJ2IWRZ3ALAa7rdBfhF2Zeyh5Kk7L4riMXRo3eHal9yQR1TgBryp+OzGyxfFfwsnEBOQztoANZIzpMQ=="],
+
+    "@pierre/highlights": ["@pierre/highlights@0.3.0", "", {}, "sha512-s6xZ/giPPrSeCO2w254GiysUXD4ditKMTOrl1vHynvPqP7VdlujYi01O9joxJ0T16XkoXGQMN6zkRi9+O8NCzg=="],
+
+    "@pierre/theme": ["@pierre/theme@2.0.0", "", {}, "sha512-yNDd9GYLQl1mEUJR8AneJ5e4ohLIHQd/wZLWr4fagt78vS2RwwZNW530vVgHqXFAyFVcFlRmGUD5ramXH46OXw=="],
+
+    "@pierre/theming": ["@pierre/theming@1.0.2", "", { "peerDependencies": { "@pierre/theme": "^1.1.0 || ^2.0.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-RmXLLqtx31UGcR8kZyO5hGAQ1EXz6loT1Cu0BFAGsbnBboIxp2BlomkLfWyvdT4WZXnBGyu25onL1gKpFQuSUw=="],
 
     "@posthog/browser-common": ["@posthog/browser-common@0.9.11", "", { "dependencies": { "@posthog/core": "^1.60.1", "@posthog/types": "^1.416.0", "preact": "^10.29.3" } }, "sha512-ZCwJIgiDBRoEAlrlYxaIIIAUfITmBDpWDQJp+IZmAcTyvJka5/ebEKu8uV+jSSA/RhpvDKKte1WmhLUbkIWQjA=="],
 
@@ -2133,6 +2180,8 @@
 
     "lru-cache": ["lru-cache@5.1.1", "", { "dependencies": { "yallist": "^3.0.2" } }, "sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w=="],
 
+    "lru_map": ["lru_map@0.4.1", "", {}, "sha512-I+lBvqMMFfqaV8CJCISjI3wbjmwVu/VyOoU7+qtu9d7ioW5klMgsTTiUOUp+DJvfTTzKXoPbyC6YfgkNcyPSOg=="],
+
     "lucide-react": ["lucide-react@1.61.0", "", { "peerDependencies": { "@types/react": "*", "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" }, "optionalPeers": ["@types/react"] }, "sha512-v2SQPPPNjnr+BlhL9Spuzmo5yR+hLkftfuE4E3jaxdNPgSH0hJKPcLJBP7yAta87jQNPsSERS59PJjCJ/CorBA=="],
 
     "magic-string": ["magic-string@1.4.3", "", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.6.0" } }, "sha512-z12OxmaPGE0F4xlpGdjuAUckipLpQlTAuAmyGhNoD7ODpYUzvDfvtxUbjM/jwznyP178oju/KDdyi220wNJ0RQ=="],
@@ -2884,6 +2933,8 @@
     "@octokit/plugin-rest-endpoint-methods/@octokit/types": ["@octokit/types@16.0.0", "", { "dependencies": { "@octokit/openapi-types": "^27.0.0" } }, "sha512-sKq+9r1Mm4efXW1FCk7hFSeJo4QKreL/tTbR0rz/qx/r1Oa2VV83LTA/H/MuCOX7uCIJmQVRKBcbmWoySjAnSg=="],
 
     "@octokit/request/content-type": ["content-type@3.1.1", "", {}, "sha512-GW4qUsfFo59d0HbUibDlWv5wPz+vAAcaTWbKIuKCf0JkC7wWkSyf8f13IpXn5JkeMlB2P8iTSSIjwXljorg2vA=="],
+
+    "@pierre/diffs/diff": ["diff@9.0.0", "", {}, "sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw=="],
 
     "@radix-ui/react-accordion/@radix-ui/primitive": ["@radix-ui/primitive@1.2.0", "", {}, "sha512-KABY+VMIRPJL+Vyzv/335FEhXXD/xDv8BMb1kl48/aXJZMH0LtHCTx5ga5RnxaEP3nZHtmTLf1P9vanmFX46bw=="],
 

@@ -352,7 +352,7 @@ export async function prlessBranches(ctx: Context, agents: Json[]): Promise<stri
   return []
 }
 
-// Each open PR of ours, in the factory repo or the repo of a PR a live roster row names, read in one GraphQL search into ops/alerts-prs.json, which ops-unstick folds into alerts-pending.json: one whose last REPEATS ReviewBot verdicts hold one score below 5 (a fresh round resets the idle clock, so a 3/5 every 20 minutes never idles), and one with no new commit, verdict or comment for STALL_AFTER seconds that waits on neither its checks nor merge-on-ready. A PR held on purpose is left out: a park or hold label, or a line of its body or newest comment opening with Held: or Parked:.
+// Each open PR of ours, in the factory repo or the repo of a PR a live roster row names, read in one GraphQL search into ops/alerts-prs.json, which ops-unstick folds into alerts-pending.json: one whose last REPEATS ReviewBot verdicts hold one score below 5 (a fresh round resets the idle clock, so a 3/5 every 20 minutes never idles), and one with no opening, new commit, verdict or comment for STALL_AFTER seconds that waits on neither its checks nor merge-on-ready. A PR held on purpose is left out: a park or hold label, or a line of its body or newest comment opening with Held: or Parked:.
 export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]> {
   let factory: string
   try {
@@ -370,7 +370,7 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
     .map((r) => `repo:${r}`)
     .join(" ")}`
   const fields =
-    "number body repository { nameWithOwner } labels(first: 20) { nodes { name } } comments(last: 100) { nodes { body createdAt } } reviews(last: 1) { nodes { submittedAt } } commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }"
+    "number body createdAt repository { nameWithOwner } labels(first: 20) { nodes { name } } comments(last: 100) { nodes { body createdAt } } reviews(last: 1) { nodes { submittedAt } } commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }"
   const query = `{ search(query: ${JSON.stringify(search)}, type: ISSUE, first: 50) { nodes { ... on PullRequest { ${fields} } } } }`
   const r = await ctx.run(["gh", "api", "graphql", "-f", `query=${query}`], { timeoutMs: 60_000 })
   let prs: {
@@ -381,6 +381,7 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
         commit?: { committedDate?: string; statusCheckRollup?: { state?: string } | null }
       }[]
     }
+    createdAt?: string
     labels?: { nodes?: { name?: string }[] }
     number?: number
     repository?: { nameWithOwner?: string }
@@ -416,6 +417,7 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
     const last = Math.max(
       0,
       ...[
+        pr.createdAt,
         commit?.committedDate,
         comments.at(-1)?.createdAt,
         pr.reviews?.nodes?.at(-1)?.submittedAt,

@@ -22,6 +22,14 @@ The rule has **no opt-out**, so no pin survives an install, whatever reason is r
 
 Enforcement is only partial by design. Specs the rule cannot convert are reported and the script still exits 0, so a compound range such as `>=4.4.3 <5` survives an install with nothing but a line of `postinstall` output. Failing the install instead would block work for a range that may be perfectly deliberate, so the auto-convertible half is enforced and the rest is advisory.
 
+## Notable dependencies
+
+### `@pierre/diffs` (`^1.6.2`, web)
+
+- **What:** draws a `.diff` or `.patch` attachment in the Inbox's viewer as a patch view (`web/next/src/components/dashboard/viewer/patch-view.tsx`). Apache-2.0, from `pierrecomputer/pierre`.
+- **Cost:** about 101 KB gzip with its own Shiki highlighter (measured on 1.6.2 with `bun build --minify`, React external), loaded through `next/dynamic` only when a patch opens, so no other page carries it; `tests/web/next/src/components/dashboard/viewer/patch-view.test.ts` fails when any other file imports it.
+- **Watch:** a fast-moving 1.x (17 publishes in the 90 days to 2 Nov 2026) under a caret range; a minor that changes `FileDiff`'s options or `parsePatchFiles` shows in that test and in the viewer's own fallback to text, which takes any render the package throws on.
+
 ## Active overrides
 
 ### `seroval` → `^1.6.8`

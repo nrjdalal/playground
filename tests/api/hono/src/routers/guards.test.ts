@@ -6,6 +6,8 @@ process.env.BETTER_AUTH_SECRET ||= "guards-test-secret-not-for-use-anywhere"
 const { guardWrites, requireTrustedOrigin } =
   await import("../../../../../api/hono/src/middlewares/dashboard")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
+const { markRelayed } = await import("../../../../../api/hono/src/lib/relay/relayed")
+const { Hono } = await import("../../../../../api/hono/node_modules/hono")
 
 const ROUTERS = join(import.meta.dir, "../../../../../api/hono/src/routers")
 const READS = new Set(["GET", "HEAD", "OPTIONS"])
@@ -75,18 +77,18 @@ const send = (router: Router, route: Route, origin: string, server?: ReturnType<
 describe("every write on the owner rung is guarded by its method, not its path", () => {
   test("the walk finds the dashboard's routers", () => {
     expect(owners.map((f) => f.file).toSorted()).toEqual(
-      expect.arrayContaining(["apps.ts", "dashboard.ts", "inbox.ts", "sessions.ts"]),
+      expect.arrayContaining(["apps.ts", "dashboard.ts", "inbox.ts", "remote.ts", "sessions.ts"]),
     )
   })
 
   // A router put on the owner rung another way (a shared constant) would drop out of the source check, so the routers the API mounts at the dashboard's paths must be among those walked.
   test("every router the API mounts at a dashboard path is walked as owner-rung", async () => {
-    const index = await Bun.file(join(ROUTERS, "..", "index.ts")).text()
+    const index = await Bun.file(join(ROUTERS, "..", "local.ts")).text()
     const mounted = [...index.matchAll(/\.route\(\s*"\/([\w/-]+)"\s*,\s*(\w+)\s*\)/g)].map(
       ([, at, name]) => ({ at: at!, name: name! }),
     )
     const ownerNames = owners.map((f) => f.name)
-    for (const at of ["v1/apps", "v1/inbox", "v1/sessions"])
+    for (const at of ["v1/apps", "v1/inbox", "v1/remote", "v1/sessions"])
       expect(ownerNames).toContain(mounted.find((m) => m.at === at)?.name ?? "")
     // the dashboard's own router has no segment of its own: it mounts at v1 beside v1Router
     expect(mounted.filter((m) => m.at === "v1").some((m) => ownerNames.includes(m.name))).toBe(true)
@@ -147,21 +149,83 @@ describe("a write is refused before any session read or handler unless it comes 
 
 describe("an ask's file is read only from the dashboard's own page on this machine (#2282)", () => {
   const inbox = found.find((f) => f.file === "inbox.ts")!.router
-  const read = (origin: string, server?: ReturnType<typeof peer>) =>
+  const read = (origin: string, server?: ReturnType<typeof peer>, query = "") =>
     inbox.request(
-      "http://127.0.0.1/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png",
+      `http://127.0.0.1/attachments/3f0e7a52-1c4b-4d2a-9e6f-0000000000a1.png${query}`,
       { headers: origin ? { origin } : {} },
       server,
     )
 
-  test("refused from another origin, with no origin (an <img> elsewhere), off loopback or from an unknown peer", async () => {
-    expect((await read("http://evil.localhost", peer("127.0.0.1"))).status).toBe(403)
-    expect((await read("", peer("127.0.0.1"))).status).toBe(403)
-    expect((await read(trusted(), peer("192.168.1.20"))).status).toBe(403)
-    expect((await read(trusted())).status).toBe(403)
+  // a download (#783) is the same read, so a plain link to it from anywhere is refused alike
+  test.each(["", "?download=1"])(
+    "refused from another origin, with no origin (an <img> elsewhere), off loopback or from an unknown peer%s",
+    async (query) => {
+      expect((await read("http://evil.localhost", peer("127.0.0.1"), query)).status).toBe(403)
+      expect((await read("", peer("127.0.0.1"), query)).status).toBe(403)
+      expect((await read(trusted(), peer("192.168.1.20"), query)).status).toBe(403)
+      expect((await read(trusted(), undefined, query)).status).toBe(403)
+    },
+  )
+
+  test.each(["", "?download=1"])(
+    "past both guards it still needs the owner's session%s",
+    async (query) => {
+      expect((await read(trusted(), peer("127.0.0.1"), query)).status).toBe(401)
+    },
+  )
+})
+
+// writes.md's hosted rule: Yard's writes, which hosted.ts alone mounts, take a trusted origin and the member rung or the one their route names, with no loopback check, since the hosted build serves the network.
+describe("Yard's writes take a trusted origin and no loopback", () => {
+  const yard = found.find((f) => f.file === "yard.ts")!
+
+  test.each(writesOf(yard.router).map((r) => [r.method, r.path] as const))(
+    "%s %s refuses another origin before the session is read, and asks a trusted one off this machine for a session",
+    async (method, path) => {
+      const route = { handler: null, method, path }
+      const refused = await send(yard.router, route, "http://evil.localhost", peer("203.0.113.9"))
+      expect(refused.status).toBe(403)
+      expect(await refused.text()).toContain("Untrusted origin")
+      expect((await send(yard.router, route, trusted(), peer("203.0.113.9"))).status).toBe(401)
+    },
+  )
+})
+
+// stack.md's relay rule: a write from Yard runs here only as the request answerRelay builds in process once requireSignedWrite passes it, marked in memory, never by anything a request carries.
+describe("a relayed write passes the guards by the in-process mark alone", () => {
+  const guarded = new Hono().use("/*", guardWrites).post("/api/v1/messages", (c) => c.text("ran"))
+  const post = (headers: Record<string, string> = {}) =>
+    new Request("http://127.0.0.1/api/v1/messages?relayed=1", {
+      body: "{}",
+      headers: { "content-type": "application/json", ...headers },
+      method: "POST",
+    })
+
+  test("a network request carrying the mark's name, by header or query, is refused", async () => {
+    const marks: Record<string, string>[] = [
+      {},
+      { relayed: "1" },
+      { "x-relayed": "1" },
+      { "x-playground-relayed": "1" },
+    ]
+    for (const headers of marks) {
+      const offMachine = await guarded.request(post(headers), undefined, peer("192.168.1.20"))
+      expect(offMachine.status).toBe(403)
+      const noOrigin = await guarded.request(post(headers), undefined, peer("127.0.0.1"))
+      expect(noOrigin.status).toBe(403)
+    }
   })
 
-  test("past both guards it still needs the owner's session", async () => {
-    expect((await read(trusted(), peer("127.0.0.1"))).status).toBe(401)
+  test("the request answerRelay marks passes with no origin and no peer, as app.fetch hands it in process", async () => {
+    const response = await guarded.fetch(markRelayed(post()))
+    expect([response.status, await response.text()]).toEqual([200, "ran"])
+  })
+
+  test("only answerRelay marks a request", async () => {
+    const callers: string[] = []
+    const API = join(ROUTERS, "..")
+    for await (const file of new Bun.Glob("**/*.ts").scan({ cwd: API }))
+      if ((await Bun.file(join(API, file)).text()).includes("markRelayed(")) callers.push(file)
+    expect(callers.toSorted()).toEqual(["lib/relay/mac.ts"])
   })
 })

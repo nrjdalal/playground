@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs"
-import { join } from "node:path"
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync } from "node:fs"
+import { basename, dirname, join } from "node:path"
 
+import { MARKER, makeScratch, removeScratch } from "@packages/safe-delete"
 import {
   CORE,
   CORE_READ_ONLY,
@@ -71,9 +72,7 @@ const privateRepo = async (
   if ("local" in where) {
     const question = `playground ${command} will create ${slug} on GitHub, private, with issues, wiki and projects off. Create it? [y/N]`
     if (!(await confirm(question)))
-      throw new Error(
-        `${slug} was not created: run playground ${command} in a terminal and answer y, or pass --yes`,
-      )
+      throw new Error(`${slug} was not created: run playground ${command} again with --yes`)
     const steps = [
       ["gh", "repo", "create", slug, "--private", "--disable-issues", "--disable-wiki"],
       ["gh", "repo", "edit", slug, "--enable-projects=false"],
@@ -124,9 +123,19 @@ export async function extInit(data: string, run: Run, confirm: Confirm): Promise
   const url = await privateRepo(run, slug, lines, confirm, "ext init")
   const root = extensionsDir(data)
   const dir = scopeDir(data, login)
-  // A root this run made goes again when the run fails, since a root with no policy.json refuses every settings read where no root reads the defaults.
-  const made = !existsSync(root)
-  mkdirSync(root, { recursive: true })
+  // A root this run made goes again when the run fails, since a root with no policy.json refuses every settings read where no root reads the defaults: it starts as a scratch folder renamed into place, which keeps its marker until the run lands.
+  let made = !existsSync(root)
+  if (made) {
+    mkdirSync(dirname(root), { recursive: true })
+    const fresh = makeScratch(`${basename(root)}.`, dirname(root))
+    try {
+      renameSync(fresh, root)
+    } catch {
+      made = false
+      const refused = removeScratch(fresh, dirname(root))
+      if (refused) console.error(`ext init: ${refused}`)
+    }
+  }
   try {
     withLock(data, () => {
       if (existsSync(join(dir, ".git"))) lines.push(`${dir} is already a clone`)
@@ -151,9 +160,11 @@ export async function extInit(data: string, run: Run, confirm: Confirm): Promise
       deriveRoot(data, login)
     })
   } catch (error) {
-    if (made) rmSync(root, { force: true, recursive: true })
+    const refused = made && removeScratch(root, dirname(root))
+    if (refused) console.error(`ext init: ${refused}`)
     throw error
   }
+  if (made) unlinkSync(join(root, MARKER))
   return lines
 }
 

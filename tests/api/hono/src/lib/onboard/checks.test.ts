@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -152,7 +152,7 @@ describe("onboardChecks on a machine it reads", () => {
       herdr: "herdr",
       Homebrew: null,
       node: "node",
-      portless: null,
+      portless: "trust",
       python3: "python",
       Settings: null,
       uv: null,
@@ -232,7 +232,7 @@ describe("the rows the app cannot fix itself", () => {
     expect(absent!.note).toBeTruthy()
   })
 
-  test("portless is ok once its proxy answers and its CA is trusted, and optional with a note otherwise", async () => {
+  test("portless is ok once its proxy answers and its CA is trusted, and optional with a note otherwise, a CA not trusted offering the trust fix", async () => {
     const at = async (files: string[], trusted: boolean, ports = [443]) =>
       byName(
         await onboardChecks({
@@ -253,24 +253,32 @@ describe("the rows the app cannot fix itself", () => {
       [[], true, [443], "not trusted"],
     ] as const) {
       const row = await at([...files], trusted, [...ports])
-      expect(row).toMatchObject({ action: null, detail, status: "optional" })
+      expect(row).toMatchObject({
+        action: detail === "not trusted" ? { id: "trust", label: "Trust the certificate" } : null,
+        detail,
+        status: "optional",
+      })
       expect(row!.note).toBeTruthy()
     }
   })
 
   test("portless's proxy is looked for on the port its state folder saved, by the dev launcher's own rule", async () => {
     const dir = mkdtempSync(join(tmpdir(), "portless-state-"))
-    const ca = join(dir, "ca.pem")
-    const at = async (ports: number[], extra = {}) =>
+    const fallback = join(dir, "fallback")
+    mkdirSync(fallback)
+    const at = async (ports: number[], extra = {}, state = dir) =>
       byName(
         await onboardChecks({
           ...signedUp,
           database: "ok",
-          env: { HOME, PORTLESS_STATE_DIR: dir, ...extra },
+          env: { HOME, PORTLESS_STATE_DIR: state, ...extra },
           reader: machine(
             TOOLS,
-            { ...ANSWERS, [`security verify-cert -c ${ca} -L -p ssl`]: {} },
-            [ca],
+            {
+              ...ANSWERS,
+              [`security verify-cert -c ${join(state, "ca.pem")} -L -p ssl`]: {},
+            },
+            [join(state, "ca.pem")],
             { ports },
           ).reader,
         }),
@@ -281,10 +289,49 @@ describe("the rows the app cannot fix itself", () => {
       writeFileSync(join(dir, "proxy.port"), "444\n")
       expect(await at([443])).toBe("not running")
       expect(await at([444])).toBe("ready")
+      writeFileSync(join(fallback, "proxy.port"), "1355\n")
+      expect(await at([], {}, fallback)).toBe("not running")
+      expect(await at([1355], {}, fallback)).toBe("not on 443")
+      expect(await at([1355, 443], {}, fallback)).toBe("set up")
+      // a 1355 proxy in a folder of the owner's own is no fallback, so no button offers the install that would stop it
       writeFileSync(join(dir, "proxy.port"), "1355\n")
-      expect(await at([])).toBe("ready")
+      expect(await at([1355])).toBe("ready")
+      writeFileSync(join(dir, "proxy.port"), "8443\n")
+      expect(await at([8443])).toBe("ready")
     } finally {
       rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  // #810: a stack whose proxy was down runs it on 1355, and Settings offers to set up 443, whose service install trusts the CA too, so it comes before the trust fix
+  test("a proxy on 1355 offers the proxy fix, before the trust fix, naming its port", async () => {
+    const root = mkdtempSync(join(tmpdir(), "portless-state-"))
+    const dir = join(root, "fallback")
+    mkdirSync(dir)
+    writeFileSync(join(dir, "proxy.port"), "1355\n")
+    const ca = join(dir, "ca.pem")
+    try {
+      const row = byName(
+        await onboardChecks({
+          ...signedUp,
+          database: "ok",
+          env: { HOME, PORTLESS_STATE_DIR: dir },
+          reader: machine(
+            TOOLS,
+            { ...ANSWERS, [`security verify-cert -c ${ca} -L -p ssl`]: { code: 1 } },
+            [ca],
+            { ports: [1355] },
+          ).reader,
+        }),
+      ).portless
+      expect(row).toMatchObject({
+        action: { id: "proxy", label: "Set up the web address" },
+        detail: "not on 443",
+        status: "optional",
+      })
+      expect(row!.note).toContain("runs on port 1355 for now")
+    } finally {
+      rmSync(root, { force: true, recursive: true })
     }
   })
 

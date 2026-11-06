@@ -5,7 +5,7 @@ import { Glob } from "bun"
 
 const LIB = join(import.meta.dir, "../../../../../api/hono/src/lib")
 
-// Every file under api/hono/src/lib allowed to start a process, the 18 that spawn today: a new one fails here, and one that stops spawning leaves the list.
+// Every file under api/hono/src/lib allowed to start a process, the 24 that spawn today: a new one fails here, and one that stops spawning leaves the list.
 const ALLOWLIST = [
   "accounts/claude-setup.ts",
   "dashboard/agents.ts",
@@ -14,17 +14,23 @@ const ALLOWLIST = [
   "dashboard/fixture.ts",
   "dashboard/repo.ts",
   "dashboard/restart.ts",
+  "dashboard/run-argv.ts",
   "dashboard/secret-sink.ts",
+  "dashboard/slack-upload.ts",
+  "dashboard/templates.ts",
   "dashboard/update.ts",
   "dashboard/vibe.ts",
   "dev/launch.ts",
+  "dev/proxy.ts",
   "dev/stop.ts",
+  "keychain.ts",
   "onboard/fix.ts",
   "onboard/machine.ts",
   "sessions/guard.ts",
   "setup/container.ts",
   "store/extensions.ts",
   "system/probe.ts",
+  "trash.ts",
 ]
 
 // A call shape, not the word: Bun's spawners and shell tag, a `$` imported from bun (matched through the import, so a regex source ending in `$` before its template's backtick never reads as one), the child_process module in any import form (probe.test.ts's SPAWNS shapes), or a bare call of the child_process family, so prose and re.exec never match. `from "bun"` alone is not a spawn (Glob reaches lib through it), and `= Bun` matches every `= Bun.file(...)` at repo scale.

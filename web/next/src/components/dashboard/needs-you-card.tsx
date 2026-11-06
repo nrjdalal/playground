@@ -36,8 +36,10 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { toast } from "@/components/ui/toast"
+import { useYardWrites } from "@/hooks/use-yard-writes"
 import { agentLabel } from "@/lib/agent-label"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
+import { config } from "@/lib/config"
 import {
   isAnswered,
   needsYouAnchor,
@@ -50,6 +52,7 @@ import {
   type OnAnswer,
   submitWhy,
 } from "@/lib/needs-you"
+import { ON_THE_MAC_LINE, READ_ONLY_LINE } from "@/lib/relay"
 import { relativeTime } from "@/lib/time"
 
 // An answered card, collapsed to one line: what the owner chose and what became of it.
@@ -111,6 +114,27 @@ function Body({ body, label }: { body: NeedsYouBody; label: string }) {
   )
 }
 
+// Where a card that cannot be answered here is answered: on the Mac from a hosted page (sends: a paired one, whose chat still sends), through the chat, by the session's manager, or in its terminal for a dispatcher's own card, since a dispatcher has no manager.
+function readOnlyFooter(item: NeedsYou, sends: boolean): string {
+  const label = agentLabel(item.from)
+  const approving = item.kind === "permission" || item.kind === "plan"
+  if (config.hosted) return sends ? ON_THE_MAC_LINE : READ_ONLY_LINE
+  if (item.hosted)
+    return `Approving a ${item.kind} here is off for now, so it is refused after 10 minutes.`
+  if (item.dispatcher) {
+    if (item.herdr)
+      return `Answer it in ${label}'s terminal, in herdr: the Dashboard answers only a herdr session's pickers.`
+    return approving
+      ? `Answer it in ${label}'s terminal: approving a ${item.kind} here is off for now.`
+      : `This can only be answered in ${label}'s terminal.`
+  }
+  const manager = `ask Playground in the chat, and ${label}'s manager answers it.`
+  if (item.herdr) return `The Dashboard answers only a herdr session's pickers: ${manager}`
+  return approving
+    ? `Approving a ${item.kind} here is off for now: ${manager}`
+    : `This cannot be answered here: ${manager}`
+}
+
 // What waits on the owner, inside the stream of the session that asked: a Feed prompt (a picker, a permission, a plan), one card shape for all, on shadcn's Questionnaire. One question shows at a time, with Previous and Next between them; pick an option (the recommended one comes first and says so), add words where a question takes them, and Submit sends every answer at once. Without onAnswer the card is shown as it would be answered but can only be answered in the session's terminal: its options stay in sight, disabled one by one, since Questionnaire hides a disabled question whole. With a resolution it collapses to one line.
 export function NeedsYouCard({
   item,
@@ -123,6 +147,7 @@ export function NeedsYouCard({
   onAnswer: OnAnswer | null
   resolution: NeedsYouResolution | null
 }) {
+  const writes = useYardWrites()
   const send = useMutation({
     mutationFn: async (given: NeedsYouGiven[]) => {
       if (!onAnswer) throw new Error("This can only be answered in the session's terminal")
@@ -136,7 +161,7 @@ export function NeedsYouCard({
       if (!result.ok) throw Object.assign(new Error(result.reason), { sent: result.sent === true })
       return result
     },
-    // A refusal that says to look at the terminal stays on the card, and sending again becomes its own step.
+    // A refusal stays on the card with its reason, and sending again becomes its own step.
     onMutate: () => setFailure(null),
     onError: (error) => {
       setFailure({ reason: error.message, sent: (error as { sent?: boolean }).sent === true })
@@ -366,13 +391,7 @@ export function NeedsYouCard({
       </CardContent>
       {readOnly && (
         <CardFooter className="text-muted-foreground text-xs">
-          {item.herdr
-            ? `Answer it in ${agentLabel(item.from)}'s terminal, in herdr: the Dashboard answers only a herdr session's pickers.`
-            : item.hosted
-              ? `Approving a ${item.kind} here is off for now, so it is refused after 10 minutes.`
-              : item.kind === "permission" || item.kind === "plan"
-                ? `Answer it in ${agentLabel(item.from)}'s terminal: approving a ${item.kind} here is off for now.`
-                : `This can only be answered in ${agentLabel(item.from)}'s terminal.`}
+          {readOnlyFooter(item, writes.send)}
         </CardFooter>
       )}
     </Card>

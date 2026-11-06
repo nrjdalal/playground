@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Spawns a factory session in herdr, the one way a factory session starts one
 # (the no-raw-spawn hook refuses the rest). A capacity gate refuses, failing
-# closed, unless three gates pass in order (a move runs the usage gate alone),
+# closed, unless four gates pass in order (a move runs the usage gate alone),
 # the first failure naming its gate and its reading, every pass and refusal
 # logged as one JSON line in ~/.playground/ops/capacity.jsonl, where the
 # load gate reads the starts of the last 5 minutes back, with each slots.peers folder's own log's. No count of live sessions holds a spawn, so
@@ -13,14 +13,18 @@ set -euo pipefail
 #      half its item's load units (small 1, medium 2, big 3: --size, else small
 #      for a reviewer or tester, else what `ops/run-slot.sh size <name>` reads),
 #      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
-#      a small worker keeping an eighth in its place for the reviewers and testers; a load over that
-#      line reads the CPU's busy cores (top -l 2 -n 0) too, and refuses only when they and the starts
-#      are over it as well, or when top cannot be read
+#      a small worker keeping an eighth in its place for the reviewers and testers; a load at or over
+#      that line refuses whatever the CPU's idle share, so the load stays under the cores, but for a
+#      --firefighting start while its trigger file stands (FF_TRIGGER), logged as readings.firefighting
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
 #   load5 under 30, pressure level 1 and swap-ins under 100/s (vm_stat -c 2 1)
-#   3. usage, the launching backend's own window: Claude reads usage.json
+#   Under Claude Code's sandbox the load comes from uptime, and a refused pressure level leaves the swap-ins to decide (scripts/README.md)
+#   3. slots, for a fresh worker start alone (a reviewer, tester, resume or move skips it, so work
+#      already admitted finishes): `ops/run-slot.sh room`, refusing while runs wait in its queue and no
+#      lane is free with the load units for a run, or when room gives no reading
+#   4. usage, the launching backend's own window: Claude reads usage.json
 #      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
 #      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
 #      its row reading it unread; a missing 5-hour window is an account with no 5-hour limit, read as none) and each other login's
@@ -30,6 +34,9 @@ set -euo pipefail
 #      check, since the other login's usage is not this machine's, but refuses a week a reading names at 100%; GLM reads zai-usage.json
 #      (the 5-hour window under 95% of its credits, with no week check, and no empty balance (its `balance`), valid only
 #      while the zai usage job's last beat is ok and within 3 cycles)
+#   The first dispatcher starts past every gate, so the owner always has one: the gates still read, a failure
+#   logs a skipped row naming its gate and reading (which the load gate counts as a start) and prints it, and the
+#   pass picks its login as for any start; every other manager start, an orchestrator's included, takes them all
 # It also refuses a name a live session holds, since Claude Code would start the
 # new one under a generated name. Every launch is in bypass mode, and drops
 # inscope's own CLAUDE_CONFIG_DIR where inscope exports one.
@@ -40,13 +47,14 @@ set -euo pipefail
 #                      a column right of a herdr pane id (w1:p2), its spawner's own being $HERDR_PANE_ID; a cmux surface:N is refused
 #   spawn.sh column    <manager> <pane> <brief>        a manager's column names it once: a lead (sessions.names' builder, ops or planner, an <id>-builder, -ops or -planner, or a name the roster kinds) reports to the first dispatcher, and the first dispatcher (sessions.names' dispatcher or an <id>-dispatcher) is briefed by the session running spawn.sh
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
-#   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher
+#   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
-#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and that the roster has not ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with and an --effort other than high; a live one is skipped, and one restore runs at a time
+#   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
 #   spawn.sh move      <name>                           takes the live cmux session holding <name> to herdr: every check and the usage gate run but the load and memory gates, since the copy it closes frees what the new one takes; only then it closes the session's cmux surface (its workspace when that was the last surface), waits up to 30s (PLAYGROUND_MOVE_WAIT seconds) for its process to exit, and resumes it in herdr by its session id. It takes --model, --effort, --account and --brief as a resume does, --backend for a session with no pin, and --runtime herdr alone; a session cmux holds no record of at its pid is left alone, and a session cannot move itself: its lead moves it
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" ("can move" for a move) and start or close nothing
+#   --firefighting     with any mode but restore or close, anywhere among its words: the start passes focus's refusal and the load gate (the memory gate still reads it) while a firefighting trigger file stands in the data folder (firefighting-stop.json or firefighting-headstart.json), and is refused while none does
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
@@ -71,6 +79,8 @@ REPO="$(cd -P "$(dirname "$0")/.." && pwd -P)"
 # The main checkout: git's common dir less .git, the same folder from a worktree as from the checkout itself.
 MAIN="$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && MAIN="$(cd -P "$(dirname "$MAIN")" && pwd -P)" || MAIN=$REPO
 ROSTER="$REPO/scripts/roster.ts"
+# pid $1 and its start, one `<pid> <lstart>` line words single-spaced, or nothing once it has gone: from ps, else from the kernel's process table, since Claude Code's sandbox refuses the setuid ps
+started() { echo $(LC_ALL=C TZ=UTC ps -o pid=,lstart= -p "$1" 2>/dev/null || python3 -I "$REPO/scripts/ops/ptable.py" started "$1"); }
 # launchd runs a login item (herdr's restore) on /usr/bin:/bin, where bun is not on PATH, so the roster write falls back to bun's own install folder.
 BUN=$(command -v bun || echo "$HOME/.bun/bin/bun")
 REGISTRY="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions"
@@ -83,8 +93,19 @@ if [ -n "${INSCOPE_CCD:-}" ] || { [ -r "$INSCOPE_HOOK" ] && grep -q -e INSCOPE_C
 fi
 # The data folder of the config folder the launch runs from, as dataDir() resolves it, and as a brief or a refusal names it.
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
+# The roster's manager kinds (kinds.ts' ROSTER_ROLE_OF_KIND), so a kind role_of_kind does not list runs as a lead: an orchestrator. A read that fails leaves the named kinds alone, so an orchestrator is refused rather than guessed.
+MANAGER_KINDS=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { ROSTER_ROLE_OF_KIND as r } from '$REPO/packages/config/src/kinds.ts'; console.log(Object.keys(r).filter((k) => r[k] === 'manager').join(' '))" 2>/dev/null) || MANAGER_KINDS=
+# The firefighting trigger file standing in the data folder, the first of the two that exists; exit 1 when neither does. Its content is not read.
+firefighting_trigger() {
+  local f
+  for f in "$DATA/firefighting-stop.json" "$DATA/firefighting-headstart.json"; do
+    [ -e "$f" ] && { echo "$f"; return 0; }
+  done
+  return 1
+}
 [[ $DATA == "$HOME"/* ]] && SHOWN="~${DATA#"$HOME"}" || SHOWN=$DATA
 SETTINGS="$DATA/factory-settings.json"
+HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
 PINS="$DATA/backends"
 RESUME_DIR="$DATA/resume"
 ROSTER_JSON="$DATA/roster.json"
@@ -155,13 +176,14 @@ kind_of_name() {
       ;;
   esac
 }
-# The PLAYGROUND_ROLE a kind runs under; nothing for a kind off the list.
+# The PLAYGROUND_ROLE a kind runs under: lead for any other manager kind (an orchestrator), nothing for a kind off the list.
 role_of_kind() {
   case "$1" in
     worker | researcher) echo worker ;;
     reviewer | tester | runner | probe) echo "$1" ;;
     builder | ops | optimizer | planner) echo lead ;;
     dispatcher) echo dispatcher ;;
+    *) case " $MANAGER_KINDS " in *" $1 "*) [ -z "$1" ] || echo lead ;; esac ;;
   esac
 }
 
@@ -184,10 +206,10 @@ second_dispatcher() { [ "${1%-2}" != "$1" ] && [ "$(session_kind "${1%-2}")" = d
 
 # The live sessions: a registry file whose pid is alive with the start time the file records, as the Dashboard reads them, but for a `claude -p` run (entrypoint sdk-cli), which holds no name. It prints a line, tab-separated pid, session id, folder and process start ("-" for a field the file lacks), for each live session named $1, the lowest pid first.
 live_holders() {
-  python3 - "$REGISTRY" "$1" <<'PY'
+  python3 - "$REGISTRY" "$1" "$REPO" <<'PY'
 import json, os, subprocess, sys
 
-folder, wanted = sys.argv[1:3]
+folder, wanted, repo = sys.argv[1:4]
 entries = {}
 # Claude Code makes its sessions folder with its first session, so a Mac that never ran one holds no live session.
 try:
@@ -205,19 +227,28 @@ for file in files:
         data = {}
     entries[int(stem)] = data if isinstance(data, dict) else {}
 me = os.getpid()
-listing = subprocess.run(
-    ["ps", "-o", "pid=,lstart=", "-p", ",".join(str(p) for p in [me, *entries])],
-    capture_output=True,
-    env=dict(os.environ, LC_ALL="C", TZ="UTC"),
-    text=True,
-).stdout
+pids = [me, *entries]
+# each pid's start from ps, else from the kernel's process table (ptable.py), since Claude Code's sandbox refuses the setuid ps
+try:
+    listing = subprocess.run(
+        ["ps", "-o", "pid=,lstart=", "-p", ",".join(str(p) for p in pids)],
+        capture_output=True,
+        env=dict(os.environ, LC_ALL="C", TZ="UTC"),
+        text=True,
+    ).stdout
+except OSError:
+    listing = ""
 starts = {}
 for line in listing.splitlines():
     parts = line.split(None, 1)
     if len(parts) == 2 and parts[0].isdigit():
         starts[int(parts[0])] = " ".join(parts[1].split())
 if me not in starts:
-    sys.exit("ps did not list this process")
+    sys.path.insert(0, os.path.join(repo, "scripts", "ops"))
+    import ptable
+    starts = {pid: start for pid in pids if (start := ptable.started(pid))}
+if me not in starts:
+    sys.exit("neither ps nor the kernel's process table listed this process")
 def field(value):
     return " ".join(value.split()) if isinstance(value, str) and value.strip() else "-"
 for pid, data in sorted(entries.items()):
@@ -228,21 +259,28 @@ for pid, data in sorted(entries.items()):
         print(pid, field(data.get("sessionId")), field(data.get("cwd")), starts[pid], sep="\t")
 PY
 }
-# The capacity gate: three gates in order (load, memory, usage; a move skips load and memory, since the copy it closes frees what the new one takes), the first failure naming its gate and its reading, every pass and refusal one JSON line in ~/.playground/ops/capacity.jsonl (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing ok, or the refusal for refuse() to print.
+# The capacity gate: four gates in order (load, memory, slots for a fresh worker start, usage; a move skips load and memory, since the copy it closes frees what the new one takes), the first failure naming its gate and its reading (a first dispatcher's failures each kept as a skip, the gates after it still read), every pass and refusal, and a first dispatcher's skipped start, one JSON line in ~/.playground/ops/capacity.jsonl (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing a past line for each skip and then ok, or the refusal for refuse() to print.
 # The login a launch runs on with no --account, from Claude Code's config, which the launch reads from ~ when it drops inscope's folder.
 own_config() { if [ -n "$UNSET" ]; then echo "$HOME/.claude.json"; else echo "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; fi; }
 gate_capacity() {
+  # run-slot's room, for the slots gate (the header's gate 3)
+  room=
+  if [ "$MODE" = worker ]; then
+    room=$(RUN_SLOT_OPS="$DATA/ops" bash "$REPO/scripts/ops/run-slot.sh" room 2>/dev/null) || room=
+    [ -n "$room" ] || room=unread
+  fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${FF_TRIGGER:-}" <<'PY'
 import datetime as dt
 import glob
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role = sys.argv[1:12]
+data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role, room, first, firefighting = sys.argv[1:15]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -251,7 +289,16 @@ readings = {}
 if move:
     readings["move"] = f"pid {move}"
 
+# The first dispatcher starts past a failing gate, so the owner always has one: the skip is kept and the gates after it still read, its login pick included.
+skips = []
+
+class Skip(Exception):
+    pass
+
 def refuse(gate, detail):
+    if first:
+        skips.append((gate, detail))
+        raise Skip
     row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "detail": detail, "gate": gate, "readings": readings, "verdict": "refused"}
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -275,6 +322,30 @@ def sysctl_int(name):
     try:
         return int(out.stdout.strip())
     except ValueError:
+        return None
+
+# whether Claude Code's sandbox refuses sysctl reading name, as it does every kern.memorystatus_* reading
+def sandbox_refuses(name):
+    return "not permitted" in subprocess.run(["sysctl", "-n", name], capture_output=True, text=True).stderr
+
+# (load1, load5) from sysctl, else from uptime, since Claude Code's sandbox refuses the sysctl command's name lookup; None when neither reads
+def loadavg():
+    words = subprocess.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True).stdout.strip(" {}\n").split()
+    if len(words) < 2:
+        out = subprocess.run(["uptime"], capture_output=True, text=True, env=dict(os.environ, LC_ALL="C")).stdout
+        words = out.rpartition("load average")[2].lstrip("s:").replace(",", " ").split()
+    try:
+        return float(words[0]), float(words[1])
+    except (IndexError, ValueError):
+        return None
+
+# the last second's swap-ins, from vm_stat's last row under a header naming each column, or None when it cannot be read
+def swapins():
+    try:
+        rows = [line.split() for line in subprocess.run(["vm_stat", "-c", "2", "1"], capture_output=True, text=True, timeout=10, check=True).stdout.splitlines()]
+        column = next(row for row in rows if "swapins" in row).index("swapins")
+        return int(rows[-1][column])
+    except (IndexError, OSError, StopIteration, subprocess.SubprocessError, ValueError):
         return None
 
 def load(name):
@@ -304,338 +375,382 @@ if move:
     readings["load"] = f"skipped (move of pid {move})"
     readings["memory"] = f"skipped (move of pid {move})"
 elif backend == "glm":
-    # a GLM session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second
-    fields = subprocess.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True).stdout.split()
     try:
-        readings["load5"] = float(fields[2])
-    except (IndexError, ValueError):
-        refuse("load", "it cannot read the load average (sysctl vm.loadavg)")
-    if readings["load5"] >= gates["glmLoad5Max"]:
-        refuse("load", f"load5 is {readings['load5']:.2f} (sysctl vm.loadavg), and a GLM session starts under {fmt(gates['glmLoad5Max'])}")
-    readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
-    if readings["pressure"] is None:
-        refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
-    if readings["pressure"] != 1:
-        refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), and a GLM session starts at 1 alone")
-    # vm_stat's last row is the last second's counts, under a header naming each column
-    try:
-        rows = [line.split() for line in subprocess.run(["vm_stat", "-c", "2", "1"], capture_output=True, text=True, timeout=10, check=True).stdout.splitlines()]
-        column = next(row for row in rows if "swapins" in row).index("swapins")
-        readings["swapins"] = int(rows[-1][column])
-    except (IndexError, OSError, StopIteration, subprocess.SubprocessError, ValueError):
-        refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1)")
-    if readings["swapins"] >= gates["glmSwapinsMax"]:
-        refuse("memory", f"swap-ins are {readings['swapins']}/s (vm_stat), and a GLM session starts under {fmt(gates['glmSwapinsMax'])}/s")
+        # a GLM session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second
+        loads = loadavg()
+        if loads is None:
+            refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
+        readings["load5"] = loads[1]
+        if readings["load5"] >= gates["glmLoad5Max"]:
+            refuse("load", f"load5 is {readings['load5']:.2f} (sysctl vm.loadavg), and a GLM session starts under {fmt(gates['glmLoad5Max'])}")
+        readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
+        if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
+            readings["memory"] = "pressure level refused by the sandbox, so the swap-ins alone decide"
+        elif readings["pressure"] is None:
+            refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
+        elif readings["pressure"] != 1:
+            refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), and a GLM session starts at 1 alone")
+        readings["swapins"] = swapins()
+        if readings["swapins"] is None:
+            refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1)")
+        if readings["swapins"] >= gates["glmSwapinsMax"]:
+            refuse("memory", f"swap-ins are {readings['swapins']}/s (vm_stat), and a GLM session starts under {fmt(gates['glmSwapinsMax'])}/s")
+    except Skip:
+        pass
 else:
-    # 1 load: max(load1, load5) plus the starts the log holds from the last gates.startsWindow seconds
-    fields = subprocess.run(["sysctl", "-n", "vm.loadavg"], capture_output=True, text=True).stdout.split()
     try:
-        load1, load5 = float(fields[1]), float(fields[2])
-    except (IndexError, ValueError):
-        refuse("load", "it cannot read the load average (sysctl vm.loadavg)")
-    cores = sysctl_int("hw.ncpu")
-    if cores is None:
-        refuse("load", "it cannot read the core count (sysctl hw.ncpu)")
-    readings["cores"] = cores
-    mult = 1.0
-    raw_mult = os.environ.get("PLAYGROUND_LOAD_MULT")
-    if raw_mult is not None:
-        try:
-            mult = float(raw_mult)
-        except ValueError:
-            mult = 0.0
-        if not (math.isfinite(mult) and mult > 0):
-            readings["load_mult"] = raw_mult
-            refuse("load", f"PLAYGROUND_LOAD_MULT is {raw_mult}; set a number above 0, or unset it for the default 1.0")
-    readings["load5"] = max(load1, load5)
-    readings["size"] = size
-    readings["units"] = units
-    readings["load_mult"] = mult
-    cap = cores * mult
-    starts = 0
-    # this factory's starts, then each peer's (slots.peers) from its own log, read only, since the load average lags a start on either side
-    for path in [log_path] + [os.path.join(p, "capacity.jsonl") for p in gates["peers"] if isinstance(p, str)]:
-        try:
-            with open(path) as f:
-                for line in f:
-                    try:
-                        row = json.loads(line)
-                    except ValueError:
-                        continue
-                    if not isinstance(row, dict) or row.get("verdict") != "pass":
-                        continue
-                    try:
-                        if (now - from_iso(row["at"])).total_seconds() <= gates["startsWindow"]:
-                            weight = (row.get("readings") or {}).get("units") if isinstance(row.get("readings"), dict) else None
-                            starts += weight / 2 if weight in (1, 2, 3) else 1
-                    except (KeyError, TypeError, ValueError):
-                        continue
-        except OSError:
-            pass
-    readings["starts"] = starts
-    # the reserves nest: a start that is not small keeps gates.smallReserve for small items, so a big plan never blocks the small ones, and a small worker keeps gates.reviewReserve for the checkers, which start small
-    share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
-    keep = cap * share
-    readings["reserve"] = keep
-    # the load average counts the sessions' many short-lived processes (load 24 on 15 cores at 55% idle, 22 Oct), so a load over the line reads the CPU's busy cores too, against the same line held at the cores' count, and refuses only when both are over
-    if readings["load5"] + starts >= cap - keep:
-        idle = None
-        try:
-            out = subprocess.run(["top", "-l", "2", "-n", "0"], capture_output=True, text=True, timeout=10).stdout
-            idle = float([line for line in out.splitlines() if line.startswith("CPU usage:")][-1].split(",")[-1].split("%")[0])
-        except (IndexError, OSError, subprocess.TimeoutExpired, ValueError):
-            pass
-        readings["cpu_idle"] = idle
-        cpu_cap = min(cap, cores)
-        cpu_line = cpu_cap - cpu_cap * share
-        if idle is not None:
-            readings["cpu_busy"] = round(cores * (100 - idle) / 100, 2)
-        if idle is None or readings["cpu_busy"] + starts >= cpu_line:
+        # 1 load: max(load1, load5) plus the starts the log holds from the last gates.startsWindow seconds
+        loads = loadavg()
+        if loads is None:
+            refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
+        load1, load5 = loads
+        cores = sysctl_int("hw.ncpu") or os.cpu_count()
+        if cores is None:
+            refuse("load", "it cannot read the core count (sysctl hw.ncpu)")
+        readings["cores"] = cores
+        mult = 1.0
+        raw_mult = os.environ.get("PLAYGROUND_LOAD_MULT")
+        if raw_mult is not None:
+            try:
+                mult = float(raw_mult)
+            except ValueError:
+                mult = 0.0
+            if not (math.isfinite(mult) and mult > 0):
+                readings["load_mult"] = raw_mult
+                refuse("load", f"PLAYGROUND_LOAD_MULT is {raw_mult}; set a number above 0, or unset it for the default 1.0")
+        readings["load5"] = max(load1, load5)
+        readings["size"] = size
+        readings["units"] = units
+        readings["load_mult"] = mult
+        cap = cores * mult
+        starts = 0
+        # this factory's starts (a pass row, or a first dispatcher's skipped one), then each peer's (slots.peers) from its own log, read only, since the load average lags a start on either side
+        for path in [log_path] + [os.path.join(p, "capacity.jsonl") for p in gates["peers"] if isinstance(p, str)]:
+            try:
+                with open(path) as f:
+                    for line in f:
+                        try:
+                            row = json.loads(line)
+                        except ValueError:
+                            continue
+                        if not isinstance(row, dict) or row.get("verdict") not in ("pass", "skipped"):
+                            continue
+                        try:
+                            if (now - from_iso(row["at"])).total_seconds() <= gates["startsWindow"]:
+                                weight = (row.get("readings") or {}).get("units") if isinstance(row.get("readings"), dict) else None
+                                starts += weight / 2 if weight in (1, 2, 3) else 1
+                        except (KeyError, TypeError, ValueError):
+                            continue
+            except OSError:
+                pass
+        readings["starts"] = starts
+        # the reserves nest: a start that is not small keeps gates.smallReserve for small items, so a big plan never blocks the small ones, and a small worker keeps gates.reviewReserve for the checkers, which start small
+        share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
+        keep = cap * share
+        readings["reserve"] = keep
+        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --firefighting start passes while its trigger file stands (FF_TRIGGER), since firefighting comes first, and the memory gate still reads it
+        if firefighting:
+            readings["firefighting"] = firefighting
+        elif readings["load5"] + starts >= cap - keep:
             at = (
                 f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
                 if mult != 1
                 else f"the {cores} cores"
             )
             at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
-            cpu = (
-                "it cannot read the CPU use (top), so the load alone decides"
-                if idle is None
-                else f"the CPU is {100 - idle:g}% busy (top), {readings['cpu_busy']:g} of the {cores} cores, which with the starts is at or over {cpu_line:g} too"
-            )
-            refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}; {cpu}. Wait for it to fall, or close a session that is done, and run it again.")
-
-    # 2 memory
-    readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
-    if readings["pressure"] is None:
-        refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
-    if readings["pressure"] not in (1, 2):
-        refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), 1 or 2 passes")
-    readings["free"] = sysctl_int("kern.memorystatus_level")
-    if readings["free"] is None:
-        refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level)")
-    if readings["free"] < gates["memoryFreeMin"]:
-        refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
-
-# 3 usage: the launching backend's own window
-readings["backend"] = backend or "claude"
-if account:
-    # a week at 100% leaves no room on any login, so a reading that names the account (usage.json, stored-login.json or a usage-<name>.json) refuses it before its week resets.
-    names = ["usage.json", "ops/usage/stored-login.json"] + [os.path.basename(p) for p in sorted(glob.glob(os.path.join(data_dir, "usage-*.json")))]
-    for name in names:
-        data, detail = load(name)
-        if detail or not isinstance(data, dict) or str(data.get("account") or "").lower() != account.lower():
-            continue
-        try:
-            week = data["rate_limits"]["seven_day"]
-            week_pct, resets = week["used_percentage"], from_iso(week["resets_at"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if isinstance(week_pct, (int, float)) and not isinstance(week_pct, bool) and week_pct >= 100 and resets > now:
-            readings["week"] = week_pct
-            refuse("usage", f"--account {account}: its week reads {fmt(week_pct)}% ({name} seven_day.used_percentage) until {resets:%a %H:%M} UTC. Name another account, or, for a session that may run on this machine's login, none, so it starts on the login with the most room")
-    readings["usage"] = f"skipped (--account {account}, whose usage this machine does not read)"
-elif backend == "glm":
-    beat = read("ops/ops-zai-usage.json")
-    if not isinstance(beat, dict) or beat.get("lastResult") != "ok":
-        refuse("usage", f"the zai usage job's last beat is not ok ({beat.get('lastResult') if isinstance(beat, dict) else 'unread'}, ops-zai-usage.json)")
-    try:
-        age = (now - from_iso(beat["lastBeatAt"])).total_seconds()
-        cycle = beat["cycleSeconds"]
-        if isinstance(cycle, bool) or not isinstance(cycle, (int, float)) or cycle <= 0:
-            raise ValueError
-        cycles = math.ceil(age / cycle)
-    except (KeyError, TypeError, ValueError):
-        refuse("usage", "it cannot read ops-zai-usage.json (does not read)")
-    if cycles > 3:
-        refuse("usage", f"the zai usage job's last beat is {cycles} cycles old (ops-zai-usage.json), 3 is the limit")
-    zai = read("zai-usage.json")
-    try:
-        five = zai["windows"]["fiveHour"]
-        five_pct = pct(five["used"], five["cap"])
-    except (KeyError, TypeError):
-        five_pct = None
-    balance = zai.get("balance") if isinstance(zai, dict) else None
-    if isinstance(balance, dict) and balance.get("empty") is True:
-        readings["balance"] = "empty"
-        refuse("usage", f"the GLM balance is empty (zai-usage.json balance, a GLM session's 429 [1113] at {balance.get('seenAt', 'an unread time')}). Top it up at Z.ai: the gate lets GLM starts try again an hour after that failure.")
-    if five_pct is None:
-        refuse("usage", "zai-usage.json holds no five-hour window")
-    readings["fiveHour"] = five_pct
-    if five_pct >= 95:
-        refuse("usage", f"the 5-hour window is at {fmt(five_pct)}% of its credits (zai-usage.json windows.fiveHour), 95 is its cap. Wait for the window to reset, or close a session, and run it again.")
-    try:
-        week = zai["windows"]["week"]
-        week_pct = pct(week["used"], week["cap"])
-    except (KeyError, TypeError):
-        week_pct = None
-    readings["week"] = week_pct
-else:
-    # The pace override (#i509): while ~/.playground/usage-pace-off-until holds a future ISO 8601 time with its zone,
-    # the week-pace check is off and a 98% sanity backup holds instead; anything else leaves the pace on (fail closed).
-    pace_off = None
-    try:
-        with open(os.path.join(data_dir, "usage-pace-off-until")) as f:
-            until = dt.datetime.fromisoformat(f.read().strip().replace("Z", "+00:00"))
-        if until.tzinfo is not None and until > now:
-            pace_off = until.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-    except (OSError, ValueError):
+            refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}. Wait for it to fall, or close a session that is done, and run it again.")
+    except Skip:
         pass
-    if pace_off:
-        readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
 
-    # One login's reading: what it read, and why it is over the gate (None when it passes).
-    def judge(name, usage, limit, writer):
-        seen = {}
-        try:
-            written = from_iso(usage["writtenAt"])
-        except (KeyError, TypeError, ValueError):
-            return seen, f"it cannot read {name} (does not read)"
-        age = int((now - written).total_seconds() // 60)
-        if age >= limit:
-            return seen, f"{name} was written {age} minutes ago (writtenAt), {limit} is its limit. {writer}"
-        rate = usage.get("rate_limits")
-        if not isinstance(rate, dict):
-            return seen, f"{name} holds no rate_limits (does not read)"
-        try:
-            week = rate["seven_day"]
-            resets = from_iso(week["resets_at"])
-            week_pct = week["used_percentage"]
-            if isinstance(week_pct, bool) or not isinstance(week_pct, (int, float)):
-                raise TypeError
-        except (KeyError, TypeError, ValueError):
-            return seen, f"{name} holds no week share (seven_day.used_percentage with seven_day.resets_at)"
-        five = rate.get("five_hour")
-        five_hour = five.get("used_percentage") if isinstance(five, dict) else None
-        if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
-            five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, so none, never 0%
-        seen["fiveHour"] = "none" if five_hour is None else five_hour
-        if five_hour is not None and five_hour >= 90:
-            try:
-                reset = f"{from_iso(five['resets_at']):%H:%M} UTC"
-            except (KeyError, TypeError, ValueError):
-                reset = "later"
-            return seen, f"the 5-hour window is at {fmt(five_hour)}% ({name} five_hour.used_percentage), 90 is its cap. It resets {reset}."
-        seen["week"] = week_pct
-        if pace_off:
-            if week_pct >= 98:
-                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup while the pace check is off until {pace_off} (usage-pace-off-until)"
+    try:
+        # 2 memory; where Claude Code's sandbox refuses the pressure level and free share, the swap-ins stand in, under GLM's line
+        readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
+        if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
+            readings["memory"] = "pressure level and free share refused by the sandbox"
+            readings["swapins"] = swapins()
+            if readings["swapins"] is None:
+                refuse("memory", "the sandbox refuses the pressure level, and it cannot read the swap-ins (vm_stat -c 2 1)")
+            if readings["swapins"] >= gates["glmSwapinsMax"]:
+                refuse("memory", f"the sandbox refuses the pressure level, and swap-ins are {readings['swapins']}/s (vm_stat), {fmt(gates['glmSwapinsMax'])}/s is the line. Close a session or wait for the pressure to pass, and run it again.")
         else:
-            days_in = 7 - (resets - now).total_seconds() / 86400
-            pace = max(days_in, 1) * 100 / 7  # never below one day's share, so a week that has just reset is not refused for its first points
-            if week_pct > pace:
-                return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), past 14.3 points a day ({days_in:.1f} days in, {pace:.1f} is its pace)"
-        return seen, None
+            if readings["pressure"] is None:
+                refuse("memory", "it cannot read the pressure level (sysctl kern.memorystatus_vm_pressure_level)")
+            if readings["pressure"] not in (1, 2):
+                refuse("memory", f"pressure level is {readings['pressure']} (sysctl kern.memorystatus_vm_pressure_level), 1 or 2 passes")
+            readings["free"] = sysctl_int("kern.memorystatus_level")
+            if readings["free"] is None:
+                refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level)")
+            if readings["free"] < gates["memoryFreeMin"]:
+                refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
+    except Skip:
+        pass
 
-    # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
-    # which ops-usage writes for the stored login and account-watch.py <email>, run by hand, for another; another login's week moves slowly, so its reading holds for an hour.
-    usage, detail = load("usage.json")
-    own = usage.get("account") if isinstance(usage, dict) else None
-    writer = "The ops-usage job writes it every 5 minutes; wait for its next run and try again."
-    # a usage.json never written, as on a fresh install before ops-usage first runs, passes: the gate paces spending, and Anthropic's own limits still bind the login. One that exists is judged.
-    if not os.path.exists(os.path.join(data_dir, "usage.json")):
-        seen, detail = {"usage": "unread (usage.json not yet written)"}, None
-    else:
-        seen, detail = judge("usage.json", usage, 15, writer) if not detail else ({}, detail)
-    logins = [(own or "this machine's login", "usage.json", None, seen, detail)]
-    # a bare start runs on the config's own login; while usage.json reads another account (the factory's), that login is judged by ops-usage's stored-login.json, failing when the file is missing, stale or names another account, and the factory becomes a login --account reaches.
-    try:
-        with open(own_config) as f:
-            runs_on = (json.load(f).get("oauthAccount") or {}).get("emailAddress")
-    except Exception:
-        runs_on = None
-    if isinstance(runs_on, str) and runs_on and own and runs_on.lower() != own.lower():
-        name = "ops/usage/stored-login.json"
-        stored, stored_detail = load(name)
-        named = stored.get("account") if isinstance(stored, dict) else None
-        if not stored_detail and (not isinstance(named, str) or named.lower() != runs_on.lower()):
-            stored_detail = f"{name} reads {named or 'no account'}, not {runs_on}, the login a start with no --account runs on"
-        stored_seen, stored_detail = judge(name, stored, 15, writer) if not stored_detail else ({}, stored_detail)
-        logins = [(runs_on, "stored-login.json", None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
-    known = {login[0].lower() for login in logins}
-    for path in sorted(glob.glob(os.path.join(data_dir, "usage-*.json"))):
-        name = os.path.basename(path)
+# 3 slots (the header's gate 3)
+try:
+    if room:
         try:
-            with open(path) as f:
-                other = json.load(f)
-        except (OSError, ValueError):
-            other = None
-        email = other.get("account") if isinstance(other, dict) else None
-        if not isinstance(email, str) or not email or email.lower() in known:
-            continue
-        seen, detail = judge(name, other, 60, "ops-usage writes the stored login's every 5 minutes, and account-watch.py <email>, run by hand, another account's.")
-        logins.append((email, name, email, seen, detail))
-        # a refused file leaves the account open to its login-flip reading below
-        if detail is None:
-            known.add(email.lower())
-    # each account login-flip probes, from its reading in login-flip.json's seen, so the split's accounts reach the pick with no usage-<name>.json of their own
-    try:
-        with open(os.path.join(data_dir, "ops", "usage", "login-flip.json")) as f:
-            flip_seen = json.load(f).get("seen") or {}
-    except Exception:
-        flip_seen = {}
-    for email, s in sorted(flip_seen.items()) if isinstance(flip_seen, dict) else []:
-        if not isinstance(email, str) or "@" not in email or email.lower() in known or not isinstance(s, dict):
-            continue
-        rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
-        if isinstance(s.get("five"), (int, float)):
-            rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
-        name = "login-flip.json seen"
-        seen, detail = judge(name, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, "login-flip.py probes it each ops tick.")
-        logins.append((email, name, email, seen, detail))
-        if detail is None:
-            known.add(email.lower())
-    passing = [login for login in logins if login[4] is None]
-    if not passing:
-        readings.update(logins[0][3])
-        if len(logins) == 1:
-            refuse("usage", logins[0][4])
-        readings["logins"] = {f"{email} ({name})": detail for email, name, _, _, detail in logins}
-        refuse("usage", "every login is over it: " + "; ".join(f"{email} ({name}): {detail}" for email, name, _, _, detail in logins))
-    # login-flip.py's split, under 30 minutes old (two of the ops tick's 15-minute beats), picks among the passing logins it shares by smooth weighted round robin over split-picks.json (SESSIONS.md, Spawn), else the lowest week
-    flip_dir = os.path.join(data_dir, "ops", "usage")
-    try:
-        with open(os.path.join(flip_dir, "login-flip.json")) as f:
-            split = json.load(f)["split"]
-        shares = {a.lower(): v for a, v in split["shares"].items()} if now.timestamp() - split["at"] < 1800 else {}
-    except Exception:
-        shares = {}
-    shared = {login[0]: shares[login[0].lower()] for login in passing if isinstance(shares.get(login[0].lower()), (int, float)) and shares[login[0].lower()] > 0}
-    if shared:
-        picks_path = os.path.join(flip_dir, "split-picks.json")
-        try:
-            with open(picks_path) as f:
-                credit = {a: float(c) for a, c in json.load(f).items() if a in shared}
-        except Exception:
-            credit = {}
-        for a, share in shared.items():
-            credit[a] = credit.get(a, 0) + share
-        pick = max(shared, key=lambda a: credit[a])
-        credit[pick] -= sum(shared.values())
-        if not check:
+            lanes, held, free, waiters = (int(n) for n in room.split())
+        except ValueError:
+            refuse("slots", "it cannot read run-slot's lanes and queue (run-slot.sh room)")
+        readings.update(lanes=lanes, lanes_free=free, lanes_held=held, waiters=waiters)
+        if free == 0 and waiters > 0:
+            short = "run-slot has no lane open" if lanes == 0 else f"run-slot's {lanes} lanes are all held" if held >= lanes else f"{held} of run-slot's {lanes} lanes are held and the rest lack the load units for a run"
+            refuse("slots", f"{short}, and {waiters} {'run waits' if waiters == 1 else 'runs wait'} in its queue (run-slot.sh room). Wait for the queue to drain, or close a worker that is done, and run it again.")
+except Skip:
+    pass
+
+# 4 usage: the launching backend's own window
+try:
+    readings["backend"] = backend or "claude"
+    if account:
+        # a week at 100% leaves no room on any login, so a reading that names the account (usage.json, stored-login.json or a usage-<name>.json) refuses it before its week resets.
+        names = ["usage.json", "ops/usage/stored-login.json"] + [os.path.basename(p) for p in sorted(glob.glob(os.path.join(data_dir, "usage-*.json")))]
+        for name in names:
+            data, detail = load(name)
+            if detail or not isinstance(data, dict) or str(data.get("account") or "").lower() != account.lower():
+                continue
             try:
-                with open(f"{picks_path}.{os.getpid()}", "w") as f:
-                    json.dump(credit, f)
-                os.replace(f"{picks_path}.{os.getpid()}", picks_path)
-            except OSError:
-                pass
-        chosen = next(login for login in passing if login[0] == pick)
-        readings["share"] = shared[pick]
+                week = data["rate_limits"]["seven_day"]
+                week_pct, resets = week["used_percentage"], from_iso(week["resets_at"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if isinstance(week_pct, (int, float)) and not isinstance(week_pct, bool) and week_pct >= 100 and resets > now:
+                readings["week"] = week_pct
+                refuse("usage", f"--account {account}: its week reads {fmt(week_pct)}% ({name} seven_day.used_percentage) until {resets:%a %H:%M} UTC. Name another account, or, for a session that may run on this machine's login, none, so it starts on the login with the most room")
+        # usage.json's accounts map holds every account's week as login-flip reads it, a week past its weekReset read as 0, so a full one refuses too, naming the account with the most room as most_room() in ops/unstick/run.py picks it: the lowest week under 100.
+        own_usage, own_detail = load("usage.json")
+        accounts = own_usage.get("accounts") if not own_detail and isinstance(own_usage, dict) else None
+        weeks = {}
+        for acct, entry in accounts.items() if isinstance(accounts, dict) else []:
+            acct_week = entry.get("week") if isinstance(entry, dict) else None
+            if not isinstance(acct_week, (int, float)) or isinstance(acct_week, bool):
+                continue
+            try:
+                acct_reset = from_iso(entry.get("weekReset"))
+            except (TypeError, ValueError):
+                acct_reset = None
+            weeks[str(acct).lower()] = (str(acct), 0 if acct_reset and acct_reset <= now else acct_week, acct_reset)
+        if account.lower() in weeks:
+            _, week_pct, resets = weeks[account.lower()]
+            if week_pct >= 100 and resets:
+                readings["week"] = week_pct
+                roomiest = min(((acct, week) for key, (acct, week, _) in weeks.items() if key != account.lower() and week < 100), key=lambda pair: pair[1], default=None)
+                hint = f"Name {roomiest[0]}, the account with the most room (its week reads {fmt(roomiest[1])}%), or, for a session that may run on this machine's login, none" if roomiest else "No account in usage.json's accounts has room; wait for a week to reset"
+                refuse("usage", f"--account {account}: its week reads {fmt(week_pct)}% (usage.json accounts) until {resets:%a %H:%M} UTC. {hint}")
+        readings["usage"] = f"skipped (--account {account}, whose usage this machine does not read)"
+    elif backend == "glm":
+        beat = read("ops/ops-zai-usage.json")
+        if not isinstance(beat, dict) or beat.get("lastResult") != "ok":
+            refuse("usage", f"the zai usage job's last beat is not ok ({beat.get('lastResult') if isinstance(beat, dict) else 'unread'}, ops-zai-usage.json)")
+        try:
+            age = (now - from_iso(beat["lastBeatAt"])).total_seconds()
+            cycle = beat["cycleSeconds"]
+            if isinstance(cycle, bool) or not isinstance(cycle, (int, float)) or cycle <= 0:
+                raise ValueError
+            cycles = math.ceil(age / cycle)
+        except (KeyError, TypeError, ValueError):
+            refuse("usage", "it cannot read ops-zai-usage.json (does not read)")
+        if cycles > 3:
+            refuse("usage", f"the zai usage job's last beat is {cycles} cycles old (ops-zai-usage.json), 3 is the limit")
+        zai = read("zai-usage.json")
+        try:
+            five = zai["windows"]["fiveHour"]
+            five_pct = pct(five["used"], five["cap"])
+        except (KeyError, TypeError):
+            five_pct = None
+        balance = zai.get("balance") if isinstance(zai, dict) else None
+        if isinstance(balance, dict) and balance.get("empty") is True:
+            readings["balance"] = "empty"
+            refuse("usage", f"the GLM balance is empty (zai-usage.json balance, a GLM session's 429 [1113] at {balance.get('seenAt', 'an unread time')}). Top it up at Z.ai: the gate lets GLM starts try again an hour after that failure.")
+        if five_pct is None:
+            refuse("usage", "zai-usage.json holds no five-hour window")
+        readings["fiveHour"] = five_pct
+        if five_pct >= 95:
+            refuse("usage", f"the 5-hour window is at {fmt(five_pct)}% of its credits (zai-usage.json windows.fiveHour), 95 is its cap. Wait for the window to reset, or close a session, and run it again.")
+        try:
+            week = zai["windows"]["week"]
+            week_pct = pct(week["used"], week["cap"])
+        except (KeyError, TypeError):
+            week_pct = None
+        readings["week"] = week_pct
     else:
-        chosen = min(passing, key=lambda login: login[3].get("week", 0))
-    readings.update(chosen[3])
-    if len(logins) > 1:
-        readings["logins"] = {f"{email} ({name})": detail or (f"week {fmt(seen['week'])}%" if "week" in seen else seen["usage"]) for email, name, _, seen, detail in logins}
-    if chosen[2]:
-        readings["account"] = chosen[2]
+        # The pace override (#i509): while ~/.playground/usage-pace-off-until holds a future ISO 8601 time with its zone,
+        # the week-pace check is off and a 98% sanity backup holds instead; anything else leaves the pace on (fail closed).
+        pace_off = None
+        try:
+            with open(os.path.join(data_dir, "usage-pace-off-until")) as f:
+                until = dt.datetime.fromisoformat(f.read().strip().replace("Z", "+00:00"))
+            if until.tzinfo is not None and until > now:
+                pace_off = until.astimezone(dt.timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+        except (OSError, ValueError):
+            pass
+        if pace_off:
+            readings["pace"] = f"skipped until {pace_off} (usage-pace-off-until)"
+
+        # One login's reading: what it read, and why it is over the gate (None when it passes).
+        def judge(name, usage, limit, writer):
+            seen = {}
+            try:
+                written = from_iso(usage["writtenAt"])
+            except (KeyError, TypeError, ValueError):
+                return seen, f"it cannot read {name} (does not read)"
+            age = int((now - written).total_seconds() // 60)
+            if age >= limit:
+                return seen, f"{name} was written {age} minutes ago (writtenAt), {limit} is its limit. {writer}"
+            rate = usage.get("rate_limits")
+            if not isinstance(rate, dict):
+                return seen, f"{name} holds no rate_limits (does not read)"
+            try:
+                week = rate["seven_day"]
+                resets = from_iso(week["resets_at"])
+                week_pct = week["used_percentage"]
+                if isinstance(week_pct, bool) or not isinstance(week_pct, (int, float)):
+                    raise TypeError
+            except (KeyError, TypeError, ValueError):
+                return seen, f"{name} holds no week share (seven_day.used_percentage with seven_day.resets_at)"
+            five = rate.get("five_hour")
+            five_hour = five.get("used_percentage") if isinstance(five, dict) else None
+            if isinstance(five_hour, bool) or not isinstance(five_hour, (int, float)):
+                five_hour = None  # no 5-hour window: an account Anthropic gives no 5-hour limit, so none, never 0%
+            seen["fiveHour"] = "none" if five_hour is None else five_hour
+            if five_hour is not None and five_hour >= 90:
+                try:
+                    reset = f"{from_iso(five['resets_at']):%H:%M} UTC"
+                except (KeyError, TypeError, ValueError):
+                    reset = "later"
+                return seen, f"the 5-hour window is at {fmt(five_hour)}% ({name} five_hour.used_percentage), 90 is its cap. It resets {reset}."
+            seen["week"] = week_pct
+            if pace_off:
+                if week_pct >= 98:
+                    return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), and 98% is the sanity backup while the pace check is off until {pace_off} (usage-pace-off-until)"
+            else:
+                days_in = 7 - (resets - now).total_seconds() / 86400
+                pace = max(days_in, 1) * 100 / 7  # never below one day's share, so a week that has just reset is not refused for its first points
+                if week_pct > pace:
+                    return seen, f"the week is at {fmt(week_pct)}% ({name} seven_day.used_percentage), past 14.3 points a day ({days_in:.1f} days in, {pace:.1f} is its pace)"
+            return seen, None
+
+        # this machine's own login (usage.json, which ops-usage writes every 5 minutes) and each other login with a usage-<name>.json,
+        # which ops-usage writes for the stored login and account-watch.py <email>, run by hand, for another; another login's week moves slowly, so its reading holds for an hour.
+        usage, detail = load("usage.json")
+        own = usage.get("account") if isinstance(usage, dict) else None
+        writer = "The ops-usage job writes it every 5 minutes; wait for its next run and try again."
+        # a usage.json never written, as on a fresh install before ops-usage first runs, passes: the gate paces spending, and Anthropic's own limits still bind the login. One that exists is judged.
+        if not os.path.exists(os.path.join(data_dir, "usage.json")):
+            seen, detail = {"usage": "unread (usage.json not yet written)"}, None
+        else:
+            seen, detail = judge("usage.json", usage, 15, writer) if not detail else ({}, detail)
+        logins = [(own or "this machine's login", "usage.json", None, seen, detail)]
+        # a bare start runs on the config's own login; while usage.json reads another account (the factory's), that login is judged by ops-usage's stored-login.json, failing when the file is missing, stale or names another account, and the factory becomes a login --account reaches.
+        try:
+            with open(own_config) as f:
+                runs_on = (json.load(f).get("oauthAccount") or {}).get("emailAddress")
+        except Exception:
+            runs_on = None
+        if isinstance(runs_on, str) and runs_on and own and runs_on.lower() != own.lower():
+            name = "ops/usage/stored-login.json"
+            stored, stored_detail = load(name)
+            named = stored.get("account") if isinstance(stored, dict) else None
+            if not stored_detail and (not isinstance(named, str) or named.lower() != runs_on.lower()):
+                stored_detail = f"{name} reads {named or 'no account'}, not {runs_on}, the login a start with no --account runs on"
+            stored_seen, stored_detail = judge(name, stored, 15, writer) if not stored_detail else ({}, stored_detail)
+            logins = [(runs_on, "stored-login.json", None, stored_seen, stored_detail), (own, "usage.json", own, seen, detail)]
+        known = {login[0].lower() for login in logins}
+        for path in sorted(glob.glob(os.path.join(data_dir, "usage-*.json"))):
+            name = os.path.basename(path)
+            try:
+                with open(path) as f:
+                    other = json.load(f)
+            except (OSError, ValueError):
+                other = None
+            email = other.get("account") if isinstance(other, dict) else None
+            if not isinstance(email, str) or not email or email.lower() in known:
+                continue
+            seen, detail = judge(name, other, 60, "ops-usage writes the stored login's every 5 minutes, and account-watch.py <email>, run by hand, another account's.")
+            logins.append((email, name, email, seen, detail))
+            # a refused file leaves the account open to its login-flip reading below
+            if detail is None:
+                known.add(email.lower())
+        # each account login-flip probes, from its reading in login-flip.json's seen, so the split's accounts reach the pick with no usage-<name>.json of their own
+        try:
+            with open(os.path.join(data_dir, "ops", "usage", "login-flip.json")) as f:
+                flip_seen = json.load(f).get("seen") or {}
+        except Exception:
+            flip_seen = {}
+        for email, s in sorted(flip_seen.items()) if isinstance(flip_seen, dict) else []:
+            if not isinstance(email, str) or "@" not in email or email.lower() in known or not isinstance(s, dict):
+                continue
+            rate = {"seven_day": {"used_percentage": s.get("week"), "resets_at": s.get("weekReset")}}
+            if isinstance(s.get("five"), (int, float)):
+                rate["five_hour"] = {"used_percentage": s["five"], "resets_at": s.get("fiveReset")}
+            name = "login-flip.json seen"
+            seen, detail = judge(name, {"rate_limits": rate, "writtenAt": s.get("at")}, 60, "login-flip.py probes it each ops tick.")
+            logins.append((email, name, email, seen, detail))
+            if detail is None:
+                known.add(email.lower())
+        passing = [login for login in logins if login[4] is None]
+        if not passing:
+            readings.update(logins[0][3])
+            if len(logins) == 1:
+                refuse("usage", logins[0][4])
+            readings["logins"] = {f"{email} ({name})": detail for email, name, _, _, detail in logins}
+            refuse("usage", "every login is over it: " + "; ".join(f"{email} ({name}): {detail}" for email, name, _, _, detail in logins))
+        # login-flip.py's split, under 30 minutes old (two of the ops tick's 15-minute beats), picks among the passing logins it shares by smooth weighted round robin over split-picks.json (SESSIONS.md, Spawn), else the lowest week
+        flip_dir = os.path.join(data_dir, "ops", "usage")
+        try:
+            with open(os.path.join(flip_dir, "login-flip.json")) as f:
+                split = json.load(f)["split"]
+            shares = {a.lower(): v for a, v in split["shares"].items()} if now.timestamp() - split["at"] < 1800 else {}
+        except Exception:
+            shares = {}
+        shared = {login[0]: shares[login[0].lower()] for login in passing if isinstance(shares.get(login[0].lower()), (int, float)) and shares[login[0].lower()] > 0}
+        if shared:
+            picks_path = os.path.join(flip_dir, "split-picks.json")
+            try:
+                with open(picks_path) as f:
+                    credit = {a: float(c) for a, c in json.load(f).items() if a in shared}
+            except Exception:
+                credit = {}
+            for a, share in shared.items():
+                credit[a] = credit.get(a, 0) + share
+            pick = max(shared, key=lambda a: credit[a])
+            credit[pick] -= sum(shared.values())
+            if not check:
+                try:
+                    with open(f"{picks_path}.{os.getpid()}", "w") as f:
+                        json.dump(credit, f)
+                    os.replace(f"{picks_path}.{os.getpid()}", picks_path)
+                except OSError:
+                    pass
+            chosen = next(login for login in passing if login[0] == pick)
+            readings["share"] = shared[pick]
+        else:
+            chosen = min(passing, key=lambda login: login[3].get("week", 0))
+        readings.update(chosen[3])
+        if len(logins) > 1:
+            readings["logins"] = {f"{email} ({name})": detail or (f"week {fmt(seen['week'])}%" if "week" in seen else seen["usage"]) for email, name, _, seen, detail in logins}
+        if chosen[2]:
+            readings["account"] = chosen[2]
+except Skip:
+    pass
 
 row = {"at": now.isoformat(timespec="seconds").replace("+00:00", "Z"), "gate": None, "readings": readings, "verdict": "check" if check else "pass"}
+if skips:
+    row.update(detail="; ".join(d for _, d in skips), gate=", ".join(g for g, _ in skips), verdict="check" if check else "skipped")
 try:
     with open(log_path, "a") as f:
         f.write(json.dumps(row, sort_keys=True) + "\n")
 except OSError:
     pass
+# each skip's words without the refusal's advice to run it again, since this start goes ahead; the pattern stays outside the f-string, where macOS's own python3 (3.9, on launchd's PATH) refuses a backslash
+advice = re.compile(r"\. Wait for|\. Close a session|; wait for its next run")
+for gate, detail in skips:
+    words = advice.split(detail)[0]
+    print(f"past the first dispatcher starts past the {gate} gate, which would hold another start: {words}")
 why = f"next in the account split ({fmt(readings['share'] * 100)}% of new sessions)" if "share" in readings else "the login with the most room this week"
-if readings.get("account"):
+if any(gate == "usage" for gate, _ in skips):
+    print("ok")
+elif readings.get("account"):
     print(f"ok {readings['account']} no --account, so it starts on {readings['account']}, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
 elif "logins" in readings:
     print(f"ok - no --account, so it stays on {chosen[0]}, {why}: its week is at {fmt(readings['week'])}% ({chosen[1]})")
@@ -643,6 +758,12 @@ else:
     print("ok")
 PY
   ) || refuse "it cannot read the machine's readings"
+  # A first dispatcher's skips come first, one line each, before the verdict's own.
+  while [[ $verdict == "past "*$'\n'* ]]; do
+    line=${verdict%%$'\n'*}
+    echo "spawn.sh: ${line#past }"
+    verdict=${verdict#*$'\n'}
+  done
   case "$verdict" in
     ok) ;;
     "ok "*)
@@ -655,7 +776,7 @@ PY
   esac
 }
 
-# --account, --backend, --model, --effort, --brief, --reports-to, --title, --in and --check may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --model, --effort, --brief, --reports-to, --title, --in, --check and --firefighting may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -682,6 +803,7 @@ REPORTS_TO=
 TITLE_ARG=
 IN_DIR=
 CHECK=
+FIREFIGHTING=
 SIZE=
 RUNTIME=
 MOVE_PID=
@@ -739,6 +861,9 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = --check ]; then
     CHECK=1
     shift
+  elif [ "$1" = --firefighting ]; then
+    FIREFIGHTING=1
+    shift
   elif [ "$1" = --brief ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RESUME_BRIEF" ] || usage
     case "$2" in --*) usage "--brief needs a value; \"$2\" starts with --" ;; esac
@@ -753,7 +878,6 @@ set -- ${words[@]+"${words[@]}"}
 
 # herdr runs by the absolute path herdr's pin names, never a bare herdr, and only while that file is the pinned version and hash and the server $1 is running; hr then speaks to that server.
 herdr_ready() {
-  HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
   HERDR_SESSION_NAME=$1
   word "$HERDR_SESSION_NAME" || refuse "PLAYGROUND_HERDR_SESSION is a word, not $HERDR_SESSION_NAME"
   pinned=$(python3 -I - "$HERDR_DIR/pin.json" <<'PY'
@@ -797,13 +921,12 @@ if [ "$MODE" = restore ]; then
   [ $# -eq 0 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "restore takes no other words"
   # One restore at a time: ops-herdr's start and its job's next cycle can both run one, and two resumes of a name both pass the live-name check until its claude writes its registry file, so it would start twice. The lock is a symlink naming its holder's pid and start time, so a holder that died, or a pid macOS handed on, frees it.
   LOCK="$RESUME_DIR/.restore.lock"
-  holder() { echo $(LC_ALL=C TZ=UTC ps -o pid=,lstart= -p "$1" 2>/dev/null); }
-  ME=$(holder $$)
+  ME=$(started $$)
   ME=${ME:-$$}
   mkdir -p "$RESUME_DIR"
   if ! ln -s "$ME" "$LOCK" 2>/dev/null; then
     HELD=$(readlink "$LOCK")
-    if [ -n "$HELD" ] && [ "$HELD" = "$(holder "${HELD%% *}")" ]; then
+    if [ -n "$HELD" ] && [ "$HELD" = "$(started "${HELD%% *}")" ]; then
       echo "another restore is running (pid ${HELD%% *})"
       exit 1
     fi
@@ -823,27 +946,48 @@ lw, server = sys.argv[1], sys.argv[2]
 roster = os.path.join(lw, "roster.json")
 try:
     agents = json.load(open(roster)).get("agents", []) if os.path.exists(roster) else []
-    down = {a.get("name") for a in agents if isinstance(a, dict) and a.get("status") in ("ended", "parked", "paused")}
+    down = {a.get("name"): a.get("status") for a in agents if isinstance(a, dict) and a.get("status") in ("done", "ended", "parked", "paused")}
 except (OSError, ValueError, AttributeError, TypeError):
     sys.exit("it cannot read the roster " + roster)
+
+def skip(name, reason):
+    print("skip\t" + name + "\t" + reason)
+
 folder = os.path.join(lw, "resume")
 for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
     name = file[:-3]
-    if not file.endswith(".sh") or name in down:
+    if not file.endswith(".sh") or "\t" in name or "\n" in name:
+        continue
+    try:
+        lines = open(os.path.join(folder, file)).read().splitlines()
+    except (OSError, ValueError):
+        skip(name, "its resume record does not read")
+        continue
+    if next((l[len("# server: "):] for l in lines if l.startswith("# server: ")), "playground") != server:
+        continue
+    if name in down:
+        skip(name, "its roster row reads " + down[name])
+        continue
+    try:
+        words = shlex.split(next(l for l in lines if l.startswith("exec ")))
+    except StopIteration:
+        skip(name, "its resume record has no exec line")
+        continue
+    except ValueError:
+        skip(name, "its exec line does not parse")
         continue
     try:
         runtime = open(os.path.join(lw, "runtimes", name)).read().strip()
-        lines = open(os.path.join(folder, file)).read().splitlines()
-        words = shlex.split(next(l for l in lines if l.startswith("exec ")))
-    except (OSError, StopIteration, ValueError):
+    except (OSError, ValueError):
+        skip(name, "it has no runtime pin")
         continue
-    if next((l[len("# server: "):] for l in lines if l.startswith("# server: ")), "playground") != server:
+    if runtime != "herdr":
+        skip(name, "it runs in " + (runtime if runtime.isalnum() else "another runtime") + ", not herdr")
         continue
     extras = words[6:]
     keys = extras[::2]
     if (
-        runtime == "herdr"
-        and len(words) >= 6
+        len(words) >= 6
         and words[1].endswith("/scripts/spawn.sh")
         and words[2:4] == ["resume", name]
         and len(extras) % 2 == 0
@@ -851,21 +995,30 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
         and set(keys) <= {"--account", "--effort", "--model"}
         and not any("\t" in w or "\n" in w for w in words)
     ):
-        print("\t".join(words[3:]))
+        print("run\t" + "\t".join(words[3:]))
+    else:
+        skip(name, "its exec line is not a resume restore runs")
 PY
   }
   lines=$(restore_list) || refuse "it cannot read the roster or the resume files"
   failed=0
   while IFS=$'\t' read -r -a args; do
-    [ "${#args[@]}" -ge 3 ] || continue
-    if said=$(bash "$0" resume "${args[@]}" 2>&1 </dev/null); then
-      echo "restored ${args[0]}"
-    elif [ $? -eq 3 ]; then
-      echo "skipped ${args[0]}: live"
-    else
-      failed=1
-      echo "not restored: $(tail -1 <<<"$said")"
-    fi
+    case "${args[0]:-}" in
+      skip) echo "skipped ${args[1]}: ${args[2]}" ;;
+      run)
+        args=("${args[@]:1}")
+        [ "${#args[@]}" -ge 3 ] || continue
+        if said=$(bash "$0" resume "${args[@]}" 2>&1 </dev/null); then
+          echo "restored ${args[0]}"
+        elif [ $? -eq 3 ]; then
+          echo "skipped ${args[0]}: live"
+        else
+          failed=1
+          said=$(tail -1 <<<"$said")
+          echo "not restored ${args[0]}: ${said#"spawn.sh refuses ${args[0]}: "}"
+        fi
+        ;;
+    esac
   done <<<"$lines"
   exit "$failed"
 fi
@@ -956,7 +1109,8 @@ except Exception:
     word "$by" || refuse "it reads no session running spawn.sh (CLAUDE_PID's entry in $REGISTRY) to brief $NAME: name it, column dispatcher $NAME <the lead that briefs it> <pane> <brief>"
     set -- dispatcher "$NAME" "$by" "$2" "$3"
   else
-    [[ $(kind_of "$NAME") =~ ^(dispatcher|optimizer)$ ]] && refuse "$NAME opens in a workspace of its own: spawn.sh manager $NAME <brief>"
+    kind=$(kind_of "$NAME")
+    { [[ $kind =~ ^(dispatcher|optimizer)$ ]] || { [ "$(role_of_kind "$kind")" = lead ] && [[ ! $kind =~ ^(builder|ops|planner)$ ]]; }; } && refuse "$NAME opens in a workspace of its own: spawn.sh manager $NAME <brief>"
     [[ $(kind_of "$NAME") =~ ^(builder|ops|planner)$ ]] ||
       refuse "$NAME is no manager: column <manager> <pane> <brief> takes a lead or the first dispatcher, and column <reviewer|tester|probe|lead|dispatcher> <name> <reports-to> <pane> <brief> takes the rest"
     set -- lead "$NAME" "$(dispatcher_of 1)" "$2" "$3"
@@ -991,7 +1145,7 @@ case "$MODE" in
     ROLE=$1 NAME=$2 TO=$3 SURFACE=$4 BRIEF=$5
     case "$ROLE" in
       reviewer | tester | probe) ;;
-      lead) [[ $(kind_of "$NAME") =~ ^(builder|ops|planner)$ ]] || refuse "a lead is a builder, ops or planner by its roster kind, else by its sessions.names name; give a new name its kind first: roster.ts set <name> kind=<kind> task=<what it does>" ;;
+      lead) kind=$(kind_of "$NAME"); [[ $kind =~ ^(builder|ops|planner)$ ]] || { [ "$(role_of_kind "$kind")" = lead ] && refuse "$NAME opens in a workspace of its own: spawn.sh manager $NAME <brief>"; } || refuse "a lead is a builder, ops or planner by its roster kind, else by its sessions.names name; give a new name its kind first: roster.ts set <name> kind=<kind> task=<what it does>" ;;
       dispatcher)
         ROLE=dispatcher
         [ "$(kind_of "$NAME")" = dispatcher ] || refuse "the dispatcher is an <id>-dispatcher, or sessions.names' dispatcher"
@@ -1019,18 +1173,29 @@ case "$MODE" in
       dispatcher) ROLE=dispatcher KIND=dispatcher TO=$(dispatcher_of 1) ;;
       optimizer) ROLE=lead KIND=optimizer TO=$(dispatcher_of 1) ;;
       builder | ops | planner) ROLE=lead KIND=$(kind_of "$NAME") TO=$(dispatcher_of 1) ;;
-      *) refuse "a manager in a workspace of its own is the first dispatcher (sessions.names' dispatcher), the second (an <id>-dispatcher, or sessions.names' dispatcher with -2), the optimizer, the builder, ops or the planner; give a new name its kind first: roster.ts set <name> kind=<kind> task=<what it does>" ;;
+      *)
+        # An orchestrator: any other manager kind the roster gives the name, reporting to the session its row names.
+        KIND=$(kind_of "$NAME") TO=$(roster_field "$NAME" reportsTo) ROLE=lead
+        [ "$(role_of_kind "$KIND")" = lead ] || refuse "a manager in a workspace of its own is the first dispatcher (sessions.names' dispatcher), the second (an <id>-dispatcher, or sessions.names' dispatcher with -2), the optimizer, the builder, ops or the planner, or an orchestrator, a name the roster gives a manager kind ($MANAGER_KINDS) and a session to report to; give a new name both first: roster.ts set <name> kind=<kind> reportsTo=<session> task=<what it does>"
+        word "$TO" || refuse "$NAME is an orchestrator of the $KIND kind, and its roster row names no session it reports to: roster.ts set $NAME reportsTo=<session>"
+        ;;
     esac
     [ "$KIND" = dispatcher ] && { [ "$NAME" = "$TO" ] || { [ "$(session_kind "$NAME")" = dispatcher ] && ! second_dispatcher "$NAME"; }; } && FIRST=1 TO=
     DIR="${PLAYGROUND_REPO:-$MAIN}/.claude/worktrees/leads"
-    # A fresh checkout has no leads worktree until its first manager start cuts one as branch leads from origin's copy of the branch the checkout was cloned on, tracking it: canary only for a checkout cloned on canary on purpose, else main, so a public install's managers run what it shipped. A branch of its own, since the checkout holds its branch already, and a manager's bare git calls land in its own tree, never the main checkout. Its install follows at once, since a manager runs bun run from it.
+    # A fresh checkout has no leads worktree until its first manager start cuts one as branch leads from origin's copy of the branch the checkout was cloned on, tracking it: canary only for a checkout cloned on canary on purpose, else main, so a public install's managers run what it shipped. A branch of its own, since the checkout holds its branch already, and a manager's bare git calls land in its own tree, never the main checkout.
+    CUT=
     if [ ! -e "$DIR" ]; then
       base=main
       [ "$(git -C "${PLAYGROUND_REPO:-$MAIN}" symbolic-ref -q --short HEAD 2>/dev/null)" = canary ] && base=canary
       made=$(git -C "${PLAYGROUND_REPO:-$MAIN}" worktree add -q --track -B leads "$DIR" "origin/$base" 2>&1) || refuse "git worktree add $DIR origin/$base failed, so there is no leads worktree to open in: ${made%%$'\n'*}"
-      made=$(bash "$REPO/scripts/ops/run-slot.sh" "$NAME" -- "$BUN" install --frozen-lockfile --ignore-scripts --cwd "$DIR" 2>&1) || { git -C "${PLAYGROUND_REPO:-$MAIN}" worktree remove --force "$DIR" >/dev/null 2>&1; refuse "bun install in the new leads worktree $DIR failed, so it is removed for the next start to cut again: ${made##*$'\n'}"; }
+      CUT=1
     fi
     [ -d "$DIR" ] || refuse "$DIR is not a folder"
+    # Its install follows until one has exited 0, which leaves node_modules/.playground-installed, since a failed install leaves a partial node_modules and a manager runs bun run from it; a failed install moves only this start's cut to the trash for the next start to cut again, and keeps any other leads worktree, which may hold work, for the next start's install.
+    if [ ! -e "$DIR/node_modules/.playground-installed" ]; then
+      made=$(bash "$REPO/scripts/ops/run-slot.sh" "$NAME" -- "$BUN" install --frozen-lockfile --ignore-scripts --cwd "$DIR" 2>&1) || { [ -n "${CUT:-}" ] || refuse "bun install in the leads worktree $DIR failed, and this start did not cut it, so it stays for the next start's install: ${made##*$'\n'}"; gone=$("$BUN" --no-env-file "$REPO/packages/scripts/src/playground/cli.ts" rm --worktree "$DIR" --reason "its install failed" 2>&1) || refuse "bun install in the new leads worktree $DIR failed (${made##*$'\n'}), and playground rm --worktree refused to move it, so it stays: ${gone##*$'\n'}"; refuse "bun install in the new leads worktree $DIR failed, so it is moved to the trash for the next start to cut again: ${made##*$'\n'}"; }
+      mkdir -p "$DIR/node_modules" && : > "$DIR/node_modules/.playground-installed"
+    fi
     ;;
   resume)
     [ $# -ge 2 ] && [ $# -le 3 ] || usage
@@ -1039,6 +1204,12 @@ case "$MODE" in
     KIND=$(kind_of "$NAME")
     ROLE=$(role_of_kind "$KIND")
     [ -n "$ROLE" ] || refuse "$NAME is not a factory session's name, and the roster gives it no kind"
+    # A checker whose roster row names an ended worker is ended again on the checker reaper's next pass (checker-worker-gone, scripts/ops/optimizer/idle_sessions.ts), so its row moves to the worker it now serves before it comes back.
+    if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
+      serves=$(roster_field "$NAME" worker)
+      [ -z "$serves" ] || [ "$(roster_field "$serves" status)" != ended ] ||
+        refuse "its roster row names $serves as its worker, which has ended, so the checker reaper would end it again: point it at the worker it serves first, with bun scripts/roster.ts assign $NAME \"<title>\" review worker=<live worker> pr=<url>, or, when it serves none, end its row with bun scripts/roster.ts set $NAME status=ended"
+    fi
     # macOS guards the Desktop folder, so a new pane there fails until Full Disk Access is granted again after each update: a folder there resumes in the same tree under the code root, and in place where the code root is on the Desktop itself.
     desktop="$HOME/Desktop/" # the folder the factory left
     off_desktop() { local rest=${1#"$desktop"} root; root=$(code_root); [[ $1 == "$desktop"* && -d $root && $root/ != "$desktop"* ]] && echo "$root/${rest#"$(basename "$root")"/}" || echo "$1"; }
@@ -1116,6 +1287,11 @@ if [ "$MODE" != resume ] || [ -n "$BRIEF" ]; then
   { [[ $BRIEF =~ ^[A-Za-z0-9._-][A-Za-z0-9._/-]*$ ]] && [[ /$BRIEF/ != */../* ]]; } || refuse "a brief is a file name under $SHOWN"
   # Only the file's name reaches the prompt, so a session reads the file itself.
   [ -f "$DATA/$BRIEF" ] || refuse "$SHOWN/$BRIEF is not a file"
+  # A brief filled from its role's template (new-reviewer.md for a reviewer) keeps none of that template's slots, so a session never starts on a bare slot, while a brief's prose about another role's slot is left alone.
+  template="$REPO/scripts/briefs/new-${ROLE:-}.md"
+  slots=$([ ! -f "$template" ] || grep -oE '__[A-Z0-9]+__' "$template" | sort -u || true)
+  left=$([ -z "$slots" ] || grep -oE '__[A-Z0-9]+__' "$DATA/$BRIEF" | sort -u | grep -Fx -f <(printf '%s\n' "$slots") | paste -sd ' ' - || true)
+  [ -z "$left" ] || refuse "$SHOWN/$BRIEF still holds the slot $left: fill each one, read the brief back, then run spawn.sh again (playbook's SESSIONS.md, the fill rule)"
 fi
 # A resume runs the session the way its start recorded; only a start takes a backend fresh.
 PIN_GIVEN=
@@ -1241,6 +1417,27 @@ case "$SIZE" in
   *) ITEM=$(bash "$REPO/scripts/ops/run-slot.sh" size "$NAME" 2>/dev/null) || ITEM= ;;
 esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
+FF_TRIGGER=
+if [ -n "$FIREFIGHTING" ]; then
+  FF_TRIGGER=$(firefighting_trigger) || refuse "--firefighting starts only while a firefighting trigger file stands in $DATA (firefighting-stop.json or firefighting-headstart.json), and none does"
+fi
+# While focus stands (playground focus), one session has the Mac, so a start waits for its end; a move closes the copy it replaces, so it goes on, as do that session's own reviewer and tester and a --firefighting start (below).
+if [ -z "$MOVE_PID" ] && FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
+import datetime, json, sys
+try:
+    f = json.load(open(sys.argv[1]))
+    until = datetime.datetime.fromisoformat(f["until"].replace("Z", "+00:00"))
+except Exception:
+    sys.exit(1)
+if until <= datetime.datetime.now(datetime.timezone.utc):
+    sys.exit(1)
+print(f"{f.get('session')} until {f['until']}")
+PY
+); then
+  # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --firefighting start goes on while its trigger file stands
+  [ -n "$FF_TRIGGER" ] || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
+    refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
+fi
 gate_capacity
 if [ "$RUNTIME" = herdr ]; then
   # herdr names an agent by [a-z][a-z0-9_-]{0,31}, so a longer name could never name the session's agent there.
@@ -1277,16 +1474,45 @@ fi
 # The window reaches the session through its one settings file, built here from the factory's on every launch so the two never drift, one file per backend. On GLM: the user settings turn on telemetry to the Loom relay, and Loom counts Claude usage alone, so a GLM session exports none. Claude Code keeps only the last --settings, and the user settings' env beats a variable on the launch line (both measured by a reviewer, 16 Oct), so the session's one settings file also turns the telemetry off (measured from a folder outside any checkout, 16 Oct: a SessionStart hook ran, no-env-dump refused printenv, and no metric left).
 TAG=
 [ "$BACKEND" = glm ] && TAG=glm-
-BUILT="$DATA/factory-settings-$TAG$((WINDOW / 1000))k.json"
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+# A probe runs its shell commands in Claude Code's sandbox, which every child process inherits, so a delete a script makes where no guard hook sees it stays inside the write roots; its settings go in a file of their own. Workers and testers join once the worker git flow runs inside it, as run-slot and spawn.sh do.
+SANDBOX=
+[ "$ROLE" = probe ] && SANDBOX=sandbox-
+BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k.json"
+# The folder the session runs in, as the launch below moves to it.
+OWN=${DIR:-$REPO}
+[ "$MODE" = column ] && OWN=$REPO
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend = sys.argv[1:5]
+src, dst, window, backend, sandbox, data, herdr, main, temp, own = sys.argv[1:11]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
 # The home skill set link-skills.sh turns on at user scope stays off here, since the session loads its own set (below) and two plugins that ship one name refuse it at call time.
 settings["enabledPlugins"] = {**settings.get("enabledPlugins", {}), "ws-home@ws": False}
 if backend == "glm":
     settings["env"] = {**settings.get("env", {}), "CLAUDE_CODE_ENABLE_TELEMETRY": "0", "OTEL_METRICS_EXPORTER": "none"}
+if sandbox:
+    # The sandbox lets a session write its own folder, the main checkout or a worktree in it; a deny wins over that, so every entry of the main checkout is denied, .git and every other worktree included, but the path down to a worktree the session runs in.
+    own = os.path.realpath(own)
+    def denied(folder):
+        paths = [os.path.join(folder, name) for name in sorted(os.listdir(folder))]
+        return [d for p in paths if p != own for d in (denied(p) if own.startswith(p + os.sep) else [p])]
+    deny = denied(main)
+    home = os.path.expanduser("~")
+    settings["sandbox"] = {
+        # Bypass mode would run the unsandboxed retry with no prompt, and a sandbox that cannot start would run every command unsandboxed.
+        "allowUnsandboxedCommands": False,
+        "enabled": True,
+        # gh, a Go CLI, verifies TLS through trustd, which the sandbox closes without this.
+        "enableWeakerNetworkIsolation": True,
+        # Docker cannot run in the sandbox, and a wildcard in an exclusion spans arguments, so only the read-only listing leaves it when typed; a script's own docker stays inside, its socket closed.
+        "excludedCommands": ["docker ps", "docker ps *"],
+        "failIfUnavailable": True,
+        "filesystem": {
+            "allowWrite": sorted({data, os.path.join(home, ".agent-browser"), os.path.join(home, ".bun", "install", "cache"), os.path.join(home, ".cache", "turbo"), os.path.join(home, ".portless")} | ({temp.rstrip("/")} if temp else set())),
+            "denyWrite": deny,
+        },
+        "network": {"allowLocalBinding": True, "allowUnixSockets": sorted({herdr, os.path.join(home, ".agent-browser")})},
+    }
 tmp = f"{dst}.{os.getpid()}.tmp"
 with open(tmp, "w") as f:
     json.dump(settings, f, indent=2)
@@ -1296,8 +1522,7 @@ SETTINGS=$BUILT
 # The factory's sessions run in bypass mode, passed here so it never rests on the machine's own settings: a session in another mode holds every cross-session message for approval.
 FLAGS="--model $MODEL --effort ${EFFORT:-high} --settings $SETTINGS --dangerously-skip-permissions"
 # The skills: one merged plugin per session, from the login's scope, its repo's org, core, then each always org's new names, loaded in place by --plugin-dir, from the data folder this launch reads (under inscope ~/.claude's, not the workspace's); the resolver writes it fresh on every spawn, so a skill `playground ext add` puts in an extension reaches the next session with no install. A column runs in this checkout.
-SKILLS_REPO=${DIR:-$REPO}
-[ "$MODE" = column ] && SKILLS_REPO=$REPO
+SKILLS_REPO=$OWN
 PLUGIN=$(PLAYGROUND_DATA_DIR="$DATA" "$BUN" --no-env-file "$REPO/packages/scripts/src/playground/orgs.ts" resolve --repo "$SKILLS_REPO") && [ -d "$PLUGIN" ] || refuse "playground orgs resolve gave no skill plugin for $SKILLS_REPO"
 FLAGS+=" --plugin-dir $(printf %q "$PLUGIN")"
 READ="Load the playbook skill first. Your brief is in $SHOWN/$BRIEF: read it in full and follow it."
@@ -1322,8 +1547,14 @@ if [ "$MODE" = resume ]; then
       PROMPT=
     fi
   else
-    # Whom it reports to, from the prompt its start recorded, so the re-sends reach the right session; a session started in cmux has no record.
-    UP=$(sed -n 's/.*; you report to \([A-Za-z0-9-]*\)\..*/\1/p' "$RESUME_DIR/$NAME.prompt" 2>/dev/null | head -1) || UP=
+    # Whom it reports to, by scripts/README.md's order, so the re-sends reach the right session; a value that is not a session name would break the launch's quotes.
+    if [[ $ROLE =~ ^(reviewer|tester)$ ]]; then
+      UP=$(roster_field "$NAME" worker)
+    else
+      UP=$(roster_field "$NAME" reportsTo)
+      word "$UP" || UP=$(roster_field "$NAME" lead)
+    fi
+    word "$UP" || UP=$(sed -n 's/.*; you report to \([A-Za-z0-9-]*\)\..*/\1/p' "$RESUME_DIR/$NAME.prompt" 2>/dev/null | head -1) || UP=
     # A session idle at the restart takes no turn, so it would never act on after-resume's context.
     PROMPT="You are $NAME, resumed after a restart${UP:+; you report to $UP}. Act on the after-resume instruction in your context first, then carry on."
   fi
@@ -1417,7 +1648,7 @@ if [ -n "$MOVE_PID" ]; then
     fi
   fi
   tries=0
-  while [ "$(echo $(LC_ALL=C TZ=UTC ps -o pid=,lstart= -p "$MOVE_PID" 2>/dev/null))" = "$MOVE_PID $MOVE_START" ]; do
+  while [ "$(started "$MOVE_PID")" = "$MOVE_PID $MOVE_START" ]; do
     if [ "$tries" -ge $((MOVE_WAIT * 2)) ]; then
       rm -f -- "$LAUNCH_FILE"
       refuse "pid $MOVE_PID still runs ${MOVE_WAIT}s after cmux closed its surface, so the herdr copy was not started: resume it by hand once it exits: $by_hand"
@@ -1514,6 +1745,8 @@ set -- set "$NAME" "kind=$KIND"
 if [ "$MODE" = column ]; then
   [[ $ROLE =~ ^(reviewer|tester)$ ]] && { [ "$(kind_of_name "$TO")" = worker ] || [ "$(roster_kind "$TO")" = worker ]; } && set -- "$@" "worker=$TO"
 else
+  # A worker or runner records whom it reports to, --reports-to's session or its lead's seat, which the Dashboard's tree and every escalation read; a resume keeps the row's.
+  [[ $MODE =~ ^(worker|runner)$ ]] && set -- "$@" "reportsTo=$TO"
   # The roster's surface is a cmux one (surface:N), which a herdr session never has, so a session in a workspace of its own clears a column's old one; its pane's label carries its name.
   set -- "$@" "surface="
 fi

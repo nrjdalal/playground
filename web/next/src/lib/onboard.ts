@@ -72,9 +72,9 @@ export const canContinue = (checks: Check[]): boolean =>
 export const runnable = (check: Check): Check["action"] =>
   check.status !== "ok" && check.action && check.action.id !== SETTINGS_ACTION ? check.action : null
 
-// Pure: each row still missing, in the API's order, which Settings lists.
+// Pure: each row still missing or offering a fix the app runs, in the API's order, which Settings lists.
 export const toFix = (checks: Check[]): Check[] =>
-  checks.filter((check) => check.status === "MISSING")
+  checks.filter((check) => check.status === "MISSING" || runnable(check) !== null)
 
 // Pure: the fix read in GET or POST /api/v1/onboard/fix/:id's body, or undefined when it does not read as one; a read with no device reads as none.
 export const fixJobOf = (body: unknown): FixJob | undefined => {

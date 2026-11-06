@@ -3,9 +3,9 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import {
-  GroupCount,
   groupEmpty,
   dispatcherRowLabel,
+  keepsNested,
   navGroups,
   OpsJobRow,
   SessionRow,
@@ -550,6 +550,20 @@ describe("SessionRow", () => {
     expect(dispatcherRowLabel({ name: "glm-dispatcher" }, false)).toBe("GlmDispatcher")
     expect(dispatcherRowLabel(null, true)).toBe("Alpha")
     expect(dispatcherRowLabel(null, false)).toBe("Bravo")
+  })
+})
+
+describe("keepsNested", () => {
+  const waiting = new Set(["checker"])
+  const keep = (name: string) => waiting.has(name)
+
+  test("a closed group keeps a row whose nested member waits on you or is open, its lead idle", () => {
+    expect(keepsNested("manager", ["checker"], keep)).toBe(true)
+  })
+
+  test("and keeps a row whose lead keeps, and drops one where nothing does", () => {
+    expect(keepsNested("checker", [], keep)).toBe(true)
+    expect(keepsNested("manager", ["tester"], keep)).toBe(false)
   })
 })
 
@@ -1165,15 +1179,6 @@ describe("OpsJobRow", () => {
   })
 })
 
-describe("GroupCount", () => {
-  test("a group's count is one number at the label's right, as ZeroSDK's countCell, in the sidebar's own sans with tabular digits", () => {
-    const html = renderToStaticMarkup(createElement(GroupCount, { count: 14 }))
-    const outer =
-      html.match(/^<span data-slot="group-count" class="([^"]*)">14<\/span>$/)?.[1] ?? ""
-    expect(outer.split(" ")).toEqual(["ml-auto", "flex", "w-4", "justify-center", "tabular-nums"])
-  })
-})
-
 describe("ThreadsGroup", () => {
   type Page = Parameters<typeof ThreadsGroup>[0]["data"]
   type Thread = Page["threads"][number]
@@ -1208,16 +1213,18 @@ describe("ThreadsGroup", () => {
   const badges = (html: string) =>
     [...html.matchAll(/data-sidebar="menu-badge"[^>]*>([^<]*)</g)].map(([, text]) => text)
 
-  // the dispatchers' rows sit in the header, so Threads leads the nav
-  test("is the nav's first group once the threads are read, and is left out before; no Dispatchers group", () => {
+  // the dispatchers' rows sit in the header, so Threads leads the nav, and Yard's Channels and Direct messages follow it, above Orchestrators
+  test("is the nav's first group once the threads are read, and is left out before; Yard's groups next; no Dispatchers group", () => {
     expect(navGroups(true, []).map(({ label }) => label)).toEqual([
       "Threads",
+      "Yard",
       "Orchestrators",
       "Subagents",
       "AI Runners",
       "Scripts",
     ])
     expect(navGroups(false, []).map(({ label }) => label)).toEqual([
+      "Yard",
       "Orchestrators",
       "Subagents",
       "AI Runners",
@@ -1291,7 +1298,8 @@ describe("ThreadsGroup", () => {
     expect(openTag(first, /<button[^>]*aria-label="Next page"[^>]*>/)).toContain(
       'aria-disabled="false"',
     )
-    const label = openTag(first, /<div[^>]*data-sidebar="group-label"[^>]*>/)
+    // the label is the group's toggle button, and the pager sits beside it
+    const label = openTag(first, /<button[^>]*data-sidebar="group-label"[^>]*>/)
     expect(first.indexOf("Previous page")).toBeGreaterThan(first.indexOf(label))
     expect(first.indexOf("Next page")).toBeGreaterThan(first.indexOf("1 / 2"))
     expect(first.indexOf("Previous page")).toBeLessThan(first.indexOf("1 / 2"))

@@ -1,7 +1,7 @@
 "use client"
 
 import type { Agent, DashboardFrame, Entry, Worker } from "@api/hono"
-import { kindOfName, setSessionNames } from "@packages/config/kinds"
+import { isEndedStatus, kindOfName, setSessionNames } from "@packages/config/kinds"
 import { replaceEqualDeep } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -13,6 +13,7 @@ import {
   withoutIdKind,
 } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
+import { config } from "@/lib/config"
 import { createWatch, type ActivityFrame, type SessionActivity } from "@/lib/live-activity"
 
 const RECONNECT_MIN_MS = 2000
@@ -498,15 +499,16 @@ export const dispatcherOf = (
   primary: string | null = null,
 ): Worker | null => workers?.find((w) => isPrimary(w, primary)) ?? null
 
-// Pure: the header's dispatcher slots, a list by role in the order the API names them (PLAYGROUND_DISPATCHER, then PLAYGROUND_DISPATCHER_SECONDARY), each the live session holding the role under that name, or none while it is down. The primary's slot is always kept; the second's only while its session is live or the roster lists it (rostered, the board's agent names), so a machine that runs no second dispatcher shows no row for it.
+// Pure: the header's dispatcher slots, a list by role in the order the API names them (PLAYGROUND_DISPATCHER, then PLAYGROUND_DISPATCHER_SECONDARY), each the live session holding the role under that name, or none while it is down. The primary's slot is always kept; the second's only while its session is live or the roster lists it in a status that has not ended (rostered, the board's agents), so a machine that runs no second dispatcher, or ended it, shows no row for it.
 export const dispatchersOf = (
   workers: Worker[] | null,
   names: readonly string[],
-  rostered: ReadonlySet<string> = new Set(),
+  rostered: readonly { name: string; status: string | null }[] = [],
 ): { name: string; worker: Worker | null }[] =>
   names.flatMap((name, i) => {
     const worker = workers?.find((w) => w.role === "dispatcher" && w.name === name) ?? null
-    return worker || i === 0 || rostered.has(name) ? [{ name, worker }] : []
+    const listed = rostered.some((agent) => agent.name === name && !isEndedStatus(agent.status))
+    return worker || i === 0 || listed ? [{ name, worker }] : []
   })
 
 // The worker /dashboard shows: the one the URL asks for while it is live, else the primary dispatcher, whose chat is the dashboard's home, since the owner talks to the dispatcher alone. None while the list has not come or the primary is not live.
@@ -541,6 +543,9 @@ export const afterFrame = (state: Misses, failure: DashboardProblem | null): Mis
         problem: state.problem || state.misses + 1 >= MISSES_TO_ALERT ? failure : null,
       }
 
+// How often the hosted build reads the board through the relay.
+export const BOARD_POLL_MS = 5000
+
 // The dashboard's one WebSocket: every worker change, every new transcript entry handed to whoever subscribed, and the activity of the one chat it watches (watch names it, null for none).
 export function useDashboardSocket(enabled: boolean) {
   const [workers, setWorkers] = useState<Worker[] | null>(null)
@@ -564,6 +569,51 @@ export function useDashboardSocket(enabled: boolean) {
     let fresh = false
     let misses: Misses = { misses: 0, problem: null }
 
+    // A board frame, from the socket or, on the hosted build, from a read of the board.
+    const onFrame = (frame: DashboardFrame) => {
+      if (frame.type === "workers") {
+        // each frame is parsed afresh, so a session it left as it was keeps its object and a frame that moved nothing keeps the board, and nothing reading them draws again
+        setWorkers((shown) => replaceEqualDeep(shown, frame.workers))
+        setApprovals(frame.approvals)
+        setDispatcher(frame.dispatcher)
+        setSessionNames(frame.names)
+        setDispatcherOrder(frame.dispatchers)
+        setDispatchers((shown) => replaceEqualDeep(shown, frame.dispatchers))
+        misses = afterFrame(misses, null)
+        setProblem(null)
+        if (fresh) {
+          fresh = false
+          setGeneration((n) => n + 1)
+        }
+      } else if (frame.type === "error") {
+        setDispatcher(frame.dispatcher)
+        setSessionNames(frame.names)
+        setDispatcherOrder(frame.dispatchers)
+        setDispatchers((shown) => replaceEqualDeep(shown, frame.dispatchers))
+        misses = afterFrame(misses, { code: frame.code, message: frame.message })
+        setProblem(misses.problem)
+      } else {
+        for (const listener of listeners.current) listener(frame.sessionId, frame.entries)
+      }
+    }
+
+    // The hosted build reaches the Mac through the relay, which carries requests and no live frames yet, so it reads the board every BOARD_POLL_MS in place of the socket.
+    if (config.hosted) {
+      const read = async () => {
+        const { data } = await unwrap(apiClient.v1.board.$get())
+        if (closed) return
+        setConnected(Boolean(data))
+        if (data) onFrame(data)
+        retry = setTimeout(() => void read(), BOARD_POLL_MS)
+      }
+      fresh = true
+      void read()
+      return () => {
+        closed = true
+        if (retry) clearTimeout(retry)
+      }
+    }
+
     const connect = () => {
       const opened = apiClient.v1.ws.$ws()
       socket = opened
@@ -580,30 +630,7 @@ export function useDashboardSocket(enabled: boolean) {
         const frame = JSON.parse(String(event.data)) as DashboardFrame | ActivityFrame
         if (frame.type === "activity") {
           setActivity({ activity: frame.activity, sessionId: frame.sessionId })
-        } else if (frame.type === "workers") {
-          // each frame is parsed afresh, so a session it left as it was keeps its object and a frame that moved nothing keeps the board, and nothing reading them draws again
-          setWorkers((shown) => replaceEqualDeep(shown, frame.workers))
-          setApprovals(frame.approvals)
-          setDispatcher(frame.dispatcher)
-          setSessionNames(frame.names)
-          setDispatcherOrder(frame.dispatchers)
-          setDispatchers((shown) => replaceEqualDeep(shown, frame.dispatchers))
-          misses = afterFrame(misses, null)
-          setProblem(null)
-          if (fresh) {
-            fresh = false
-            setGeneration((n) => n + 1)
-          }
-        } else if (frame.type === "error") {
-          setDispatcher(frame.dispatcher)
-          setSessionNames(frame.names)
-          setDispatcherOrder(frame.dispatchers)
-          setDispatchers((shown) => replaceEqualDeep(shown, frame.dispatchers))
-          misses = afterFrame(misses, { code: frame.code, message: frame.message })
-          setProblem(misses.problem)
-        } else {
-          for (const listener of listeners.current) listener(frame.sessionId, frame.entries)
-        }
+        } else onFrame(frame)
       })
       opened.addEventListener("close", () => {
         watcher.current.disconnected(sendWatch)
@@ -775,15 +802,21 @@ export async function fetchSubagentSteps(sessionId: string, agentId: string) {
   )
 }
 
-// Types a message into a live session's terminal through the API, which records it in the console's activity; attachments are the ids of files uploaded for it, whose paths follow the words, and thread the thread it is routed to by the marker the API puts first, or newThread to open one with it.
+// Types a message into a live session's terminal through the API, which records it in the console's activity; attachments are the ids of files uploaded for it, whose paths follow the words, and thread the thread it is routed to by the marker the API puts first, or newThread to open one with it; queuedAt is when Claude Code first held it, for an API that restarted since.
 export async function sendMessage(
   to: string,
   text: string,
   attachments: string[] = [],
   id?: string,
-  { newThread, threadId }: { newThread?: boolean; threadId?: string } = {},
+  {
+    newThread,
+    queuedAt,
+    threadId,
+  }: { newThread?: boolean; queuedAt?: string; threadId?: string } = {},
 ) {
   return unwrap(
-    apiClient.v1.messages.$post({ json: { attachments, id, newThread, text, threadId, to } }),
+    apiClient.v1.messages.$post({
+      json: { attachments, id, newThread, queuedAt, text, threadId, to },
+    }),
   )
 }

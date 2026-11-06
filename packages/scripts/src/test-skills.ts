@@ -1,6 +1,7 @@
-import { rmSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+
+import { removeScratch } from "@packages/safe-delete"
 
 import { sandbox } from "./sandbox"
 
@@ -24,6 +25,7 @@ const steps: [string, string[]][] = [
   ["loopback postgres and redis", py("test_loopback_postgres.py")],
   ["container volumes", py("test_docker_rm_volumes.py")],
   ["kill by name", py("test_kill_by_name.py")],
+  ["hooks on main", ["bun", "packages/scripts/src/hooks-on-main.ts"]],
   ["ops cmux", py("test_ops_cmux.py")],
   ["ops merge train", py("test_ops_merge_train.py")],
   ["em-dash check", ["bash", "scripts/check-em-dashes.sh"]],
@@ -58,7 +60,8 @@ export const runSteps = async (list: [string, string[]][]) => {
       results.push([name, (await step.exited) === 0, fail?.trim()])
     }
   } finally {
-    rmSync(scratch, { force: true, recursive: true })
+    const refused = removeScratch(scratch)
+    if (refused) console.error(`test-skills: ${refused}`)
   }
   return results
 }

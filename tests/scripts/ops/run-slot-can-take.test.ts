@@ -52,20 +52,47 @@ describe("slots counts the CPU slots held or open now", () => {
     return [run.exitCode, run.stdout.toString()]
   }
 
-  test("all four while load1 is under 12", () => {
+  test("all four while the CPU idles and load1 is low", () => {
     expect(slots(machine())).toEqual([0, "4\n"])
   })
 
   test("run-slot.4-off closes the fourth", () => {
     expect(slots(machine({ off: ["run-slot.4-off"] }))).toEqual([0, "3\n"])
   })
+})
 
-  test("load1 at 12 closes the third and fourth, and a holder keeps each", () => {
-    const m = machine({ load1: 12 })
-    expect(slots(m)).toEqual([0, "2\n"])
-    m.hold("run-slot-3", 2, "medium")
-    m.hold("run-slot-4", 2, "medium")
-    expect(slots(m)).toEqual([0, "4\n"])
+// spawn.sh's slots gate reads this line before it admits a new worker
+describe("room prints the lanes, the held ones, the ones a run can take and the live waiters", () => {
+  const room = (m: ReturnType<typeof machine>) => {
+    const run = Bun.spawnSync(["bash", SCRIPT, "room"], { cwd: m.root, env: m.env() })
+    return [run.exitCode, run.stdout.toString()]
+  }
+
+  test("an idle machine has four free lanes and no one waiting", () => {
+    expect(room(machine())).toEqual([0, "4 0 4 0\n"])
+  })
+
+  test("held lanes and live tickets count, and a dead waiter's ticket does not", () => {
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+    m.hold("run-slot", 2, "medium")
+    m.hold("run-slot-2", 2, "medium")
+    m.ticket(2, "worker-a", "s2 22 2 medium")
+    m.ticket(3, "worker-b", "s2 21 1 small")
+    writeFileSync(join(m.ops, "run-slot.waiters", "4-999999-worker-gone"), "s2 22 2 medium\n")
+    expect(room(m)).toEqual([0, "2 2 0 2\n"])
+  })
+
+  test("an unheld lane is not free while a medium run's load units do not fit", () => {
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+    m.hold("run-slot", 3, "big")
+    m.ticket(2, "worker-a", "s2 22 2 medium")
+    expect(room(m)).toEqual([0, "2 1 0 1\n"])
+  })
+
+  test("under Claude Code's sandbox it reads a live waiter by kill, and the memory it cannot read leaves one lane", () => {
+    const m = machine({ sandboxed: true })
+    m.ticket(2, "worker-a", "s2 22 2 medium")
+    expect(room(m)).toEqual([0, "1 0 1 1\n"])
   })
 })
 
@@ -116,4 +143,26 @@ describe("every read subcommand answers as before when the runs log holds three 
       expect(short).toEqual(answer(false))
       expect(short[2]).toBe(true)
     })
+})
+
+// LANES carries one slot count's lanes verdict inside capacity(), so a value the caller's env holds must steer no check outside a count
+describe("a LANES value in the caller's env", () => {
+  test("LANES=open leaves slot 2 shut on a machine whose gauges shut the lanes", async () => {
+    expect(
+      await machine({ idle: 30 }).canTake("run-slot-2", "worker-probe", { LANES: "open" }),
+    ).toBe(false)
+  })
+
+  test("LANES=shut leaves slot 2 open on a machine whose gauges open the lanes", async () => {
+    expect(await machine().canTake("run-slot-2", "worker-probe", { LANES: "shut" })).toBe(true)
+  })
+
+  test("slots counts one lane under LANES=open on a machine whose gauges shut the lanes", () => {
+    const m = machine({ idle: 30 })
+    const run = Bun.spawnSync(["bash", SCRIPT, "slots"], {
+      cwd: m.root,
+      env: m.env({ LANES: "open" }),
+    })
+    expect([run.exitCode, run.stdout.toString()]).toEqual([0, "1\n"])
+  })
 })

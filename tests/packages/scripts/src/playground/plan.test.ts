@@ -9,8 +9,10 @@ import {
   runStart,
   runStatus,
   statusLines,
+  usageOf,
   VIEW_HINT,
   dashboardBeatOf,
+  startFailure,
   waitOutcome,
   wantsHelp,
   type DashboardBeat,
@@ -524,7 +526,8 @@ describe("playground view", () => {
     expect(HELP).toContain("playground view       open the playground herdr server")
     expect(HELP).toContain("start herdr's servers that are down and restore their sessions")
     expect(HELP).toContain("each herdr server")
-    expect(HELP).toContain("in cmux while a session is open there, else in herdr")
+    expect(HELP).toContain("start the Dashboard's stack and follower in herdr when down")
+    expect(HELP).not.toContain("cmux")
     expect(VIEW_HINT).toContain("playground view")
   })
 
@@ -563,6 +566,13 @@ describe("playground view", () => {
     expect(
       extraWordRefusal(["picker", "k3m9px-worker", "deny", "0a1b2c3d", "use", "mv"]),
     ).toBeNull()
+  })
+
+  test("yard post takes its words unquoted, as runYard joins them", () => {
+    expect(extraWordRefusal(["yard", "post", "ops", "the", "suite", "is", "green"])).toBeNull()
+    expect(extraWordRefusal(["yard", "read", "ops", "now"])).toBe(
+      "playground yard read takes no now\n" + usageOf("yard"),
+    )
   })
 
   test("sweep takes exactly its lead's name", () => {
@@ -614,8 +624,12 @@ describe("managing the install", () => {
 
 describe("waitOutcome", () => {
   const RUNNING: DashboardBeat = { ageMs: 5_000, cycleSeconds: 60, running: true }
-  const at = (now: number, beat: DashboardBeat | null = RUNNING, api = false) =>
-    waitOutcome({ api, beat, now }, { shownAt: 0, startedAt: 0 })
+  const at = (
+    now: number,
+    beat: DashboardBeat | null = RUNNING,
+    api = false,
+    failure: string | null = null,
+  ) => waitOutcome({ api, beat, failure, now }, { shownAt: 0, startedAt: 0 })
 
   test("ends at once when the API answers", () => {
     expect(at(42_000, RUNNING, true)).toEqual({
@@ -650,11 +664,42 @@ describe("waitOutcome", () => {
   test("prints what it waits on and the time spent, at most every 10s", () => {
     expect(at(10_000)).toEqual({ progress: "Waiting for the Dashboard's API to answer… 10s" })
     expect(
-      waitOutcome({ api: false, beat: RUNNING, now: 75_000 }, { shownAt: 70_000, startedAt: 0 }),
+      waitOutcome(
+        { api: false, beat: RUNNING, failure: null, now: 75_000 },
+        { shownAt: 70_000, startedAt: 0 },
+      ),
     ).toEqual({ progress: null })
     expect(
-      waitOutcome({ api: false, beat: RUNNING, now: 80_000 }, { shownAt: 70_000, startedAt: 0 }),
+      waitOutcome(
+        { api: false, beat: RUNNING, failure: null, now: 80_000 },
+        { shownAt: 70_000, startedAt: 0 },
+      ),
     ).toEqual({ progress: "Waiting for the Dashboard's API to answer… 1m 20s" })
+  })
+
+  test("ends with the supervisor's failed start in its words once the 30s grace has passed", () => {
+    const why = "cmux is not running; open cmux, then run playground again"
+    expect(at(29_000, RUNNING, false, why)).not.toHaveProperty("done")
+    expect(at(30_000, RUNNING, false, why)).toEqual({
+      done: `the Dashboard's stack could not start: ${why} (waited 30s); see ops/dashboard/supervisor.log, then run playground again`,
+      ok: false,
+    })
+    expect(at(30_000, RUNNING, true, why)).toMatchObject({ ok: true })
+  })
+
+  test("a stale FAIL keeps the wait going, and the next roll's FAIL or answer ends it", () => {
+    const T = "2026-11-02T18:00:00Z"
+    const stale = `${T} RESTART abc1234 FAIL dev=DOWN (dev: refusing to start: no database) follower=running`
+    const read = (results: string[], api = false) =>
+      waitOutcome(
+        { api, beat: RUNNING, failure: startFailure(results, []), now: 60_000 },
+        { shownAt: 60_000, startedAt: 0 },
+      )
+    expect(read([stale])).toEqual({ progress: null })
+    expect(read([stale, `${T} DOWN dev: x`, stale])).toMatchObject({ ok: false })
+    expect(read([stale, `${T} DOWN dev: x`, `${T} RESTART abc1234 PASS v`], true)).toMatchObject({
+      ok: true,
+    })
   })
 
   test("ends after 15 minutes, as before", () => {
@@ -662,6 +707,75 @@ describe("waitOutcome", () => {
       done: "the Dashboard did not answer within 15 minutes; see ops/dashboard/supervisor.log, then run playground again",
       ok: false,
     })
+  })
+})
+
+describe("startFailure", () => {
+  const T = "2026-11-02T18:00:00Z"
+  const FOLLOWER = "follower=running follower: running entries: 12"
+  const ARMED = [`${T} supervisor armed at abc1234`]
+  const REFUSED = `${T} RESTART abc1234 FAIL dev=DOWN (dev: refusing to start: no single running Docker container publishes port 50300) ${FOLLOWER}`
+  const OPENED = `${T} DOWN dev: refusing to start`
+
+  test("reads a refused dev's reason in plain words, from a roll begun after the mark", () => {
+    expect(startFailure([OPENED, REFUSED], [])).toBe(
+      "no single running Docker container publishes port 50300",
+    )
+    expect(startFailure([`${T} START abc1234 FAIL build: error: tsc exited 2`], ARMED)).toBe(
+      "error: tsc exited 2",
+    )
+    expect(
+      startFailure(
+        [`${T} DOWN web: gone`, `${T} RESTART abc1234 FAIL web: next build exited 1`],
+        [],
+      ),
+    ).toBe("next build exited 1")
+  })
+
+  test("skips a FAIL from a roll begun before the mark: a RESTART with no DOWN after it, a START with no supervisor armed after it", () => {
+    expect(startFailure([REFUSED], [])).toBeNull()
+    expect(startFailure([`${T} START abc1234 FAIL build: error`], [])).toBeNull()
+    expect(startFailure([`${T} DOWN follower: lost the lock`, REFUSED], [])).toBeNull()
+    expect(
+      startFailure([REFUSED, OPENED, `${T} RESTART abc1234 PASS version=1 ${FOLLOWER}`], []),
+    ).toBeNull()
+    expect(startFailure([REFUSED, OPENED, REFUSED], [])).toBe(
+      "no single running Docker container publishes port 50300",
+    )
+  })
+
+  test("gives a dev that died with no reason in its log one, and is null for a newer PASS, a failure off the stack and DOWN or other lines alone", () => {
+    expect(startFailure([OPENED, `${T} RESTART abc1234 FAIL dev=DOWN () ${FOLLOWER}`], [])).toBe(
+      "its API exited with no reason in its log",
+    )
+    expect(
+      startFailure(
+        [OPENED, REFUSED, OPENED, `${T} RESTART abc1234 PASS version=1 verify=PASS ${FOLLOWER}`],
+        [],
+      ),
+    ).toBeNull()
+    expect(
+      startFailure(
+        [
+          OPENED,
+          REFUSED,
+          OPENED,
+          `${T} RESTART abc1234 FAIL version=1 verify=PASS follower=FAIL lost the lock`,
+        ],
+        [],
+      ),
+    ).toBeNull()
+    expect(
+      startFailure(
+        [
+          `${T} DOWN dev: refusing to start: gone`,
+          `${T} RESTART follower follower=running`,
+          `${T} ALIAS FAIL playground.localhost`,
+        ],
+        ARMED,
+      ),
+    ).toBeNull()
+    expect(startFailure([], ARMED)).toBeNull()
   })
 })
 

@@ -1,7 +1,7 @@
 import "@packages/env/aliases"
 import { mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { parseArgs } from "node:util"
 
 import { withPortlessCa } from "../portless-ca"
@@ -17,6 +17,7 @@ import {
   cursor,
   dashboardSocket,
   ended,
+  fixtureDirOf,
   fixtureOnly,
   health,
   type Label,
@@ -70,9 +71,9 @@ Checks (default: all)
                 the route's own error
   signin        the agent sign-in works and /api/v1/user is LocalAgent
   ws            the dashboard's WebSocket sends a well-formed workers frame
-  system        the machine's room for more workers, idle dev stacks, the usage windows and
-                what did not read, as the Dashboard's System panel shows them: what a lead
-                reads before it spawns
+  system        the machine's room for more workers and orchestrators, idle dev stacks,
+                the usage windows and what did not read, as the Dashboard's System panel
+                shows them: what a lead reads before it spawns
   ended <name>  the session reads Ended as the Dashboard shows it: the roster's ended and no
                 live session of its name (a herdr session's included), failing while live
                 sessions or a herdr server could not be read; what a lead outside herdr
@@ -84,9 +85,10 @@ Checks (default: all)
                 each route at 1280 loads with a screen recorder extension's node in body, a div
                 with a shadow root as Scrnli adds it while the page streams, after the theme
                 script, and Next's dev overlay counts no issue
-  reply-focus   on /dashboard at 1280x800, Chat about it on an Inbox card puts focus in Playground's
-                box in the click's own frame, so a paste sent at once lands there; it posts the
-                card into this checkout's database with bun run ask and settles it after, so it
+  reply-focus   on /dashboard at 1280x800, Reply on an Inbox card with an empty box puts focus in
+                the composer, reading re #iN:, in the click's own frame, so a paste sent at once lands
+                there; it posts the card into this checkout's database with bun run ask, then empties
+                the composer and settles the card, sending nothing, so it
                 needs a fixture stack whose database is this checkout's own (all skips it on
                 any other)
   send-focus    on /dashboard at 1280x800, a real click on Send leaves focus in Playground's box
@@ -104,7 +106,8 @@ Checks (default: all)
                 the footer is 32px, every row's and member row's words fit its box and none
                 runs past its padded edge, no first-line label ends in an ellipsis at the
                 stock width, and no row covers another, so a row never grows or draws over
-                its neighbours
+                its neighbours, and the sidebar body is never wider than it shows, so it
+                scrolls only up and down
   screenshots   each route, full page, at 1280x800, 1782x972 and 390x844, light then dark
                 (named -dark), named before-* or after-* by --label; only on a stack whose
                 /api/health reports dashboard: fixture, since any other shows live sessions
@@ -448,14 +451,9 @@ const layoutShifts = (at: Target, inAll = false) =>
 // The phone's width as well as the dashboard's, since the composer and the stream share a short screen there.
 const CHAT_VIEWPORTS = [VIEWPORTS[0]!, { height: 844, width: 390 }]
 
-// The fixture's scratch folder the reply checks write to, as the launcher names it (fixtureDir in api/hono/src/lib/dashboard/fixture.ts): only this checkout's own stack's, so a stack named by --web and --api skips them.
+// The fixture's scratch folder the reply checks write to (fixtureDirOf): only this checkout's own stack's, so a stack named by --web and --api skips them.
 const ROOT = join(import.meta.dir, "../../../..")
-const fixture =
-  values.web || values.api
-    ? null
-    : process.env.PLAYGROUND_FIXTURE_DIR
-      ? resolve(ROOT, process.env.PLAYGROUND_FIXTURE_DIR)
-      : join(ROOT, ".turbo/dashboard-fixture")
+const fixture = values.web || values.api ? null : fixtureDirOf(process.env, ROOT)
 
 const sendTops = (at: Target) =>
   guard("send-top", async () => {

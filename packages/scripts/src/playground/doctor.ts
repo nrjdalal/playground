@@ -3,7 +3,12 @@
 import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { proxyRefusal } from "../../../../api/hono/src/lib/dev/proxy"
+import {
+  FALLBACK_PORT,
+  portlessDir,
+  proxyDown,
+  serviceDir,
+} from "../../../../api/hono/src/lib/dev/proxy"
 import { readPolicyFile } from "../../../settings/src/rendered"
 import { assetOf, herdrPath, PIN_SOURCE, pinnedSum } from "../ops-herdr/pin"
 import { checkHerdr } from "./herdr-pin"
@@ -108,13 +113,13 @@ export const herdrCheck = (path: string, want: string, version: string, own: str
         existsSync(path) ? `${path} is not the pinned ${version}` : `${path} is missing`,
       )
 
-// portless's proxy, which serves the Dashboard's https://playground.localhost: ok by the stack's own rule, proxyRefusal, so doctor passes what `bun run dev` would start on; install.sh sets it up with the Mac's password.
-export const proxyCheck = (repo: string, refusal: string | null): Check =>
+// portless's proxy, which serves the Dashboard's https://playground.localhost: ok by the stack's own rule, proxyDown, and optional while it is down, since `bun run dev` then starts it on FALLBACK_PORT with no password; Settings' Things to fix or install.sh sets it up with the Mac's password.
+export const proxyCheck = (repo: string, down: number | null): Check =>
   check(
     "portless proxy",
-    true,
-    refusal === null,
-    `run bash ${repo}/install.sh again in a terminal, which asks for your Mac's password once`,
+    false,
+    down === null,
+    `the Dashboard runs on port ${FALLBACK_PORT} meanwhile; click Set up the web address in Settings' Things to fix, or run bash ${repo}/install.sh again in a terminal, which asks for your Mac's password once`,
     "the Dashboard's https://playground.localhost",
   )
 
@@ -201,7 +206,7 @@ export const doctor = async (repo: string, home: string, data: string): Promise<
   ),
   ...(process.platform === "darwin"
     ? [
-        proxyCheck(repo, await proxyRefusal(process.env)),
+        proxyCheck(repo, await proxyDown(process.env, serviceDir(portlessDir()))),
         ...(await launchdChecks(data, (label) =>
           exitsZero(["launchctl", "print", `gui/${process.getuid!()}/${label}`]),
         )),

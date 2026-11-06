@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { chmodSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 
@@ -23,7 +23,7 @@ test("the dispatcher reads the Dashboard by /api/health and the Inbox by bun run
     'R="${PLAYGROUND_REPO:-$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")}"',
   )
   expect(step).toContain("playground settings get live.branch")
-  expect(step).toContain('git -C "$R" worktree list --porcelain')
+  expect(step).toContain('git -C "$R" worktree list | grep -F "[$B]"')
   expect(step).toContain('[ -n "$D" ] || {')
   expect(step).toContain("`dashboardCheckout()`")
   expect(step).toContain("a session the Dashboard hosts gets no `PLAYGROUND_REPO`")
@@ -94,6 +94,7 @@ const fixtureRepo = () => {
   git("worktree", "add", "-q", "-b", "live-old", join(repo, ".claude", "worktrees", "old"))
   git("worktree", "add", "-q", "-b", "live", join(repo, ".claude", "worktrees", "desk"))
   git("worktree", "add", "-q", "--detach", join(repo, ".claude", "worktrees", "loose"))
+  symlinkSync(join(import.meta.dir, "../../../api"), join(repo, "api"))
   return realpathSync(repo)
 }
 

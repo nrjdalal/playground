@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs"
@@ -20,6 +21,7 @@ import {
   submitCode,
   urlOf,
 } from "../../../../../../api/hono/src/lib/accounts/claude-setup"
+import { MARKER } from "../../../../../../packages/safe-delete/src"
 import { readSetting } from "../../../../../../packages/settings/src/settings-folder"
 import { liveReads } from "../../../../../live-reads"
 
@@ -140,7 +142,14 @@ describe("the guided Claude sign-in", () => {
     expect(started.browser).toBeNull()
     const kept = await submitCode(started.id, "made-up-code", who, { ...fakes, data })
     expect(kept).toEqual({
-      account: { email: EMAIL, key: EMAIL, label: "work", provider: "claude", stored: true },
+      account: {
+        email: EMAIL,
+        key: EMAIL,
+        label: "work",
+        own: false,
+        provider: "claude",
+        stored: true,
+      },
       confirmed: true,
       ok: true,
     })
@@ -298,7 +307,7 @@ describe("the guided Claude sign-in", () => {
     expect(logged()).toContain(
       `open -na Google Chrome --args --user-data-dir=${profile} --no-first-run ${started.url}\n`,
     )
-    expect(existsSync(profile)).toBe(true)
+    expect(existsSync(join(profile, MARKER))).toBe(true)
     writeFileSync(log, "")
     expect(await openPrivate(started.id, { ...fakes, applications: apps() })).toEqual({
       browser: null,
@@ -325,6 +334,22 @@ describe("the guided Claude sign-in", () => {
     expect(existsSync(profile)).toBe(true)
     await submitCode(started.id, "refused", who, { ...fakes, data })
     expect(existsSync(profile)).toBe(false)
+  })
+
+  test("a profile folder without the scratch marker is not removed, and the sign-in still ends", async () => {
+    const data = fresh()
+    const applications = apps("Firefox")
+    const started = await startSetup({ email: EMAIL }, { ...fakes, applications, data })
+    if (!started.ok) throw new Error(started.message)
+    await openPrivate(started.id, { ...fakes, applications })
+    const profile = profileIn(logged())
+    renameSync(join(profile, MARKER), join(profile, "moved-marker"))
+    const answer = await submitCode(started.id, "refused", who, { ...fakes, data })
+    expect(answer.ok).toBe(false)
+    expect(existsSync(join(profile, "moved-marker"))).toBe(true)
+    expect(await submitCode(started.id, "made-up-code", who, { ...fakes, data })).toMatchObject({
+      status: 404,
+    })
   })
 
   test("Safari alone opens nothing, so the page offers the link to copy", async () => {

@@ -121,6 +121,30 @@ describe("gatesOf", () => {
     expect(gate?.detail).toContain("git merge origin/canary")
   })
 
+  test("a squash whose lost lines all sit in scripts/hooks/bundled names bundles rebuilt inside the merge, and the redo (#673)", () => {
+    const lost = [
+      { commit: CANARY, line: 4, path: "scripts/hooks/bundled/no-stash.js" },
+      { commit: CANARY, line: 9, path: "scripts/hooks/bundled/no-raw-spawn.js" },
+    ]
+    const gate = gatesOf(facts({ lost })).find((g) => g.name === "keeps canary")
+    expect(gate).toMatchObject({ ok: false })
+    expect(gate?.detail).toContain("scripts/hooks/bundled/no-stash.js (dropped in 6f3db1e)")
+    expect(gate?.detail).toContain("bundles rebuilt inside the merge")
+    expect(gate?.detail).toContain(
+      "commit the merge with canary's bundles as they are, then run `bun run hooks:bundle` and commit the rebuild on its own",
+    )
+  })
+
+  test("a squash with a lost line outside scripts/hooks/bundled keeps the plain redo (#673)", () => {
+    const lost = [
+      { commit: CANARY, line: 4, path: "scripts/hooks/bundled/no-stash.js" },
+      { commit: CANARY, line: 9, path: "a.ts" },
+    ]
+    const gate = gatesOf(facts({ lost })).find((g) => g.name === "keeps canary")
+    expect(gate?.detail).toContain("git merge origin/canary")
+    expect(gate?.detail).not.toContain("bundles rebuilt inside the merge")
+  })
+
   test("a squash it could not read refuses, saying why", () => {
     const gate = gatesOf(facts({ lost: "git rev-list exited 128" })).find(
       (g) => g.name === "keeps canary",
@@ -146,6 +170,14 @@ describe("gatesOf", () => {
   test("a body that is not the PR template refuses, and one never read is not judged", () => {
     expect(failing({ body: "Closes #2410" })).toEqual(["body"])
     expect(gatesOf(facts()).some((gate) => gate.name === "body")).toBe(false)
+  })
+
+  test("the body gate refuses a changed doc the Evidence leaves out, from the PR's files", () => {
+    const gate = gatesOf(facts({ body: SKILL_BODY })).find((g) => g.name === "body")
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("AGENTS.md")
+    const named = SKILL_BODY.replace("**After:** one.", "**After:** one. `AGENTS.md` checked.")
+    expect(gatesOf(facts({ body: named })).find((g) => g.name === "body")?.ok).toBe(true)
   })
 
   test("the body gate refuses an Outcome line in a PR's TL;DR, naming it", () => {

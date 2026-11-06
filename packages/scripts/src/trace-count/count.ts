@@ -32,13 +32,14 @@ export type Kept = {
   reason: string
 }
 
-// Left out of the seed, so never counted: these counts and the kept hits, whose lines hold the hits they keep, the files that define the old names, and core's upstream skills, whose text is upstream's.
+// Left out of the seed, so never counted: these counts and the kept hits, whose lines hold the hits they keep, the files that define the old names, core's upstream skills, whose text is upstream's, and the guards' bundles, built from sources counted here.
 export const LEFT_OUT = [
   /^packages\/scripts\/src\/rename\/rules\.ts$/,
   /^packages\/scripts\/src\/trace-count\/counts\.json$/,
   /^packages\/scripts\/src\/trace-count\/kept\.json$/,
   /^packages\/scripts\/src\/trace-count\/kinds\.ts$/,
   new RegExp(`^extensions/core/(upstream|skills/(${UPSTREAM_SKILLS.join("|")}))/`),
+  /^scripts\/hooks\/bundled\//,
 ]
 
 // In the seed but never counted, nor swapped: a lockfile, whose integrity hashes can spell a list value by chance and break the install when rewritten.
@@ -142,9 +143,61 @@ export const risen = (now: Counts, baseline: Counts): string[] =>
     ]
   })
 
-// The refusal for the risen lines, naming the fix where a kind has one.
-export const refusal = (over: string[]): string =>
-  `trace-count: a count rose; write the new text in plain words${over.some((line) => line.startsWith("issueRefs:")) ? "; describe the case in words; a doc cites no issue number" : ""}:\n${over.join("\n")}`
+// The refusal for the risen lines, naming the fix where a kind has one, then each file and line located found.
+export const refusal = (over: string[], at: string[] = []): string =>
+  `trace-count: a count rose; write the new text in plain words${over.some((line) => line.startsWith("issueRefs:")) ? "; describe the case in words; a doc cites no issue number" : ""}:\n${[...over, ...at].join("\n")}`
+
+// Each line holding a hit of one of the kinds, as path:line: kind, past the paths never counted and the lines kept.json keeps while they hold no more than its hits; for each kind, the changed files' alone when they hold one, since a kind's floor can hold many older hits.
+export function located(
+  files: File[],
+  wanted: Kind[],
+  list: PublicList = EMPTY_LIST,
+  repos: Repos = UNSET_REPOS,
+  kept: Kept[] = [],
+  changed: string[] = [],
+): string[] {
+  const near = files.filter((file) => changed.includes(file.path))
+  return patterns(list, repos)
+    .filter(([kind]) => wanted.includes(kind))
+    .flatMap((kind) => {
+      const own = locatedIn(near, [kind], repos, kept)
+      return own.length > 0 ? own : locatedIn(files, [kind], repos, kept)
+    })
+}
+
+const locatedIn = (from: File[], kinds: [Kind, RegExp][], repos: Repos, kept: Kept[]) =>
+  from.flatMap(({ path, text }) =>
+    [...LEFT_OUT, ...LOCKFILES].some((re) => re.test(path))
+      ? []
+      : text.split("\n").flatMap((line, i) =>
+          Object.entries(hitsIn(path, line, kinds, repos))
+            .filter(
+              ([kind, n]) =>
+                n &&
+                !kept.some(
+                  (entry) =>
+                    entry.kind === kind &&
+                    entry.path === path &&
+                    entry.line === line.trim() &&
+                    n <= entry.hits,
+                ),
+            )
+            .map(([kind]) => `${path}:${i + 1}: ${kind}`),
+        ),
+  )
+
+// The files the index or the working tree changes against HEAD, which located names first.
+export const changedFiles = (root: string): string[] => {
+  const diff = Bun.spawnSync(["git", "diff", "HEAD", "--name-only", "-z"], {
+    cwd: root,
+    env: { ...process.env },
+  })
+  return diff.exitCode === 0 ? diff.stdout.toString().split("\0").filter(Boolean) : []
+}
+
+// The kinds the risen lines name.
+export const risenKinds = (over: string[]): Kind[] =>
+  over.map((line) => line.slice(0, line.indexOf(":")) as Kind)
 
 // The baseline with each measured kind lowered to its count; a kind this run did not measure keeps its count.
 export const lowered = (now: Counts, baseline: Counts): Counts =>
@@ -159,12 +212,10 @@ export const lowered = (now: Counts, baseline: Counts): Counts =>
 
 const SKIPPED = /(?:^|\/)(?:\.git|\.next|\.turbo|coverage|dist|node_modules)\//
 
-// The tree's text files: git's tracked and untracked ones where a .git is, else every file but build output and installs (the runner box's copy, which holds no ignored file).
+// The tree's text files: the ones git's index holds, tracked or staged, where a .git is, so a harness's untracked output never counts (git reads process.env as it is now, which Bun's default spawn env does not); else every file but build output and installs (the runner box's copy, which holds no ignored file).
 export async function tree(root: string): Promise<File[]> {
   const listed = existsSync(join(root, ".git"))
-    ? Bun.spawnSync(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
-        cwd: root,
-      })
+    ? Bun.spawnSync(["git", "ls-files", "-z", "--cached"], { cwd: root, env: { ...process.env } })
     : undefined
   const paths =
     listed?.exitCode === 0

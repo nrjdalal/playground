@@ -7,7 +7,9 @@ export const FIX_IDS = [
   "git",
   "herdr",
   "node",
+  "proxy",
   "python",
+  "trust",
 ] as const
 export type FixId = (typeof FIX_IDS)[number]
 export const fixtureFixed = new Set<FixId>()

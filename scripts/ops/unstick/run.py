@@ -28,6 +28,7 @@ HERE = os.path.join(OPS, "unstick")
 CYCLE = 120
 QUIET_READ = 60
 REALERT = 600
+LIMIT_SUMMARY = 3600  # a limit block's alert goes once, then one summary an hour while any holds
 LIMIT_KINDS = ("usage-limit", "usage-limit-stuck")  # a session at its usage limit, or one still showing it past its reset
 STALL = 600
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -228,10 +229,27 @@ def limit_targets(name, transcript):
     return [alert_to(name, transcript)] if kind_of(name) == "probe" else ["builder", "dispatcher"]
 
 
+def most_room(skip):
+    """The account with the most of its week left in usage.json's accounts map, the readings login-flip picks from (a week past its reset
+    counts as 0), other than skip, as (account, week %); None when none is under 100%."""
+    best = None
+    for acct, a in own_accounts().items():
+        if acct == skip or not isinstance(a, dict):
+            continue
+        week, reset = a.get("week"), a.get("weekReset")
+        if isinstance(reset, (int, float)) and time.time() >= reset:
+            week = 0
+        if isinstance(week, (int, float)) and week < 100 and (best is None or week < best[1]):
+            best = (acct, week)
+    return best
+
+
 def limit_alert(name, line, transcript=None):
-    """A session at its usage limit goes to the builder and dispatcher at once, since the owner does not slow down at a limit (
-    the limit ends"), a probe's to its spawner. The script takes no option on the dialog: a key other than Escape is not its to press (**voice**)."""
-    msg = f"{name} is at its usage limit and is not continuing: {line}. No slowing down at a limit; decide its next step now (another account through spawn.sh resume --account)."
+    """A session at its usage limit goes to the builder and dispatcher once a block, naming the account with the most room, since the owner
+    does not slow down at a limit, a probe's to its spawner. The script takes no option on the dialog: a key other than Escape is not its to press (**voice**)."""
+    target = most_room(session_account(name))
+    move = f"Most room: {target[0]} (week {target[1]:g}%)" if target else "No account in usage.json's accounts has room"
+    msg = f"{name} is at its usage limit and is not continuing: {line}. {move}; decide its next step now (another account through spawn.sh resume --account)."
     for to in limit_targets(name, transcript):
         notify(msg, to=to)
 
@@ -350,7 +368,8 @@ def room(name):
         return False, "a GLM session, which no usage file reads"
     u = readings().get(acct)
     if not u:
-        return False, "no usage file reads " + (acct or "this machine's own login")
+        week = ((own_accounts().get(acct) or {}) if acct else {}).get("week")
+        return False, f"no fresh usage file reads {acct} (usage.json's accounts: 7d {week}%)" if isinstance(week, (int, float)) else "no usage file reads " + (acct or "this machine's own login")
     try:
         fresh = time.time() - calendar.timegm(time.strptime(u["writtenAt"], "%Y-%m-%dT%H:%M:%SZ")) < 900
         used = {label: (u["rate_limits"].get(w) or {}).get("used_percentage") for label, w in (("5h", "five_hour"), ("7d", "seven_day"))}
@@ -359,6 +378,15 @@ def room(name):
     used = {label: pct for label, pct in used.items() if isinstance(pct, (int, float))}
     ok = fresh and "7d" in used and all(pct < 100 for pct in used.values())
     return ok, f"{acct}: " + ", ".join(f"{label} {pct}%" for label, pct in used.items())
+
+
+def own_accounts():
+    """usage.json's accounts map, each account's week as login-flip reads it; {} when it does not read."""
+    try:
+        accounts = json.load(open(os.path.join(LW, "usage.json"))).get("accounts")
+    except (OSError, ValueError, AttributeError):
+        return {}
+    return accounts if isinstance(accounts, dict) else {}
 
 
 def ago(t):
@@ -400,6 +428,8 @@ def stall(live, state):
 # dispatcher, 8 Oct (load 80 on 15 cores, the dashboard 5.7s): at most 2 heavy jobs at once (3 while slot 3 is open). A heavy job is a full suite, a
 # build or type check, or a dev stack other than the live dashboard's. slot_alerts says which of them raise the outside-slot alert.
 HEAVY = re.compile(r"(NODE_ENV=test bun test|(^|/)bun test tests|bun run test(:skills)?\b|turbo run (build|check-types)|api/hono/src/bin/dev\.ts)")
+# precommit:light runs outside the slots by rule (scripts/ops/README.md) and its checks (trace-count's test, env-keys' one-package build) take seconds, so nothing under it is a job or counts toward the cap
+PRECOMMIT_LIGHT = re.compile(r"^(\S*/)?bun\s+(\S*/)?packages/scripts/src/precommit-light\.ts(\s|$)")
 
 
 ORGS = None
@@ -456,6 +486,8 @@ def heavy_jobs(rows=None):
             p = parent.get(p)
         # one job per tree: skip a heavy process whose ancestor is itself a heavy process already counted
         if any(a in cmds and HEAVY.search(cmds[a]) for a in chain):
+            continue
+        if any(PRECOMMIT_LIGHT.match(cmds.get(a, "")) for a in chain):
             continue
         cwd = subprocess.run(["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"], capture_output=True, text=True, timeout=10).stdout
         # a self-hosted runner's CI job runs the workflow's own steps, so it takes no run slot; it still counts toward the cap
@@ -765,6 +797,9 @@ def api_stop_alerts(state, found, now_t):
 # dispatcher, 15 Oct: worker-sure-note's harness held run-slot-3 at 0% CPU for 35 minutes after it moved on; a holder whose run used under
 # SLOT_IDLE_CPU seconds of CPU in SLOT_IDLE seconds is flagged to the builder once
 SLOT_IDLE, SLOT_IDLE_CPU = 900, 2.0
+# PG-731: a bun install downloads at near 0% CPU for up to about 31 minutes, and macOS's ps reports no I/O to tell it is moving, so a tree with a bun install process running (its own command, not a wrapper's argv) waits SLOT_IDLE_INSTALL instead
+SLOT_IDLE_INSTALL = 2700
+INSTALL = re.compile(r"^(?:\S*/)?bun\s+(?:add|i|install)(?:\s|$)")
 
 
 def cpu_seconds(t):
@@ -802,14 +837,19 @@ def slot_idle_alerts(state, now_t):
             c = todo.pop()
             tree.append(c)
             todo += kids.get(c, [])
-        total = sum(cpu.get(c, 0.0) for c in tree)
+        # ps reads CPU time in hundredths, so the sum is rounded to them and the same times never read as a drop
+        total = round(sum(cpu.get(c, 0.0) for c in tree), 2)
         key = f"{slot}:{pid}"
         e = prev.get(key)
-        if not e or total - e["cpu"] >= SLOT_IDLE_CPU:
-            cur[key] = {"cpu": total, "since": now_t, "told": False}
+        # a total below the saved one means a step exited and took its CPU time with it, so the next step is measured from the new total
+        # a pid the last check did not see started since, so its run is younger than the wait; an entry with no pids reads as this tree
+        if not e or total - e["cpu"] >= SLOT_IDLE_CPU or total < e["cpu"] or set(tree) - set(e.get("pids", tree)):
+            cur[key] = {"cpu": total, "pids": sorted(tree), "since": now_t, "told": False}
             continue
+        e["pids"] = sorted(tree)
         cur[key] = e
-        if now_t - e["since"] >= SLOT_IDLE:
+        idle = SLOT_IDLE_INSTALL if any(INSTALL.search(cmd.get(c, "")) for c in tree) else SLOT_IDLE
+        if now_t - e["since"] >= idle:
             top = " ".join((cmd.get(kids.get(pid, [""])[0], "") or "?").split())[:90]
             line = f"{who} holds {slot} with a run idle at 0% CPU for {ago(e['since'])} (pid {pid}: {top}); stop it if it is done, and run a server outside run-slot"
             out.append({"at": now(), "kind": "slot-idle", "line": line, "name": who, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(e["since"]))})
@@ -947,7 +987,7 @@ def cycle(state):
                 prev = state["blocks"].get(key, {})
                 blocks[key] = {"account": session_account(name), "kind": "usage-limit-stuck", "line": f"{stuck[0]} (still showing {int(stuck[1] // 60)}m after that reset; nudge it)", "name": name,
                                "since": prev.get("since", now_t), "alerted": prev.get("alerted", 0), "surface": s["surface_id"], "workspace": s["workspace_id"]}
-                if now_t - blocks[key]["alerted"] >= REALERT and not held_for_move("usage-limit-stuck", mover):
+                if not blocks[key]["alerted"] and not held_for_move("usage-limit-stuck", mover):
                     blocks[key]["alerted"] = now_t
                     limit_alert(name, blocks[key]["line"], s.get("transcript_path"))
             continue
@@ -978,7 +1018,8 @@ def cycle(state):
         blocks[key] = {"kind": kind, "line": line, "name": name, "since": since, "alerted": prev.get("alerted", 0), "surface": s["surface_id"], "workspace": s["workspace_id"]}
         if kind in LIMIT_KINDS:
             blocks[key]["account"] = session_account(name)  # ops-tick's limitWatch names it to the builder
-        if now_t - blocks[key]["alerted"] >= REALERT and not held_for_move(kind, mover) and not (kind != "usage-limit" and hook_owned(s["session_id"])):
+        due = not blocks[key]["alerted"] if kind in LIMIT_KINDS else now_t - blocks[key]["alerted"] >= REALERT
+        if due and not held_for_move(kind, mover) and not (kind != "usage-limit" and hook_owned(s["session_id"])):
             blocks[key]["alerted"] = now_t
             msg = f"{name} is blocked on a {kind} prompt, waiting {ago(since)}: {line}"
             if kind == "permission":
@@ -989,6 +1030,15 @@ def cycle(state):
                 notify(msg, to=alert_to(name, s.get("transcript_path")))
             log(msg)
     state["blocks"] = blocks
+    # a limit block's own alert went once; while any alerted one holds, the builder and dispatcher get one summary an hour (a move's dispatcher gets its own, below)
+    if mover or not any(b["kind"] in LIMIT_KINDS and b["alerted"] for b in blocks.values()):
+        state.pop("limitSummaryAt", None)
+    elif now_t - state.setdefault("limitSummaryAt", now_t) >= LIMIT_SUMMARY:
+        state["limitSummaryAt"] = now_t
+        summary = move_summary(blocks)
+        for to in ("builder", "dispatcher"):
+            notify(summary, to=to)
+        log(f"limit summary: {summary}")
     # during a move each session's limit alert waits, and the move's dispatcher gets one summary every REALERT instead; the alerts come back once move.json ends
     if not mover:
         state.pop("moveAlerted", None)

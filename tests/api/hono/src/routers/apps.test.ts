@@ -1,15 +1,22 @@
-import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 // The router's auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets; any secret serves requests that carry no session. Set before the router loads.
 process.env.BETTER_AUTH_SECRET ||= "apps-router-test-secret-not-for-use-anywhere"
-const { appsRouter, orderBodySchema, orderLimiter, servePreview } =
+const { appsRouter, deleteLimiter, orderBodySchema, orderLimiter, servePreview } =
   await import("../../../../../api/hono/src/routers/apps")
 const { readPreview } = await import("../../../../../api/hono/src/lib/apps/previews")
 const { Hono } = await import("../../../../../api/hono/node_modules/hono")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
+// Resolved from the API's own source, so the test holds the same auth instance the middlewares do.
+const { auth } = await import(
+  Bun.resolveSync(
+    "@packages/auth",
+    new URL("../../../../../api/hono/src", import.meta.url).pathname,
+  )
+)
 
 // Validated, the setting is a list; with validation skipped, as in CI, it is the raw comma-separated string.
 const trusted = (): string => {
@@ -36,9 +43,38 @@ const reorder = (headers: Record<string, string>, server?: ReturnType<typeof pee
     server,
   )
 
+// A page's delete, as the Pages tab sends it.
+const remove = (name: string, headers: Record<string, string>, server?: ReturnType<typeof peer>) =>
+  appsRouter.request(`http://127.0.0.1/previews/${name}`, { headers, method: "DELETE" }, server)
+
+// Stands in for Better Auth's session read: authMiddleware asks with returnHeaders and takes { headers, response }, requireConsoleRole asks without and takes the session.
+const signedIn = (role: string) =>
+  spyOn(auth.api, "getSession").mockImplementation((async (options: {
+    returnHeaders?: boolean
+  }) => {
+    const session = {
+      session: { id: "s-pages", userId: `u-${role}` },
+      user: { banned: false, id: `u-${role}`, role },
+    }
+    return options.returnHeaders ? { headers: new Headers(), response: session } : session
+  }) as never)
+
+let spy: { mockRestore: () => void } | null = null
+afterEach(() => {
+  spy?.mockRestore()
+  spy = null
+})
+
 describe("the apps routes", () => {
   test("every route turns away a request with no session", async () => {
-    for (const path of ["/plan", "/previews", "/previews/spinner-preview.html", "/usage"]) {
+    for (const path of [
+      "/plan",
+      "/previews",
+      "/previews/spinner-preview.html",
+      "/previews/spinner-preview.html?download=1",
+      "/previews/sidebar-mock.pdf?download=1",
+      "/usage",
+    ]) {
       expect((await request(path)).status).toBe(401)
     }
   })
@@ -55,6 +91,120 @@ describe("the apps routes", () => {
 
   test("a board order from the dashboard's own page on this machine still needs a session", async () => {
     expect((await reorder({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
+  })
+})
+
+describe("the page delete route", () => {
+  // The owner's session is stubbed in the origin and machine cases, so each 403 can come only from guardWrites.
+  test("refuses a request with no origin before the session is read", async () => {
+    spy = signedIn("owner")
+    expect((await remove("lookup.html", {}, peer("127.0.0.1"))).status).toBe(403)
+  })
+
+  test("refuses an untrusted origin before the session is read", async () => {
+    spy = signedIn("owner")
+    const at = { origin: "http://evil.localhost" }
+    expect((await remove("lookup.html", at, peer("127.0.0.1"))).status).toBe(403)
+  })
+
+  test("refuses a request from another machine before the session is read", async () => {
+    spy = signedIn("owner")
+    expect((await remove("lookup.html", { origin: trusted() }, peer("192.168.1.20"))).status).toBe(
+      403,
+    )
+  })
+
+  test("refuses a request whose peer cannot be read", async () => {
+    spy = signedIn("owner")
+    expect((await remove("lookup.html", { origin: trusted() })).status).toBe(403)
+  })
+
+  test("refuses a request with no session", async () => {
+    expect((await remove("lookup.html", { origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
+  })
+
+  test("refuses a session below the owner rung", async () => {
+    spy = signedIn("admin")
+    expect((await remove("lookup.html", { origin: trusted() }, peer("127.0.0.1"))).status).toBe(403)
+  })
+
+  test("the route passes its limiter, behind the router's guards", () => {
+    const handlers = appsRouter.routes
+      .filter((r) => r.method === "DELETE" && r.path === "/previews/:name")
+      .map((r) => r.handler)
+    expect(handlers).toContain(deleteLimiter)
+  })
+
+  test("the owner deletes a page pages.jsonl names, and a name that names no page is a 404 that leaves every file", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dashboard-previews-delete-"))
+    const saved = {
+      dir: process.env.PLAYGROUND_PREVIEWS_DIR,
+      live: process.env.PLAYGROUND_LIVE_READS,
+    }
+    try {
+      Object.assign(process.env, { PLAYGROUND_LIVE_READS: "1", PLAYGROUND_PREVIEWS_DIR: dir })
+      writeFileSync(join(dir, "lookup.html"), "<p>hi</p>")
+      writeFileSync(join(dir, "lookup.txt"), "Lookup\n")
+      writeFileSync(join(dir, "shot.html"), "<p>not kept</p>")
+      writeFileSync(
+        join(dir, "pages.jsonl"),
+        `${JSON.stringify({ at: "2026-11-03T10:00:00.000Z", by: "planner", file: "lookup.html", for: null, title: "Lookup" })}\n`,
+      )
+      spy = signedIn("owner")
+      const at = { origin: trusted() }
+      for (const name of ["shot.html", "missing.html", "..%2Flookup.html", "lookup.txt"]) {
+        expect((await remove(name, at, peer("127.0.0.1"))).status).toBe(404)
+      }
+      expect(existsSync(join(dir, "shot.html"))).toBe(true)
+      const deleted = await remove("lookup.html", at, peer("127.0.0.1"))
+      expect(deleted.status).toBe(200)
+      expect(await deleted.json()).toEqual({ data: { name: "lookup.html" } })
+      expect(existsSync(join(dir, "lookup.html"))).toBe(false)
+      expect(existsSync(join(dir, "lookup.txt"))).toBe(false)
+      expect((await remove("lookup.html", at, peer("127.0.0.1"))).status).toBe(404)
+    } finally {
+      for (const [key, value] of [
+        ["PLAYGROUND_PREVIEWS_DIR", saved.dir],
+        ["PLAYGROUND_LIVE_READS", saved.live],
+      ] as const) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+    }
+  })
+
+  test("the owner's ?download saves a page under its title through the router, and without it the page shows inline (#821)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dashboard-previews-route-download-"))
+    const saved = {
+      dir: process.env.PLAYGROUND_PREVIEWS_DIR,
+      live: process.env.PLAYGROUND_LIVE_READS,
+    }
+    try {
+      Object.assign(process.env, { PLAYGROUND_LIVE_READS: "1", PLAYGROUND_PREVIEWS_DIR: dir })
+      writeFileSync(join(dir, "lookup.html"), "<p>hi</p>")
+      writeFileSync(
+        join(dir, "pages.jsonl"),
+        `${JSON.stringify({ at: "2026-11-03T10:00:00.000Z", by: "planner", file: "lookup.html", for: null, title: "Lookup: weekly" })}\n`,
+      )
+      spy = signedIn("owner")
+      const download = await request("/previews/lookup.html?download=1")
+      expect(download.status).toBe(200)
+      expect(download.headers.get("content-disposition")).toBe(
+        "attachment; filename=\"Lookup weekly.html\"; filename*=UTF-8''Lookup%20weekly.html",
+      )
+      const shown = await request("/previews/lookup.html")
+      expect(shown.status).toBe(200)
+      expect(shown.headers.get("content-disposition")).toBe("inline")
+    } finally {
+      for (const [key, value] of [
+        ["PLAYGROUND_PREVIEWS_DIR", saved.dir],
+        ["PLAYGROUND_LIVE_READS", saved.live],
+      ] as const) {
+        if (value === undefined) delete process.env[key]
+        else process.env[key] = value
+      }
+      rmSync(dir, { force: true, recursive: true })
+    }
   })
 })
 
@@ -119,6 +269,44 @@ describe("servePreview", () => {
       }
     } finally {
       rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  test("with download a file saves under the name it gives, and a name outside the folder is a 404 that asks for no name (#783)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dashboard-previews-download-"))
+    const outside = mkdtempSync(join(tmpdir(), "dashboard-previews-outside-"))
+    try {
+      writeFileSync(join(dir, "spin.html"), "<p>hi</p>")
+      writeFileSync(join(dir, "spin.pdf"), "%PDF-1.4\n%%EOF\n")
+      writeFileSync(join(outside, "secret.pdf"), "%PDF-1.4\n%%EOF\n")
+      const named: string[] = []
+      const download = async (name: string) => {
+        named.push(name)
+        return name === "spin.pdf" ? "Spinner, both speeds.pdf" : "Spinner, both speeds.html"
+      }
+      const read = (name: string) => readPreview(name, dir)
+      const page = await servePreview("spin.html", read, [], download)
+      expect(page.headers.get("content-disposition")).toBe(
+        "attachment; filename=\"Spinner, both speeds.html\"; filename*=UTF-8''Spinner%2C%20both%20speeds.html",
+      )
+      expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8")
+      const pdf = await servePreview("spin.pdf", read, [], download)
+      expect(pdf.headers.get("content-type")).toBe("application/pdf")
+      expect(pdf.headers.get("content-disposition")).toStartWith(
+        'attachment; filename="Spinner, both speeds.pdf"',
+      )
+      expect(named).toEqual(["spin.html", "spin.pdf"])
+      const outsideName = `../${outside.split("/").at(-1)}/secret.pdf`
+      for (const name of [outsideName, "../spin.pdf", `${outside}/secret.pdf`]) {
+        const gone = await servePreview(name, read, [], download).catch(
+          (thrown: { status: number }) => thrown,
+        )
+        expect(gone).toMatchObject({ status: 404 })
+      }
+      expect(named).toEqual(["spin.html", "spin.pdf"])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+      rmSync(outside, { force: true, recursive: true })
     }
   })
 })

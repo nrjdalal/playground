@@ -211,6 +211,15 @@ const DRAWING = new Set(["", "ascii", "text", "txt"])
 
 const MEASURE_PX = 100
 
+// The stock added line is muted gray, which reads as a highlight; it takes the success tint, as removed takes the destructive one.
+const ADDED = "bg-success/10 after:text-success"
+
+// A diff's added or removed line takes code-block's own variant, whose marker shows its sign, so its text drops the sign; a file header (--- or +++) stays a plain line.
+const diffLine = (line: string) =>
+  /^(\+\+\+|---)( |$)/.test(line) || !/^[+-]/.test(line)
+    ? null
+    : { text: line.slice(1), variant: line[0] === "+" ? ("added" as const) : ("removed" as const) }
+
 // A drawing's widest line in em, measured in its own font with pretext once the fonts load; null until then, and off the card.
 function useWidestEm(code: string, drawing: boolean, pre: RefObject<HTMLPreElement | null>) {
   const [em, setEm] = useState<number | null>(null)
@@ -231,7 +240,7 @@ function useWidestEm(code: string, drawing: boolean, pre: RefObject<HTMLPreEleme
 }
 
 // On a card a drawing never wraps: its font shrinks from text-xs until its widest line fits the block's width less the pre's 1.25rem padding, down to 10px, and only then does it scroll sideways; the container query keeps it fitted as the card resizes, with no layout read.
-const fitWidth = (em: number) => `clamp(10px, calc((100cqi - 1.25rem) / ${em}), 12px)`
+export const fitWidth = (em: number) => `clamp(10px, calc((100cqi - 1.25rem) / ${em}), 12px)`
 
 function FencedCode({
   card,
@@ -245,6 +254,7 @@ function FencedCode({
   const language = /language-(\S+)/.exec(className ?? "")?.[1] ?? ""
   const code = text.replace(/\n$/, "")
   const lines = useHighlightedCode(code, language)
+  const diffs = language === "diff" ? code.split("\n").map(diffLine) : []
   const drawing = card && DRAWING.has(language)
   const pre = useRef<HTMLPreElement>(null)
   const em = useWidestEm(code, drawing, pre)
@@ -267,9 +277,18 @@ function FencedCode({
         style={em ? { fontSize: fitWidth(em) } : undefined}
         wrap={!drawing}
       >
-        {lines.map((line, index) => (
-          <CodeBlockLine key={index}>{line}</CodeBlockLine>
-        ))}
+        {lines.map((line, index) => {
+          const diff = diffs[index]
+          return (
+            <CodeBlockLine
+              className={diff?.variant === "added" ? ADDED : undefined}
+              key={index}
+              variant={diff?.variant}
+            >
+              {diff ? diff.text : line}
+            </CodeBlockLine>
+          )
+        })}
       </CodeBlockContent>
     </CodeBlock>
   )

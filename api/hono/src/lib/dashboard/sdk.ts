@@ -13,17 +13,16 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk"
 import { PERMISSION_MODE_LABELS } from "@packages/config/console"
-import { dashboardMessageSummary, type ActivityActor, type ActivityEvent } from "@packages/db"
+import type { ActivityActor, ActivityEvent } from "@packages/db"
 import { env } from "@packages/env/api-hono"
 import { dataDirOf } from "@packages/env/data-dir"
 
 import { claudeBinary } from "@/lib/claude-binary"
 import { withAttachments } from "@/lib/dashboard/attachments"
-import type { FeedReply } from "@/lib/dashboard/cmux"
 import {
   deliverDeps,
-  normalize,
-  refusal,
+  deliveryEvent,
+  deliveryWords,
   type Delivery,
   type DeliveryResult,
 } from "@/lib/dashboard/deliver"
@@ -33,13 +32,15 @@ import {
   canApprove,
   replyFor,
   type FeedAnswering,
+  type FeedReply,
   type FeedResult,
 } from "@/lib/dashboard/feed"
+import { settingSummary, type SessionEffort, type SessionSetting } from "@/lib/dashboard/setting"
 import { feedItemOf, hostSessions, type FeedItem, type Worker } from "@/lib/dashboard/workers"
 import { SESSION_FILE } from "@/lib/sessions/own"
 import { transcriptPath } from "@/lib/sessions/paths"
 
-// The dashboard's second way to reach a session, beside the cmux one: a session it hosts itself on the Claude Agent SDK, which runs the installed `claude` on this user's own login. Phase 1 hosts one throwaway session, probe-sdk, in the folder PLAYGROUND_SDK_PROBE_DIR names. A message goes in as a user message on its input stream, never typed into a terminal, and its replies reach the dashboard from its transcript, as every other session's do. What it asks (a tool to run, a picker, a plan) waits on its canUseTool callback, shown as a NeedsYou card and answered by the card's Submit.
+// The dashboard's second way to reach a session, beside herdr's: a session it hosts itself on the Claude Agent SDK, which runs the installed `claude` on this user's own login. Phase 1 hosts one throwaway session, probe-sdk, in the folder PLAYGROUND_SDK_PROBE_DIR names. A message goes in as a user message on its input stream, never typed into a terminal, and its replies reach the dashboard from its transcript, as every other session's do. What it asks (a tool to run, a picker, a plan) waits on its canUseTool callback, shown as a NeedsYou card and answered by the card's Submit.
 export const SDK_PROBE = "probe-sdk"
 
 export { SESSION_FILE }
@@ -182,6 +183,8 @@ export class SdkHost {
   private startedAt: string | null = null
   private session: Query | null = null
   private mode: HostedMode = "default"
+  private model: string | null = null
+  private effort: SessionEffort | null = null
   sessionId: string | null = null
   transcript: string | null = null
 
@@ -199,6 +202,8 @@ export class SdkHost {
     const resume = Boolean(known) && this.deps.exists(this.transcript)
     this.startedAt = this.deps.now().toISOString()
     this.mode = mode
+    this.model = null
+    this.effort = null
     const stream = this.deps.query({
       options: {
         allowDangerouslySkipPermissions: true,
@@ -227,6 +232,19 @@ export class SdkHost {
     if (!this.session) throw new Error(`${SDK_PROBE} is not running`)
     await this.session.setPermissionMode(mode)
     this.mode = mode
+    this.changed()
+  }
+
+  // Sets the running session's model or effort as /model and /effort do in a terminal; the row shows the value set.
+  async setSetting(setting: SessionSetting): Promise<void> {
+    if (!this.session) throw new Error(`${SDK_PROBE} is not running`)
+    if ("model" in setting) {
+      await this.session.setModel(setting.model)
+      this.model = setting.model
+    } else {
+      await this.session.applyFlagSettings({ effortLevel: setting.effort })
+      this.effort = setting.effort
+    }
     this.changed()
   }
 
@@ -263,6 +281,14 @@ export class SdkHost {
           message.permissionMode !== this.mode
         ) {
           this.mode = message.permissionMode
+          this.changed()
+        }
+        if (
+          message.type === "system" &&
+          message.subtype === "init" &&
+          message.model !== this.model
+        ) {
+          this.model = message.model
           this.changed()
         }
         if (message.type === "result" && this.working) {
@@ -345,7 +371,7 @@ export class SdkHost {
       .sort((a, b) => a.at.localeCompare(b.at))
     return {
       cwd: this.cwd,
-      effort: null,
+      effort: this.effort,
       eta: null,
       failed: false,
       feed,
@@ -353,7 +379,7 @@ export class SdkHost {
       lastActiveAt: null,
       lifecycle: this.working ? "running" : "idle",
       light: this.working ? "working" : "idle",
-      model: null,
+      model: this.model,
       name: SDK_PROBE,
       permissionMode: this.mode,
       questions: [],
@@ -408,7 +434,7 @@ export function startSdkProbe(
   )
 }
 
-// Whether the dashboard hosts this session itself, so its messages and answers go through here rather than cmux.
+// Whether the dashboard hosts this session itself, so its messages and answers go through here rather than herdr.
 export const hosts = (sessionId: string, host: SdkHost = sdkHost): boolean =>
   host.sessionId !== null && host.sessionId === sessionId
 
@@ -426,7 +452,7 @@ const sendDeps: SendDeps = {
   record: deliverDeps.record,
 }
 
-// The composer's message to the hosted session, judged by the same rules as a typed one (no command, nothing empty or too long, nothing while a card waits) and recorded the same way, its size and never its words, under the composer's id so a retry sends nothing twice. Nothing reads the session's screen: the message joins its input stream, and a session busy with a turn takes it after (from the session's own queue, which goes if the API stops first).
+// The composer's message to the hosted session, never a setting (changeHostedSetting() sets those), judged by the same rules as a typed one (no command, nothing empty or too long, nothing while a card waits) and recorded the same way, its size and never its words, under the composer's id so a retry sends nothing twice. Nothing reads the session's screen: the message joins its input stream, and a session busy with a turn takes it after (from the session's own queue, which goes if the API stops first).
 export async function sendToHosted(
   delivery: Delivery,
   deps: SendDeps = sendDeps,
@@ -440,8 +466,8 @@ export async function sendToHosted(
     }
   }
   const attachments = delivery.attachments ?? []
-  const words = normalize(delivery.text)
-  const refused = refusal(words, attachments.length)
+  const message = { ...delivery, setting: undefined }
+  const { refused, words } = deliveryWords(message)
   if (refused) return refused
   const at = delivery.id ? await deps.delivered(delivery.id) : null
   if (at) return { at: at.toISOString(), ok: true, sessionId }
@@ -452,16 +478,7 @@ export async function sendToHosted(
       reason: `${SDK_PROBE} is waiting on a card. Answer that first: the message goes once it is answered.`,
     }
   }
-  const event: ActivityEvent = {
-    action: "dashboard.message",
-    actor: delivery.actor,
-    id: delivery.id,
-    summary: dashboardMessageSummary(
-      SDK_PROBE,
-      words,
-      attachments.map((file) => file.size),
-    ),
-  }
+  const event = deliveryEvent(message, SDK_PROBE, words)
   await deps.record(event, async () => deps.host.send(withAttachments(words, attachments)))
   return { at: deps.now().toISOString(), ok: true, sessionId }
 }
@@ -547,4 +564,27 @@ export async function changeHostedMode(
   }
   await deps.record(event, () => deps.host.setMode(mode))
   return { at: deps.now().toISOString(), mode, ok: true }
+}
+
+export type SettingChanging = { actor: ActivityActor; sessionId: string; setting: SessionSetting }
+
+// The owner's pick in the composer's model and effort menu for the hosted session, set through the SDK rather than typed: the dashboard.setting row commits only once the session has taken it, so a value it refuses throws and records nothing.
+export async function changeHostedSetting(
+  { actor, sessionId, setting }: SettingChanging,
+  deps: Pick<AnswerHostedDeps, "host" | "now" | "record"> = answerHostedDeps,
+): Promise<DeliveryResult> {
+  if (!hosts(sessionId, deps.host)) {
+    return {
+      code: "NOT_FOUND",
+      ok: false,
+      reason: "The dashboard hosts no running session with that id.",
+    }
+  }
+  const event: ActivityEvent = {
+    action: "dashboard.setting",
+    actor,
+    summary: settingSummary(SDK_PROBE, setting),
+  }
+  await deps.record(event, () => deps.host.setSetting(setting))
+  return { at: deps.now().toISOString(), ok: true, sessionId }
 }

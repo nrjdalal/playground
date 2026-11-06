@@ -63,12 +63,14 @@ A background job that runs `claude -p` from outside the checkout passes that set
 Some guards read a list of their own, such as the words to keep out of a write or the repositories whose comments to check.
 Each list is read at every call, and it fails closed:
 
-| The list                          | The guarded call                           |
-| --------------------------------- | ------------------------------------------ |
-| holds a list (`[]` counts)        | runs as the list says                      |
-| empty, malformed or missing a key | refused, naming the file and how to fix it |
-| missing, with extensions          | refused, naming the file                   |
-| missing, on a fresh clone         | runs on the guard's empty default          |
+| The list                          | The guarded call                             |
+| --------------------------------- | -------------------------------------------- |
+| holds a list (`[]` counts)        | runs as the list says                        |
+| empty, malformed or missing a key | refused, naming the file and how to fix it   |
+| missing, with extensions          | refused, naming the file and how to write it |
+| missing, on a fresh clone         | runs on the guard's empty default            |
+
+While a leak guard's list is missing or broken, a Bash call that only reads still runs, such as `git log` or `gh issue list`.
 
 A machine has extensions once its data folder holds the `extensions/` folder ([Settings and extensions](/docs/extensions)).
 A broken list refuses only the calls its guard checks, so the rest of your work runs on.
@@ -78,7 +80,7 @@ Its refusal names the kind of text, never the text, and says how to put it in pl
 
 ## Traces
 
-`bun run trace-count` counts each of those kinds over the code, plus issue numbers, the old session names and the old skill names, and fails when any count rises.
+`bun run trace-count` counts each of those kinds over the files git holds, plus issue numbers, the old session names and the old skill names, and fails when any count rises.
 It needs that guard's list: when the list is missing or one of its keys is empty, it stops and says how to add it, since those kinds would count nothing.
 A made-up address counts as none: one on a domain kept for examples (`example.com`, `.test`, `.invalid`, `.localhost`) or the fixtures' `local.host`.
 So do a made-up issue number in a test or a fixture and a hex colour such as `#000`.

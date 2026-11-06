@@ -4,6 +4,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  FIXTURE_REVEAL,
+  readFromKeychain,
   runSink,
   sinkEnv,
   spawnSink,
@@ -55,5 +57,18 @@ describe("the secret's sink process (PG-59)", () => {
       VERCEL_TOKEN: "made-up-token",
     })
     expect(env).toEqual({ HOME: "/home/made-up", PATH: "/usr/bin", VERCEL_TOKEN: "made-up-token" })
+  })
+})
+
+describe("a reveal card's reader (PG-1023)", () => {
+  // the test stack reads the fixture, so a reveal there shows a made-up value and never runs `security`, and no test or shot reaches the real Keychain
+  test("on a stack that does not read the live machine, runs no `security` and shows the fixture's made-up value", async () => {
+    const calls: string[][] = []
+    const read = readFromKeychain(async (argv) => {
+      calls.push(argv)
+      return { code: 0, stderr: "", stdout: "real" }
+    })
+    expect(await read("playground-glm")).toBe(FIXTURE_REVEAL)
+    expect(calls).toEqual([])
   })
 })

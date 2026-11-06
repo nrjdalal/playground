@@ -18,10 +18,19 @@ import { readRegistry, sessionsDir } from "@/lib/dashboard/peers"
 import { checkoutPulls, pullsUrlOf } from "@/lib/dashboard/repo"
 import { readRoster, type RosterAgent } from "@/lib/dashboard/roster"
 import { updateCheck, type Update } from "@/lib/dashboard/update"
-import { recordsProblem, unstickProblem } from "@/lib/dashboard/workers"
+import { unstickProblem } from "@/lib/dashboard/workers"
 import { ownRegistered } from "@/lib/sessions/own"
 import { hasGlmAccount } from "@/lib/store/accounts"
-import { idleLineOf, PER_WORKER, roomOf, type IdleStack, type Limit } from "@/lib/system/capacity"
+import {
+  idleLineOf,
+  orchestratorsOf,
+  PER_ORCHESTRATOR,
+  PER_WORKER,
+  roomOf,
+  type Fit,
+  type IdleStack,
+  type Limit,
+} from "@/lib/system/capacity"
 import { footprintOf, type Container, type Session, type Stack } from "@/lib/system/footprint"
 import {
   parseContainers,
@@ -94,6 +103,9 @@ export type SystemReport = {
     idle: { bytes: number; line: string | null; ready: boolean; stacks: IdleStack[] }
     limitedBy: Limit | null
     line: string
+    // How many more orchestrators fit, each a claude alone, and what limits them.
+    orchestrators: Fit
+    perOrchestrator: { bytes: number; cores: number }
     perWorker: { bytes: number; cores: number }
     workers: number
   }
@@ -146,7 +158,7 @@ export type Readings = {
   update: Update | null
   usage: Usage | null
   usedBytes: number | null
-  // Each live session's cmux workspace, from the dashboard's own live list when it has one, so a roster agent pairs with its session the way the dashboard pairs it.
+  // Each live session's herdr workspace, from the dashboard's own live list when it has one, so a roster agent pairs with its session the way the dashboard pairs it.
   workspaces: Map<string, string>
   zai: ZaiUsage | null
 }
@@ -263,13 +275,14 @@ export function compose(
   )
 
   const swap = sysctl.swap
-  const room = roomOf({
+  const machine = {
     cores: readings.cores,
     freePercent: sysctl.freePercent,
     load5: readings.load[1],
     pressure: sysctl.pressure,
     totalBytes: readings.totalBytes,
-  })
+  }
+  const room = roomOf(machine)
   const point: SystemPoint = {
     at: new Date(now).toISOString(),
     load1: round(readings.load[0]),
@@ -298,6 +311,8 @@ export function compose(
       },
       limitedBy: room.limitedBy,
       line: room.line,
+      orchestrators: orchestratorsOf(machine),
+      perOrchestrator: PER_ORCHESTRATOR,
       perWorker: PER_WORKER,
       workers: room.workers,
     },
@@ -420,10 +435,10 @@ export async function read(): Promise<Readings> {
       readUsage().then((usage) => usage && withSeen(usage, seenWindows)),
       readZaiUsage(),
     ])
-  // The dashboard proves a cmux record live by Claude's registry; without it, it falls back to cmux's stored pid, which can name a process that took an ended session's pid, so the fallback is named rather than silent.
+  // The dashboard proves a herdr pane's session live by Claude's registry; without it, it takes the session each pane reports at its word, which can name one that has ended, so the fallback is named rather than silent.
   if (registry === null) {
     problems.push(
-      `Claude's session registry (${sessionsDir()}) cannot be read, so live sessions are judged by cmux's stored pids alone and one that has ended may still show`,
+      `Claude's session registry (${sessionsDir()}) cannot be read, so live sessions are judged by herdr's panes alone and one that has ended may still show`,
     )
   }
   const [listed, stats] = await docker
@@ -510,12 +525,9 @@ export class Sampler {
       this.latest = previous ? fresh.catch(() => previous) : fresh
     }
     const report = await (this.latest ??= this.sample())
-    const live = [
-      this.lost ? TIMER_LOST : null,
-      recordsProblem(),
-      unstickProblem(),
-      herdrProblem(),
-    ].filter((p) => p !== null)
+    const live = [this.lost ? TIMER_LOST : null, unstickProblem(), herdrProblem()].filter(
+      (p) => p !== null,
+    )
     return live.length ? { ...report, problems: [...report.problems, ...live] } : report
   }
 

@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test"
+import { afterAll, afterEach, describe, expect, test } from "bun:test"
 import {
   existsSync,
   mkdirSync,
@@ -12,7 +12,7 @@ import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
 import type { LockStore } from "../../../../../packages/redis/src/index"
-import { heldPath } from "../../../../../packages/scripts/src/pr-merge/held"
+import { FREEZE_LAPSE_MS, heldPath } from "../../../../../packages/scripts/src/pr-merge/held"
 import {
   gateOptions,
   isServerError,
@@ -291,6 +291,22 @@ describe("prMerge", () => {
     }
   })
 
+  test('a floor-wide "*" hold refuses a PR the list does not name, giving its reason, and never calls gh pr merge', async () => {
+    writeFileSync(HELD, JSON.stringify({ held: { "*": "merges held until v0.0.35 ships" } }))
+    try {
+      const { calls, run } = stub()
+      const outcome = await prMerge(112, { repo: REPO }, run, local())
+      expect(outcome.kind).toBe("refused")
+      expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+        detail: "merges held until v0.0.35 ships",
+        ok: false,
+      })
+      expect(merges(calls)).toEqual([])
+    } finally {
+      rmSync(HELD, { force: true })
+    }
+  })
+
   test("refuses, and never calls gh pr merge, when canary is ahead and the head conflicts with it", async () => {
     const { calls, run } = stub({ aheadBy: "1" })
     const outcome = await prMerge(112, { repo: REPO }, run, local({ tree: null }))
@@ -359,6 +375,122 @@ describe("prMerge", () => {
     expect(outcome).toMatchObject({ kind: "failed" })
     expect(outcome.kind === "failed" && outcome.reason).toContain("Head branch was modified")
     expect(merges(once.calls)).toHaveLength(1)
+  })
+})
+
+describe("a hold written after the gates are read", () => {
+  // git in local()'s world whose types gate, the slow step between the gates and the merge call, writes the held list as it starts
+  const holdingDuringTypes = (text: string) => {
+    const world = local()
+    const git: Run = async (args) => {
+      if (args[0] === "merge-base" && args[1] === "--is-ancestor") writeFileSync(HELD, text)
+      return world.git(args)
+    }
+    return { ...world, git }
+  }
+  afterEach(() => rmSync(HELD, { force: true }))
+
+  test("refuses, naming the hold's reason, and never calls gh pr merge", async () => {
+    const { calls, run } = stub()
+    const outcome = await prMerge(
+      112,
+      { repo: REPO },
+      run,
+      holdingDuringTypes(JSON.stringify({ held: { [`${REPO}#112`]: "held for the ship" } })),
+    )
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+      detail: "read again before the merge: held for the ship",
+      ok: false,
+    })
+    expect(merges(calls)).toEqual([])
+  })
+
+  test("refuses when the held list no longer reads, and never calls gh pr merge", async () => {
+    const { calls, run } = stub()
+    const outcome = await prMerge(112, { repo: REPO }, run, holdingDuringTypes("{"))
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+      detail: "read again before the merge: held-prs.json does not read: it is not JSON",
+      ok: false,
+    })
+    expect(merges(calls)).toEqual([])
+  })
+
+  test('a floor-wide "*" hold written during the type check refuses at the re-read and never calls gh pr merge', async () => {
+    const { calls, run } = stub()
+    const outcome = await prMerge(
+      112,
+      { repo: REPO },
+      run,
+      holdingDuringTypes(JSON.stringify({ held: { "*": "merges held until v0.0.35 ships" } })),
+    )
+    expect(outcome.kind).toBe("refused")
+    expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+      detail: "read again before the merge: merges held until v0.0.35 ships",
+      ok: false,
+    })
+    expect(merges(calls)).toEqual([])
+  })
+
+  test('with "*" removed, the PR merges as before', async () => {
+    writeFileSync(HELD, JSON.stringify({ held: { "*": "merges held until v0.0.35 ships" } }))
+    const held = stub()
+    expect((await prMerge(112, { repo: REPO }, held.run, local())).kind).toBe("refused")
+    expect(merges(held.calls)).toEqual([])
+    writeFileSync(HELD, JSON.stringify({ held: {} }))
+    const { calls, run } = stub()
+    const outcome = await prMerge(112, { repo: REPO }, run, local())
+    expect(outcome).toMatchObject({ kind: "merged", sha: "abc1234def" })
+    expect(merges(calls)).toHaveLength(1)
+  })
+
+  // the ship flow's freeze (bun run ship:freeze) writes "*" with its time, and a ship that stopped without its --end leaves it to lapse
+  test("a ship's fresh \"*\" line refuses a PR at 5/5 with green checks, one past its lapse merges, and a PR's own line as old still refuses", async () => {
+    const line = "v0.0.38 ships: canary is frozen until its tag lands"
+    const since = (ago: number) => new Date(Date.now() - ago).toISOString()
+    try {
+      writeFileSync(HELD, JSON.stringify({ held: { "*": line }, since: { "*": since(60_000) } }))
+      const fresh = stub()
+      const outcome = await prMerge(112, { repo: REPO }, fresh.run, local())
+      expect(outcome.kind).toBe("refused")
+      expect(outcome.gates.filter((gate) => !gate.ok).map((gate) => gate.name)).toEqual(["held"])
+      expect(merges(fresh.calls)).toEqual([])
+      const old = since(FREEZE_LAPSE_MS + 60_000)
+      writeFileSync(
+        HELD,
+        JSON.stringify({ held: { "*": line, [`${REPO}#113`]: "own" }, since: { "*": old } }),
+      )
+      const lapsed = stub()
+      expect(await prMerge(112, { repo: REPO }, lapsed.run, local())).toMatchObject({
+        kind: "merged",
+      })
+      const own = stub()
+      const refused = await prMerge(113, { repo: REPO }, own.run, local())
+      expect(refused.gates.find((gate) => gate.name === "held")).toMatchObject({
+        detail: "own",
+        ok: false,
+      })
+      expect(merges(own.calls)).toEqual([])
+    } finally {
+      rmSync(HELD, { force: true })
+    }
+  })
+
+  test("merges as before when the list still does not name the PR at the merge call", async () => {
+    const { calls, run } = stub()
+    const outcome = await prMerge(
+      112,
+      { repo: REPO },
+      run,
+      holdingDuringTypes(JSON.stringify({ held: { [`${REPO}#113`]: "held for the ship" } })),
+    )
+    expect(outcome).toMatchObject({ kind: "merged", sha: "abc1234def" })
+    expect(outcome.gates.find((gate) => gate.name === "held")).toMatchObject({
+      detail: "not in held-prs.json",
+      ok: true,
+    })
+    expect(merges(calls)).toHaveLength(1)
   })
 })
 

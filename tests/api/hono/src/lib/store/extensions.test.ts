@@ -11,11 +11,13 @@ import {
   type CliRun,
   extensionsOf,
   linkOf,
+  ownerApps,
   runCli,
   setUpSettings,
   syncExtension,
   whySkill,
 } from "../../../../../../api/hono/src/lib/store/extensions"
+import { putItem } from "../../../../../../packages/settings/src/items"
 import { loginPath } from "../../../../../../packages/settings/src/rendered"
 import { setSetting } from "../../../../../../packages/settings/src/settings-folder"
 
@@ -94,7 +96,7 @@ test("add with no yes names the repo it would create and makes nothing; yes pass
   const data = folder()
   const missing = fake({
     code: 1,
-    err: `playground ext: ${ME}/playground-acme was not created: run playground ext add in a terminal and answer y, or pass --yes`,
+    err: `playground ext: ${ME}/playground-acme was not created: run playground ext add again with --yes`,
   })
   expect(await live(() => addExtension({ name: "acme", yes: false }, missing.cli, data))).toEqual({
     create: `${ME}/playground-acme`,
@@ -166,6 +168,32 @@ test("why reads the resolver's answer, and a skill no extension holds is a 404",
   expect(none.calls).toEqual([["why", "nope"]])
 })
 
+test("runCli hands its stdin to the CLI when given one, and an empty input when not", async () => {
+  const cli = join(scratch, "echo-cli.ts")
+  writeFileSync(cli, "console.log(JSON.stringify(await Bun.stdin.text()))\n")
+  expect((await runCli(cli)(["put"], '["Notes"]')).out).toBe(JSON.stringify('["Notes"]'))
+  expect((await runCli(cli)(["put"])).out).toBe('""')
+})
+
+test("ownerApps reads the login's own desktop-owner-apps as accepted, none before ext init", () => {
+  const data = folder()
+  const apps = ownerApps(data, async () => ({ code: 0, err: "", out: "" }))
+  expect(apps?.login).toBe(ME)
+  expect(apps?.read()).toEqual([])
+  const ref = { kind: "list" as const, key: "desktop-owner-apps", scope: ME }
+  expect(
+    putItem(data, ref, { attachments: [], body: null, files: null, value: ["Notes"] }, WHO, true)
+      .ok,
+  ).toBe(true)
+  expect(apps?.read()).toEqual(["Notes"])
+  expect(
+    putItem(data, ref, { attachments: [], body: null, files: null, value: { Notes: 1 } }, WHO, true)
+      .ok,
+  ).toBe(true)
+  expect(apps?.read()).toBeNull()
+  expect(ownerApps(folder(false))).toBeUndefined()
+})
+
 test("runCli runs the CLI it is given by its path with a fixed argv and no shell, and only HOME, PATH and the data folder", async () => {
   const cli = join(scratch, "fake-cli.ts")
   writeFileSync(
@@ -176,6 +204,7 @@ process.exit(3)
 `,
   )
   process.env.MADE_UP_TOKEN = "never-passed"
+  process.env.PLAYGROUND_ROLE = "dispatcher"
   try {
     const run = await runCli(cli)(["add", "acme; touch /tmp/x", "$(id)"])
     expect(run.code).toBe(3)
@@ -183,9 +212,12 @@ process.exit(3)
     const seen = JSON.parse(run.out) as { argv: string[]; env: string[] }
     expect(seen.argv).toEqual(["ext", "add", "acme; touch /tmp/x", "$(id)"])
     expect(seen.env).not.toContain("MADE_UP_TOKEN")
+    // no role reaches the child, so an accept it runs is the owner's own (PG-658)
+    expect(seen.env).not.toContain("PLAYGROUND_ROLE")
     expect(seen.env).toEqual(expect.arrayContaining(["HOME", "PATH", "PLAYGROUND_DATA_DIR"]))
   } finally {
     delete process.env.MADE_UP_TOKEN
+    delete process.env.PLAYGROUND_ROLE
   }
 })
 

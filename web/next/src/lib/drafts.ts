@@ -2,6 +2,7 @@ import { useSyncExternalStore } from "react"
 
 import { attachmentUrl, isAttachmentId } from "@/lib/attachments"
 import type { OutboxAttachment } from "@/lib/outbox"
+import { withRef } from "@/lib/reply"
 
 // What the composer holds for a session and has not sent: its words and the files already uploaded for them.
 export type Draft = { attachments: OutboxAttachment[]; text: string }
@@ -138,14 +139,15 @@ export const useDrafted = (to: string): boolean =>
     () => false,
   )
 
-// Pure: what the composer's box holds once it takes words handed to it (a failed message's Edit), after anything already typed, or null when it takes none: words for another session, or the very hand-off it took already, since React's development run of a new composer's effects twice would take one twice before it clears. A message of files alone hands back no words, so what is typed stays as it is.
-export function takeHanded<Handed extends { text: string; to: string }>(
+// Pure: what the composer's box holds once it takes words handed to it (a failed message's Edit), after anything already typed, or null when it takes none: words for another session, or the very hand-off it took already, since React's development run of a new composer's effects twice would take one twice before it clears. A message of files alone hands back no words, so what is typed stays as it is. A card's Reply hands its ref alone, which goes before what is typed (withRef).
+export function takeHanded<Handed extends { ref?: number; text: string; to: string }>(
   typed: string,
   handed: Handed | null,
   to: string,
   taken: Handed | null,
 ): string | null {
   if (!handed || handed.to !== to || handed === taken) return null
+  if (handed.ref !== undefined) return withRef(typed, handed.ref)
   return typed.trim() && handed.text
     ? `${typed}\n${handed.text}`
     : typed.trim()

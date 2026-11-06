@@ -60,10 +60,9 @@ describe("the bare alias reader", () => {
         "bun",
         "--no-env-file",
         join(import.meta.dir, "../../../../scripts/ops/dashboard/alias.ts"),
-        "/nowhere/routes.json",
         ...URLS,
       ],
-      { stdout: "pipe" },
+      { env: { ...process.env, PORTLESS_STATE_DIR: "/nowhere" }, stdout: "pipe" },
     )
     const [out, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
     expect([code, out.trim()]).toEqual([2, "no route file at /nowhere/routes.json"])

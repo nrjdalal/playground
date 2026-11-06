@@ -1,9 +1,11 @@
-// A factory session's kind, what it does: spawn.sh writes it to the roster at every start, and every reader takes it before the session's name, so a name need not carry its role. A builder, ops, planner or optimizer holds a manager's seat; the dispatcher routes the owner's asks. It imports nothing, so the hooks and scripts read it from source.
+// A factory session's kind, what it does: spawn.sh writes it to the roster at every start, and every reader takes it before the session's name, so a name need not carry its role. A builder, ops, planner or optimizer holds a manager's seat, the assistant runs the owner's errands and the dispatcher's tracker, an orchestrator is a lead the sidebar's plus starts, any number at once and holding no seat, and the dispatcher routes the owner's asks. It imports nothing, so the hooks and scripts read it from source.
 export const ROSTER_KINDS = [
+  "assistant",
   "builder",
   "dispatcher",
   "ops",
   "optimizer",
+  "orchestrator",
   "planner",
   "probe",
   "researcher",
@@ -20,10 +22,12 @@ export const isRosterKind = (value: unknown): value is RosterKind =>
 
 // The roster's role for each kind, which roster.ts writes beside it.
 export const ROSTER_ROLE_OF_KIND: Record<RosterKind, "manager" | "runner" | "worker"> = {
+  assistant: "manager",
   builder: "manager",
   dispatcher: "manager",
   ops: "manager",
   optimizer: "manager",
+  orchestrator: "manager",
   planner: "manager",
   probe: "worker",
   researcher: "worker",
@@ -33,12 +37,18 @@ export const ROSTER_ROLE_OF_KIND: Record<RosterKind, "manager" | "runner" | "wor
   worker: "worker",
 }
 
+// Pure: whether a roster row's status ends its session for good, done or ended, so the row no longer counts as listed (an ended second dispatcher draws no sidebar row); a parked or paused row still does.
+export const isEndedStatus = (status: string | null | undefined): boolean =>
+  status === "done" || status === "ended"
+
 // The PLAYGROUND_ROLE a session of each kind runs under, as spawn.sh sets it and the hooks read it.
 export const FACTORY_ROLE_OF_KIND: Record<RosterKind, string> = {
+  assistant: "lead",
   builder: "lead",
   dispatcher: "dispatcher",
   ops: "lead",
   optimizer: "lead",
+  orchestrator: "lead",
   planner: "lead",
   probe: "probe",
   researcher: "worker",
@@ -176,14 +186,22 @@ const seatedOf = (agents: unknown, kind: RosterKind): Seated[] =>
 const newestOf = (held: Seated[]): string | undefined =>
   held.findLast((entry) => !entry.starting)?.name ?? held.at(-1)?.name
 
-// Pure: the session that holds a manager kind's seat, the newest live entry of that kind, else its sessions.names name.
-export const managerOf = (agents: unknown, kind: ManagerKind): string =>
-  newestOf(seatedOf(agents, kind)) ?? aliasOf(kind)
+// Pure: the session that holds a kind's seat, the newest live entry of that kind; undefined while none does, and always for an orchestrator, which holds none.
+export const seatOf = (agents: unknown, kind: RosterKind): string | undefined =>
+  kind === "orchestrator" ? undefined : newestOf(seatedOf(agents, kind))
 
-// Pure: the dispatcher holding a slot (1 the primary, Alpha; 2 the second, Bravo): the newest live dispatcher whose entry's `slot`, else its name's (slotOfName), else the first, is that one; else the slot's sessions.names name.
-export const dispatcherOf = (agents: unknown, slot: 1 | 2): string =>
+// Pure: the session that holds a manager kind's seat (seatOf), else its sessions.names name.
+export const managerOf = (agents: unknown, kind: ManagerKind): string =>
+  seatOf(agents, kind) ?? aliasOf(kind)
+
+// Pure: the dispatcher seated in a slot (1 the primary, Alpha; 2 the second, Bravo): the newest live dispatcher whose entry's `slot`, else its name's (slotOfName), else the first, is that one; none while no live entry holds it.
+export const dispatcherSeatOf = (agents: unknown, slot: 1 | 2): string | undefined =>
   newestOf(
     seatedOf(agents, "dispatcher").filter(
       (entry) => Number(entry.slot ?? slotOfName(entry.name) ?? 1) === slot,
     ),
-  ) ?? `${getSessionNames().names.dispatcher}${slot === 1 ? "" : "-2"}`
+  )
+
+// Pure: the dispatcher holding a slot (dispatcherSeatOf), else the slot's sessions.names name.
+export const dispatcherOf = (agents: unknown, slot: 1 | 2): string =>
+  dispatcherSeatOf(agents, slot) ?? `${getSessionNames().names.dispatcher}${slot === 1 ? "" : "-2"}`

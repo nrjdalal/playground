@@ -1,16 +1,18 @@
 "use client"
 
-import { RiFullscreenLine } from "@remixicon/react"
+import { RiFullscreenLine, RiWindowLine } from "@remixicon/react"
 import { cn } from "cn"
 import { type KeyboardEvent, useState } from "react"
 
+import { useAsideDocs } from "@/components/dashboard/aside-docs"
 import { HTML_VIEWER } from "@/components/dashboard/viewer/documents"
 import { FileIcon } from "@/components/dashboard/viewer/file-icons"
 import { type ViewerItem, VIEWERS } from "@/components/dashboard/viewer/registry"
-import { useAttachmentUrl } from "@/components/dashboard/viewer/use-attachment-url"
-import { Viewer } from "@/components/dashboard/viewer/viewer"
+import { useAttachment } from "@/components/dashboard/viewer/use-attachment-url"
+import { Download, Missing, Viewer } from "@/components/dashboard/viewer/viewer"
 import { Hint } from "@/components/hint"
 import { Button } from "@/components/ui/button"
+import { fileDoc, opensInAside } from "@/lib/aside-docs"
 import { BAR_ITEM, FLOATING_BAR } from "@/lib/floating-bar"
 import { foldPairs } from "@/lib/pictures"
 
@@ -23,6 +25,20 @@ const GRID_COLUMNS = 4
 const TILE =
   "text-muted-foreground hover:bg-muted/50 [&_img]:transition dark:[&_img]:brightness-75 dark:hover:[&_img]:brightness-100 dark:focus-visible:[&_img]:brightness-100 relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md border focus-visible:ring-ring/50 outline-none focus-visible:ring-3 focus-visible:border-ring"
 
+// A tile's own Download on the glass in its top-right corner, shown while the tile is hovered or holds focus and always on a touch screen, as a code block's copy button is.
+function TileDownload({ item }: { item: ViewerItem }) {
+  return (
+    <div
+      className={cn(
+        FLOATING_BAR,
+        "absolute top-1.5 right-1.5 opacity-0 transition-opacity group-focus-within/tile:opacity-100 group-hover/tile:opacity-100 pointer-coarse:opacity-100",
+      )}
+    >
+      <Download className={cn("size-7", BAR_ITEM)} item={item} label={`Download ${item.name}`} />
+    </div>
+  )
+}
+
 function Thumb({
   index,
   item,
@@ -33,25 +49,31 @@ function Thumb({
   onOpen: (index: number) => void
 }) {
   const viewer = VIEWERS[item.kind]
-  const url = useAttachmentUrl(item.id, Boolean(viewer?.Thumb))
+  const { missing, url } = useAttachment(item.id, Boolean(viewer?.Thumb))
   return (
-    <Hint content={item.name}>
-      <button
-        aria-label={`Open ${item.name}`}
-        className={TILE}
-        onClick={() => onOpen(index)}
-        type="button"
-      >
-        {viewer?.Thumb && url ? (
-          <viewer.Thumb item={item} url={url} />
-        ) : (
-          <span className="flex w-full min-w-0 flex-col items-center gap-2 px-2">
-            <FileIcon className="size-8 shrink-0" name={item.name} />
-            <span className="text-2xs w-full truncate text-center">{item.name}</span>
-          </span>
-        )}
-      </button>
-    </Hint>
+    <div className="group/tile relative">
+      <Hint content={missing ? `${item.name} is missing` : item.name}>
+        <button
+          aria-label={`Open ${item.name}`}
+          className={TILE}
+          data-tile=""
+          onClick={() => onOpen(index)}
+          type="button"
+        >
+          {viewer?.Thumb && url ? (
+            <viewer.Thumb item={item} url={url} />
+          ) : (
+            <span className="flex w-full min-w-0 flex-col items-center gap-2 px-2">
+              <FileIcon className="size-8 shrink-0" name={item.name} />
+              <span className="text-2xs w-full truncate text-center">
+                {missing ? "Missing" : item.name}
+              </span>
+            </span>
+          )}
+        </button>
+      </Hint>
+      <TileDownload item={item} />
+    </div>
   )
 }
 
@@ -68,7 +90,8 @@ export function focusTarget(
 }
 
 const moveFocus = (columns: number) => (event: KeyboardEvent<HTMLDivElement>) => {
-  const tiles = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")]
+  // the tiles alone, so a tile's Download takes no arrow stop
+  const tiles = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button[data-tile]")]
   const at = tiles.indexOf(document.activeElement as HTMLButtonElement)
   const to = at === -1 ? null : focusTarget(event.key, at, tiles.length, columns)
   if (to === null) return
@@ -77,7 +100,7 @@ const moveFocus = (columns: number) => (event: KeyboardEvent<HTMLDivElement>) =>
   tiles[to]?.focus()
 }
 
-// One side of a lone before/after pair, its label over the picture at the card's full width in a box of fixed height, so it holds its room before the picture loads and a tall screenshot cannot stretch the card; it opens the pair in the viewer.
+// One side of a lone before/after pair, its label over the picture at the card's full width in a box of fixed height, so it holds its room before the picture loads and a tall screenshot cannot stretch the card; it opens the pair in the viewer, and its corner Download saves its own file.
 function WideSide({
   item,
   label,
@@ -87,18 +110,26 @@ function WideSide({
   label: string
   onOpen: () => void
 }) {
-  const url = useAttachmentUrl(item.id)
+  const { missing, url } = useAttachment(item.id)
   return (
     <div className="flex flex-col gap-1.5">
       <span className="text-muted-foreground text-xs">{label}</span>
-      <button
-        aria-label={`Open ${label.toLowerCase()}: ${item.name}`}
-        className="focus-visible:border-ring block h-48 w-full overflow-hidden rounded-md border outline-none"
-        onClick={onOpen}
-        type="button"
-      >
-        {url ? <img alt={item.name} className="size-full object-contain" src={url} /> : null}
-      </button>
+      <div className="group/tile relative">
+        <button
+          aria-label={`Open ${label.toLowerCase()}: ${item.name}`}
+          className="focus-visible:border-ring block h-48 w-full overflow-hidden rounded-md border outline-none"
+          data-tile=""
+          onClick={onOpen}
+          type="button"
+        >
+          {url ? (
+            <img alt={item.name} className="size-full object-contain" src={url} />
+          ) : missing ? (
+            <Missing />
+          ) : null}
+        </button>
+        <TileDownload item={item} />
+      </div>
     </div>
   )
 }
@@ -106,28 +137,34 @@ function WideSide({
 // a card has no slide before or after to hand the arrows to
 const stay = () => {}
 
-// A lone HTML page live in the card at its full width, through the viewer's own HTML view (its sandboxed frame, links opened in a tab, a page that leaves put back, Spinner and Unreadable), never taking the focus, with a one-square floating bar in its corner that opens it full screen.
+// A lone HTML page live in the card at its full width, through the viewer's own HTML view (its sandboxed frame, links opened in a tab, a page that leaves put back, Spinner and Unreadable), never taking the focus, with a floating bar in its corner that saves it (Download) and opens it in an aside tab, or full screen outside the aside.
 function LivePage({ item, onOpen }: { item: ViewerItem; onOpen: () => void }) {
-  const url = useAttachmentUrl(item.id, true)
+  const { missing, url } = useAttachment(item.id, true)
+  const inTab = useAsideDocs() !== null
   return (
     <div className="relative flex h-80 items-center justify-center overflow-hidden rounded-md border">
-      {url ? <HTML_VIEWER.View active={false} item={item} onEdge={stay} url={url} /> : null}
+      {url ? (
+        <HTML_VIEWER.View active={false} item={item} onEdge={stay} url={url} />
+      ) : missing ? (
+        <Missing />
+      ) : null}
       <div className={cn(FLOATING_BAR, "absolute top-2 right-2")}>
+        <Download className={cn("size-8", BAR_ITEM)} item={item} />
         <Button
-          aria-label={`Open ${item.name} full screen`}
+          aria-label={`Open ${item.name} ${inTab ? "in a tab" : "full screen"}`}
           className={cn("size-8", BAR_ITEM)}
           onClick={onOpen}
           size="icon-sm"
           variant="ghost"
         >
-          <RiFullscreenLine />
+          {inTab ? <RiWindowLine /> : <RiFullscreenLine />}
         </Button>
       </div>
     </div>
   )
 }
 
-// An ask's files under its text: a lone HTML page live (LivePage), a lone before/after pair at full width, Before over After, else up to GRID_TILES thumbnails (a kind with no Thumb a titled tile, its icon over its name), then a +N tile that opens the first one it stands for; each opens the viewer at its own place.
+// An ask's, a draft's, a Slack decision's or a read-only update's files under its text: a lone HTML page live (LivePage), a lone before/after pair at full width, Before over After, else up to GRID_TILES thumbnails (a kind with no Thumb a titled tile, its icon over its name), then a +N tile that opens the first one it stands for; each opens the viewer at its own place, and each tile but +N saves its file, a pair's both, with its corner Download.
 export function AttachmentThumbs({
   items,
   onOpen,
@@ -174,6 +211,7 @@ export function AttachmentThumbs({
           <button
             aria-label={`Open ${more} more`}
             className={`${TILE} text-foreground text-sm font-medium`}
+            data-tile=""
             onClick={() => onOpen(shown)}
             type="button"
           >
@@ -185,16 +223,20 @@ export function AttachmentThumbs({
   )
 }
 
-// The one component a surface drops in for a set of files: the thumbnails, and the viewer they open (the Inbox's ask today).
+// The one component a surface drops in for a set of files: the thumbnails, and what they open: in the aside, a page, a markdown document or a PDF in an aside tab of its own, and anything else the viewer, at its place.
 export function Attachments({ items: files }: { items: ViewerItem[] }) {
   const items = foldPairs(files)
   const [open, setOpen] = useState(false)
   const [index, setIndex] = useState(0)
+  const openInAside = useAsideDocs()
   return (
     <>
       <AttachmentThumbs
         items={items}
         onOpen={(at) => {
+          const item = items[at]
+          if (openInAside && item && !item.pair && opensInAside(item.kind))
+            return openInAside(fileDoc(item))
           setIndex(at)
           setOpen(true)
         }}
