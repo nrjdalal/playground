@@ -631,6 +631,11 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
   }
   const live = (container: string) => container === "playground-dashboard-db"
   // A scratch remote and its clone as the main checkout, with a pushed worktree pg-1 in its .claude/worktrees on branch PG-1-thing.
+  const recorded = (wt: string) => {
+    mkdirSync(join(wt, ".turbo"), { recursive: true })
+    writeFileSync(join(wt, ".turbo", "dev.pgid"), "{}")
+  }
+
   const machine = (name = "pg-1", at?: (main: string) => string) => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "cleanup-")))
     const remote = join(root, "remote.git")
@@ -638,7 +643,9 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     run(root, "git", "init", "-q", "--bare", remote)
     run(root, "git", "clone", "-q", remote, main)
     writeFileSync(join(main, "a.txt"), "a\n")
-    run(main, "git", "add", "a.txt")
+    // as the repo's own .gitignore keeps a stack's record out of git status
+    writeFileSync(join(main, ".gitignore"), ".turbo/\n")
+    run(main, "git", "add", "a.txt", ".gitignore")
     run(main, "git", "commit", "-qm", "a")
     run(main, "git", "push", "-q", "origin", "HEAD")
     const wt = at ? at(main) : join(main, ".claude", "worktrees", name)
@@ -683,6 +690,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
   test("a clean, pushed worktree goes, with its dev stack stopped, its two containers and its branch", async () => {
     const { main, wt } = machine()
     const listed = ["playground-pg-1-db", "playground-pg-1-redis", "playground-dashboard-db"]
+    recorded(wt)
     const { calls, deps } = fakes(main, listed)
     expect(await cleanWorktree(wt, "k3m9px-reviewer ended", deps)).toBe(
       `removed ${wt}, containers playground-pg-1-db, playground-pg-1-redis, branch PG-1-thing`,
@@ -725,6 +733,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
   test("a worktree playground rm refuses is kept with its refusal, and its containers and branch stay", async () => {
     const { main, wt } = machine()
     const refusal = `${wt} is held by pid 7 (zsh) working in ${wt}`
+    recorded(wt)
     const { calls, deps } = fakes(main, ["playground-pg-1-db"], refusal)
     expect(await cleanWorktree(wt, "r ended", deps)).toBe(`kept ${wt}: ${refusal}`)
     expect(calls).toEqual([`dev:stop ${wt}`, `rm ${wt} (r ended)`])
@@ -840,6 +849,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
 
   test("a dev:stop refusal keeps the worktree, while no recorded stack lets it go", async () => {
     const { main, wt } = machine()
+    recorded(wt)
     const refusal = "dev:stop: the stack's process groups also hold pid 9, so nothing is signalled"
     const refused = fakes(main, ["playground-pg-1-db"], undefined, {
       devStop: async () => ({ ok: false, out: refusal }),
@@ -852,6 +862,19 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
     expect(await cleanWorktree(wt, "r ended", none.deps)).toBe(
       `removed ${wt}, containers playground-pg-1-db, branch PG-1-thing`,
     )
+  })
+
+  test("a clone with no recorded stack goes without dev:stop, so one with no node_modules, whose dev:stop cannot load, still goes (PG-1186)", async () => {
+    const { main, wt } = machine()
+    const stops: string[] = []
+    const { deps } = fakes(main, [], undefined, {
+      devStop: async (dir) => (
+        stops.push(dir),
+        { ok: false, out: 'error: script "dev:stop" exited with code 1' }
+      ),
+    })
+    expect(await cleanWorktree(wt, "r ended", deps)).toBe(`removed ${wt}, branch PG-1-thing`)
+    expect(stops).toEqual([])
   })
 
   test("a docker ps that cannot list keeps the containers and says so", async () => {
