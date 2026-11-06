@@ -1,19 +1,13 @@
-- cmux is deprecated: it takes no new work, only a fix for a break, and herdr is the terminal, where Playground runs its sessions and the dashboard reads, writes to and answers every one; cmux.ts keeps code no route reaches now, which goes with the rest of cmux's code, and the rules below still bind a fix.
-- ALWAYS: Keep every cmux call inside `api/hono/src/lib/dashboard/cmux.ts`, whose `run()`, `stream()` and `write()` no route calls now: the board reads herdr, `deliver()` sends through herdr and the answer route answers by keys into a herdr pane, so the file holds dead code until cmux's code goes,
-  and a fix there keeps `run()` and `stream()` to `READ_COMMANDS` and `write()` to `writeCommand()`'s argv.
+- herdr is the terminal, where Playground runs its sessions and the dashboard reads, writes to and answers every one.
   The Feed's answer shapes (`FeedReply`, `PERMISSION_MODES`, `PLAN_MODES`) live in `api/hono/src/lib/dashboard/feed.ts`.
   Outside the dashboard, the factory's `playground picker` answers a permission prompt through its session's herdr pane alone (playbook's SESSIONS.md).
   The dashboard's answer to a prompt is confirmed by the NeedsYou card's Submit (`feedNeeds()` in `web/next/src/lib/needs-you.ts`), which shows a permission's whole input and a plan's text above the choices, and offers only refusing when not all of one could be shown.
   What that Submit says while off is `submitWhy()` in the same file.
   The dashboard's permission and plan answers approve another session's actions, so they go only while `PLAYGROUND_APPROVALS_ENABLED` is on (off by default), and who may answer at all is `canApprove()`, to narrow once the owner picks a login only they can use.
   The answer route sends a prompt from the session the dashboard hosts on the Agent SDK to `answerHosted()` in `sdk.ts` (messages.md), under the same two checks, and answers every other by keys into its herdr pane (the herdr rule below).
-  The boundary test in `tests/api/hono/src/lib/dashboard/cmux.test.ts` reads every JS and TS source in the repo but the skills' (which drive cmux from their own scripts), comments stripped, and fails on any other file that names cmux as an argv element (by name in any case,
-  or by a path however it is built),
-  holds `cmux` and any argument after it where it can spawn (Bun's spawn or `$`, `child_process`, execa, zx, cross-spawn, tinyexec, node-pty), names an argv builder (`cmuxCommand`, `writeCommand`) beside a module ending in `/cmux` (imported, re-exported or loaded with `import()`), or re-exports that module whole (`export * from`; a barrel names what it shares instead).
-  A new export from cmux.ts goes into the test's `BUILDER_NAMES` or `CALLABLE`, and a message that puts a new word after "cmux" in a file that spawns adds that word to `PROSE`.
   A new kind of write (closing a worker) arrives with a confirmation in the UI; when a session ends, and who closes it, is playbook's Lifecycle.
 - ALWAYS: Route every herdr call through `api/hono/src/lib/dashboard/herdr.ts`, the terminal the dashboard reads every session from.
-  Every board asks cmux nothing: `listLive` reads herdr's servers alone and the hub opens no `cmux events`, so a session cmux runs never shows, opted in or not; on a stack that has not opted in with `PLAYGROUND_ALL_SESSIONS`, `/api/health`'s dispatcher slots also count the roster's names alone, never the registry's,
+  `listLive` reads herdr's servers alone, so a session another terminal runs never shows, opted in or not; on a stack that has not opted in with `PLAYGROUND_ALL_SESSIONS`, `/api/health`'s dispatcher slots also count the roster's names alone, never the registry's,
   which names every session on the machine (`readDispatcherSlots()` in `workers.ts`).
   A stack that reads this machine reads each server `PLAYGROUND_HERDR_SESSIONS` names (`playground,playground-probes` by default, plus every other server socket in that folder, such as an older Playground's `factory` and `probes`, while the variable is blank) at `<PLAYGROUND_HERDR_DIR>/<name>.sock` (else `herdr` in the data folder, `~/.playground`,
   following `HOME` and never `CLAUDE_CONFIG_DIR` or `PLAYGROUND_DATA_DIR`, where ops-herdr serves them, so a session on another login reads the same servers);
@@ -44,7 +38,7 @@
   built on captured Claude Code permission boxes.
   Any other read that fails is named in the System report's `problems` (`herdrProblem()`).
   `tests/api/hono/src/lib/dashboard/herdr.test.ts` holds the boundary: no other API source speaks herdr's protocol, only `deliver.ts` imports `prompt` and `pressEnter`, and every field the schemas read stands in the pinned binary's `herdr api schema --json`;
-  `cmux.test.ts`'s herdr's pane writes keeps every herdr method that types (`agent.prompt`, `agent.send_keys`, `pane.send_*`) to herdr.ts and `typeKeys` to `feed.ts`.
+  Its pane-typing guards keep every herdr method that types (`agent.prompt`, `agent.send_keys`, `pane.send_*`) to herdr.ts and `typeKeys` to `feed.ts`, and fail on any file in the repo outside `tests/` that types into a pane through cmux (`cmux send`, `send-key`).
 - ALWAYS: Count a session record as live only through `liveRecords()` (`isLiveRecord()` in `api/hono/src/lib/dashboard/workers.ts`), which `listLive` applies to herdr's records before any read, then drops the transcript reads kept for sessions it no longer holds;
   it returns the branded `LiveRecords` that `composeWorkers` and the transcript reads require, so an ended session never reaches a row, a light, a picker or a needs-you count.
   A pid alone proves nothing, since macOS hands a freed pid to the next process that starts (an ended `greed` once read as a red Waiting on you).

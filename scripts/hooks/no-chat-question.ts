@@ -166,13 +166,20 @@ const ownLines = (reply: string) =>
     .split("\n")
     .filter((line) => !BLOCKQUOTE.test(line))
 
-// Pure: whether the reply keeps steps or a table the owner comes back to, 3 or more numbered lines or a markdown table, code and blockquotes left out, so a bulleted list passes.
+// An issue or PR a line names: a #<n> (never an Inbox #iN or an HTML entity's &#<n>) or a GitHub issue or PR link.
+const TRACKED = /(?<![\w&])#\d+\b|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+/
+
+// Pure: whether the reply keeps steps or a table the owner comes back to, 3 or more numbered lines or a markdown table, code and blockquotes left out, so a bulleted list passes; steps or a table whose every step or body row names an issue or PR are progress on tracked work, which stays in chat.
 export function keepsForOwner(reply: string): boolean {
   const lines = ownLines(reply)
-  return (
-    lines.filter((line) => STEP.test(line)).length >= 3 ||
-    lines.some((line, i) => TABLE_ROW.test(line) && TABLE_RULE.test(lines[i + 1] ?? ""))
-  )
+  const steps = lines.filter((line) => STEP.test(line))
+  if (steps.length >= 3 && !steps.every((line) => TRACKED.test(line))) return true
+  return lines.some((line, i) => {
+    if (!TABLE_ROW.test(line) || !TABLE_RULE.test(lines[i + 1] ?? "")) return false
+    const rows: string[] = []
+    for (let j = i + 2; TABLE_ROW.test(lines[j] ?? ""); j++) rows.push(lines[j])
+    return rows.length === 0 || !rows.every((row) => TRACKED.test(row))
+  })
 }
 
 export type Deps = {

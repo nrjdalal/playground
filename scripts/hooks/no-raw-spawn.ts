@@ -49,7 +49,7 @@ const AGENT_TALK = new Set(["hibernate", "inbox", "message", "messages"])
 // respawn-pane's flags that take a value; any other word after it is the command it runs.
 const RESPAWN_TAKES = new Set(["--command", "--surface", "--window", "--workspace"])
 const REOPENS = new Set(["-c", "-r", "--continue", "--resume"])
-// The terminal app's program, matched as a pattern since the cmux boundary test reads a quoted name as a spawn of it.
+// cmux's program, by its name.
 const TERMINAL = /^cmux$/
 
 // herdr 0.9.5's command groups; a program the hook cannot read is judged as herdr when one of these follows it.

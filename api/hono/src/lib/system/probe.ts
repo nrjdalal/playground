@@ -1,7 +1,7 @@
 import { readFixtureMachine, readsLive } from "@/lib/dashboard/fixture"
 import { settledWithin } from "@/lib/settle"
 
-// A kill at a timeout is bounded, as cmux.ts's is: SIGTERM first, then this grace, then SIGKILL, and the pipes stop being waited on a moment later.
+// A kill at a timeout is bounded: SIGTERM first, then this grace, then SIGKILL, and the pipes stop being waited on a moment later.
 const KILL_GRACE_MS = 3000
 
 // The System panel reads the machine through these commands alone, each a fixed argv run without a shell, and so does the dashboard when it reads when a session's process started. Every one only reports (memory_pressure is left out, since its -l simulates pressure; sysctl is never handed a name=value), so nothing the panel runs can change the machine. Nothing else under lib/system starts a process.

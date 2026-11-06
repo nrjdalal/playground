@@ -88,17 +88,15 @@ test("--sessions names a session of a kind only kinds.ts knows", () => {
   )
 })
 
-// Loads up.py and runs main() with the arguments given after where it runs, every job down, inside cmux or outside it; each start is recorded rather than made, and the exit code printed with them.
-const EXIT = `${LOAD}inside = sys.argv[2] == "inside"
-started = []
-up.healthy = lambda job, procs: (False, "no heartbeat")
+// Loads up.py and runs main(), every job down; each start is recorded rather than made, and the exit code printed with them.
+const EXIT = `${LOAD}started = []
+up.healthy = lambda job: (False, "no heartbeat")
 up.ptable.table = lambda: {4101: None}
-up.ptable.cmux_of = lambda pid, procs: 1 if inside else None
 up.once.running = lambda name, marker: None
 up.run = lambda argv, timeout=60: (0, "")
 up.start = lambda job: started.append(job["name"]) or True
 up.herdr = lambda: ("/x/herdr", "")
-sys.argv = ["up.py", *sys.argv[3:]]
+sys.argv = ["up.py"] + sys.argv[2:]
 try:
     up.main()
     code = 0
@@ -107,16 +105,13 @@ except SystemExit as e:
 print(json.dumps({"code": code, "started": started}))
 `
 
-const exitOf = (jobs: object[], where: "inside" | "outside", ...args: string[]) => {
+const exitOf = (jobs: object[], ...args: string[]) => {
   const config = mkdtempSync(join(scratch, "exit-"))
-  const cmuxSocket = join(config, "cmux.sock")
-  writeFileSync(cmuxSocket, "")
   mkdirSync(join(dataOf(config), "ops"), { recursive: true })
   writeFileSync(join(dataOf(config), "ops", "jobs.json"), JSON.stringify({ jobs }))
-  const child = Bun.spawnSync(["python3", "-I", "-c", EXIT, upPy, where, ...args], {
+  const child = Bun.spawnSync(["python3", "-I", "-c", EXIT, upPy, ...args], {
     env: {
       CLAUDE_CONFIG_DIR: config,
-      CMUX_SOCKET_PATH: cmuxSocket,
       PLAYGROUND_DATA_DIR: join(config, "playground"),
       HOME: scratch,
       PATH: "/usr/bin:/bin",
@@ -124,15 +119,17 @@ const exitOf = (jobs: object[], where: "inside" | "outside", ...args: string[]) 
     stderr: "pipe",
     stdout: "pipe",
   })
-  expect(child.stderr.toString()).toBe("")
-  return JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!) as {
-    code: number
-    started: string[]
+  return {
+    ...(JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!) as {
+      code: number
+      started: string[]
+    }),
+    stderr: child.stderr.toString(),
   }
 }
 
-// a job row stored before cmux left the runtimes still names cmux or auto, and ops-up starts it in herdr from any terminal.
-test("a pass exits 0 and starts a down job stored as cmux or auto in herdr, inside cmux or outside it", () => {
+// a job row stored before cmux left the runtimes still names cmux or auto, and ops-up starts it in herdr.
+test("a pass exits 0 and starts a down job stored as cmux or auto in herdr", () => {
   const cmuxJob = {
     command: "bash /x/ops/ops-dashboard/loop.sh",
     name: "ops-dashboard",
@@ -141,30 +138,34 @@ test("a pass exits 0 and starts a down job stored as cmux or auto in herdr, insi
   }
   const autoJob = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "auto" }
   const launchdJob = { launchd: "blue.acme.x", name: "x" }
-  for (const where of ["inside", "outside"] as const)
-    expect(exitOf([cmuxJob, autoJob, launchdJob], where)).toEqual({
-      code: 0,
-      started: ["ops-dashboard", "ops-x"],
-    })
+  expect(exitOf([cmuxJob, autoJob, launchdJob])).toEqual({
+    code: 0,
+    started: ["ops-dashboard", "ops-x"],
+    stderr: "",
+  })
   // a row that names no runtime and has a command starts in herdr too, as a hand-kept jobs.json row the render never parsed
-  expect(exitOf([{ ...cmuxJob, runtime: undefined }], "outside")).toEqual({
+  expect(exitOf([{ ...cmuxJob, runtime: undefined }])).toEqual({
     code: 0,
     started: ["ops-dashboard"],
+    stderr: "",
   })
 })
 
-// an old ~/.zshrc hook still calls --once-per-cmux in every cmux terminal it opens.
-test("--once-per-cmux runs no pass and exits 0", () => {
+// an old ~/.zshrc hook still calls up.py --once-per-cmux in each terminal it opens, so an argument up.py does not know starts nothing.
+test("an argument up.py does not know is refused with its usage and runs no pass", () => {
   const job = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "herdr" }
-  for (const where of ["inside", "outside"] as const)
-    expect(exitOf([job], where, "--once-per-cmux")).toEqual({ code: 0, started: [] })
+  for (const args of [["--once-per-cmux"], ["--restarted"], ["--sessions", "x"]])
+    expect(exitOf([job], ...args)).toEqual({
+      code: 1,
+      started: [],
+      stderr: "usage: up.py [--restarted <a,b> | --sessions]\n",
+    })
 })
 
-// Loads up.py and runs main() with the arguments after its path, every job down and outside cmux, each start printed rather than made.
+// Loads up.py and runs main() with the arguments after its path, every job down, each start printed rather than made.
 const RESTARTED = `${LOAD}started = []
-up.healthy = lambda job, procs: (False, "no heartbeat")
+up.healthy = lambda job: (False, "no heartbeat")
 up.ptable.table = lambda: {}
-up.ptable.cmux_of = lambda pid, procs: None
 up.once.running = lambda name, marker: None
 up.run = lambda argv, timeout=60: (0, "")
 up.start = lambda job: started.append(job["name"]) or True
@@ -226,9 +227,8 @@ test("--restarted drops the named jobs' starts once any running pass ends, and s
 // Loads up.py and runs two passes with every job healthy by its heartbeat, lsof answering the fake listing given and every other call recorded; a TERM'd pid dies, and starts are recorded rather than made.
 const DELETED = `${LOAD}listing = sys.argv[2]
 calls, kills, started = [], [], []
-up.healthy = lambda job, procs: (True, "ok")
+up.healthy = lambda job: (True, "ok")
 up.ptable.table = lambda: {pid: None for pid in (4301, 4302, 4401, 4501, 4601, 4602, 4701)}
-up.ptable.cmux_of = lambda pid, procs: None
 up.once.running = lambda name, marker: {"ops-x": 4301, "ops-y": 4501, "ops-z": 4601}.get(name)
 up.run = lambda argv, timeout=60: (0, listing) if argv[0] == "lsof" else (calls.append(argv), (0, ""))[1]
 up.os.kill = lambda pid, sig: kills.append([pid, sig])

@@ -1,11 +1,5 @@
 import { join } from "node:path"
 
-// The terminal playground status names; the factory's sessions run in herdr, which playground starts and playground view opens.
-export const TERMINAL = "cmux terminal"
-
-// Whether this process descends from a cmux terminal, which alone cmux's socket answers; playground status reports it, and nothing refuses on it.
-export const insideTerminal = (): boolean => Boolean(process.env.CMUX_SOCKET_PATH)
-
 // Starts every ops job that is down (up.py), the dashboard's stack and its follower among them, each in herdr's Ops workspace, so they outlive this terminal.
 export const startJobs = async (repo: string): Promise<number> => {
   const child = Bun.spawn(["python3", "-I", join(repo, "scripts", "ops", "up.py")], {

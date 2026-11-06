@@ -4,199 +4,9 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/no-unslotted-run.ts
 import { join as join5, resolve as resolve4, sep as sep2 } from "path";
 
-// scripts/hooks/no-main-checkout.ts
-import { readFileSync, realpathSync } from "fs";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join4, normalize, resolve as resolve3, sep } from "path";
-
-// packages/env/src/aliases.ts
-var DESK_ENV = new Set([
-  "APPROVALS_ENABLED",
-  "ATTACHMENTS_DIR",
-  "BARE_NAMES",
-  "CHANGELOG_DIR",
-  "DATA_DIR",
-  "DEBUG_",
-  "DEBUG_PASTE_DIR",
-  "DISPATCHER",
-  "DISPATCHER_SECONDARY",
-  "FIXTURE",
-  "FIXTURE_DIR",
-  "FIXTURE_LAUNCHED",
-  "HERDR_",
-  "HERDR_ALONE",
-  "HERDR_DIR",
-  "HERDR_SESSION",
-  "HERDR_SESSIONS",
-  "LIVE_READS",
-  "MERGED_PULLS",
-  "OWNER_NAME",
-  "PREVIEWS_DIR",
-  "SDK_PERMISSION_MODE",
-  "SDK_PROBE_DIR"
-]);
-var RENAMED_ENV = {
-  PLAYGROUND_CMUX_SESSIONS: "PLAYGROUND_ALL_SESSIONS"
-};
-var renamedEnv = (name) => {
-  if (Object.hasOwn(RENAMED_ENV, name))
-    return RENAMED_ENV[name];
-  if (!name.startsWith("DESK_"))
-    return;
-  const rest = name.slice("DESK_".length);
-  if (DESK_ENV.has(rest) || [...DESK_ENV].some((p) => p.endsWith("_") && rest.startsWith(p)))
-    return `PLAYGROUND_${rest}`;
-};
-var applyEnvAliases = (env = process.env) => {
-  for (const [name, value] of Object.entries(env)) {
-    const renamed = renamedEnv(name);
-    if (renamed && !env[renamed])
-      env[renamed] = value;
-  }
-};
-applyEnvAliases();
-
-// scripts/hooks/role.ts
-import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
-
-// packages/config/src/kinds.ts
-var ROSTER_KINDS = [
-  "assistant",
-  "builder",
-  "dispatcher",
-  "ops",
-  "optimizer",
-  "orchestrator",
-  "planner",
-  "probe",
-  "researcher",
-  "reviewer",
-  "runner",
-  "tester",
-  "worker"
-];
-var isRosterKind = (value) => ROSTER_KINDS.includes(value);
-var FACTORY_ROLE_OF_KIND = {
-  assistant: "lead",
-  builder: "lead",
-  dispatcher: "dispatcher",
-  ops: "lead",
-  optimizer: "lead",
-  orchestrator: "lead",
-  planner: "lead",
-  probe: "probe",
-  researcher: "worker",
-  reviewer: "reviewer",
-  runner: "runner",
-  tester: "tester",
-  worker: "worker"
-};
-var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
-var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
-var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
-var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
-var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
-var DEFAULT_SESSION_NAMES = {
-  aliases: {},
-  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
-};
-var NAMES = Symbol.for("playground.sessionNames");
-var held = globalThis;
-var setSessionNames = (next) => {
-  held[NAMES] = next;
-};
-var getSessionNames = () => held[NAMES] ?? DEFAULT_SESSION_NAMES;
-var namedKinds = () => {
-  const { aliases, names } = getSessionNames();
-  return new Map([
-    ...Object.entries(names).map(([kind, name]) => [name, kind]),
-    [`${names.dispatcher}-2`, "dispatcher"],
-    ...Object.entries(aliases),
-    ["optimizer", "optimizer"]
-  ]);
-};
-var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
-function roleOfName(name) {
-  const kind = placedKindOfName(name);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-var SEATLESS = new Set(["ended", "parked"]);
-
-// packages/env/src/data-dir.ts
-import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
-
-// scripts/hooks/role.ts
-var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
-var names;
-function loadNames(environment = process.env) {
-  names ??= (async () => {
-    try {
-      const setting = join2(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
-      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
-        env: { ...process.env, ...environment },
-        stderr: "ignore",
-        stdout: "pipe"
-      });
-      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
-`);
-      if (await read.exited === 0)
-        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
-    } catch {}
-  })();
-  return names;
-}
-async function registryName(sessionId, environment = process.env) {
-  const dir = join2(environment.CLAUDE_CONFIG_DIR || join2(homedir2(), ".claude"), "sessions");
-  for await (const file of new Bun.Glob("*.json").scan(dir)) {
-    try {
-      const entry = await Bun.file(join2(dir, file)).json();
-      if (entry.sessionId === sessionId && typeof entry.name === "string")
-        return entry.name;
-    } catch {}
-  }
-}
-async function rosterRole(name, environment = process.env) {
-  const path = join2(dataDirOf(environment), "roster.json");
-  try {
-    const roster = await Bun.file(path).json();
-    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
-  } catch {
-    return "";
-  }
-}
-async function sessionRole(environment, sessionId) {
-  if (environment.PLAYGROUND_ROLE)
-    return environment.PLAYGROUND_ROLE;
-  if (typeof sessionId !== "string")
-    return "";
-  try {
-    const name = await registryName(sessionId, environment) ?? "";
-    const role = name && await rosterRole(name, environment);
-    if (role)
-      return role;
-    await loadNames(environment);
-    return roleOfName(name);
-  } catch {
-    return "";
-  }
-}
-async function fromFactory(raw, environment = process.env) {
-  return await sessionRole(environment, sessionOf(raw)) !== "";
-}
-function sessionOf(raw) {
-  try {
-    return JSON.parse(raw).session_id;
-  } catch {
-    return;
-  }
-}
-
 // scripts/hooks/shell.ts
-import { homedir as homedir3 } from "os";
-import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
+import { homedir } from "os";
+import { basename, dirname, isAbsolute, resolve } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
@@ -221,7 +31,7 @@ function filled(script, mark, value) {
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
-var held2 = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
+var held = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
 var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
@@ -598,7 +408,7 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join3 = (parts, separator = "") => {
+var join = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -964,7 +774,7 @@ function word(lx) {
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
-      out.value += homedir3();
+      out.value += homedir();
       lx.i++;
     } else {
       out.value += c;
@@ -1489,7 +1299,7 @@ var tildeSign = (name, dir, env) => (name === "cd" || name === "pushd") && env.o
 async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
-    return homedir3();
+    return homedir();
   const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
   const sign = typed ? undefined : tildeSign(name, dir, env);
   const base = sign && (sign === "-" ? env.old?.dir : env.cwd);
@@ -1504,7 +1314,7 @@ function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
   const [dir] = dirs;
   if (!dir) {
-    return name === "cd" ? { paths: [homedir3()], unread: false } : { back: true, paths: [homedir3()], unread: true };
+    return name === "cd" ? { paths: [homedir()], unread: false } : { back: true, paths: [homedir()], unread: true };
   }
   if (dir.value === "-")
     return { back: true, paths: [], unread: true };
@@ -1653,7 +1463,7 @@ async function scriptOf(operand, cmd, env) {
   return script;
 }
 async function outputs(cmds, env) {
-  return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -1664,7 +1474,7 @@ async function record(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join3([await existing(path, env), out]) : out));
+    env.files.set(path, held(r.op === ">>" ? join([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -1673,7 +1483,7 @@ async function record(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join3([await existing(path, env), input]) : input));
+      env.files.set(path, held(append ? join([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -1702,7 +1512,7 @@ async function outputOf(cmd, env) {
         return unknown(LARGE);
       parts.push(part);
     }
-    return join3(parts);
+    return join(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -1742,7 +1552,7 @@ function printf([format = "", ...args]) {
 }
 async function stdinOf(cmd, env) {
   tick();
-  return held2(await stdinText(cmd, env));
+  return held(await stdinText(cmd, env));
 }
 async function stdinText(cmd, env) {
   const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
@@ -1780,7 +1590,7 @@ function pathOf(text, env) {
     return;
   if (isAbsolute(text.value))
     return text.value;
-  return env.cwd ? resolve2(env.cwd, text.value) : undefined;
+  return env.cwd ? resolve(env.cwd, text.value) : undefined;
 }
 async function readFile(path) {
   const file = Bun.file(path);
@@ -1817,6 +1627,351 @@ function knownVariables(command, environment, cwd) {
       known[name] = value;
   }
   return known;
+}
+
+// scripts/hooks/docker-build.ts
+var DOCKERS = new Set(["docker", "docker-compose"]);
+var DOCKER_TAKES = new Set([
+  "--config",
+  "--context",
+  "--host",
+  "--log-level",
+  "--tlscacert",
+  "--tlscert",
+  "--tlskey",
+  "-c",
+  "-H",
+  "-l"
+]);
+var COMPOSE_TAKES = new Set([
+  "--ansi",
+  "--env-file",
+  "--file",
+  "--parallel",
+  "--profile",
+  "--progress",
+  "--project-directory",
+  "--project-name",
+  "-f",
+  "-p"
+]);
+var SERVICE_TAKES = new Set([
+  "--attach",
+  "--build-arg",
+  "--builder",
+  "--cap-add",
+  "--cap-drop",
+  "--entrypoint",
+  "--env",
+  "--env-from-file",
+  "--exit-code-from",
+  "--label",
+  "--memory",
+  "--name",
+  "--no-attach",
+  "--progress",
+  "--publish",
+  "--pull",
+  "--scale",
+  "--ssh",
+  "--timeout",
+  "--user",
+  "--volume",
+  "--wait-timeout",
+  "--workdir",
+  "-e",
+  "-l",
+  "-m",
+  "-p",
+  "-t",
+  "-u",
+  "-v",
+  "-w"
+]);
+var BUILD_TAKES = new Set([
+  "--build-arg",
+  "--builder",
+  "--memory",
+  "--provenance",
+  "--sbom",
+  "--ssh",
+  "-m"
+]);
+var union = (...sets) => new Set(sets.flatMap((set) => [...set]));
+var COMPOSE_SERVICE_TAKES = union(SERVICE_TAKES, COMPOSE_TAKES);
+var COMPOSE_BUILD_TAKES = union(BUILD_TAKES, COMPOSE_TAKES);
+function subcommand(args, takes) {
+  let k = 0;
+  while (k < args.length && args[k].value.startsWith("-"))
+    k += takes.has(args[k].value) ? 2 : 1;
+  return { rest: args.slice(k + 1), sub: args[k] };
+}
+var help = (args) => args.some((a) => a.value === "-h" || a.value === "--help");
+var COMPOSE_ROOT_TAKES = new Set([...COMPOSE_TAKES, ...DOCKER_TAKES]);
+function composeBuild(args) {
+  const found = subcommand(args, COMPOSE_ROOT_TAKES);
+  const { rest, sub } = found.sub?.value === "alpha" ? subcommand(found.rest, new Set) : found;
+  if (!sub)
+    return;
+  const own = sub.value === "run" ? beforeService(rest) : rest;
+  if (help(own))
+    return;
+  if (sub.value === "watch")
+    return { kind: "compose", rest, sub: "watch" };
+  if (!["build", "create", "run", "up"].includes(sub.value))
+    return;
+  if (own.some((a) => a.value === "--no-build"))
+    return;
+  return { kind: "compose", rest, sub: sub.value };
+}
+function beforeService(rest) {
+  for (let k = 0;k < rest.length; k++) {
+    const v = rest[k].value;
+    if (COMPOSE_SERVICE_TAKES.has(v))
+      k++;
+    else if (!v.startsWith("-") || v === "-")
+      return rest.slice(0, k);
+  }
+  return rest;
+}
+function dockerBuild(args, compose) {
+  if (compose)
+    return composeBuild(args);
+  const { rest, sub } = subcommand(args, DOCKER_TAKES);
+  if (!sub)
+    return;
+  if (sub.value === "compose")
+    return composeBuild(rest);
+  const image = (words) => help(words) ? undefined : { kind: "image", rest: words, sub: "build" };
+  if (sub.value === "build")
+    return image(rest);
+  if (sub.value === "bake")
+    return help(rest) ? undefined : { kind: "bake", rest, sub: "bake" };
+  if (["builder", "buildx", "image"].includes(sub.value)) {
+    const inner = subcommand(rest, new Set(["--builder"]));
+    if (inner.sub?.value === "build" || inner.sub?.value === "b")
+      return image(inner.rest);
+    if (sub.value !== "image" && ["bake", "f"].includes(inner.sub?.value ?? "") && !help(inner.rest))
+      return { kind: "bake", rest: inner.rest, sub: "bake" };
+  }
+}
+var buildName = (build) => build.kind === "image" ? "a docker build" : build.kind === "bake" ? "docker buildx bake" : `docker compose ${build.sub}`;
+function atOnce(build) {
+  if (build.kind === "bake")
+    return "it builds its targets at once in the one Docker VM: build each image with docker build, one run-slot run at a time";
+  if (build.kind === "image" || build.sub === "build")
+    return;
+  const what = build.sub === "watch" ? "it builds and rebuilds its images" : "without --no-build it builds each missing image";
+  return `${what} at once in the one Docker VM: build first with run-slot.sh <your name> -- docker compose build, which builds one service at a time, then start it with docker compose up --no-build`;
+}
+function portlessCompose(name, args) {
+  let words = args;
+  if (name === "bun") {
+    if (args[0]?.value !== "x")
+      return;
+    words = args.slice(1);
+  }
+  if (name !== "portless") {
+    if (!["bun", "bunx", "npx"].includes(name))
+      return;
+    let k = 0;
+    while (k < words.length && words[k].value.startsWith("-"))
+      k += ["--package", "-p"].includes(words[k].value) ? 2 : 1;
+    if (program(words[k]?.value ?? "").replace(/@.*$/, "") !== "portless")
+      return;
+    words = words.slice(k + 1);
+  }
+  return words[0]?.value === "compose" ? words.slice(1) : undefined;
+}
+
+// scripts/hooks/no-main-checkout.ts
+import { readFileSync, realpathSync } from "fs";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join4, normalize, resolve as resolve3, sep } from "path";
+
+// packages/env/src/aliases.ts
+var DESK_ENV = new Set([
+  "APPROVALS_ENABLED",
+  "ATTACHMENTS_DIR",
+  "BARE_NAMES",
+  "CHANGELOG_DIR",
+  "DATA_DIR",
+  "DEBUG_",
+  "DEBUG_PASTE_DIR",
+  "DISPATCHER",
+  "DISPATCHER_SECONDARY",
+  "FIXTURE",
+  "FIXTURE_DIR",
+  "FIXTURE_LAUNCHED",
+  "HERDR_",
+  "HERDR_ALONE",
+  "HERDR_DIR",
+  "HERDR_SESSION",
+  "HERDR_SESSIONS",
+  "LIVE_READS",
+  "MERGED_PULLS",
+  "OWNER_NAME",
+  "PREVIEWS_DIR",
+  "SDK_PERMISSION_MODE",
+  "SDK_PROBE_DIR"
+]);
+var RENAMED_ENV = {
+  PLAYGROUND_CMUX_SESSIONS: "PLAYGROUND_ALL_SESSIONS"
+};
+var renamedEnv = (name) => {
+  if (Object.hasOwn(RENAMED_ENV, name))
+    return RENAMED_ENV[name];
+  if (!name.startsWith("DESK_"))
+    return;
+  const rest = name.slice("DESK_".length);
+  if (DESK_ENV.has(rest) || [...DESK_ENV].some((p) => p.endsWith("_") && rest.startsWith(p)))
+    return `PLAYGROUND_${rest}`;
+};
+var applyEnvAliases = (env = process.env) => {
+  for (const [name, value] of Object.entries(env)) {
+    const renamed = renamedEnv(name);
+    if (renamed && !env[renamed])
+      env[renamed] = value;
+  }
+};
+applyEnvAliases();
+
+// scripts/hooks/role.ts
+import { homedir as homedir3 } from "os";
+import { join as join3 } from "path";
+
+// packages/config/src/kinds.ts
+var ROSTER_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "orchestrator",
+  "planner",
+  "probe",
+  "researcher",
+  "reviewer",
+  "runner",
+  "tester",
+  "worker"
+];
+var isRosterKind = (value) => ROSTER_KINDS.includes(value);
+var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
+  builder: "lead",
+  dispatcher: "dispatcher",
+  ops: "lead",
+  optimizer: "lead",
+  orchestrator: "lead",
+  planner: "lead",
+  probe: "probe",
+  researcher: "worker",
+  reviewer: "reviewer",
+  runner: "runner",
+  tester: "tester",
+  worker: "worker"
+};
+var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
+var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
+var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
+var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
+var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
+var DEFAULT_SESSION_NAMES = {
+  aliases: {},
+  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
+};
+var NAMES = Symbol.for("playground.sessionNames");
+var held2 = globalThis;
+var setSessionNames = (next) => {
+  held2[NAMES] = next;
+};
+var getSessionNames = () => held2[NAMES] ?? DEFAULT_SESSION_NAMES;
+var namedKinds = () => {
+  const { aliases, names } = getSessionNames();
+  return new Map([
+    ...Object.entries(names).map(([kind, name]) => [name, kind]),
+    [`${names.dispatcher}-2`, "dispatcher"],
+    ...Object.entries(aliases),
+    ["optimizer", "optimizer"]
+  ]);
+};
+var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
+function roleOfName(name) {
+  const kind = placedKindOfName(name);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+var SEATLESS = new Set(["ended", "parked"]);
+
+// packages/env/src/data-dir.ts
+import { homedir as homedir2 } from "os";
+import { join as join2, resolve as resolve2 } from "path";
+var dataDirOf = (env, home = env.HOME || homedir2()) => env.PLAYGROUND_DATA_DIR ? resolve2(env.PLAYGROUND_DATA_DIR) : join2(home, ".playground");
+
+// scripts/hooks/role.ts
+var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
+var names;
+function loadNames(environment = process.env) {
+  names ??= (async () => {
+    try {
+      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
+        env: { ...process.env, ...environment },
+        stderr: "ignore",
+        stdout: "pipe"
+      });
+      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
+`);
+      if (await read.exited === 0)
+        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
+    } catch {}
+  })();
+  return names;
+}
+async function registryName(sessionId, environment = process.env) {
+  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir3(), ".claude"), "sessions");
+  for await (const file of new Bun.Glob("*.json").scan(dir)) {
+    try {
+      const entry = await Bun.file(join3(dir, file)).json();
+      if (entry.sessionId === sessionId && typeof entry.name === "string")
+        return entry.name;
+    } catch {}
+  }
+}
+async function rosterRole(name, environment = process.env) {
+  const path = join3(dataDirOf(environment), "roster.json");
+  try {
+    const roster = await Bun.file(path).json();
+    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
+    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
+  } catch {
+    return "";
+  }
+}
+async function sessionRole(environment, sessionId) {
+  if (environment.PLAYGROUND_ROLE)
+    return environment.PLAYGROUND_ROLE;
+  if (typeof sessionId !== "string")
+    return "";
+  try {
+    const name = await registryName(sessionId, environment) ?? "";
+    const role = name && await rosterRole(name, environment);
+    if (role)
+      return role;
+    await loadNames(environment);
+    return roleOfName(name);
+  } catch {
+    return "";
+  }
+}
+async function fromFactory(raw, environment = process.env) {
+  return await sessionRole(environment, sessionOf(raw)) !== "";
+}
+function sessionOf(raw) {
+  try {
+    return JSON.parse(raw).session_id;
+  } catch {
+    return;
+  }
 }
 
 // scripts/hooks/steady.ts
@@ -2129,6 +2284,7 @@ if (false) {}
 
 // scripts/hooks/no-unslotted-run.ts
 var refuse = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
+var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var anywhere = (what, command) => `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`;
 var BUN_SCRIPTS2 = new Set(["build", "check-types", "test"]);
 var RUNNERS2 = new Set(["bunx", "npx"]);
@@ -2190,6 +2346,11 @@ function turboTask(words) {
 }
 var recursive = (args) => args.some((a) => /^-[a-zA-Z]*[Rra]/.test(a.value) || ["--archive", "--recursive"].includes(a.value));
 function heavy(name, args, env) {
+  const compose = portlessCompose(name, args);
+  if (DOCKERS.has(name) || compose) {
+    const build = compose ? dockerBuild(compose, true) : dockerBuild(args, name === "docker-compose");
+    return build && { anywhere: true, dir: env.cwd, fix: atOnce(build), what: buildName(build) };
+  }
   if (name === "cp") {
     const paths = args.filter((a) => !a.value.startsWith("-"));
     const from = paths.slice(0, -1);
@@ -2272,18 +2433,21 @@ function inspect(raw, environment, main) {
     if (env.cwdAnywhere) {
       const found = heavy(name, args, { ...env, cwd: undefined });
       const line = words();
+      if (found?.anywhere && line !== undefined)
+        return refuseDocker(found.what, "", line, found.fix);
       if (found && line !== undefined && (found.dir === undefined || inWorktree(found.dir)))
         return anywhere(found.what, line);
     }
     for (const here of places(env)) {
       const found = heavy(name, args, here);
-      if (!found || !inWorktree(found.dir))
+      if (!found || !(found.anywhere || inWorktree(found.dir)))
         continue;
       const line = words();
       if (line === undefined)
         return;
       const moved = here.cwd !== undefined && (directory === undefined || resolve4(here.cwd) !== resolve4(directory));
-      return refuse(found.what, moved ? `cd ${quotedDir(here.cwd)} && ` : "", line);
+      const cd = moved ? `cd ${quotedDir(here.cwd)} && ` : "";
+      return found.anywhere ? refuseDocker(found.what, cd, line, found.fix) : refuse(found.what, cd, line);
     }
   };
   const env = {

@@ -3,7 +3,7 @@ import { existsSync } from "node:fs"
 import { listening } from "@/lib/dev/proxy"
 import { settledWithin } from "@/lib/settle"
 
-// The machine onboarding's checks read: a tool on PATH, a fixed path's presence, a loopback port taking a connection, and a fixed argv's answer within 5 seconds. checks.ts names the tools and builds every argv; this file names none, so the cmux boundary holds.
+// The machine onboarding's checks read: a tool on PATH, a fixed path's presence, a loopback port taking a connection, and a fixed argv's answer within 5 seconds. checks.ts names the tools and builds every argv; this file names none, so every command it runs is one checks.ts built.
 
 export type Reader = {
   exists: (path: string) => boolean

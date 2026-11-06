@@ -3,7 +3,7 @@
 (0.0.0.0, [::] or any non-loopback address), once per container and port set.
 
 A stuck session's alert comes from its own session-state hook now (PG-2184, packages/scripts/src/stuck-alert.ts), so this watch no
-longer reads sessions or cmux's Feed. Reads only `docker ps`. State (what was already alerted) persists in STATE across re-arms.
+longer reads sessions or their prompts. Reads only `docker ps`. State (what was already alerted) persists in STATE across re-arms.
 On exit it writes the alerts to ALERT and prints them. It never answers or types anything.
 """
 import json, os, subprocess, sys, time
