@@ -4,9 +4,7 @@ import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 // `tilde` marks a word that opens with an unquoted ~- or ~+, which zsh expands to the folder it last left or the one it is in.
-// `inferred` marks a here-string's echo substitution read as its words, which stdinOf, the reading every hook takes as stdin, still takes as unknown; only scriptStdin reads it.
 export type Text = {
-  inferred?: string
   reads?: Text[]
   tilde?: boolean
   unknown?: string
@@ -59,8 +57,6 @@ export type Command = {
 }
 type Lexer = {
   commands: Command[]
-  // set while the lexer reads a here-string's word, the one place a substitution's echo is read (substituted)
-  hereString?: boolean
   i: number
   known: Record<string, string>
   scope: number
@@ -694,7 +690,6 @@ export function varsSince(vars: Map<string, Text>, cursor: number | undefined): 
 const merge = (out: Text, part: Text): void => {
   out.value += part.value
   if (part.unknown) out.unknown ??= part.unknown
-  if (part.inferred) out.inferred ??= part.inferred
   if (part.variable) out.variable ??= part.variable
   if (part.reads?.length) (out.reads ??= []).push(...part.reads)
 }
@@ -1037,10 +1032,7 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       const [, fd] = redirect
       // zsh's >!, >>! and >&! override noclobber as >| does
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1")
-      const outer = lx.hereString
-      lx.hereString = op === "<<<"
       const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx)
-      lx.hereString = outer
       const entry: Redirect = { fd, op, target }
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -1231,9 +1223,8 @@ function dollar(lx: Lexer): Text {
   if (next === "(") {
     lx.i += 2
     const from = lx.commands.length
-    const here = lx.hereString
     nest(lx)
-    return substituted(lx.commands.slice(from), lx.known, here)
+    return substituted(lx.commands.slice(from), lx.known)
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}")
@@ -1303,7 +1294,10 @@ function backtick(lx: Lexer): Text {
 }
 
 // `$(cat <<'EOF' ... EOF)`, `$(cat file)` and `$(< file)` are read; any other command substitution is unknown.
-function substituted(inner: Command[], known: Record<string, string>, here = false): Text {
+// Set while hereStringEchoed lexes a here-string's source again, the one reading in which a substitution's echo is read as its words
+let echoes = false
+
+function substituted(inner: Command[], known: Record<string, string>): Text {
   const [only] = inner
   if (inner.length !== 1 || only.stdin || only.group) return unknown("a command substitution")
   const made = mktempPath(only, known)
@@ -1333,14 +1327,14 @@ function substituted(inner: Command[], known: Record<string, string>, here = fal
     args.every((w) => !w.unknown && !w.glob && !marked(w.value)) &&
     printed.every((v) => !v.includes("\\"))
   if (
-    here &&
+    echoes &&
     first?.value === "echo" &&
     !first.quoted &&
     only.redirects.length === 0 &&
     words &&
     !args[0]?.value.startsWith("-")
   )
-    return { inferred: "a command substitution", value: printed.join(" ") }
+    return { value: printed.join(" ") }
   return unknown("a command substitution")
 }
 
@@ -1600,8 +1594,12 @@ export async function examine(
   }
   // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already
   if (!cmd.runsStdin || stdinScript(primary)) return
-  const script = await scriptStdin(cmd, env)
-  return nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins))
+  for (const script of await scriptStdin(cmd, env)) {
+    const verdict = await nested(cmd, env, () =>
+      run(lexScript(known(script), env), subshell(env), visit, builtins),
+    )
+    if (verdict) return verdict
+  }
 }
 
 // Whether a shell or a source reads its script from stdin, as shell() and examineReading read it
@@ -1729,12 +1727,14 @@ async function examineReading(
     (name === "source" || name === ".") &&
     (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))
   ) {
-    const script = await scriptOf(args[0], cmd, here)
-    verdict =
-      (script.unknown ? await visit(cmd, parsed, here) : undefined) ??
-      (await nested(cmd, env, () =>
+    const scripts = await scriptOf(args[0], cmd, here)
+    verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined
+    for (const script of verdict ? [] : scripts) {
+      verdict = await nested(cmd, env, () =>
         run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins),
-      ))
+      )
+      if (verdict) break
+    }
   } else if (name === "eval") {
     verdict = await nested(cmd, env, () =>
       run(
@@ -2067,23 +2067,24 @@ async function shell(
     }
     return run(lexScript(script, env), subshell(env), visit, builtins)
   }
-  const script = await scriptOf(operand, cmd, env)
-  return run(lexScript(known(script), env), subshell(env), visit, builtins)
+  for (const script of await scriptOf(operand, cmd, env)) {
+    const verdict = await run(lexScript(known(script), env), subshell(env), visit, builtins)
+    if (verdict) return verdict
+  }
 }
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
 export const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
 
-// A shell's or source's script: stdin with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
-async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text> {
-  const script =
+// A shell's or source's scripts: stdin's readings with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
+async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text[]> {
+  const scripts =
     !operand || STDIN_PATHS.has(operand.value)
       ? await scriptStdin(cmd, env)
-      : operand.procs
-        ? await outputs(operand.procs, env)
-        : unknown("a script file")
-  if (deadline !== undefined && script.unknown === LARGE) throw new RangeError(LARGE)
-  return script
+      : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")]
+  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
+    throw new RangeError(LARGE)
+  return scripts
 }
 
 // The output of a list of commands run in order, unknown when any part is.
@@ -2185,18 +2186,15 @@ export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
   const input = cmd.redirects.findLast((r) => !r.bodyFed && ownFeed(r))
   if (!input)
     return held(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see"))
-  const text = await redirectText(input, env, false)
-  return held(text.inferred ? unknown(text.inferred) : text)
+  return held(await redirectText(input, env, false))
 }
 
-// A script a shell reads from stdin: stdinOf's reading and, where it differs, the one stdinRedirect applies left to right, each part it cannot read a line break, so a delete either reading finds is judged; unknown only when stdinOf's is
-export async function scriptStdin(cmd: Command, env: Env): Promise<Text> {
+// The scripts a shell may read from stdin: stdinOf's reading and, where it differs, the shell's own (stdinText), each judged as a script of its own, so a delete either reading finds is judged and a cd in one moves no folder for the other
+export async function scriptStdin(cmd: Command, env: Env): Promise<Text[]> {
   const own = await stdinOf(cmd, env)
   tick()
   const fed = held(await stdinText(cmd, env))
-  if (fed.unknown === LARGE) return fed
-  if (fed.value === own.value) return own
-  return { ...(own.unknown ? { unknown: own.unknown } : {}), value: `${known(own)}\n${known(fed)}` }
+  return fed.value === own.value && fed.unknown === own.unknown ? [own] : [own, fed]
 }
 
 const ownFeed = ({ fd, op }: Redirect): boolean =>
@@ -2229,20 +2227,34 @@ export const rootFed = (cmd: Command): boolean => stdinFed(cmd) && stdinShell(cm
 async function stdinText(cmd: Command, env: Env): Promise<Text> {
   const input = stdinRedirect(cmd)
   if (!input) return cmd.stdin ? outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see")
-  const text = await redirectText(input, env, true)
-  return text.inferred ? { ...text, inferred: undefined } : text
+  return redirectText(input, env, true)
 }
 
-async function redirectText(input: Redirect, env: Env, vars: boolean): Promise<Text> {
+// stdin's text from one redirect; the shell's own reading (`fed`) also reads a here-string's `$(echo …)` and a here-string of one variable the line set, which stdinOf leaves unknown as canary did
+async function redirectText(input: Redirect, env: Env, fed: boolean): Promise<Text> {
   if (input.target?.procs) return outputs(input.target.procs, env)
   if (input.op === "<" || input.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect")
   if (!input.body) return unknown("a heredoc the hook could not read")
   // a here-string of one variable the line set earlier (`S=x; sh <<< "$S"`) is that variable's value
-  const set = vars && input.body.variable ? env.vars.get(input.body.variable) : undefined
+  const set = fed && input.body.variable ? env.vars.get(input.body.variable) : undefined
   if (input.body.unknown && input.body.value === `${UNKNOWN}\n` && set && !set.unknown)
     return resolveText({ ...set, value: `${set.value}\n` }, env)
-  return resolveText(input.body, env)
+  return resolveText((fed && hereStringEchoed(input, env)) || input.body, env)
+}
+
+// A here-string's text with each `$(echo …)` read as its words, lexed again from its source, when its own text holds a part it cannot read
+function hereStringEchoed(input: Redirect, env: Env): Text | undefined {
+  const source = input.target?.source
+  if (input.op !== "<<<" || !input.body?.unknown || !source?.includes("$(")) return undefined
+  echoes = true
+  try {
+    // a substitution's commands lex ahead of the one that holds it, so the here-string is the last command's
+    const outer = lex(`: <<< ${source}`, env.known).commands.at(-1)
+    return outer?.redirects.find((r) => r.op === "<<<")?.body
+  } finally {
+    echoes = false
+  }
 }
 
 export async function resolveText(text: Text, env: Env): Promise<Text> {

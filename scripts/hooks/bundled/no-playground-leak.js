@@ -6237,8 +6237,6 @@ var merge2 = (out, part) => {
   out.value += part.value;
   if (part.unknown)
     out.unknown ??= part.unknown;
-  if (part.inferred)
-    out.inferred ??= part.inferred;
   if (part.variable)
     out.variable ??= part.variable;
   if (part.reads?.length)
@@ -6531,10 +6529,7 @@ function walk(lx, scope, nested, inherit) {
         lx.i++;
       const [, fd] = redirect;
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1");
-      const outer = lx.hereString;
-      lx.hereString = op === "<<<";
       const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx);
-      lx.hereString = outer;
       const entry = { fd, op, target };
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -6717,9 +6712,8 @@ function dollar(lx) {
   if (next === "(") {
     lx.i += 2;
     const from = lx.commands.length;
-    const here = lx.hereString;
     nest(lx);
-    return substituted(lx.commands.slice(from), lx.known, here);
+    return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}");
@@ -6790,7 +6784,8 @@ function backtick(lx) {
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
   return unknown2("a command substitution");
 }
-function substituted(inner, known, here = false) {
+var echoes = false;
+function substituted(inner, known) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
     return unknown2("a command substitution");
@@ -6812,8 +6807,8 @@ function substituted(inner, known, here = false) {
   const printed = args.map((w) => w.value.replaceAll("\\n", `
 `));
   const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value)) && printed.every((v) => !v.includes("\\"));
-  if (here && first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
-    return { inferred: "a command substitution", value: printed.join(" ") };
+  if (echoes && first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
+    return { value: printed.join(" ") };
   return unknown2("a command substitution");
 }
 var MKTEMP_FLAGS = new Set(["d", "q"]);
@@ -7003,8 +6998,11 @@ async function examine(cmd, env, visit, builtins) {
   }
   if (!cmd.runsStdin || stdinScript(primary))
     return;
-  const script = await scriptStdin(cmd, env);
-  return nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins));
+  for (const script of await scriptStdin(cmd, env)) {
+    const verdict = await nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins));
+    if (verdict)
+      return verdict;
+  }
 }
 function stdinScript({ args, name }) {
   if (name === "." || name === "source")
@@ -7106,8 +7104,13 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   } else if (SHELLS.has(name))
     verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
   else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
-    const script = await scriptOf(args[0], cmd, here);
-    verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
+    const scripts = await scriptOf(args[0], cmd, here);
+    verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
+    for (const script of verdict ? [] : scripts) {
+      verdict = await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
+      if (verdict)
+        break;
+    }
   } else if (name === "eval") {
     verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
@@ -7318,16 +7321,19 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     }
     return run(lexScript(script, env), subshell(env), visit, builtins);
   }
-  const script = await scriptOf(operand, cmd, env);
-  return run(lexScript(known(script), env), subshell(env), visit, builtins);
+  for (const script of await scriptOf(operand, cmd, env)) {
+    const verdict = await run(lexScript(known(script), env), subshell(env), visit, builtins);
+    if (verdict)
+      return verdict;
+  }
 }
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const script = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : operand.procs ? await outputs(operand.procs, env) : unknown2("a script file");
-  if (deadline !== undefined && script.unknown === LARGE)
+  const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown2("a script file")];
+  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
-  return script;
+  return scripts;
 }
 async function outputs(cmds, env) {
   return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
@@ -7422,19 +7428,13 @@ async function stdinOf(cmd, env) {
   const input = cmd.redirects.findLast((r) => !r.bodyFed && ownFeed(r));
   if (!input)
     return held(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown2("stdin the hook cannot see"));
-  const text = await redirectText(input, env, false);
-  return held(text.inferred ? unknown2(text.inferred) : text);
+  return held(await redirectText(input, env, false));
 }
 async function scriptStdin(cmd, env) {
   const own = await stdinOf(cmd, env);
   tick();
   const fed = held(await stdinText(cmd, env));
-  if (fed.unknown === LARGE)
-    return fed;
-  if (fed.value === own.value)
-    return own;
-  return { ...own.unknown ? { unknown: own.unknown } : {}, value: `${known(own)}
-${known(fed)}` };
+  return fed.value === own.value && fed.unknown === own.unknown ? [own] : [own, fed];
 }
 var ownFeed = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
 function stdinRedirect(cmd) {
@@ -7456,22 +7456,33 @@ async function stdinText(cmd, env) {
   const input = stdinRedirect(cmd);
   if (!input)
     return cmd.stdin ? outputOf(cmd.stdin, env) : unknown2("stdin the hook cannot see");
-  const text = await redirectText(input, env, true);
-  return text.inferred ? { ...text, inferred: undefined } : text;
+  return redirectText(input, env, true);
 }
-async function redirectText(input, env, vars) {
+async function redirectText(input, env, fed) {
   if (input.target?.procs)
     return outputs(input.target.procs, env);
   if (input.op === "<" || input.op === "<>")
     return input.target ? readPath(input.target, env) : unknown2("an input redirect");
   if (!input.body)
     return unknown2("a heredoc the hook could not read");
-  const set = vars && input.body.variable ? env.vars.get(input.body.variable) : undefined;
+  const set = fed && input.body.variable ? env.vars.get(input.body.variable) : undefined;
   if (input.body.unknown && input.body.value === `${UNKNOWN}
 ` && set && !set.unknown)
     return resolveText({ ...set, value: `${set.value}
 ` }, env);
-  return resolveText(input.body, env);
+  return resolveText(fed && hereStringEchoed(input, env) || input.body, env);
+}
+function hereStringEchoed(input, env) {
+  const source = input.target?.source;
+  if (input.op !== "<<<" || !input.body?.unknown || !source?.includes("$("))
+    return;
+  echoes = true;
+  try {
+    const outer = lex(`: <<< ${source}`, env.known).commands.at(-1);
+    return outer?.redirects.find((r) => r.op === "<<<")?.body;
+  } finally {
+    echoes = false;
+  }
 }
 async function resolveText(text, env) {
   if (text.unknown || !text.reads?.length)

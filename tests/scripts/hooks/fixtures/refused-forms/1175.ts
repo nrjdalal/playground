@@ -208,10 +208,63 @@ export const groups: Group[] = [
       ],
     ],
   },
+  // The round-2 review's probe: a here-string holding an echo substitution keeps the rest of its text readable, as on canary
+  {
+    folders: ["checkout", "process data folder", "process home", "process worktree"],
+    guards: ["no-raw-delete"],
+    rows: () => [
+      [
+        "a recursive delete beside an echo substitution in a here-string cat feeds to bash",
+        `cat <<< "${D} $(echo x)" | bash`,
+      ],
+      [
+        "a recursive delete beside an echo substitution in a here-string cat feeds to sudo's root shell",
+        `cat <<< "${D} $(echo x)" | sudo -s`,
+      ],
+      [
+        "a recursive delete beside an echo substitution in a here-string tee feeds to bash",
+        `tee <<< "${D} $(echo x)" | bash`,
+      ],
+    ],
+  },
+  {
+    folders: ["process home"],
+    guards: ["no-raw-delete"],
+    rows: () => [
+      [
+        "a relative recursive delete on descriptor 3 duplicated to bash, its own here-string a cd away",
+        "bash <<< 'cd /tmp' 3<<< 'rm -rf .playground/extensions/.no-such-folder' <&3",
+      ],
+    ],
+  },
+  {
+    folders: ["process home"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a removal beside an echo substitution in a here-string cat feeds to bash",
+        `cat <<< "${D} $(echo x)" | bash`,
+      ],
+    ],
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-linear-ticket"],
+    rows: () => [
+      [
+        "python fed a here-string naming issueCreate beside an echo substitution",
+        `python3 <<< "issueCreate $(echo x)"`,
+      ],
+    ],
+  },
   {
     folders: ["main checkout"],
     guards: ["no-main-checkout"],
     rows: () => [
+      [
+        "a commit beside an echo substitution in a here-string cat feeds to bash",
+        `cat <<< "git commit -m x $(echo y)" | bash`,
+      ],
       [
         "a harmless script on descriptor 3 duplicated to a root shell",
         "sudo -s 3<<< 'git status' <&3",
