@@ -9,6 +9,7 @@ import {
   choicesOf,
   CLOCKS_STOPPED_AT,
   MAX_OPTIONS,
+  picksOf,
   rowOfAnswer,
 } from "@packages/config/inbox"
 import type { ActivityActor, Database } from "@packages/db"
@@ -892,18 +893,44 @@ export function checkAnswer(
 
 function answerOf(
   item: Shape<"kind" | "preview" | "status">,
-  { action, option, text }: AnswerInput,
+  { action, option, options, text }: AnswerInput,
 ): { answer: Omit<InboxAnswer, "at">; status: InboxStatus } | { message: string } {
   if (item.kind === "update") return { message: "An update is read, not answered" }
   if (item.status !== "open") return { message: "This item is already answered" }
   if (option !== undefined && !(item.kind === "decision" && action === "approve")) {
     return { message: "Only a decision's go picks an option" }
   }
+  if (
+    options !== undefined &&
+    !(
+      item.kind === "decision" &&
+      action === "approve" &&
+      item.preview.type === "ask" &&
+      !!item.preview.questions
+    )
+  ) {
+    return { message: "Only a multi-question ask's approve names a pick for each question" }
+  }
   // Dismiss on what still waits sets it aside as the old `clear` did, its poster told so, and sends it to Done; a secret ask takes it too, since no value travels
   if (action === "dismiss") return { answer: { choice: "clear" }, status: "cleared" }
   if (item.kind === "decision") {
     if (item.preview.type === "secret") {
       return { message: "A secret ask takes its value through its Submit alone" }
+    }
+    // a multi-question ask is approved with one pick for each of its questions, each within that question's options, and denied or set aside as a whole
+    if (item.preview.type === "ask" && item.preview.questions) {
+      const questions = item.preview.questions
+      if (action === "clear") return { answer: { choice: "clear" }, status: "cleared" }
+      if (action === "deny") return { answer: { choice: "deny" }, status: "denied" }
+      if (
+        action !== "approve" ||
+        options === undefined ||
+        options.length !== questions.length ||
+        options.some((pick, at) => pick >= questions[at]!.options.length)
+      ) {
+        return { message: `Pick one of each of its ${questions.length} questions` }
+      }
+      return { answer: { choice: "approve", options }, status: "approved" }
     }
     // a lettered decision's go names which of its go rows the owner picked, and takes no Edit, which names none; a yes or no has one
     const go = choicesOf(item.preview)?.rows.filter((row) => row.go).length ?? 1
@@ -964,6 +991,11 @@ function answerOf(
 function optionOf(item: InboxItem, answer: { choice: string; option?: number }) {
   const row = item.kind === "decision" ? rowOfAnswer(item.preview, answer) : null
   return row ? { index: row.index, label: row.label, letter: row.letter } : undefined
+}
+
+// The pick the owner made in each question of a multi-question ask, as the card lettered and labelled them (picksOf), for the poster's payload.
+function picksFor(item: InboxItem, options: number[]) {
+  return item.kind === "decision" ? (picksOf(item.preview, options) ?? undefined) : undefined
 }
 
 // Pure: the option an approved or denied decision's answer picked, as its letter and label, for bun run ask get; null for any other item or answer.
@@ -1034,7 +1066,9 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
         close: "link" in item.preview ? ack : ackOrWhy,
         go: true,
         next: "carry-out",
-        option: optionOf(item, answer),
+        ...(answer.options
+          ? { picks: picksFor(item, answer.options) }
+          : { option: optionOf(item, answer) }),
         verb: "pick",
       }
     case "deny":
