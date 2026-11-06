@@ -385,7 +385,7 @@ describe("the types gate", () => {
     expect(existsSync(join(worktree, "node_modules", "kept"))).toBe(true)
   })
 
-  // turbo's change filter selects a package by folder, and @packages/scripts imports scripts/hooks/ from outside its own, so a hooks-only change type-checks it only by name (#1153)
+  // pr:merge's types step runs CI's own type filters, @packages/scripts among them for the reason turbo.json's @packages/scripts#check-types gives
   test("ciSteps' check-types takes CI's filters, @packages/scripts among them, with canary for CI's base", async () => {
     const canary = "c".repeat(40)
     const workflow = Bun.YAML.parse(

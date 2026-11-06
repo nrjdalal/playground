@@ -21,10 +21,31 @@
         "src/generate-env.ts"
       ]
     },
-    // @packages/scripts imports scripts/hooks/, outside every package's folder, so the hooks hash into its check-types: a hook edit misses the cache, which the type gates' --filter=@packages/scripts then runs, since turbo's change filter selects packages by folder alone
+    // @packages/scripts imports these files by relative path from outside every package's folder, which turbo's change filter never maps to it, since it selects packages by folder alone: the type gates name it with --filter=@packages/scripts, and these inputs make that run miss the cache when one of them changed, so its tsc runs; tests/turbo.test.ts keeps this list whole
     "@packages/scripts#check-types": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/scripts/hooks/**/*.ts"]
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/api/hono/src/lib/dashboard/delete-targets.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/dev/live-dashboard.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/dev/proxy.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/dev/stop.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/keychain-items.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/keychain.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/usage/prices.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/yard/client.ts",
+        "$TURBO_ROOT$/api/hono/src/lib/yard/keychain.ts",
+        "$TURBO_ROOT$/scripts/hooks/**/*.ts",
+        "$TURBO_ROOT$/scripts/ops/optimizer/*.ts",
+        "$TURBO_ROOT$/scripts/roster-statuses.json",
+        "$TURBO_ROOT$/web/next/docs.config.ts",
+        "$TURBO_ROOT$/web/next/src/lib/agent-label.ts",
+        "$TURBO_ROOT$/web/next/src/lib/blog-policy.ts",
+        "$TURBO_ROOT$/web/next/src/lib/docs.ts",
+        "$TURBO_ROOT$/web/next/src/lib/model-label.ts",
+        "$TURBO_ROOT$/web/next/src/lib/tooltip.ts",
+        "$TURBO_ROOT$/web/next/src/lib/verify-visit.ts"
+      ]
     },
     // web's build also writes .generated/ at the repo root, which a bare check-types:tests reads, so a cached replay restores it too; it waits for web's check-types, whose tsc reads the .next/types next build deletes and rewrites
     "@web/next#build": {

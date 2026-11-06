@@ -55,16 +55,47 @@ const workspaceTasks = async (turbo: Turbo) => {
 }
 
 type DryTask = { dependencies: string[]; inputs: Record<string, string>; taskId: string }
-let dry: DryTask[] | undefined
-const dryRun = () => {
-  if (dry) return dry
+const dry = new Map<string, DryTask[]>()
+const dryRun = (filter = "@web/next") => {
+  const cached = dry.get(filter)
+  if (cached) return cached
   const run = Bun.spawnSync(
-    ["bunx", "turbo", "run", "check-types", "build", "--filter=@web/next", "--dry=json"],
+    ["bunx", "turbo", "run", "check-types", "build", `--filter=${filter}`, "--dry=json"],
     { cwd: ROOT, env: { ...process.env, TURBO_TELEMETRY_DISABLED: "1" } },
   )
   expect(run.exitCode).toBe(0)
-  dry = (JSON.parse(run.stdout.toString()) as { tasks: DryTask[] }).tasks
-  return dry
+  const tasks = (JSON.parse(run.stdout.toString()) as { tasks: DryTask[] }).tasks
+  dry.set(filter, tasks)
+  return tasks
+}
+
+// Every file outside packages/scripts that its sources reach by relative import, following those files' own relative imports, less the workspace packages it declares, which turbo's graph already hashes in
+const outside = async () => {
+  const pkg = await Bun.file(join(SCRIPTS, "..", "package.json")).json()
+  const declared = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })
+    .filter((name) => name.startsWith("@packages/"))
+    .map((name) => `packages/${name.slice("@packages/".length)}/`)
+  const resolve = async (from: string, spec: string) => {
+    const path = relative(ROOT, join(ROOT, dirname(from), spec))
+    for (const each of [path, `${path}.ts`, `${path}.tsx`, `${path}/index.ts`])
+      if (await Bun.file(join(ROOT, each)).exists()) return each
+  }
+  const found = new Set<string>()
+  const walk = async (file: string) => {
+    if (!/\.tsx?$/.test(file)) return
+    for (const [, spec] of (await Bun.file(join(ROOT, file)).text()).matchAll(
+      /(?:from\s+|import\(\s*)["'](\.\.?\/[^"']+)["']/g,
+    )) {
+      const target = await resolve(file, spec!)
+      if (!target || target.startsWith("packages/scripts/") || found.has(target)) continue
+      if (declared.some((folder) => target.startsWith(folder))) continue
+      found.add(target)
+      await walk(target)
+    }
+  }
+  for await (const file of new Bun.Glob("**/*.{ts,tsx}").scan(SCRIPTS))
+    await walk(`packages/scripts/src/${file}`)
+  return [...found].sort()
 }
 
 describe("turbo.json", () => {
@@ -128,27 +159,17 @@ describe("turbo.json", () => {
       )
   }, 60_000)
 
-  // turbo's change filter selects a package by its folder, so a hooks-only change reaches @packages/scripts' check-types through the type gates' --filter=@packages/scripts, and these inputs make that run miss the cache when a hook it imports changed (#1153)
-  test("@packages/scripts#check-types hashes every scripts/hooks file the package imports", async () => {
-    const run = Bun.spawnSync(
-      ["bunx", "turbo", "run", "check-types", "--filter=@packages/scripts", "--dry=json"],
-      { cwd: ROOT, env: { ...process.env, TURBO_TELEMETRY_DISABLED: "1" } },
-    )
-    expect(run.exitCode).toBe(0)
-    const task = (JSON.parse(run.stdout.toString()) as { tasks: DryTask[] }).tasks.find(
+  // turbo.json's comment on @packages/scripts#check-types says why these inputs are listed by name
+  test("@packages/scripts#check-types hashes every file outside the package that its sources import", async () => {
+    const imported = await outside()
+    expect(imported).toContain("scripts/hooks/shell.ts")
+    expect(imported).toContain("scripts/hooks/role.ts")
+    const task = dryRun("@packages/scripts").find(
       (each) => each.taskId === "@packages/scripts#check-types",
     )
-    const hashed = Object.keys(task?.inputs ?? {})
-      .filter((path) => path.startsWith("../../scripts/hooks/"))
-      .map((path) => path.slice("../../".length))
-    const imported = new Set<string>()
-    for await (const file of new Bun.Glob("**/*.ts").scan(SCRIPTS))
-      for (const [, hook] of (await Bun.file(join(SCRIPTS, file)).text()).matchAll(
-        /["'](?:\.\.\/)+scripts\/hooks\/([\w-]+)["']/g,
-      ))
-        imported.add(`scripts/hooks/${hook}.ts`)
-    expect([...imported]).toContain("scripts/hooks/shell.ts")
-    expect([...imported]).toContain("scripts/hooks/role.ts")
-    expect(hashed).toEqual(expect.arrayContaining([...imported].sort()))
+    const hashed = new Set(
+      Object.keys(task?.inputs ?? {}).map((path) => relative(ROOT, join(SCRIPTS, "..", path))),
+    )
+    expect(imported.filter((file) => !hashed.has(file))).toEqual([])
   }, 60_000)
 })
