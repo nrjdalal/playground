@@ -68,7 +68,8 @@ Checks (default: all)
                 the panes; at 1440x900, with the bar hidden, a row jump to a card low in the Inbox
                 and a focus on a hidden square leave the aside unscrolled and the bar's handle on
                 its bottom edge (the row jump posts 3 cards, only on this checkout's own fixture
-                stack, and settles them)
+                stack, and settles them; it fails when the jump leaves the Inbox pane short of
+                its end, which tests nothing, or a card stays open)
   health        /api/health answers ok and reports the expected version
   problems      /api/health flags nothing: today, a database it cannot reach, named with
                 the route's own error
@@ -571,6 +572,15 @@ const asideBars = (at: Target) =>
       : []
     const ids = posted.flatMap((card) => ("id" in card ? [card.id] : []))
     const refused = posted.find((card) => "refused" in card)
+    // each card left open, named with why its settle failed, so it never sits below the next run's cards unseen
+    let settled = false
+    const settle = () => {
+      settled = true
+      return ids.flatMap((id) => {
+        const why = settleCard(id, "verify aside-bar")
+        return why ? [`${id}: ${why}`] : []
+      })
+    }
     try {
       return await browse(at, "aside-bar", async (browser) => {
         await browser.signIn(at)
@@ -593,10 +603,17 @@ const asideBars = (at: Target) =>
         results.push(
           ...(await asideDrift(browser, at, ASIDE_WIDE, refused ? null : (ids[0] ?? null))),
         )
+        const open = settle()
+        if (open.length)
+          results.push({
+            check: `aside-bar ${ASIDE_WIDE.width} row jump`,
+            detail: `left open: ${open.join("; ")}`,
+            ok: false,
+          })
         return results
       })
     } finally {
-      for (const id of ids) settleCard(id, "verify aside-bar")
+      if (!settled) settle()
     }
   })
 
