@@ -8,7 +8,7 @@
     "web/*"
   ],
   "scripts": {
-    "ask": "bun api/hono/src/bin/dashboard-ask.ts",
+    "ask": "bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun api/hono/src/bin/dashboard-ask.ts",
     "auth:schema": "bun packages/scripts/src/auth-schema.ts",
     "build": "turbo run build --summarize && bun packages/scripts/src/build-sizes.ts",
     "changelog": "bun api/hono/src/plugins/changelog/cli.ts",
@@ -63,7 +63,7 @@
     "test:file": "NODE_ENV=test bun packages/scripts/src/test-sandbox.ts",
     "test:skills": "bun packages/scripts/src/test-skills.ts",
     "test:timings": "TEST_TIMINGS_UPDATE=1 bun run test",
-    "thread": "bun api/hono/src/bin/dashboard-thread.ts",
+    "thread": "bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun api/hono/src/bin/dashboard-thread.ts",
     "trace-count": "bun packages/scripts/src/trace-count/cli.ts",
     "vendor:upstream": "bun packages/scripts/src/vendor-upstream/cli.ts",
     "verify": "bun packages/scripts/src/verify/prebuild.ts && bun packages/scripts/src/verify/cli.ts",

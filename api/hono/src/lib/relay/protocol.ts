@@ -66,13 +66,22 @@ const parsed = <T>(schema: z.ZodType<T>, body: string): T | null => {
   }
 }
 
-// Pure: the Inbox cards a write reaches, each by its id or, for a card a message names, its `#iN`: the one an answer's or a schedule's path names, every id a dismiss's body lists, every card a message's text names, none for any other write, or null for a dismiss whose body lists no ids, which the Mac refuses.
-export function cardsOf({ body, path }: { body: string; path: string }): string[] | null {
-  if (pathOn(CARD_ROUTES, path)) return [path.split("?")[0]!.split("/")[4]!]
-  if (pathOn(DISMISS_ROUTES, path)) return parsed(dismissIds, body)?.ids ?? null
-  if (!pathOn(MESSAGE_ROUTES, path)) return []
+// Pure: the Inbox cards a write reaches, each by its id or, for a card a message names, its `#iN`: the one an answer's or a schedule's path names, every id a dismiss's body lists, every card a message's text names, none for any other write, or refuse for a dismiss whose body lists no ids, which the Mac refuses.
+export function cardsOf({
+  body,
+  path,
+}: {
+  body: string
+  path: string
+}): { cards: string[] } | { refuse: true } {
+  if (pathOn(CARD_ROUTES, path)) return { cards: [path.split("?")[0]!.split("/")[4]!] }
+  if (pathOn(DISMISS_ROUTES, path)) {
+    const ids = parsed(dismissIds, body)?.ids
+    return ids ? { cards: ids } : { refuse: true }
+  }
+  if (!pathOn(MESSAGE_ROUTES, path)) return { cards: [] }
   const text = parsed(messageText, body)?.text ?? ""
-  return [...text.matchAll(REPLY_REFS)].map((match) => `#i${Number(match[1])}`)
+  return { cards: [...text.matchAll(REPLY_REFS)].map((match) => `#i${Number(match[1])}`) }
 }
 
 // The dashboard's writes the relay carries, A to Z, every one a POST the owner's paired key signs: the composer's send, an Inbox card's answer (its Archive among them), and Later's schedule and Done's dismiss. No first-run, onboarding, delete, secret or settings route, and no route on the never-from-Yard list.

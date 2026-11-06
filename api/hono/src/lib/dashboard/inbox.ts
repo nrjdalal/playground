@@ -1175,7 +1175,7 @@ const toItem = (row: Row): InboxItem =>
 export const KEEP_MS = 7 * 24 * 60 * 60 * 1000
 const MAX_SHOWN = 200
 
-// threadId files the item under a thread (bun run ask new --thread), refused when no thread has it. now stamps createdAt and updatedAt, from the clock every later write stamps with, so changedAt, quietIds and listItems compare stamps of one clock.
+// threadId files the item under a thread (bun run ask new --thread), refused when no thread has it. now stamps createdAt and updatedAt, from the clock every later write stamps with.
 export async function postItem(
   db: Database,
   input: unknown,
