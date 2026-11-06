@@ -585,16 +585,16 @@ for i, step in enumerate(steps):
             step += [seps[i], later[0]]
     if step:
         print("\x1f".join(step))
-# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, or that a command substitution beside docker, podman or a portless compose builds, names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
+# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, or a command substitution in a chain whose script or lead words name docker, podman or a portless compose (shlex splits a backquote's inner script at ;, so a name split across its steps is read over the whole chain), names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
 wrappers = set(sys.argv[4].split())
+if any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3]):
+    sys.exit(1)
 for step in steps:
     i = 0
     while i < len(step) and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", step[i]):
         i += 1
     hidden = lambda w: w == "eval" or "$" in w
     if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
-        sys.exit(1)
-    if any("$(" in w or "`" in w for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", " ".join(step)):
         sys.exit(1)
 PY
 }
