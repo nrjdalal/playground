@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -34,6 +35,7 @@ import {
   PORTLESS,
   preflight,
   prefixOf,
+  setNextDevAside,
   type SettingsRead,
   syncAliases,
 } from "../../../../../../api/hono/src/lib/dev/launch"
@@ -1299,5 +1301,64 @@ describe("mainCheckoutOf", () => {
     expect(mainCheckoutOf(linked)).toBe(realpathSync(main))
     expect(mainCheckoutOf(main)).toBe(realpathSync(main))
     expect(mainCheckoutOf(tmpdir())).toBeNull()
+  })
+})
+
+describe("setNextDevAside", () => {
+  const dir = mkdtempSync(join(tmpdir(), "dev-aside-"))
+  const main = join(dir, "main")
+  const linked = join(dir, "linked")
+  const cache = (root: string) => join(root, "web/next/.next/dev")
+  const keep = (root: string) => {
+    mkdirSync(cache(root), { recursive: true })
+    writeFileSync(join(cache(root), "trace"), "kept")
+  }
+  const now = new Date("2026-11-05T09:00:00.000Z")
+  beforeAll(() => {
+    mkdirSync(main)
+    gitIn(main, "init", "-q", "-b", "main")
+    gitIn(main, "commit", "-q", "--allow-empty", "-m", "first")
+    gitIn(main, "worktree", "add", "-q", "-b", "feat/a", linked)
+  })
+  afterAll(() => rmSync(dir, { force: true, recursive: true }))
+
+  test("a linked worktree's dev start renames the kept web dev cache beside it", () => {
+    keep(linked)
+    const to = setNextDevAside(linked, { ...checkoutOf(linked), serving: false }, now)
+    expect(to).toBe(join(linked, "web/next/.next/dev-aside-2026-11-05T09-00-00-000Z"))
+    expect(existsSync(cache(linked))).toBe(false)
+    expect(readFileSync(join(to!, "trace"), "utf8")).toBe("kept")
+  })
+
+  test("a --serve start and the main checkout keep it", () => {
+    keep(linked)
+    keep(main)
+    expect(setNextDevAside(linked, { ...checkoutOf(linked), serving: true }, now)).toBeNull()
+    expect(setNextDevAside(main, { ...checkoutOf(main), serving: false }, now)).toBeNull()
+    expect(readFileSync(join(cache(linked), "trace"), "utf8")).toBe("kept")
+    expect(readFileSync(join(cache(main), "trace"), "utf8")).toBe("kept")
+  })
+
+  test("a rename that fails throws, for the launcher to refuse with, and the cache stays", () => {
+    keep(linked)
+    const taken = join(linked, "web/next/.next/dev-aside-2026-11-05T09-00-00-000Z")
+    mkdirSync(taken, { recursive: true })
+    writeFileSync(join(taken, "trace"), "earlier")
+    let thrown: unknown
+    try {
+      setNextDevAside(linked, { ...checkoutOf(linked), serving: false }, now)
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as NodeJS.ErrnoException).code).toMatch(/^(EEXIST|ENOTEMPTY)$/)
+    expect(readFileSync(join(cache(linked), "trace"), "utf8")).toBe("kept")
+    expect(readFileSync(join(taken, "trace"), "utf8")).toBe("earlier")
+  })
+
+  test("a first start with no cache moves nothing", () => {
+    const fresh = join(dir, "fresh")
+    gitIn(main, "worktree", "add", "-q", "-b", "feat/b", fresh)
+    expect(setNextDevAside(fresh, { ...checkoutOf(fresh), serving: false }, now)).toBeNull()
   })
 })

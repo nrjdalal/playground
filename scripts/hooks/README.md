@@ -271,9 +271,12 @@ Only the first reading moves the folder, sets variables and records files for th
   env's long options are read by any unique prefix (`--split='sudo -s'`, `--u X`), and `-a` and `--argv0` take a value, as GNU env reads them, and a lone `-` is env's `-i`, after which its options go on, as BSD env reads it; GNU env ends its options at a lone `-`, so this reads more of GNU's words than GNU runs.
   A root shell is sudo's `-s`, `-i`, `--shell` or `--login`, or doas's `-s`, alone or in a cluster of the wrapper's flags ahead of its first value-taking letter (`-Es`, `-su root`, `-su#0`; in `-us` the `-u` takes the `s`).
   Such an option counts behind any wrapper and quoted or not (`'-s'`, `-su'root'`, `'sudo' -s`), and an option or a program in a variable counts as one.
+  `su` not handed a command is a root shell, busybox's `su` applet and one behind any wrapper included (`<reader> | su`, `<reader> | su -s /bin/sh root`, `<reader> | busybox su`).
+  `su` reads as handed one only by `-c` or `--command` with its command, after option words of `-f`, `-l`, `-m` and `-` alone, so any other option word, one taking a value included, and any word before the `-c` it cannot read (a variable, a substitution, a glob) reads as a root shell.
+  A line that runs its own command after another option (`su -lc <cmd>`) is then read as a root shell on purpose, so an option's value never hides a `-c`.
   Each word is read as an option of every privilege wrapper before it: the first unquoted word naming one, and any word whose unquoted value is `sudo` or `doas` (`'doas' sudo -i`, `doas sudo -i`); any other word ending in a wrapper's name (a quoted path, or a path after the first wrapper) is read as an option, never as a wrapper.
   A long option's unambiguous prefix counts as that option, as sudo's getopt_long reads it (`--sh`, `--lo`), while sudo itself refuses the ambiguous `--s` and `--l`.
-  The root shell is looked for under each reading of the wrapper's options (above); once the parse runs out of readings, any sudo or doas among the command's words counts as a root shell and any shell's name as a shell.
+  The root shell is looked for under each reading of the wrapper's options (above); once the parse runs out of readings, any sudo, doas or su among the command's words counts as a root shell and any shell's name as a shell.
   Every spaced text of every program on such a line, each `\n`-separated part of it and an awk program's strings are read as command lines.
   A root shell's stdin is read as its script, and one the hook cannot read (a download, a file it cannot see, a bare `sudo -s`) is refused: run its commands as calls of their own.
   For any program but a reader, each text that holds a space (a word, the value after its `=`, an option's attached value, a variable the call sets or exports) is judged as a command line of its own, a leading `!` dropped, since a program may run it (`watch`, `tmux`, `ssh -o ProxyCommand`, `rsync -e`, a git alias, a pager).
@@ -560,10 +563,8 @@ Only the first reading moves the folder, sets variables and records files for th
   It reads the script a here-string, a heredoc, a file or a process substitution feeds a shell (`sudo -s <<< '<command>'`, `sh <<EOF`, `sudo -s < <(<reader>)`) the same way.
   A pipe into an interpreter there is refused from the main checkout whatever it carries, since the hook reads no other language, while one that runs a script file or a module of its own past options its family's table names (`| node x.js`, `| python3 -m json.tool`) runs, that file's text being outside the line.
   For bun and deno that file is a JavaScript or TypeScript name, since they run a bare name off PATH (`| bun run sh`).
-  A root shell there is one as [no-extensions-write](#no-extensions-write) reads it (`<reader> | sudo '-s'`, `<reader> | sudo --sh`, `<reader> | env -S 'sudo -s'`), or `su` not handed a command (`sudo su`, `su root`).
-  `su` reads as handed one only by `-c` or `--command` with its command, after option words of `-f`, `-l`, `-m` and `-` alone, so any other option word, one taking a value included, and any word before the `-c` it cannot read (a variable, a substitution, a glob) reads as a root shell.
-  A line that runs its own command after another option (`su -lc <cmd>`) is then judged by the script fed to it, a false refusal the hook accepts so an option's value never hides a `-c`.
-  A script it reads is judged command by command, a root shell's by this hook and a plain shell's by the shared reader, which runs it itself.
+  A root shell there is one as [no-extensions-write](#no-extensions-write) reads it (`<reader> | sudo '-s'`, `<reader> | sudo --sh`, `<reader> | env -S 'sudo -s'`, `<reader> | sudo su`, `<reader> | su root`).
+  A script it reads is judged command by command: a root shell's here-string, heredoc, file or process substitution by this hook, and a plain shell's script and a root shell's piped one by the shared reader, which runs them itself.
   It fails open on a call it cannot read.
   Its tests are in `bun run test:file tests/scripts/hooks`.
   The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).
