@@ -578,7 +578,7 @@ describe("the quick slot runs whatever load5 reads", () => {
     expect(await run.ran()).toBe(true)
   })
 
-  test("and so does a node_modules clone, with clone-off unset", async () => {
+  test("and so does a node_modules clone at load1 30, with clone-off unset and load5 under its margin", async () => {
     expect(await machine({ load1: 30, load5: 2 }).clones("node_modules")).toBe(true)
   })
 })

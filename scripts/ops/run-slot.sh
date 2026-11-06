@@ -834,8 +834,9 @@ CHILD=""
 # seconds between a waiter's looks, and a held clone's (the tests shorten both)
 POLL=${RUN_SLOT_POLL:-15}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
-# the seconds a clone waits after the last clone's end, so fseventsd settles between two clones
+# the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake's line it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
 CLONE_GAP=180
+CLONE_MARGIN=4
 
 # Waiters take slots oldest first (builder, 12 Oct: a request queued at 13:28Z lost three slots in a row to later ones): each waiter leaves a
 # ticket, run-slot.waiters/<ns>-<pid>-<who>, and only the oldest ticket whose pid is alive may take a slot; a ticket goes once its slot is taken
@@ -1213,11 +1214,16 @@ lanes_open() {
 # reading to show them and the slots fill one a minute; a run that takes a slot a run freed adds nothing and goes on, as does a small run,
 # and the dashboard's and the merge train's runs go on too, as they skip slot 2's lanes_open; prints how many runs the last
 # minute added when it holds
-burst_held() {
-  local now cutoff
-  [ "$SIZE" != small ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
+# the UTC time $1 seconds ago as run-slot.runs.log writes it, by BSD date, else GNU date
+iso_ago() {
+  local now
   now=$(date +%s)
-  cutoff=$(date -u -r $((now - 60)) +%FT%TZ 2>/dev/null || date -u -d "@$((now - 60))" +%FT%TZ 2>/dev/null) || return 1
+  date -u -r $((now - $1)) +%FT%TZ 2>/dev/null || date -u -d "@$((now - $1))" +%FT%TZ 2>/dev/null
+}
+burst_held() {
+  local cutoff
+  [ "$SIZE" != small ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
+  cutoff=$(iso_ago 60) || return 1
   tail -n 3000 "$OPS/run-slot.runs.log" 2>/dev/null | CUTOFF=$cutoff awk '
     $2 == "start" && $5 ~ /^run-slot(-[234]|-clone)?$/ { run[$3 " " $4] = 1; if ($1 > ENVIRON["CUTOFF"]) n++ }
     $2 == "end" && run[$3 " " $4] { delete run[$3 " " $4]; if ($1 > ENVIRON["CUTOFF"]) n-- }
@@ -1433,21 +1439,20 @@ if [ -n "$KIND" ]; then
     ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
   while clone_held; do reread; sleep "$CLONE_POLL"; done
-  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within 4 of load_line's brake line, and while a big run holds a CPU slot, whatever clone-allow names (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
+  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of load_line's brake line, and while a big run holds a CPU slot, whatever clone-allow names; an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
   clone_spaced() {
-    local brake s now cutoff last
+    local brake l s last
     brake=$(load_line)
-    [ "$(load5)" -ge $((brake - 4)) ] && { echo "for load5 under $((brake - 4)), 4 under the brake's $brake"; return; }
+    l=$(load5)
+    [ -n "$l" ] && [ "$l" -ge $((brake - CLONE_MARGIN)) ] && { echo "for load5 under $((brake - CLONE_MARGIN)), $CLONE_MARGIN under the brake's $brake"; return; }
     for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
       reclaim "$OPS/$s"
-      [ -d "$OPS/$s" ] && [ "$(cut -d' ' -f4 "$OPS/$s.holder" 2>/dev/null)" = 3 ] && { echo "while a big run holds $s"; return; }
+      [ -d "$OPS/$s" ] && [ "$(cut -d' ' -f5 "$OPS/$s.holder" 2>/dev/null)" = big ] && { echo "while a big run holds $s"; return; }
     done
-    now=$(date +%s)
-    cutoff=$(date -u -r $((now - CLONE_GAP)) +%FT%TZ 2>/dev/null || date -u -d "@$((now - CLONE_GAP))" +%FT%TZ 2>/dev/null) || return
-    last=$(tail -n 3000 "$OPS/run-slot.runs.log" 2>/dev/null | CUTOFF=$cutoff awk '
+    last=$(tail -n 3000 "$OPS/run-slot.runs.log" 2>/dev/null | CUTOFF=$(iso_ago "$CLONE_GAP") awk '
       $2 == "start" && $5 == "run-slot-clone" { run[$3 " " $4] = 1 }
       $2 == "end" && run[$3 " " $4] { delete run[$3 " " $4]; t = $1 }
-      END { if (t > ENVIRON["CUTOFF"]) print t }')
+      END { if (ENVIRON["CUTOFF"] != "" && t > ENVIRON["CUTOFF"]) print t }')
     [ -n "$last" ] && echo "${CLONE_GAP}s past the last clone's end at $last"
   }
   # a commit's build, a merge or a clone is heavy, so it waits under focus; the quick slot's short runs go on
