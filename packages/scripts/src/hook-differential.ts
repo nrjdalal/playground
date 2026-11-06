@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 
 import { dataDirOf } from "@packages/env/data-dir"
 
@@ -19,6 +19,7 @@ import { dataDirOf } from "@packages/env/data-dir"
 export type Check = (
   raw: string,
   env: Record<string, string | undefined>,
+  main?: string,
 ) => Promise<string | undefined> | string | undefined
 type Form = { command: string; inClass?: boolean }
 type Call = { command: string; cwd: string }
@@ -28,6 +29,9 @@ const USAGE =
   "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>]> --canary <sha> --hook <name> [--hook <name> ...] [--fresh]"
 
 const DAY = 24 * 3600 * 1000
+
+// The hooks whose check() takes the main checkout third: canary's tree is unpacked by git archive and is no git checkout, so on its own default each would read that folder as main, and both sides get the head's main checkout
+export const TAKES_MAIN = ["no-main-checkout", "no-unslotted-run"]
 
 // The run-slot call a bare start becomes, or the argv itself inside a ticket (whose child carries the RUN_SLOT_NICE run-slot exports) or with no executable run-slot.sh
 export const routed = ({
@@ -56,16 +60,22 @@ export const cwdsOf = (home: string) => [
   join(home, "x", ".claude", "worktrees", "y"),
 ]
 
-const allows = async (check: Check, call: Call, home: string) =>
+// main undefined leaves a hook's own default in place, as a call with no third argument does
+const allows = async (check: Check, call: Call, home: string, main?: string) =>
   (await check(
     JSON.stringify({ cwd: call.cwd, tool_input: { command: call.command }, tool_name: "Bash" }),
-    {
-      HOME: home,
-    },
+    { HOME: home },
+    main,
   )) === undefined
 
 // Each form from each folder through both hooks: the same, newly allowed and newly refused, each split by the form's class (a form with no class is outside it)
-export async function sweep(canary: Check, head: Check, forms: Form[], home: string) {
+export async function sweep(
+  canary: Check,
+  head: Check,
+  forms: Form[],
+  home: string,
+  main?: string,
+) {
   const counts = {
     cases: 0,
     forms: forms.length,
@@ -78,8 +88,8 @@ export async function sweep(canary: Check, head: Check, forms: Form[], home: str
     for (const cwd of cwdsOf(home)) {
       counts.cases++
       const [was, now] = [
-        await allows(canary, { command, cwd }, home),
-        await allows(head, { command, cwd }, home),
+        await allows(canary, { command, cwd }, home, main),
+        await allows(head, { command, cwd }, home, main),
       ]
       if (was === now) {
         counts.same++
@@ -128,11 +138,20 @@ export async function calls(projects: string, since: number): Promise<Call[]> {
 }
 
 // Each call from its own folder through both hooks: the same, newly allowed and newly refused
-export async function replay(canary: Check, head: Check, list: Call[], home: string) {
+export async function replay(
+  canary: Check,
+  head: Check,
+  list: Call[],
+  home: string,
+  main?: string,
+) {
   const counts = { calls: list.length, "newly allowed": 0, "newly refused": 0, same: 0 }
   const changed: string[] = []
   for (const call of list) {
-    const [was, now] = [await allows(canary, call, home), await allows(head, call, home)]
+    const [was, now] = [
+      await allows(canary, call, home, main),
+      await allows(head, call, home, main),
+    ]
     if (was === now) counts.same++
     else {
       counts[now ? "newly allowed" : "newly refused"]++
@@ -356,14 +375,16 @@ async function main(args: string[]): Promise<number> {
     return 2
   }
   const list = mode === "replay" ? await calls(projects, Date.now() - hours * 3600 * 1000) : []
+  const headMain = dirname(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]))
   const result = { changed: [] as string[], counts: [] as string[] }
   for (const hook of hooks) {
     const canary: Check = (await import(join(before, "scripts/hooks", `${hook}.ts`))).check
     const head: Check = (await import(join(root, "scripts/hooks", `${hook}.ts`))).check
+    const main = TAKES_MAIN.includes(hook) ? headMain : undefined
     const { changed, counts } =
       mode === "sweep"
-        ? await sweep(canary, head, forms, home)
-        : await replay(canary, head, list, home)
+        ? await sweep(canary, head, forms, home, main)
+        : await replay(canary, head, list, home, main)
     result.counts.push(JSON.stringify({ hook, ...counts }))
     console.log(result.counts.at(-1))
     for (const line of changed.slice(0, 20)) {
