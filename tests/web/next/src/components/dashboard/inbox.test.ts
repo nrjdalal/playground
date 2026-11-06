@@ -1675,6 +1675,8 @@ describe("the shelves under the list, by place", () => {
       .split("<h3")
       .find((row) => row.split("</h3>")[0]!.includes(`>${label}<`))
       ?.split("</h3>")[0] ?? ""
+  // the count badge a shelf's header shows
+  const count = (row: string) => /data-slot="badge"[^>]*>(\d+)<\/span>/.exec(row)?.[1]
   const renamed = { archived: "Bench", done: "Tally", progress: "Forge", snoozed: "Drift" }
   const withLabels = (labels: typeof SHELF_LABELS, render: () => string) => {
     const kept = { ...SHELF_LABELS }
@@ -1686,7 +1688,7 @@ describe("the shelves under the list, by place", () => {
     }
   }
 
-  test("Archive's ✓ dismisses each card, Done's marks what is unread as read, and In progress and Later have none", () => {
+  test("each shelf counts what it holds; Archive's ✓ dismisses each card, Done's marks what is unread as read, and In progress and Later have none", () => {
     const html = inbox([settled])
     expect(header(html, "Archive")).toContain('aria-label="Dismiss all in Archive"')
     expect(header(html, "Done")).toContain('aria-label="Mark all in Done as read"')
@@ -1694,15 +1696,20 @@ describe("the shelves under the list, by place", () => {
       /<span class="sr-only">, (<!-- -->)?1(<!-- -->)? unread<\/span>/,
     )
     expect(header(html, "Done")).not.toContain("opacity-50 hover:opacity-100")
+    for (const label of ["In progress", "Later", "Archive", "Done"])
+      expect(count(header(html, label))).toBe("1")
     for (const label of ["In progress", "Later"]) {
       expect(header(html, label)).not.toBe("")
       expect(header(html, label)).not.toContain("aria-label=")
     }
   })
 
-  test("Done with nothing left to read reads muted as an empty shelf, its ✓ gone", () => {
+  test("Done with nothing left to read reads muted as an empty shelf, its ✓ gone, its count its history", () => {
     const row = header(inbox([read]), "Done")
     expect(row).toContain("opacity-50 hover:opacity-100 aria-expanded:opacity-100")
+    // its count is its history too, the read card included
+    expect(count(row)).toBe("1")
+    expect(row).toMatch(/<span class="sr-only">, (<!-- -->)?0(<!-- -->)? unread<\/span>/)
     expect(row).not.toContain("Mark all in Done as read")
   })
 
@@ -1711,6 +1718,8 @@ describe("the shelves under the list, by place", () => {
       const kept = inbox(done)
       const html = withLabels(renamed, () => inbox(done))
       expect(header(html, "Bench")).toContain('aria-label="Dismiss all in Bench"')
+      if (done[0] === settled)
+        expect(header(html, "Tally")).toContain('aria-label="Mark all in Tally as read"')
       const back = Object.entries(renamed).reduce(
         (text, [place, label]) =>
           text.replaceAll(label, SHELF_LABELS[place as keyof typeof renamed]),

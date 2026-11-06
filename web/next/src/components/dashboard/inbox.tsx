@@ -2004,7 +2004,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
         <div ref={below}>
           {shelves.map(([place, Icon, shelf]) => {
             const label = SHELF_LABELS[place]
-            const { bulk: all, muted, unread } = shelfRow(place, shelf)
+            const row = shelfRow(place, shelf)
             return (
               <AccordionItem
                 key={place}
@@ -2016,22 +2016,24 @@ export function Inbox({ viewing }: { viewing: boolean }) {
                   // Done at 0 unread reads as muted as an empty shelf, yet still opens to its history
                   className={cn(
                     SHELF_ROW,
-                    muted && "opacity-50 hover:opacity-100 aria-expanded:opacity-100",
+                    row.muted && "opacity-50 hover:opacity-100 aria-expanded:opacity-100",
                   )}
                   header={(props) => (
                     <h3 {...props} className={cn(props.className, STICKY_HEADER)}>
                       {props.children}
                       {/* the Archive shelf empties in one click, each card's own Dismiss in turn; Done marks what settled on its own read, typing nothing into any session, greyed once all are */}
-                      {all && !config.hosted && (
+                      {row.bulk && !config.hosted && (
                         <ShelfDismiss
                           disabled={bulkPending}
-                          ids={all.ids}
+                          ids={row.bulk.ids}
                           label={
-                            all.each ? `Dismiss all in ${label}` : `Mark all in ${label} as read`
+                            row.bulk.each
+                              ? `Dismiss all in ${label}`
+                              : `Mark all in ${label} as read`
                           }
                           onDismiss={(ids) =>
                             void bulk(() =>
-                              all.each
+                              row.bulk.each
                                 ? dismissEach(shelf.filter((item) => ids.includes(item.id)))
                                 : dismissItems(ids),
                             )
@@ -2042,7 +2044,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
                   )}
                 >
                   {/* every shelf counts what it holds, Done its history too, its ✓ and its muting saying whether any is unread */}
-                  <ShelfLabel count={shelf.length} icon={Icon} label={label} unread={unread} />
+                  <ShelfLabel count={shelf.length} icon={Icon} label={label} unread={row.unread} />
                   <ShelfMark empty={shelf.length === 0} />
                 </AccordionTrigger>
                 {/* kept mounted while shut, as the open row is, so a card opened on its shelf stays opened */}
