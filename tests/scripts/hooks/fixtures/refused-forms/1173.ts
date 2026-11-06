@@ -23,6 +23,22 @@ export const groups: Group[] = [
         `cd "$D"; gmv --target=. /tmp/f`,
       ],
       [
+        "GNU mv to a dash-led relative folder by its short target option after a cd to a variable",
+        `cd "$D"; gmv -t -x /tmp/f`,
+      ],
+      [
+        "GNU mv to a dash-led relative folder by its target option in a cluster after a cd to a variable",
+        `cd "$D"; gmv -ft -x /tmp/f`,
+      ],
+      [
+        "GNU mv to a dash-led relative folder by its long target option after a cd to a variable",
+        `cd "$D"; gmv --target-directory -x /tmp/f`,
+      ],
+      [
+        "GNU mv to a dash-led relative folder by its shortened long target option after a cd to a variable",
+        `cd "$D"; gmv --target -x /tmp/f`,
+      ],
+      [
         "rsync with a relative log file attached after a cd to a variable",
         `cd "$D"; rsync -a --log-file=x /tmp/a /tmp/b`,
       ],
