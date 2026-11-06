@@ -1823,6 +1823,7 @@ var BUN_DATA_SCRIPTS = new Map([
   ["ask", "api/hono/src/bin/dashboard-ask.ts"],
   ["thread", "api/hono/src/bin/dashboard-thread.ts"]
 ]);
+var PREBUILD = "bun --no-env-file packages/scripts/src/verify/prebuild.ts api";
 var realOf = (path) => {
   try {
     return realpathSync(path);
@@ -1841,7 +1842,7 @@ async function mapsDataScript(cwd, script) {
     return false;
   try {
     const { scripts } = JSON.parse(await pkg.text());
-    if (scripts?.[script] !== `bun ${entry}`)
+    if (scripts?.[script] !== `${PREBUILD} && bun ${entry}`)
       return false;
   } catch {
     return false;
