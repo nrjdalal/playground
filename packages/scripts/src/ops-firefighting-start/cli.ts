@@ -20,7 +20,10 @@ const config = async (): Promise<StartConfig> => {
   return {
     account: get("firefighting.start.account") || undefined,
     brief: get("firefighting.start.brief"),
+    consultFrom: get("firefighting.start.consultFrom") || undefined,
+    daysOff: get("firefighting.start.daysOff"),
     freshMinutes: get("firefighting.start.freshMinutes"),
+    hours: get("firefighting.start.hours"),
     in: get("firefighting.start.in") || undefined,
     prefixes: get("firefighting.start.prefixes"),
   }

@@ -7,6 +7,7 @@ import { writeAtomic } from "../write-atomic"
 
 // ops-firefighting-start: each beat reads the relay's firefighting.json and starts one --firefighting worker for each open ticket of firefighting.start.prefixes that the tracker's digest lists and no one holds, Urgent, High, Medium, Low and oldest first, at most CAP in progress but for an Urgent, which always starts; its start file keeps spawn.sh's load and slots gates open for those starts while one is open, and focus stands for an Urgent ticket's session alone.
 
+// hours is the UTC start window, "HH:MM-HH:MM" (one past midnight wraps), empty for any time; consultFrom the UTC time inside it from which a ticket is the owner's call, told to the dispatcher rather than started; daysOff the UTC dates it starts nothing on.
 export type StartConfig = {
   account?: string
   brief: string
@@ -43,9 +44,12 @@ type Line = {
 }
 type Row = { name?: string; status?: string; ticket?: string; title?: string }
 
-// What a beat keeps between passes: the session started for each ticket, the name a ticket whose start was refused keeps, the line last told for each, when each closed line was first seen closed, when Linear first read each of those open again (kept for a ticket card to read), and when Linear was last asked.
+// What a beat keeps between passes: when it first watched, the UTC day each roster row was first seen ended (empty for one already ended on the first beat), the session started for each ticket, the name a ticket whose start was refused keeps, the line last told for each, when each closed line was first seen closed, when Linear first read each of those open again (kept for a ticket card to read), and when Linear was last asked.
 export type State = {
   closedSeen: Record<string, string>
+  ended: Record<string, string>
+  // when the job first finished a fresh pass inside its window; a stale or out-of-window pass saves state but is no first beat
+  watchingSince?: string
   linearAt?: string
   named: Record<string, string>
   reopened: Record<string, string>
@@ -86,14 +90,21 @@ export async function startPass({
   name,
 }: StartDeps): Promise<void> {
   const path = statePath(ctx.ops)
-  const kept = await readJson<State>(path)
-  const state: State = { closedSeen: {}, named: {}, reopened: {}, started: {}, told: {}, ...kept }
+  const state: State = {
+    closedSeen: {},
+    ended: {},
+    named: {},
+    reopened: {},
+    started: {},
+    told: {},
+    ...(await readJson<State>(path)),
+  }
   const save = () => writeAtomic(path, `${JSON.stringify(state, null, 2)}\n`)
-  const tell = async (id: string, text: string) => {
+  const tell = async (id: string, text: string, to = "builder") => {
     if (state.told[id] === text) return
     state.told[id] = text
     await save()
-    await ctx.send("builder", text)
+    await ctx.send(to, text)
   }
   const ticket = new RegExp(
     `^(?:${config.prefixes.map((p) => p.replace(/[^A-Za-z0-9]/g, "")).join("|")})-\\d+$`,
@@ -120,6 +131,20 @@ export async function startPass({
     return
   }
   delete state.told[""]
+  // The owner takes tickets only inside the start window: outside it, or on a day off, nothing starts and the start file goes, while a focus already standing is left to its session.
+  const day = ctx.now.toISOString().slice(0, 10)
+  if (!inWindow(config, ctx.now)) {
+    await tell(
+      "window",
+      `Starting nothing: ${day} ${ctx.now.toISOString().slice(11, 16)}Z is outside the start window (${config.hours || "any time"}${(config.daysOff ?? []).includes(day) ? ", and a day off" : ""})`,
+    )
+    await rm(join(data, START_FILE), { force: true })
+    await save()
+    return
+  }
+  delete state.told.window
+  // A ticket taken in the window's last stretch cannot be finished before it ends, so from consultFrom on the job asks the owner through the dispatcher instead of starting one; on the owner's yes the dispatcher hands it to the Builder, who starts it with spawn.sh worker … --firefighting.
+  const consult = !!config.consultFrom && ctx.now.toISOString().slice(11, 16) >= config.consultFrom
   const all = Object.values(ff?.lines ?? {})
   const matched = config.prefixes.length
     ? all.filter((l): l is Line & { id: string } => typeof l?.id === "string" && ticket.test(l.id))
@@ -131,15 +156,23 @@ export async function startPass({
       await tell(line.id, `Skipped ${line.id}: no digest of the tracker lists it`)
   const lines = matched.filter((l) => listed.has(l.id))
   const rows = (await readJson<{ agents?: Row[] }>(join(data, "roster.json")))?.agents ?? []
-  const live = rows.filter((r) => !ENDED.has(r.status ?? ""))
   const rowOf = (session: string) => rows.find((r) => r.name === session)
+  const rowsFor = (id: string) =>
+    rows.filter((r) => r.ticket === id || r.title === id || (r.title ?? "").startsWith(`${id} `))
+  // The roster keeps no end time, so the job notes the day it first sees each row ended; a ticket whose row ended today never starts again today. A row already ended on the first beat ended before the job ran and counts on no day.
+  const firstBeat = state.watchingSince === undefined
+  for (const r of rows)
+    if (r.name && ENDED.has(r.status ?? "")) state.ended[r.name] ??= firstBeat ? "" : day
+  for (const name of Object.keys(state.ended))
+    if (!rows.some((r) => r.name === name && ENDED.has(r.status ?? ""))) delete state.ended[name]
+  const endedToday = (id: string) => rowsFor(id).find((r) => r.name && state.ended[r.name] === day)
   // A ticket is held by a live row that carries it or whose title it leads, or by the session this job started for it while that row is not ended, or not yet written.
   const held = (id: string) =>
-    live.some((r) => r.ticket === id || r.title === id || (r.title ?? "").startsWith(`${id} `)) ||
+    rowsFor(id).some((r) => !ENDED.has(r.status ?? "")) ||
     (state.started[id] !== undefined && !ENDED.has(rowOf(state.started[id]!)?.status ?? ""))
   for (const line of lines)
     if (line.theirs === true) await tell(line.id, `Skipped ${line.id}: someone else took it`)
-  await reopen(lines, state, ctx.now, linearStates, tell, kept === undefined)
+  await reopen(lines, state, ctx.now, linearStates, tell, firstBeat)
   const open = lines.filter(
     (l) => (l.open === true || state.reopened[l.id] !== undefined) && l.theirs !== true,
   )
@@ -174,6 +207,19 @@ export async function startPass({
   let heldBy: string | undefined
   for (const line of queue) {
     const id = line.id
+    if (consult) {
+      await tell(
+        id,
+        `consult ${id} (${line.urgency ?? "no urgency"}): it came in after ${config.consultFrom}Z, the start window's last stretch, so the owner decides whether to take it; a yes goes to the Builder, who starts it`,
+        "dispatcher",
+      )
+      continue
+    }
+    const ended = endedToday(id)
+    if (ended) {
+      await tell(id, `Not starting ${id} again today: ${ended.name}, its session, ended today`)
+      continue
+    }
     if (!isUrgent(line) && inProgress >= CAP) {
       await tell(
         id,
@@ -214,10 +260,12 @@ export async function startPass({
     state.named[id] = session
     await save()
     const brief = `brief-${session}.md`
-    await Bun.write(
-      join(data, brief),
-      (await template.text()).replaceAll("{TICKET}", id).replaceAll("{NAME}", session),
-    )
+    // a retry under the kept name reuses the brief its first try wrote
+    if (!(await Bun.file(join(data, brief)).exists()))
+      await Bun.write(
+        join(data, brief),
+        (await template.text()).replaceAll("{TICKET}", id).replaceAll("{NAME}", session),
+      )
     const argv = [
       join(ctx.repo, "scripts", "spawn.sh"),
       "worker",
@@ -266,6 +314,7 @@ export async function startPass({
     state,
     heldBy,
   )
+  state.watchingSince ??= ctx.now.toISOString()
   await save()
 }
 
@@ -279,7 +328,7 @@ async function reopen(
   firstBeat: boolean,
 ): Promise<void> {
   const closed = lines.filter((l) => l.open !== true && l.theirs !== true)
-  // On the first beat, with no state kept, a line already closed closed before the job ran, at a time no line holds, so it counts as closed long ago and is never asked.
+  // On the first beat, before the job has finished a fresh pass, a line already closed closed before the job ran, at a time no line holds, so it counts as closed long ago and is never asked.
   const seen = firstBeat ? new Date(0).toISOString() : now.toISOString()
   for (const l of closed) state.closedSeen[l.id] ??= seen
   for (const id of Object.keys(state.closedSeen))
@@ -314,6 +363,16 @@ async function reopen(
       await tell(`${id} reopened`, `${id} reopened`)
     }
   }
+}
+
+// Inside config.hours at `now` (UTC), and on no day of config.daysOff.
+const inWindow = (config: StartConfig, now: Date): boolean => {
+  const iso = now.toISOString()
+  if ((config.daysOff ?? []).includes(iso.slice(0, 10))) return false
+  const [from, to] = (config.hours ?? "").split("-")
+  if (!from || !to) return true
+  const at = iso.slice(11, 16)
+  return from <= to ? at >= from && at < to : at >= from || at < to
 }
 
 const focus = (ctx: Context, args: string[]) =>

@@ -156,10 +156,17 @@ const setup = (
 }
 
 // A running job's state, with nothing started yet, so a line seen closed now closed while it ran.
-const RUNNING = { closedSeen: {}, reopened: {}, started: {}, told: {} }
+const WATCHING = new Date(NOW.getTime() - 60 * MINUTE).toISOString()
+const RUNNING = { closedSeen: {}, reopened: {}, started: {}, told: {}, watchingSince: WATCHING }
 
 // The job's state once it has started ff-first-worker for MADE-1.
-const FIRST = { closedSeen: {}, reopened: {}, started: { "MADE-1": "ff-first-worker" }, told: {} }
+const FIRST = {
+  closedSeen: {},
+  reopened: {},
+  started: { "MADE-1": "ff-first-worker" },
+  told: {},
+  watchingSince: WATCHING,
+}
 
 const focusFile = (reason: string, minutesLeft: number, session = "worker-made-up-1") => ({
   reason,
@@ -507,6 +514,25 @@ describe("ops-firefighting-start", () => {
     await s.pass()
     expect(s.asked).toEqual([])
     expect(s.spawns()).toEqual([])
+  })
+
+  test("a stale first beat leaves the next fresh one the first: a line closed before the job ran is not asked, and a row ended before it ran holds nothing for the day (#1160)", async () => {
+    const s = setup(
+      line("MADE-1", "High", 1, { open: false }),
+      { "roster.json": { agents: [{ name: "a", status: "ended", ticket: "MADE-2" }] } },
+      { linear: { "MADE-1": "backlog" }, wrote: NOW.getTime() - 11 * MINUTE },
+    )
+    await s.pass()
+    writeFileSync(
+      join(s.data, "firefighting.json"),
+      relayFile(
+        { ...line("MADE-1", "High", 1, { open: false }), ...line("MADE-2", "Medium", 2) },
+        NOW.getTime(),
+      ),
+    )
+    await s.pass()
+    expect(s.asked).toEqual([])
+    expect(s.titles()).toEqual(["MADE-2 firefight"])
   })
 
   test("with no folder set it starts none and tells the Builder once, naming the setting", async () => {

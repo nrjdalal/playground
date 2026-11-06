@@ -6068,10 +6068,28 @@ var firefightingSettings = defineSettings({
     description: "The standing brief under the data folder that ops-firefighting-start fills for each ticket, its {TICKET} and {NAME} replaced by the ticket's ID and the new worker's name.",
     schema: string2().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder")
   },
+  "firefighting.start.consultFrom": {
+    default: "",
+    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts nothing and tells the dispatcher "consult <id>" once per ticket, so the owner decides; empty never consults.',
+    schema: union([literal(""), string2().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM in UTC")])
+  },
+  "firefighting.start.daysOff": {
+    default: [],
+    description: "The UTC dates (YYYY-MM-DD) ops-firefighting-start starts nothing on, as a day off; empty starts on every day.",
+    schema: array(string2().regex(/^\d{4}-\d{2}-\d{2}$/, "a YYYY-MM-DD date"))
+  },
   "firefighting.start.freshMinutes": {
     default: 10,
     description: "How many minutes old firefighting.json's lines may be (its lastTry, else its file time) for a start; older ones are a closed window's or a stopped relay's, so the job starts nothing and tells the Builder once.",
     schema: number2().int().min(1).max(120)
+  },
+  "firefighting.start.hours": {
+    default: "",
+    description: "The UTC window ops-firefighting-start starts in, HH:MM-HH:MM (one past midnight wraps); outside it the job starts nothing and tells the Builder once; empty starts at any time.",
+    schema: union([
+      literal(""),
+      string2().regex(/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/, "HH:MM-HH:MM in UTC")
+    ])
   },
   "firefighting.start.in": {
     default: "",
