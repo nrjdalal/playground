@@ -1744,6 +1744,7 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
 describe("an unquoted variable stays one word where the shell does not split it (PG-1133)", () => {
   test.each([
     ["ln of one variable at zsh's top level", "ln -s $X"],
+    ["GNU ln of one variable at zsh's top level", "gln -s $X"],
     ["dd with a variable after if= at zsh's top level", "dd if=$X"],
     ["mkdir with a mode from a variable at zsh's top level", "mkdir -m $X /tmp/x"],
     ["ln of one quoted variable in bash -c", `bash -c 'ln -s "$X"'`],

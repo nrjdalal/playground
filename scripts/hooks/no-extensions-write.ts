@@ -212,16 +212,28 @@ const after = (word: Word, cut: number): Word => ({
   value: word.value.slice(cut),
 })
 
-// The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install and ln (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch
-function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): Word[] {
+// The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install and ln (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch; where the shell splits (`Env.splits`), every word holding an unquoted expansion the hook cannot read too, since it may split into a target
+function writeTargets(
+  name: string,
+  args: Word[],
+  gnu: boolean,
+  posix = false,
+  splitting = false,
+): Word[] {
+  const splits = splitting ? args.filter((word) => word.splits) : []
   if (name === "dd")
-    return args.flatMap((word) =>
-      word.value.startsWith("of=")
-        ? [after(word, 3)]
-        : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value)
-          ? [word]
-          : [],
-    )
+    return [
+      ...new Set([
+        ...args.flatMap((word) =>
+          word.value.startsWith("of=")
+            ? [after(word, 3)]
+            : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value)
+              ? [word]
+              : [],
+        ),
+        ...splits,
+      ]),
+    ]
   const into = name === "cp" || name === "install" || name === "ln"
   const takes = WRITER_TAKES[name]
   const operands: Word[] = []
@@ -274,9 +286,13 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
         }
       }
   }
-  if (name === "ln" && !folder && operands.length === 1) return [{ quoted: false, value: "." }]
+  // ln's lone operand links into the shell's folder, unless the shell splits it into more operands
+  if (name === "ln" && !folder && operands.length === 1)
+    return [{ quoted: false, value: "." }, ...splits]
   const targets = into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
-  return [...new Set([...targets, ...maybe, ...logs])]
+  // macOS's cp and ln take no target option and write to their last operand, so a split word moves no target there
+  const split = into && !gnu && name !== "install" ? [] : splits
+  return [...new Set([...targets, ...maybe, ...logs, ...split])]
 }
 
 // The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from.
@@ -907,7 +923,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         return refuse(`git on a clone in ${root}`)
       // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
       const unheld = (
-        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : []
+        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, here.splits) : []
       ).find((word) => !held(word, here, steady))
       if (unheld)
         return refuse(
@@ -989,7 +1005,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           (word, k) => (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !option(word),
         )
       : WRITERS.has(tool)
-        ? writeTargets(tool, args, gnu, posix)
+        ? writeTargets(tool, args, gnu, posix, env.splits)
         : []
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
     if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))

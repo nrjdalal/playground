@@ -14,12 +14,14 @@ export type Text = {
 // `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
 // `raw` keeps the source of a word that holds a value the lexer cannot read, so a hook can lex it again once the call has set its variables.
 // `source` is the word as written, quotes and expansions included, so a hook can judge what a word expands rather than what it came to.
+// `splits` marks a word holding an unquoted expansion the lexer cannot read, which bash and sh split into any number of words where zsh keeps one (`Env.splits`).
 export type Word = Text & {
   glob?: boolean
   procs?: Command[]
   quoted: boolean
   raw?: string
   source?: string
+  splits?: boolean
 }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
@@ -94,6 +96,8 @@ export type Env = {
   // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
   oldFrom?: string[]
   process: Record<string, string | undefined>
+  // Set inside a script bash, dash, ksh or sh runs, which split an unquoted expansion into words where zsh keeps it whole (`Word.splits`)
+  splits?: boolean
   vars: Map<string, Text>
 }
 export type Flag = { name: string; value?: Word }
@@ -533,6 +537,8 @@ export function codeFed(commands: Command[]): Map<Command, Fed> {
 // Wrappers that take one positional argument (a count or a duration) before the command.
 export const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"])
+// The shells that split an unquoted expansion into words, as POSIX's field splitting does; zsh keeps one word unless SH_WORD_SPLIT is set
+const SPLITTERS = new Set(["bash", "dash", "ksh", "sh"])
 // The script names a shell or a source reads stdin through
 const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
@@ -1068,6 +1074,7 @@ function word(lx: Lexer): Word {
       const text = c === "$" ? dollar(lx) : backtick(lx)
       merge(out, text)
       if (GLOB_CHARS.test(text.value)) out.glob = true
+      if (marked(text.value)) out.splits = true
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir()
       lx.i++
@@ -1956,10 +1963,20 @@ async function shell(
       const fed = await stdinOf(cmd, env)
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins)
+    return run(
+      lexScript(script, env),
+      { ...subshell(env), splits: SPLITTERS.has(name) },
+      visit,
+      builtins,
+    )
   }
   const script = await scriptOf(operand, cmd, env)
-  return run(lexScript(known(script), env), subshell(env), visit, builtins)
+  return run(
+    lexScript(known(script), env),
+    { ...subshell(env), splits: SPLITTERS.has(name) },
+    visit,
+    builtins,
+  )
 }
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.

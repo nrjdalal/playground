@@ -474,6 +474,7 @@ function codeFed(commands) {
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
+var SPLITTERS = new Set(["bash", "dash", "ksh", "sh"]);
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
@@ -951,6 +952,8 @@ function word(lx) {
       merge(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
+      if (marked(text.value))
+        out.splits = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir2();
       lx.i++;
@@ -1633,10 +1636,10 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins);
+    return run(lexScript(script, env), { ...subshell(env), splits: SPLITTERS.has(name) }, visit, builtins);
   }
   const script = await scriptOf(operand, cmd, env);
-  return run(lexScript(known(script), env), subshell(env), visit, builtins);
+  return run(lexScript(known(script), env), { ...subshell(env), splits: SPLITTERS.has(name) }, visit, builtins);
 }
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
@@ -2528,9 +2531,15 @@ var after = (word, cut) => ({
   raw: word.raw?.startsWith(word.value.slice(0, cut)) ? word.raw.slice(cut) : undefined,
   value: word.value.slice(cut)
 });
-function writeTargets(name, args, gnu, posix = false) {
+function writeTargets(name, args, gnu, posix = false, splitting = false) {
+  const splits = splitting ? args.filter((word) => word.splits) : [];
   if (name === "dd")
-    return args.flatMap((word) => word.value.startsWith("of=") ? [after(word, 3)] : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value) ? [word] : []);
+    return [
+      ...new Set([
+        ...args.flatMap((word) => word.value.startsWith("of=") ? [after(word, 3)] : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value) ? [word] : []),
+        ...splits
+      ])
+    ];
   const into = name === "cp" || name === "install" || name === "ln";
   const takes = WRITER_TAKES[name];
   const operands = [];
@@ -2579,9 +2588,10 @@ function writeTargets(name, args, gnu, posix = false) {
       }
   }
   if (name === "ln" && !folder && operands.length === 1)
-    return [{ quoted: false, value: "." }];
+    return [{ quoted: false, value: "." }, ...splits];
   const targets = into && !folders ? folder ? [folder] : operands.slice(-1) : operands;
-  return [...new Set([...targets, ...maybe, ...logs])];
+  const split = into && !gnu && name !== "install" ? [] : splits;
+  return [...new Set([...targets, ...maybe, ...logs, ...split])];
 }
 var GUARD_KEYS = new Set([
   "ext.links",
@@ -3077,7 +3087,7 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`${verb} run inside ${root}`);
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`);
-      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : []).find((word) => !held2(word, here, steady));
+      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, here.splits) : []).find((word) => !held2(word, here, steady));
       if (unheld)
         return refuse(`${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`);
       if (name === "git") {
@@ -3124,7 +3134,7 @@ async function inspect(raw, environment, unknown = false) {
     const end = args.findIndex((word) => word.value === "--");
     const option = (word) => /^-./.test(word.value);
     const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(args[0]?.value === "--") : args.findIndex((word) => !option(word));
-    const operands = remover ? args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)) : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : [];
+    const operands = remover ? args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)) : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, env.splits) : [];
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined;
     if (loose)
       return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`));
