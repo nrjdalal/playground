@@ -482,6 +482,8 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       "/usr/local/bin/doc[^x]er build .",
       "/usr/local/bin/doc{j..l}er build .",
       "case $1 in a) (/usr/local/bin/doc?er build .) ;; esac",
+      "case x in *) /usr/local/bin/d?cker build . ;; esac",
+      "case x in a|b) /usr/local/bin/d?cker build . ;; esac",
     ])
       test(`a docker program word in a step: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
@@ -489,11 +491,15 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
         expect(r.err).toContain(GLOB)
       })
 
-    test("a globbed shell after a reserved word", async () => {
-      const r = await run(["sh", "-c", "echo docker | ! /bin/s?"])
-      expect(r.code).toBe(2)
-      expect(r.err).toContain(CANNOT)
-    })
+    for (const script of [
+      "echo docker | ! /bin/s?",
+      "echo docker | case x in a|*) /bin/s? ;; esac",
+    ])
+      test(`a globbed shell after a reserved word or a case pattern: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CANNOT)
+      })
 
     // review round 1 of #1209, the lead's ruling: a glob in a script run-slot does not open (a nested -c, one fed on stdin, eval's words, a chain behind an unplaced first word) is read piece by piece as a program word
     for (const argv of [
