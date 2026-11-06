@@ -1599,7 +1599,8 @@ async function examineReading(
   }
   if (name === "") {
     for (const [key, value] of local) setVar(env.vars, key, value)
-    if (builtins || cmd.feedsShell) verdict = await visit(cmd, parsed, here)
+    // a root shell with no program of its own (`sudo -s <<< …`) is visited when a redirect feeds it, so a hook can read that script
+    if (builtins || cmd.feedsShell || rootFed(cmd)) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     // a glob in the folder is judged as any program's words are, since it may land anywhere it matches
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -1962,7 +1963,7 @@ async function shell(
 }
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
-const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
+export const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
 
 // A shell's or source's script: stdin with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text> {
@@ -2074,10 +2075,16 @@ export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
   return held(await stdinText(cmd, env))
 }
 
+// A redirect that feeds stdin text, as stdinOf reads it: a file, a here-string, a heredoc or a process substitution, never a duplicated descriptor
+export const feedsStdin = ({ fd, op }: Redirect): boolean =>
+  (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&"
+
+// Whether a redirect feeds a root shell its script (`sudo -s <<< …`, `su < <(…)`), which run() hands every hook and leaves each to read
+export const rootFed = (cmd: Command): boolean =>
+  cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root"
+
 async function stdinText(cmd: Command, env: Env): Promise<Text> {
-  const input = cmd.redirects.findLast(
-    (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
-  )
+  const input = cmd.redirects.findLast(feedsStdin)
   if (input?.target?.procs) return outputs(input.target.procs, env)
   if (input?.op === "<" || input?.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect")

@@ -32,7 +32,7 @@ notified = []
 run.notify = lambda text, to="dispatcher": notified.append([to, text])
 paths = [run.CODE, run.LW, run.OPS, run.HERE]
 out = paths if call["fn"] == "paths" else getattr(run, call["fn"])(*call["args"])
-print(json.dumps({"notified": notified, "result": out} if call.get("notified") else out))
+print(json.dumps({"notified": notified, "result": out} if call.get("notified") else {"result": out, "state": call["args"][0]} if call.get("state") else out))
 `
 
 const dirs: string[] = []
@@ -47,11 +47,11 @@ const scratch = (): string => {
   return dir
 }
 
-// Every run swaps notify for a recorder, so no test sends a line; `notified` returns what it would have sent beside the result.
+// Every run swaps notify for a recorder, so no test sends a line; `notified` returns what it would have sent beside the result, and `state` the first argument as the call left it.
 const drive = async (
   env: Record<string, string>,
   config: string,
-  body: { args: unknown[]; fn: string; notified?: true },
+  body: { args: unknown[]; fn: string; notified?: true; state?: true },
 ): Promise<unknown> => {
   const proc = Bun.spawn([...PYTHON, "-I", "-c", DRIVER, RUN_PY], {
     env: {
@@ -1251,8 +1251,8 @@ describe("ops-unstick's slot alerts", () => {
     expect(new Set(alerts.map((a) => a.kind))).toEqual(new Set(["slot-idle"]))
   })
 
-  // run-slot's holder on run-slot-3 with the given ps rows under it, its saved baseline at cpu seconds over the pids it saw, idle since `ago` seconds
-  const idleCheck = async (rows: string[], cpu: number, ago: number, pids?: string[]) => {
+  // run-slot's holder on run-slot-3 with the given ps rows under it, its saved baseline at cpu seconds over the pids it saw, idle since `ago` seconds; the alerts' kinds and the entry the check saved
+  const idleRun = async (rows: string[], cpu: number, ago: number, pids?: string[]) => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
     const bin = join(config, "bin")
@@ -1269,15 +1269,15 @@ describe("ops-unstick's slot alerts", () => {
     const state = {
       slot_idle: { [key]: { cpu, since: now - ago, told: true, ...(pids && { pids }) } },
     }
-    const alerts = (await callWith(
-      { PATH: `${bin}:${process.env.PATH}` },
-      config,
-      "slot_idle_alerts",
-      state,
-      now,
-    )) as { kind: string }[]
-    return alerts.map((a) => a.kind)
+    const after = (await drive({ PATH: `${bin}:${process.env.PATH}` }, config, {
+      args: [state, now],
+      fn: "slot_idle_alerts",
+      state: true,
+    })) as { result: { kind: string }[]; state: { slot_idle: Record<string, { pids?: string[] }> } }
+    return { kinds: after.result.map((a) => a.kind), saved: after.state.slot_idle[key] }
   }
+  const idleCheck = async (rows: string[], cpu: number, ago: number, pids?: string[]) =>
+    (await idleRun(rows, cpu, ago, pids)).kinds
 
   test("a batch whose earlier step exited is measured from its new total, so its busy next step raises no slot-idle", async () => {
     expect(await idleCheck([`  999471 ${process.pid} 5:00.00 bun test`], 600, 1000)).toEqual([])
@@ -1306,6 +1306,18 @@ describe("ops-unstick's slot alerts", () => {
       "  999479 999478 0:00.30 bun test",
     ]
     expect(await idleCheck(rows, 0.34, 1000, ["999478", "999479"])).toEqual(["slot-idle"])
+  })
+
+  test("a check with no reset saves the tree's pids, so an entry saved with none takes them and an exited pid drops out (#1061's nit)", async () => {
+    const rows = [
+      `  999480 ${process.pid} 0:00.00 bash -c batch`,
+      "  999481 999480 0:00.00 sleep 900",
+    ]
+    expect((await idleRun(rows, 0, 100)).saved?.pids).toEqual(["999480", "999481"])
+    expect((await idleRun(rows, 0, 100, ["999480", "999481", "999482"])).saved?.pids).toEqual([
+      "999480",
+      "999481",
+    ])
   })
 
   test("a bun install process at near 0% CPU waits SLOT_IDLE_INSTALL, then still raises slot-idle, and a wrapper naming one in its argv waits SLOT_IDLE", async () => {

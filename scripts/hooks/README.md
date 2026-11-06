@@ -301,7 +301,10 @@ Only the first reading moves the folder, sets variables and records files for th
   A name spelled across a quote or a backslash counts as the shell reads it (`read X\Y` names `XY`).
   A parameter the shell sets itself is never held (`_`, `RANDOM` and the rest of bash(1)'s Shell Variables the shell sets, zshparam(1)'s PARAMETERS SET BY THE SHELL and each module's Parameters in zshmodules(1)), nor is the `REPLY`, `MATCH` or `ZPCRE_OP` a builtin or a match writes.
   Nor is a parameter zsh ties to another, where a write to either side rewrites the other (`TIED`, from zshparam(1)'s PARAMETERS USED BY THE SHELL and zshmodules(1)'s zsh/watch: each array and its colon-joined scalar, `cdpath` and `CDPATH` or `watch` and `WATCH`, and the aliases, `PROMPT` and `PS1`).
-  A line that runs `eval`, `source` or `.`, names `IFS` other than by expanding it, or reaches a variable through a name the hook cannot read whole holds no variable steady: any name indirection (zsh's P flag, and bash's `${!…}` through any parameter, `INDIRECTS`), whose assignment sets that name and whose read evaluates any subscript its value holds.
+  A line that runs text or loads code in its own shell holds no variable steady, by the builtins of `RUNS_TEXT`: `eval`, `source`, `.`, `trap` (whose DEBUG trap runs before each command), `alias` (expanded on a later line), `fc` and `r` (which run a history event), bash's `mapfile` and `readarray` (whose `-C` callback runs) and `enable` (whose `-f` loads a builtin).
+  zsh adds `sched`, `emulate` (whose `-c` runs its text), `zstyle` (whose `-e` value runs when looked up), `zregexparse` (whose actions run) and the loaders `autoload` and `zmodload`.
+  So does a command whose name the hook cannot read, which may be any of them or a builtin that sets a variable.
+  So does a line that names `IFS` other than by expanding it, or reaches a variable through a name the hook cannot read whole: any name indirection (zsh's P flag, and bash's `${!…}` through any parameter, `INDIRECTS`), whose assignment sets that name and whose read evaluates any subscript its value holds.
   So do a bash nameref (`declare -n`, `local -n`, `typeset -n`) and a zsh flag with a delimited argument (`${(j:…:)…}`), whose argument can hide a P, while bash's name list and array keys (`${!N*}`, `${!N[@]}`) hold, as does `${!}`, the last background job's pid.
   So does text the shell evaluates, where an assignment sets a name the hook never reads: zsh's `e`, `%` and `#` flags, bash's `${V@P}`, zsh's `print -P` and a glob qualifier that runs code, an `e` with any separator or a `+` (`*(e:…:)`, `*(e{…})`, `*(+f)`), read on the line's unquoted text, so a single-quoted jq filter's `select(…)` is none.
   So does arithmetic naming a variable, whose value it evaluates as an expression (`V=XY=0; (( V ))` sets `XY`): in `(( ))`, `$(( ))`, `$[ ]`, `let`, a `[[ ]]` comparison, a subscript, a substring offset, or after an integer or float attribute (`declare -i`, `integer`).
@@ -375,6 +378,9 @@ Only the first reading moves the folder, sets variables and records files for th
   An `ext score` after an `unset` or an `export -n` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset or un-exported.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` whose landing folder nothing on the line names (`cd "$X"`, `cd -`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so after one a relative write (a writing redirect, a remover's operand, one after `--` included, or a writer's target) is refused, since the shell may be in this root.
+  macOS's `mv`, `rm` and `rmdir`, named bare, read options only up to their first operand, as its getopt does, so every later word, a dashed one too, is an operand, and macOS's `unlink` reads every word as its operand but a leading `--`; a GNU build reads options anywhere before `--` unless the call sets `POSIXLY_CORRECT`, and a lone `-` is an operand for every remover.
+  A path a remover's option writes to is an operand too, attached to the option or as the next word, a dash-led one included: GNU `mv`'s target folder (`-t`, alone or in a cluster, and `--target-directory`), read by `writeTargets` as for `cp`.
+  rsync's are its backup, partial and temp folders, log file and batch files (`RSYNC_PATHS`, by any prefix, since macOS's openrsync takes a shortened long name, and `-T` in a short cluster).
   Each such word is read whole, so one holding an `=` or opening with a dash is relative unless it opens with `/` or `~`.
   A reader, any other program and a write by an absolute path still run after one, so a program that writes where it runs (a build, a script) passes.
   A `cd` whose target the reader names is judged in every folder it may reach, this root included ([The folder a hook reads](#the-folder-a-hook-reads)).
@@ -613,7 +619,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 ## no-raw-delete
 
-- A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>`, so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
+- A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>` (with `--discard` once its PR has merged or closed, whatever it holds), so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
   The trash takes up to 5,000 files or 2 GB, so the refusal also names the lead's cleanup for a bigger tree and `bun install` for a `node_modules`.
   `scripts/hooks/no-raw-delete.ts`, registered after no-kill-by-name, acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
   an `rm` or GNU rm's `grm` with `-r`, `-R` or `--recursive` (any prefix GNU rm takes, anywhere among its words), `find -delete`, `rm` under xargs, `gxargs` or `parallel`,
@@ -629,6 +635,7 @@ Only the first reading moves the folder, sets variables and records files for th
   It reads a delete wherever the shell runs one, through `shell.ts`'s walk (wrappers such as `nohup` and `sudo`, `sh -c`, `eval`, substitutions), and more ways:
   the words after run-slot's `--`, each word of `screen` or `tmux` that starts no option as the command it runs, the script `at` or `batch` takes from stdin or `-f`, and every program it judges named among another program's words (`arch -arm64 rm -rf`, `busybox rm`, `npx rimraf`);
   a printer's or a search's words stay text.
+  A root shell's here-string, heredoc, input file or process substitution (`sudo -s <<< '…'`, `su <<'EOF'`) is read as its script, as the shared reader runs a piped one, each part it cannot read (an unset variable, a download's output) taken as a line break so the rest is still judged, as a plain shell's script is.
   A job a redirect, a pipe or `-f` feeds `at` or `batch` that it cannot read is refused, a program's output included (`at now < "$F"`, `ls | at now`), while `at -l` runs.
   A word it cannot read among those words, given `-r` after it (`arch -arm64 $R -rf`), is refused as a program it cannot read; a data program's words stay text (`gh pr checks $N -R <repo>`).
   A plain `rm` met that way is judged for recursion alone, so `docker rm -fv "$ID"` and `bun rm <package>` run.
@@ -708,8 +715,8 @@ Only the first reading moves the folder, sets variables and records files for th
   herdr's own resume, when it is on, brings a session back without its `--settings` (measured on herdr 0.9.5), so a session resumed that way outside the factory's checkout writes no state and its file goes stale; a reader takes a record as about the moment it was written, never as the session now.
   The file also holds the shell-pane launcher's caller check (`procOf`, `sessionAbove`, `callerRefusal`): `run` and `login` refuse a call whose `PLAYGROUND_ROLE` or `CLAUDE_CODE_SESSION_ID` is not its claude process's own;
   [the shell-pane docs page](../../docs/playground/shell-pane.md#where-it-fits) says what the check reads and the gaps it leaves open.
-  `playground rm --discard` reads the same lookup (`sessionAbove`) the other way (`callerOf` in `packages/scripts/src/playground/rm.ts`): a claude process above the call makes it a session's, which needs an approved delete decision, and none makes it a terminal's.
-  Before the lookup, rm refuses a call whose parent is pid 1 or one the system cannot read without that decision, since a detached call's climb would find no claude process.
+  `playground rm --discard` reads the same lookup (`sessionAbove`) the other way (`callerOf` in `packages/scripts/src/playground/rm.ts`): a claude process above the call makes it a session's, which needs an approved delete decision unless the worktree's PR has merged or closed, and none makes it a terminal's.
+  Before the lookup, rm refuses a call whose parent is pid 1 or one the system cannot read without that decision or that PR state, since a detached call's climb would find no claude process.
   When it writes `stuck` or `failed` for a factory session, it also queues one line in the ops outbox (`ops-stuck-alert.jsonl`, which the relay sends by SendMessage) for the session's manager alone, by `managerFor()` in `packages/scripts/src/stuck-alert.ts`: the session, its roster task, the reason, the command or question, and its last message (playbook's **unstick**);
   An orchestrator's manager, the Assistant's for one, is the session its roster row reports to.
   The dispatcher's own and a session outside the factory queue nothing.

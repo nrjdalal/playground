@@ -312,6 +312,8 @@ const guardsOf = (
   "no-raw-delete": {
     folders: {
       checkout: [CHECKOUT, HOME],
+      "process data folder": [join(homedir(), ".playground"), homedir()],
+      "process home": [homedir(), homedir()],
       "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
     },
     run: (raw) => c.rawDelete(raw),

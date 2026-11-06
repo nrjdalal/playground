@@ -43,6 +43,9 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 a secret ask names a key and a sink (a Vercel project, or a Keychain
                                                 item such as yard); the owner's value goes to the sink, and get shows
                                                 only when and each exit status, or saved
+                                                an accept decision names one proposal (scope, kind, key, rev), and
+                                                more lists up to 20 further ones, accepted after it in that order;
+                                                Approve stops at the first that fails
                                                 --thread files it under that thread (bun run thread)
                                                 write {now} for a now-time, which new and edit fill with the time
                                                 they post at; a "measured" or "now" time ahead of the clock is refused
