@@ -85,6 +85,7 @@ A checkout with no `.env` gets one from `.env.example` on its first `bun run dev
 ### CI
 
 Two workflows run every check on GitHub's hosted runners, on every pull request into `canary` or `main`, with no label to start them: `auto-check-build.yml` (its check `Audit, Lint, and Build`, green when its `Lint and Build` job (format, lint, types and the build) and every `Suite (n)` shard of the suite passed, and the `Suite (n, clock ahead)` jobs that run it once more with the clock 30 days on, [.agents/testing.md](.agents/testing.md#the-clock-ahead-pass)) and `auto-test.yml` (its job `test`: `bun run test:skills`).
+The type check runs on the packages a pull request changes and those that depend on them, and on `@packages/scripts` every time, since it imports `scripts/hooks/` from outside its own folder; turbo.json counts `scripts/hooks/**/*.ts` as that check's inputs, so it replays from the cache until a hook or a script changes.
 Both run on `pull_request`, never `pull_request_target`, with a read-only token, so a fork's pull request reaches no secret and waits for approval before it runs.
 
 Playground registers no self-hosted runner, since a fork's pull request could then run its code on that machine. `runnerProblems` (`packages/scripts/src/workflow-runners.ts`) holds every workflow to hosted images, and its test fails on a self-hosted one.

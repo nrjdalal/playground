@@ -127,4 +127,28 @@ describe("turbo.json", () => {
         "@packages/scripts#build",
       )
   }, 60_000)
+
+  // turbo's change filter selects a package by its folder, so a hooks-only change reaches @packages/scripts' check-types through the type gates' --filter=@packages/scripts, and these inputs make that run miss the cache when a hook it imports changed (#1153)
+  test("@packages/scripts#check-types hashes every scripts/hooks file the package imports", async () => {
+    const run = Bun.spawnSync(
+      ["bunx", "turbo", "run", "check-types", "--filter=@packages/scripts", "--dry=json"],
+      { cwd: ROOT, env: { ...process.env, TURBO_TELEMETRY_DISABLED: "1" } },
+    )
+    expect(run.exitCode).toBe(0)
+    const task = (JSON.parse(run.stdout.toString()) as { tasks: DryTask[] }).tasks.find(
+      (each) => each.taskId === "@packages/scripts#check-types",
+    )
+    const hashed = Object.keys(task?.inputs ?? {})
+      .filter((path) => path.startsWith("../../scripts/hooks/"))
+      .map((path) => path.slice("../../".length))
+    const imported = new Set<string>()
+    for await (const file of new Bun.Glob("**/*.ts").scan(SCRIPTS))
+      for (const [, hook] of (await Bun.file(join(SCRIPTS, file)).text()).matchAll(
+        /["'](?:\.\.\/)+scripts\/hooks\/([\w-]+)["']/g,
+      ))
+        imported.add(`scripts/hooks/${hook}.ts`)
+    expect([...imported]).toContain("scripts/hooks/shell.ts")
+    expect([...imported]).toContain("scripts/hooks/role.ts")
+    expect(hashed).toEqual(expect.arrayContaining([...imported].sort()))
+  }, 60_000)
 })

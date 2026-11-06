@@ -21,6 +21,11 @@
         "src/generate-env.ts"
       ]
     },
+    // @packages/scripts imports scripts/hooks/, outside every package's folder, so the hooks hash into its check-types: a hook edit misses the cache, which the type gates' --filter=@packages/scripts then runs, since turbo's change filter selects packages by folder alone
+    "@packages/scripts#check-types": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/scripts/hooks/**/*.ts"]
+    },
     // web's build also writes .generated/ at the repo root, which a bare check-types:tests reads, so a cached replay restores it too; it waits for web's check-types, whose tsc reads the .next/types next build deletes and rewrites
     "@web/next#build": {
       "dependsOn": ["^build", "check-types"],
