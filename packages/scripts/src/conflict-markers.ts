@@ -2,7 +2,7 @@
 
 const MARKER = /^(?:<{7}|>{7})(?:[ \r]|$)/
 
-// Each added line of a `git diff -U0` that is a conflict marker, as `<path>:<line>` in the staged file. A hunk's lines are counted from its header, so an added or removed line that starts with `++ ` or `-- ` is never read as a file header.
+// Each added line of a `git diff -U0` that is a conflict marker, as `<path>:<line>` in the file the diff writes. A hunk's lines are counted from its header, so an added or removed line that starts with `++ ` or `-- ` is never read as a file header.
 export const markersIn = (diff: string): string[] => {
   const found: string[] = []
   let path = ""
@@ -59,7 +59,7 @@ const git = (args: string[]) => {
   return { code: result.exitCode, out: result.stdout.toString().trim() }
 }
 
-// Each pushed ref's range from git's pre-push lines (`<local ref> <local sha> <remote ref> <remote sha>`): from the remote sha when this clone has it, else from the merge-base with origin/canary for a new branch; a delete, or a ref with neither, reads nothing.
+// Each pushed ref's range from git's pre-push lines (`<local ref> <local sha> <remote ref> <remote sha>`): from the remote sha when this clone has it, else from the merge-base with origin/canary, as for a new branch; a delete, or a ref with neither, reads nothing.
 const pushRanges = (stdin: string): string[][] => {
   const ranges: string[][] = []
   for (const line of stdin.split("\n")) {
