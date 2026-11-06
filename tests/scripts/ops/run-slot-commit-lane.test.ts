@@ -876,7 +876,7 @@ describe("commit-lane forms that cost no build", () => {
   test("a chain whose cd joins by && and then ; waits", async () => {
     const m = repo({ idle: 30 }, ["docs/notes.md"])
     m.hold("run-slot", 3, "big")
-    const steps = "git add docs/notes.md && cd ROOT ; git commit -m x"
+    const steps = "git -C ROOT add docs/notes.md && cd ROOT ; git commit -m x"
     expect(await takes(m, chain(m, steps), m.root)).toBe("waited")
   })
 
