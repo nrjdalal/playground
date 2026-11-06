@@ -86,101 +86,86 @@ function singleQuotesOut(command: string): string {
   return double || docs.length ? command : out
 }
 
-// the characters that end a heredoc's delimiter word
-const DELIMITER_END = /[\s;&|<>()]/
-// the openers of a parameter expansion and of bash's and zsh's $[ ] arithmetic
-const OPAQUE = /^\$[{[]/
+// a plain read of a variable: `$name` or `${name}`, never one zsh subscripts with a `[` after it
+const READ = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(?!\[)/.source
+// a character double quotes hold as text
+const TEXT = /[^"$`\\]/.source
+// a part of a plain word: word characters and reads, a single quote, or a double quote holding nothing but text and reads
+const WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ})+|'[^']*'|"(?:${TEXT}|${READ})*")`)
+// a redirection whose target is the next word, or one that carries its own (`2>&1`, `>&-`)
+const REDIRECT = /^(?:[<>]&(?:\d+|-)|<<<|&>>?|>>?\|?|<>?)/
+// the reserved words and precommand modifiers after which the next word is still a program word
+const KEEPS_PROGRAM =
+  /^(?:builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/
+// a heredoc operator whose delimiter is quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`), its word ending where a word does
+const QUOTED_DOC =
+  /^<<(-?)[ \t]*((?:[\w.-]*(?:'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])[\w.-]*)+)(?=[\s;&|<>]|$)/
 
-// The line with each body of a heredoc whose delimiter is quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) put as an empty line, since the shell expands nothing in it, so its text reads as no evaluation, subscript or qualifier; the line as written wherever the scan cannot place a body as the shell does, each case a `return command` below and a fallback scripts/hooks/README.md's held rule lists
+// The line with each body of a heredoc whose delimiter is quoted put as an empty line, since the shell expands nothing in it, so its text reads as no evaluation, subscript or qualifier; only a line whose text outside the bodies is blanks, WORD's parts, `;`, `&&`, `||`, `|`, REDIRECT's and QUOTED_DOC's is scanned, so the bodies start and end where the shell's do, and any other line, one whose step's program word holds a read among them, comes back as written
 function quotedBodiesOut(command: string): string {
-  if (command.includes("$'")) return command
   let out = ""
-  let depth = 0
-  let double = false
-  const docs: { delim: string; quoted: boolean; strip: boolean }[] = []
-  for (let i = 0; i < command.length; i++) {
-    const c = command[i]
-    // a parameter expansion with an operator, or zsh's and bash's $[ ], holds words the shell reads its own way, a `<<` or a ` #` among them
-    if (OPAQUE.test(command.slice(i, i + 2)) && !/^\$\{[A-Za-z_]\w*\}/.test(command.slice(i)))
-      return command
-    if (c === "\\") {
-      // the shell joins a backslash-newline before it reads an operator, so `<` and `<` across one are a heredoc's `<<`
-      if (command[i + 1] === "\n" && command[i - 1] === "<") return command
-      out += command.slice(i, i + 2)
+  const docs: { delim: string; strip: boolean }[] = []
+  // the next word is a step's program word, unless it is an assignment or a redirection's target
+  let program = true
+  let target = false
+  let word = ""
+  const endWord = () => {
+    if (word && target) target = false
+    else if (word && !/^[A-Za-z_]\w*=/.test(word) && !KEEPS_PROGRAM.test(word)) program = false
+    word = ""
+  }
+  for (let i = 0; i < command.length;) {
+    const rest = command.slice(i)
+    let token: string | undefined
+    let doc: RegExpMatchArray | null = null
+    if (rest[0] === "\n") {
+      endWord()
+      out += "\n"
       i++
-    } else if (double) {
-      // a substitution inside double quotes holds its own quoting, which this scan does not follow
-      if (c === "`" || command.startsWith("$(", i)) return command
-      if (c === '"') double = false
-      out += c
-    } else if (c === '"') {
-      double = true
-      out += c
-    } else if (c === "'") {
-      const end = command.indexOf("'", i + 1)
-      if (end === -1) return command
-      out += command.slice(i, end + 1)
-      i = end
-    } else if (c === "#" && /[)<>]/.test(command[i - 1] ?? "")) {
-      // a `#` after a closing parenthesis or a redirection starts a comment in one shell and a word in another
-      return command
-    } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
-      const end = command.indexOf("\n", i)
-      const stop = end === -1 ? command.length : end
-      out += command.slice(i, stop)
-      i = stop - 1
-    } else if (c === "`") return command
-    else if (c === "(") {
-      depth++
-      out += c
-    } else if (c === ")") {
-      if (--depth < 0) return command
-      out += c
-    } else if (command.startsWith("<<<", i)) {
-      out += "<<<"
-      i += 2
-    } else if (command.startsWith("<<", i)) {
-      // a heredoc inside a substitution or a group's parentheses may end at `delim)`, so only one at the top level is read
-      if (depth > 0) return command
-      const doc = command
-        .slice(i)
-        .match(/^<<(-?)[ \t]*((?:[\w.-]|'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])+)/)
-      if (!doc || !DELIMITER_END.test(command[i + doc[0].length] ?? " ")) return command
-      const word = doc[2]
+      for (const { delim, strip } of docs)
+        for (;;) {
+          if (i >= command.length) return command
+          const end = command.indexOf("\n", i)
+          const stop = end === -1 ? command.length : end
+          const line = command.slice(i, stop)
+          const last = (strip ? line.replace(/^\t+/, "") : line) === delim
+          out += (last ? line : "") + (end === -1 ? "" : "\n")
+          i = stop + 1
+          if (last) break
+        }
+      docs.length = 0
+      program = true
+      continue
+    } else if ((token = rest.match(/^[ \t]+/)?.[0])) endWord()
+    else if ((token = rest.match(/^(?:&&|\|\||[;|])/)?.[0])) {
+      endWord()
+      program = true
+    } else if (rest.startsWith("<<") && !rest.startsWith("<<<")) {
+      doc = rest.match(QUOTED_DOC)
+      if (!doc) return command
+      if (/^\d+$/.test(word)) word = ""
+      endWord()
+      token = doc[0]
       docs.push({
-        delim: word.replace(/\\(.)/g, "$1").replace(/["']/g, ""),
-        quoted: /["'\\]/.test(word),
+        delim: doc[2].replace(/\\(.)/g, "$1").replace(/["']/g, ""),
         strip: doc[1] === "-",
       })
-      out += doc[0]
-      i += doc[0].length - 1
-    } else if (c === "\n" && docs.length) {
-      // a newline inside a substitution's parentheses ends no command line, so the shell reads the bodies after the line that closes it
-      if (depth > 0) return command
-      out += c
-      let at = i + 1
-      for (const { delim, quoted, strip } of docs) {
-        for (;;) {
-          const end = command.indexOf("\n", at)
-          if (end === -1 && at >= command.length) return command
-          const stop = end === -1 ? command.length : end
-          const line = command.slice(at, stop)
-          const bare = strip ? line.replace(/^\t+/, "") : line
-          if (bare.startsWith(`${delim})`)) return command
-          // an unquoted body joins a line that ends in a backslash to the next, which moves where it ends
-          if (!quoted && line.endsWith("\\")) return command
-          const last = bare === delim
-          out += (quoted && !last ? "" : line) + (end === -1 ? "" : "\n")
-          at = stop + 1
-          if (last) break
-          if (end === -1) return command
-        }
-      }
-      docs.length = 0
-      i = at - 1
-    } else out += c
+    } else if ((token = rest.match(REDIRECT)?.[0])) {
+      // a file descriptor's number belongs to the redirection it leads
+      if (/^\d+$/.test(word)) word = ""
+      endWord()
+      target = !/&(?:\d+|-)$/.test(token)
+    } else if ((token = rest.match(WORD)?.[0])) {
+      word += token
+      // a read as a step's program word runs a command the scan cannot name
+      if (program && !target && token.includes("$") && !/^[A-Za-z_]\w*=/.test(word)) return command
+    }
+    // a quote that spans a newline while a body is pending moves where the shell starts reading it
+    if (!token || (docs.length && token.includes("\n"))) return command
+    out += token
+    i += token.length
   }
-  return double || docs.length || depth !== 0 ? command : out
+  return docs.length ? command : out
 }
 
 // How many times the line names each variable other than by reading it ($K, ${K}, ${K:-…} and the other READS_ONLY forms): every other spelling of the name counts, an assignment, an append, a bare word (read's, a for loop's, arithmetic's) and a name spelled across a quote or a backslash (`X\Y`, `X"Y"`, which the shell reads as XY) included, as does one attached after an option cluster's a or v (`printf -vK`), a lone flag (`-K`) aside; and the names an unquoted plain assignment sets (`K=`, where a quoted `"K=a"` is a command), read in one pass

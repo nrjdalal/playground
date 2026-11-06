@@ -2018,109 +2018,87 @@ function singleQuotesOut(command) {
   }
   return double || docs.length ? command : out;
 }
-var DELIMITER_END = /[\s;&|<>()]/;
-var OPAQUE = /^\$[{[]/;
+var READ2 = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(?!\[)/.source;
+var TEXT = /[^"$`\\]/.source;
+var WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ2})+|'[^']*'|"(?:${TEXT}|${READ2})*")`);
+var REDIRECT2 = /^(?:[<>]&(?:\d+|-)|<<<|&>>?|>>?\|?|<>?)/;
+var KEEPS_PROGRAM = /^(?:builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/;
+var QUOTED_DOC = /^<<(-?)[ \t]*((?:[\w.-]*(?:'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])[\w.-]*)+)(?=[\s;&|<>]|$)/;
 function quotedBodiesOut(command) {
-  if (command.includes("$'"))
-    return command;
   let out = "";
-  let depth = 0;
-  let double = false;
   const docs = [];
-  for (let i = 0;i < command.length; i++) {
-    const c = command[i];
-    if (OPAQUE.test(command.slice(i, i + 2)) && !/^\$\{[A-Za-z_]\w*\}/.test(command.slice(i)))
-      return command;
-    if (c === "\\") {
-      if (command[i + 1] === `
-` && command[i - 1] === "<")
-        return command;
-      out += command.slice(i, i + 2);
+  let program = true;
+  let target = false;
+  let word = "";
+  const endWord = () => {
+    if (word && target)
+      target = false;
+    else if (word && !/^[A-Za-z_]\w*=/.test(word) && !KEEPS_PROGRAM.test(word))
+      program = false;
+    word = "";
+  };
+  for (let i = 0;i < command.length; ) {
+    const rest = command.slice(i);
+    let token;
+    let doc = null;
+    if (rest[0] === `
+`) {
+      endWord();
+      out += `
+`;
       i++;
-    } else if (double) {
-      if (c === "`" || command.startsWith("$(", i))
-        return command;
-      if (c === '"')
-        double = false;
-      out += c;
-    } else if (c === '"') {
-      double = true;
-      out += c;
-    } else if (c === "'") {
-      const end = command.indexOf("'", i + 1);
-      if (end === -1)
-        return command;
-      out += command.slice(i, end + 1);
-      i = end;
-    } else if (c === "#" && /[)<>]/.test(command[i - 1] ?? "")) {
-      return command;
-    } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
-      const end = command.indexOf(`
-`, i);
-      const stop = end === -1 ? command.length : end;
-      out += command.slice(i, stop);
-      i = stop - 1;
-    } else if (c === "`")
-      return command;
-    else if (c === "(") {
-      depth++;
-      out += c;
-    } else if (c === ")") {
-      if (--depth < 0)
-        return command;
-      out += c;
-    } else if (command.startsWith("<<<", i)) {
-      out += "<<<";
-      i += 2;
-    } else if (command.startsWith("<<", i)) {
-      if (depth > 0)
-        return command;
-      const doc = command.slice(i).match(/^<<(-?)[ \t]*((?:[\w.-]|'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])+)/);
-      if (!doc || !DELIMITER_END.test(command[i + doc[0].length] ?? " "))
-        return command;
-      const word = doc[2];
-      docs.push({
-        delim: word.replace(/\\(.)/g, "$1").replace(/["']/g, ""),
-        quoted: /["'\\]/.test(word),
-        strip: doc[1] === "-"
-      });
-      out += doc[0];
-      i += doc[0].length - 1;
-    } else if (c === `
-` && docs.length) {
-      if (depth > 0)
-        return command;
-      out += c;
-      let at = i + 1;
-      for (const { delim, quoted, strip } of docs) {
+      for (const { delim, strip } of docs)
         for (;; ) {
+          if (i >= command.length)
+            return command;
           const end = command.indexOf(`
-`, at);
-          if (end === -1 && at >= command.length)
-            return command;
+`, i);
           const stop = end === -1 ? command.length : end;
-          const line = command.slice(at, stop);
-          const bare = strip ? line.replace(/^\t+/, "") : line;
-          if (bare.startsWith(`${delim})`))
-            return command;
-          if (!quoted && line.endsWith("\\"))
-            return command;
-          const last = bare === delim;
-          out += (quoted && !last ? "" : line) + (end === -1 ? "" : `
+          const line = command.slice(i, stop);
+          const last = (strip ? line.replace(/^\t+/, "") : line) === delim;
+          out += (last ? line : "") + (end === -1 ? "" : `
 `);
-          at = stop + 1;
+          i = stop + 1;
           if (last)
             break;
-          if (end === -1)
-            return command;
         }
-      }
       docs.length = 0;
-      i = at - 1;
-    } else
-      out += c;
+      program = true;
+      continue;
+    } else if (token = rest.match(/^[ \t]+/)?.[0])
+      endWord();
+    else if (token = rest.match(/^(?:&&|\|\||[;|])/)?.[0]) {
+      endWord();
+      program = true;
+    } else if (rest.startsWith("<<") && !rest.startsWith("<<<")) {
+      doc = rest.match(QUOTED_DOC);
+      if (!doc)
+        return command;
+      if (/^\d+$/.test(word))
+        word = "";
+      endWord();
+      token = doc[0];
+      docs.push({
+        delim: doc[2].replace(/\\(.)/g, "$1").replace(/["']/g, ""),
+        strip: doc[1] === "-"
+      });
+    } else if (token = rest.match(REDIRECT2)?.[0]) {
+      if (/^\d+$/.test(word))
+        word = "";
+      endWord();
+      target = !/&(?:\d+|-)$/.test(token);
+    } else if (token = rest.match(WORD)?.[0]) {
+      word += token;
+      if (program && !target && token.includes("$") && !/^[A-Za-z_]\w*=/.test(word))
+        return command;
+    }
+    if (!token || docs.length && token.includes(`
+`))
+      return command;
+    out += token;
+    i += token.length;
   }
-  return double || docs.length || depth !== 0 ? command : out;
+  return docs.length ? command : out;
 }
 function namings(command) {
   const counts = new Map;
