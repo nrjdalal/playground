@@ -57,6 +57,9 @@ export const MADE_UP_DATA = [
 const LEFT_OUT_OF: Partial<Record<Kind, RegExp[]>> = { issueRefs: MADE_UP_DATA }
 
 const LIVE = new RegExp(LIVE_NAMES.join("|"), "g")
+// A file's text as the kinds read it: past every live name and every public repository.
+export const readable = (text: string, repos: Repos): string =>
+  readPast(text.replace(LIVE, ""), repos)
 
 // No person's address, so no trace: a domain reserved for examples (RFC 2606 and 6761) or the fixtures' local.host, an ssh remote's git user, and a package's version.
 const NOT_A_PERSON = [
@@ -67,7 +70,7 @@ const NOT_A_PERSON = [
 
 // Each kind's hits in one file's text, past the live names, the read-past repositories and the kinds its path is left out of.
 const hitsIn = (path: string, text: string, kinds: [Kind, RegExp][], repos: Repos): Counts => {
-  const said = readPast(text.replace(LIVE, ""), repos)
+  const said = readable(text, repos)
   const hits: Counts = {}
   for (const [kind, re] of kinds) {
     if (LEFT_OUT_OF[kind]?.some((out) => out.test(path))) continue

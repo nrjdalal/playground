@@ -10,12 +10,12 @@ Each hit is reported by its place and kind (`file:line`, leg, kind and where it 
 Type `/core-audit` when you want to know whether core is still generic: after a run of org work, before core is shared, or when a review spots one org's term in a merged change.
 Nothing fires it on its own.
 
-| Leg                     | Runs                        | Finds                                                                                                                    |
-| ----------------------- | --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| 1, a linked org's terms | when an org scope is linked | no-public-leak's derived list, each org's firefighting prefixes and each org's own name, a tracker key keyed or bare     |
-| 2, org-shaped values    | always                      | a Slack id or a person's home path written into the tree, and a skill, rule, script or job that serves one org's process |
+| Leg                     | Runs                        | Finds                                                                                                                                   |
+| ----------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 1, a linked org's terms | when an org scope is linked | no-public-leak's derived list, each org's firefighting prefixes, own name, GitHub orgs and repository, a tracker key keyed or bare      |
+| 2, org-shaped values    | always                      | a Slack id, a person's home path or a tracker key written into the tree, and a skill, rule, script or job that serves one org's process |
 
-The runner, `bun run core-audit`, prints the hits and exits 1 on any; the skill adds the read for one org's process, the report, the fix PR and the audit doc.
+The runner, `bun run core-audit`, prints the hits and exits 1 on any, or 2 when an org is linked and its list, policy or login cannot be read; the skill adds the read for one org's process, the report, the fix PR and the audit doc.
 
 ## Where a hit belongs
 
@@ -24,9 +24,10 @@ The runner, `bun run core-audit`, prints the hits and exits 1 on any; the skill 
 | A list term in a test or a fixture   | a made-up value in core (`MADE`, `acme`) |
 | A list term anywhere else            | the org's extension                      |
 | A Slack id or a home path            | config with a sensible default           |
+| A tracker key (leg 2)                | a placeholder key such as `PG-1`         |
 | A one-org skill, rule, script or job | the org's extension                      |
 
-A placeholder passes leg 2: an id holding `EXAMPLE` or `MADE`, a home of `you`, `me`, `owner`, `someone`, `runner` or `x`.
+A placeholder passes leg 2: an id holding `EXAMPLE` or `MADE`, a home of `you`, `me`, `owner`, `someone`, `runner` or `x`, a key of the factory's `PG`, a made-up team or a standard such as `UTF-8`.
 Leg 2 reads no `tests/` yet, since a test's made-up ids do not hold a placeholder shape today.
 
 ## It's working if
