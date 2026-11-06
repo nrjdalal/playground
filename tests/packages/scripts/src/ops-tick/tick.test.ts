@@ -1583,13 +1583,9 @@ describe("the focus card", () => {
         until: "2026-10-19T09:00:00.000Z",
       }),
     )
-    const failing = fake(
-      ops,
-      new Date("2026-10-19T09:01:00.000Z"),
-      { "ask new": "ask: refused" },
-      [],
-      { "ask new": 1 },
-    )
+    const failing = fake(ops, new Date("2026-10-19T09:01:00.000Z"), {
+      "ask new": { code: 1, out: "ask: refused" },
+    })
     await expect(beat("focus-card").run(failing.ctx)).rejects.toThrow(
       "bun run ask new: ask: refused",
     )
