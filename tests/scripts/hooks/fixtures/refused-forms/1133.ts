@@ -79,6 +79,15 @@ export const groups: Group[] = [
       ],
       ["ln of an array zstyle fills by name", "zstyle -a :c s X; ln -s $X"],
       ["ln of an array zstyle fills by name in zsh -c", `zsh -c 'zstyle -a :c s X; ln -s $X'`],
+      [
+        "dd of a quoted default holding the positional parameters in bash -c",
+        `bash -c 'dd if="\${X:-$@}"' _ a b`,
+      ],
+      ["dd of a quoted default holding the positional parameters", `dd if="\${X:-$@}"`],
+      ["dd of zsh's aliases hash", "dd if=$aliases"],
+      ["dd of zsh's commands hash", "dd if=$commands"],
+      ["dd of zsh's options hash in zsh -c", `zsh -c 'dd if=$options'`],
+      ["dd of one unquoted list fish expands", `fish -c 'dd if=$X'`],
     ],
   },
 ]

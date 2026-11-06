@@ -1863,6 +1863,11 @@ describe("an unquoted value stays one word where the shell does not split it (PG
     ["dd with a quoted variable after if=", `dd if="$X"`],
     ["ln of a quoted positional parameter", `ln -s "$1"`],
     ["ln of a held variable", "D=/tmp/d; ln -s $D"],
+    [
+      "dd of a quoted pattern cut holding the positional parameters in bash -c",
+      `bash -c 'dd if="\${X#$@}"'`,
+    ],
+    ["dd of a quoted default holding zsh's argv", `dd if="\${X:-$argv}"`],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
