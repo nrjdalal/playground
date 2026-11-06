@@ -5,6 +5,7 @@ import { join, resolve } from "node:path"
 import { dataDir } from "@packages/env/data-dir"
 import {
   type Clone,
+  inWorktrees,
   isAgentBrowser,
   linkPlaces,
   listTrash,
@@ -291,7 +292,7 @@ export const discardRefusal = async (
   deps: Pick<RmDeps, "decision" | "prState">,
   pr?: string,
 ): Promise<string | null> => {
-  const route = `post an Inbox delete decision with bun run ask new naming ${resolve(path)} and why, then run playground rm --worktree ${path} --discard --decision <id> once it is approved`
+  const route = `post an Inbox delete decision with bun run ask new naming ${resolve(path)} and why (bun run ask example delete prints one to start from), then run playground rm --worktree ${path} --discard --decision <id> once it is approved`
   if (id === undefined) {
     const state = await deps.prState(path, pr)
     if (state === "MERGED" || state === "CLOSED") return null
@@ -371,7 +372,9 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     console.error(`playground: ${args.error}`)
     return 2
   }
-  if ("discard" in args && args.discard) {
+  const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
+  // a folder outside the worktrees folder skips the gate, since quarantine refuses its --worktree naming plain playground rm
+  if ("discard" in args && args.discard && inWorktrees(args.path, roots)) {
     const caller = await deps.caller()
     const refusal = caller
       ? await discardRefusal(args.path, args.decision, caller, deps, args.pr)
@@ -381,7 +384,6 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
       return 1
     }
   }
-  const roots: Roots = { home: deps.home, main: deps.main, trash: join(deps.data, "trash") }
   if ("list" in args) {
     for (const entry of listTrash(roots.trash))
       console.log(

@@ -39,6 +39,7 @@ import {
   RiSlackLine,
   RiTableLine,
   RiTicketLine,
+  RiUserStarLine,
   RiWindowLine,
   RiZzzLine,
   type RemixiconComponentType,
@@ -112,6 +113,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useYardWrites } from "@/hooks/use-yard-writes"
+import { ACCOUNTS_QUERY_KEY } from "@/lib/accounts"
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
@@ -188,6 +190,7 @@ const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   delete: RiDeleteBinLine,
   grant: RiShieldKeyholeLine,
   guard: RiShieldCheckLine,
+  own: RiUserStarLine,
   reveal: RiKey2Line,
   schema: RiTableLine,
   secret: RiKey2Line,
@@ -745,6 +748,20 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
       )
+    case "own":
+      // the one row and the change Approve asks for; Approve's result line says what it found there
+      return (
+        <>
+          <p>
+            On Approve, the dashboard {preview.own ? "marks" : "unmarks"}{" "}
+            <code className="font-mono">{preview.key}</code> as your own account in{" "}
+            <code className="font-mono">usage.accounts</code> at{" "}
+            <code className="font-mono">{preview.scope}</code>: Own{" "}
+            {preview.own ? "off → on" : "on → off"}. Every other account stays as it is.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
   }
 }
 
@@ -938,6 +955,9 @@ export function InboxCard({
       return false
     } finally {
       await queryClient.invalidateQueries({ queryKey: INBOX_QUERY_KEY })
+      // an own card's Approve writes usage.accounts, so Settings > Accounts reads its switch again
+      if (item.kind === "decision" && item.preview.type === "own")
+        await queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY })
       setPending(false)
     }
   }

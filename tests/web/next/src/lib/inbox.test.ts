@@ -260,6 +260,49 @@ describe("a guard decision (PG-1090)", () => {
   })
 })
 
+describe("an own decision (PG-1162)", () => {
+  const own = {
+    key: "pat@example.com",
+    own: true,
+    scope: "made-up-me",
+    type: "own",
+    why: "Spend the org's accounts first",
+  }
+  const approved = (preview: object, owned: object) =>
+    item({
+      answer: { at: "2026-11-06T03:00:00.000Z", choice: "approve", owned },
+      delivery: { at: "x", status: "delivered", via: "session" },
+      kind: "decision",
+      preview,
+      status: "approved",
+    } as never)
+
+  test("needs you while open, and reads Own account", () => {
+    const asked = item({ kind: "decision", preview: own } as never)
+    expect(kindWord(asked)).toBe("Own account")
+    expect(needsYou(asked)).toBe(true)
+  })
+
+  test("reads the line the dashboard wrote, done or failed by its exit code", () => {
+    const ran = approved(own, {
+      exitCode: 0,
+      line: "pat@example.com is now your own account at made-up-me",
+    })
+    expect(outcomeLine(ran)).toBe(
+      "Approve · Mark pat@example.com as your own account · Own account: pat@example.com is now your own account at made-up-me",
+    )
+    expect(itemState(ran)).toBe("done")
+    const gone = approved(
+      { ...own, own: false },
+      { exitCode: 1, line: "pat@example.com is no longer in usage.accounts at made-up-me" },
+    )
+    expect(outcomeLine(gone)).toBe(
+      "Approve · Unmark pat@example.com as your own account · Own account change failed (exit 1): pat@example.com is no longer in usage.accounts at made-up-me",
+    )
+    expect(itemState(gone)).toBe("failed")
+  })
+})
+
 describe("an apps decision and a grant decision (PG-658)", () => {
   const apps = { app: "Notes", change: "add", type: "apps", why: "It holds your notes" }
   const grant = { permission: "accessibility", type: "grant", why: "It drives Notes" }
