@@ -6108,6 +6108,14 @@ var firefightingSettings = defineSettings({
     default: [],
     description: "The ticket keys the job starts for (MADE for MADE-1), each a tracker team's key; empty starts none.",
     schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "a ticket key, upper case"))
+  },
+  "firefighting.start.prepareBrief": {
+    default: "",
+    description: "The standing brief under the data folder that ops-firefighting-start fills for a prepare-only worker, one for a ticket the relay's prepare map holds before the digest lists it, its {TICKET} and {NAME} replaced as for firefighting.start.brief; empty starts none.",
+    schema: union([
+      literal(""),
+      string2().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder")
+    ])
   }
 });
 // packages/settings/src/gates.ts

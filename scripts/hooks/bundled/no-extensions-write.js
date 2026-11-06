@@ -2868,6 +2868,7 @@ var GUARD_KEYS = new Set([
   "ext.repos",
   "factory.archiveRepo",
   "factory.publicRepo",
+  "firefighting.start.prepareBrief",
   "glm.readOnlyLoad5",
   "live.branch",
   "owner.names",

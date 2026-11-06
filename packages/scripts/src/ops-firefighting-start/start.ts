@@ -5,9 +5,9 @@ import type { Context } from "../ops-tick/tick"
 import { MAX_MINUTES, standing } from "../playground/focus"
 import { writeAtomic } from "../write-atomic"
 
-// ops-firefighting-start: each beat reads the relay's firefighting.json and starts one --firefighting worker for each open ticket of firefighting.start.prefixes that the tracker's digest lists and no one holds, Urgent, High, Medium, Low and oldest first, at most CAP in progress but for an Urgent, which always starts; its start file keeps spawn.sh's load and slots gates open for those starts while one is open, and focus stands for an Urgent ticket's session alone.
+// ops-firefighting-start: each beat reads the relay's firefighting.json and starts one --firefighting worker for each open ticket of firefighting.start.prefixes that the tracker's digest lists and no one holds, Urgent, High, Medium, Low and oldest first, at most CAP in progress but for an Urgent, which always starts; its start file keeps spawn.sh's load and slots gates open for those starts while one is open, and focus stands for an Urgent ticket's session alone. With firefighting.start.prepareBrief set, a ticket the relay's prepare map holds before the digest lists it starts a prepare-only worker from that brief, which the same session claims once the digest lists it.
 
-// hours is the UTC start window, "HH:MM-HH:MM" (one past midnight wraps), empty for any time; consultFrom the UTC time inside it from which a ticket is the owner's call, told to the dispatcher rather than started; daysOff the UTC dates it starts nothing on.
+// prepareBrief is the standing brief a prepare-only worker starts from, empty to serve no prepare map; hours is the UTC start window, "HH:MM-HH:MM" (one past midnight wraps), empty for any time; consultFrom the UTC time inside it from which a ticket is the owner's call, told to the dispatcher rather than started; daysOff the UTC dates it starts nothing on.
 export type StartConfig = {
   account?: string
   brief: string
@@ -17,6 +17,7 @@ export type StartConfig = {
   hours?: string
   in?: string
   prefixes: string[]
+  prepareBrief?: string
 }
 
 export const CAP = 2
@@ -44,12 +45,13 @@ type Line = {
 }
 type Row = { name?: string; status?: string; ticket?: string; title?: string }
 
-// What a beat keeps between passes: when it first watched, the UTC day each roster row was first seen ended (empty for one already ended on the first beat), the session started for each ticket, the name a ticket whose start was refused keeps, the line last told for each, when each closed line was first seen closed, when Linear first read each of those open again (kept for a ticket card to read), and when Linear was last asked.
+// What a beat keeps between passes: when it first watched, the UTC day each roster row was first seen ended (empty for one already ended on the first beat), the session started for each ticket, the prepare-only session of each ticket not yet claimed, the name a ticket whose start was refused keeps, the line last told for each, when each closed line was first seen closed, when Linear first read each of those open again (kept for a ticket card to read), and when Linear was last asked.
 export type State = {
   closedSeen: Record<string, string>
   ended: Record<string, string>
   linearAt?: string
   named: Record<string, string>
+  prepared: Record<string, string>
   reopened: Record<string, string>
   started: Record<string, string>
   told: Record<string, string>
@@ -95,6 +97,7 @@ export async function startPass({
     closedSeen: {},
     ended: {},
     named: {},
+    prepared: {},
     reopened: {},
     started: {},
     told: {},
@@ -129,6 +132,7 @@ export async function startPass({
     clock?: Record<string, unknown>
     lastTry?: number
     lines?: Record<string, Line>
+    prepare?: Record<string, { at?: unknown }>
   }>(relay)
   // The relay writes lastTry on every pass inside its window, quiet ones included, and nothing outside it, so lines older than freshMinutes are a closed window's or a stopped relay's, and a file that does not parse holds no lines to trust: none starts from them, and a focus already standing is left to the session working its ticket.
   const exists = await Bun.file(relay).exists()
@@ -150,6 +154,34 @@ export async function startPass({
     return
   }
   delete state.told[""]
+  // Only a ticket the tracker's digest lists is a firefighting one: the relay keeps it in the file's clock map, while a line a mention elsewhere named (an integration or port ask) has no entry, so it never starts; a file with no clock map starts nothing.
+  const listed = new Set(Object.keys(ff?.clock ?? {}))
+  // A ticket the relay's prepare map holds is registered but not yet listed: with a prepareBrief set, it starts a prepare-only worker, which makes no tracker write, no chat post and no PR until the digest lists it.
+  const prepare = new Map(
+    config.prepareBrief
+      ? Object.entries(ff?.prepare ?? {}).flatMap(([id, p]) =>
+          ticket.test(id) && !listed.has(id) && typeof p?.at === "string"
+            ? [[id, Date.parse(p.at)] as const]
+            : [],
+        )
+      : [],
+  )
+  // A prepared ticket that leaves the prepare map with no clock entry (closed, taken by someone else, never posted in time, or the relay's window ended) is no longer ours: its session stops with its branch local, on any fresh beat, outside the window too, and one whose row ended is let go.
+  for (const [id, session] of Object.entries(state.prepared)) {
+    if (prepare.has(id) || listed.has(id)) continue
+    delete state.prepared[id]
+    delete state.started[id]
+    await save()
+    if (ENDED.has(rowOf(session)?.status ?? "")) continue
+    await ctx.send(
+      session,
+      `stop ${id}: it left the prepare list with no digest entry, so it is not ours to take; keep its branch local, push nothing, and end`,
+    )
+    await tell(
+      id,
+      `Stopped ${session}, the prepare-only worker for ${id}: it left the prepare list with no digest entry`,
+    )
+  }
   // The owner takes tickets only inside the start window: outside it, or on a day off, nothing starts and the start file goes, while a focus already standing is left to its session; the line names the window, never the beat's time or day, so a closed stretch is told once, and the next close once more.
   if (!inWindow(config, ctx.now)) {
     await tell(
@@ -167,8 +199,6 @@ export async function startPass({
   const matched = config.prefixes.length
     ? all.filter((l): l is Line & { id: string } => typeof l?.id === "string" && ticket.test(l.id))
     : []
-  // Only a ticket the tracker's digest lists is a firefighting one: the relay keeps it in the file's clock map, while a line a mention elsewhere named (an integration or port ask) has no entry, so it never starts; a file with no clock map starts nothing.
-  const listed = new Set(Object.keys(ff?.clock ?? {}))
   for (const line of matched)
     if (!listed.has(line.id) && line.open === true)
       await tell(line.id, `Skipped ${line.id}: no digest of the tracker lists it`)
@@ -185,7 +215,58 @@ export async function startPass({
   const open = lines.filter(
     (l) => (l.open === true || state.reopened[l.id] !== undefined) && l.theirs !== true,
   )
-  const ids = new Set(open.map((l) => l.id))
+  // A prepared ticket the digest now lists is claimed by its own prepare-only session, never started again: outside the last stretch the session is told to claim it now and its row's mode drops; in the last stretch the owner is asked first, as for a start; a line someone else took or closed stops the session.
+  for (const [id, session] of Object.entries(state.prepared)) {
+    if (!listed.has(id)) continue
+    const line = matched.find((l) => l.id === id)
+    if (ENDED.has(rowOf(session)?.status ?? "")) {
+      delete state.prepared[id]
+      continue
+    }
+    if (line && !open.some((l) => l.id === id)) {
+      delete state.prepared[id]
+      delete state.started[id]
+      await save()
+      await ctx.send(
+        session,
+        `stop ${id}: ${line.theirs === true ? "someone else took it" : "it closed"} before you claimed it; keep its branch local, push nothing, and end`,
+      )
+      await tell(
+        id,
+        `Stopped ${session}, the prepare-only worker for ${id}: ${line.theirs === true ? "someone else took it" : "it closed"}`,
+      )
+      continue
+    }
+    if (consult) {
+      await tell(
+        id,
+        `consult ${id} (${line?.urgency ?? "no urgency"}): it was listed after ${config.consultFrom}Z, the start window's last stretch, so the owner decides whether to take it; a yes goes to the Builder, who tells ${session}, its prepare-only worker, to claim it`,
+        "dispatcher",
+      )
+      continue
+    }
+    delete state.prepared[id]
+    await save()
+    await ctx.send(session, `claim ${id} now: the digest lists it, so take it and go on to the PR`)
+    const set = await ctx.run([
+      process.execPath,
+      join(ctx.repo, "scripts", "roster.ts"),
+      "set",
+      session,
+      "mode=",
+    ])
+    await tell(
+      id,
+      `Claimed ${id}: ${session}, its prepare-only worker, takes it now${set.code === 0 ? "" : `; its roster row keeps mode=prepare: ${lastLine(set.out)}`}`,
+    )
+  }
+  const pending = [...prepare].map(([id, at]): Line & { id: string } => ({
+    ...ff?.lines?.[id],
+    id,
+    open: true,
+    shownAt: at,
+  }))
+  const ids = new Set([...open, ...pending].map((l) => l.id))
   for (const id of Object.keys(state.started)) if (!ids.has(id)) delete state.started[id]
   // a ticket that closed while its start was refused frees its name and its brief
   for (const [id, session] of Object.entries(state.named))
@@ -194,11 +275,16 @@ export async function startPass({
       delete state.named[id]
     }
   for (const key of Object.keys(state.told))
-    if (key && key !== "linear" && !matched.some((l) => key === l.id || key === `${l.id} reopened`))
+    if (
+      key &&
+      key !== "linear" &&
+      !ids.has(key) &&
+      !matched.some((l) => key === l.id || key === `${l.id} reopened`)
+    )
       delete state.told[key]
-  // The start file names every open ticket this job serves, so it stands while one is open and goes once none is.
+  // The start file names every open ticket this job serves, a prepare-only one included, so it stands while one is open and goes once none is.
   const startFile = join(data, START_FILE)
-  if (open.length) {
+  if (ids.size) {
     const had = await readJson<{ ids?: string[]; since?: string }>(startFile)
     const at = ctx.now.toISOString()
     const named = [...ids].sort()
@@ -208,8 +294,8 @@ export async function startPass({
         `${JSON.stringify({ ids: named, since: had?.since ?? at, updatedAt: at })}\n`,
       )
   } else await rm(startFile, { force: true })
-  let inProgress = open.filter((l) => held(l.id)).length
-  const queue = open
+  let inProgress = [...open, ...pending].filter((l) => held(l.id)).length
+  const queue = [...open, ...pending.filter((l) => l.theirs !== true)]
     .filter((l) => l.busy !== true && !held(l.id))
     .sort((a, b) => rankOf(a) - rankOf(b) || (a.shownAt ?? Infinity) - (b.shownAt ?? Infinity))
   // An Urgent start passes this job's own focus, which spawn.sh's start file never does: the focus is lowered for the start and raised again for the session that held it.
@@ -236,8 +322,9 @@ export async function startPass({
       )
       continue
     }
-    // a ticket ended today or held by the cap is no ticket to ask the owner about
-    if (consult) {
+    const prepareOnly = prepare.has(id)
+    // a ticket ended today or held by the cap is no ticket to ask the owner about; a prepare-only start makes no write, so it runs in the last stretch too
+    if (consult && !prepareOnly) {
       await tell(
         id,
         `consult ${id} (${line.urgency ?? "no urgency"}): it came in after ${config.consultFrom}Z, the start window's last stretch, so the owner decides whether to take it; a yes goes to the Builder, who starts it`,
@@ -252,11 +339,12 @@ export async function startPass({
       )
       continue
     }
-    const template = Bun.file(join(data, config.brief))
+    const standingBrief = prepareOnly ? config.prepareBrief! : config.brief
+    const template = Bun.file(join(data, standingBrief))
     if (!(await template.exists())) {
       await tell(
         id,
-        `Not started for ${id}: the standing brief ${config.brief}, which firefighting.start.brief names, is not in ${data}`,
+        `Not started for ${id}: the standing brief ${standingBrief}, which firefighting.start.${prepareOnly ? "prepareBrief" : "brief"} names, is not in ${data}`,
       )
       continue
     }
@@ -291,7 +379,7 @@ export async function startPass({
       session,
       brief,
       "--title",
-      `${id} firefight`,
+      `${id} ${prepareOnly ? "prepare" : "firefight"}`,
       "--in",
       config.in,
       "--size",
@@ -299,7 +387,7 @@ export async function startPass({
       "--firefighting",
       ...(config.account ? ["--account", config.account] : []),
     ]
-    if (isUrgent(line) && (urgentId === undefined || id > urgentId)) {
+    if (!prepareOnly && isUrgent(line) && (urgentId === undefined || id > urgentId)) {
       urgentId = id
       urgentStarted = session
     }
@@ -311,6 +399,7 @@ export async function startPass({
       continue
     }
     state.started[id] = session
+    if (prepareOnly) state.prepared[id] = session
     delete state.named[id]
     inProgress++
     await save()
@@ -320,11 +409,15 @@ export async function startPass({
       "set",
       session,
       `ticket=${id}`,
+      ...(prepareOnly ? ["mode=prepare"] : []),
     ])
-    const unset = set.code === 0 ? "" : `; its roster row lacks ticket=${id}: ${lastLine(set.out)}`
+    const unset =
+      set.code === 0
+        ? ""
+        : `; its roster row lacks ticket=${id}${prepareOnly ? " mode=prepare" : ""}: ${lastLine(set.out)}`
     await tell(
       id,
-      `Started ${session} for ${id} (${line.urgency ?? "no urgency"}) with --firefighting, from ${config.brief}${unset}`,
+      `Started ${session} for ${id} (${line.urgency ?? "no urgency"}) with --firefighting, ${prepareOnly ? "prepare-only, " : ""}from ${standingBrief}${unset}`,
     )
   }
   await holdFocus(

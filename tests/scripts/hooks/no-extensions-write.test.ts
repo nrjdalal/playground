@@ -2218,6 +2218,16 @@ describe("a guard decision's keys are the keys the hook gates (PG-1090)", () => 
   )
 })
 
+// PG-1232: the prepare-only brief starts sessions whose writes no-prepare-write holds, so only the owner's Approve of a guard decision sets it
+test("a session's own set of firefighting.start.prepareBrief is refused, and the Inbox's guard decision takes the key", async () => {
+  expect(GUARD_SETTING_KEYS).toContain("firefighting.start.prepareBrief")
+  expect(
+    await bash(
+      "playground settings set firefighting.start.prepareBrief brief-ff-prepare.md --reason r",
+    ),
+  ).toContain("no-extensions-write hook refuses")
+})
+
 describe("a refusal for a value the hook does not hold names it in readable text", () => {
   test.each([
     ["a variable", "rm -f $X/x", "rm on $X/x,"],
