@@ -19,6 +19,7 @@ import {
   type Clone,
   isProtected,
   LIMITS,
+  linkPlaces,
   listTrash,
   MARKER,
   makeScratch,
@@ -210,6 +211,7 @@ describe("quarantine, listTrash and restore", () => {
       discard: false,
       live: ["working"],
       merged: () => true,
+      places: () => [],
       procs: [],
       roster: join(roots.root, "roster.json"),
     }
@@ -294,6 +296,7 @@ const withWorktree = () => {
     discard: false,
     live: ["working"],
     merged: (_sha: string, _at: string): boolean | null => true,
+    places: (): string[] => [],
     procs: [] as Proc[] | null,
     roster,
   }
@@ -435,6 +438,24 @@ describe.each(Object.entries(CARVE_OUTS))("the %s carve-out", (name, carve) => {
   })
 })
 
+test("linkPlaces lists each marked scratch folder in a temp folder, and each session's scratchpad with the folders directly in it", () => {
+  const roots = machine()
+  const tmp = join(roots.root, "tmp")
+  mkdirSync(tmp)
+  const marked = makeScratch("audit-base-", tmp)
+  mkdirSync(join(tmp, "unmarked"))
+  const pad = join(roots.root, "claude-501", "-Users-x-playground", "session-1", "scratchpad")
+  mkdirSync(join(pad, "canary"), { recursive: true })
+  file(join(pad, "notes.md"))
+  mkdirSync(join(roots.root, "claude-501", "-Users-x-playground", "session-2"))
+  expect(linkPlaces([tmp, tmp], join(roots.root, "claude-501"))).toEqual([
+    marked,
+    pad,
+    join(pad, "canary"),
+  ])
+  expect(linkPlaces([join(roots.root, "none")], join(roots.root, "none"))).toEqual([])
+})
+
 describe("worktreeRefusal", () => {
   test("refuses when the roster cannot be read", () => {
     const { holders, roots, wt } = withWorktree()
@@ -553,6 +574,61 @@ describe("worktreeRefusal", () => {
     )
     expect(refusal(proc(45, daemon, wt))).toContain(
       "agent-browser session default, which agent-browser --session default close frees",
+    )
+  })
+
+  test("refuses a worktree another worktree's node_modules links into, naming the link", () => {
+    const { holders, roots, wt } = withWorktree()
+    mkdirSync(join(wt, "node_modules"))
+    const sibling = join(roots.main, ".claude", "worktrees", "pg-2")
+    mkdirSync(sibling)
+    const link = join(sibling, "node_modules")
+    symlinkSync(join(wt, "node_modules"), link)
+    expect(worktreeRefusal(wt, roots, holders)).toBe(
+      `${wt} is linked into by ${link} -> ${join(wt, "node_modules")}: repoint or remove each link first`,
+    )
+  })
+
+  test("refuses a worktree a scratch folder's copy links into, one level down its node_modules", () => {
+    const { holders, roots, wt } = withWorktree()
+    mkdirSync(join(wt, "node_modules", "zod"), { recursive: true })
+    const copy = join(roots.root, "scratch", "canary")
+    mkdirSync(join(copy, "node_modules"), { recursive: true })
+    const link = join(copy, "node_modules", "zod")
+    symlinkSync(join(wt, "node_modules", "zod"), link)
+    expect(worktreeRefusal(wt, roots, { ...holders, places: () => [copy] })).toBe(
+      `${wt} is linked into by ${link} -> ${join(wt, "node_modules", "zod")}: repoint or remove each link first`,
+    )
+  })
+
+  test("names the first three links and counts the rest", () => {
+    const { holders, roots, wt } = withWorktree()
+    const copy = join(roots.root, "scratch", "canary")
+    mkdirSync(copy, { recursive: true })
+    for (const n of [1, 2, 3, 4, 5]) symlinkSync(wt, join(copy, `l${n}`))
+    const refusal = worktreeRefusal(wt, roots, { ...holders, places: () => [copy] })
+    expect(refusal).toStartWith(`${wt} is linked into by ${join(copy, "l1")} -> ${wt}, `)
+    expect(refusal).toEndWith(", and 2 more: repoint or remove each link first")
+  })
+
+  test("moves a worktree no link points into: a missing target, another worktree and its own links pass", () => {
+    const { holders, roots, wt } = withWorktree()
+    writeFileSync(join(roots.main, ".git", "info", "exclude"), "node_modules\n")
+    mkdirSync(join(wt, "node_modules"))
+    symlinkSync(join(wt, "README.md"), join(wt, "node_modules", "own"))
+    const other = join(roots.main, ".claude", "worktrees", "pg-3")
+    mkdirSync(join(other, "node_modules"), { recursive: true })
+    const sibling = join(roots.main, ".claude", "worktrees", "pg-2")
+    mkdirSync(sibling)
+    symlinkSync(join(other, "node_modules"), join(sibling, "node_modules"))
+    symlinkSync(join(wt, "gone"), join(sibling, "dangling"))
+    const copy = join(roots.root, "scratch", "canary")
+    mkdirSync(copy, { recursive: true })
+    symlinkSync(join(roots.root, "remote.git"), join(copy, "remote"))
+    const places = () => [copy, join(roots.root, "missing")]
+    expect(worktreeRefusal(wt, roots, { ...holders, places })).toBeNull()
+    expect(quarantine(wt, { ...opts, worktree: { ...holders, places } }, roots)).toHaveProperty(
+      "id",
     )
   })
 

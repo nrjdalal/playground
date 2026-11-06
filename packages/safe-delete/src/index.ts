@@ -1,5 +1,6 @@
 import {
   appendFileSync,
+  type Dirent,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -28,12 +29,13 @@ export type Proc = { command: string; cwd: string; pid: number; sockets: string[
 // A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
 export type Clone = { destination: string; pid: number; source: string; who: string }
 
-// What tells a worktree is held: the running clones, a reader quarantine calls again right before its move, the roster's live statuses, every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that.
+// What tells a worktree is held: the running clones, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that.
 export type Holders = {
   clones: () => Clone[]
   discard: boolean
   live: string[]
   merged: (sha: string, at: string) => boolean | null
+  places: () => string[]
   pr?: string
   procs: Proc[] | null
   roster: string
@@ -348,6 +350,34 @@ const cloneHolder = (at: string, clones: Clone[]): string | null => {
   return clone
     ? `${at} is held by ${clone.who}'s node_modules clone (pid ${clone.pid}) from ${clone.source} into ${clone.destination}`
     : null
+}
+
+// A folder's entries, or none when it cannot be read.
+const entriesOf = (dir: string): Dirent[] => {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+}
+
+// The folders worktreeRefusal reads for links beyond the other worktrees: each makeScratch folder directly in a temp folder, and each session's scratchpad (<scratchpads>/<project>/<session>/scratchpad) with each folder directly in it, where a scratch copy sits.
+export function linkPlaces(
+  tmps = [tmpdir(), "/tmp"],
+  scratchpads = join("/tmp", `claude-${process.getuid?.() ?? 0}`),
+): string[] {
+  const dirs = (dir: string) =>
+    entriesOf(dir)
+      .filter((e) => e.isDirectory())
+      .map((e) => join(dir, e.name))
+  const marked = [...new Set(tmps.map(real))].flatMap((tmp) =>
+    dirs(tmp).filter((dir) => lstat(join(dir, MARKER))?.isFile()),
+  )
+  const pads = dirs(scratchpads)
+    .flatMap(dirs)
+    .map((session) => join(session, "scratchpad"))
+    .filter((pad) => lstat(pad)?.isDirectory())
+  return [...marked, ...pads.flatMap((pad) => [pad, ...dirs(pad)])]
 }
 
 // Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session, running clone or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary.
