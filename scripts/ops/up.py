@@ -13,8 +13,8 @@ as herdr.
 Any other argument is refused with the usage line, exit 1, and runs no pass.
 
 Healthy means the job's heartbeat (ops/<name>.json) is fresh (within three cycles), its pid is alive, its last result
-is not an exit. An unhealthy job's old herdr pane, which ops
-opened, is closed first (ops-dashboard then waits until its recorded process groups are gone, stopping them through procs.sh);
+is not an exit. An unhealthy job's old herdr pane, which ops opened, is closed first (ops-dashboard then waits until its
+recorded process groups are gone, stopping them through procs.sh);
 nothing is ever selected by name or pattern. A launchd job is only reported: launchd keeps it alive. A job whose holder runs an
 executable an update deleted, or whose heartbeat pid does while a holder or launchd holds it, (lsof, once a pass) is unhealthy: a
 terminal job is stopped by its recorded pid and started again, a launchd job is reported once. A job that fails to start is logged
