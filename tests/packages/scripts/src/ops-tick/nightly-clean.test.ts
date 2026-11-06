@@ -107,7 +107,7 @@ describe("worktrees", () => {
     expect(discardable("kept /w: could not count its unpushed commits")).toBe(false)
     expect(
       discardable(
-        "kept /w: /w's HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree /w --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved",
+        "kept /w: /w's HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree /w --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved",
       ),
     ).toBe(true)
     expect(
@@ -318,6 +318,7 @@ describe("one night's run against a fixture data folder", () => {
     outputs: Record<string, string> = {},
     state?: (wt: (name: string) => string) => object,
     grow = 0.6,
+    finished: CleanupDeps["finished"] = async () => false,
   ) => {
     const root = scratch()
     const data = join(root, "data")
@@ -359,6 +360,7 @@ describe("one night's run against a fixture data folder", () => {
     const cleanup: CleanupDeps = {
       containers: async () => [],
       devStop: async () => ({ ok: true, out: "" }),
+      finished,
       git: async (dir, args) => {
         if (args[0] === "rev-parse") return `${dir}/.git\n${main}/.git`
         if (args[0] === "symbolic-ref") return `PG-${dir.slice(-1)}`
@@ -421,6 +423,20 @@ describe("one night's run against a fixture data folder", () => {
       at: "2026-11-05T03:00:00.000Z",
       decision: { id: ID, targets: [{ kind: "worktree", name: wt("pg-2") }] },
     })
+  })
+
+  // PG-1165
+  test("a dirty worktree whose PR merged goes through --discard, so no decision names it", async () => {
+    const asked: (string | undefined)[] = []
+    const { ctx, deps, inputs, ops, wt } = night({}, undefined, 0.6, async (path, pr) => {
+      asked.push(`${path} ${pr}`)
+      return true
+    })
+    await nightlyClean(deps)(ctx)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(`removed ${wt("pg-2")}`)
+    expect(asked).toEqual([`${wt("pg-2")} https://github.com/acme/app/pull/2`])
+    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
   })
 
   test("a night that frees under 1 GB posts no update", async () => {
