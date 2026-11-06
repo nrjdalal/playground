@@ -1779,7 +1779,7 @@ function dockerBuild(args, compose) {
     const inner = subcommand(rest, new Set(["--builder"]));
     if (inner.sub?.value === "build" || inner.sub?.value === "b")
       return image(inner.rest);
-    if (sub.value === "buildx" && inner.sub?.value === "bake" && !help(inner.rest))
+    if (sub.value !== "image" && ["bake", "f"].includes(inner.sub?.value ?? "") && !help(inner.rest))
       return { kind: "bake", rest: inner.rest, sub: "bake" };
   }
 }
