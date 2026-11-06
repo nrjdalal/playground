@@ -365,7 +365,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   for (const w of before) {
     if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value)))
       return "root";
-    if (w === firstWrapper || ROOT_SHELLS.has(w.value))
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value.toLowerCase()))
       wrappers.push(program(w.value));
   }
   if (first && wrappers.length)
@@ -668,7 +668,43 @@ var slice = (word, from) => {
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
-var program = (value) => basename(value.replace(/^=/, ""));
+var SHELL_OWN = new Set([
+  ".",
+  "alias",
+  "cd",
+  "declare",
+  "eval",
+  "export",
+  "hash",
+  "let",
+  "local",
+  "popd",
+  "pushd",
+  "read",
+  "readonly",
+  "set",
+  "shift",
+  "source",
+  "trap",
+  "type",
+  "typeset",
+  "unalias",
+  "unset"
+]);
+var G_WRAPPERS = new Map([
+  ["genv", "env"],
+  ["gnice", "nice"],
+  ["gnohup", "nohup"],
+  ["gstdbuf", "stdbuf"],
+  ["gtimeout", "timeout"]
+]);
+var program = (value) => {
+  const base = basename(value.replace(/^=/, ""));
+  const lower = base.toLowerCase();
+  if (SHELL_OWN.has(lower) && value !== lower)
+    return value;
+  return G_WRAPPERS.get(lower) ?? lower;
+};
 var UV_TAKES = new Set([
   "--cache-dir",
   "--config-file",
@@ -1280,6 +1316,8 @@ function unwrap(state, inside, budget) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+      } else if (wrapper === "env" && v === "-") {
+        take();
       } else if (v === "--") {
         take();
         while (ASSIGN.test(peek()?.value ?? ""))
@@ -1520,7 +1558,7 @@ var throughBuiltin = (cmd, { first }) => {
   if (!first)
     return false;
   const before = cmd.words.slice(0, cmd.words.indexOf(first));
-  return before.some((w) => !w.quoted && BUILTIN.has(program(w.value))) && before.every((w) => !w.quoted && (BUILTIN.has(program(w.value)) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
+  return before.some((w) => !w.quoted && BUILTIN.has(w.value)) && before.every((w) => !w.quoted && (BUILTIN.has(w.value) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
 };
 var manyTimes = (cmd, { first }) => !!cmd.repeated || cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0).some((w) => !w.quoted && COUNTED.has(program(w.value)));
 var startFolders = (env) => [
@@ -1865,7 +1903,7 @@ var unreadable = (text) => Boolean(text.unknown) || Boolean(text.reads?.length) 
 // scripts/hooks/no-desktop-owner-app.ts
 var GUARD = "no-desktop-owner-app";
 var TOOL = /^agent-desktop(?:@.*)?$/;
-var MENTION = /agent-desktop/;
+var MENTION = /agent-desktop/i;
 var LAUNCHERS = new Set([
   "bun",
   "bunx",
@@ -2047,7 +2085,7 @@ async function runsTool(line) {
 async function prose(text) {
   if (/['"`\\${}\n\r]/.test(text))
     return false;
-  for (const match of text.matchAll(/agent-desktop/g)) {
+  for (const match of text.matchAll(/agent-desktop/gi)) {
     const before = text.slice(0, match.index);
     const word = before.trimEnd().split(/\s+/).pop() ?? "";
     if (!/\s$/.test(before) || !/[\p{L}\p{N},:.]$/u.test(word) || word.startsWith("-"))
