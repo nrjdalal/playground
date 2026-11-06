@@ -788,6 +788,11 @@ describe("a resume with no id finds its session by name in its folder (#1201)", 
     return existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []
   }
   const ranHere = (home: string) => ranIn(join(home, ".claude"), root, "worker-x")
+  // each verdict the gate logged, none when it never ran
+  const verdicts = (r: { home: string }) =>
+    existsSync(join(r.home, ".playground", "ops", "capacity.jsonl"))
+      ? capacityLog(r).map((row) => row.verdict)
+      : []
 
   test.each([
     ["load", { FAKE_LOAD1: "40.00", FAKE_LOAD5: "40.00" }, "max(load1, load5) is 40.00"],
@@ -824,6 +829,17 @@ describe("a resume with no id finds its session by name in its folder (#1201)", 
     expect(checked.err).toContain(`no session named worker-x ran in ${root}`)
     expect(checked.out).not.toContain("can start")
     expect(scans(checked)).toHaveLength(1)
+  })
+
+  // The load gate counts each pass row as a start, so a resume the name check refuses must log none, or each retry of it would add a start that never happened.
+  test("a resume the name check refuses past the gate logs no pass row, and one that goes ahead logs one", async () => {
+    const refused = await spawn(["resume", "worker-x", root], [], NONE, undefined, claude)
+    expect(refused.code).toBe(1)
+    expect(refused.err).toContain(`no session named worker-x ran in ${root}`)
+    expect(verdicts(refused)).not.toContain("pass")
+    const passed = await spawn(["resume", "worker-x", root], [], NONE, undefined, claude, ranHere)
+    expect(passed.code).toBe(0)
+    expect(verdicts(passed).filter((v) => v === "pass")).toHaveLength(1)
   })
 
   test("a live session holding the name refuses before the folder's transcripts are read, with the live session's exit 3", async () => {
