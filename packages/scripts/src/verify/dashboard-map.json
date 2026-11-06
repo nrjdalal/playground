@@ -421,7 +421,7 @@
     },
     {
       "route": "GET /api/v1/settings/:key",
-      "use": "One setting's value as it applies, at its narrowest scope, the same value `playground settings get` reads from the folder itself; Settings' Privacy reads its two fields through it."
+      "use": "One setting's value as it applies, at its narrowest scope, the same value `playground settings get` reads from the folder itself; Settings' Privacy reads its two fields through it, and Settings' Templates the templates' list and its defaults."
     },
     {
       "route": "GET /api/v1/settings/:key/why",
@@ -457,7 +457,7 @@
     },
     {
       "route": "POST /api/v1/settings/:key/reset",
-      "use": "Puts a setting back to its default at a scope, with a reason, the same write `playground settings reset` makes in the folder itself."
+      "use": "Puts a setting back to its default at a scope, with a reason, the same write `playground settings reset` makes in the folder itself; Settings' Templates resets sessions.templates through it once its list is the defaults alone."
     },
     {
       "route": "POST /api/v1/stacks/start",
@@ -469,7 +469,7 @@
     },
     {
       "route": "PUT /api/v1/settings/:key",
-      "use": "Sets a setting at a scope, with a reason, checked by its key's schema, the same write `playground settings set` makes in the folder itself; Settings' Privacy saves each field it changed through it."
+      "use": "Sets a setting at a scope, with a reason, checked by its key's schema and its field's `against` (sessions.templates: an account usage.accounts names), the same write `playground settings set` makes in the folder itself; Settings' Privacy saves each field it changed through it, and Settings' Templates the whole templates' list on each Save, Reset or Remove."
     }
   ]
 }
