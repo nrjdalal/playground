@@ -30,6 +30,9 @@ export const stop = async (p: Subprocess) => {
   await p.exited
 }
 
+// Ubuntu 26.04's default mkdir, uutils 0.10.0, reports success when another process made the folder between its own check and its mkdir (fixed in uutils 0.11.0), so two looks could each take one of run-slot.sh's mkdir locks; the image keeps GNU's as gnumkdir, which fails there as the Mac's mkdir does, so a machine's fake bin runs that one where it exists
+const GNU_MKDIR = Bun.which("gnumkdir")
+
 export const dirs: string[] = []
 afterAll(() => {
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
@@ -133,6 +136,10 @@ esac
   chmodSync(join(bin, "bun"), 0o755)
   // SLOW_CHILD puts a slowed python3 in the fake bin folder, which PATH reads first
   slowChild("python3", bin)
+  if (GNU_MKDIR) {
+    writeFileSync(join(bin, "mkdir"), `#!/bin/bash\nexec ${GNU_MKDIR} "$@"\n`)
+    chmodSync(join(bin, "mkdir"), 0o755)
+  }
   const env = (extra: Record<string, string> = {}) => ({
     CLAUDE_CONFIG_DIR: config,
     PLAYGROUND_DATA_DIR: join(config, "playground"),

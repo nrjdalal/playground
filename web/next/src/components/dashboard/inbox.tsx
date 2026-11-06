@@ -17,6 +17,9 @@ import {
   RiDeleteBinLine,
   RiDraftLine,
   RiExternalLinkLine,
+  RiEyeLine,
+  RiEyeOffLine,
+  RiFileCopyLine,
   RiGitMergeLine,
   RiInboxLine,
   RiInboxUnarchiveLine,
@@ -111,6 +114,7 @@ import { useYardWrites } from "@/hooks/use-yard-writes"
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
+import { copyToClipboard } from "@/lib/clipboard"
 import { config } from "@/lib/config"
 import { dispatcherOf, useNow } from "@/lib/dashboard"
 import {
@@ -130,6 +134,7 @@ import {
   focusAfterTake,
   foldsByDefault,
   INBOX_QUERY_KEY,
+  isArchived,
   inboxLight,
   inboxSummary,
   inboxView,
@@ -149,6 +154,7 @@ import {
   resultLink,
   retryable,
   retryItem,
+  revealSecret,
   scheduleChoices,
   scheduleItem,
   sendFailed,
@@ -179,6 +185,7 @@ const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   budget: RiMoneyDollarCircleLine,
   delete: RiDeleteBinLine,
   grant: RiShieldKeyholeLine,
+  reveal: RiKey2Line,
   schema: RiTableLine,
   secret: RiKey2Line,
   ship: RiShipLine,
@@ -485,6 +492,63 @@ function Shown({ preview }: { preview: Pick<InboxUpdate, "attachments" | "text">
   )
 }
 
+// How long a shown value stays on screen before it hides itself.
+const REVEAL_SHOWN_MS = 30_000
+
+// A reveal card's value: masked until Show, which fetches it and hides it again after REVEAL_SHOWN_MS, on Hide or when the card folds; Copy fetches it straight to the clipboard and never draws it. It lives in this state alone.
+function RevealField({ id }: { id: string }) {
+  const [value, setValue] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (value === null) return
+    const hide = setTimeout(() => setValue(null), REVEAL_SHOWN_MS)
+    return () => clearTimeout(hide)
+  }, [value])
+  const reveal = async (use: (value: string) => unknown) => {
+    setError(null)
+    try {
+      await use(await revealSecret(id))
+    } catch (failure) {
+      setError((failure as Error).message)
+    }
+  }
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <code
+          aria-label="Value"
+          className="border-input min-w-0 flex-1 truncate rounded-md border px-2.5 py-1.5 font-mono text-xs"
+        >
+          {value ?? "\u25CF".repeat(12)}
+        </code>
+        <Button
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={() => (value === null ? void reveal(setValue) : setValue(null))}
+        >
+          {value === null ? (
+            <RiEyeLine data-icon="inline-start" />
+          ) : (
+            <RiEyeOffLine data-icon="inline-start" />
+          )}
+          {value === null ? "Show" : "Hide"}
+        </Button>
+        <Button
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={() => void reveal((got) => copyToClipboard(got, "Copied"))}
+        >
+          <RiFileCopyLine data-icon="inline-start" />
+          Copy
+        </Button>
+      </div>
+      {error ? <p className="text-destructive text-xs">{error}</p> : null}
+    </div>
+  )
+}
+
 // Exactly what Approve does, the card's description: our own words around the session's, a Slack message's plain text that hides nothing and an ask's rendered as its chat would show them.
 function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
   const preview = item.preview
@@ -612,6 +676,20 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
             {preview.change === "add" ? "to" : "from"} your apps, which no session may drive.
           </p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "reveal":
+      return (
+        <>
+          <p>
+            Shows this Mac&apos;s Keychain item{" "}
+            <code className="font-mono break-all">{preview.service}</code> here when you click Show
+            or Copy. It is kept nowhere else.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+          {item.status === "open" && !isArchived(item) && !config.hosted && (
+            <RevealField id={item.id} />
+          )}
         </>
       )
     case "grant":
@@ -803,6 +881,8 @@ export function InboxCard({
   const secretKey =
     item.kind === "decision" && item.preview.type === "secret" ? item.preview.key : null
   const secretAsk = secretKey !== null
+  // a secret ask's or a reveal card's Reply stays in its own box, never the chat's composer, so its value reaches no chat (the API refuses a reveal card's comment that holds its value)
+  const keepsReply = secretAsk || (item.kind === "decision" && item.preview.type === "reveal")
   const titleId = useId()
   // every write the card makes goes through here, and a card whose answer the relay does not carry sends nothing; a refusal shows in the Mac's own words
   const settle = async (write: () => Promise<unknown>) => {
@@ -877,7 +957,7 @@ export function InboxCard({
   // Reply with an empty box hands the card's ref to Playground's composer (a secret ask's, or any while that session is down, opens its own box), and with words opens a folded card to them or sends them alone; either box takes focus in the click's own frame, so a paste sent at once lands there
   const onReply = () => {
     const text = note.trim()
-    const route = replyRoute({ chat: chat !== null, folded, secret: secretAsk, text })
+    const route = replyRoute({ chat: chat !== null, folded, secret: keepsReply, text })
     if (route === "composer" && chat) {
       flushSync(() => outbox.reply(chat.name, item.ref))
       document.getElementById(COMPOSER_ID)?.focus()

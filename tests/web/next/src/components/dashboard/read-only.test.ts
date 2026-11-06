@@ -112,6 +112,10 @@ describe("the hosted dashboard writes only what a paired key signs", () => {
       ["thread-view.tsx", "if (unread === 0 || config.hosted) return"],
       ["inbox.tsx", "unread && !paused && !config.hosted ? void settle(() => markRead([item.id]))"],
       ["inbox.tsx", ") : secretAsk && !config.hosted ? ("],
+      [
+        "inbox.tsx",
+        "!isArchived(item) && !config.hosted && (\n            <RevealField id={item.id} />",
+      ],
       ["inbox.tsx", '{!answers ? (\n          <p className="whitespace-pre-wrap">{draft}</p>'],
       [
         "inbox.tsx",

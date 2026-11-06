@@ -4254,6 +4254,173 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       )
       expect((await store.getItem(db, secret.id))?.status).toBe("open")
     })
+
+    // PG-1023: a reveal card shows a Keychain item on the owner's click, only while open, and writes nothing
+    const REVEAL = { service: "playground-glm", type: "reveal", why: "Set up GLM on a new Mac" }
+
+    test("a reveal card shows its item's value in the return alone, and the row, the log and every table hold none of it", async () => {
+      const posted = await post(decision(REVEAL))
+      const asked: string[] = []
+      const logged: string[] = []
+      const console_ = { error: console.error, log: console.log, warn: console.warn }
+      for (const name of ["error", "log", "warn"] as const)
+        console[name] = (...args: unknown[]) => void logged.push(args.map(String).join(" "))
+      let shown: Awaited<ReturnType<typeof store.revealSecret>>
+      try {
+        shown = await store.revealSecret(db, posted.id, async (item) => {
+          asked.push(item)
+          return VALUE
+        })
+      } finally {
+        Object.assign(console, console_)
+      }
+      expect(shown).toEqual({ ok: true, value: VALUE })
+      expect(asked).toEqual(["playground-glm"])
+      const after = await store.getItem(db, posted.id)
+      expect(after?.status).toBe("open")
+      expect(after?.version).toBe(posted.version)
+      expect(JSON.stringify(after)).not.toContain(VALUE)
+      expect(logged.join("\n")).not.toContain(VALUE)
+      expect(await everyRow()).not.toContain(VALUE)
+    })
+
+    test("a reveal card names a playground- service alone", () => {
+      for (const service of ["github.com", "slack", "Chrome Safe Storage"])
+        expect(inboxInputSchema.safeParse(decision({ ...REVEAL, service })).success).toBe(false)
+      expect(inboxInputSchema.safeParse(decision(REVEAL)).success).toBe(true)
+    })
+
+    test("a closed, archived or dismissed reveal card, or any other card, shows nothing and never reads the Keychain", async () => {
+      const asked: string[] = []
+      const read = async (item: string) => {
+        asked.push(item)
+        return VALUE
+      }
+      const done = await post(decision(REVEAL))
+      await store.answerItem(db, done.id, { action: "approve" }, { actor })
+      const dismissed = await post(decision(REVEAL))
+      await store.answerItem(db, dismissed.id, { action: "dismiss" }, { actor })
+      const archived = await post(decision(REVEAL))
+      await store.answerItem(db, archived.id, { action: "archive" }, { actor })
+      for (const card of [done, dismissed, archived])
+        expect(await store.revealSecret(db, card.id, read)).toMatchObject({
+          code: "CONFLICT",
+          ok: false,
+        })
+      const ask = await post(decision(PREVIEWS.ask))
+      expect(await store.revealSecret(db, ask.id, read)).toMatchObject({
+        code: "VALIDATION_ERROR",
+        ok: false,
+      })
+      expect(await store.revealSecret(db, crypto.randomUUID(), read)).toMatchObject({
+        code: "NOT_FOUND",
+        ok: false,
+      })
+      expect(asked).toEqual([])
+    })
+
+    // a Copy pasted into the card's own comment box would type the value into its poster's transcript, so a reply or an answer's note that holds it is refused before anything is sent
+    test("a reveal card's reply or note that holds its value is refused and sends nothing, while other words go, and its Edit is refused", async () => {
+      const posted = await post({ ...decision(REVEAL), from: "dispatcher" })
+      const sent: Delivery[] = []
+      const deliver = async (delivery: Delivery) => {
+        sent.push(delivery)
+        return { at: "2026-11-05T22:00:00.000Z", ok: true as const, sessionId: "s1" }
+      }
+      const reveal = async () => VALUE
+      const refused = {
+        code: "VALIDATION_ERROR",
+        message: "That is the card's value: it stays out of a comment",
+        ok: false,
+      } as const
+      expect(
+        await store.replyItem(
+          db,
+          posted.id,
+          { text: `here: ${VALUE}` },
+          { actor, deliver, reveal },
+        ),
+      ).toEqual(refused)
+      expect(
+        await store.answerItem(
+          db,
+          posted.id,
+          { action: "approve", note: VALUE, option: 0 },
+          { actor, deliver, reveal },
+        ),
+      ).toEqual(refused)
+      expect(sent).toEqual([])
+      expect(await everyRow()).not.toContain(VALUE)
+      expect(
+        await store.answerItem(db, posted.id, { action: "edit", text: "other words" }, { actor }),
+      ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      const replied = await store.replyItem(
+        db,
+        posted.id,
+        { text: "Pasted it, thanks" },
+        { actor, deliver, reveal },
+      )
+      expect(replied.ok).toBe(true)
+      expect(sent.map((delivery) => delivery.text)).toEqual([
+        `re #i${posted.ref}: Pasted it, thanks`,
+      ])
+    })
+
+    test("a comment on any other card never reads the Keychain", async () => {
+      const posted = await post(decision(PREVIEWS.ask))
+      const asked: string[] = []
+      const replied = await store.replyItem(
+        db,
+        posted.id,
+        { text: VALUE },
+        {
+          actor,
+          deliver: async () => ({ at: "2026-11-05T22:00:00.000Z", ok: true, sessionId: "s1" }),
+          reveal: async (item) => {
+            asked.push(item)
+            return VALUE
+          },
+        },
+      )
+      expect(replied.ok).toBe(true)
+      expect(asked).toEqual([])
+    })
+
+    test("an item with no value of its shape reads not found, naming no value", async () => {
+      const posted = await post(decision(REVEAL))
+      expect(await store.revealSecret(db, posted.id, async () => null)).toEqual({
+        code: "NOT_FOUND",
+        message: "That Keychain item holds no value",
+        ok: false,
+      })
+    })
+
+    test("a secret ask may name a playground- service, which takes the untyped check", async () => {
+      const posted = await post(
+        decision({
+          key: "GLM_KEY",
+          sink: { item: "playground-glm", type: "keychain" },
+          type: "secret",
+        }),
+      )
+      const saved: { item: string; value: string }[] = []
+      const keychain = async (item: string, value: string) => void saved.push({ item, value })
+      const refused = await store.provideSecret(
+        db,
+        posted.id,
+        { value: 'a"b' },
+        { actor, keychain, run: stub().run },
+      )
+      expect(refused).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      const provided = await store.provideSecret(
+        db,
+        posted.id,
+        { value: VALUE },
+        { actor, keychain, run: stub().run },
+      )
+      expect(provided.ok).toBe(true)
+      expect(saved).toEqual([{ item: "playground-glm", value: VALUE }])
+    })
   })
 
   describe("an accept decision's Approve (PG-658)", () => {

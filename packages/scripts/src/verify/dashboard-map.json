@@ -22,6 +22,7 @@
         "POST /api/v1/inbox/read",
         "POST /api/v1/inbox/:id/reply",
         "POST /api/v1/inbox/:id/retry",
+        "POST /api/v1/inbox/:id/reveal",
         "POST /api/v1/inbox/:id/schedule",
         "POST /api/v1/inbox/:id/secret",
         "POST /api/v1/workers/:sessionId/feed/:requestId",
