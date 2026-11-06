@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -590,6 +591,41 @@ describe("the slot-stuck alert", () => {
 
   test("stays quiet while the waiter's units are not free", async () => {
     expect(await queue(true)).toBeNull()
+  })
+
+  // issue 1216: can-take read the session's size, so a pinned big head read as a medium paged while its own 3 units could not fit
+  test("stays quiet while the head's own units are not free, whatever the session's size", async () => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    const bin = join(config, "bin")
+    mkdirSync(join(ops, "run-slot.waiters"), { recursive: true })
+    mkdirSync(bin)
+    writeFileSync(
+      join(bin, "sysctl"),
+      `#!/bin/bash\ncase "$2" in vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
+    )
+    chmodSync(join(bin, "sysctl"), 0o755)
+    for (const off of ["run-slot.3-off", "run-slot.4-off"]) writeFileSync(join(ops, off), "")
+    mkdirSync(join(ops, "run-slot-2"))
+    writeFileSync(
+      join(ops, "run-slot-2.holder"),
+      `worker-s ${process.pid} 2026-10-18T19:00:00Z 1 small\n`,
+    )
+    const head = join(ops, "run-slot.waiters", `1-${process.pid}-worker-big`)
+    writeFileSync(head, "s2 23 3 big\n")
+    const pinned = Date.now() / 1000 - 1300
+    utimesSync(head, pinned, pinned)
+    const now = Date.now() / 1000
+    const state = { slot_free: { since: now - 200, ticket: `1${process.pid}` } }
+    expect(
+      await callWith(
+        { PATH: `${bin}:${process.env.PATH}`, RUN_SLOT_SIZE: "medium" },
+        config,
+        "slot_stuck",
+        state,
+        now,
+      ),
+    ).toBeNull()
   })
 
   // 31 Oct: both alerts named a big session's ticket, the oldest, which ranks behind a newer medium one by design
