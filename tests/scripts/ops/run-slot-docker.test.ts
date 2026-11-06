@@ -24,7 +24,7 @@ case " $* " in
   *" buildx create "*) touch ${made}; exit 0 ;;
   *" buildx stop "*) exit 0 ;;
   *" config --services "*) printf 'api\\nweb\\n'; exit 0 ;;
-  *" compose "*" build"*) shift; while [ "$1" != build ]; do shift; done; shift
+  *" compose "*"build "*) shift; while [ "$1" != build ]; do shift; done; shift
     echo "start $*" >> ${log}; sleep 0.3; echo "end $*" >> ${log}; exit 0 ;;
 esac
 touch "\${@: -1}"

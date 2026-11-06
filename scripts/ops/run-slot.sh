@@ -1114,7 +1114,7 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
   [ -n "$SLOT" ] && [ "$(cat "$SLOT.preempted" 2>/dev/null)" = "$CHILD" ] && echo "run-slot.sh: focus preempted this run for $(focus_holder || echo a session that has since ended); ask again once its focus ends" >&2
   reap "$CHILD"
   CHILD=""
-  [ -n "${DOCKER:-}" ] && docker buildx stop "$DOCKER_BUILDER" >/dev/null 2>&1
+  [ -n "${DOCKER:-}" ] && unset BUILDX_BUILDER && docker buildx stop "$DOCKER_BUILDER" >/dev/null 2>&1
   rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
   exit "$code"
 }
