@@ -1810,6 +1810,14 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       `cd "$X"; gfind /tmp -name x -print`,
     ],
     ["GNU xargs by its g name running echo", "echo a | gxargs echo"],
+    [
+      "GNU find by its g name printing to a held absolute file after a cd to a variable",
+      `O=/tmp/out; cd "$X"; gfind /tmp/x -fprint "$O"`,
+    ],
+    [
+      "GNU find by a path to its g name printing to an absolute file after a cd to a variable",
+      `cd "$X"; /opt/homebrew/bin/gfind /tmp/x -fprint /tmp/out`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })

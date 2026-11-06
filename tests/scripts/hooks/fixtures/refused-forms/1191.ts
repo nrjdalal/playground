@@ -39,6 +39,10 @@ export const groups: Group[] = [
         `cd "$D"; gfind /tmp/x -fls -x`,
       ],
       [
+        "GNU find by a path to its g name deleting the shell's folder after a cd to a variable",
+        `cd "$D"; /opt/homebrew/bin/gfind . -delete`,
+      ],
+      [
         "GNU xargs by its g name running rm on a list after a cd to a variable",
         `cd "$D"; gxargs rm < /tmp/list`,
       ],
