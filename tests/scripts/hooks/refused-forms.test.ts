@@ -366,6 +366,22 @@ const CASES = REFUSED_FORMS.flatMap(({ folders, guards, rows, source }) =>
 const allowed = ({ id, key }: { id: string; key: string }) =>
   ALLOWED.includes(id) || ALLOWED.includes(key)
 
+// #646's refusals each name the fix a session can make at once; its #603 row that canary's redirect check refuses keeps canary's reason
+const FIX =
+  /hold it in the same call \(X=<path>; .+ "\$X"\) or write the path literally|cd to a literal path first, or name the path absolutely|write the value literally (?:with git -c|in the call)/
+const PINNED = "#646 a redirect into the root after a cd that may not run"
+
+describe("each refusal of a #646 row names its fix", () => {
+  test.each(
+    CASES.filter(
+      (c) => c.id.startsWith("#646 ") && c.guard === "no-extensions-write" && c.id !== PINNED,
+    ).map((c) => [c.key, c] as const),
+  )("%s", async (_, c) => {
+    const at = GUARDS[c.guard].folders[c.folder] as [string, string]
+    expect(await GUARDS[c.guard].run(input(c.call, at[0]), at[1])).toMatch(FIX)
+  })
+})
+
 describe("every refused form stays refused unless the allow list names it", () => {
   test.each(CASES.map((c) => [c.key, c] as const))(
     "%s",
