@@ -1,4 +1,4 @@
-import { type Group } from "./_shared"
+import { type Group, NEVER_MADE } from "./_shared"
 
 // The forms the review of this file's source found refused; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
@@ -89,6 +89,48 @@ export const groups: Group[] = [
       [
         "a removal echoed to busybox's shell applet behind nice and sudo",
         "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice sudo busybox sh",
+      ],
+      [
+        "a removal echoed to sudo's shell inside env's abbreviated split-string option",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env --split='sudo -s'",
+      ],
+      [
+        "a removal echoed to sudo's shell inside a quoted env's abbreviated split-string option",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'env' --split='sudo -s'",
+      ],
+      [
+        "a removal echoed to sudo's shell inside the abbreviated split-string option of a second env behind nice",
+        "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env nice env --split='sudo -s'",
+      ],
+    ],
+  },
+  {
+    folders: ["process home"],
+    guards: ["no-raw-delete"],
+    rows: () => [
+      [
+        "a recursive delete echoed to sudo's shell inside env's abbreviated split-string option",
+        `echo 'rm -rf ${NEVER_MADE}' | env --split='sudo -s'`,
+      ],
+      [
+        "a recursive delete echoed to sudo's shell inside a second env's split string spaced from its abbreviated option",
+        `echo 'rm -rf ${NEVER_MADE}' | env nice env --sp 'sudo -s'`,
+      ],
+      [
+        "a recursive delete echoed to sudo's shell in a second env's split string after an abbreviated unset",
+        `echo 'rm -rf ${NEVER_MADE}' | env nice env --u X -S 'sudo -s'`,
+      ],
+      [
+        "a recursive delete echoed to sudo's shell in a quoted env's split string after an abbreviated chdir",
+        `echo 'rm -rf ${NEVER_MADE}' | 'env' --ch /tmp -S 'sudo -s'`,
+      ],
+      [
+        "a recursive delete echoed to sudo's shell in env's split string after argv0's short option",
+        `echo 'rm -rf ${NEVER_MADE}' | env -a name -S 'sudo -s'`,
+      ],
+      [
+        "a recursive delete echoed to sudo's shell in a quoted env's split string after argv0's long option",
+        `echo 'rm -rf ${NEVER_MADE}' | 'env' --argv0 name -S 'sudo -s'`,
       ],
     ],
   },

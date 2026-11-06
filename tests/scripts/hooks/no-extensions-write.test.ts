@@ -881,6 +881,14 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a second env behind nice whose split string names sudo and a harmless command",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env nice env -S 'sudo ls'",
     ],
+    [
+      "an abbreviated split-string option naming sudo and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'env' --split='sudo ls'",
+    ],
+    [
+      "argv0's option ahead of a split string naming sudo and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env nice env -a name -S 'sudo ls'",
+    ],
     ["a quoted ~- used as a literal folder name", "mkdir '~-' && touch '~-/f'"],
     ["a write under ~+, the worktree itself", "touch ~+/f"],
     ["a write under ~- after a cd out of the worktree", "cd /usr; touch ~-/f"],
