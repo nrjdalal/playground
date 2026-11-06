@@ -438,7 +438,7 @@ test("a session's --worktree --discard on a folder outside the worktrees folder 
       console.error = error
     }
     expect(said).toEqual([
-      `playground: --worktree takes a folder in ${worktrees}, not ${outside}: playground rm ${outside} moves a folder outside it to the trash, with no --worktree or --discard`,
+      `playground: --worktree takes a folder in ${worktrees}, not ${outside}: playground rm ${outside} moves a folder outside it to the trash, with no --worktree or --discard, up to 5,000 files or 2 GB; leave a bigger tree in place for your lead's cleanup`,
     ])
     expect(existsSync(outside)).toBe(true)
   }

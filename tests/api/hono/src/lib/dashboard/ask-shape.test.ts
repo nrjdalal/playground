@@ -183,6 +183,11 @@ describe("ASK_EXAMPLES", () => {
     const worktrees = path!.slice(0, path!.lastIndexOf("/"))
     const machine = { cwd: "/", exists: () => true, home: "/Users/you", worktrees }
     expect(deleteRefusal(example, machine)).toBeNull()
+    // the card shows "Why: " before the first line, so a sentence leads and its bullets follow a blank line
+    expect(example.preview.why.split("\n").slice(0, 2)).toEqual([
+      expect.stringMatching(/^[^-]/),
+      "",
+    ])
   })
 
   test("the slack template is a valid slack decision led by its thread so far (#2287)", () => {
