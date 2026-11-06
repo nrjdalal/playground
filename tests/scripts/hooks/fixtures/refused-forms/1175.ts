@@ -230,6 +230,10 @@ export const groups: Group[] = [
         `echo ls | { sudo -s; } <<< '${D}'`,
       ],
       [
+        "a recursive delete in a subshell's here-string, a pipe into the subshell, to sudo's root shell",
+        `echo ls | ( sudo -s ) <<< '${D}'`,
+      ],
+      [
         "a recursive delete for at on descriptor 3 duplicated onto descriptor 0 by >&",
         `at now 3<<< '${D}' 0>&3`,
       ],
@@ -250,6 +254,18 @@ export const groups: Group[] = [
       [
         "a removal in a subshell's here-string, a pipe into the subshell, to bash",
         `echo ls | ( bash ) <<< '${D}'`,
+      ],
+      [
+        "a removal in a brace group's here-string, a pipe into the group, to sudo's root shell",
+        `echo ls | { sudo -s; } <<< '${D}'`,
+      ],
+      [
+        "a removal in a subshell's here-string, a pipe into the subshell, to sudo's root shell",
+        `echo ls | ( sudo -s ) <<< '${D}'`,
+      ],
+      [
+        "a removal in a brace group's here-string, a pipe into the group, to su",
+        `echo ls | { su; } <<< '${D}'`,
       ],
     ],
   },
