@@ -87,6 +87,18 @@ export const groups: Group[] = [
       ],
       ["ln of a variable after a file sourced under the - modifier", "- source /tmp/f; ln -s $X"],
       [
+        "ln of a variable after a file sourced past a comment holding an apostrophe",
+        "true # don't\nsource /tmp/f; ln -s $X",
+      ],
+      [
+        "ln of a variable after a file sourced past a heredoc holding an apostrophe",
+        "cat <<'E' >/dev/null\ndon't\nE\nsource /tmp/f; ln -s $X",
+      ],
+      [
+        "ln of a variable after a file sourced past a comment's apostrophe a later quote pairs",
+        "true # don't\nsource /tmp/f; ln -s $X\necho 'x'",
+      ],
+      [
         "ln of a variable after a file sourced as if's condition in zsh -c",
         `zsh -c 'if source /tmp/f; then :; fi; ln -s $X'`,
       ],
