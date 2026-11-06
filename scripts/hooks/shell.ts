@@ -279,6 +279,7 @@ const ROOT_SHELLS = new Map([
 ])
 // Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; "code" for an interpreter of another language (`python3`, `node18`) that a pipe or xargs feeds, whatever its options or inline program, unless it runs a script file or a module of its own; a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): StdinKind | undefined {
+  cmd = spreadSplit(cmd)
   const parsed = parse(cmd)
   const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading))
   if (parsed.capped) {
@@ -287,6 +288,82 @@ export function stdinShell(cmd: Command): StdinKind | undefined {
     else if (names.some((n) => SHELLS.has(n))) kinds.push("shell")
   }
   return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean)
+}
+
+// The command with each env's split string (`env -S 'sudo -s'`) spread into the words env runs, every env read, quoted or behind another wrapper, in one linear pass over a stack of the words still to read; the grammar is the stdin-shell lines of scripts/hooks/README.md
+function spreadSplit(cmd: Command): Command {
+  if (!cmd.words.some((w) => program(w.value) === "env")) return cmd
+  const options = WRAPPERS.get("env") as Options
+  const out: Word[] = []
+  const rest = [...cmd.words].reverse()
+  let inEnvOptions = false
+  let spreadOne = false
+  for (let w = rest.pop(); w; w = rest.pop()) {
+    const v = w.value
+    const long = inEnvOptions ? envLong(v) : undefined
+    const split =
+      long?.name === "split-string"
+        ? (long.value ?? "")
+        : long || !inEnvOptions
+          ? undefined
+          : SPLIT.exec(v)?.[1]
+    if (split !== undefined) {
+      const text = (split || rest.pop()?.value || "")
+        .replace(/\$\{[^}]*\}/g, UNKNOWN)
+        .replace(/\\[_fnrtv]/g, " ")
+        .replace(/['"\\]/g, "")
+      const words = text.split(/\s+/).filter(Boolean)
+      for (let j = words.length - 1; j >= 0; j--) rest.push({ quoted: false, value: words[j] })
+      spreadOne = true
+      continue
+    }
+    // a lone `-` is env's `-i`, and BSD env reads its options on after it (GNU env's end there, so this reads more than GNU runs); it is written as `-i` for parse
+    if (inEnvOptions && v === "-") {
+      out.push({ ...w, value: "-i" })
+      continue
+    }
+    out.push(w)
+    if (program(v) === "env") inEnvOptions = true
+    else if (!inEnvOptions || ASSIGN.test(v)) continue
+    else if (!v.startsWith("-") || v === "--") inEnvOptions = false
+    else if (
+      long
+        ? ENV_LONG_VALUES.has(long.name) && long.value === undefined
+        : ENV_SHORT_VALUE.test(v) || optionValue(v, options) === "next"
+    ) {
+      const value = rest.pop()
+      if (value) out.push(value)
+    }
+  }
+  return spreadOne ? { ...cmd, words: out } : cmd
+}
+
+// GNU env's long options, each read by any unique prefix as its getopt_long reads it (`--split`, `--u X`), and the ones that take a value; its short ones that take a value end a cluster of its flags (`-a name`, `-iu X`)
+const ENV_LONG = [
+  "argv0",
+  "block-signal",
+  "chdir",
+  "debug",
+  "default-signal",
+  "help",
+  "ignore-environment",
+  "ignore-signal",
+  "list-signal-handling",
+  "null",
+  "split-string",
+  "unset",
+  "version",
+]
+const ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"])
+const ENV_SHORT_VALUE = /^-[0iv]*[aCu]$/
+
+// env's long option a word names, by its full name or a unique prefix, with the value attached after `=`
+function envLong(v: string): { name: string; value?: string } | undefined {
+  const m = /^--([a-z0-9-]+)(?:=([\s\S]*))?$/.exec(v)
+  if (!m) return undefined
+  const hits = ENV_LONG.filter((o) => o.startsWith(m[1]!))
+  const name = hits.includes(m[1]!) ? m[1] : hits.length === 1 ? hits[0] : undefined
+  return name ? { name, value: m[2] } : undefined
 }
 
 export type StdinKind = "code" | "root" | "shell"
