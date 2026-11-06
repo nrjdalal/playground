@@ -740,4 +740,11 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       expect(result.stderr).toContain("usage:")
     }
   })
+
+  test("its usage names an accept decision's list form (PG-1149)", async () => {
+    const result = await cli(["delete", "x"])
+    expect(result.stderr.replace(/\s+/g, " ")).toContain(
+      "more lists up to 20 further ones, accepted after it in that order; Approve stops at the first that fails",
+    )
+  })
 })

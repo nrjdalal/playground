@@ -177,20 +177,44 @@ describe("a node_modules clone waits for its spacing", () => {
     expect(await clone(m)).toBe("ran")
   })
 
-  test("while load5 is within 4 of the brake's line, 22 with no cap", async () => {
-    expect(await clone(machine({ load1: 2, load5: 18 }))).toBe("waited")
+  // the owner's load rule, 5 Nov: load5 under the core count, one per core
+  test("while load5 is within 4 of the brake, one per core", async () => {
+    expect(await clone(machine({ cores: 8, load1: 2, load5: 4 }))).toBe("waited")
   })
 
-  test("and within 4 of run-slot.load5-cap's line", async () => {
+  test("but starts under it", async () => {
+    expect(await clone(machine({ cores: 8, load1: 2, load5: 3 }))).toBe("ran")
+  })
+
+  // with 4 cores or fewer the brake minus 4 is 0 or less, which would hold every clone, so the line keeps a floor of half the cores
+  test("and on 4 cores a clone at low load starts", async () => {
+    expect(await clone(machine({ cores: 4, load1: 1, load5: 1 }))).toBe("ran")
+  })
+
+  test("while one at half the cores waits", async () => {
+    expect(await clone(machine({ cores: 4, load1: 2, load5: 2 }))).toBe("waited")
+  })
+
+  // 6 Nov, 06:52Z to 07:03Z: a run-slot.load5-cap of 1, set to shut lane 2, held every clone, since the brake read that cap
+  test("and run-slot.load5-cap moves no clone: a cap of 1 still lets one start under the brake", async () => {
+    const m = machine({ load1: 2, load5: 10 })
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "1\n")
+    expect(await clone(m)).toBe("ran")
+  })
+
+  test("while one within 4 of the brake still waits under that cap", async () => {
     const m = machine({ load1: 2, load5: 11 })
-    writeFileSync(join(m.ops, "run-slot.load5-cap"), "15\n")
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "1\n")
     expect(await clone(m)).toBe("waited")
   })
 
-  test("but starts under that line", async () => {
-    const m = machine({ load1: 2, load5: 10 })
-    writeFileSync(join(m.ops, "run-slot.load5-cap"), "15\n")
-    expect(await clone(m)).toBe("ran")
+  // under Claude Code's sandbox sysctl is refused, so the brake falls back to this Mac's 15 cores
+  test("and a core count it cannot read is 15: within 4 of it waits", async () => {
+    expect(await clone(machine({ load1: 2, load5: 11, sandboxed: true }))).toBe("waited")
+  })
+
+  test("and under it starts", async () => {
+    expect(await clone(machine({ load1: 2, load5: 10, sandboxed: true }))).toBe("ran")
   })
 
   test("while a big run holds a lane", async () => {

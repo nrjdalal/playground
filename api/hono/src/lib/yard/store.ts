@@ -440,9 +440,9 @@ export const tokens = async (db: Database, caller: Caller) =>
   ).map(tokenOut)
 
 // A new token: its secret, yard_ and 32 random characters, is returned this once and kept only as its hash.
-export const createToken = async (db: Database, caller: Caller, name: string) => {
+export const createToken = async (db: Database, caller: Caller, name: string, now = Date.now()) => {
   tokenNameSchema.parse(name)
-  await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR)
+  await take(db, `writes:${caller.id}`, "hour", WRITES_HOUR, now)
   const value = secret("yard_")
   try {
     const [row] = await db

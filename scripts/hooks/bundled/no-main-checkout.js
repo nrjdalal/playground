@@ -1475,7 +1475,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   if (name === "") {
     for (const [key, value] of local)
       setVar(env.vars, key, value);
-    if (builtins || cmd.feedsShell)
+    if (builtins || cmd.feedsShell || rootFed(cmd))
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -1823,8 +1823,10 @@ async function stdinOf(cmd, env) {
   tick();
   return held2(await stdinText(cmd, env));
 }
+var feedsStdin = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
+var rootFed = (cmd) => cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root";
 async function stdinText(cmd, env) {
-  const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
+  const input = cmd.redirects.findLast(feedsStdin);
   if (input?.target?.procs)
     return outputs(input.target.procs, env);
   if (input?.op === "<" || input?.op === "<>")
@@ -2214,7 +2216,24 @@ var NAME_SETTERS = new Set([
 var PRINTS = new Set(["print", "printf"]);
 var NUMERIC = new Set(["float", "integer"]);
 var TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"]);
-var RUNS_TEXT = new Set([".", "eval", "source"]);
+var RUNS_TEXT = new Set([
+  ".",
+  "alias",
+  "autoload",
+  "emulate",
+  "enable",
+  "eval",
+  "fc",
+  "mapfile",
+  "r",
+  "readarray",
+  "sched",
+  "source",
+  "trap",
+  "zmodload",
+  "zregexparse",
+  "zstyle"
+]);
 var TESTS = new Set(["[", "[[", "test"]);
 var PLAIN_NAME = /^[A-Za-z_]\w*$/;
 var EXPANDS = /\$(?![A-Za-z_]\w*|\{[A-Za-z_]\w*\})|`|[<>]\(/;
@@ -2259,7 +2278,7 @@ function steadyNames(named, commands) {
   const parses = commands.map((cmd) => parse(cmd));
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at];
-    if (RUNS_TEXT.has(name))
+    if (RUNS_TEXT.has(name) || marked(name))
       return () => NONE;
     const flagged = (letters) => cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value));
     if (NUMERIC.has(name) || TYPESETS.has(name) && flagged(/[EFin]/))
