@@ -15,15 +15,15 @@ import { SCRIPT, WAITING, stop, machine } from "./run-slot-fake"
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang: 60s, twice the slowest case under SLOW_CHILD=1.5 but local CI's, which sets its own
 setDefaultTimeout(60_000)
 
-// review round 1: a big run let every smaller run pass it, so it could wait all night
+// review round 1: a big run let every smaller run pass it, so it could wait all night; the held run here took its slot after the ticket, a passer, so it alone keeps the ticket out (issue 1216: one held from before the ticket lets a run that fits pass, run-slot-one-gate.test.ts)
 describe("a waiter that has waited 20 minutes", () => {
   const held = () => {
     const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
-    m.hold("run-slot", 1, "small")
+    m.hold("run-slot", 1, "small", `${new Date().toISOString().slice(0, 19)}Z`)
     return m
   }
 
-  test("lets no newer run pass it", async () => {
+  test("lets no newer run pass it while only the runs that passed it keep it out", async () => {
     const m = held()
     m.ticket(1, "worker-big", "s2 23 3 big", 21 * 60)
     expect(await m.waits("worker-m", { RUN_SLOT_SIZE: "medium" })).toBe(true)
