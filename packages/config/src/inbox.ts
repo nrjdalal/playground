@@ -42,6 +42,16 @@ export const answerPayloadSchema = z.strictObject({
     })
     .optional(),
   owned: ranSchema.optional(),
+  picks: z
+    .array(
+      z.strictObject({
+        index: z.number().int().min(0).max(5),
+        label: z.string().min(1),
+        letter: z.string().length(1),
+        question: z.string().min(1),
+      }),
+    )
+    .optional(),
   ref: z.string().regex(/^#i\d+$/),
   relay: z.strictObject({ for: z.string().min(1), why: z.literal("poster-ended") }).optional(),
   results: z

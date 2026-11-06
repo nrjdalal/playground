@@ -710,6 +710,39 @@ describe("an answer", () => {
     expect(answerInputSchema.safeParse({ action: "approve", option: 5 }).success).toBe(false)
   })
 
+  test("a multi-question ask approves with one pick per question, within its choices (#1250)", () => {
+    const multi = item({
+      kind: "decision",
+      preview: {
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          { options: [{ label: "now" }, { label: "later" }, { label: "soon" }], question: "When?" },
+        ],
+        text: "Pick for each.",
+        type: "ask",
+      } as never,
+    })
+    expect(checkAnswer(multi, { action: "approve", options: [0, 2] })).toEqual({
+      answer: { choice: "approve", options: [0, 2] },
+      status: "approved",
+    })
+    expect(checkAnswer(multi, { action: "deny" })).toEqual({
+      answer: { choice: "deny" },
+      status: "denied",
+    })
+    const invalid: Parameters<typeof checkAnswer>[1][] = [
+      { action: "approve" },
+      { action: "approve", option: 0 },
+      { action: "approve", options: [0] },
+      { action: "approve", options: [0, 1, 2] },
+      { action: "approve", options: [0, 3] },
+      { action: "approve", options: [2, 0] },
+    ]
+    for (const input of invalid) {
+      expect(checkAnswer(multi, input)).toHaveProperty("message")
+    }
+  })
+
   test("sends a draft as written or as changed, or discards it", () => {
     const draft = item({ kind: "draft" })
     expect(checkAnswer(draft, { action: "send", text: "hi" })).toEqual({
@@ -895,6 +928,19 @@ describe("an answer", () => {
       ref: 47,
       title: "Which way?",
     })
+    const several = item({
+      id: "vwx",
+      kind: "decision",
+      preview: {
+        ...PREVIEWS.ask,
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          { options: [{ label: "now" }, { label: "later" }, { label: "soon" }], question: "When?" },
+        ],
+      } as never,
+      ref: 48,
+      title: "Pick for each?",
+    })
     const cases: [InboxItem, Parameters<typeof answerPayload>[1], Record<string, unknown>][] = [
       [
         decided,
@@ -938,6 +984,22 @@ describe("an answer", () => {
         lettered,
         { at: AT, choice: "deny" },
         { go: false, option: { index: 3, label: "None of these", letter: "D" }, verb: "pick" },
+      ],
+      // a multi-question ask's approve names one pick per question, each by its letter and label, and reads its note back
+      [
+        several,
+        { at: AT, choice: "approve", note: "both fine", options: [0, 2] },
+        {
+          comment: "both fine",
+          go: true,
+          next: "carry-out",
+          picks: [
+            { index: 0, label: "staging", letter: "A", question: "Base?" },
+            { index: 2, label: "soon", letter: "C", question: "When?" },
+          ],
+          type: "ask",
+          verb: "pick",
+        },
       ],
       [
         decided,
@@ -1758,6 +1820,53 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       to: "ops",
       via: "session",
     })
+  })
+
+  test("a multi-question ask stores one pick per question and tells its poster each, with the Note (#1250)", async () => {
+    const posted = await post(
+      decision({
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          {
+            options: [{ label: "now" }, { label: "later" }, { label: "soon" }],
+            question: "When?",
+          },
+        ],
+        text: "Pick for each.",
+        type: "ask",
+      }),
+    )
+    const sent: Delivery[] = []
+    const answered = await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve", note: "both fine", options: [0, 2] },
+      {
+        actor,
+        deliver: async (delivery) => {
+          sent.push(delivery)
+          return { at: "2026-10-07T12:00:00.000Z", ok: true, sessionId: "s1" }
+        },
+      },
+    )
+    expect(answered.ok).toBe(true)
+    if (!answered.ok) return
+    expect(answered.item.status).toBe("approved")
+    expect(answered.item.answer).toMatchObject({
+      choice: "approve",
+      note: "both fine",
+      options: [0, 2],
+    })
+    // read the stored answer back: one index per question, and the Note
+    const got = await store.getItem(db, posted.id)
+    expect(got?.answer).toMatchObject({ choice: "approve", note: "both fine", options: [0, 2] })
+    // the poster is told each pick by its letter and label, and the Note as a comment
+    const payload = payloadOf(sent[0]?.text ?? "")
+    expect(payload?.picks).toEqual([
+      { index: 0, label: "staging", letter: "A", question: "Base?" },
+      { index: 2, label: "soon", letter: "C", question: "When?" },
+    ])
+    expect(payload?.comment).toBe("both fine")
   })
 
   describe("a Slack send's files (PG-649)", () => {

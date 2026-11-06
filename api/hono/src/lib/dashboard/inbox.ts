@@ -662,6 +662,7 @@ export type InboxAnswer = {
   note?: string
   opened?: RunResult
   option?: number
+  options?: number[]
   owned?: RunResult
   set?: RunResult
   uploaded?: number
@@ -822,6 +823,17 @@ export const answerInputSchema = z.strictObject({
     .int()
     .min(0)
     .max(MAX_OPTIONS - 1)
+    .optional(),
+  options: z
+    .array(
+      z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_OPTIONS - 1),
+    )
+    .min(MIN_QUESTIONS)
+    .max(MAX_QUESTIONS)
     .optional(),
   seen: z.iso.datetime().optional(),
   text: z.string().trim().max(LIMITS.text).optional(),
