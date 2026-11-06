@@ -256,6 +256,7 @@ var WRAPPERS = new Map(Object.entries({
   nocorrect: ["", ""],
   noglob: ["", ""],
   nohup: ["", ""],
+  pkexec: ["--disable-internal-agent --help --keep-cwd --version", "--user"],
   repeat: ["", ""],
   stdbuf: ["", "-e -i -o --error --input --output"],
   sudo: [
@@ -294,8 +295,10 @@ function optionValue(word, { flags, values }) {
 }
 var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
+  ["pkexec", new Set],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
+var BARE_ROOT = new Set(["pkexec"]);
 var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
 var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var COUNTED = new Set(["repeat", "timeout"]);
@@ -396,6 +399,8 @@ var merge = (out, part) => {
   out.value += part.value;
   if (part.unknown)
     out.unknown ??= part.unknown;
+  if (part.inferred)
+    out.inferred ??= part.inferred;
   if (part.variable)
     out.variable ??= part.variable;
   if (part.reads?.length)
@@ -686,7 +691,10 @@ function walk(lx, scope, nested, inherit) {
         lx.i++;
       const [, fd] = redirect;
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1");
+      const outer = lx.hereString;
+      lx.hereString = op === "<<<";
       const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx);
+      lx.hereString = outer;
       const entry = { fd, op, target };
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -869,8 +877,9 @@ function dollar(lx) {
   if (next === "(") {
     lx.i += 2;
     const from = lx.commands.length;
+    const here = lx.hereString;
     nest(lx);
-    return substituted(lx.commands.slice(from), lx.known);
+    return substituted(lx.commands.slice(from), lx.known, here);
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}");
@@ -941,7 +950,7 @@ function backtick(lx) {
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
   return unknown("a command substitution");
 }
-function substituted(inner, known) {
+function substituted(inner, known, here = false) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
     return unknown("a command substitution");
@@ -960,6 +969,11 @@ function substituted(inner, known) {
   if (only.words.length === 0 && only.redirects.length === 1 && input.op === "<" && input.target) {
     return { reads: [input.target], value: READ };
   }
+  const printed = args.map((w) => w.value.replaceAll("\\n", `
+`));
+  const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value)) && printed.every((v) => !v.includes("\\"));
+  if (here && first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
+    return { inferred: "a command substitution", value: printed.join(" ") };
   return unknown("a command substitution");
 }
 var MKTEMP_FLAGS = new Set(["d", "q"]);
