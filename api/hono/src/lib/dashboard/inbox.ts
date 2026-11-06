@@ -1245,7 +1245,8 @@ export async function editItem(
       ...(choiceOf(item) === "replied" && { answer: null }),
       preview: parsed.data.preview,
       title: parsed.data.title,
-      updatedAt: now,
+      // past the stamp he read, even inside its millisecond, so an answer whose seen names the old words is refused (answerItem)
+      updatedAt: sql`greatest(${now.toISOString()}::timestamptz, ${inboxItem.updatedAt} + interval '1 millisecond')`,
       version: sql`${inboxItem.version} + 1`,
     })
     .where(and(eq(inboxItem.id, item.id), eq(inboxItem.version, item.version)))
