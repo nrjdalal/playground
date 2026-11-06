@@ -1,8 +1,9 @@
 import { z } from "zod"
 
-import { defineSettings } from "@/settings"
+// By relative path, as factory.ts imports, so the web's tests import it from outside the package.
+import { defineSettings } from "./settings"
 
-// The ops job registry: one setting per job, `jobs.<camelName>`, holding the whole job, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR. The runner renders <data>/ops/jobs.json and each launchd job's plist from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard) and ops-usage, so the Dashboard shows the account's week with no setting. In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
+// The ops job registry: one setting per job, `jobs.<camelName>`, whose row holds the fields it changes (its enabled field alone, for a job turned on) and reads over the job's registry entry, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR, and the rest still follows the registry. The runner renders <data>/ops/jobs.json and each launchd job's plist from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard) and ops-usage, so the Dashboard shows the account's week with no setting. In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
 // A row stored before needsCmux left the schema loads without it, and one that set it with no runtime is a terminal job, which runs in herdr.
 const withoutNeedsCmux = (row: unknown): unknown => {
   if (!row || typeof row !== "object" || !("needsCmux" in row)) return row
@@ -41,6 +42,9 @@ const jobFields = z.strictObject({
 })
 export const jobSchema = z.preprocess(withoutNeedsCmux, jobFields)
 export type Job = z.infer<typeof jobSchema>
+
+// A job's stored row: any of its fields, none it does not have, read over the registry's entry (settingsFor's merge).
+const jobRowSchema = z.preprocess(withoutNeedsCmux, jobFields.partial())
 
 // A job's name as its setting key: ops-merge-train is jobs.opsMergeTrain.
 export const jobKey = (name: string): string =>
@@ -174,7 +178,8 @@ export const jobSettings = defineSettings(
         aliases: OLD_KEYS[name],
         default: job,
         description: `The ${name} ops job: ${job.description}`,
-        schema: jobSchema,
+        merge: true,
+        schema: jobRowSchema,
       },
     ]),
   ),

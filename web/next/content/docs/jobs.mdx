@@ -7,20 +7,25 @@ description: The background jobs Playground runs, how to turn each one on, and w
 # Ops jobs
 
 Playground's background work runs as ops jobs: the Dashboard's supervisor, the sweeps, the merge train, the usage reads and the rest.
-Each job is a setting, `jobs.<name>` (`ops-merge-train` is `jobs.opsMergeTrain`), whose value is the whole job: whether it is on, its schedule, its command or launchd program, and why it is paused.
+Each job is a setting, `jobs.<name>` (`ops-merge-train` is `jobs.opsMergeTrain`), whose value is the job: whether it is on, its schedule, its command or launchd program, and why it is paused.
+A stored value holds only the fields it changes, and reads over the job's entry in Playground's registry, so a job turned on still runs the command and schedule Playground ships, including after an update changes them.
 A fresh install has every job off but two: `jobs.opsDashboard`, the Dashboard's own, which serves first run's checks and every settings write, and `jobs.opsUsage`, which reads your Claude login's 5-hour and week usage every 5 minutes, so the Dashboard shows them with no setting.
 
 ## Turn a job on
 
-Read the job, change `enabled` to `true`, and set it back with a reason:
+Settings > Jobs on the Dashboard lists every job with what it does, when it runs, whether it is on and whether your settings set it.
+Its switch saves the job's `enabled` field alone at your login's scope, with a reason, over any other field your scope's value holds.
+
+A session cannot write a job's setting (the `no-extensions-write` hook refuses `playground settings set` and `reset` of every `jobs.<name>`), so it asks you with an Inbox guard decision whose value is `{"enabled": true}` or `{"enabled": false}` alone; your Approve writes it the same way ([Inbox](/docs/inbox)).
+
+From your own terminal, set the field with a reason:
 
 ```bash
-playground settings get jobs.opsSweep
-playground settings set jobs.opsSweep '<the job, with "enabled": true>' --reason "<why>" [--scope <scope>]
+playground settings set jobs.opsSweep '{"enabled": true}' --reason "<why>" [--scope <scope>]
 ```
 
 Your login's value wins over your org's, as for every setting, so a job you turn on or off holds whatever your org set.
-Moving a schedule or pausing a job with `pausedFor` is the same kind of write.
+Moving a schedule or pausing a job with `pausedFor` is the same kind of write, naming that field.
 
 ## How a change reaches the runner
 
