@@ -256,7 +256,6 @@ var WRAPPERS = new Map(Object.entries({
   nocorrect: ["", ""],
   noglob: ["", ""],
   nohup: ["", ""],
-  pkexec: ["--disable-internal-agent --help --keep-cwd --version", "--user"],
   repeat: ["", ""],
   stdbuf: ["", "-e -i -o --error --input --output"],
   sudo: [
@@ -295,10 +294,8 @@ function optionValue(word, { flags, values }) {
 }
 var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
-  ["pkexec", new Set],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
-var BARE_ROOT = new Set(["pkexec"]);
 var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
 var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var COUNTED = new Set(["repeat", "timeout"]);
@@ -399,8 +396,6 @@ var merge = (out, part) => {
   out.value += part.value;
   if (part.unknown)
     out.unknown ??= part.unknown;
-  if (part.inferred)
-    out.inferred ??= part.inferred;
   if (part.variable)
     out.variable ??= part.variable;
   if (part.reads?.length)
@@ -411,7 +406,43 @@ var slice = (word, from) => {
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
-var program = (value) => basename(value.replace(/^=/, ""));
+var SHELL_OWN = new Set([
+  ".",
+  "alias",
+  "cd",
+  "declare",
+  "eval",
+  "export",
+  "hash",
+  "let",
+  "local",
+  "popd",
+  "pushd",
+  "read",
+  "readonly",
+  "set",
+  "shift",
+  "source",
+  "trap",
+  "type",
+  "typeset",
+  "unalias",
+  "unset"
+]);
+var G_WRAPPERS = new Map([
+  ["genv", "env"],
+  ["gnice", "nice"],
+  ["gnohup", "nohup"],
+  ["gstdbuf", "stdbuf"],
+  ["gtimeout", "timeout"]
+]);
+var program = (value) => {
+  const base = basename(value.replace(/^=/, ""));
+  const lower = base.toLowerCase();
+  if (SHELL_OWN.has(lower) && value !== lower)
+    return value;
+  return G_WRAPPERS.get(lower) ?? lower;
+};
 var UV_TAKES = new Set([
   "--cache-dir",
   "--config-file",
@@ -655,10 +686,7 @@ function walk(lx, scope, nested, inherit) {
         lx.i++;
       const [, fd] = redirect;
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1");
-      const outer = lx.hereString;
-      lx.hereString = op === "<<<";
       const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx);
-      lx.hereString = outer;
       const entry = { fd, op, target };
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -841,9 +869,8 @@ function dollar(lx) {
   if (next === "(") {
     lx.i += 2;
     const from = lx.commands.length;
-    const here = lx.hereString;
     nest(lx);
-    return substituted(lx.commands.slice(from), lx.known, here);
+    return substituted(lx.commands.slice(from), lx.known);
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}");
@@ -914,7 +941,7 @@ function backtick(lx) {
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
   return unknown("a command substitution");
 }
-function substituted(inner, known, here = false) {
+function substituted(inner, known) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
     return unknown("a command substitution");
@@ -933,11 +960,6 @@ function substituted(inner, known, here = false) {
   if (only.words.length === 0 && only.redirects.length === 1 && input.op === "<" && input.target) {
     return { reads: [input.target], value: READ };
   }
-  const printed = args.map((w) => w.value.replaceAll("\\n", `
-`));
-  const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value)) && printed.every((v) => !v.includes("\\"));
-  if (here && first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
-    return { inferred: "a command substitution", value: printed.join(" ") };
   return unknown("a command substitution");
 }
 var MKTEMP_FLAGS = new Set(["d", "q"]);
@@ -1026,6 +1048,8 @@ function unwrap(state, inside, budget) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+      } else if (wrapper === "env" && v === "-") {
+        take();
       } else if (v === "--") {
         take();
         while (ASSIGN.test(peek()?.value ?? ""))

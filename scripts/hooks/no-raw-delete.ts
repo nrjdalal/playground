@@ -419,13 +419,13 @@ async function inspect(raw: string, environment: Record<string, string | undefin
 
 const bare = (command: string) => command.replace(/[\\'"]/g, "")
 
-// The cheap first look: a name the hook judges, or a $, a backtick, a brace or a glob that can spell one.
+// The cheap first look: a name the hook judges, in any case as macOS runs it, or a $, a backtick, a brace or a glob that can spell one.
 const CANDIDATE =
-  /rm|del|chflags|chmod|clean|worktree|rimraf|rsync|shred|\bg?tar\b|screen|tmux|\bat\b|batch|\$|`|[{*?[]/
+  /rm|del|chflags|chmod|clean|worktree|rimraf|rsync|shred|\bg?tar\b|screen|tmux|\bat\b|batch|\$|`|[{*?[]/i
 
-// A call that reads as a delete, which the hook refuses when it cannot read it.
+// A call that reads as a delete, in any case, which the hook refuses when it cannot read it.
 const DELETES =
-  /\bg?rm\b|-delete\b|\bchflags\b|\bchmod\b|\bclean\b|\bworktree\b|\brimraf\b|\bdel-cli\b|\bg?shred\b|--del|--rem/
+  /\bg?rm\b|-delete\b|\bchflags\b|\bchmod\b|\bclean\b|\bworktree\b|\brimraf\b|\bdel-cli\b|\bg?shred\b|--del|--rem/i
 
 // The Bash command an input names, or undefined when the input does not parse as one.
 function commandOf(raw: string): string | undefined {

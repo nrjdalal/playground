@@ -915,6 +915,34 @@ describe("a quoted argument is read as a command line only where a program runs 
       "pkexec running a program of its own",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | pkexec cat",
     ],
+    [
+      "env's lone dash ahead of a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - ls",
+    ],
+    [
+      "env's lone dash and an unset ahead of a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - -u X ls",
+    ],
+    [
+      "genv running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | genv -u X ls",
+    ],
+    [
+      "gnice running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | gnice -n 5 ls",
+    ],
+    [
+      "gnohup running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | gnohup ls",
+    ],
+    [
+      "gstdbuf running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | gstdbuf -o0 ls",
+    ],
+    [
+      "gtimeout running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | gtimeout -k 1 5 ls",
+    ],
     ["a quoted ~- used as a literal folder name", "mkdir '~-' && touch '~-/f'"],
     ["a write under ~+, the worktree itself", "touch ~+/f"],
     ["a write under ~- after a cd out of the worktree", "cd /usr; touch ~-/f"],
@@ -936,6 +964,14 @@ describe("a quoted argument is read as a command line only where a program runs 
     const env = { HOME: homedir(), TMPDIR: tmpdir() }
     const raw = JSON.stringify({ cwd: homedir(), tool_input: { command }, tool_name: "Bash" })
     expect(await check(raw, env)).toBeUndefined()
+  })
+
+  // #1123: the hook reads a plain mktemp's folder by its exact name, so one named in another case reads as a folder it cannot know, and a miss fails closed
+  test("rm of a folder made by mktemp in capitals is refused from the home with TMPDIR set", async () => {
+    const env = { HOME: homedir(), TMPDIR: tmpdir() }
+    const command = 'T=$(MKTEMP -d); rm -rf "$T"'
+    const raw = JSON.stringify({ cwd: homedir(), tool_input: { command }, tool_name: "Bash" })
+    expect(await check(raw, env)).toBeDefined()
   })
 
   test("the dispatcher brief's call that finds the Dashboard's checkout runs from a worktree", async () => {
@@ -1597,6 +1633,7 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["jq of policy.json", `jq . ${join(ROOT, "policy.json")}`],
     ["ls of the root by ~", "ls -la ~/.playground/extensions ~/.playground/extensions/hooks"],
     ["grep in the root", `grep -rn Slack ${ROOT}`],
+    ["grep named in capitals over the home, a read like grep's", "GREP -rn foo ."],
     ["head and wc", `head -5 ${LIST} && wc -l ${LIST}`],
     ["find without an action", `find ${ROOT} -name '*.json'`],
     ["git log in a scope", `git -C ${SCOPE} log --oneline -5`],
@@ -1640,6 +1677,10 @@ describe("a read of the root, and writes elsewhere, run", () => {
     expect(await bash("cat policy.json", ROOT)).toBeUndefined()
   })
 
+  test("grep named in capitals over the data folder, a read like grep's", async () => {
+    expect(await bash("GREP -rn foo .", DATA)).toBeUndefined()
+  })
+
   test.each([
     ["Read is no write", "Read", { file_path: LIST }],
     ["Write elsewhere", "Write", { content: "x", file_path: join(DATA, "handoffs", "w.md") }],
@@ -1675,6 +1716,14 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["a git author name from a variable", `GIT_AUTHOR_NAME="$N" git commit -m x`],
     ["cp to a literal path elsewhere", "cp x /tmp/y"],
     ["cp to a path the line holds", `D=/tmp/d; cp x "$D/y"`],
+    [
+      "cp to a path the line holds beside trap, sched and autoload as words",
+      `D=/tmp/d; echo trap sched autoload; cp x "$D/y"`,
+    ],
+    [
+      "cp to a path the line holds after a program named by its path",
+      `D=/tmp/d; /bin/echo hi; cp x "$D/y"`,
+    ],
     ["cp of a variable to a literal path", `cp "$S" /tmp/y`],
     ["touch with a reference file from a variable", `touch -r "$R" /tmp/y`],
     ["dd reading a variable to a literal path", `dd if="$S" of=/tmp/y`],
@@ -1734,6 +1783,62 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     [
       "GNU rm by its gnubin path past an option after its first operand after a cd to a variable",
       `cd "$X"; /opt/homebrew/opt/coreutils/libexec/gnubin/rm /tmp/x -f`,
+    ],
+    [
+      "GNU mv to an absolute target folder after a cd to a variable",
+      `cd "$X"; gmv -t /tmp/d /tmp/f`,
+    ],
+    [
+      "GNU mv to an absolute target folder attached after a cd to a variable",
+      `cd "$X"; gmv -t/tmp/d /tmp/f`,
+    ],
+    [
+      "GNU mv to an absolute target folder by its long option after a cd to a variable",
+      `cd "$X"; gmv --target-directory=/tmp/d /tmp/f`,
+    ],
+    [
+      "rsync with an absolute log file attached after a cd to a variable",
+      `cd "$X"; rsync -a --log-file=/tmp/l /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute temp folder attached to its short option after a cd to a variable",
+      `cd "$X"; rsync -a -T/tmp/t /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a filter rule holding a T after a cd to a variable",
+      `cd "$X"; rsync -a -f'+ Tx' /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute partial folder by a shortened long option after a cd to a variable",
+      `cd "$X"; rsync -a --partial-d=/tmp/p /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a log format by a shortened long option after a cd to a variable",
+      `cd "$X"; rsync -a --log-file-f=x /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a relative link folder it only reads after a cd to a variable",
+      `cd "$X"; rsync -a --link-dest=prev /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute partial folder as the next word after a cd to a variable",
+      `cd "$X"; rsync -a --partial-dir /tmp/p /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute temp folder after a cluster ending in its short option after a cd to a variable",
+      `cd "$X"; rsync -aT /tmp/t /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a dash-led block size after its short option after a cd to a variable",
+      `cd "$X"; rsync -a -B -1 /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with its partial flag, a prefix of its partial folder option, after a cd to a variable",
+      `cd "$X"; rsync -a --partial --progress /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with its backup flag, a prefix of its backup folder option, after a cd to a variable",
+      `cd "$X"; rsync -a --backup --suffix=.bak /tmp/a /tmp/b`,
     ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
@@ -2097,6 +2202,11 @@ describe("a refusal for a value the hook does not hold names it in readable text
     ["a variable", "rm -f $X/x", "rm on $X/x,"],
     ["a loop variable", 'for d in a b; do rm -f "$d/x"; done', 'rm on "$d/x",'],
     ["a variable inside a nested shell's script", 'bash -c "rm -f $X/x"', "rm on $…/x,"],
+    [
+      "a held variable after a command named by a variable from the environment",
+      'D=/tmp/d; $EDITOR f; cp x "$D/y"',
+      'cp on "$D/y",',
+    ],
     [
       "git -c with a variable",
       'git -c core.pager="$P" log',
