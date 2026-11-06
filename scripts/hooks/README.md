@@ -378,8 +378,8 @@ Only the first reading moves the folder, sets variables and records files for th
   macOS's `mv`, `rm` and `rmdir`, named bare, read options only up to their first operand, as its getopt does, so every later word, a dashed one too, is an operand, and macOS's `unlink` reads every word as its operand but a leading `--`; a GNU build reads options anywhere before `--` unless the call sets `POSIXLY_CORRECT`, and a lone `-` is an operand for every remover.
   A path a remover's option writes to is an operand too, attached to the option or as the next word, a dash-led one included: GNU `mv`'s target folder (`-t`, alone or in a cluster, and `--target-directory`), read by `writeTargets` as for `cp`.
   rsync's are its backup, partial and temp folders, log file and batch files (`RSYNC_PATHS`, by any prefix, since macOS's openrsync takes a shortened long name, and `-T` in a short cluster).
-  Each such word is read whole, so one holding an `=` or opening with a dash is relative unless it opens with `/` or `~`.
   The word after find's `-fls`, `-fprint`, `-fprint0` and `-fprintf` is an operand too, a dash-led one included, since each writes the file it names (`FIND_WRITES`).
+  Each such word is read whole, so one holding an `=` or opening with a dash is relative unless it opens with `/` or `~`.
   A reader, any other program and a write by an absolute path still run after one, so a program that writes where it runs (a build, a script) passes.
   A `cd` whose target the reader names is judged in every folder it may reach, this root included ([The folder a hook reads](#the-folder-a-hook-reads)).
   A `cd ~-` or `pushd ~-` is judged in every folder a `cd -` would go back to, the start folder among them, and a `cd ~+` or `pushd ~+` in each folder the shell may be in, so a write after either is refused wherever zsh may land.
