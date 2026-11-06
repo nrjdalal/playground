@@ -1465,7 +1465,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   if (name === "") {
     for (const [key, value] of local)
       setVar(env.vars, key, value);
-    if (builtins || cmd.feedsShell || cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root")
+    if (builtins || cmd.feedsShell || rootFed(cmd))
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -1797,6 +1797,7 @@ async function stdinOf(cmd, env) {
   return held2(await stdinText(cmd, env));
 }
 var feedsStdin = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
+var rootFed = (cmd) => cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root";
 async function stdinText(cmd, env) {
   const input = cmd.redirects.findLast(feedsStdin);
   if (input?.target?.procs)

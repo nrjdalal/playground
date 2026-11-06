@@ -28,6 +28,14 @@ export const groups: Group[] = [
         `su <<'EOF'\nrm -rf ${NEVER_MADE}\nEOF`,
       ],
       [
+        "a recursive delete in a file the line writes, fed to sudo's root shell",
+        `echo 'rm -rf ${NEVER_MADE}' > /tmp/.no-such-script-1146; sudo -s < /tmp/.no-such-script-1146`,
+      ],
+      [
+        "a recursive delete in a process substitution fed to su's root shell",
+        `su < <(echo 'rm -rf ${NEVER_MADE}')`,
+      ],
+      [
         "a recursive delete before an unset variable in a here-string to sudo's root shell",
         `sudo -s <<< "rm -rf ${NEVER_MADE}; echo $NO_SUCH_VAR_1146"`,
       ],

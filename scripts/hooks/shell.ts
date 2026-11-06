@@ -1600,12 +1600,7 @@ async function examineReading(
   if (name === "") {
     for (const [key, value] of local) setVar(env.vars, key, value)
     // a root shell with no program of its own (`sudo -s <<< …`) is visited when a redirect feeds it, so a hook can read that script
-    if (
-      builtins ||
-      cmd.feedsShell ||
-      (cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root")
-    )
-      verdict = await visit(cmd, parsed, here)
+    if (builtins || cmd.feedsShell || rootFed(cmd)) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     // a glob in the folder is judged as any program's words are, since it may land anywhere it matches
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -2083,6 +2078,10 @@ export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
 // A redirect that feeds stdin text, as stdinOf reads it: a file, a here-string, a heredoc or a process substitution, never a duplicated descriptor
 export const feedsStdin = ({ fd, op }: Redirect): boolean =>
   (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&"
+
+// Whether a redirect feeds a root shell its script (`sudo -s <<< …`, `su < <(…)`), which run() hands every hook and leaves each to read
+export const rootFed = (cmd: Command): boolean =>
+  cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root"
 
 async function stdinText(cmd: Command, env: Env): Promise<Text> {
   const input = cmd.redirects.findLast(feedsStdin)
