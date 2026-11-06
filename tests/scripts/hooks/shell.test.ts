@@ -260,3 +260,15 @@ describe("zshSplits reads a long line in linear time (PG-1222)", () => {
     expect(await overBaseline(async (c) => zshSplits(c), line)).toBeLessThan(50)
   })
 })
+
+describe("zshSplits finds a sourcing command in linear time (PG-1231)", () => {
+  test.each([
+    ["assignments after separators", ";x=".repeat(70_000)],
+    ["assignment prefixes", "x=a ".repeat(50_000)],
+    ["reserved words", "if ".repeat(70_000)],
+    ["bangs", "! ".repeat(100_000)],
+    ["case patterns", "a) ".repeat(70_000)],
+  ])("200 KB of %s", async (_, line) => {
+    expect(await overBaseline(async (c) => zshSplits(c), line)).toBeLessThan(50)
+  })
+})
