@@ -5956,6 +5956,7 @@ var glmAccount = strictObject({ label, provider: literal("glm") });
 var account = union([claudeAccount, glmAccount]);
 var providerOf = (row) => row.provider === "glm" ? "glm" : "claude";
 var accountKey = (row) => (providerOf(row) === "glm" ? row.label : row.email) ?? "";
+var accountsOf = (rows, provider) => rows.filter((row) => providerOf(row) === provider);
 var accountSettings = defineSettings({
   "models.probe": {
     default: "claude-haiku-4-5",
@@ -6364,6 +6365,15 @@ var sessionTemplate = strictObject({
   message: "a GLM template runs on models.glm and its first GLM row, so it takes no account, effort or model"
 });
 var sessionTemplates = array(sessionTemplate).refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "each id is listed once");
+var unknownAccounts = (templates, accounts) => {
+  const known = new Set(accountsOf(accounts, "claude").map(accountKey));
+  return templates.flatMap((template, at) => template.account && !known.has(template.account) ? [
+    {
+      message: `${template.account} is not in usage.accounts: add it in Settings > Accounts`,
+      path: [at, "account"]
+    }
+  ] : []);
+};
 var sessionSettings = defineSettings({
   "sessions.aliases": {
     default: {},
@@ -6376,6 +6386,7 @@ var sessionSettings = defineSettings({
     schema: strictObject({ builder: name, dispatcher: name, ops: name, planner: name })
   },
   "sessions.templates": {
+    against: (templates, read) => unknownAccounts(templates, read("usage.accounts")),
     default: [
       {
         backend: "claude",
@@ -6406,7 +6417,7 @@ var sessionSettings = defineSettings({
         label: "Second dispatcher on GLM"
       }
     ],
-    description: "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, backend, model, effort, account and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
+    description: "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, backend, model, effort, account (a Claude row of usage.accounts) and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
     schema: sessionTemplates
   }
 });

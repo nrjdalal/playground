@@ -127,7 +127,7 @@ function reads(parsed: Parsed, env: Env): boolean {
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value)
   return (
     !!sub &&
-    GIT_READS.has(sub) &&
+    (GIT_READS.has(sub) || (sub === "worktree" && rest[0] === "list")) &&
     !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) &&
     !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w))
   )
@@ -305,6 +305,89 @@ function programLines({ args, first }: Parsed, rooted: boolean): string[] {
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
 }
 
+const SEDS = new Set(["gsed", "sed"])
+// Whether a word is read as written: no glob and no part the hook cannot read
+const literal = (w: Word) => !w.glob && !marked(w.value)
+// sed's options that write nothing and read no script from elsewhere: -E, -n, -r, -s, -u and -z, alone or clustered, and their long names
+const SED_FLAG =
+  /^-[Enrsuz]+$|^--(?:null-data|posix|quiet|regexp-extended|separate|silent|unbuffered)$/
+// a bracket expression holding no / and no [, which BSD sed reads whole and GNU sed reads to the same end, so both end its regex at one /
+const SED_BRACKET = String.raw`\[\^?\]?[^\]/[\n]*\]`
+// a regex's body up to its closing /, a / inside a bracket expression held by SED_BRACKET alone
+const SED_BODY = String.raw`(?:[^/\\\n[]|\\.|${SED_BRACKET})*/`
+// a replacement's text up to its closing /
+const SED_TEXT = String.raw`(?:[^/\\\n]|\\.)*/`
+const SED_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
+const SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|s/${SED_BODY}${SED_TEXT}[giImMp0-9]*)[ \t]*`
+// a sed script read whole by a closed grammar: addresses, then =, d, l, n, N, p, P, q, Q or s/// with flags from g, i, I, m, M, p and digits, so it holds no w or W write, no e run and no r read of another file
+const SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`)
+
+// Whether a sed call only reads and prints: every option on SED_FLAG's list, and every script (each -e value, else the first operand) a literal word, unglobbed, that SED_SCRIPT holds
+function sedReads(args: Word[]): boolean {
+  const scripts: Word[] = []
+  const operands: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "-e" || value === "--expression") {
+      if (!args[k + 1]) return false
+      scripts.push(args[++k])
+    } else if (value.startsWith("--expression="))
+      scripts.push({ ...args[k], value: value.slice("--expression=".length) })
+    else if (value === "--") {
+      operands.push(...args.slice(k + 1))
+      break
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!SED_FLAG.test(value)) return false
+    } else operands.push(args[k])
+  }
+  const read = scripts.length ? scripts : operands.slice(0, 1)
+  return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value))
+}
+
+// perl's options that run no other code and write nothing: a, l, n, p and w clustered, the last of them may be e or E, whose script is the next word; -d, -i, -I, -m, -M, -s, -x and the rest are off it
+const PERL_FLAG = /^-[alnpw]*[eE]?$/
+// a regex with no variable, no array and no code block (`(?{`, `(??{`, `(*{`), its $ only an anchor
+const PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`
+const PERL_RE = `/${PERL_BODY}`
+// a match variable, $1 to $9 or $&, before no [, { or ->, since perl reads one there as a subscript and runs its expression as code
+const PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`
+// a value print may name: a string holding only text, \n, \t and the match variables $1 to $9 and $&, or one of those variables, or $_
+const PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-9&_])`
+const PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`
+const PERL_SUB = String.raw`s/${PERL_BODY}(?:[^/\\\n@$]|\\.|${PERL_MATCH})*/[gimsx]*`
+const PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`
+// a perl one-liner read whole by a closed grammar: print statements of match variables and plain strings, each optionally under for, if, unless or while a regex, and s/// with flags from g, i, m, s and x, so no regex holds a variable, an array or a code block and no replacement interpolates code
+const PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`)
+
+// a file operand perl's -n and -p open as a file alone: its 2-arg open runs a name ending or starting in | as a command, and reads <, >, + and & as modes
+const PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/
+
+// Whether a perl call only reads and prints: every option on PERL_FLAG's list, at least one -e or -E script, every script a literal word, unglobbed, that PERL_SCRIPT holds, every file operand a literal PERL_FILE, and no PERL variable set, since PERL5OPT and PERL5LIB load code
+function perlReads({ args, local }: Parsed, env: Env): boolean {
+  if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL"))) return false
+  const scripts: Word[] = []
+  let k = 0
+  for (; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "--") {
+      k++
+      break
+    }
+    if (!value.startsWith("-") || value === "-") break
+    if (!PERL_FLAG.test(value)) return false
+    if (/[eE]$/.test(value)) {
+      if (!args[k + 1]) return false
+      scripts.push(args[++k])
+    }
+  }
+  const files = args.slice(k)
+  return (
+    scripts.length > 0 &&
+    scripts.every((w) => literal(w) && PERL_SCRIPT.test(w.value)) &&
+    files.every((w) => literal(w) && PERL_FILE.test(w.value))
+  )
+}
+
 // Whether a call's program is its command's own first word, read outright, bare or by a system path, so no wrapper or file of another folder runs in its place
 function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   return (
@@ -314,7 +397,7 @@ function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   )
 }
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, grep, head, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, git, grep, head, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
   const { args, first } = parsed
@@ -335,6 +418,10 @@ function narrow(cmd: Command, env: Env): boolean {
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
+  // a git reader with a word the hook cannot read keeps canary's reading, since that word may be an option that writes or runs (`--output=…`)
+  if (base === "git") return reads(parsed, env) && !args.some(({ value }) => marked(value))
+  if (SEDS.has(base)) return sedReads(args)
+  if (base === "perl") return perlReads(parsed, env)
   if (base === "cut") return true
   // a read-only gh call is narrow when its jq filter is the only word that holds a space
   if (base === "gh") {

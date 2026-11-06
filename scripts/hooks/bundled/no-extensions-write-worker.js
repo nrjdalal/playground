@@ -2377,7 +2377,7 @@ function reads(parsed, env) {
     return false;
   const { rest, sub } = gitCall(args, env);
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value);
-  return !!sub && GIT_READS.has(sub) && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
+  return !!sub && (GIT_READS.has(sub) || sub === "worktree" && rest[0] === "list") && !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) && !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w));
 }
 var GH_READS = new Set([
   "api",
@@ -2521,6 +2521,72 @@ function programLines({ args, first }, rooted) {
     return [];
   return (awkPrograms(args) ?? []).filter(({ value }) => rooted || awkRuns(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
+var SEDS = new Set(["gsed", "sed"]);
+var literal = (w) => !w.glob && !marked(w.value);
+var SED_FLAG = /^-[Enrsuz]+$|^--(?:null-data|posix|quiet|regexp-extended|separate|silent|unbuffered)$/;
+var SED_BRACKET = String.raw`\[\^?\]?[^\]/[\n]*\]`;
+var SED_BODY = String.raw`(?:[^/\\\n[]|\\.|${SED_BRACKET})*/`;
+var SED_TEXT = String.raw`(?:[^/\\\n]|\\.)*/`;
+var SED_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
+var SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|s/${SED_BODY}${SED_TEXT}[giImMp0-9]*)[ \t]*`;
+var SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`);
+function sedReads(args) {
+  const scripts = [];
+  const operands = [];
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "-e" || value === "--expression") {
+      if (!args[k + 1])
+        return false;
+      scripts.push(args[++k]);
+    } else if (value.startsWith("--expression="))
+      scripts.push({ ...args[k], value: value.slice("--expression=".length) });
+    else if (value === "--") {
+      operands.push(...args.slice(k + 1));
+      break;
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!SED_FLAG.test(value))
+        return false;
+    } else
+      operands.push(args[k]);
+  }
+  const read = scripts.length ? scripts : operands.slice(0, 1);
+  return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value));
+}
+var PERL_FLAG = /^-[alnpw]*[eE]?$/;
+var PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
+var PERL_RE = `/${PERL_BODY}`;
+var PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`;
+var PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-9&_])`;
+var PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`;
+var PERL_SUB = String.raw`s/${PERL_BODY}(?:[^/\\\n@$]|\\.|${PERL_MATCH})*/[gimsx]*`;
+var PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`;
+var PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`);
+var PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/;
+function perlReads({ args, local }, env) {
+  if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL")))
+    return false;
+  const scripts = [];
+  let k = 0;
+  for (;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "--") {
+      k++;
+      break;
+    }
+    if (!value.startsWith("-") || value === "-")
+      break;
+    if (!PERL_FLAG.test(value))
+      return false;
+    if (/[eE]$/.test(value)) {
+      if (!args[k + 1])
+        return false;
+      scripts.push(args[++k]);
+    }
+  }
+  const files = args.slice(k);
+  return scripts.length > 0 && scripts.every((w) => literal(w) && PERL_SCRIPT.test(w.value)) && files.every((w) => literal(w) && PERL_FILE.test(w.value));
+}
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
 }
@@ -2539,6 +2605,12 @@ function narrow(cmd, env) {
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base))
     return reads(parsed, env);
+  if (base === "git")
+    return reads(parsed, env) && !args.some(({ value }) => marked(value));
+  if (SEDS.has(base))
+    return sedReads(args);
+  if (base === "perl")
+    return perlReads(parsed, env);
   if (base === "cut")
     return true;
   if (base === "gh") {
