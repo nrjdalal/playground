@@ -410,6 +410,34 @@ export type KeychainRead = (item: string) => Promise<string | null>
 
 const OPTIONS_MESSAGE = `An ask offers 1 to ${MAX_OPTIONS} options, each with a label: one for a yes or no, two or more for lettered choices`
 
+// One ask option: a label and an optional one-line description.
+const askOption = z.strictObject({
+  description: oneLine(LIMITS.line).optional(),
+  label: oneLine(LIMITS.line),
+})
+
+// The most and fewest questions one ask holds.
+export const MAX_QUESTIONS = 20
+export const MIN_QUESTIONS = 2
+const QUESTIONS_MESSAGE = `An ask holds ${MIN_QUESTIONS} to ${MAX_QUESTIONS} questions, each with its own ${MAX_OPTIONS}-at-most options`
+
+// One question in a multi-question ask: its own words, its 1-to-5 options in the ask's shape, and an optional recommended option index, marked on the card rather than moved.
+const askQuestion = z
+  .strictObject({
+    options: z.array(askOption).min(1, OPTIONS_MESSAGE).max(MAX_OPTIONS, OPTIONS_MESSAGE),
+    question: oneLine(LIMITS.line),
+    recommended: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_OPTIONS - 1)
+      .optional(),
+  })
+  .refine((q) => q.recommended === undefined || q.recommended < q.options.length, {
+    error: "An ask question's recommended index is one of its own options",
+    path: ["recommended"],
+  })
+
 // What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change, a grant's System Settings pane, a guard setting or an own account change, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in ELI5 / ASD-STE100, one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere. A reveal shows the owner a Keychain item's value on the owner's click instead, kept nowhere either.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -426,6 +454,11 @@ export const previewSchema = z.discriminatedUnion("type", [
       )
       .min(1, OPTIONS_MESSAGE)
       .max(MAX_OPTIONS, OPTIONS_MESSAGE)
+      .optional(),
+    questions: z
+      .array(askQuestion)
+      .min(MIN_QUESTIONS, QUESTIONS_MESSAGE)
+      .max(MAX_QUESTIONS, QUESTIONS_MESSAGE)
       .optional(),
     text: words,
     type: z.literal("ask"),
@@ -547,6 +580,13 @@ export const inboxInputSchema = z
       input.preview.type !== "ask" ||
       !(input.preview.approve && input.preview.options),
     "An ask labels its go row in options or in approve, not both",
+  )
+  .refine(
+    (input) =>
+      input.kind !== "decision" ||
+      input.preview.type !== "ask" ||
+      !(input.preview.questions && (input.preview.options || input.preview.approve)),
+    "An ask holds either one question's options or a questions list, not both",
   )
   .superRefine((input, ctx) => {
     const text =
