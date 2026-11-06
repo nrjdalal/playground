@@ -9,6 +9,10 @@
   ],
   "type": "module",
   "exports": {
+    "./accounts": {
+      "types": "./dist/accounts.d.mts",
+      "default": "./dist/accounts.mjs"
+    },
     "./console": {
       "types": "./dist/console.d.mts",
       "default": "./dist/console.mjs"

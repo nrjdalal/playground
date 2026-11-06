@@ -37,6 +37,7 @@ import {
   type Visit,
   withDeadline,
   type Word,
+  zshSplits,
 } from "./shell"
 import { held, heldWord, namings, NONE, type Steady, steadyNames, unquoted } from "./steady"
 
@@ -226,16 +227,32 @@ const after = (word: Word, cut: number): Word => ({
   value: word.value.slice(cut),
 })
 
-// The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install, ln and mv (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch
-function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): Word[] {
+// Whether the shell may split a word into several: always for a substitution or a pasted value, and for a parameter where the shell splits one (`Word.splits` in shell.ts)
+const splitIn = (word: Word, splitting = false): boolean =>
+  word.splits === "always" || (word.splits === "sh" && splitting)
+
+// The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install, ln and mv (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch; and every word the shell may split (`Word.splits`), since one of its words may land as a target
+function writeTargets(
+  name: string,
+  args: Word[],
+  gnu: boolean,
+  posix = false,
+  splitting = false,
+): Word[] {
+  const splits = args.filter((word) => splitIn(word, splitting))
   if (name === "dd")
-    return args.flatMap((word) =>
-      word.value.startsWith("of=")
-        ? [after(word, 3)]
-        : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value)
-          ? [word]
-          : [],
-    )
+    return [
+      ...new Set([
+        ...args.flatMap((word) =>
+          word.value.startsWith("of=")
+            ? [after(word, 3)]
+            : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value)
+              ? [word]
+              : [],
+        ),
+        ...splits,
+      ]),
+    ]
   const into = name === "cp" || name === "install" || name === "ln" || name === "mv"
   const takes = WRITER_TAKES[name]
   const operands: Word[] = []
@@ -288,9 +305,13 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
         }
       }
   }
-  if (name === "ln" && !folder && operands.length === 1) return [{ quoted: false, value: "." }]
+  // ln's lone operand links into the shell's folder, unless the shell splits it into more operands
+  if (name === "ln" && !folder && operands.length === 1)
+    return [{ quoted: false, value: "." }, ...splits]
   const targets = into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
-  return [...new Set([...targets, ...maybe, ...logs])]
+  // macOS's cp, ln and mv take no target option and write to their last operand, so a split word moves no target there
+  const moved = into && !gnu && name !== "install" ? [] : splits
+  return [...new Set([...targets, ...maybe, ...logs, ...moved])]
 }
 
 // The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, ext.repos, which names the repository each scope syncs from, and the ticket card's, which turn on what the factory shows; every jobs.<name> is refused beside them (JOB_PREFIX).
@@ -898,7 +919,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
+      // a runner the hook cannot name may hand the line to sh, which splits its parameters
+      const verdict = await run(
+        lex(line, env.known),
+        { ...env, splits: true, vars: new Map() },
+        visit,
+        true,
+      )
       if (verdict) return verdict
     }
     // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
@@ -936,11 +963,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         return refuse(`git on a clone in ${root}`)
       // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
       const unheld = (
-        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : []
+        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, here.splits) : []
       ).find((word) => !held(word, here, steady))
       if (unheld)
         return refuse(
-          `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
+          splitIn(unheld, here.splits)
+            ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally`
+            : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
         )
       if (name === "git") {
         const config = gitConfigs(args).find((word) => marked(word.value))
@@ -1016,7 +1045,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // mv's -t folder and rsync's path values are written to, though their word opens with a dash
     const values =
       tool === "mv"
-        ? writeTargets(tool, args, gnu, posix)
+        ? writeTargets(tool, args, gnu, posix, env.splits)
         : tool === "rsync"
           ? args.flatMap((word, k) => {
               const long = /^--([^=]+)=?/.exec(word.value)
@@ -1039,7 +1068,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           ...values,
         ]
       : WRITERS.has(tool)
-        ? writeTargets(tool, args, gnu, posix)
+        ? writeTargets(tool, args, gnu, posix, env.splits)
         : []
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
     if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
@@ -1059,6 +1088,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
     process: environment,
+    splits: zshSplits(command),
     vars: new Map(),
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs

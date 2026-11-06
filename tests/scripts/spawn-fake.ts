@@ -514,3 +514,26 @@ export const execLine = (r: { home: string }, name: string) =>
     .split("\n")
     .find((l) => l.startsWith("exec "))
     ?.replace(/^exec \S+\/scripts\/spawn\.sh /, "exec spawn.sh ")
+
+const LANES = ["run-slot", "run-slot-2", "run-slot-3", "run-slot-4"]
+
+// run-slot's state in the case's own home (spawn-fake's mkdtemp scratch): `held` lanes held by this live test process with `units` load units each, and `waiters` live tickets in its queue.
+export const slots =
+  (held: number, waiters: number, units = 2) =>
+  (home: string): void => {
+    const ops = join(home, ".playground", "ops")
+    for (const lane of LANES.slice(0, held)) {
+      mkdirSync(join(ops, lane), { recursive: true })
+      writeFileSync(
+        join(ops, `${lane}.holder`),
+        `worker-held ${process.pid} 2026-11-02T18:00:00Z ${units} medium\n`,
+      )
+    }
+    const queue = join(ops, "run-slot.waiters")
+    mkdirSync(queue, { recursive: true })
+    for (let i = 0; i < waiters; i++)
+      writeFileSync(
+        join(queue, `${1_000_000 + i}-${process.pid}-worker-wait${i}`),
+        "s2 22 2 medium\n",
+      )
+  }
