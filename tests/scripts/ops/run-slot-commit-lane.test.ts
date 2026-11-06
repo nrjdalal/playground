@@ -887,6 +887,19 @@ describe("commit-lane forms that cost no build", () => {
     ["git merge -X theirs", "cd ROOT && git merge --no-edit -X theirs origin/canary", [], []],
     ["git merge -m <msg>", "cd ROOT && git merge --no-edit -m x origin/canary", [], []],
     ["git merge of a $REF", 'cd ROOT && git merge --no-edit "$REF"', [], []],
+    // a merge that stops on a conflict leaves the other side's files for a later add or commit, so either after a merge counts as a build
+    [
+      "an add and commit after a merge, joined by ;",
+      "cd ROOT && git merge --no-edit origin/canary; git add -A; git commit -m x",
+      [],
+      [],
+    ],
+    [
+      "a commit after a merge",
+      "cd ROOT && git merge --no-edit origin/canary && git commit -m x",
+      [],
+      [],
+    ],
   ] as const)
     test(`a chain with ${what} still waits off the commit lane`, async () => {
       const m = repo({ idle: 30 }, ["docs/notes.md"], [...unstaged], LEFTHOOK, [...untracked])
@@ -912,6 +925,14 @@ describe("commit-lane forms that cost no build", () => {
     const steps = "cd ROOT && git merge --no-edit conflict && git push origin pushed"
     expect(await takes(m, chain(m, steps))).toBe("run-slot-commit")
     expect(existsSync(join(m.root, "pushed"))).toBe(false)
+  })
+
+  test("while a merge that ends clean runs its push", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    const steps = "cd ROOT && git merge --no-edit clean && git push origin pushed"
+    expect(await takes(m, chain(m, steps))).toBe("run-slot-commit")
+    expect(existsSync(join(m.root, "pushed"))).toBe(true)
   })
 
   // 8: bash -c reads -e, -u, -x, -v and -o pipefail as options before its script, which zsh -c runs as sh does

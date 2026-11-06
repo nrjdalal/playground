@@ -753,7 +753,7 @@ runs_program() {
 }
 # a commit whose pre-commit build runs next build goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56): a git commit but -n, in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every one is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one; and, failing closed, a git run with a word outside these lists, or a verb that is an alias
 heavy_build() {
-  local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir=""
+  local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir="" merged=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with what its git add steps stage, and when an add runs in another folder than a commit, whose paths it would misread
   first=$(first_word "$@")
   case "$(basename -- "$first")" in
@@ -771,7 +771,10 @@ heavy_build() {
         while IFS= read -r line; do
           IFS=$'\x1f' read -ra words <<< "$line"
           [ ${#words[@]} -gt 0 ] || continue
+          # an add or commit after a merge counts as a build, since a merge that stops on a conflict leaves the other side's files for them to stage
+          case "${words[3]}:$merged" in add:1 | commit:1) CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0 ;; esac
           case "${words[3]}" in
+            merge) merged=1 ;;
             add) adir=${adir:-${words[2]}}; [ "$adir" = "${words[2]}" ] && chain_add "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0; } ;;
             commit) { [ -z "$adir" ] || [ "$adir" = "${words[2]}" ]; } && ! heavy_build "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0; } ;;
           esac
@@ -902,7 +905,7 @@ if [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
   WHY=$(chain_lane "$@")
   case "$WHY" in
     "general "*)
-      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since \`${WHY#general }\` is not a form the commit lane takes (git add, commit, merge --no-edit or push in run-slot's folder, or after a cd or as git -C to an absolute folder in the repo, and bun run precommit:light); run the commit or merge as one of those to take the commit lane, or run an off-list merge and its push as two calls" >&2
+      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since \`${WHY#general }\` is not a form the commit lane takes (git add, commit, push, or merge with --no-edit, --ff, --ff-only or --no-ff, in run-slot's folder, or after a cd or as git -C to an absolute folder in the repo, and bun run precommit:light); run the commit or merge as one of those to take the commit lane, or run an off-list merge and its push as two calls" >&2
       rlog why "general: \`${WHY#general }\` is outside the commit lane's forms" ;;
   esac
 fi
