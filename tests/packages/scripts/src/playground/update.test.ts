@@ -437,6 +437,51 @@ test("a real update swaps each changed hook bundle in whole, so a reader of it m
   expect(git(checkout, "status", "--porcelain").stdout.toString()).toBe("")
 })
 
+test("a real update whose move fails after its bundles swapped in puts HEAD's bundles back, a bundle HEAD lacks removed, and stops", async () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+  const root = join(scratch, "unswap")
+  const origin = join(root, "origin")
+  const write = (path: string, text: string) => {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, text)
+  }
+  const bundled = join("scripts", "hooks", "bundled")
+  write(join(origin, "scripts", "link-skills.sh"), "true\n")
+  write(join(origin, bundled, "no-raw-delete.js"), "export const old = 1\n")
+  git(root, "init", "-q", "-b", "main", origin)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "one")
+  const checkout = join(root, "checkout")
+  git(root, "clone", "-q", origin, checkout)
+  write(join(origin, bundled, "no-raw-delete.js"), "export const changed = 2\n")
+  write(join(origin, bundled, "no-new.js"), "export const added = 3\n")
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "two")
+  const head = git(checkout, "rev-parse", "HEAD").stdout.toString().trim()
+  const failMerge: Run = async (argv, show) =>
+    argv.includes("merge") && argv.includes("--ff-only")
+      ? { code: 1, out: "merge refused" }
+      : spawnRun(argv, show)
+  const lines: string[] = []
+  expect(
+    await runUpdate(
+      checkout,
+      failMerge,
+      async () => 0,
+      (line) => lines.push(line),
+    ),
+  ).toBe(1)
+  expect(git(checkout, "rev-parse", "HEAD").stdout.toString().trim()).toBe(head)
+  expect(readFileSync(join(checkout, bundled, "no-raw-delete.js"), "utf8")).toBe(
+    "export const old = 1\n",
+  )
+  expect(existsSync(join(checkout, bundled, "no-new.js"))).toBe(false)
+  expect(git(checkout, "status", "--porcelain").stdout.toString()).toBe("")
+  expect(lines.at(-1)).toContain("merge --ff-only origin/main, or move to main there failed")
+})
+
 test("a real update cut short after its fast-forward is finished by the next run, which restarts from the commit the last finished update reached", async () => {
   const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
   const git = (cwd: string, ...args: string[]) =>

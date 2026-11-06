@@ -1,6 +1,7 @@
 // playground update: the release skill's step 5 as one script, then the Dashboard's roll.
 import { basename, join } from "node:path"
 
+import { swapBundles, unswapBundles } from "../swap-bundles"
 import { BUNDLED_ROOT, CORE_SKILLS } from "./orgs"
 import { unlinked } from "./unlinked"
 
@@ -144,6 +145,22 @@ export const runUpdate = async (
       ...manifestsChanged,
     )
   }
+  // the guards load their bundles from this checkout, so the move finds each changed one swapped in whole first (swap-bundles.ts); a checkout with commits of its own or files of its own moves as before, and a move that fails puts them back
+  let swapped: string[] = []
+  const swap = async (): ReturnType<Run> => {
+    const merges = !to && branch === "main"
+    if (merges && (await git("merge-base", "--is-ancestor", "HEAD", target)).code !== 0) return ok
+    if ((await git("status", "--porcelain", "--untracked-files=all")).out.trim()) return ok
+    const result = await swapBundles(repo, git, target)
+    swapped = result.swapped
+    if (result.code !== 0 && swapped.length) await unswapBundles(git, swapped)
+    return result
+  }
+  const swappedMove = (step: () => ReturnType<Run>) => async (): ReturnType<Run> => {
+    const moved = await step()
+    if (moved.code !== 0 && swapped.length) await unswapBundles(git, swapped)
+    return moved
+  }
   const prelinked =
     "the checkout's files are as they were; fix the failure above and run playground update again"
   const steps: [string, () => ReturnType<Run>, string?][] = to
@@ -154,13 +171,18 @@ export const runUpdate = async (
           () => git("merge-base", "--is-ancestor", "HEAD", "origin/main"),
         ],
         ["link the new commit's dependencies", prelink, prelinked],
-        [`check out ${to}`, () => git("checkout", "-q", "-B", "main", `refs/tags/${to}`)],
+        ["swap in the new commit's hook bundles", swap, prelinked],
+        [
+          `check out ${to}`,
+          swappedMove(() => git("checkout", "-q", "-B", "main", `refs/tags/${to}`)),
+        ],
       ]
     : [
         ["fetch origin main", () => git("fetch", "-q", "origin", "main")],
         ["a tree with no uncommitted changes, off main", cleanTree],
         ["link the new commit's dependencies", prelink, prelinked],
-        ["merge --ff-only origin/main, or move to main there", move],
+        ["swap in the new commit's hook bundles", swap, prelinked],
+        ["merge --ff-only origin/main, or move to main there", swappedMove(move)],
       ]
   for (const [name, step, state = "the checkout is as it was"] of steps)
     if ((await step()).code !== 0) {
