@@ -217,6 +217,47 @@ describe("an accept decision (PG-658)", () => {
   })
 })
 
+describe("a guard decision (PG-1090)", () => {
+  const guard = {
+    key: "slack.gatedSends",
+    scope: "acme-test",
+    type: "guard",
+    value: { path: "/made/up/send", selfDm: "D0MADEUP1", servers: ["made-up-slack"] },
+    why: "Back the org's no-Slack-writes guard",
+  }
+  const approved = (preview: object, set: object) =>
+    item({
+      answer: { at: "2026-11-06T03:00:00.000Z", choice: "approve", set },
+      delivery: { at: "x", status: "delivered", via: "session" },
+      kind: "decision",
+      preview,
+      status: "approved",
+    } as never)
+
+  test("needs you while open, and reads Guard setting", () => {
+    const asked = item({ kind: "decision", preview: guard } as never)
+    expect(kindWord(asked)).toBe("Guard setting")
+    expect(needsYou(asked)).toBe(true)
+  })
+
+  test("reads the line the dashboard wrote, done or failed by its exit code", () => {
+    const ran = approved(guard, { exitCode: 0, line: "set slack.gatedSends at acme-test to {}" })
+    expect(outcomeLine(ran)).toBe(
+      "Approve · Set slack.gatedSends · Guard setting: set slack.gatedSends at acme-test to {}",
+    )
+    expect(itemState(ran)).toBe("done")
+    const { value: _, ...cleared } = guard
+    const refused = approved(cleared, {
+      exitCode: 1,
+      line: "slack.gatedSends has no value at acme-test: it is at its default",
+    })
+    expect(outcomeLine(refused)).toBe(
+      "Approve · Take slack.gatedSends back to its default · Guard setting failed (exit 1): slack.gatedSends has no value at acme-test: it is at its default",
+    )
+    expect(itemState(refused)).toBe("failed")
+  })
+})
+
 describe("an apps decision and a grant decision (PG-658)", () => {
   const apps = { app: "Notes", change: "add", type: "apps", why: "It holds your notes" }
   const grant = { permission: "accessibility", type: "grant", why: "It drives Notes" }
