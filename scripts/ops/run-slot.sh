@@ -685,6 +685,9 @@ while j < len(raw):
             else:
                 depth += (raw[end] == "(") - (raw[end] == ")")
             end += 1
+        # a case inside it closes its patterns with a ) the count reads as the substitution's end, so it reads to the script's end, failing closed
+        if re.search(r"(^|[\s;&|(`])case\s", raw[j + 1 : end]):
+            end = len(raw)
         subs.append(raw[j + 1 : end])
         j = end
         continue
