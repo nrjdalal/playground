@@ -1331,6 +1331,26 @@ describe("the supervisor's build before the stop queues in run-slot (#1099)", ()
     expect(existsSync(stage)).toBe(false)
   })
 
+  // the clone waits as a job of the supervisor's own shell, in a group of its own that run.sh's group stop misses, so the supervisor's trap stops it by its recorded pid
+  test("the supervisor's own stop stops a clone waiting in run-slot by its pid, then the stack, and builds nothing", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "slot-slow"), "clone 60\n")
+    const trap = script.match(/^trap 'say "supervisor stopping".*$/m)?.[0]
+    if (!trap) throw new Error("the supervisor's stop trap is gone from supervisor.sh")
+    const rolled = await slotRun(
+      `${trap}\nstop_all() { sleep 0.5; echo stop >> ${keptCalls}; kill $stack 2>/dev/null; }\n(sleep 1; kill -TERM $$) & running=${c1}; roll_to ${c2} canary`,
+      c1,
+    )
+    expect(rolled.code).toBe(0)
+    expect(await keptLines(/^(slot|build|stop|serve)/)).toEqual([
+      steps[0],
+      "slot stopped clone",
+      "stop",
+    ])
+    expect(await keptLines(/^say supervisor stopping/)).toHaveLength(1)
+  })
+
   test("a roll skipped for a stack that went down rolls on a later try once the stack serves again", async () => {
     fresh()
     await slotted()
