@@ -790,6 +790,23 @@ describe("commit-lane forms that cost no build", () => {
       [PAGE],
       [],
     ],
+    // a merge runs commit-msg alone, never pre-commit, so a merge with its push builds nothing
+    [
+      "git merge --no-edit then a push",
+      "cd ROOT && git merge --no-edit origin/canary && git push origin HEAD:x",
+      [],
+      [],
+      [],
+    ],
+    ["git -C R merge --no-edit alone", "git -C ROOT merge --no-edit origin/canary", [], [], []],
+    ["git merge --ff-only", "cd ROOT && git merge --ff-only origin/canary", [], [], []],
+    [
+      "git merge --no-ff --no-edit then a push",
+      "cd ROOT && git merge --no-ff --no-edit origin/canary && git push origin x",
+      [],
+      [],
+      [],
+    ],
   ] as const)
     test(`a chain with ${what} takes run-slot-commit beside a big run`, async () => {
       const m = repo({ idle: 30 }, [...staged], [...unstaged], LEFTHOOK, [...untracked])
@@ -860,6 +877,16 @@ describe("commit-lane forms that cost no build", () => {
       [PAGE],
       [],
     ],
+    // a merge option past --no-edit, --ff, --ff-only and --no-ff, or a ref sh expands, is off the list
+    [
+      "git merge -s ours",
+      "cd ROOT && git merge -s ours origin/canary && git push origin x",
+      [],
+      [],
+    ],
+    ["git merge -X theirs", "cd ROOT && git merge --no-edit -X theirs origin/canary", [], []],
+    ["git merge -m <msg>", "cd ROOT && git merge --no-edit -m x origin/canary", [], []],
+    ["git merge of a $REF", 'cd ROOT && git merge --no-edit "$REF"', [], []],
   ] as const)
     test(`a chain with ${what} still waits off the commit lane`, async () => {
       const m = repo({ idle: 30 }, ["docs/notes.md"], [...unstaged], LEFTHOOK, [...untracked])
@@ -870,6 +897,22 @@ describe("commit-lane forms that cost no build", () => {
           : chain(m, steps)
       expect(await takes(m, argv)).toBe("waited")
     })
+
+  // a merge that stops on a conflict exits non-zero, so the push after its && never runs
+  test("a chain whose merge stops on a conflict takes run-slot-commit and pushes nothing", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    writeFileSync(
+      join(m.bin, "git"),
+      readFileSync(join(m.bin, "git"), "utf8").replace(
+        "#!/bin/bash\n",
+        '#!/bin/bash\ncase " $* " in *" merge "*" conflict "*) echo CONFLICT >&2; exit 1 ;; esac\n',
+      ),
+    )
+    m.hold("run-slot", 3, "big")
+    const steps = "cd ROOT && git merge --no-edit conflict && git push origin pushed"
+    expect(await takes(m, chain(m, steps))).toBe("run-slot-commit")
+    expect(existsSync(join(m.root, "pushed"))).toBe(false)
+  })
 
   // 8: bash -c reads -e, -u, -x, -v and -o pipefail as options before its script, which zsh -c runs as sh does
   for (const argv of [
