@@ -231,6 +231,13 @@ test("run-slot.sh kind prints the lane a command takes and runs nothing", async 
   }
   expect(await kind(["cp", "-R", "node_modules", join(m.root, "made")])).toBe("clone")
   expect(await kind(["touch", join(m.root, "made")])).toBe("")
+  // review round 1: a run run-slot refuses reads as refuse, a dev stack's among them
+  expect(await kind(["bun", "run", "dev"])).toBe("refuse")
+  for (const shell of ["sh", "dash", "ksh"])
+    expect([
+      shell,
+      await kind([shell, "-c", `git -C ${m.root} commit -m x; git -C ${m.root} push origin`]),
+    ]).toEqual([shell, "commit"])
   expect(existsSync(join(m.root, "made"))).toBe(false)
   expect(existsSync(join(m.ops, "run-slot.runs.log"))).toBe(false)
   expect(existsSync(join(m.ops, "run-slot.waiters"))).toBe(false)

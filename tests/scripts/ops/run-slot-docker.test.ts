@@ -310,6 +310,54 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       expect(r.err).toContain(CANNOT)
     })
 
+    // review round 1: a wrapper option's value is never its program, so a docker word there leaves the shell after it to be read
+    for (const argv of [
+      ["sudo", "-g", "docker", "sh", "-c", "docker build ."],
+      ["sudo", "-u", "docker", "bash", "-c", "docker compose build web"],
+      ["env", "-u", "docker", "sh", "-c", "docker build ."],
+      ["timeout", "-k", "docker", "600", "sh", "-c", "docker build ."],
+      ["xargs", "-I", "docker", "sh", "-c", "docker build ."],
+    ])
+      test(`a docker word as a wrapper option's value: ${argv.slice(0, 3).join(" ")}`, async () => {
+        const r = await run(argv)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CHAIN)
+      })
+
+    // review round 1: a $ word behind a wrapper word, and a command substitution in any word, name their program only when the shell runs them
+    for (const script of [
+      "D=docker; command $D build .",
+      "D=docker; time $D build .",
+      'echo "$(docker build .)"',
+      "x=`docker build .`",
+      "echo `docker build .`",
+      "`echo docker` build .",
+    ])
+      test(`a step it cannot read: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CANNOT)
+      })
+
+    // a command substitution that reads portless's URL starts no container, so it keeps its lane
+    test("while a portless URL read in a substitution keeps its lane", async () => {
+      const m = dockerMachine()
+      const p = Bun.spawn(
+        [
+          "bash",
+          SCRIPT,
+          "kind",
+          "--",
+          "sh",
+          "-c",
+          'curl -s "$(bunx portless get api.playground)/api/health"',
+        ],
+        { cwd: m.root, env: m.env(), stdout: "pipe" },
+      )
+      expect(await p.exited).toBe(0)
+      expect((await new Response(p.stdout).text()).trim()).toBe("")
+    })
+
     test("while a wrapped chain that names no docker runs as before", async () => {
       const r = await run(["nice", "sh", "-c", 'echo hi && touch "$MARKER"'])
       expect(r.code).toBe(0)

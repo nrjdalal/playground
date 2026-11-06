@@ -221,7 +221,8 @@ const GROUPING = new Set(["}", "done", "esac", "fi"])
 export const ASSIGN = /^[A-Za-z_]\w*=/
 // Each wrapper's options, A to Z: its flags, then the options that take a value, short and long; parse reads a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, and reads an option missing here both as a flag and as taking the next word, so a hook judges the program under each
 type Options = { flags: Set<string>; values: Set<string> }
-const WRAPPERS = new Map<string, Options>(
+// run-slot.sh's CHAIN_WRAPPER_OPTIONS mirrors these lists, which a test holds equal, so its chain reader reads past the same options
+export const WRAPPERS = new Map<string, Options>(
   Object.entries({
     builtin: ["", ""],
     busybox: ["", ""],
@@ -254,8 +255,6 @@ const WRAPPERS = new Map<string, Options>(
     { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) },
   ]),
 )
-// The wrapper names, A to Z, which run-slot.sh's CHAIN_WRAPPERS mirrors so its chain reader reads past the same words
-export const WRAPPER_NAMES: readonly string[] = [...WRAPPERS.keys()].sort()
 
 // Where a wrapper's option word leaves its value: "own" when it takes none or carries it, "next" when the next word is its value, or undefined for an option the wrapper's list lacks
 function optionValue(word: string, { flags, values }: Options): "next" | "own" | undefined {
@@ -440,7 +439,7 @@ export function codeFed(commands: Command[]): Map<Command, Fed> {
 }
 
 // Wrappers that take one positional argument (a count or a duration) before the command.
-const COUNTED = new Set(["repeat", "timeout"])
+export const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"])
 // The script names a shell or a source reads stdin through
 const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
