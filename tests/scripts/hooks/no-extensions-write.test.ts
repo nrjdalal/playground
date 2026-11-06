@@ -1737,6 +1737,62 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "GNU rm by its gnubin path past an option after its first operand after a cd to a variable",
       `cd "$X"; /opt/homebrew/opt/coreutils/libexec/gnubin/rm /tmp/x -f`,
     ],
+    [
+      "GNU mv to an absolute target folder after a cd to a variable",
+      `cd "$X"; gmv -t /tmp/d /tmp/f`,
+    ],
+    [
+      "GNU mv to an absolute target folder attached after a cd to a variable",
+      `cd "$X"; gmv -t/tmp/d /tmp/f`,
+    ],
+    [
+      "GNU mv to an absolute target folder by its long option after a cd to a variable",
+      `cd "$X"; gmv --target-directory=/tmp/d /tmp/f`,
+    ],
+    [
+      "rsync with an absolute log file attached after a cd to a variable",
+      `cd "$X"; rsync -a --log-file=/tmp/l /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute temp folder attached to its short option after a cd to a variable",
+      `cd "$X"; rsync -a -T/tmp/t /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a filter rule holding a T after a cd to a variable",
+      `cd "$X"; rsync -a -f'+ Tx' /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute partial folder by a shortened long option after a cd to a variable",
+      `cd "$X"; rsync -a --partial-d=/tmp/p /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a log format by a shortened long option after a cd to a variable",
+      `cd "$X"; rsync -a --log-file-f=x /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a relative link folder it only reads after a cd to a variable",
+      `cd "$X"; rsync -a --link-dest=prev /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute partial folder as the next word after a cd to a variable",
+      `cd "$X"; rsync -a --partial-dir /tmp/p /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute temp folder after a cluster ending in its short option after a cd to a variable",
+      `cd "$X"; rsync -aT /tmp/t /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a dash-led block size after its short option after a cd to a variable",
+      `cd "$X"; rsync -a -B -1 /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with its partial flag, a prefix of its partial folder option, after a cd to a variable",
+      `cd "$X"; rsync -a --partial --progress /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with its backup flag, a prefix of its backup folder option, after a cd to a variable",
+      `cd "$X"; rsync -a --backup --suffix=.bak /tmp/a /tmp/b`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
