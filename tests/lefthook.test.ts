@@ -624,23 +624,25 @@ test("the pre-commit rule test runs when the rules change, and a broken pin refu
 }, 60_000)
 
 // The trace ratchet's test counts the whole tree against counts.json, so it runs in a clone of this repo at its head, with this checkout's installs, and lefthook gets the step as lefthook.yml has it.
-test("the pre-commit trace count refuses a commit that raises a count, and a commit of images alone skips it", async () => {
+test("the pre-commit trace count refuses a commit that raises a count or holds a key on this machine's list, and a commit of images alone skips it", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
     "pre-commit": { commands: Record<string, Record<string, unknown>>; piped?: boolean }
   }
   const step = config["pre-commit"].commands["trace-count"]
   expect(step).toBeDefined()
   const dir = mkdtempSync(join(tmpdir(), "lefthook-trace-"))
-  const run = (argv: string[]) => {
-    const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
+  // a made-up list in a data folder of its own, which the sandbox's scratch home lacks, so only the rows that name it read one
+  const data = mkdtempSync(join(tmpdir(), "lefthook-trace-data-"))
+  const run = (argv: string[], env = SCRATCH_ENV) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env, stdin: "ignore" })
     return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
   }
   const git = (...args: string[]) =>
     run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args])
-  const hookWith = async (files: Record<string, string>) => {
+  const hookWith = async (files: Record<string, string>, env = SCRATCH_ENV) => {
     for (const [file, text] of Object.entries(files)) await Bun.write(join(dir, file), text)
     expect(git("add", ...Object.keys(files))).toMatchObject({ code: 0 })
-    const hook = run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+    const hook = run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"], env)
     expect(git("reset", "-q", "--hard")).toMatchObject({ code: 0 })
     expect(git("clean", "-q", "-fd")).toMatchObject({ code: 0 })
     return { ...hook, skipped: hook.out.includes("trace-count (skip)") }
@@ -680,8 +682,29 @@ test("the pre-commit trace count refuses a commit that raises a count, and a com
       code: 0,
       skipped: true,
     })
+
+    // the list step reads the data folder's list: a staged file holding a listed key fails, and another made-up key passes (PG-1211)
+    const listed = { ...SCRATCH_ENV, PLAYGROUND_DATA_DIR: data }
+    mkdirSync(join(data, "extensions", "hooks"), { recursive: true })
+    await Bun.write(
+      join(data, "extensions", "hooks", "no-public-leak.json"),
+      JSON.stringify({ companies: [], handles: [], linearKeys: ["QZX"], names: [], slackIds: [] }),
+    )
+    const held = await hookWith(
+      { "docs/trace-scratch.md": `Filed as ${["QZX", "12"].join("-")}.\n` },
+      listed,
+    )
+    expect(held.code).not.toBe(0)
+    expect(held.out).toContain("linearKeys: 1 in the tree")
+    expect(
+      await hookWith(
+        { "docs/trace-scratch.md": `Filed as ${["MADE", "12"].join("-")}.\n` },
+        listed,
+      ),
+    ).toMatchObject({ code: 0, skipped: false })
   } finally {
     rmSync(dir, { force: true, recursive: true })
+    rmSync(data, { force: true, recursive: true })
   }
 }, 120_000)
 

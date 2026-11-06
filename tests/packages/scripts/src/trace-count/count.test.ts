@@ -12,6 +12,7 @@ import {
   KEPT,
   type Kept,
   list,
+  listGate,
   located,
   lowered,
   refusal,
@@ -475,5 +476,46 @@ describe("a refusal names where each hit is", () => {
     expect(located(grown, ["issueRefs"], undefined, undefined, [kept])).toEqual([
       "docs/a.md:1: issueRefs",
     ])
+  })
+})
+
+// The commit's list step reads this machine's list, which the sandboxed tree test cannot see, so a listed key in a staged file fails the commit (PG-1211); each key is built at run time, so this file adds no hit of its own.
+describe("the commit's list gate", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "trace-count-gate-"))
+  afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+  const key = (team: string) => [team, "12"].join("-")
+  const listAt = (value: unknown): string => {
+    const path = join(scratch, `list-${crypto.randomUUID()}.json`)
+    writeFileSync(path, JSON.stringify(value))
+    return path
+  }
+  const treeWith = (text: string): string => {
+    const root = join(scratch, `tree-${crypto.randomUUID()}`)
+    mkdirSync(join(root, "docs"), { recursive: true })
+    writeFileSync(join(root, "docs", "a.md"), `${text}\n`)
+    return root
+  }
+  const made = { ...LIST, linearKeys: ["QZX"] }
+
+  test("a file holding a listed key fails, naming the kind and its line, and another made-up key passes", async () => {
+    const refused = await listGate(treeWith(`Filed as ${key("QZX")}.`), listAt(made))
+    expect(refused).toContain("linearKeys: 1 in the tree, counts.json allows 0")
+    expect(refused).toContain("docs/a.md:1: linearKeys")
+    expect(await listGate(treeWith(`Filed as ${key("MADE")}.`), listAt(made))).toBe("")
+  })
+
+  test("a partial list still gates the keys it holds", async () => {
+    const partial = { ...EMPTY_LIST, linearKeys: ["QZX"] }
+    expect(await listGate(treeWith(`Filed as ${key("QZX")}.`), listAt(partial))).toContain(
+      "linearKeys: 1 in the tree",
+    )
+  })
+
+  test("no list on the machine counts nothing, and a file that is not the list is refused", async () => {
+    const root = treeWith(`Filed as ${key("QZX")}.`)
+    expect(await listGate(root, join(scratch, "none.json"))).toBe("")
+    expect(await listGate(root, listAt({ names: "Quilla" }))).toContain(
+      "is not no-public-leak's list",
+    )
   })
 })
