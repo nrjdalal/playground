@@ -3,7 +3,7 @@ import { type Group } from "./_shared"
 // The forms the review of this file's source found refused, with #603's; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
-    folders: ["home", "worktree"],
+    folders: ["checkout", "home"],
     guards: ["no-extensions-write"],
     rows: () => [
       [
