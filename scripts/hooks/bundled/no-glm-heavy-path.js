@@ -5589,7 +5589,37 @@ function codeFed(commands) {
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/;
+var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]/;
+var LEADS = new Set([
+  "!",
+  "builtin",
+  "command",
+  "do",
+  "elif",
+  "else",
+  "exec",
+  "if",
+  "nocorrect",
+  "noglob",
+  "then",
+  "time",
+  "until",
+  "while"
+]);
+function sources(joined) {
+  let command = true;
+  for (const [word] of joined.matchAll(/[;&|(){}\n]|[^\s;&|(){}]+/g)) {
+    if (/^[;&|(){}\n]$/.test(word))
+      command = true;
+    else if (!command)
+      continue;
+    else if (word === "source" || word === "." || word === "eval")
+      return true;
+    else if (!LEADS.has(word) && !/^\w+=/.test(word))
+      command = false;
+  }
+  return false;
+}
 var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
 var zshSplits = (line) => {
   if (ZSH_SPLITS.test(line))
@@ -5600,6 +5630,8 @@ var zshSplits = (line) => {
       return true;
   }
   const joined = line.replace(/[\\'"]/g, "");
+  if (sources(joined))
+    return true;
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
   const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
   return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
