@@ -5857,6 +5857,7 @@ var WRAPPERS = new Map(Object.entries({
   name,
   { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) }
 ]));
+var WRAPPER_NAMES = [...WRAPPERS.keys()].sort();
 function optionValue(word, { flags, values }) {
   if (word.startsWith("--")) {
     const eq = word.indexOf("=");

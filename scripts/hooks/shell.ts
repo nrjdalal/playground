@@ -254,6 +254,8 @@ const WRAPPERS = new Map<string, Options>(
     { flags: new Set(flags.split(" ")), values: new Set(values.split(" ")) },
   ]),
 )
+// The wrapper names, A to Z, which run-slot.sh's CHAIN_WRAPPERS mirrors so its chain reader reads past the same words
+export const WRAPPER_NAMES: readonly string[] = [...WRAPPERS.keys()].sort()
 
 // Where a wrapper's option word leaves its value: "own" when it takes none or carries it, "next" when the next word is its value, or undefined for an option the wrapper's list lacks
 function optionValue(word: string, { flags, values }: Options): "next" | "own" | undefined {
