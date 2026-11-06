@@ -50,8 +50,11 @@ How the Dashboard shows each role, how a session is named and when a dev stack r
 - Questions, reports and results go up by `SendMessage`, never through `AskUserQuestion`.
 - A message opens with its content, never with your own name, since the Dashboard shows the sender.
   Read [rules/voice.md](../../rules/voice.md) before you name a session or list PR status for the owner.
-- A session's effort, model, permission mode and settings are the owner's: tell him which pane to type into, rather than asking a running session to change its own.
-  The one path past a pane is effort: a lead starts or resumes a session at another effort with spawn.sh's `--effort`, on the owner's word relayed in the **override** shape (SESSIONS.md).
+- A session's effort, model, permission mode and settings are the owner's, changed by the owner's act or word alone, never by a running session asked to change its own.
+  The model and effort of a dispatcher, the Assistant and the hosted session (the one the Dashboard runs on the Agent SDK) are the owner's pick in the menu left of Send in that session's Dashboard composer.
+  Any other session's model or effort changes when a lead starts or resumes it with spawn.sh's `--model` or `--effort`, on the owner's word relayed through the dispatcher in the **override** shape (SESSIONS.md).
+  The hosted session's permission mode is the owner's pick in its composer's mode menu, while approvals are on.
+  Any other session's permission mode and settings stay as spawn.sh's launch flags and the factory's settings set them, and a change to them is a PR to those, until the Dashboard control on a session's row lands (the issue "every step that needs the owner is one GUI action").
 
 ## Standing rules
 
