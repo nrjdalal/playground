@@ -150,6 +150,62 @@ describe("what bun run ask takes", () => {
     )
   })
 
+  describe("an ask holds several questions, each with its own choices (#1250)", () => {
+    const q = (n: number) =>
+      Array.from({ length: n }, (_, at) => ({
+        options: [{ label: "Yes" }, { label: "No" }],
+        question: `Question ${at + 1}?`,
+      }))
+    const asksQ = (over: object) =>
+      inboxInputSchema.safeParse(decision({ ...PREVIEWS.ask, ...over }))
+
+    test("a questions list takes 2 to 20 entries and refuses 1 or 21", () => {
+      expect(asksQ({ questions: q(2) }).success).toBe(true)
+      expect(asksQ({ questions: q(20) }).success).toBe(true)
+      expect(asksQ({ questions: q(1) }).success).toBe(false)
+      expect(asksQ({ questions: q(21) }).success).toBe(false)
+    })
+
+    test("each entry has its own question and 1 to 5 options, recommended within them", () => {
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ description: "soak a day", label: "staging" }], question: "Base?" },
+            { options: [{ label: "now" }, { label: "later" }], question: "When?" },
+          ],
+        }).success,
+      ).toBe(true)
+      const six = Array.from({ length: 6 }, (_, at) => ({ label: `Way ${at + 1}` }))
+      expect(asksQ({ questions: [{ options: six, question: "Q?" }, ...q(1)] }).success).toBe(false)
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ label: "a" }, { label: "b" }], question: "Q?", recommended: 0 },
+            { options: [{ label: "c" }], question: "R?" },
+          ],
+        }).success,
+      ).toBe(true)
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ label: "a" }, { label: "b" }], question: "Q?", recommended: 2 },
+            ...q(1),
+          ],
+        }).success,
+      ).toBe(false)
+    })
+
+    test("a questions list and top-level options or approve are mutually exclusive", () => {
+      expect(asksQ({ options: OPTIONS, questions: q(2) }).success).toBe(false)
+      expect(asksQ({ approve: "Do it", questions: q(2) }).success).toBe(false)
+    })
+
+    test("an ask with no questions is unchanged", () => {
+      expect(inboxInputSchema.safeParse(decision(PREVIEWS.ask)).success).toBe(true)
+      expect(asksQ({ options: OPTIONS }).success).toBe(true)
+    })
+  })
+
   test("a draft is a recipient and the words, and an update an outcome with an optional link", () => {
     expect(
       inboxInputSchema.safeParse({
