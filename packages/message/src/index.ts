@@ -36,7 +36,7 @@ export const invitePath = (inviteId: string) => `/yard/invites/${encodeURICompon
 // Where the hosted API's relay to the owner's own Mac sits: the hosted web's dashboard reads go to this prefix plus their own path.
 export const RELAY_PREFIX = "/api/v1/yard/relay"
 
-// The Inbox cards a relayed answer may reach, by their kind (answerKind), A to Z: each one whose poster carries out the answer. Every other kind stays on the Mac, one added later included: an Approve the Mac carries out itself on its own settings and permissions (an extension accept, an apps change, a grant, a guard setting), a delete, and a secret ask, whose value goes to its sink through its own Submit alone.
+// The Inbox cards a relayed answer may reach, by their kind (answerKind), A to Z: each one whose poster carries out the answer. Every other kind stays on the Mac, one added later included: an Approve the Mac carries out itself on its own settings and permissions (an extension accept, an apps change, a grant, a guard setting), a delete, a secret ask, whose value goes to its sink through its own Submit alone, and a reveal card, whose value shows on the Mac's own click.
 export const RELAY_ANSWER_KINDS = [
   "ask",
   "budget",
