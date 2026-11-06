@@ -913,6 +913,7 @@ describe("a quoted argument is read as a command line only where a program runs 
       "env's lone dash ahead of a harmless program",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - ls",
     ],
+    ["a redirect through a variable set to a scratch path", "D=/tmp/scratch-dir; echo x > $D/x"],
     [
       "env's lone dash and an unset ahead of a harmless program",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - -u X ls",
@@ -1638,6 +1639,11 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["the roster's writer", "bun scripts/roster.ts set w status=working"],
     ["a write in a worktree", "echo x > notes.txt"],
     ["rm elsewhere", "rm -rf /tmp/scratch-dir"],
+    ["a redirect through a variable set to a scratch path", "D=/tmp/scratch-dir; echo x > $D/x"],
+    [
+      "an append through a variable exported to a scratch path",
+      'export D=/tmp/scratch-dir; echo x >> "$D/x"',
+    ],
     ["a glob elsewhere", "rm -rf /tmp/scratch-dir/*"],
     ["a printer naming the root", `echo ${ROOT}`],
     ["tr with a bare slash", "tr / _ < /tmp/x"],
