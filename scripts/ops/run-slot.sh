@@ -544,6 +544,7 @@ try:
         lines.append(buf)
         buf = None
     text = "\n".join(lines + ([buf] if buf is not None else []))
+    raw = text
     # each ?, *, [, {, # or ~ inside quotes or after a backslash becomes \x02 to \x07, which sh leaves as written, so plain() tells a quoted message's from one sh expands
     held, out, quote, esc = "?*[{#~", [], "", False
     if any(chr(n) in text for n in range(2, 8)):
@@ -665,6 +666,33 @@ def can_be(w, names):
 
 reserved = {"!", "{", "coproc", "do", "elif", "else", "function", "if", "then", "until", "while"}
 unread = any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3])
+# a command substitution's script ($( ) or a backquote, outside single quotes), split at blanks, quotes and ; | & ( ) < > with backslashes dropped: a glob or brace in it that can expand to docker, podman or a chain shell reads as one it cannot read, wherever it sits (a case word or pattern, or a word it does not lead), so docker_kind reads its pieces
+subs, j, quote = [], 0, ""
+while j < len(raw):
+    c = raw[j]
+    if c == "\\" and quote != "'":
+        j += 2
+        continue
+    if c in "'\"" and quote in ("", c):
+        quote = "" if quote else c
+    elif quote != "'" and (c == "`" or raw.startswith("$(", j)):
+        end, depth = j + (1 if c == "`" else 2), 1
+        while end < len(raw) and depth:
+            if raw[end] == "\\":
+                end += 1
+            elif c == "`":
+                depth -= raw[end] == "`"
+            else:
+                depth += (raw[end] == "(") - (raw[end] == ")")
+            end += 1
+        subs.append(raw[j + 1 : end])
+        j = end
+        continue
+    j += 1
+for w in re.split(r"[\s;|&()<>\"'`]+", " ".join(subs).replace("\\", "")):
+    brace = "{" in w and re.search(r",|\.\.", w)
+    if (brace or re.search(r"[*?[]", w)) and can_be(w, {"docker", "podman"} | shells):
+        unread = True
 # each open case's state: pat while its patterns run (after `case … in`, or after ;;, ;& or ;;&, through each | up to the closing )), cmd for the arm's commands after that )
 cases = []
 for k, step in enumerate(steps):
