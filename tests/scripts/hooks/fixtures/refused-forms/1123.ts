@@ -86,7 +86,7 @@ export const groups: Group[] = [
     ],
   },
   {
-    folders: ["worktree"],
+    folders: ["checkout"],
     guards: ["no-unslotted-run"],
     rows: () => [["next build by bun x with next in capitals", "bun x NEXT build"]],
   },
