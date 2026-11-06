@@ -3,6 +3,9 @@ import type { Context } from "../../../../../packages/scripts/src/ops-tick/tick"
 // One command's answer: what it writes to stdout and to stderr, and its exit code.
 export type Answer = { code?: number; err?: string; out?: string }
 
+// What fakeRun answers, by the first key a command's joined argv holds: an Answer, or a string as its stdout alone.
+export type Answers = Record<string, Answer | string>
+
 // gh api graphql's answer with errors, as measured: the body on stdout with no newline after it, its failed aliases null in data, each error's message on stderr after "gh: ", and exit 1.
 export const ghErrors = (repository: Record<string, unknown>, messages: string[]): Answer => ({
   code: 1,
@@ -21,7 +24,7 @@ const bunRunErr = (argv: string[], code: number, err: string): string => {
 }
 
 // A fake ctx.run that answers each command by the first key its argv, joined by spaces, holds, and returns out as the real run does: stdout, then stderr, with bun run's own lines; a string answer is stdout alone. Every argv and stdin is recorded.
-export const fakeRun = (answers: Record<string, Answer | string> = {}) => {
+export const fakeRun = (answers: Answers = {}) => {
   const runs: string[][] = []
   const inputs: string[] = []
   const run: Context["run"] = async (argv, _timeoutMs, stdin) => {
