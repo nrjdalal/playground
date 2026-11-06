@@ -22,6 +22,7 @@ import {
   mainCheckoutOf,
   prefixOf,
   preflight,
+  setNextDevAside,
   type SettingsRead,
   syncAliases,
 } from "@/lib/dev/launch"
@@ -136,6 +137,14 @@ if (!dry) {
   const checked = await preflight(checkout, readSettings, { root: ROOT })
   if (!checked.ok) {
     console.error(`dev: refusing to start: ${checked.refusal}`)
+    leave(1)
+  }
+  try {
+    const aside = setNextDevAside(ROOT, { ...checkout, serving })
+    if (aside)
+      console.error(`dev: the web's dev cache moved aside to ${aside}, so next dev starts fresh`)
+  } catch (error) {
+    console.error(`dev: refusing to start: ${error instanceof Error ? error.message : error}`)
     leave(1)
   }
   const portlessOwn = serviceDir(env.PORTLESS_STATE_DIR || portlessDir())
