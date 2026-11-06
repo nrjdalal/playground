@@ -112,14 +112,16 @@ export async function startPass({
   )
   // The roster keeps no end time, so the job notes the day it first sees each row ended, on every beat, stale or outside the window too; a ticket whose row ended today never starts again today. A row already ended on the job's very first beat, with no state yet, ended before the job ran and counts on no day.
   const day = ctx.now.toISOString().slice(0, 10)
-  const rows = (await readJson<{ agents?: Row[] }>(join(data, "roster.json")))?.agents ?? []
+  const roster = await readJson<{ agents?: Row[] }>(join(data, "roster.json"))
+  const rows = roster?.agents ?? []
   const rowOf = (session: string) => rows.find((r) => r.name === session)
   const rowsFor = (id: string) =>
     rows.filter((r) => r.ticket === id || r.title === id || (r.title ?? "").startsWith(`${id} `))
   const firstBeat = state.watchingSince === undefined
   for (const r of rows)
     if (r.name && ENDED.has(r.status ?? "")) state.ended[r.name] ??= kept ? day : ""
-  for (const name of Object.keys(state.ended))
+  // a beat that reads no roster file keeps every ended day it noted
+  for (const name of roster ? Object.keys(state.ended) : [])
     if (!rows.some((r) => r.name === name && ENDED.has(r.status ?? ""))) delete state.ended[name]
   const relay = join(data, "firefighting.json")
   const ff = await readJson<{
@@ -207,6 +209,8 @@ export async function startPass({
     .sort((a, b) => rankOf(a) - rankOf(b) || (a.shownAt ?? Infinity) - (b.shownAt ?? Infinity))
   // An Urgent start passes this job's own focus, which spawn.sh's start file never does: the focus is lowered for the start and raised again for the session that held it.
   let heldBy: string | undefined
+  // an Urgent started in this pass holds every later High, Medium or Low in it, as the focus raised after the loop will
+  let urgentStarted: string | undefined
   for (const line of queue) {
     const id = line.id
     const ended = endedToday(id)
@@ -217,7 +221,7 @@ export async function startPass({
     if (!isUrgent(line) && inProgress >= CAP) {
       await tell(
         id,
-        `Waiting on ${id} (${line.urgency ?? "no urgency"}): ${inProgress} in progress, the cap is ${CAP}`,
+        `Waiting on ${id} (${line.urgency ?? "no urgency"}): the cap of ${CAP} in progress is reached`,
       )
       continue
     }
@@ -247,10 +251,11 @@ export async function startPass({
     }
     // spawn.sh lets every --firefighting start past focus while the relay's stop file stands, and cannot tell an Urgent from the rest, so the job holds its own: a High, Medium or Low waits while any focus stands.
     const f = await standing(data, ctx.now)
-    if (f && !isUrgent(line)) {
+    const holder = f?.session ?? heldBy ?? urgentStarted
+    if (holder && !isUrgent(line)) {
       await tell(
         id,
-        `Waiting on ${id} (${line.urgency ?? "no urgency"}): focus stands for ${f.session}`,
+        `Waiting on ${id} (${line.urgency ?? "no urgency"}): focus stands for ${holder}`,
       )
       continue
     }
@@ -292,6 +297,7 @@ export async function startPass({
     }
     state.started[id] = session
     delete state.named[id]
+    if (isUrgent(line)) urgentStarted = session
     inProgress++
     await save()
     const set = await ctx.run([

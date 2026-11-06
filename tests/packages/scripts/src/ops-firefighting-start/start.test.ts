@@ -208,22 +208,54 @@ describe("ops-firefighting-start", () => {
     expect(s.focus()).toEqual([])
   })
 
-  test("Urgent, High, Medium, Low, then oldest first; at most 2 in progress, each waiting line told once", async () => {
+  test("High, Medium, Low, then oldest first; at most 2 in progress, each waiting line told once", async () => {
     const s = setup({
       ...line("MADE-1", "Medium", 100),
       ...line("MADE-2", "Low", 50),
       ...line("ALSO-3", "High", 300),
-      ...line("MADE-4", "Urgent", 400),
       ...line("MADE-5", "Medium", 90),
     })
     await s.pass()
     await s.pass()
-    expect(s.titles()).toEqual(["MADE-4 firefight", "ALSO-3 firefight"])
-    expect(s.sent.filter((t) => t.startsWith("Waiting on")).map((t) => t.split(" ")[2])).toEqual([
-      "MADE-5",
-      "MADE-1",
-      "MADE-2",
+    expect(s.titles()).toEqual(["ALSO-3 firefight", "MADE-5 firefight"])
+    expect(s.sent.filter((t) => t.startsWith("Waiting on"))).toEqual([
+      "Waiting on MADE-1 (Medium): the cap of 2 in progress is reached",
+      "Waiting on MADE-2 (Low): the cap of 2 in progress is reached",
     ])
+  })
+
+  test("an Urgent starts first and alone in its beat, and the High after it waits under its focus, told once (#1160)", async () => {
+    const s = setup({ ...line("ALSO-3", "High", 300), ...line("MADE-4", "Urgent", 400) })
+    await s.pass()
+    await s.pass()
+    expect(s.titles()).toEqual(["MADE-4 firefight"])
+    expect(s.sent.filter((t) => t.startsWith("Waiting on"))).toEqual([
+      "Waiting on ALSO-3 (High): focus stands for worker-made-up-1",
+    ])
+  })
+
+  test("at 04:00Z the window opens on an Urgent and a Medium queued overnight, and the Urgent starts alone (#1160)", async () => {
+    const s = setup(
+      { ...line("MADE-1", "Urgent", 1), ...line("MADE-2", "Medium", 2) },
+      {},
+      { wrote: NOW.getTime() + (20 * 60 - 1) * MINUTE },
+    )
+    s.later(20 * 60)
+    await s.pass({ ...CONFIG, hours: "04:00-12:00" })
+    expect(s.titles()).toEqual(["MADE-1 firefight"])
+    expect(s.sent).toContain("Waiting on MADE-2 (Medium): focus stands for worker-made-up-1")
+  })
+
+  test("a Medium queued after a second Urgent started past the job's own focus waits in that beat (#1160)", async () => {
+    const s = setup(
+      { ...line("MADE-2", "Urgent", 2), ...line("MADE-3", "Medium", 3) },
+      { "focus.json": focusFile(`${REASON} MADE-1 open`, 60, "ff-first-worker") },
+    )
+    await s.pass()
+    expect(s.titles()).toEqual(["MADE-2 firefight"])
+    expect(s.sent.some((t) => t.startsWith("Waiting on MADE-3 (Medium): focus stands for"))).toBe(
+      true,
+    )
   })
 
   test("an Urgent starts while 2 others are in progress, and focus stands for its session", async () => {
@@ -446,7 +478,7 @@ describe("ops-firefighting-start", () => {
     s.later(180)
     await s.pass({ ...CONFIG, consultFrom: "11:00", hours: "04:00-12:00" })
     expect(s.sentTo).toEqual(["builder"])
-    expect(s.sent[0]).toStartWith("Waiting on MADE-3 (Medium): 2 in progress")
+    expect(s.sent).toEqual(["Waiting on MADE-3 (Medium): the cap of 2 in progress is reached"])
   })
 
   test("a window that wraps past midnight reads its last stretch up to its end: 23:00Z starts, 05:00Z is a consult (#1160)", async () => {
