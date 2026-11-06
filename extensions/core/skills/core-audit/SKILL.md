@@ -1,0 +1,61 @@
+---
+name: core-audit
+description: "Check that Playground's core holds nothing beyond its generic self: no linked org's terms, read at run time from the extensions, and no value or process shaped like one org's. Report each hit by its place and kind, never its text, then fix them in one PR and keep the run as an audit doc."
+license: Complete terms in the repository's NOTICE
+disable-model-invocation: true
+---
+
+# core-audit
+
+Core is generic: an org's terms, values and processes live in that org's extension, never in this repo ([ADR 0016](../../../../.agents/adr/0016-playground-is-generic-with-a-small-core.md)). This audit finds what slipped in. It names no org: leg 1 reads every linked org's terms at run time, and leg 2 needs no list, so it runs with no org linked at all.
+
+Every hit is a **place**: `file:line`, its kind and where it belongs. The matched text stays out of the report, the fix PR's body and the doc, since it is the very term core keeps out.
+
+## 1. Run both legs
+
+In a Playground checkout whose HEAD is `origin/canary`'s (a fresh worktree under `.claude/worktrees/`, its install done), run `bun run core-audit`. It prints one line a hit, `path:line`, the leg, the kind and where the hit belongs, then a count per kind, and exits 1 on any hit.
+
+- **Leg 1** runs when an org scope sits under the data folder's `extensions/`, and says so when none does. Its terms are no-public-leak's derived list (names, handles, companies, Slack ids, tracker keys), each org's `firefighting.start.prefixes`, and each org scope's own name. A tracker key counts keyed (`MADE-12`) and bare (`MADE`, `worker-made`, `MADE 12`).
+- **Leg 2** always runs: a Slack id or a person's home path written into the tree. A placeholder passes: an id holding `EXAMPLE` or `MADE`, a home of `you`, `me`, `owner`, `someone`, `runner` or `x`.
+
+**Done when** the run printed its count per kind for both legs, or leg 1's line that no org is linked.
+
+## 2. Read for one org's process
+
+Leg 2's other half is judgement, so read it yourself: list core's skills (`extensions/core/skills/`, `skills/`), rules (`extensions/core/rules/`), brief templates (`scripts/briefs/`), scripts and ops jobs (`scripts/`, `packages/scripts/src/`), and ask of each whether it serves one org's process rather than a generic one: a step only one org's tracker, team or customer takes, a default that is one org's value.
+
+**Done when** every item on that list has a verdict, and each one-org item is a place on the report.
+
+## 3. Report
+
+Group the hits by kind, each as `file:line` and where it belongs:
+
+| Hit                                  | Belongs                                  |
+| ------------------------------------ | ---------------------------------------- |
+| A list term in a test or a fixture   | a made-up value in core (`MADE`, `acme`) |
+| A list term anywhere else            | the org's extension                      |
+| A Slack id or a home path            | config with a sensible default           |
+| A one-org skill, rule, script or job | the org's extension                      |
+
+**Done when** each hit of steps 1 and 2 has its row, and no row holds a matched term.
+
+## 4. Fix in one PR
+
+Open one PR into `canary` that moves each piece out or swaps in a made-up value, by the Shipping flow in `AGENTS.md`; its body names places and kinds alone. A hit an open PR already fixes counts as taken: name that PR instead.
+
+**Done when** `bun run core-audit` prints zero hits on the PR's head, or each hit left names the PR that takes it.
+
+## 5. Keep the run
+
+Write the report of step 3 as a file at mode 600 in your scratchpad, and hand its path to the owner, or to your lead in a factory session, to put as `doc audit-YYYY-MM-DD-core` in the owner's login scope: no-extensions-write keeps every session's hand off the extensions.
+
+**Done when** the owner or your lead has the file's path.
+
+## Limits
+
+- Leg 2 reads no `tests/` yet: a test's made-up ids and homes do not hold a placeholder shape today, so a real id in a test is found only by leg 1's list.
+- Leg 2 has no shape for a tracker key, a company or a person's name, since a made-up one reads like a real one without a list: leg 1 covers those once an org is linked.
+
+## Keep the skills learning
+
+When you get past a hurdle this skill did not foresee, find a fix, or find a faster way, tell the `dispatcher` session: `SendMessage` to `dispatcher` with what happened, what worked, and which skill and section it belongs in, in a few plain lines. When `ListAgents` lists no `dispatcher` session, end your report with the finding instead, so the owner can pass it on. A finding never carries prod data, secrets or customer details.
