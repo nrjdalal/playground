@@ -12,6 +12,8 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { SCRIPT as RUN_SLOT, machine as slotMachine } from "../run-slot-fake"
+
 const root = join(import.meta.dir, "..", "..", "..", "..")
 const script = await Bun.file(join(root, "scripts", "ops", "dashboard", "supervisor.sh")).text()
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "supervisor-urls-")))
@@ -1059,9 +1061,13 @@ describe("the supervisor's production build", () => {
 })
 
 // A roll builds its target before it stops anything: prebuild builds the target from a detached staging worktree into $S/builds/<sha> while the old stack serves, and roll_up then finds that build kept
+// a block the script may not hold yet, as none, so a red-first row reads the script before its change
+const has = (name: string) => (script.includes(`\n${name}() {\n`) ? block(name) : "")
 const prebuilt = `${keptStubs}
 stop_all() { echo stop >> ${keptCalls}; }
 ${block("pull_to")}
+${has("slot_step")}
+${has("skip_roll")}
 ${block("prebuild")}
 ${block("roll_to")}
 `
@@ -1174,6 +1180,322 @@ describe("the supervisor's build before the stop (#122)", () => {
       `serve ${c1}`,
     ])
     clean()
+  })
+})
+
+// A roll's build before the stop queues in run-slot (#1099): a stand-in run-slot.sh logs each step it is given, refuses one with the exit slot-refuses names or holds one for the seconds slot-slow names (a TERM there logs and exits 143, as run-slot's trap does), then logs its start in runs.log and runs it, the clone as a plain folder; a sleep stands in for the serving stack, its pid the API's and the web's
+const slotted = async () => {
+  await Bun.write(
+    join(kept, "stubs.sh"),
+    `listed() { grep -qx "$(git rev-parse HEAD)" "${kept}/$1" 2>/dev/null; }
+bun() {
+  case "$1 $2" in
+    "run build") echo "build $(git rev-parse --short HEAD)" >> ${keptCalls}
+      echo "envs \${HONO_APP_URL:-} \${HONO_TRUSTED_ORIGINS:-} \${NEXT_PUBLIC_API_URL:-} \${NEXT_PUBLIC_APP_URL:-} \${NODE_ENV:-} \${SKIP_ENV_VALIDATION_SERVER:-}" >> ${keptCalls}
+      listed build-fails && { echo "Error: next build failed"; return 1; }
+      listed build-exits-2 && { echo "Error: next build failed"; return 2; }
+      mkdir -p web/next/.next/standalone/web/next web/next/.next/static
+      git rev-parse HEAD > web/next/.next/standalone/web/next/server.js ;;
+    "install --frozen-lockfile") echo "NODE_ENV=\${NODE_ENV:-} SKIP_ENV_VALIDATION=\${SKIP_ENV_VALIDATION:-}" >> ${kept}/installs
+      ! listed install-fails ;;
+  esac
+}
+`,
+  )
+  await Bun.write(
+    join(kept, "run-slot.sh"),
+    `#!/bin/bash
+echo "$(date -u +%FT%TZ) ask $1 $$ $*" >> ${kept}/runs.log
+shift 2
+case "$1 $2" in "cp "*) step=clone ;; "bun install") step=install ;; *) step=build ;; esac
+echo "slot $*" >> ${keptCalls}
+code=$(sed -n "s/^$step //p" ${kept}/slot-refuses 2>/dev/null)
+[ -z "$code" ] || { echo "run-slot.sh: refusing the $step" >&2; exit "$code"; }
+trap 'kill $! 2>/dev/null; echo "slot stopped $step" >> ${keptCalls}; exit 143' TERM
+slow=$(sed -n "s/^$step //p" ${kept}/slot-slow 2>/dev/null)
+[ -z "$slow" ] || { sleep "$slow" & wait $!; }
+echo "$(date -u +%FT%TZ) start ops-dashboard $$ run-slot waited=7s" >> ${kept}/runs.log
+[ "$step" != clone ] || { mkdir -p "\${@: -1}node_modules"; exit 0; }
+. ${kept}/stubs.sh
+"$@"
+`,
+  )
+  chmodSync(join(kept, "run-slot.sh"), 0o755)
+  await Bun.write(join(kept, "ops", "notify.sh"), `#!/bin/sh\necho "notify $*" >> ${keptCalls}\n`)
+  chmodSync(join(kept, "ops", "notify.sh"), 0o755)
+  Bun.spawnSync(["mkdir", "-p", join(wt, "node_modules")])
+}
+const slotRun = async (body: string, at: string) => {
+  git(wt, "reset", "-q", "--hard", at)
+  git(wt, "worktree", "prune")
+  const proc = Bun.spawn(
+    [
+      "bash",
+      "-c",
+      `D=${dashboardDir}\n${prebuilt}\nOPS=${kept}/ops RS=${kept}/run-slot.sh RUNS=${kept}/runs.log PREBUILD_SLOW=1200 PREBUILD_POLL=0.2\nsleep 300 & stack=$!; echo $stack > ${kept}/dashboard-dev.pid; echo $stack > ${kept}/dashboard-web.pid\n${body}\nrc=$?; kill $stack 2>/dev/null; exit $rc`,
+    ],
+    { cwd: wt, stdout: "pipe" },
+  )
+  const code = await proc.exited
+  rmSync(join(wt, "node_modules"), { force: true, recursive: true })
+  return { code, out: (await new Response(proc.stdout).text()).trim() }
+}
+const stage = join(kept, "staging")
+const steps = [
+  `slot cp -cR node_modules ${stage}/`,
+  "slot bun install --frozen-lockfile --ignore-scripts",
+  "slot bun run build",
+]
+
+describe("the supervisor's build before the stop queues in run-slot (#1099)", () => {
+  test("the clone, the install and the build each queue in run-slot as ops-dashboard, in that order, and nothing stops before the build returns", async () => {
+    fresh()
+    await slotted()
+    const rolled = await slotRun(
+      `export NODE_ENV=production SKIP_ENV_VALIDATION=true; running=${c1}; roll_to ${c2} canary; echo "$running"`,
+      c1,
+    )
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await keptLines(/^(slot|build|stop|serve)/)).toEqual([
+      ...steps,
+      `build ${short(c2)}`,
+      "stop",
+      `serve ${c2}`,
+    ])
+    expect(await keptLines(/^envs /)).toEqual([`envs ${API} ${WEB} ${API} ${WEB} production true`])
+    expect((await Bun.file(join(kept, "installs")).text()).split("\n")[0]).toBe(
+      "NODE_ENV= SKIP_ENV_VALIDATION=",
+    )
+    expect(await keptLines(/^say prebuild /)).toEqual([
+      "say prebuild clone queued 7s",
+      "say prebuild install queued 7s",
+      "say prebuild build queued 7s",
+    ])
+    expect(existsSync(stage)).toBe(false)
+  })
+
+  // the stand-in takes every argv, so the head's run-slot reads the lane each one takes, on a data folder of its own with no runs.log history to steer quick
+  test("the head's run-slot sends the clone to the clone lane, the install to the quick lane and the build to the queue", async () => {
+    const m = slotMachine()
+    const kind = async (line: string) => {
+      const p = Bun.spawn(
+        ["bash", RUN_SLOT, "kind", "--", ...line.replace(/^slot /, "").split(" ")],
+        {
+          cwd: m.root,
+          env: m.env(),
+          stdout: "pipe",
+        },
+      )
+      expect(await p.exited).toBe(0)
+      return (await new Response(p.stdout).text()).trim()
+    }
+    expect([await kind(steps[0]), await kind(steps[1]), await kind(steps[2])]).toEqual([
+      "clone",
+      "quick",
+      "",
+    ])
+  })
+
+  test("a step queued past PREBUILD_SLOW logs once that it still waits, and keeps waiting rather than building bare", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "slot-slow"), "install 2\n")
+    const rolled = await slotRun(
+      `PREBUILD_SLOW=1; running=${c1}; roll_to ${c2} canary; echo "$running"`,
+      c1,
+    )
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await keptLines(/^say prebuild install still queued/)).toEqual([
+      expect.stringMatching(/^say prebuild install still queued after \d+s; it keeps waiting$/),
+    ])
+    expect(await keptLines(/^(slot|build|stop)/)).toEqual([...steps, `build ${short(c2)}`, "stop"])
+  })
+
+  test("a stack that goes down while the clone queues stops the clone by its pid within a poll, and the roll is skipped, nothing stopped", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "slot-slow"), "clone 60\n")
+    const t0 = Date.now()
+    const rolled = await slotRun(
+      `(sleep 1; kill $stack) & running=${c1}; roll_to ${c2} canary; echo "$running"`,
+      c1,
+    )
+    expect(Date.now() - t0).toBeLessThan(15_000)
+    expect(rolled).toEqual({ code: 0, out: c1 })
+    expect(await keptLines(/^(slot|build|stop|serve)/)).toEqual([steps[0], "slot stopped clone"])
+    expect(await keptLines(/^say roll to/)).toEqual([
+      `say roll to ${short(c2)} skipped: the stack went down during prebuild's clone, so the supervisor stopped it; trying again at the next tick`,
+    ])
+    expect(existsSync(join(kept, "bad-builds"))).toBe(false)
+    expect(existsSync(join(kept, "prebuild.pid"))).toBe(false)
+    expect(existsSync(stage)).toBe(false)
+  })
+
+  // the clone waits as a job of the supervisor's own shell, in a group of its own that run.sh's group stop misses, so the supervisor's trap stops it by its recorded pid
+  test("the supervisor's own stop stops a clone waiting in run-slot by its pid, then the stack, and builds nothing", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "slot-slow"), "clone 60\n")
+    const trap = script.match(/^trap 'say "supervisor stopping".*$/m)?.[0]
+    if (!trap) throw new Error("the supervisor's stop trap is gone from supervisor.sh")
+    const rolled = await slotRun(
+      `${trap}\nstop_all() { sleep 0.5; echo stop >> ${keptCalls}; kill $stack 2>/dev/null; }\n(sleep 1; kill -TERM $$) & running=${c1}; roll_to ${c2} canary`,
+      c1,
+    )
+    expect(rolled.code).toBe(0)
+    expect(await keptLines(/^(slot|build|stop|serve)/)).toEqual([
+      steps[0],
+      "slot stopped clone",
+      "stop",
+    ])
+    expect(await keptLines(/^say supervisor stopping/)).toHaveLength(1)
+  })
+
+  test("a roll skipped for a stack that went down rolls on a later try once the stack serves again", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "slot-slow"), "clone 60\n")
+    const rolled = await slotRun(
+      `(sleep 1; kill $stack) & running=${c1}; roll_to ${c2} canary
+rm ${kept}/slot-slow; sleep 300 & stack=$!; echo $stack > ${kept}/dashboard-dev.pid; echo $stack > ${kept}/dashboard-web.pid
+roll_to ${c2} canary; echo "$running"`,
+      c1,
+    )
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await keptLines(/^say roll to/)).toHaveLength(1)
+    expect(await keptLines(/^(slot|build|stop|serve)/)).toEqual([
+      steps[0],
+      "slot stopped clone",
+      ...steps,
+      `build ${short(c2)}`,
+      "stop",
+      `serve ${c2}`,
+    ])
+  })
+
+  test("the loop checks the stack right after a roll, in the same tick, so a skipped roll's dead stack restarts then", () => {
+    const loop = script.slice(script.indexOf("\nwhile true; do\n"))
+    const roll = loop.indexOf('roll_to "$target" "$why"; held_said=')
+    const down = loop.indexOf("  if ! alive dashboard-dev; then")
+    expect(roll).toBeGreaterThan(0)
+    expect(down).toBeGreaterThan(roll)
+    expect(loop.slice(roll, down)).not.toContain("sleep")
+  })
+
+  test("a step run-slot refuses skips the roll with one line naming its exit: nothing stops, no bad-builds entry, the staging worktree removed", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "slot-refuses"), "build 2\n")
+    const rolled = await slotRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c1 })
+    expect(git(wt, "rev-parse", "HEAD")).toBe(c1)
+    expect(await keptLines(/^(slot|build|stop|serve)/)).toEqual(steps)
+    expect(await keptLines(/^say roll to/)).toEqual([
+      `say roll to ${short(c2)} skipped: run-slot exited 2 before prebuild's build ran; trying again at the next tick`,
+    ])
+    expect(await keptLines(/^(result|notify) /)).toEqual([])
+    expect(existsSync(join(kept, "bad-builds"))).toBe(false)
+    expect(existsSync(stage)).toBe(false)
+    expect(worktrees()).toBe(1)
+  })
+
+  test("a clone whose wait run-slot stops at 143 skips the roll too, before the install", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "slot-refuses"), "clone 143\n")
+    const rolled = await slotRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c1 })
+    expect(await keptLines(/^(slot|build|stop)/)).toEqual([steps[0]])
+    expect(await keptLines(/^say roll to/)).toEqual([
+      `say roll to ${short(c2)} skipped: run-slot exited 143 before prebuild's clone ran; trying again at the next tick`,
+    ])
+    expect(existsSync(join(kept, "bad-builds"))).toBe(false)
+  })
+
+  test("the same target skipped 3 rolls in a row tells ops once, and a new target starts its count again", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "slot-refuses"), "install 2\n")
+    const rolled = await slotRun(
+      `running=${c1}; for i in 1 2 3 4; do roll_to ${c2} canary; done; roll_to ${c0} canary; echo "$running"`,
+      c1,
+    )
+    expect(rolled).toEqual({ code: 0, out: c1 })
+    expect(await keptLines(/^say roll to/)).toHaveLength(5)
+    expect(await keptLines(/^notify /)).toEqual([
+      `notify dashboard dashboard roll to ${short(c2)} skipped 3 times: run-slot exited 2 before prebuild's install ran`,
+    ])
+    expect(await Bun.file(join(kept, "skips")).text()).toBe(`${c0}\n`)
+  })
+
+  test("a build that fails after run-slot starts it is the head's own failure, so it joins bad-builds as before", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "build-fails"), `${c2}\n`)
+    const rolled = await slotRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c1 })
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL build before the stop: Error: next build failed; still serving ${short(c1)}`,
+    ])
+    expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
+    expect(await keptLines(/^say roll to/)).toEqual([])
+  })
+
+  test("a build that exits 2 after run-slot starts it is the head's own failure, not a skip, since its start line is there", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "build-exits-2"), `${c2}\n`)
+    const rolled = await slotRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c1 })
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL build before the stop: Error: next build failed; still serving ${short(c1)}`,
+    ])
+    expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
+    expect(await keptLines(/^say roll to/)).toEqual([])
+  })
+
+  test("an install that fails after run-slot starts it builds after the stop, as before", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "install-fails"), `${c2}\n`)
+    const rolled = await slotRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await keptLines(/^say .*building after the stop/)).toEqual([
+      `say the staging worktree's install for ${short(c2)} failed; building after the stop`,
+    ])
+    expect(await keptLines(/^(build|stop|serve)/)).toEqual([
+      "stop",
+      `build ${short(c2)}`,
+      `serve ${c2}`,
+    ])
+  })
+
+  test("the build after the stop, a migrating target's, runs bare, since the dashboard is down then", async () => {
+    fresh()
+    await slotted()
+    const rolled = await slotRun(`running=${c2}; roll_to ${c3} canary; echo "$running"`, c2)
+    expect(rolled).toEqual({ code: 0, out: c3 })
+    expect(await keptLines(/^(slot|build|stop|serve)/)).toEqual([
+      "stop",
+      `build ${short(c3)}`,
+      `serve ${c3}`,
+    ])
+  })
+
+  test("with no executable run-slot.sh in the data folder every step runs bare, as on a fork", async () => {
+    fresh()
+    await slotted()
+    rmSync(join(wt, "node_modules"), { force: true, recursive: true })
+    const rolled = await slotRun(
+      `RS=${kept}/absent.sh; running=${c1}; roll_to ${c2} canary; echo "$running"`,
+      c1,
+    )
+    expect(rolled).toEqual({ code: 0, out: c2 })
+    expect(await keptLines(/^(slot|build|stop|serve)/)).toEqual([
+      `build ${short(c2)}`,
+      "stop",
+      `serve ${c2}`,
+    ])
   })
 })
 
