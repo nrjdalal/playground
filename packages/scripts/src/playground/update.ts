@@ -153,15 +153,19 @@ export const runUpdate = async (
   }
   // the guards load their bundles from this checkout, so the move finds each changed one swapped in whole first (swap-bundles.ts), where stages() allows; a swap that fails puts back what it wrote, and a move that fails puts the swap back
   let swapped: string[] = []
+  let unswapped = ""
   const swap = async (): ReturnType<Run> => {
     if (!(await stages())) return ok
     const result = await swapBundles(repo, git, target)
     swapped = result.swapped
+    if (result.putBack?.code) unswapped = result.putBack.out
     return result
   }
   const swappedMove = (step: () => ReturnType<Run>) => async (): ReturnType<Run> => {
     const moved = await step()
-    if (moved.code !== 0 && swapped.length) await unswapBundles(repo, git, swapped)
+    if (moved.code === 0 || !swapped.length) return moved
+    const putBack = await unswapBundles(repo, git, swapped)
+    if (putBack.code) unswapped = putBack.out
     return moved
   }
   const prelinked =
@@ -189,7 +193,9 @@ export const runUpdate = async (
       ]
   for (const [name, step, state = "the checkout is as it was"] of steps)
     if ((await step()).code !== 0) {
-      log(`playground update: ${name} failed; ${state}`)
+      log(
+        `playground update: ${name} failed; ${unswapped ? `HEAD's hook bundles could not be put back (${unswapped}), so git status names what is left` : state}`,
+      )
       return 1
     }
   // link-skills.sh first, as the release skill's step 5 runs it: every later step and every ops job reads the data folder it links
