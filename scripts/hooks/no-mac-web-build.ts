@@ -153,7 +153,7 @@ const BUILDS = /build|compose/
 const candidate = (command: string): boolean => command.includes("$'") || BUILDS.test(BARE(command))
 
 const buildCall = (command: string): boolean =>
-  /\bdocker/.test(BARE(command)) && BUILDS.test(BARE(command))
+  /\bdocker/i.test(BARE(command)) && BUILDS.test(BARE(command))
 
 async function inspect(raw: string, environment: Record<string, string | undefined>) {
   let payload: unknown
