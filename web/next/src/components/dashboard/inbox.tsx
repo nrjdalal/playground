@@ -663,6 +663,25 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
         </p>
       )
     case "accept":
+      if (preview.more?.length)
+        return (
+          <>
+            <p>
+              On Approve, the dashboard accepts these proposals in order, and stops at the first
+              that fails:
+            </p>
+            <ol className="list-decimal pl-5">
+              {[preview, ...preview.more].map((proposal, at) => (
+                <li key={at}>
+                  the proposed {proposal.kind} <code className="font-mono">{proposal.key}</code> in{" "}
+                  {proposal.scope}, as it reads at{" "}
+                  <code className="font-mono">{proposal.rev.slice(0, 7)}</code>
+                </li>
+              ))}
+            </ol>
+            <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+          </>
+        )
       return (
         <>
           <p>

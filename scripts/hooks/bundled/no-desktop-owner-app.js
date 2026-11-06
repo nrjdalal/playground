@@ -1408,7 +1408,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   if (name === "") {
     for (const [key, value] of local)
       setVar(env.vars, key, value);
-    if (builtins || cmd.feedsShell)
+    if (builtins || cmd.feedsShell || rootFed(cmd))
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -1739,8 +1739,10 @@ async function stdinOf(cmd, env) {
   tick();
   return held(await stdinText(cmd, env));
 }
+var feedsStdin = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
+var rootFed = (cmd) => cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root";
 async function stdinText(cmd, env) {
-  const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
+  const input = cmd.redirects.findLast(feedsStdin);
   if (input?.target?.procs)
     return outputs(input.target.procs, env);
   if (input?.op === "<" || input?.op === "<>")
@@ -1823,6 +1825,7 @@ var BUN_DATA_SCRIPTS = new Map([
   ["ask", "api/hono/src/bin/dashboard-ask.ts"],
   ["thread", "api/hono/src/bin/dashboard-thread.ts"]
 ]);
+var PREBUILD = "bun --no-env-file packages/scripts/src/verify/prebuild.ts api";
 var realOf = (path) => {
   try {
     return realpathSync(path);
@@ -1841,7 +1844,7 @@ async function mapsDataScript(cwd, script) {
     return false;
   try {
     const { scripts } = JSON.parse(await pkg.text());
-    if (scripts?.[script] !== `bun ${entry}`)
+    if (scripts?.[script] !== `${PREBUILD} && bun ${entry}`)
       return false;
   } catch {
     return false;

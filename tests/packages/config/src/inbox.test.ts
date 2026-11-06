@@ -9,6 +9,10 @@ describe("choicesOf", () => {
         { key: "end-of-day", kind: "skill", type: "accept" },
         ["Accept the skill end-of-day", "Leave it unaccepted"],
       ],
+      [
+        { key: "end-of-day", kind: "skill", more: [{}, {}], type: "accept" },
+        ["Accept the skill end-of-day and 2 more", "Leave them unaccepted"],
+      ],
       [{ app: "Notes", change: "add", type: "apps" }, ["Add Notes", "Keep the list as it is"]],
       [
         { app: "Notes", change: "remove", type: "apps" },

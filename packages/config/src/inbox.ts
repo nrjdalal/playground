@@ -98,7 +98,7 @@ export type ChoicePreview =
       options?: { description?: string; label: string }[]
       type: "ask"
     }
-  | { key: string; kind: string; type: "accept" }
+  | { key: string; kind: string; more?: unknown[]; type: "accept" }
   | { app: string; change: "add" | "remove"; type: "apps" }
   | { amount: string; type: "budget" }
   | { type: "delete" }
@@ -118,7 +118,10 @@ const defaultLabels = (
 ): [string, string] => {
   switch (preview.type) {
     case "accept":
-      return [`Accept the ${preview.kind} ${preview.key}`, "Leave it unaccepted"]
+      return [
+        `Accept the ${preview.kind} ${preview.key}${preview.more?.length ? ` and ${preview.more.length} more` : ""}`,
+        preview.more?.length ? "Leave them unaccepted" : "Leave it unaccepted",
+      ]
     case "apps":
       return [
         `${preview.change === "add" ? "Add" : "Remove"} ${preview.app}`,
