@@ -295,31 +295,69 @@ function spreadSplit(cmd: Command): Command {
   const options = WRAPPERS.get("env") as Options
   const out: Word[] = []
   const rest = [...cmd.words].reverse()
-  let env = false
-  let spread = false
+  let inEnvOptions = false
+  let spreadOne = false
   for (let w = rest.pop(); w; w = rest.pop()) {
     const v = w.value
-    const split = env ? SPLIT.exec(v) : null
-    if (split) {
-      const text = (split[1] || rest.pop()?.value || "")
+    const long = inEnvOptions ? envLong(v) : undefined
+    const split =
+      long?.name === "split-string"
+        ? (long.value ?? "")
+        : long || !inEnvOptions
+          ? undefined
+          : SPLIT.exec(v)?.[1]
+    if (split !== undefined) {
+      const text = (split || rest.pop()?.value || "")
         .replace(/\$\{[^}]*\}/g, UNKNOWN)
         .replace(/\\[_fnrtv]/g, " ")
         .replace(/['"\\]/g, "")
       const words = text.split(/\s+/).filter(Boolean)
       for (let j = words.length - 1; j >= 0; j--) rest.push({ quoted: false, value: words[j] })
-      spread = true
+      spreadOne = true
       continue
     }
     out.push(w)
-    if (program(v) === "env") env = true
-    else if (!env || ASSIGN.test(v)) continue
-    else if (!v.startsWith("-") || v === "-" || v === "--") env = false
-    else if (v === "-C" || v === "--chdir" || optionValue(v, options) === "next") {
+    if (program(v) === "env") inEnvOptions = true
+    else if (!inEnvOptions || ASSIGN.test(v)) continue
+    else if (!v.startsWith("-") || v === "-" || v === "--") inEnvOptions = false
+    else if (
+      long
+        ? ENV_LONG_VALUES.has(long.name) && long.value === undefined
+        : ENV_SHORT_VALUE.test(v) || optionValue(v, options) === "next"
+    ) {
       const value = rest.pop()
       if (value) out.push(value)
     }
   }
-  return spread ? { ...cmd, words: out } : cmd
+  return spreadOne ? { ...cmd, words: out } : cmd
+}
+
+// GNU env's long options, each read by any unique prefix as its getopt_long reads it (`--split`, `--u X`), and the ones that take a value; its short ones that take a value end a cluster of its flags (`-a name`, `-iu X`)
+const ENV_LONG = [
+  "argv0",
+  "block-signal",
+  "chdir",
+  "debug",
+  "default-signal",
+  "help",
+  "ignore-environment",
+  "ignore-signal",
+  "list-signal-handling",
+  "null",
+  "split-string",
+  "unset",
+  "version",
+]
+const ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"])
+const ENV_SHORT_VALUE = /^-[0iv]*[aCu]$/
+
+// env's long option a word names, by its full name or a unique prefix, with the value attached after `=`
+function envLong(v: string): { name: string; value?: string } | undefined {
+  const m = /^--([a-z0-9-]+)(?:=([\s\S]*))?$/.exec(v)
+  if (!m) return undefined
+  const hits = ENV_LONG.filter((o) => o.startsWith(m[1]!))
+  const name = hits.includes(m[1]!) ? m[1] : hits.length === 1 ? hits[0] : undefined
+  return name ? { name, value: m[2] } : undefined
 }
 
 export type StdinKind = "code" | "root" | "shell"
