@@ -121,8 +121,9 @@ export async function startPass({
   for (const r of rows)
     if (r.name && ENDED.has(r.status ?? "")) state.ended[r.name] ??= kept ? day : ""
   // a beat that reads no roster file keeps every ended day it noted
-  for (const name of roster ? Object.keys(state.ended) : [])
-    if (!rows.some((r) => r.name === name && ENDED.has(r.status ?? ""))) delete state.ended[name]
+  for (const rowName of roster ? Object.keys(state.ended) : [])
+    if (!rows.some((r) => r.name === rowName && ENDED.has(r.status ?? "")))
+      delete state.ended[rowName]
   const relay = join(data, "firefighting.json")
   const ff = await readJson<{
     clock?: Record<string, unknown>
@@ -209,7 +210,8 @@ export async function startPass({
     .sort((a, b) => rankOf(a) - rankOf(b) || (a.shownAt ?? Infinity) - (b.shownAt ?? Infinity))
   // An Urgent start passes this job's own focus, which spawn.sh's start file never does: the focus is lowered for the start and raised again for the session that held it.
   let heldBy: string | undefined
-  // an Urgent started in this pass holds every later High, Medium or Low in it, as the focus raised after the loop will
+  // an Urgent that reaches its start in this pass holds every later High, Medium or Low in it, named as the focus raised after the loop will name it: the session of the last such ticket by ID
+  let urgentId: string | undefined
   let urgentStarted: string | undefined
   for (const line of queue) {
     const id = line.id
@@ -288,6 +290,10 @@ export async function startPass({
       "--firefighting",
       ...(config.account ? ["--account", config.account] : []),
     ]
+    if (isUrgent(line) && (urgentId === undefined || id > urgentId)) {
+      urgentId = id
+      urgentStarted = session
+    }
     const spawned = await ctx.run(argv, 300_000)
     // told once per reason: the session's name is taken out, so the same refusal reads the same on every retry
     if (spawned.code !== 0) {
@@ -297,7 +303,6 @@ export async function startPass({
     }
     state.started[id] = session
     delete state.named[id]
-    if (isUrgent(line)) urgentStarted = session
     inProgress++
     await save()
     const set = await ctx.run([
@@ -345,9 +350,14 @@ async function reopen(
     if (!closed.some((l) => l.id === id)) delete state.closedSeen[id]
   for (const id of Object.keys(state.reopened))
     if (!closed.some((l) => l.id === id)) delete state.reopened[id]
+  // a line marked reopened is asked past REOPEN_DAYS too, so the mark goes once Linear reads it done again
   const recent = closed
     .map((l) => l.id)
-    .filter((id) => now.getTime() - Date.parse(state.closedSeen[id]!) <= REOPEN_DAYS * 86_400_000)
+    .filter(
+      (id) =>
+        state.reopened[id] !== undefined ||
+        now.getTime() - Date.parse(state.closedSeen[id]!) <= REOPEN_DAYS * 86_400_000,
+    )
   if (!recent.length || (state.linearAt && now.getTime() - Date.parse(state.linearAt) < LINEAR_MS))
     return
   state.linearAt = now.toISOString()

@@ -6,6 +6,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -817,5 +818,359 @@ describe("ops-firefighting-start", () => {
     const s = setup(line("MADE-1", "High", 1))
     await s.pass({ ...CONFIG, consultFrom: "13:00", hours: "04:00-12:00" })
     expect(s.titles()).toEqual(["MADE-1 firefight"])
+  })
+
+  test("an Urgent whose start spawn.sh refuses still holds the Medium after it in that beat (#1160)", async () => {
+    const s = setup(
+      { ...line("MADE-1", "Urgent", 1), ...line("MADE-2", "Medium", 2) },
+      {},
+      {
+        spawned: (argv) =>
+          argv.includes("MADE-1 firefight")
+            ? { code: 1, out: `spawn.sh refuses ${argv[2]}: the memory gate holds it\n` }
+            : { code: 0, out: "" },
+      },
+    )
+    await s.pass()
+    expect(s.titles()).toEqual(["MADE-1 firefight"])
+    expect(s.sent.some((t) => t.startsWith("Waiting on MADE-2 (Medium): focus stands for"))).toBe(
+      true,
+    )
+  })
+
+  test("a ticket read open again on day 2 and done on day 5 leaves the queue and starts nothing more (#1160)", async () => {
+    const linear: Record<string, string> = {}
+    const s = setup(
+      line("MADE-1", "High", 1, { open: false }),
+      { "ops/ops-firefighting-start.state.json": RUNNING },
+      { linear },
+    )
+    let day = 0
+    const at = (days: number) => {
+      day += days
+      s.later(days * 24 * 60)
+      writeFileSync(
+        join(s.data, "firefighting.json"),
+        relayFile(
+          line("MADE-1", "High", 1, { open: false }),
+          NOW.getTime() + day * 24 * 60 * MINUTE,
+        ),
+      )
+    }
+    await s.pass()
+    linear["MADE-1"] = "started"
+    at(2)
+    await s.pass()
+    expect(s.titles()).toEqual(["MADE-1 firefight"])
+    linear["MADE-1"] = "completed"
+    writeFileSync(
+      join(s.data, "roster.json"),
+      JSON.stringify({ agents: [{ name: "worker-made-up-1", status: "ended", ticket: "MADE-1" }] }),
+    )
+    at(3)
+    await s.pass()
+    at(1)
+    await s.pass()
+    expect(s.titles()).toEqual(["MADE-1 firefight"])
+    expect(s.state().reopened).toEqual({})
+  })
+})
+
+// The date and window cases, one row each, keyed to the PR's Evidence table (F freshness, W window, C last stretch, E ended today). An outcome is a start, nothing, or a consult told to the dispatcher.
+type Case = {
+  at: string
+  config?: Partial<StartConfig>
+  ended?: string
+  expect: "consult" | "none" | "start"
+  id: string
+  relay?: "fresh" | "mtime" | "missing" | number
+  told?: string
+}
+const CASES: Case[] = [
+  {
+    at: "2026-11-07T03:59:59Z",
+    config: { hours: "04:00-12:00" },
+    expect: "none",
+    id: "W2a",
+    told: "Starting nothing: 2026-11-07 03:59Z is outside the start window (04:00-12:00)",
+  },
+  { at: "2026-11-07T04:00:00Z", config: { hours: "04:00-12:00" }, expect: "start", id: "W2b" },
+  { at: "2026-11-07T04:00:01Z", config: { hours: "04:00-12:00" }, expect: "start", id: "W2c" },
+  { at: "2026-11-06T11:59:59Z", config: { hours: "04:00-12:00" }, expect: "start", id: "W2d" },
+  { at: "2026-11-06T12:00:00Z", config: { hours: "04:00-12:00" }, expect: "none", id: "W2e" },
+  { at: "2026-11-06T12:00:01Z", config: { hours: "04:00-12:00" }, expect: "none", id: "W2f" },
+  { at: "2026-11-06T23:30:00Z", expect: "start", id: "W1" },
+  {
+    at: "2026-11-06T10:59:59Z",
+    config: { consultFrom: "11:00", hours: "04:00-12:00" },
+    expect: "start",
+    id: "C3a",
+  },
+  {
+    at: "2026-11-06T11:00:00Z",
+    config: { consultFrom: "11:00", hours: "04:00-12:00" },
+    expect: "consult",
+    id: "C3b",
+  },
+  {
+    at: "2026-11-06T11:00:01Z",
+    config: { consultFrom: "11:00", hours: "04:00-12:00" },
+    expect: "consult",
+    id: "C3c",
+  },
+  {
+    at: "2026-11-06T11:59:59Z",
+    config: { consultFrom: "11:00", hours: "04:00-12:00" },
+    expect: "consult",
+    id: "C3d",
+  },
+  {
+    at: "2026-11-06T11:30:00Z",
+    config: { consultFrom: "13:00", hours: "04:00-12:00" },
+    expect: "start",
+    id: "C4",
+  },
+  { at: "2026-11-06T23:00:00Z", config: { consultFrom: "11:00" }, expect: "consult", id: "C2" },
+  { at: "2026-11-06T21:59:59Z", config: { hours: "22:00-06:00" }, expect: "none", id: "W3a" },
+  { at: "2026-11-06T22:00:00Z", config: { hours: "22:00-06:00" }, expect: "start", id: "W3b" },
+  { at: "2026-11-07T02:00:00Z", config: { hours: "22:00-06:00" }, expect: "start", id: "W3c" },
+  { at: "2026-11-07T05:59:59Z", config: { hours: "22:00-06:00" }, expect: "start", id: "W3d" },
+  { at: "2026-11-07T06:00:00Z", config: { hours: "22:00-06:00" }, expect: "none", id: "W3e" },
+  {
+    at: "2026-11-06T23:00:00Z",
+    config: { consultFrom: "05:00", hours: "22:00-06:00" },
+    expect: "start",
+    id: "C5a",
+  },
+  {
+    at: "2026-11-07T05:00:00Z",
+    config: { consultFrom: "05:00", hours: "22:00-06:00" },
+    expect: "consult",
+    id: "C5b",
+  },
+  {
+    at: "2026-11-07T08:00:00Z",
+    config: { daysOff: ["2026-11-07"], hours: "04:00-12:00" },
+    expect: "none",
+    id: "W5a",
+    told: "Starting nothing: 2026-11-07 08:00Z is outside the start window (04:00-12:00, and a day off)",
+  },
+  {
+    at: "2026-11-08T08:00:00Z",
+    config: { daysOff: ["2026-11-07"], hours: "04:00-12:00" },
+    expect: "start",
+    id: "W5b",
+  },
+  { at: "2026-11-07T23:59:59Z", config: { daysOff: ["2026-11-07"] }, expect: "none", id: "W5c" },
+  { at: "2026-11-08T00:00:00Z", config: { daysOff: ["2026-11-07"] }, expect: "start", id: "W5d" },
+  { at: "2026-11-06T09:00:00Z", expect: "start", id: "F4", relay: 10 * MINUTE },
+  {
+    at: "2026-11-06T09:00:00Z",
+    expect: "none",
+    id: "F1b",
+    relay: 10 * MINUTE + 1000,
+    told: "Starting nothing: firefighting.json's lines are stale since 2026-11-06T08:49:59.000Z",
+  },
+  { at: "2026-11-06T09:00:00Z", expect: "start", id: "F2", relay: "mtime" },
+  {
+    at: "2026-11-06T09:00:00Z",
+    expect: "none",
+    id: "F3",
+    relay: "missing",
+    told: "Starting nothing: firefighting.json's lines are stale since never written",
+  },
+  {
+    at: "2026-11-06T09:00:00Z",
+    ended: "2026-11-06",
+    expect: "none",
+    id: "E3",
+    told: "Not starting MADE-1 again today: a, its session, ended today",
+  },
+  { at: "2026-11-06T09:00:00Z", ended: "2026-11-05", expect: "start", id: "E4" },
+  { at: "2026-11-06T09:00:00Z", ended: "first beat", expect: "start", id: "E1" },
+  { at: "2026-11-06T09:00:00Z", expect: "start", id: "F1a", relay: 5 * MINUTE },
+  { at: "2026-11-06T09:00:00Z", config: { hours: "09:00-09:00" }, expect: "none", id: "W4" },
+  {
+    at: "2026-11-06T23:00:00Z",
+    config: { daysOff: ["2026-11-07"], hours: "22:00-06:00" },
+    expect: "start",
+    id: "W6a",
+  },
+  {
+    at: "2026-11-07T02:00:00Z",
+    config: { daysOff: ["2026-11-07"], hours: "22:00-06:00" },
+    expect: "none",
+    id: "W6b",
+  },
+  { at: "2026-11-06T11:30:00Z", config: { hours: "04:00-12:00" }, expect: "start", id: "C1" },
+  {
+    at: "2026-11-06T22:30:00Z",
+    config: { consultFrom: "23:00", hours: "22:00-06:00" },
+    expect: "start",
+    id: "C6a",
+  },
+  {
+    at: "2026-11-06T23:30:00Z",
+    config: { consultFrom: "23:00", hours: "22:00-06:00" },
+    expect: "consult",
+    id: "C6b",
+  },
+  {
+    at: "2026-11-07T01:00:00Z",
+    config: { consultFrom: "23:00", hours: "22:00-06:00" },
+    expect: "consult",
+    id: "C6c",
+  },
+  {
+    at: "2026-11-07T04:00:00Z",
+    config: { consultFrom: "04:00", hours: "04:00-12:00" },
+    expect: "consult",
+    id: "C7",
+  },
+]
+
+describe("ops-firefighting-start's date and window cases", () => {
+  for (const c of CASES)
+    test(`${c.id}: ${c.at}, ${JSON.stringify(c.config ?? {})}${c.ended ? `, a row ended ${c.ended}` : ""}${c.relay ? `, relay ${c.relay}` : ""}: ${c.expect}`, async () => {
+      const at = Date.parse(c.at)
+      const wrote = typeof c.relay === "number" ? at - c.relay : at - MINUTE
+      const ended =
+        c.ended === undefined
+          ? {}
+          : { "roster.json": { agents: [{ name: "a", status: "ended", ticket: "MADE-1" }] } }
+      const state =
+        c.ended === undefined || c.ended === "first beat"
+          ? {}
+          : { "ops/ops-firefighting-start.state.json": { ...RUNNING, ended: { a: c.ended } } }
+      const s = setup(line("MADE-1", "High", 1), { ...ended, ...state }, { wrote })
+      const relay = join(s.data, "firefighting.json")
+      if (c.relay === "missing") rmSync(relay)
+      if (c.relay === "mtime") {
+        const { lastTry: _, ...rest } = JSON.parse(readFileSync(relay, "utf8"))
+        writeFileSync(relay, JSON.stringify(rest))
+        utimesSync(relay, new Date(at - MINUTE), new Date(at - MINUTE))
+      }
+      s.later((at - NOW.getTime()) / MINUTE)
+      await s.pass({ ...CONFIG, ...c.config })
+      if (c.expect === "start") expect(s.titles()).toEqual(["MADE-1 firefight"])
+      else expect(s.spawns()).toEqual([])
+      expect(s.sentTo.includes("dispatcher")).toBe(c.expect === "consult")
+      if (c.told) expect(s.sent).toContain(c.told)
+    })
+})
+
+describe("ops-firefighting-start's date and window flows", () => {
+  const roster = (status: string) => ({ agents: [{ name: "a", status, ticket: "MADE-1" }] })
+  const relayAt = (s: ReturnType<typeof setup>, minutes: number, extra: Partial<Line> = {}) =>
+    writeFileSync(
+      join(s.data, "firefighting.json"),
+      relayFile(line("MADE-1", "High", 1, extra), NOW.getTime() + minutes * MINUTE),
+    )
+
+  test("W7: outside the window the start file goes, the line is told once, and a standing focus is left", async () => {
+    const config = { ...CONFIG, hours: "04:00-07:00" }
+    const s = setup(line("MADE-1", "High", 1), {
+      [START_FILE]: { ids: ["MADE-1"], since: NOW.toISOString(), updatedAt: NOW.toISOString() },
+      "focus.json": focusFile(`${REASON} MADE-9 open`, 60),
+    })
+    await s.pass(config)
+    await s.pass(config)
+    expect(s.startFile()).toBeUndefined()
+    expect(s.focus()).toEqual([])
+    expect(s.sent.filter((t) => t.includes("outside the start window"))).toHaveLength(1)
+  })
+
+  test("E5: a row seen ended at 23:59Z holds its ticket until 00:00Z, when it starts", async () => {
+    const s = setup(line("MADE-1", "High", 1), {
+      "ops/ops-firefighting-start.state.json": RUNNING,
+      "roster.json": roster("working"),
+    })
+    s.later(15 * 60 + 58)
+    relayAt(s, 15 * 60 + 58)
+    await s.pass()
+    writeFileSync(join(s.data, "roster.json"), JSON.stringify(roster("ended")))
+    s.later(1)
+    relayAt(s, 15 * 60 + 59)
+    await s.pass()
+    expect(s.spawns()).toEqual([])
+    s.later(1)
+    relayAt(s, 16 * 60)
+    await s.pass()
+    expect(s.titles()).toEqual(["MADE-1 firefight"])
+  })
+
+  test("E8: a beat with no roster file keeps the ended days, so the row still holds its ticket once the file is back", async () => {
+    const s = setup(
+      line("MADE-1", "High", 1),
+      { "ops/ops-firefighting-start.state.json": { ...RUNNING, ended: { a: "2026-11-06" } } },
+      { wrote: NOW.getTime() - 11 * MINUTE },
+    )
+    await s.pass()
+    expect(s.state().ended).toEqual({ a: "2026-11-06" })
+    writeFileSync(join(s.data, "roster.json"), JSON.stringify(roster("ended")))
+    relayAt(s, 0)
+    await s.pass()
+    expect(s.spawns()).toEqual([])
+  })
+
+  test("E9: a row live again loses its stamp, and its next end stamps the new day", async () => {
+    const s = setup(line("MADE-1", "High", 1), {
+      "ops/ops-firefighting-start.state.json": { ...RUNNING, ended: { a: "2026-11-05" } },
+      "roster.json": roster("working"),
+    })
+    await s.pass()
+    expect(s.state().ended).toEqual({})
+    writeFileSync(join(s.data, "roster.json"), JSON.stringify(roster("ended")))
+    await s.pass()
+    expect(s.state().ended).toEqual({ a: "2026-11-06" })
+    expect(s.spawns()).toEqual([])
+  })
+
+  test("B2: an out-of-window first beat spends no first beat, so a line closed before the job ran is not asked", async () => {
+    const config = { ...CONFIG, hours: "09:00-12:00" }
+    const s = setup(
+      line("MADE-1", "High", 1, { open: false }),
+      {},
+      { linear: { "MADE-1": "started" } },
+    )
+    await s.pass(config)
+    s.later(60)
+    relayAt(s, 60, { open: false })
+    await s.pass(config)
+    expect(s.asked).toEqual([])
+    expect(s.spawns()).toEqual([])
+  })
+
+  test("R1: a line first seen closed exactly 3 days ago is still asked, and one a minute past is not", async () => {
+    const s = setup(
+      line("MADE-1", "High", 1, { open: false }),
+      { "ops/ops-firefighting-start.state.json": RUNNING },
+      { linear: { "MADE-1": "completed" } },
+    )
+    await s.pass()
+    s.later(3 * 24 * 60)
+    relayAt(s, 3 * 24 * 60, { open: false })
+    await s.pass()
+    s.later(1)
+    relayAt(s, 3 * 24 * 60 + 1, { open: false })
+    await s.pass()
+    expect(s.asked).toEqual([["MADE-1"], ["MADE-1"]])
+  })
+
+  test("R2: Linear is asked at most every 5 minutes", async () => {
+    const s = setup(
+      line("MADE-1", "High", 1, { open: false }),
+      { "ops/ops-firefighting-start.state.json": RUNNING },
+      { linear: { "MADE-1": "completed" } },
+    )
+    await s.pass()
+    s.later(4)
+    relayAt(s, 4, { open: false })
+    await s.pass()
+    expect(s.asked).toHaveLength(1)
+    s.later(1)
+    relayAt(s, 5, { open: false })
+    await s.pass()
+    expect(s.asked).toHaveLength(2)
   })
 })
