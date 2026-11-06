@@ -56,6 +56,8 @@ import {
   sendFailed,
   sendUnconfirmed,
   sendWhy,
+  SHELF_LABELS,
+  shelfRow,
   STUCK_QUEUED_MS,
   updatedSince,
   upfrontLink,
@@ -664,6 +666,52 @@ describe("Dismiss", () => {
     expect(inboxView([seen]).shown).toEqual([seen])
     expect(needsYou(seen)).toBe(true)
     expect(outcomeLine(seen)).toBeNull()
+  })
+})
+
+// PG-1074: a shelf's row does what its place says, whatever words it shows.
+describe("a shelf's row, by its place", () => {
+  const read = item({ answer: { dismissedAt: "2026-10-07T11:00:00.000Z" }, kind: "update", ref: 2 })
+  const unread = item({ kind: "update", ref: 3 })
+  const waiting = item({ kind: "decision", ref: 4 })
+
+  test("Archive's one click dismisses each card in turn, a waiting ask included", () => {
+    expect(shelfRow("archived", [waiting, unread])).toEqual({
+      bulk: { each: true, ids: ["id-4", "id-3"] },
+      muted: false,
+    })
+  })
+
+  test("Done's one click marks what is unread on it as read, and the row reads muted once none is", () => {
+    expect(shelfRow("done", [read, unread])).toEqual({
+      bulk: { each: false, ids: ["id-3"] },
+      muted: false,
+      unread: 1,
+    })
+    expect(shelfRow("done", [read])).toEqual({
+      bulk: { each: false, ids: [] },
+      muted: true,
+      unread: 0,
+    })
+  })
+
+  test("In progress and Later have no one click and never read muted", () => {
+    for (const place of ["progress", "snoozed"] as const)
+      expect(shelfRow(place, [waiting, unread])).toEqual({ bulk: null, muted: false })
+  })
+
+  test("an empty shelf has no one click", () => {
+    for (const place of ["archived", "done", "progress", "snoozed"] as const)
+      expect(shelfRow(place, []).bulk).toBeNull()
+  })
+
+  test("each place keeps its words: In progress, Later, Archive and Done", () => {
+    expect(SHELF_LABELS).toEqual({
+      archived: "Archive",
+      done: "Done",
+      progress: "In progress",
+      snoozed: "Later",
+    })
   })
 })
 
