@@ -429,43 +429,24 @@ async function unreadScript(
   return refuse(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor(sure))
 }
 
-// The option words su takes before -c or --command for its line to read as a command of its own, each known exactly; any other option word reads as a root shell, so an option's value never hides a -c
-const SU_PLAIN = new Set(["-", "-f", "-l", "-m"])
-// Whether su's words hand it a command: -c or --command with its command, after option words of SU_PLAIN and words the hook reads whole alone (`su root -c <cmd>`, `su - -c <cmd>`), since a value it cannot read, or a glob, may be any option
-const suCommand = (args: Word[]) => {
-  for (const [at, word] of args.entries()) {
-    const { value } = word
-    if (word.unknown !== undefined || word.glob || marked(value)) return false
-    if (value === "-c" || value === "--command") return at + 1 < args.length
-    if (value.startsWith("--command=")) return true
-    if (value.startsWith("-") && !SU_PLAIN.has(value)) return false
-  }
-  return false
-}
-// su with no command of its own starts a root shell that reads its script from stdin, as `sudo -s` does; one with -c or --command runs that command alone
-const suShell = ({ args, name }: { args: Word[]; name: string }) =>
-  name === "su" && !suCommand(args)
 // The builtins run() hands visit beside a bare wrapper and a bare copy of a followed command, each with no command of its own to judge.
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 
-// The shell a here-string, a heredoc, a pipeline, a file or a process substitution feeds runs that text as its script: one the hook cannot read is refused where the shell would run in the main checkout, and a root shell's, which the shared reader leaves, is judged command by command (the reader runs a plain shell's itself).
+// The shell a here-string, a heredoc, a pipeline, a file or a process substitution feeds runs that text as its script: one the hook cannot read is refused where the shell would run in the main checkout, and a root shell's here-string, heredoc, file or process substitution, which the shared reader leaves, is judged command by command (the reader runs a plain shell's itself, and a root shell's piped script).
 async function fedScript(
   cmd: Command,
   here: Env,
   sure: boolean,
   inMain: (path: string | undefined) => boolean,
   visit: Visit,
-  parsed?: { args: Word[]; name: string },
 ): Promise<string | undefined> {
   const shell = cmd.bareOf ?? cmd
   const input = shell.redirects.findLast(
     (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
   )
   if (input === undefined && shell.stdin === undefined) return
-  const fedKind = stdinShell(shell)
-  if (fedKind === "code") return
-  const kind = fedKind ?? (parsed && suShell(parsed) ? "root" : undefined)
-  if (!kind) return
+  const kind = stdinShell(shell)
+  if (!kind || kind === "code") return
   const script = await stdinOf(shell, here)
   const unread = script.unknown ?? (marked(script.value) ? "a value it cannot read" : undefined)
   if (unread) {
@@ -500,7 +481,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   // the shell each pipeline feeds, by the command whose output it reads, since the walk judges that command in the folder the pipeline runs in and never visits a shell of its own
   const fed = codeFed(lexed.commands)
   const visit: Visit = async (cmd, parsed, env) => {
-    // a builtin run() hands over for this hook alone (a bare `sudo -s`, a bare copy of a followed shell, an export) is read only for the script a here-string, a heredoc or a pipeline feeds it; one that feeds a shell (a loop's `done`) is judged in full, as the reader hands it to every hook
+    // a builtin run() hands over (a bare `sudo -s`, which it hands every hook once a redirect feeds it, a bare copy of a followed shell, an export) is read only for the script a here-string, a heredoc or a pipeline feeds it; one that feeds a shell (a loop's `done`) is judged in full, as the reader hands it to every hook
     if ((parsed.name === "" && !cmd.feedsShell) || EXPORTS.has(parsed.name)) {
       for (const here of places(env, directory)) {
         const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure
@@ -540,7 +521,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
         const verdict = await unreadScript(pipedTo.consumer, here, sure, inMain)
         if (verdict) return verdict
       }
-      const script = await fedScript(cmd, here, sure, inMain, visit, parsed)
+      const script = await fedScript(cmd, here, sure, inMain, visit)
       if (script) return script
       const ran = runs(name, args, local, here)
       if (ran && inMain(ran.cwd)) return refuse(ran.what, fixFor(sure, ran.fix))

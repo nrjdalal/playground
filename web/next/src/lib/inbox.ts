@@ -365,6 +365,14 @@ export const foldsByDefault = (item: InboxItem, now: number): boolean =>
 // The shelf a card sits on: the list, or one of the rows under it.
 export type Shelf = "archived" | "done" | "inbox" | "progress" | "snoozed"
 
+// The words each shelf's row shows; what a row does reads its place, never these, so they can change.
+export const SHELF_LABELS: Record<Exclude<Shelf, "inbox">, string> = {
+  archived: "Archive",
+  done: "Done",
+  progress: "In progress",
+  snoozed: "Later",
+}
+
 // A card's verbs, beside its own answers and Reply: Seen marks it read, Done sends it to Done, Later puts it off until a time, Archive takes it off his list unanswered and Move back returns it, and Dismiss sends it to Done marked dismissed.
 export type Verb = "archive" | "dismiss" | "done" | "later" | "moveBack" | "seen"
 
@@ -518,6 +526,25 @@ export const sendWhy = (pick: ChoiceRow | null): string | null =>
 export const dismissable = (item: InboxItem): boolean =>
   (item.kind === "update" || item.status !== "open" || chosen(item)?.choice === "replied") &&
   !answeredDismissedAt(item)
+
+// Pure: what a shelf's row does, by its place: Archive's one click dismisses each card in turn, Done's marks what is unread on it as read and the row reads muted once none is, and In progress and Later have no one click.
+export function shelfRow(
+  place: Exclude<Shelf, "inbox">,
+  shelf: InboxItem[],
+): { bulk: { each: boolean; ids: string[] } | null; muted: boolean; unread?: number } {
+  if (place === "archived")
+    return {
+      bulk: shelf.length > 0 ? { each: true, ids: shelf.map((item) => item.id) } : null,
+      muted: false,
+    }
+  if (place !== "done") return { bulk: null, muted: false }
+  const unread = shelf.filter(dismissable)
+  return {
+    bulk: shelf.length > 0 ? { each: false, ids: unread.map((item) => item.id) } : null,
+    muted: unread.length === 0,
+    unread: unread.length,
+  }
+}
 
 // Pure: the line over the list: what needs him, the drafts, the answers that failed to send and the unread updates, each left out at none. A reply took an item off his hands, so it reads here no more.
 export function inboxSummary(items: InboxItem[]): string | null {

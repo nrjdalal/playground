@@ -50,8 +50,8 @@ jobs:
         run: |
           bun run format:check
           bun run lint
-          # turbo's tasks for the packages this PR changes and those that depend on them alone, from its cache otherwise
-          bunx turbo run check-types build --filter='...[origin/${{ github.base_ref }}]'
+          # turbo's tasks for the packages this PR changes, their dependents and @packages/scripts (turbo.json's @packages/scripts#check-types says why), each from its cache when its inputs are unchanged
+          bunx turbo run check-types build --filter='...[origin/${{ github.base_ref }}]' --filter=@packages/scripts
           # the root checks import packages/* and @api/hono through dist, and web/next's tests the generated data-table metrics, which a PR changing none of them leaves unmade on a clean checkout
           bunx turbo run build --filter='./packages/*' --filter=@api/hono
           bun packages/scripts/src/data-table-metrics.ts
@@ -131,6 +131,15 @@ jobs:
 
       - name: Install dependencies
         run: bun install --ignore-scripts
+
+      # a test starts its container in a 60s beforeAll, and a fresh runner's pull inside it timed out (PG-1058); image-pull.test.ts holds this list to the images the tests start
+      - name: Pull the test images
+        run: |
+          for image in postgres:18-alpine redis:alpine; do
+            start=$(date +%s)
+            docker pull -q "$image"
+            echo "$image pulled in $(( $(date +%s) - start ))s"
+          done
 
       - name: Take the split's timings
         uses: actions/download-artifact@v8

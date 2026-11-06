@@ -476,7 +476,7 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
     return `${by}: agent-browser session ${session}, which agent-browser --session ${session} close frees`
   }
   if (holders.discard) return null
-  const discard = `playground rm --worktree ${at} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`
+  const discard = `playground rm --worktree ${at} --discard removes it anyway, which a session runs as it is once the worktree's PR has merged or closed, else with --decision <id> once an Inbox delete decision naming it is approved`
   const changed = git("status", "--porcelain", "-z", "--no-renames").out.split("\0").filter(Boolean)
   if (changed.length) {
     const paths = changed.slice(0, 3).map((line) => line.slice(3))

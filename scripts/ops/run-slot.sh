@@ -431,7 +431,7 @@ if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell's -c), and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, or with a command substitution beside docker, podman or a portless compose
+# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell's -c), and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, a step holding a chain shell word before a -c cluster or a $ word (a nested chain), or with a command substitution beside docker, podman or a portless compose
 # the wrappers chain_steps reads past to the program they run, A to Z, each as <name>|<flags>|<options that take a value>, and the ones that take one count or duration before it: scripts/hooks/shell.ts's WRAPPERS and COUNTED, with the env and xargs options its parse reads by hand, which a test holds equal
 CHAIN_WRAPPER_OPTIONS="builtin||
 busybox||
@@ -485,10 +485,10 @@ chain_steps() {
       script=$a; break
     fi
     [ -n "$file" ] && break
-    # an unplaced first word runs a program this cannot read, so a shell word with a -c after it is a chain it cannot read
+    # an unplaced first word runs a program this cannot read, so a shell word with a -c after it, any single-dash cluster holding c, is a chain it cannot read
     if [ -n "$unplaced" ]; then
       case " $CHAIN_SHELLS " in *" ${a##*/} "*) shell=1 ;; esac
-      [ -n "$shell" ] && case "$a" in -c | -[!-]*c) return 1 ;; esac
+      [ -n "$shell" ] && case "$a" in -c* | -[!-]*c*) return 1 ;; esac
       continue
     fi
     if [ -z "$first" ]; then
@@ -524,7 +524,7 @@ chain_steps() {
   [ -n "$first" ] || return 0
   if [ -n "$file" ]; then plain "$file" && [ -f "$file" ] && [ -r "$file" ] || return 1; fi
   [ -n "$script$file" ] || return 1
-  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" "$CHAIN_WRAPPERS" <<'PY'
+  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" "$CHAIN_WRAPPERS" "$CHAIN_SHELLS" <<'PY'
 import os, re, shlex, sys
 
 try:
@@ -585,8 +585,11 @@ for i, step in enumerate(steps):
             step += [seps[i], later[0]]
     if step:
         print("\x1f".join(step))
-# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, or a command substitution in a chain whose script or lead words name docker, podman or a portless compose (shlex splits a backquote's inner script at ;, so a name split across its steps is read over the whole chain), names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
+# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, a step holding a chain shell word before a -c cluster or a $ word, or a command substitution in a chain whose script or lead words name docker, podman or a portless compose (shlex splits a backquote's inner script at ;, so a name split across its steps is read over the whole chain), names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
 wrappers = set(sys.argv[4].split())
+shells = set(sys.argv[5].split())
+# a single-dash option cluster holding c (-c, -ec, -ce) gives a shell its own script
+dash_c = lambda w: re.match(r"-[^-]*c", w) is not None
 if any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3]):
     sys.exit(1)
 for step in steps:
@@ -595,6 +598,9 @@ for step in steps:
         i += 1
     hidden = lambda w: w == "eval" or "$" in w
     if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
+        sys.exit(1)
+    # a chain shell word anywhere past VAR=x, whatever program leads the step, before a -c cluster runs a chain this splits only one level of, and before a $ word one whose script it cannot see, so either reads as one it cannot read
+    if any(os.path.basename(w) in shells and any(dash_c(x) or "$" in x for x in step[k + 1 :]) for k, w in enumerate(step[i:], i)):
         sys.exit(1)
 PY
 }
@@ -662,7 +668,7 @@ set_flags() { local w; for w in "$@"; do case "$w" in pipefail) ;; [-+] | [-+]*[
 bare_dir() { local d=$1; while [ ${#d} -gt 1 ] && [ "${d%/}" != "$d" ]; do d=${d%/}; done; printf '%s' "$d"; }
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
-# Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form a reading of cd, ~ or env let through): a git add, commit or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add, commit or push after it or as `git -C <that kind of folder>`, `bun run precommit:light` in run-slot's own repo, and a script's `set` of shell options, each word plain. CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
+# Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form a reading of cd, ~ or env let through): a git add, commit, merge or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add, commit, merge or push after it or as `git -C <that kind of folder>`, `bun run precommit:light` in run-slot's own repo, and a script's `set` of shell options, each word plain. CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
 CHAIN_SAFE="" CHAIN_BAD=""
 chain_safe() {
   local line words cdir="" folder verb rest=()
@@ -691,6 +697,7 @@ chain_safe() {
     case "$verb" in
       add) plain ${rest[@]+"${rest[@]}"} && add_flags ${rest[@]+"${rest[@]}"} || return 1 ;;
       commit) commit_words ${rest[@]+"${rest[@]}"} || return 1 ;;
+      merge) merge_words ${rest[@]+"${rest[@]}"} || return 1 ;;
       push) plain ${rest[@]+"${rest[@]}"} || return 1 ;;
       *) return 1 ;;
     esac
@@ -698,13 +705,25 @@ chain_safe() {
   done < <(chain_steps "$@")
   CHAIN_BAD=""
 }
-# a chain's lane: `commit` when it commits or pushes and chain_safe takes every step, so it ends in seconds as a bare commit does (4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue); `general <step>` for one that commits or pushes with a step outside that list, which run-slot says, so its worker can run the commit on its own; else nothing
+# a git merge's words: --no-edit, --ff, --ff-only or --no-ff and one or more plain refs, since a merge runs commit-msg alone, never pre-commit's build, and any other option (-s, -X, -m) is off the list
+merge_words() {
+  local w refs=""
+  for w in "$@"; do
+    case "$w" in
+      --no-edit | --ff | --ff-only | --no-ff) ;;
+      -*) return 1 ;;
+      *) plain "$w" || return 1; refs=1 ;;
+    esac
+  done
+  [ -n "$refs" ]
+}
+# a chain's lane: `commit` when it commits, merges or pushes and chain_safe takes every step, so it ends in seconds as a bare commit does (4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue); `general <step>` for one that commits, merges or pushes with a step outside that list, which run-slot says, so its worker can run the commit on its own; else nothing
 chain_lane() {
   local line words commits=""
   while IFS= read -r line; do
     IFS=$'\x1f' read -ra words <<< "$line"
     [ ${#words[@]} -gt 0 ] || continue
-    case "$(git_verb "${words[@]}")" in commit|push) commits=1 ;; esac
+    case "$(git_verb "${words[@]}")" in commit|merge|push) commits=1 ;; esac
   done < <(chain_steps "$@")
   [ -n "$commits" ] || return
   if chain_safe "$@"; then echo commit; else echo "general $(shown "$CHAIN_BAD")"; fi
@@ -835,7 +854,7 @@ runs_program() {
 }
 # a commit whose pre-commit build runs next build goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56): a git commit but -n, in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every one is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one; and, failing closed, a git run with a word outside these lists, or a verb that is an alias
 heavy_build() {
-  local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir=""
+  local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir="" merged=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with what its git add steps stage, and when an add runs in another folder than a commit, whose paths it would misread
   first=$(first_word "$@")
   case " $CHAIN_SHELLS " in
@@ -853,7 +872,10 @@ heavy_build() {
         while IFS= read -r line; do
           IFS=$'\x1f' read -ra words <<< "$line"
           [ ${#words[@]} -gt 0 ] || continue
+          # an add or commit after a merge counts as a build, since a merge that stops on a conflict leaves the other side's files for them to stage
+          case "${words[3]}:$merged" in add:1 | commit:1) CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0 ;; esac
           case "${words[3]}" in
+            merge) merged=1 ;;
             add) adir=${adir:-${words[2]}}; [ "$adir" = "${words[2]}" ] && chain_add "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0; } ;;
             commit) { [ -z "$adir" ] || [ "$adir" = "${words[2]}" ]; } && ! heavy_build "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0; } ;;
           esac
@@ -984,7 +1006,7 @@ if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
   WHY=$(chain_lane "$@")
   case "$WHY" in
     "general "*)
-      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since \`${WHY#general }\` is not a form the commit lane takes (git add, commit or push in run-slot's folder, or after a cd or as git -C to an absolute folder in the repo, and bun run precommit:light); run the commit as one of those to take the commit lane" >&2
+      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since \`${WHY#general }\` is not a form the commit lane takes (git add, commit, push, or merge with --no-edit, --ff, --ff-only or --no-ff, in run-slot's folder, or after a cd or as git -C to an absolute folder in the repo, and bun run precommit:light); run the commit or merge as one of those to take the commit lane, or run an off-list merge and its push as two calls" >&2
       rlog why "general: \`${WHY#general }\` is outside the commit lane's forms" ;;
   esac
 fi
@@ -1051,9 +1073,15 @@ CHILD=""
 # seconds between a waiter's looks, and a held clone's (the tests shorten both)
 POLL=${RUN_SLOT_POLL:-15}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
-# the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake's line it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
+# the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake (clone_brake) it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
 CLONE_GAP=180
 CLONE_MARGIN=4
+# the clones' brake, the owner's load rule of 5 Nov (load5 under 15, the owner's Mac's core count), one per core: sysctl's hw.ncpu, the count spawn.sh's load gate starts from, else 15; never load_line, whose cap shuts run-slot-2 (6 Nov, 06:52Z to 07:03Z: a cap of 1 held every clone)
+clone_brake() {
+  local n
+  n=$(sysctl -n hw.ncpu 2>/dev/null | tr -cd 0-9)
+  if [ "${n:-0}" -gt 0 ]; then echo "$n"; else echo 15; fi
+}
 
 # Waiters take slots oldest first (builder, 12 Oct: a request queued at 13:28Z lost three slots in a row to later ones): each waiter leaves a
 # ticket, run-slot.waiters/<ns>-<pid>-<who>, and only the oldest ticket whose pid is alive may take a slot; a ticket goes once its slot is taken
@@ -1656,12 +1684,14 @@ if [ -n "$KIND" ]; then
     ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
   while clone_held; do reread; sleep "$CLONE_POLL"; done
-  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of load_line's brake line, and while a big run holds a CPU slot, whatever clone-allow names; an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
+  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of the brake, one per core, or at half the cores or more where that line sits lower (under 8 cores; on 4 or fewer the brake less the margin is 0 or less and would hold every clone), and while a big run holds a CPU slot, whatever clone-allow names; an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
   clone_spaced() {
-    local brake l s last
-    brake=$(load_line)
+    local brake line l s last
+    brake=$(clone_brake)
+    line=$((brake - CLONE_MARGIN))
+    [ "$line" -lt $(((brake + 1) / 2)) ] && line=$(((brake + 1) / 2))
     l=$(load5)
-    [ -n "$l" ] && [ "$l" -ge $((brake - CLONE_MARGIN)) ] && { echo "for load5 under $((brake - CLONE_MARGIN)), $CLONE_MARGIN under the brake's $brake"; return; }
+    [ -n "$l" ] && [ "$l" -ge "$line" ] && { echo "for load5 under $line, the brake's $brake less $CLONE_MARGIN and never under half of it"; return; }
     for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
       reclaim "$OPS/$s"
       [ -d "$OPS/$s" ] && [ "$(cut -d' ' -f5 "$OPS/$s.holder" 2>/dev/null)" = big ] && { echo "while a big run holds $s"; return; }
