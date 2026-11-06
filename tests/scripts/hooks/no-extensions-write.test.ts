@@ -1631,6 +1631,15 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["git with a pager the line holds", `P=less; GIT_PAGER="$P" git log`],
     ["git with a literal config home", "XDG_CONFIG_HOME=/tmp/c git log"],
     ["git with a literal home", "HOME=/tmp/h git log"],
+    ["GNU cp of a variable after the end of options", `gcp -- "$S" /tmp/y`],
+    ["GNU cp of a variable the line holds", `S=/tmp/s; gcp "$S" /tmp/y`],
+    ["GNU cp to a literal path", "gcp x /tmp/y"],
+    ["GNU rm of a literal path elsewhere", "grm -rf /tmp/scratch-dir"],
+    ["GNU install with a mode from a variable", `ginstall -m "$M" x /tmp/y`],
+    [
+      "GNU cp by its gnubin path of a variable after the end of options",
+      `/opt/homebrew/opt/coreutils/libexec/gnubin/cp -- "$S" /tmp/y`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
