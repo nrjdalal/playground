@@ -484,6 +484,8 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       "case $1 in a) (/usr/local/bin/doc?er build .) ;; esac",
       "case x in *) /usr/local/bin/d?cker build . ;; esac",
       "case x in a|b) /usr/local/bin/d?cker build . ;; esac",
+      "function f { /usr/local/bin/doc?er build .; }; f",
+      "coproc /usr/local/bin/doc?er build .",
     ])
       test(`a docker program word in a step: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
@@ -507,6 +509,8 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       ["sh", "-c", 'echo "/usr/local/bin/doc?er build ." | sh'],
       ["sh", "-c", "eval /usr/local/bin/doc?er build ."],
       ["launcher", "sh", "-c", "/usr/local/bin/doc?er build ."],
+      ["sh", "-c", "echo /usr/local/bin/doc\\?er build . | sh"],
+      ["sh", "-c", "eval /usr/local/bin/doc\\?er build ."],
     ])
       test(`a docker glob in a script run-slot does not open: ${argv.join(" ")}`, async () => {
         const r = await run(argv)
