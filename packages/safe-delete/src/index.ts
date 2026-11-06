@@ -47,10 +47,14 @@ export const isAgentBrowser = (command: string): boolean =>
 
 export type Quarantined = { files: number; id: string; size: number; to: string }
 
+// A worktree's git record as the trash keeps it, since the prune after its move deletes the main checkout's record folder, which holds its HEAD: the branch it held (null when detached), that folder, and its HEAD's commit.
+export type WorktreeGit = { branch: string | null; gitdir: string; sha: string }
+
 export type TrashEntry = {
   at: string
   carveOut?: string
   files: number
+  git?: WorktreeGit
   id: string
   path: string
   reason: string
@@ -242,7 +246,13 @@ const refused = (text: string, kind: Refusal["kind"] = "refused"): Refusal => ({
 // Renames a path into <trash>/<UTC-ts>-<session>/<n>/ with a manifest line, after the protected list, worktreeRefusal for a worktree (which only the worktree option's holders move), the tripwire, the volume check and, for a worktree, the running clones read again, since the walk that counts its files takes seconds and a clone can start inside it.
 export function quarantine(
   path: string,
-  opts: { carveOut?: string; reason: string; session: string; worktree?: Holders },
+  opts: {
+    carveOut?: string
+    git?: WorktreeGit
+    reason: string
+    session: string
+    worktree?: Holders
+  },
   roots: Roots,
   io: { carveOuts?: Record<string, CarveOut>; dev?: (path: string) => number; now?: Date } = {},
 ): Quarantined | Refusal {
@@ -304,6 +314,7 @@ export function quarantine(
     at: now.toISOString(),
     ...(carve ? { carveOut: opts.carveOut } : {}),
     files,
+    ...(opts.git ? { git: opts.git } : {}),
     id,
     path: abs,
     reason: opts.reason,

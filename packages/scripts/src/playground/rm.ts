@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -12,6 +12,7 @@ import {
   quarantine,
   restore,
   type Roots,
+  type WorktreeGit,
 } from "@packages/safe-delete"
 
 import { targetWords } from "../../../../api/hono/src/lib/dashboard/delete-targets"
@@ -264,6 +265,47 @@ export const discardRefusal = async (
   return null
 }
 
+const gitIn = (cwd: string, ...args: string[]) => {
+  const run = Bun.spawnSync(["git", "-C", cwd, ...args], { stderr: "pipe", stdout: "pipe" })
+  return { ok: run.exitCode === 0, out: run.stdout.toString().trim() }
+}
+
+// A worktree's git record, read before its move, or undefined when git cannot read it.
+export const worktreeGit = (path: string): WorktreeGit | undefined => {
+  const sha = gitIn(path, "rev-parse", "HEAD")
+  const gitdir = gitIn(path, "rev-parse", "--absolute-git-dir")
+  if (!sha.ok || !gitdir.ok) return undefined
+  const branch = gitIn(path, "symbolic-ref", "--quiet", "--short", "HEAD")
+  return { branch: branch.ok ? branch.out : null, gitdir: gitdir.out, sha: sha.out }
+}
+
+// Why restoring a worktree would leave it on another commit or one git cannot read, or null: its branch now points at another commit, or its branch and its commit have both gone; a record folder still there is kept as it is.
+const relinkRefusal = (main: string, git: WorktreeGit): string | null => {
+  if (existsSync(git.gitdir)) return null
+  const at = git.branch
+    ? gitIn(main, "rev-parse", "--verify", "--quiet", `refs/heads/${git.branch}`)
+    : null
+  if (at?.ok && at.out !== git.sha)
+    return `the branch ${git.branch} now points at ${at.out}, not ${git.sha}, the commit the worktree held, so the restore leaves both as they are`
+  if (at?.ok || gitIn(main, "cat-file", "-e", `${git.sha}^{commit}`).ok) return null
+  return `the commit ${git.sha} the worktree held is gone from ${main}, so its restore would leave a folder git cannot read: fetch that commit, run git -C ${main} branch ${git.branch ?? "<branch>"} ${git.sha}, then restore it again`
+}
+
+// Writes a restored worktree's git record back into the main checkout when it has gone, recreating its branch at the commit it held when the branch has gone too, then rebuilds its index from HEAD, which keeps its files; a record still there, with its index and HEAD, is left as it is.
+const relink = (path: string, main: string, git: WorktreeGit) => {
+  if (existsSync(git.gitdir)) return
+  mkdirSync(git.gitdir, { recursive: true })
+  writeFileSync(
+    join(git.gitdir, "HEAD"),
+    git.branch ? `ref: refs/heads/${git.branch}\n` : `${git.sha}\n`,
+  )
+  writeFileSync(join(git.gitdir, "commondir"), "../..\n")
+  writeFileSync(join(git.gitdir, "gitdir"), `${join(path, ".git")}\n`)
+  if (git.branch && !gitIn(main, "show-ref", "--verify", "--quiet", `refs/heads/${git.branch}`).ok)
+    gitIn(main, "branch", git.branch, git.sha)
+  gitIn(path, "reset", "-q")
+}
+
 // playground rm: one quarantine, list or restore against the deps' HOME, main checkout and trash; a protected or tripwire refusal goes to the dispatcher; exit 0 done, 1 refused, 2 a usage error.
 export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   const args = rmArgs(words)
@@ -287,13 +329,24 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
       )
     return 0
   }
+  const kept =
+    "restore" in args
+      ? listTrash(roots.trash).find((entry) => entry.id === args.restore)?.git
+      : undefined
+  const relinkRefused = kept && relinkRefusal(roots.main, kept)
+  if (relinkRefused) {
+    console.error(`playground: ${relinkRefused}`)
+    return 1
+  }
   const session = "restore" in args ? "" : await deps.session()
+  const git = "worktree" in args && args.worktree ? worktreeGit(args.path) : undefined
   const done =
     "restore" in args
       ? restore(args.restore, roots)
       : quarantine(
           args.path,
           {
+            ...(git ? { git } : {}),
             reason: args.reason,
             session,
             worktree: args.worktree
@@ -317,6 +370,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     return 1
   }
   if ("path" in done) {
+    if (kept) relink(done.path, roots.main, kept)
     console.log(`Restored ${done.path}`)
     return 0
   }
