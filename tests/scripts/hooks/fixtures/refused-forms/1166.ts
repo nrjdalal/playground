@@ -26,6 +26,18 @@ export const groups: Group[] = [
         `builtin trap ${BUILT} DEBUG; XY=/tmp/a; cp g "$XY"`,
       ],
       [
+        "cp of a held variable after a DEBUG trap of literal text that sources a file the line writes",
+        `printf '%s\\n' ${BUILT} > /tmp/t; trap 'source /tmp/t' DEBUG; XY=/tmp/a; cp g "$XY"`,
+      ],
+      [
+        "cp of a held variable after a DEBUG trap of literal text whose command name expands only when it runs",
+        `Q=${BUILT}; trap '$C $Q' DEBUG; XY=/tmp/a; cp g "$XY"`,
+      ],
+      [
+        "an EXIT trap of literal text that copies into the root",
+        `trap 'cp g "$HOME/.playground/extensions/.no-such-folder/x"' EXIT`,
+      ],
+      [
         "cp of a held variable after zsh's sched whose text the hook cannot read",
         `sched +0 ${BUILT}; XY=/tmp/a; cp g "$XY"`,
       ],
