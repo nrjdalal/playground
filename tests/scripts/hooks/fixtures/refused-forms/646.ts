@@ -129,6 +129,20 @@ export const groups: Group[] = [
       ["cp into a target folder from a variable in one quoted word", `cp "-t$D" x`],
       ["install of folders from a variable by its long option", `install --directory "$D" /tmp/a`],
       ["install of folders from a variable by a cluster holding d", `install -vd "$D" /tmp/a`],
+      [
+        "GNU ln of one operand past a suffix with its value attached after a cd to a variable",
+        `cd "$D"; gln --suffix=bak /tmp/src`,
+      ],
+      [
+        "GNU ln of one operand past a long flag after a cd to a variable",
+        `cd "$D"; gln --force /tmp/src`,
+      ],
+      ["macOS cp to a variable past a -t after its first operand", `cp x -t /tmp/d "$D"`],
+      ["macOS mkdir of a variable past a -m after its first operand", `mkdir /tmp/x -m "$D"`],
+      ["macOS touch of a variable past a -r after its first operand", `touch /tmp/x -r "$D"`],
+      ["macOS install to a variable past a -m after its first operand", `install x /tmp/y -m "$D"`],
+      ["GNU install to a variable past its strip flag", `ginstall x --strip "$D"`],
+      ["macOS install of a folder from a variable past its safe-copy flag", `install -d -S "$D"`],
     ],
   },
   {
