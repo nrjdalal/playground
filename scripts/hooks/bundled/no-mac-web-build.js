@@ -1752,15 +1752,28 @@ var help = (args) => args.some((a) => a.value === "-h" || a.value === "--help");
 function composeBuild(args) {
   const found = subcommand(args, COMPOSE_TAKES);
   const { rest, sub } = found.sub?.value === "alpha" ? subcommand(found.rest, new Set) : found;
-  if (!sub || help(rest))
+  if (!sub)
+    return;
+  const own = sub.value === "run" ? beforeService(rest) : rest;
+  if (help(own))
     return;
   if (sub.value === "watch")
     return { kind: "compose", rest, sub: "watch" };
   if (!["build", "create", "run", "up"].includes(sub.value))
     return;
-  if (rest.some((a) => a.value === "--no-build"))
+  if (own.some((a) => a.value === "--no-build"))
     return;
   return { kind: "compose", rest, sub: sub.value };
+}
+function beforeService(rest) {
+  for (let k = 0;k < rest.length; k++) {
+    const v = rest[k].value;
+    if (SERVICE_TAKES.has(v))
+      k++;
+    else if (!v.startsWith("-") || v === "-")
+      return rest.slice(0, k);
+  }
+  return rest;
 }
 function dockerBuild(args, compose) {
   if (compose)
