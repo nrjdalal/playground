@@ -156,7 +156,7 @@ const ask = async (
 
 export type Io = { data: string; org?: string; settings: Settings }
 
-// One beat: nothing outside the window or with no lines file; else the card's text from the files and GitHub, written only when it changed, a closed card or a new day getting a new card, and each new step appended to the day's steps file; each ticket's read counts toward its 5 minutes even when it fails, keeping its last PR, and the reads and steps are saved before the card is written, so a failing read or ask repeats neither; a failed read throws once the beat has saved.
+// One beat: nothing outside the window, with no lines file set or with one it cannot read; else the card's text from the files and GitHub, written only when it changed, a closed card or a new day getting a new card, and each new step appended to the day's steps file; each ticket's read counts toward its 5 minutes even when it fails, keeping its last PR, and the reads and steps are saved before the card is written, so a failing read or ask repeats neither; a failed read throws once the beat has saved.
 export const beat = async (
   ctx: Pick<Context, "now" | "ops" | "repo" | "run">,
   io: Io,
@@ -170,7 +170,9 @@ export const beat = async (
   const day = dayOf(now, zone)
   const path = statePath(ctx.ops)
   const state: State = (await read(path)) ?? { prs: {}, seen: {} }
-  const lines = linesIn(await read(linesFile), get("ticketCard.prefixes"))
+  const file = await read(linesFile)
+  if (!file || typeof file !== "object") return
+  const lines = linesIn(file, get("ticketCard.prefixes"))
   const skips = skipsIn(await read(pathIn(io.data, get("ticketCard.skipsFile"))))
   const failed: string[] = []
   for (const line of lines) {

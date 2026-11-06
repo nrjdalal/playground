@@ -188,6 +188,23 @@ describe("the beat", () => {
     expect(w.asks().filter((a) => a === "new")).toHaveLength(4)
   })
 
+  test("a lines file that is missing or half-written makes the beat write nothing, so the next good read logs no step again", async () => {
+    const w = world("torn")
+    const good = readFileSync(join(w.data, "lines.json"), "utf8")
+    await w.go(0)
+    const state = readFileSync(statePath(w.ops), "utf8")
+    writeFileSync(join(w.data, "lines.json"), good.slice(0, 20))
+    await w.go(1)
+    await w.go(2, { ...VALUES, "ticketCard.linesFile": "missing.json" })
+    expect(readFileSync(statePath(w.ops), "utf8")).toBe(state)
+    writeFileSync(join(w.data, "lines.json"), good)
+    await w.go(3)
+    expect(w.asks()).toEqual(["new"])
+    expect(readFileSync(join(w.data, "diary", "2026-11-05-steps.md"), "utf8")).toBe(
+      "- 10:00 am ABC-1 PR open\n",
+    )
+  })
+
   test("a ticket still open the next day keeps its first-seen times and adds no line to that day's steps file", async () => {
     const w = world("next-day")
     await w.go(0)
