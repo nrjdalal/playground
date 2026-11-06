@@ -431,7 +431,7 @@ if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell's -c cluster), and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, a step holding a chain shell word before a -c cluster or a $ word (a nested chain), or with no script file after it (a shell fed its script on stdin), or with a command substitution beside docker, podman or a portless compose
+# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell's -c cluster), and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, a step holding a chain shell word anywhere (a nested chain, a script file or a shell fed its script on stdin), or with a command substitution beside docker, podman or a portless compose
 # the wrappers chain_steps reads past to the program they run, A to Z, each as <name>|<flags>|<options that take a value>, and the ones that take one count or duration before it: scripts/hooks/shell.ts's WRAPPERS and COUNTED, with the env and xargs options its parse reads by hand, which a test holds equal
 CHAIN_WRAPPER_OPTIONS="builtin||
 busybox||
@@ -585,11 +585,9 @@ for i, step in enumerate(steps):
             step += [seps[i], later[0]]
     if step:
         print("\x1f".join(step))
-# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, a step holding a chain shell word before a -c cluster or a $ word, or with no script file after it, or a command substitution in a chain whose script or lead words name docker, podman or a portless compose (shlex splits a backquote's inner script at ;, so a name split across its steps is read over the whole chain), names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
+# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, a step holding a chain shell word (a nested chain, a script file or a script on stdin), or a command substitution in a chain whose script or lead words name docker, podman or a portless compose (shlex splits a backquote's inner script at ;, so a name split across its steps is read over the whole chain), names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
 wrappers = set(sys.argv[4].split())
 shells = set(sys.argv[5].split())
-# a single-dash option cluster holding c (-c, -ec, -ce) gives a shell its own script, and ksh reads one with a dash inside it (-x-c) as -x -c, as the shell-word glob before it does
-dash_c = lambda w: re.match(r"-(?:c|[^-].*c)", w) is not None
 if any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3]):
     sys.exit(1)
 for step in steps:
@@ -599,27 +597,9 @@ for step in steps:
     hidden = lambda w: w == "eval" or "$" in w
     if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
         sys.exit(1)
-    # a chain shell word anywhere past VAR=x, whatever program leads the step, before a -c cluster runs a chain this splits only one level of, and before a $ word one whose script it cannot see, so either reads as one it cannot read
-    if any(os.path.basename(w) in shells and any(dash_c(x) or "$" in x for x in step[k + 1 :]) for k, w in enumerate(step[i:], i)):
+    # a chain shell word anywhere past VAR=x, whatever program leads the step, runs a script this does not read: its own -c script (a nested chain, split only one level), a script file, or one fed on stdin (a pipe, a < redirect or a heredoc), behind any option, value or fd number, so it reads as one it cannot read
+    if any(os.path.basename(w) in shells for w in step[i:]):
         sys.exit(1)
-    # a chain shell word with no script file after it, or with an -s cluster, reads its script on stdin (a pipe, a < redirect or a heredoc into it), which this cannot see, so it reads as one it cannot read
-    for k, w in enumerate(step[i:], i):
-        if os.path.basename(w) not in shells:
-            continue
-        rest, j, stdin = step[k + 1 :], 0, True
-        while j < len(rest):
-            if rest[j] in ("-o", "+o"):
-                j += 2
-                continue
-            if rest[j] == "--":
-                stdin = j + 1 >= len(rest)
-                break
-            if re.match(r"[-+](?:s|[^-].*s)", rest[j]) or not rest[j].startswith(("-", "+")):
-                stdin = rest[j].startswith(("-", "+"))
-                break
-            j += 1
-        if stdin:
-            sys.exit(1)
 PY
 }
 # a git run's subcommand, past env, VAR=x and git's own options, each of -C, -c, --git-dir, --work-tree, --namespace and --config-env with its value; nothing for a step that runs no git
