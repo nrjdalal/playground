@@ -544,7 +544,9 @@ export function steadyNames(named: Namings, commands: Command[]): (cmd: Command)
     const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&"
     if (!top || cmd.detached || (!always && cmd.follows !== "&&")) continue
     const [first] = cmd.words
+    // an array assignment (`a=(…)`) makes several words of its name, never one value
     if (!first || !ASSIGN.test(first.value) || parses[at].name !== "") continue
+    if (/^[A-Za-z_]\w*\+?=\(/.test(first.value)) continue
     for (const key of parses[at].local.keys())
       if (holdable(key, named, counts)) set.set(key, always ? { at } : { at, chain })
   }

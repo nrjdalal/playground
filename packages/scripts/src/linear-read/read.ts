@@ -34,9 +34,29 @@ export const USAGE = `usage: linear-read <command> <arg>
   project <id>        a project with its lead, description and the issues updated in the last 30 days
   projects <word>     the projects whose name holds the word
   search <words>      open tickets (backlog, to do, started) matching the words
+  states <ID,ID>      each ticket's state type (backlog, unstarted, started, completed, canceled, triage), in one query
   user <name|email>   a Linear user with their email`
 
+// One aliased query for the comma list, so a beat that reads many tickets spends one call; it returns { <ID>: <state type> }.
+const states = async (gql: Gql, arg: string): Promise<Record<string, string>> => {
+  const ids = arg
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean)
+  if (!ids.length || ids.some((id) => !/^[A-Za-z][A-Za-z0-9]*-\d+$/.test(id)))
+    throw new Error(`states takes ticket IDs joined by commas, not ${arg}`)
+  const query = `query (${ids.map((_, i) => `$i${i}: String!`).join(", ")}) { ${ids.map((_, i) => `t${i}: issue(id: $i${i}) { identifier state { type } }`).join(" ")} }`
+  const data = (await gql(query, Object.fromEntries(ids.map((id, i) => [`i${i}`, id])))) as Record<
+    string,
+    { identifier: string; state: { type: string } } | null
+  >
+  return Object.fromEntries(
+    Object.values(data).flatMap((t) => (t ? [[t.identifier, t.state.type]] : [])),
+  )
+}
+
 export const read = async (gql: Gql, command: string, arg: string): Promise<unknown> => {
+  if (command === "states") return states(gql, arg)
   if (!Object.hasOwn(QUERIES, command)) throw new Error(`unknown command ${command}`)
   return gql(QUERIES[command as keyof typeof QUERIES], { q: arg })
 }
