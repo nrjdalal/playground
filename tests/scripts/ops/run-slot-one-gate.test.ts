@@ -78,6 +78,15 @@ describe("a run that fits passes a pinned big head the open lanes cannot serve",
     expect(await big.ran()).toBe(true)
   })
 
+  // review round 1: a commit or clone lane takes its slot outside the queue, so one taken after the head is a passer too, or each new lane would unname the head
+  test("a commit lane taken after the head counts among the passers, so no new run passes it", async () => {
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+    m.ticket(1, "worker-big", BIG, PINNED)
+    m.hold("run-slot-2", 1, "small", iso())
+    m.hold("run-slot-commit", 0, "-", iso())
+    expect(await m.start("worker-s", { RUN_SLOT_SIZE: "small" }).waits()).toBe(true)
+  })
+
   // an older copy's ticket (no rank) or local CI's is a wall no newer ticket passes, since those take a slot only while theirs is the oldest
   test("an older copy's ticket at the head is still a wall", async () => {
     const m = machine()
@@ -102,6 +111,12 @@ describe("can-take on a queue ticket reads that ticket's units", () => {
     m.hold("run-slot-2", 1, "small")
     m.ticket(1, "worker-m", "s2 22 2 medium")
     expect(await m.canTake("run-slot", `1-${process.pid}-worker-m`)).toBe(true)
+  })
+
+  // review round 1: a head that started between head and can-take leaves a ticket-shaped name with no file, which reads as no one's run rather than a session's
+  test("a ticket name whose file is gone cannot take run-slot", async () => {
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+    expect(await m.canTake("run-slot", `1-${process.pid}-worker-gone`)).toBe(false)
   })
 
   // an older copy's ticket holds no units, so it reads as a medium, as the queue reads it
