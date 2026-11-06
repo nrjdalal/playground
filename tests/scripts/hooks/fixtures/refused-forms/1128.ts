@@ -178,6 +178,22 @@ export const groups: Group[] = [
         "cp of a held variable past a PROMPT4 prompt whose quoted heredoc body it runs under promptsubst",
         `${READS}; setopt promptsubst; read -r l <<'E'\n${SETS}\nE\nPROMPT4="$l"; set -x; true; set +x; cp g "$X"`,
       ],
+      [
+        "cp of a held variable past a quoted heredoc a read sets PS4 from, run under promptsubst",
+        `${READS}; setopt promptsubst; read -r l <<'E'\n${SETS}\nE\nread -r PS4 <<<"$l"; set -x; true; set +x; cp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc read straight into PS4 under promptsubst",
+        `${READS}; setopt promptsubst; read -r PS4 <<'E'\n${SETS}\nE\nset -x; true; set +x; cp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc read straight into PROMPT4 under promptsubst",
+        `${READS}; setopt promptsubst; read -r PROMPT4 <<'E'\n${SETS}\nE\nset -x; true; set +x; cp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc a print -v sets PS4 from under promptsubst",
+        `${READS}; setopt promptsubst; read -r l <<'E'\n${SETS}\nE\nprint -v PS4 -- "$l"; set -x; true; set +x; cp g "$X"`,
+      ],
     ],
   },
 ]
