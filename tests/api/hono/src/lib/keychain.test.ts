@@ -4,6 +4,7 @@ import { keychainItem, type Run } from "../../../../../api/hono/src/lib/keychain
 import {
   KEYCHAIN_ITEMS,
   type KeychainItemName,
+  keychainSpec,
 } from "../../../../../api/hono/src/lib/keychain-items"
 
 // A fake `security`, so no test reaches the real Keychain.
@@ -57,5 +58,62 @@ describe("an allowlisted Keychain item", () => {
     await expect(item.write("yard_made-up")).rejects.toThrow(
       "the Keychain refused it: security: could not add …",
     )
+  })
+})
+
+describe("Playground's other Keychain items, by service (keychainSpec)", () => {
+  // a fake `security` for any item, its read answering stdout
+  const any = (service: string, stdout = "") => {
+    const calls: { argv: string[]; input?: string }[] = []
+    const run: Run = async (argv, input) => {
+      calls.push({ argv, input })
+      return { code: 0, stderr: "", stdout }
+    }
+    return { calls, item: keychainItem(service, { account: "owner", run }) }
+  }
+
+  test("takes any playground- service, and refuses every other, so no card names a browser's or the login keychain's items", () => {
+    expect(keychainSpec("playground-glm")?.service).toBe("playground-glm")
+    expect(keychainSpec("playground-claude-oauth")?.service).toBe("playground-claude-oauth")
+    for (const service of [
+      "github.com",
+      "Chrome Safe Storage",
+      "playground-",
+      "Playground-glm",
+      "playground-a b",
+      "toString",
+      "constructor",
+    ])
+      expect(keychainSpec(service)).toBeNull()
+    expect(() => keychainItem("github.com")).toThrow("not a Keychain item Playground may use")
+  })
+
+  test("a typed item's service keeps its typed check, by name or by service", () => {
+    expect(keychainSpec("playground-slack")).toBe(KEYCHAIN_ITEMS.slack)
+    expect(keychainSpec("yard")).toBe(KEYCHAIN_ITEMS.yard)
+  })
+
+  test("an untyped item takes printable words with no quote, backslash, line break or space at either end", async () => {
+    const { calls, item } = any("playground-glm")
+    for (const value of ['a"b', "a\\b", "a\nb", " a", "a ", "", "x".repeat(4097)])
+      await expect(item.write(value)).rejects.toThrow("a value of 1 to 4096 printable characters")
+    await item.write("made-up key 0000")
+    expect(calls).toEqual([
+      {
+        argv: ["security", "-i"],
+        input: 'add-generic-password -U -s "playground-glm" -a "owner" -w "made-up key 0000"\n',
+      },
+    ])
+  })
+
+  test("reads the value off stdout, with no value in any argv", async () => {
+    const { calls, item } = any("playground-glm", "made-up-value\n")
+    expect(await item.read()).toBe("made-up-value")
+    expect(calls).toEqual([
+      {
+        argv: ["security", "find-generic-password", "-s", "playground-glm", "-a", "owner", "-w"],
+        input: undefined,
+      },
+    ])
   })
 })

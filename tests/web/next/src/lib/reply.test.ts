@@ -2,13 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import { REPLY_RE as API_REPLY_RE } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import type { InboxItem } from "../../../../../api/hono/src/lib/dashboard/inbox"
-import {
-  currentReply,
-  setReply,
-  TYPED,
-  typedReply,
-  withReply,
-} from "../../../../../web/next/src/lib/reply"
+import { replyRoute, TYPED, typedReply, withRef } from "../../../../../web/next/src/lib/reply"
 
 const items = [
   { ref: 41, title: "Ship canary 3f9a2c1 to main?" },
@@ -20,40 +14,48 @@ describe("a reply", () => {
     expect(TYPED.source).toBe(API_REPLY_RE.source)
   })
 
-  test("a second pick of the same item is a new pick, so a phone's chat comes forward again", () => {
-    setReply({ ref: 41, title: "Ship" })
-    const first = currentReply()
-    setReply({ ref: 41, title: "Ship" })
-    expect(currentReply()).toEqual(first)
-    expect(currentReply()).not.toBe(first)
-    setReply(null)
-  })
-
   test("re #iN in the words names the item the list holds, in any case", () => {
     expect(typedReply("Re #i41 hold it", items)).toEqual({ ref: 41, title: items[0]!.title })
     expect(typedReply("re #i999 hold it", items)).toBeNull()
     expect(typedReply("#i41 alone is not a reply", items)).toBeNull()
   })
+})
 
-  test("a picked item leads the words with its id, unless they name it already", () => {
-    const reply = { ref: 41, title: "Ship" }
-    expect(withReply("Hold it", reply)).toBe("re #i41: Hold it")
-    expect(withReply("re #i41 hold it", reply)).toBe("re #i41 hold it")
-    expect(withReply("Hold it", null)).toBe("Hold it")
-    // files sent with no words still carry the id
-    expect(withReply("", reply)).toBe("re #i41")
+// A card's Reply (#1045): an empty box goes to Playground's composer, words in the box send, and a secret ask keeps its own box.
+describe("a card's Reply", () => {
+  test("an empty box goes to the composer, from an open card and a folded one", () => {
+    expect(replyRoute({ chat: true, folded: false, secret: false, text: "" })).toBe("composer")
+    expect(replyRoute({ chat: true, folded: true, secret: false, text: "  " })).toBe("composer")
   })
 
-  test("one of the session's skills keeps the start, where Claude Code runs it, and the id follows it", () => {
-    const reply = { ref: 41, title: "Ship" }
-    const skills = ["daily-notes"]
-    expect(withReply("/daily-notes Hold it", reply, skills)).toBe("/daily-notes re #i41: Hold it")
-    expect(withReply("/daily-notes", reply, skills)).toBe("/daily-notes re #i41")
-    // any other leading / word is his words, led by the id as before
-    expect(withReply("/tmp is full", reply, skills)).toBe("re #i41: /tmp is full")
-    expect(withReply("/clear the queue first", reply, skills)).toBe(
-      "re #i41: /clear the queue first",
-    )
-    expect(withReply("/daily-notes Hold it", reply)).toBe("re #i41: /daily-notes Hold it")
+  test("words in the box send, and open a folded card to them first", () => {
+    expect(replyRoute({ chat: true, folded: false, secret: false, text: "hold it" })).toBe("send")
+    expect(replyRoute({ chat: true, folded: true, secret: false, text: "hold it" })).toBe("open")
+  })
+
+  test("while Playground's session is down an empty box opens the card's own box, since no composer would take the hand until it is back", () => {
+    expect(replyRoute({ chat: false, folded: false, secret: false, text: "" })).toBe("open")
+    expect(replyRoute({ chat: false, folded: true, secret: false, text: "" })).toBe("open")
+    expect(replyRoute({ chat: false, folded: false, secret: false, text: "hold it" })).toBe("send")
+  })
+
+  test("a secret ask's Reply never goes to the composer, so a secret never reaches the chat", () => {
+    expect(replyRoute({ chat: true, folded: false, secret: true, text: "" })).toBe("open")
+    expect(replyRoute({ chat: true, folded: true, secret: true, text: "" })).toBe("open")
+    expect(replyRoute({ chat: true, folded: false, secret: true, text: "hold it" })).toBe("send")
+  })
+
+  test("the composer reads re #iN: before the words it held, an empty one re #iN: alone", () => {
+    expect(withRef("", 41)).toBe("re #i41: ")
+    expect(withRef("hold it till Monday", 41)).toBe("re #i41: hold it till Monday")
+    expect(typedReply(withRef("", 41), items)).toEqual({ ref: 41, title: items[0]!.title })
+  })
+
+  test("a composer that opens with another item's ref gets it swapped, not doubled", () => {
+    expect(withRef("re #i40: hold it", 41)).toBe("re #i41: hold it")
+    expect(withRef("  Re #i40 hold it", 41)).toBe("re #i41: hold it")
+    expect(withRef("re #i41: hold it", 41)).toBe("re #i41: hold it")
+    expect(withRef("re #i40: ", 41)).toBe("re #i41: ")
+    expect(withRef("see re #i40 first", 41)).toBe("re #i41: see re #i40 first")
   })
 })

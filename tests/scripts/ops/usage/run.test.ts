@@ -1,16 +1,25 @@
 import { afterAll, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 const script = join(import.meta.dir, "..", "..", "..", "..", "scripts", "ops", "usage", "run.py")
+const repo = join(import.meta.dir, "..", "..", "..", "..")
 const scratch = mkdtempSync(join(tmpdir(), "ops-usage-run-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
 // run.py's functions, loaded without its loop, with beat and the Keychain probe stubbed, under a scratch HOME as tests/test_ops_merge_train.py does
 const harness = `
 import json, os, sys, time, types
-sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "a-made-up-model", "usage.accounts": [], "usage.keychainService": "made-up-service"}[key])
 src = open(sys.argv[1]).read()
 ns = {"__name__": "run_under_test"}
 exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
@@ -127,7 +136,7 @@ test("PLAYGROUND_USAGE_API moves the stored login's reads to its own answers, as
   )
   const read = `
 import json, sys, types
-sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: "made-up")
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: "made-up")
 src = open(sys.argv[1]).read()
 ns = {"__name__": "run_under_test"}
 exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
@@ -166,6 +175,8 @@ def urlopen(req, timeout=None):
         return io.BytesIO(json.dumps({"seven_day": {"utilization": 70, "resets_at": "2026-11-07T00:00:00+00:00"}}).encode())
     raise OSError("no made-up answer for " + url)
 urllib.request.urlopen = urlopen
+def checkout():
+    return ${JSON.stringify(repo)}
 def setting(key):
     return ${JSON.stringify(settings)}[key]
 def beat(job, pid, started, cycle, result, extra=None):
@@ -305,7 +316,7 @@ test("week alerts name each factory account past a mark, a spare's included, and
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
   const read = `
 import json, sys, types
-sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: "made-up")
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: "made-up")
 src = open(sys.argv[1]).read()
 ns = {"__name__": "run_under_test"}
 exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
@@ -328,7 +339,7 @@ test("two factory accounts past a week mark give two alerts with their own kind 
   mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
   const read = `
 import json, sys, types
-sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, setting=lambda key: "made-up")
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: "made-up")
 src = open(sys.argv[1]).read()
 ns = {"__name__": "run_under_test"}
 exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
@@ -355,4 +366,60 @@ test("the 5-hour alert names its account (#170)", async () => {
   expect(alerts.alerts.map((a: { kind: string; name: string }) => `${a.kind} ${a.name}`)).toEqual([
     "usage-5h added@example.org",
   ])
+})
+
+test("a cycle writes the status line's two $ figures from Claude Code's transcripts, at mode 600", async () => {
+  await cycle("statusline-cost", { added: ["added@example.org"], login: false })
+  const cache = join(scratch, "statusline-cost", ".claude", ".cache")
+  for (const name of ["weekly_retail", "daily24_retail", "retail_unpriced"]) {
+    expect(readFileSync(join(cache, name), "utf8")).toBe("0")
+    expect(statSync(join(cache, name)).mode & 0o777).toBe(0o600)
+  }
+  expect(
+    existsSync(join(scratch, "statusline-cost", ".playground", "ops", "statusline-cost.json")),
+  ).toBe(true)
+})
+
+// statusline_cost() alone, its CLI swapped for one that fails or outlasts the timeout, beside cache files from an earlier run
+const costHarness = `
+import json, os, sys, types
+sys.modules["beat"] = types.SimpleNamespace(beat=lambda *a, **k: None, checkout=lambda: "/no-checkout", setting=lambda key: {"models.probe": "m", "usage.keychainService": "s"}[key])
+src = open(sys.argv[1]).read()
+ns = {"__name__": "run_under_test"}
+exec(compile(src[: src.index("\\nwhile True:")], sys.argv[1], "exec"), ns)
+print(json.dumps(ns["statusline_cost"](sys.argv[2], float(sys.argv[3]))))
+`
+
+test.each([
+  [
+    "exits 1",
+    "console.error('made-up failure'); process.exit(1)",
+    30,
+    "statusline cost: exit 1: made-up failure",
+  ],
+  ["outlasts its timeout", "await Bun.sleep(5000)", 1, "statusline cost: TimeoutExpired"],
+  [
+    "fails with a byte that is not UTF-8",
+    "process.stderr.write(new Uint8Array([0xff])); process.exit(1)",
+    30,
+    "statusline cost: exit 1: \ufffd",
+  ],
+])("a CLI that %s leaves the last figures as they are", (name, body, timeout, problem) => {
+  const home = join(scratch, `cost-${name.replace(/ /g, "-")}`)
+  mkdirSync(join(home, ".playground", "ops", "usage"), { recursive: true })
+  const cache = join(home, ".claude", ".cache")
+  mkdirSync(cache, { recursive: true })
+  writeFileSync(join(cache, "weekly_retail"), "41.5")
+  writeFileSync(join(cache, "daily24_retail"), "7.25")
+  const fake = join(home, "fake-cli.ts")
+  writeFileSync(fake, `${body}\n`)
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home }
+  delete env.CLAUDE_CONFIG_DIR
+  const child = Bun.spawnSync(["python3", "-I", "-c", costHarness, script, fake, String(timeout)], {
+    env,
+  })
+  expect(child.stderr.toString()).toBe("")
+  expect(JSON.parse(child.stdout.toString())).toBe(problem)
+  expect(readFileSync(join(cache, "weekly_retail"), "utf8")).toBe("41.5")
+  expect(readFileSync(join(cache, "daily24_retail"), "utf8")).toBe("7.25")
 })

@@ -14,6 +14,7 @@ import { join } from "node:path"
 
 import {
   bytesOf,
+  branchLink,
   decisionOf,
   discardable,
   nightlyClean,
@@ -42,7 +43,11 @@ const scratch = (): string => {
   return root
 }
 
-const pr = (state: Pr["state"], headRefOid = "h1"): Pr => ({ headRefOid, state })
+const pr = (state: Pr["state"], headRefOid = "h1", n = 1): Pr => ({
+  headRefOid,
+  state,
+  url: `https://github.com/acme/app/pull/${n}`,
+})
 const prsOf = (byBranch: Record<string, Pr>, byNumber: Record<number, Pr> = {}): Prs => ({
   byBranch: new Map(Object.entries(byBranch)),
   byNumber: new Map(Object.entries(byNumber).map(([n, p]) => [Number(n), p])),
@@ -189,10 +194,14 @@ test("gh's PR answer reads from its stdout line alone, a number that is no PR sk
     JSON.stringify({
       data: {
         repository: {
-          b0: { nodes: [{ headRefOid: "h1", state: "MERGED" }] },
+          b0: {
+            nodes: [
+              { headRefOid: "h1", state: "MERGED", url: "https://github.com/acme/app/pull/7" },
+            ],
+          },
           b1: { nodes: [] },
           n0: null,
-          n1: { headRefOid: "h2", state: "CLOSED" },
+          n1: { headRefOid: "h2", state: "CLOSED", url: "https://github.com/acme/app/pull/12" },
         },
       },
       errors: [{ message: "Could not resolve to a PullRequest with the number of 939." }],
@@ -200,8 +209,12 @@ test("gh's PR answer reads from its stdout line alone, a number that is no PR sk
     "gh: Could not resolve to a PullRequest with the number of 939.",
   ].join("\n")
   expect(readPrs(out, ["PG-1-a", "no-pr"], [939, 12], prs)).toBe(true)
-  expect([...prs.byBranch]).toEqual([["PG-1-a", { headRefOid: "h1", state: "MERGED" }]])
-  expect([...prs.byNumber]).toEqual([[12, { headRefOid: "h2", state: "CLOSED" }]])
+  expect([...prs.byBranch]).toEqual([
+    ["PG-1-a", { headRefOid: "h1", state: "MERGED", url: "https://github.com/acme/app/pull/7" }],
+  ])
+  expect([...prs.byNumber]).toEqual([
+    [12, { headRefOid: "h2", state: "CLOSED", url: "https://github.com/acme/app/pull/12" }],
+  ])
   expect(readPrs("gh: HTTP 502", [], [], prsOf({}))).toBe(false)
 })
 
@@ -243,6 +256,46 @@ describe("the turbo cache", () => {
   })
 })
 
+test("the decision's why links each target's PR or compare, and its state keeps no link", () => {
+  const { item, targets } = decisionOf("ops", [
+    {
+      kind: "worktree",
+      link: "https://github.com/acme/app/pull/12",
+      name: "/m/.claude/worktrees/pg-2",
+    },
+    { kind: "branch", link: "https://github.com/acme/app/compare/scratch", name: "scratch" },
+    { kind: "container", name: "big-db" },
+  ])
+  expect((item as { preview: { why: string } }).preview.why).toEndWith(
+    "\n\n- worktree `pg-2`: [#12](https://github.com/acme/app/pull/12)\n- branch `scratch`: [compare](https://github.com/acme/app/compare/scratch)",
+  )
+  expect(targets).toEqual([
+    { kind: "worktree", name: "/m/.claude/worktrees/pg-2" },
+    { kind: "branch", name: "scratch" },
+    { kind: "container", name: "big-db" },
+  ])
+  const linked = Array.from({ length: 60 }, (_, i) => ({
+    kind: "branch" as const,
+    link: `https://github.com/acme/app/compare/a-long-branch-name-${i}`,
+    name: `a-long-branch-name-${i}`,
+  }))
+  expect(
+    (decisionOf("ops", linked).item as { preview: { why: string } }).preview.why.length,
+  ).toBeLessThanOrEqual(3900)
+})
+
+test("a branch on the decision list links its PR, else its compare once pushed, else nothing", () => {
+  const prs = {
+    ...prsOf({ "PG-3-ahead": pr("CLOSED", "h3", 3) }),
+    repo: "https://github.com/acme/app",
+  }
+  const pushed = new Set(["PG-3-ahead", "no-pr"])
+  expect(branchLink("PG-3-ahead", prs, pushed)).toBe("https://github.com/acme/app/pull/3")
+  expect(branchLink("no-pr", prs, pushed)).toBe("https://github.com/acme/app/compare/no-pr")
+  expect(branchLink("scratch", prs, pushed)).toBeUndefined()
+  expect(branchLink("no-pr", prsOf({}), pushed)).toBeUndefined()
+})
+
 test("the decision names each target whole, and holds no more than fits", () => {
   const { item, targets } = decisionOf("ops", [
     { kind: "worktree", name: "/m/.claude/worktrees/pg-2" },
@@ -256,6 +309,7 @@ test("the decision names each target whole, and holds no more than fits", () => 
     name: `/m/.claude/worktrees/a-long-worktree-name-${i}`,
   }))
   const capped = decisionOf("ops", many)
+  expect((capped.item as { preview: { why: string } }).preview.why).not.toContain("](")
   expect(capped.targets.length).toBeLessThan(200)
   expect((capped.item as { preview: { what: string } }).preview.what.length).toBeLessThan(4000)
 })
@@ -342,7 +396,7 @@ describe("one night's run against a fixture data folder", () => {
       prs: async () =>
         prsOf({
           "PG-1-a": pr("MERGED"),
-          "PG-2-b": pr("MERGED"),
+          "PG-2-b": pr("MERGED", "h1", 2),
           "PG-3-c": pr("OPEN"),
           "PG-8-gone": pr("MERGED", "r8"),
         }),
@@ -369,7 +423,13 @@ describe("one night's run against a fixture data folder", () => {
     expect(runs.map((r) => r.join(" "))).not.toContain("docker rm -fv playground-dashboard-db")
     const [decision, update] = inputs.map((i) => JSON.parse(i))
     expect(decision.preview.what).toBe(`- worktree \`${wt("pg-2")}\``)
-    expect(update).toMatchObject({ kind: "update", preview: { outcome: "finding" } })
+    expect(decision.preview.why).toEndWith(
+      "\n\n- worktree `pg-2`: [#2](https://github.com/acme/app/pull/2)",
+    )
+    expect(update).toMatchObject({
+      kind: "update",
+      preview: { outcome: "finding", text: expect.stringContaining("](/dashboard/system)") },
+    })
     expect(JSON.parse(readFileSync(join(ops, "tick", "nightly-clean.json"), "utf8"))).toEqual({
       at: "2026-11-05T03:00:00.000Z",
       decision: { id: ID, targets: [{ kind: "worktree", name: wt("pg-2") }] },

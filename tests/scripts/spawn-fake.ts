@@ -119,11 +119,10 @@ case "$2" in
   *) exit 1 ;;
 esac`,
 )
-// The CPU read, top -l 2 -n 0: each call logged to top.calls, idle at FAKE_CPU_IDLE (0 by default, so the load alone decides as before).
+// The CPU read, top -l 2 -n 0, which run-slot's gauges take and spawn.sh does not: each call logged to top.calls, idle at FAKE_CPU_IDLE (0 by default).
 fake(
   "top",
   `echo "$*" >> "$HOME/top.calls"
-[ -n "$FAKE_TOP_BROKEN" ] && exit 1
 echo "CPU usage: 30.00% user, 20.00% sys, 50.00% idle"
 echo "CPU usage: 60.00% user, 40.00% sys, \${FAKE_CPU_IDLE:-0.00}% idle"`,
 )

@@ -12,4 +12,8 @@ describe("the Settings page", () => {
   test("lists Templates between Accounts and Extensions", () => {
     expect(home).toMatch(/<Accounts \/>\s*<Templates \/>\s*<Extensions \/>/)
   })
+
+  test("holds Privacy after Extensions, above the owner rung's fallback", () => {
+    expect(home).toMatch(/<Extensions \/>\s*<Privacy \/>[\s\S]*: \(\s*<OwnerOnly/)
+  })
 })

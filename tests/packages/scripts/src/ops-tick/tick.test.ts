@@ -240,6 +240,7 @@ describe("tick", () => {
       { text: "week passed 80% on pride@", to: "dispatcher" },
     ])
     expect(alertTitles(inputs)).toEqual(["ALERT 98 pride@example.com: week at 98%, past 98%"])
+    expect(JSON.parse(inputs[0]!).preview.text).toContain("[System page](/dashboard/system)")
   })
 
   test("an Inbox alert that fails to post is named to the builder, and its line still goes", async () => {
@@ -1251,7 +1252,10 @@ describe("relay watch", () => {
     expect(JSON.parse(first.asks[0]!.stdin!)).toEqual({
       from: OLD.ops,
       kind: "update",
-      preview: { outcome: "alert" },
+      preview: {
+        outcome: "alert",
+        text: "- 🔎 The relay's row is under AI Runners in the sidebar (runner-plain-relay on hover), and this Mac's state is on the [System page](/dashboard/system).",
+      },
       title: `The ops relay is down: no ops line has gone out since ${at(14, 7)
         .toISOString()
         .replace(/\.\d{3}Z$/, "Z")}. Resume runner-plain-relay.`,
@@ -1299,6 +1303,9 @@ describe("relay watch", () => {
       `Ops' sweep is late: no ops line has gone out since ${iso(at(14, 7))}. Ops runs its sweep, whose step 2 runs ops:outbox.`,
     )
     expect(title).not.toContain("runner-plain-relay")
+    expect(JSON.parse(late.asks[0]!.stdin!).preview.text).toBe(
+      "- 🔎 Ops' row is under Orchestrators in the sidebar, since its sweep relays here, and this Mac's state is on the [System page](/dashboard/system).",
+    )
     expect(late.sent).toEqual([])
   })
 
@@ -1539,6 +1546,61 @@ test("the switch watch reads no account on a machine with no extensions, so it s
   const data = mkdtempSync(join(tmpdir(), "ops-tick-switch-"))
   expect(await switchAccount(join(data, "ops"))).toBe("")
   rmSync(data, { force: true, recursive: true })
+})
+
+describe("the focus card", () => {
+  test("posts one Inbox update under the ops manager's name once focus.json has lapsed, and none while it stands (#974)", async () => {
+    const ops = scratch()
+    const focus = (until: string) =>
+      writeFileSync(
+        join(ops, "..", "focus.json"),
+        JSON.stringify({
+          reason: "a timed demo",
+          session: "worker-f",
+          since: "2026-10-19T08:00:00.000Z",
+          until,
+        }),
+      )
+    focus("2026-10-19T09:00:00.000Z")
+    const standing = fake(ops, new Date("2026-10-19T08:30:00.000Z"))
+    await beat("focus-card").run(standing.ctx)
+    expect(standing.runs).toEqual([])
+    const ended = fake(ops, new Date("2026-10-19T09:00:30.000Z"))
+    await beat("focus-card").run(ended.ctx)
+    expect(ended.runs).toEqual([["bun", "run", "--cwd", "/repo", "ask", "new"]])
+    expect(JSON.parse(ended.inputs[0]!)).toMatchObject({
+      from: OLD.ops,
+      kind: "update",
+      preview: { outcome: "finding" },
+      title: "Focus for worker-f ended: 0 runs queued while it stood, 0m0s in all",
+    })
+    await beat("focus-card").run(ended.ctx)
+    expect(ended.runs).toHaveLength(1)
+  })
+
+  test("a post that fails throws, so the beat names it and the next one tries again", async () => {
+    const ops = scratch()
+    writeFileSync(
+      join(ops, "..", "focus.json"),
+      JSON.stringify({
+        reason: "r",
+        session: "worker-f",
+        since: "2026-10-19T08:00:00.000Z",
+        until: "2026-10-19T09:00:00.000Z",
+      }),
+    )
+    const failing = fake(
+      ops,
+      new Date("2026-10-19T09:01:00.000Z"),
+      { "ask new": "ask: refused" },
+      [],
+      { "ask new": 1 },
+    )
+    await expect(beat("focus-card").run(failing.ctx)).rejects.toThrow(
+      "bun run ask new: ask: refused",
+    )
+    expect(existsSync(join(ops, "..", "focus.json"))).toBe(true)
+  })
 })
 
 // 31 Oct: tick ran five helpers no checkout held, and the beats' stubs above passed, so their alerts never fired on a real machine.

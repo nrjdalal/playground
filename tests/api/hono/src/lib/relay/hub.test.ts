@@ -1,8 +1,15 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 
 import { type Bus, createHub, type Hub } from "../../../../../../api/hono/src/lib/relay/hub"
 
 const ID = "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+// a made-up public key, the shape the browser's P-256 key exports to
+const KEY = {
+  crv: "P-256" as const,
+  kty: "EC" as const,
+  x: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+  y: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+}
 const AT = new Date("2026-11-05T01:00:00.000Z")
 
 // A Mac's socket that keeps what the hub sends it.
@@ -40,6 +47,19 @@ describe("the relay's hub", () => {
     const got = await forwarded
     expect(got.type).toBe("response")
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
+  })
+
+  test("sends the owner's browser's key to the owner's Mac as a pair request, and passes its answer back", async () => {
+    const hub = createHub({ id: () => ID, now: () => AT })
+    const socket = mac()
+    hub.attach("u1", socket)
+    const paired = hub.pair("u1", "owner", KEY)
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([
+      { at: AT.toISOString(), id: ID, key: KEY, login: "owner", type: "pair" },
+    ])
+    hub.answer("u1", answer(ID, "held"))
+    const got = await paired
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("held")
   })
 
   test("drops an answer for an id it is not waiting on, or from another owner's socket", async () => {
@@ -92,6 +112,29 @@ const instances = (options: { ackMs?: number; now?: () => Date } = {}) => {
   return { holder: hubs[0]!, listening: () => listening, other: hubs[1]! }
 }
 
+// Two instances on one bus, the second cold: its first publish waits coldMs for its subscriber and sender to connect before the message reaches the bus, as a fresh instance's first Redis connect does.
+const coldInstances = (coldMs: number, options: { ackMs?: number } = {}) => {
+  const hubs: Hub[] = []
+  const fan = async (data: string) => {
+    await Bun.sleep(0)
+    for (const one of hubs) one.receive(data)
+  }
+  let connected: Promise<void> | null = null
+  const warm: Bus = { listen() {}, publish: fan }
+  const cold: Bus = {
+    listen() {},
+    publish: async (data) => {
+      connected ??= Bun.sleep(coldMs)
+      await connected
+      await fan(data)
+    },
+  }
+  let n = 0
+  const id = () => `00000000-0000-4000-8000-00000000001${n++}`
+  hubs.push(createHub({ ...options, bus: warm, id }), createHub({ ...options, bus: cold, id }))
+  return { holder: hubs[0]!, other: hubs[1]! }
+}
+
 describe("a Mac that goes silent", () => {
   // a sleeping Mac's half-open socket read online, so every read waited out its timeout and the page never said offline
   test("reads offline from when the hub last heard it, closes its socket and fails a read, while a heartbeat keeps it online", async () => {
@@ -137,6 +180,55 @@ describe("the relay's hub across instances", () => {
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
     expect(await other.status("u1")).toEqual({ online: true, since: null })
     expect(other.busy()).toBe(false)
+  })
+
+  // a cold instance spent its whole ack wait connecting to Redis, so a read and the status read offline while the Mac held its socket on another instance
+  // each path meets its own cold first publish, so neither rides a bus the other warmed
+  const coldPair = () => {
+    const { holder, other } = coldInstances(60, { ackMs: 20 })
+    holder.attach("u1", {
+      send: (data: string) => {
+        const { id } = JSON.parse(data) as { id: string }
+        setTimeout(() => holder.answer("u1", answer(id, "workers")), 5)
+      },
+    })
+    return other
+  }
+
+  test("on a cold instance, the status waits for the bus before the ack wait starts", async () => {
+    expect(await coldPair().status("u1")).toEqual({ online: true, since: null })
+  })
+
+  test("on a cold instance, a read waits for the bus before the ack wait starts", async () => {
+    const got = await coldPair().forward("u1", "owner", "/api/v1/workers")
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("workers")
+  })
+
+  test("a publish that fails reads offline at once", async () => {
+    const hub = createHub({
+      ackMs: 10_000,
+      bus: { listen() {}, publish: () => Promise.reject(new Error("down")) },
+    })
+    const started = performance.now()
+    expect(await hub.status("u1")).toEqual({ online: false, since: null })
+    expect(await hub.forward("u1", "owner", "/api/v1/workers")).toEqual({ type: "offline" })
+    // long before the 10 s ack wait, which a failed publish never starts
+    expect(performance.now() - started).toBeLessThan(1000)
+  })
+
+  test("a pair request on another instance reaches the Mac's socket and comes back", async () => {
+    const { holder, other } = instances({ now: () => AT })
+    const frames: unknown[] = []
+    holder.attach("u1", {
+      send: (data: string) => {
+        frames.push(JSON.parse(data))
+        const { id } = JSON.parse(data) as { id: string }
+        setTimeout(() => holder.answer("u1", answer(id, "held")), 5)
+      },
+    })
+    const got = await other.pair("u1", "owner", KEY)
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("held")
+    expect(frames).toMatchObject([{ key: KEY, login: "owner", type: "pair" }])
   })
 
   test("with no instance holding the socket, a read and the status read offline once the ack wait passes", async () => {
@@ -185,5 +277,81 @@ describe("the relay's hub across instances", () => {
     holder.answer("u1", answer(sent, "yours"))
     const got = await forwarded
     expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("yours")
+  })
+})
+
+// A write frame as the owner's browser signs it: its body here holds a word no log or store may keep.
+const BODY = JSON.stringify({ text: "body-kept-nowhere" })
+const WRITE = {
+  at: AT.toISOString(),
+  body: BODY,
+  id: ID,
+  keyId: "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+  login: "owner",
+  method: "POST" as const,
+  path: "/api/v1/messages",
+  sig: "c2lnbmVk",
+  type: "write" as const,
+}
+
+// Every console line the hub writes while run runs, and run's result.
+const logged = async <T>(run: () => Promise<T>) => {
+  const spies = (["debug", "error", "info", "log", "warn"] as const).map((level) =>
+    spyOn(console, level).mockImplementation(() => {}),
+  )
+  try {
+    const result = await run()
+    return {
+      lines: spies.flatMap((spy) => spy.mock.calls.map((call) => call.map(String).join(" "))),
+      result,
+    }
+  } finally {
+    for (const spy of spies) spy.mockRestore()
+  }
+}
+
+describe("a write through the hub", () => {
+  test("reaches the owner's Mac as the browser signed it, and its answer comes back", async () => {
+    const hub = createHub({ id: () => "not-used", now: () => AT })
+    const socket = mac()
+    hub.attach("u1", socket)
+    const written = hub.write("u1", WRITE)
+    expect(socket.sent.map((frame) => JSON.parse(frame))).toEqual([WRITE])
+    hub.answer("u1", answer(ID, "sent"))
+    const got = await written
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("sent")
+  })
+
+  test("keeps no body once it is answered: nothing waits, and no log line holds it", async () => {
+    const hub = createHub({ now: () => AT })
+    const release = hub.attach("u1", {
+      send: (data: string) => setTimeout(() => hub.answer("u1", answer(JSON.parse(data).id)), 1),
+    })
+    const { lines } = await logged(() => hub.write("u1", WRITE))
+    release()
+    expect(hub.busy()).toBe(false)
+    expect(lines.filter((line) => line.includes("body-kept-nowhere"))).toEqual([])
+    const offline = createHub()
+    const { lines: refused, result } = await logged(() => offline.write("u1", WRITE))
+    expect([
+      result,
+      offline.busy(),
+      refused.filter((line) => line.includes("body-kept-nowhere")),
+    ]).toEqual([{ type: "offline" }, false, []])
+  })
+
+  test("on another instance reaches the Mac's socket and comes back, the body in transit alone", async () => {
+    const { holder, other } = instances({ now: () => AT })
+    const frames: unknown[] = []
+    holder.attach("u1", {
+      send: (data: string) => {
+        frames.push(JSON.parse(data))
+        setTimeout(() => holder.answer("u1", answer(ID, "sent")), 5)
+      },
+    })
+    const got = await other.write("u1", WRITE)
+    expect(got.type === "response" && Buffer.from(got.body, "base64").toString()).toBe("sent")
+    expect(frames).toEqual([WRITE])
+    expect(other.busy()).toBe(false)
   })
 })

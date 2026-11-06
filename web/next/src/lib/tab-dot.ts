@@ -73,6 +73,10 @@ export const TAB_DOT_POLLING = { background: true, poll: true } as const
 const snoozedUntil = (item: InboxItem): string | null =>
   item.answer && "snoozedUntil" in item.answer ? item.answer.snoozedUntil : null
 
+// Pure: the list's items but the ones it holds quiet while focus stands (the API's quiet), which the dot and the Inbox square's count leave out until focus ends; a look marks them seen with the rest, since the Inbox shows them.
+export const loudItems = ({ items, quiet }: { items: InboxItem[]; quiet: string[] }): InboxItem[] =>
+  items.filter((item) => !quiet.includes(item.id))
+
 // Pure: whether the inbox holds an item that needs you and came after you last viewed it; before any view, every such item is new. One put away asks again as new once its time has passed the look, though its words are old.
 export const newInInbox = (items: InboxItem[], seenAt: string | null): boolean =>
   newInInboxCount(items, seenAt) > 0

@@ -11,6 +11,7 @@ import { FEED_LABELS } from "@/components/dashboard/app-sidebar"
 import { Composer } from "@/components/dashboard/composer"
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { OwnerOnly } from "@/components/dashboard/owner-only"
+import { ReadOnlyLine } from "@/components/dashboard/read-only-line"
 import { WorkerStream } from "@/components/dashboard/worker-stream"
 import { CheckedLine, ChecksCard, readChecks } from "@/components/first-run/checks"
 import { AddAccountDialog } from "@/components/settings/add-account-dialog"
@@ -172,7 +173,8 @@ function Checklist({ name }: { name: string }) {
           )
         })}
       </ol>
-      {list.start && (
+      {list.start && config.hosted && <ReadOnlyLine />}
+      {list.start && !config.hosted && (
         <Button disabled={start.isPending || start.isSuccess} onClick={() => start.mutate()}>
           {(start.isPending || start.isSuccess) && <Spinner />}
           Start {name}
