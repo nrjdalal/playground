@@ -329,7 +329,7 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
       return { ok: code === 0, out: lines.find((l) => l.startsWith("dev:stop:")) ?? lines.at(-1)! }
     },
     git,
-    // rm's roster and clone holders alone: its process check would see the stack dev:stop is about to stop, and its saved-work checks run after the stop
+    // rm's roster, clone and link holders alone: its process check would see the stack dev:stop is about to stop, and its saved-work checks run after the stop
     held: async (path, pr) =>
       worktreeRefusal(
         path,
@@ -339,6 +339,7 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
           discard: true,
           live: STATUSES.live,
           merged: () => null,
+          places: rm.places,
           ...(pr ? { pr } : {}),
           procs: [],
           roster: join(rm.data, "roster.json"),

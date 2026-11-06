@@ -116,6 +116,7 @@ const machine = () => {
     main,
     merged: () => false,
     notify: (text) => void told.push(text),
+    places: () => [],
     session: async () => "j6rjgy-worker",
   }
   return { deps, home, main, root, told }
