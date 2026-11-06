@@ -205,7 +205,8 @@ Options
   --json           print the results as JSON
 
 Beyond the agent sign-in, which it signs out of again, and send-top, send-focus, slash-menu,
-reply-focus, typing-lag and upload-keep, which a stack that reads live data refuses, it only reads, so it is safe against the live dashboard.`
+reply-focus, typing-lag and upload-keep, which a stack that reads live data refuses, and
+aside-bar's row jump, which skips one, it only reads, so it is safe against the live dashboard.`
 
 const parse = () => {
   try {
