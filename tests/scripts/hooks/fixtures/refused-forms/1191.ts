@@ -39,6 +39,18 @@ export const groups: Group[] = [
         `cd "$D"; gfind /tmp/x -fls -x`,
       ],
       [
+        "GNU find by its g name printing null-ended names to a dash-led relative file after a cd to a variable",
+        `cd "$D"; gfind /tmp/x -fprint0 -x`,
+      ],
+      [
+        "GNU find by its g name printing a format to a dash-led relative file after a cd to a variable",
+        `cd "$D"; gfind /tmp/x -fprintf -x /%p`,
+      ],
+      [
+        "GNU find by its g name run from a path inside the extensions root",
+        "~/.playground/extensions/gfind /tmp/x -delete",
+      ],
+      [
         "GNU find by a path to its g name deleting the shell's folder after a cd to a variable",
         `cd "$D"; /opt/homebrew/bin/gfind . -delete`,
       ],
