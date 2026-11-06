@@ -2457,9 +2457,11 @@ var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
 var GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/;
 var WRITER_TAKES = {
-  install: ["-g", "-m", "-o"],
-  mkdir: ["-m"],
-  touch: ["-d", "-r", "-t"]
+  cp: { long: ["no-preserve", "sparse", "suffix"], short: "S" },
+  install: { long: ["group", "mode", "owner", "strip-program", "suffix"], short: "BSfgmo" },
+  ln: { long: ["suffix"], short: "S" },
+  mkdir: { long: ["mode"], short: "m" },
+  touch: { long: ["date", "reference", "time"], short: "Adrt" }
 };
 var DUPLICATE = /^(?:\d+|-)$/;
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
@@ -2549,6 +2551,7 @@ function writeTargets(name, args, gnu) {
   if (name === "dd")
     return args.flatMap((word) => word.value.startsWith("of=") ? [after(word, 3)] : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value) ? [word] : []);
   const into = name === "cp" || name === "install" || name === "ln";
+  const takes = WRITER_TAKES[name];
   const operands = [];
   let folder;
   let folders = false;
@@ -2556,21 +2559,34 @@ function writeTargets(name, args, gnu) {
   for (let k = 0, options = true;k < args.length; k++) {
     const word = args[k];
     const { value } = word;
-    const long = /^--([a-z-]+)(=?)/.exec(value);
     if (into && gnu && options && marked(value))
       maybe.push(word);
     if (!options || value === "-" || !value.startsWith("-"))
       operands.push(word);
     else if (value === "--")
       options = false;
-    else if (WRITER_TAKES[name]?.includes(value))
-      k++;
-    else if (name === "install" && (value === "--directory" || /^-[A-Za-z]*d/.test(value)))
-      folders = true;
-    else if (into && long && "target-directory".startsWith(long[1]))
-      folder = long[2] ? after(word, long[0].length) : args[++k];
-    else if (into && /^-[A-Za-z]*t/.test(value))
-      folder = value.endsWith("t") ? args[++k] : after(word, value.indexOf("t") + 1);
+    else if (value.startsWith("--")) {
+      const [, long, attached] = /^--([^=]*)(=?)/.exec(value) ?? [];
+      if (into && "target-directory".startsWith(long))
+        folder = attached ? after(word, long.length + 3) : args[++k];
+      else if (name === "install" && "directory".startsWith(long))
+        folders = true;
+      else if (!attached && takes?.long.some((take) => take.startsWith(long)))
+        k++;
+    } else
+      for (let i = 1;i < value.length; i++) {
+        const letter = value[i];
+        if (name === "install" && letter === "d")
+          folders = true;
+        else if (into && letter === "t") {
+          folder = i + 1 < value.length ? after(word, i + 1) : args[++k];
+          break;
+        } else if (takes?.short.includes(letter)) {
+          if (i + 1 === value.length)
+            k++;
+          break;
+        }
+      }
   }
   if (name === "ln" && !folder && operands.length === 1)
     return [{ quoted: false, value: "." }];
