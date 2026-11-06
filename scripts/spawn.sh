@@ -23,7 +23,8 @@ set -euo pipefail
 #   Under Claude Code's sandbox the load comes from uptime, and a refused pressure level leaves the swap-ins to decide (scripts/README.md)
 #   3. slots, for a fresh worker start alone (a reviewer, tester or resume skips it, so work
 #      already admitted finishes): `ops/run-slot.sh room`, refusing while runs wait in its queue and no
-#      lane is free with the load units for a run, or when room gives no reading
+#      lane is free with the load units for a run (but for a --firefighting start while its trigger file
+#      stands, FF_TRIGGER, logged as readings.firefighting), or when room gives no reading
 #   4. usage, the launching backend's own window: Claude reads usage.json
 #      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
 #      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
@@ -53,7 +54,7 @@ set -euo pipefail
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
-#   --firefighting     with any mode but restore or close, anywhere among its words: the start passes focus's refusal and the load gate (the memory gate still reads it) while a firefighting trigger file stands in the data folder (firefighting-stop.json or firefighting-headstart.json), and is refused while none does
+#   --firefighting     with any mode but restore or close, anywhere among its words: the start passes focus's refusal, the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a firefighting trigger file stands in the data folder (firefighting-stop.json or firefighting-headstart.json), and is refused while none does
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
@@ -486,7 +487,10 @@ try:
         except ValueError:
             refuse("slots", "it cannot read run-slot's lanes and queue (run-slot.sh room)")
         readings.update(lanes=lanes, lanes_free=free, lanes_held=held, waiters=waiters)
-        if free == 0 and waiters > 0:
+        # a full queue holds a fresh worker so admitted runs finish first, but firefighting comes first, as at the load gate
+        if firefighting:
+            readings["firefighting"] = firefighting
+        elif free == 0 and waiters > 0:
             short = "run-slot has no lane open" if lanes == 0 else f"run-slot's {lanes} lanes are all held" if held >= lanes else f"{held} of run-slot's {lanes} lanes are held and the rest lack the load units for a run"
             refuse("slots", f"{short}, and {waiters} {'run waits' if waiters == 1 else 'runs wait'} in its queue (run-slot.sh room). Wait for the queue to drain, or close a worker that is done, and run it again.")
 except Skip:
