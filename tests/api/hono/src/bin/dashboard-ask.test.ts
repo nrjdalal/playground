@@ -76,14 +76,14 @@ test("bun run ask example prints each template, and the usage for a kind it has 
     ])
     return { code, stderr, stdout }
   }
-  for (const kind of ["code", "decision", "slack", "ui"] as const) {
+  for (const kind of ["code", "decision", "delete", "slack", "ui"] as const) {
     const printed = await example(kind)
     expect(printed.code).toBe(0)
     expect(JSON.parse(printed.stdout)).toEqual(ASK_EXAMPLES[kind])
   }
   const unknown = await example("poem")
   expect(unknown.code).toBe(2)
-  expect(unknown.stderr).toContain("bun run ask example <code|decision|slack|ui>")
+  expect(unknown.stderr).toContain("bun run ask example <code|decision|delete|slack|ui>")
 })
 
 describe.skipIf(!dockerUp())("the bun run ask CLI", () => {

@@ -125,6 +125,21 @@ export const ASK_EXAMPLES = {
     },
     title: "Take the web-api session's request for an export dry run?",
   },
+  delete: {
+    from: "builder",
+    kind: "decision",
+    preview: {
+      type: "delete",
+      what: "/Users/you/playground/.claude/worktrees/PG-12-old-export",
+      why: [
+        "Its PR is open, and its branch holds 2 commits no merge landed.",
+        "",
+        "- 🗑️ Approve moves it to the trash, kept 7 days; playground rm --restore brings it back.",
+        "- ✋ Deny leaves it in place.",
+      ].join("\n"),
+    },
+    title: "Delete the old export worktree?",
+  },
   slack: {
     from: "builder",
     preview: {

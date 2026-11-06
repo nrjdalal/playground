@@ -123,7 +123,7 @@ describe("marking updates read", () => {
   })
 })
 
-describe("an Approve the dashboard carries out: an accept, an apps change, a grant or a guard setting (PG-658, PG-1090)", () => {
+describe("an Approve the dashboard carries out: an accept, an apps change, a grant, a guard setting or an own account change (PG-658, PG-1090, PG-1162)", () => {
   // the same answer such a card's Approve posts; past every guard it runs the decision's step (stepOf), so each refusal below is one that runs nothing
   const approve = (headers: Record<string, string>, server?: ReturnType<typeof peer>) =>
     inboxRouter.request(
@@ -150,7 +150,7 @@ describe("an Approve the dashboard carries out: an accept, an apps change, a gra
     expect((await approve({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
   })
 
-  test("a guard setting's Approve takes the same guards, and the route hands it this machine's data folder alone", async () => {
+  test("a guard setting's or an own account change's Approve takes the same guards, and the route hands it this machine's data folder alone", async () => {
     const source = await Bun.file(
       join(import.meta.dir, "../../../../../api/hono/src/routers/inbox.ts"),
     ).text()

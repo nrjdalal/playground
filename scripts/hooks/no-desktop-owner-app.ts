@@ -24,7 +24,7 @@ type Environment = Record<string, string | undefined>
 
 const GUARD = "no-desktop-owner-app"
 const TOOL = /^agent-desktop(?:@.*)?$/
-const MENTION = /agent-desktop/
+const MENTION = /agent-desktop/i
 const LAUNCHERS = new Set([
   "bun",
   "bunx",
@@ -239,7 +239,7 @@ async function runsTool(line: string): Promise<boolean> {
 // Prose: a quoted string with no quote, backslash, $, brace or newline, where each agent-desktop follows a plain word (not a flag, launcher or wrapper) and the string, read as a shell line, runs no agent-desktop.
 async function prose(text: string): Promise<boolean> {
   if (/['"`\\${}\n\r]/.test(text)) return false
-  for (const match of text.matchAll(/agent-desktop/g)) {
+  for (const match of text.matchAll(/agent-desktop/gi)) {
     const before = text.slice(0, match.index)
     const word = before.trimEnd().split(/\s+/).pop() ?? ""
     if (!/\s$/.test(before) || !/[\p{L}\p{N},:.]$/u.test(word) || word.startsWith("-")) return false
