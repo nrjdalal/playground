@@ -246,3 +246,20 @@ export async function list(path: string): Promise<{ list: PublicList } | { refus
     }
   return { list: value }
 }
+
+// The commit's count of the list-fed kinds, from the list at path, which the sandboxed tree test cannot see: nothing with no list there (the runner box, a machine with no org), else the refusal when one of them is over counts.json; an empty key counts nothing, so a partial list still gates the kinds it holds.
+export async function listGate(root: string, path: string): Promise<string> {
+  if (!existsSync(path)) return ""
+  const value: unknown = await Bun.file(path)
+    .json()
+    .catch(() => undefined)
+  if (!isPublicList(value)) return `trace-count: ${path} is not no-public-leak's list`
+  const files = await tree(root)
+  const kept = (await Bun.file(KEPT).json()) as Kept[]
+  const counted = count(files, value, UNSET_REPOS, kept)
+  const now: Counts = Object.fromEntries(LIST_KEYS.map((kind) => [kind, counted[kind] ?? 0]))
+  const over = risen(now, (await Bun.file(COUNTS).json()) as Counts)
+  return over.length
+    ? refusal(over, located(files, risenKinds(over), value, UNSET_REPOS, kept, changedFiles(root)))
+    : ""
+}
