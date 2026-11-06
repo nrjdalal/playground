@@ -65,6 +65,28 @@ export const groups: Group[] = [
         "if [[ -n x ]] source /tmp/f; ln -s $X",
       ],
       [
+        "ln of a variable after a file sourced behind a prefix whose value holds a quoted space",
+        `A="a b" source /tmp/f; ln -s $X`,
+      ],
+      [
+        "ln of a variable after a file sourced behind a prefix whose value holds an escaped space",
+        "A=a\\ b source /tmp/f; ln -s $X",
+      ],
+      [
+        "ln of a variable after a file sourced behind a prefix whose value holds a quoted ;",
+        "A=';' source /tmp/f; ln -s $X",
+      ],
+      ["ln of a variable after a file sourced behind a += prefix", "A+=1 source /tmp/f; ln -s $X"],
+      [
+        "ln of a variable after a file sourced behind a subscripted prefix",
+        "a[1]=x source /tmp/f; ln -s $X",
+      ],
+      [
+        "ln of a variable after a file sourced by a $'' quoted source",
+        "$'source' /tmp/f; ln -s $X",
+      ],
+      ["ln of a variable after a file sourced under the - modifier", "- source /tmp/f; ln -s $X"],
+      [
         "ln of a variable after a file sourced as if's condition in zsh -c",
         `zsh -c 'if source /tmp/f; then :; fi; ln -s $X'`,
       ],
