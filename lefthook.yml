@@ -146,13 +146,15 @@ pre-push:
       run: bun audit --audit-level high --ignore GHSA-vfj7-8cjw-p6xm
       only:
         - ref: canary
-    conflict-markers:
-      # what each pushed ref sends, so a commit made with hooks off is refused before it reaches the remote
-      run: bun --no-env-file packages/scripts/src/conflict-markers.ts --push
-      use_stdin: true
     ensure-branches:
       run: bun packages/scripts/src/ensure-remote-branches.ts {1}
-    keeps-canary:
-      # refuses a push whose canary merge dropped a line git merges clean, as pr:merge's keeps canary gate would a review round later
-      run: bun --no-env-file packages/scripts/src/pr-merge/prepush.ts
+  # the jobs that read the pushed refs on stdin run from .lefthook/pre-push/, since lefthook skips every pre-push command while the checked-out branch has nothing new against its upstream, and runs a script on every push
+  scripts:
+    # what each pushed ref sends, so a commit made with hooks off is refused before it reaches the remote
+    "conflict-markers.sh":
+      runner: bash
+      use_stdin: true
+    # refuses a push whose canary merge dropped a line git merges clean, as pr:merge's keeps canary gate would a review round later
+    "keeps-canary.sh":
+      runner: bash
       use_stdin: true
