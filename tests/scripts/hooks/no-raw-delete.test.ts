@@ -81,6 +81,9 @@ describe("a delete the hook lets run", () => {
     "docker exec playground-x-redis redis-cli del k",
     "bun run del",
     "bun add -d del-cli",
+    "sudo -s <<< 'ls'",
+    "su <<< 'echo hi'",
+    "sudo su <<'EOF'\nls -la\nEOF",
   ])("%s", async (command) => {
     expect(await check(input(command))).toBeUndefined()
   })
