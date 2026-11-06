@@ -1816,6 +1816,12 @@ describe("an unquoted value stays one word where the shell does not split it (PG
     ["ln of a quoted command substitution", `ln -s "$(cat /tmp/f)" /tmp/l`],
     ["cp of a command substitution to a literal last path", "cp $(cat /tmp/f) /tmp/x"],
     ["dd with an arithmetic block size", "dd if=/dev/zero of=/tmp/y bs=$((4 * 1024)) count=1"],
+    ["ln of a variable after an npx -y", "npx -y cowsay hi; ln -s $X"],
+    ["ln of a variable after a find -type", "find . -type f -name a; ln -s $X"],
+    ["ln of a quoted default", `ln -s "\${X:-/tmp/d}"`],
+    ["dd with a quoted variable after if=", `dd if="$X"`],
+    ["ln of a quoted positional parameter", `ln -s "$1"`],
+    ["ln of a held variable", "D=/tmp/d; ln -s $D"],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
