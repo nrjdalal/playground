@@ -14,14 +14,14 @@ export type Text = {
 // `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
 // `raw` keeps the source of a word that holds a value the lexer cannot read, so a hook can lex it again once the call has set its variables.
 // `source` is the word as written, quotes and expansions included, so a hook can judge what a word expands rather than what it came to.
-// `splits` marks a word holding an unquoted expansion the lexer cannot read, which bash and sh split into any number of words where zsh keeps one (`Env.splits`).
+// `splits` marks a word holding an unquoted value the lexer cannot read, which the shell may split into any number of words: `always` for a command substitution, a backtick, zsh's `=` or `(…)` flags or a value pasted in as text (an eval's), which every shell splits, `sh` for a parameter, which zsh keeps whole unless the script splits (`Env.splits`).
 export type Word = Text & {
   glob?: boolean
   procs?: Command[]
   quoted: boolean
   raw?: string
   source?: string
-  splits?: boolean
+  splits?: "always" | "sh"
 }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
@@ -96,7 +96,7 @@ export type Env = {
   // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
   oldFrom?: string[]
   process: Record<string, string | undefined>
-  // Set inside a script bash, dash, ksh or sh runs, which split an unquoted expansion into words where zsh keeps it whole (`Word.splits`)
+  // Set where an unquoted parameter splits into words (`Word.splits`'s `sh`): a script bash, csh, dash, ksh, sh or tcsh runs, a zsh run with SH_WORD_SPLIT (`ZSH_SPLITS`), and every line a runner the hook cannot name may hand to sh
   splits?: boolean
   vars: Map<string, Text>
 }
@@ -537,8 +537,10 @@ export function codeFed(commands: Command[]): Map<Command, Fed> {
 // Wrappers that take one positional argument (a count or a duration) before the command.
 export const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"])
-// The shells that split an unquoted expansion into words, as POSIX's field splitting does; zsh keeps one word unless SH_WORD_SPLIT is set
-const SPLITTERS = new Set(["bash", "dash", "ksh", "sh"])
+// The shells that split an unquoted parameter into words; zsh keeps one word unless SH_WORD_SPLIT is set (`ZSH_SPLITS`)
+const SPLITTERS = new Set(["bash", "csh", "dash", "ksh", "sh", "tcsh"])
+// A zsh line or option that may set SH_WORD_SPLIT: the option by any spelling, setopt, emulate, the options array, or set's or zsh's -y
+export const ZSH_SPLITS = /sh_?word_?split|\b(?:setopt|emulate)\b|\boptions\[|(?:^|\s)-[a-zA-Z]*y/i
 // The script names a shell or a source reads stdin through
 const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
@@ -1071,14 +1073,17 @@ function word(lx: Lexer): Word {
     } else if (c === "$" && next === '"') lx.i++
     else if (c === "$" || c === "`") {
       // an unquoted expansion's value is globbed too
+      const always = c === "`" || /^\$(?:\((?!\()|=|\{[=(])/.test(src.slice(lx.i, lx.i + 3))
       const text = c === "$" ? dollar(lx) : backtick(lx)
       merge(out, text)
       if (GLOB_CHARS.test(text.value)) out.glob = true
-      if (marked(text.value)) out.splits = true
+      if (marked(text.value)) out.splits = always || out.splits === "always" ? "always" : "sh"
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir()
       lx.i++
     } else {
+      // a value the hook could not read, pasted into a line read again (an eval's, a script's), is unquoted text there
+      if (c === UNKNOWN || c === READ) out.splits = "always"
       out.value += c
       bare += c
       lx.i++
@@ -1158,8 +1163,11 @@ function dollar(lx: Lexer): Text {
     lx.i = end
     return variable(name)
   }
-  if (/[A-Za-z_]/.test(next)) {
-    const from = ++lx.i
+  // zsh's $=X, $~X and $^X read X with a flag (a split, a glob, an array join)
+  const flagged = /[=~^]/.test(next) && /[A-Za-z_]/.test(src[lx.i + 2] ?? "")
+  if (flagged || /[A-Za-z_]/.test(next)) {
+    lx.i += flagged ? 2 : 1
+    const from = lx.i
     while (/\w/.test(src[lx.i] ?? "")) lx.i++
     return variable(src.slice(from, lx.i))
   }
@@ -1957,6 +1965,9 @@ async function shell(
   const slot = shellSlot(args, name)
   if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
   const { inline, operand } = shellOperand(args, name)
+  const splits = (script: string) =>
+    SPLITTERS.has(name) ||
+    (name === "zsh" && (ZSH_SPLITS.test(script) || args.some((a) => ZSH_SPLITS.test(a.value))))
   if (operand && inline) {
     let script = operand.value
     if (xargs?.replace && script.includes(xargs.replace)) {
@@ -1965,18 +1976,14 @@ async function shell(
     }
     return run(
       lexScript(script, env),
-      { ...subshell(env), splits: SPLITTERS.has(name) },
+      { ...subshell(env), splits: splits(script) },
       visit,
       builtins,
     )
   }
   const script = await scriptOf(operand, cmd, env)
-  return run(
-    lexScript(known(script), env),
-    { ...subshell(env), splits: SPLITTERS.has(name) },
-    visit,
-    builtins,
-  )
+  const text = known(script)
+  return run(lexScript(text, env), { ...subshell(env), splits: splits(text) }, visit, builtins)
 }
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.

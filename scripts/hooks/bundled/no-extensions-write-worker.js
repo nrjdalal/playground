@@ -474,7 +474,8 @@ function codeFed(commands) {
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
-var SPLITTERS = new Set(["bash", "dash", "ksh", "sh"]);
+var SPLITTERS = new Set(["bash", "csh", "dash", "ksh", "sh", "tcsh"]);
+var ZSH_SPLITS = /sh_?word_?split|\b(?:setopt|emulate)\b|\boptions\[|(?:^|\s)-[a-zA-Z]*y/i;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
@@ -948,16 +949,19 @@ function word(lx) {
     } else if (c === "$" && next === '"')
       lx.i++;
     else if (c === "$" || c === "`") {
+      const always = c === "`" || /^\$(?:\((?!\()|=|\{[=(])/.test(src.slice(lx.i, lx.i + 3));
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
       if (marked(text.value))
-        out.splits = true;
+        out.splits = always || out.splits === "always" ? "always" : "sh";
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir2();
       lx.i++;
     } else {
+      if (c === UNKNOWN || c === READ)
+        out.splits = "always";
       out.value += c;
       bare += c;
       lx.i++;
@@ -1033,8 +1037,10 @@ function dollar(lx) {
     lx.i = end;
     return variable(name);
   }
-  if (/[A-Za-z_]/.test(next)) {
-    const from = ++lx.i;
+  const flagged = /[=~^]/.test(next) && /[A-Za-z_]/.test(src[lx.i + 2] ?? "");
+  if (flagged || /[A-Za-z_]/.test(next)) {
+    lx.i += flagged ? 2 : 1;
+    const from = lx.i;
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
     return variable(src.slice(from, lx.i));
@@ -1630,16 +1636,18 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
   const { inline, operand } = shellOperand(args, name);
+  const splits = (script) => SPLITTERS.has(name) || name === "zsh" && (ZSH_SPLITS.test(script) || args.some((a) => ZSH_SPLITS.test(a.value)));
   if (operand && inline) {
     let script = operand.value;
     if (xargs?.replace && script.includes(xargs.replace)) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    return run(lexScript(script, env), { ...subshell(env), splits: SPLITTERS.has(name) }, visit, builtins);
+    return run(lexScript(script, env), { ...subshell(env), splits: splits(script) }, visit, builtins);
   }
   const script = await scriptOf(operand, cmd, env);
-  return run(lexScript(known(script), env), { ...subshell(env), splits: SPLITTERS.has(name) }, visit, builtins);
+  const text = known(script);
+  return run(lexScript(text, env), { ...subshell(env), splits: splits(text) }, visit, builtins);
 }
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
@@ -2531,8 +2539,9 @@ var after = (word, cut) => ({
   raw: word.raw?.startsWith(word.value.slice(0, cut)) ? word.raw.slice(cut) : undefined,
   value: word.value.slice(cut)
 });
+var splitIn = (word, splitting = false) => word.splits === "always" || word.splits === "sh" && splitting;
 function writeTargets(name, args, gnu, posix = false, splitting = false) {
-  const splits = splitting ? args.filter((word) => word.splits) : [];
+  const splits = args.filter((word) => splitIn(word, splitting));
   if (name === "dd")
     return [
       ...new Set([
@@ -2590,8 +2599,8 @@ function writeTargets(name, args, gnu, posix = false, splitting = false) {
   if (name === "ln" && !folder && operands.length === 1)
     return [{ quoted: false, value: "." }, ...splits];
   const targets = into && !folders ? folder ? [folder] : operands.slice(-1) : operands;
-  const split = into && !gnu && name !== "install" ? [] : splits;
-  return [...new Set([...targets, ...maybe, ...logs, ...split])];
+  const moved = into && !gnu && name !== "install" ? [] : splits;
+  return [...new Set([...targets, ...maybe, ...logs, ...moved])];
 }
 var GUARD_KEYS = new Set([
   "ext.links",
@@ -3059,7 +3068,7 @@ async function inspect(raw, environment, unknown = false) {
       if (seen.has(line))
         continue;
       seen.add(line);
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map }, visit, true);
+      const verdict = await run(lex(line, env.known), { ...env, splits: true, vars: new Map }, visit, true);
       if (verdict)
         return verdict;
     }
@@ -3089,7 +3098,7 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`git on a clone in ${root}`);
       const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, here.splits) : []).find((word) => !held2(word, here, steady));
       if (unheld)
-        return refuse(`${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`);
+        return refuse(splitIn(unheld, here.splits) ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally` : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`);
       if (name === "git") {
         const config = gitConfigs(args).find((word) => marked(word.value));
         if (config)
@@ -3154,6 +3163,7 @@ async function inspect(raw, environment, unknown = false) {
     known,
     old: { dir: directory },
     process: environment,
+    splits: ZSH_SPLITS.test(command),
     vars: new Map
   };
   rootLine = rooted(lexed.commands);
