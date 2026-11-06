@@ -431,7 +431,7 @@ if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell's -c), and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, or with a command substitution beside docker, podman or a portless compose
+# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell's -c), and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, a step holding a chain shell word before a -c cluster or a $ word (a nested chain), or with a command substitution beside docker, podman or a portless compose
 # the wrappers chain_steps reads past to the program they run, A to Z, each as <name>|<flags>|<options that take a value>, and the ones that take one count or duration before it: scripts/hooks/shell.ts's WRAPPERS and COUNTED, with the env and xargs options its parse reads by hand, which a test holds equal
 CHAIN_WRAPPER_OPTIONS="builtin||
 busybox||
@@ -585,7 +585,7 @@ for i, step in enumerate(steps):
             step += [seps[i], later[0]]
     if step:
         print("\x1f".join(step))
-# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, a step that runs a chain shell with its own -c script, or a command substitution in a chain whose script or lead words name docker, podman or a portless compose (shlex splits a backquote's inner script at ;, so a name split across its steps is read over the whole chain), names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
+# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, a step holding a chain shell word before a -c cluster or a $ word, or a command substitution in a chain whose script or lead words name docker, podman or a portless compose (shlex splits a backquote's inner script at ;, so a name split across its steps is read over the whole chain), names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
 wrappers = set(sys.argv[4].split())
 shells = set(sys.argv[5].split())
 # a single-dash option cluster holding c (-c, -ec, -ce) gives a shell its own script
@@ -599,12 +599,8 @@ for step in steps:
     hidden = lambda w: w == "eval" or "$" in w
     if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
         sys.exit(1)
-    # a step that runs a chain shell with its own -c script, as its program or behind a wrapper word, holds a chain this splits only one level of, so its inner steps go unread
-    program = os.path.basename(step[i]) if i < len(step) else ""
-    if program in shells and any(map(dash_c, step[i + 1 :])):
-        sys.exit(1)
-    # past a wrapper's options it fails closed: any later shell word with a -c after it
-    if program in wrappers and any(os.path.basename(w) in shells and any(map(dash_c, step[k + 1 :])) for k, w in enumerate(step[i + 1 :], i + 1)):
+    # a chain shell word anywhere past VAR=x, whatever program leads the step, before a -c cluster runs a chain this splits only one level of, and before a $ word one whose script it cannot see, so either reads as one it cannot read
+    if any(os.path.basename(w) in shells and any(dash_c(x) or "$" in x for x in step[k + 1 :]) for k, w in enumerate(step[i:], i)):
         sys.exit(1)
 PY
 }
