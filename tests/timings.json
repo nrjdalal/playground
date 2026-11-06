@@ -14,7 +14,6 @@
     "tests/api/hono/src/lib/sessions/ingest.test.ts": 26614,
     "tests/scripts/ops/dashboard/supervisor.test.ts": 24418,
     "tests/api/hono/src/bin/dashboard-thread.test.ts": 21685,
-    "tests/api/hono/src/lib/dashboard/cmux.test.ts": 17616,
     "tests/scripts/hooks/no-mac-web-build.test.ts": 17607,
     "tests/scripts/ops/dashboard/run.test.ts": 15589,
     "tests/api/hono/src/lib/dashboard/hub.test.ts": 13074,

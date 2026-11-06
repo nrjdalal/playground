@@ -61,7 +61,7 @@ export async function spawnSink(
   return proc.signalCode ? null : proc.exitCode
 }
 
-// Only a stack that reads the live machine runs the sink (fixture.ts's dashboardSource), as only it opens cmux: a fixture or test stack runs nothing and reads exit 0, so no test reaches a real Vercel project.
+// Only a stack that reads the live machine runs the sink (fixture.ts's dashboardSource), as only it reads the machine's own sessions: a fixture or test stack runs nothing and reads exit 0, so no test reaches a real Vercel project.
 export const runSink: SinkRun = (argv, value) =>
   readsLive() ? spawnSink(argv, value) : Promise.resolve(0)
 

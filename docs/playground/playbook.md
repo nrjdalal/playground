@@ -1,6 +1,6 @@
 ## What it does
 
-`playbook` holds the operating rules of Playground's factory, the Claude Code sessions cmux or herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
+`playbook` holds the operating rules of Playground's factory, the Claude Code sessions herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
 and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, signal, main, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings, talk).
 It lives in the repo rather than in one session's memory, so every session loads the same rules.
 
@@ -9,7 +9,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | You are, or you are about to                                                                                             | It gives you                                                                   |
 | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
 | the dispatcher, the Planner, the Builder, Ops, the Optimizer, the Assistant, a worker, reviewer, tester, runner or probe | your role, who you report to and the rules you keep                            |
-| Spawn, brief, rename, check or end a session                                                                             | the lifecycle (`LIFECYCLE.md`) and the cmux and herdr commands (`SESSIONS.md`) |
+| Spawn, brief, rename, check or end a session                                                                             | the lifecycle (`LIFECYCLE.md`) and the herdr commands (`SESSIONS.md`)          |
 | Update Claude Code                                                                                                       | the update steps in `LIFECYCLE.md`                                             |
 | Route a new ask, or run a lead's sweep                                                                                   | `DISPATCH.md` and `SWEEP.md`                                                   |
 | Answer the owner's DM while Slack mode is on                                                                             | `DISPATCH.md`'s Slack mode and `playground dm send`                            |
@@ -77,10 +77,10 @@ Another, ops-loom-relay, passes Claude Code's usage on to the org's Loom as coun
 each person's own.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).
 A probe lives for one test and never waits on the owner.
-The dispatcher, the Planner and the two leads never close, except to be started again with their settings after a cmux restore or from a handoff once their guidance changes; they compact their own context in one 400k window (`autoCompactWindow` 400000) and keep their surface and name.
+The dispatcher, the Planner and the two leads never close, except to be started again with their settings after a restore or from a handoff once their guidance changes; they compact their own context in one 400k window (`autoCompactWindow` 400000) and keep their pane and name.
 
-In cmux, sessions that work together share a workspace as full-height columns side by side, never wrapped into a grid: the four managers (the dispatcher, the Planner, the Builder, Ops) share a `Managers` workspace, and each worker has one of its own that reads worker | reviewer | tester, with any probe of its chore beside them.
-A session ends when the one it reports to closes its column, never the others; the last one left goes with the workspace, since cmux will not close a workspace's last surface.
+In herdr, sessions that work together share a workspace, each in a pane of its own: a checker opens as a column beside its worker's pane (`spawn.sh column`), and every other start opens a workspace of its own.
+A session ends when the one it reports to closes its pane, never the others.
 A finished worker, reviewer or tester also ends by itself: right after its PR merges, and from a check every 5 minutes, while one with work left unsaved stays open and its lead gets a `Not ended` line saying why.
 Sessions already running move at their next restart, so nothing is closed just to re-arrange it.
 
@@ -97,7 +97,7 @@ No factory session blocks on him: one that posted a decision carries on or ends 
 
 A new Linear ticket waits for the owner's yes, and Playground's own work stays out of Linear, tracked in the roster (the Dashboard's status table and Next up), the login's `doc plan-<slug>` items and GitHub.
 A session that needs a ticket asks up the chain; the dispatcher puts it to the owner as an Inbox decision, and on his yes writes that day's approval naming the team and title, which lets the ticket be filed.
-Every spawn sets `PLAYGROUND_ROLE` (a session cmux restores without it is known by its name), and in a session that has it the `no-linear-ticket` hook refuses any call that would file a ticket with no approval, through the Linear MCP or a GraphQL `issueCreate` alike.
+Every spawn sets `PLAYGROUND_ROLE` (a session herdr restores without it is known by its name), and in a session that has it the `no-linear-ticket` hook refuses any call that would file a ticket with no approval, through the Linear MCP or a GraphQL `issueCreate` alike.
 His own sessions have no role, so they file freely.
 The hook is a guard that fails closed: when it cannot start (Bun missing, its bundle damaged, the checkout gone) it refuses the call, naming the fix, and only a timeout lets the call through, where the rule still binds the session.
 Only the dispatcher writes an approval, and the hook refuses any other session a write into the approvals folder.
@@ -108,7 +108,7 @@ Playground is classified: nothing about it appears in any guarded org's ticket, 
 Playground is classified.
 Nothing about it, the factory or its sessions goes into any guarded org's ticket, PR, commit, branch, comment, Slack message or DM, and file in its repos.
 Every session is spawned with the factory's own settings file, which `scripts/link-skills.sh` installs at `~/.playground/factory-settings.json` without touching your own settings, so its `no-playground-leak` hook runs wherever the session works, in a guarded org's checkout too.
-cmux drops that file when it restores a session after a restart, so Playground's own project settings carry the hook as well, and a session restored where its folder's settings lack the hook is started again with the file.
+herdr drops that file when it restores a session after a restart, so Playground's own project settings carry the hook as well, and a session restored where its folder's settings lack the hook is started again with the file.
 The hook refuses a Linear or Slack write, a write to a guarded org's repository through gh, git, curl or the GitHub MCP, and a commit or push in its checkout, when its text names Playground, one of its skills, a session by the name the roster gives it or an older one such as `worker-envy`, the roster, the live dashboard or `~/.playground`.
 The fixed names are one list, the leak hook's terms file in `scripts/hooks/`, and every skill folder under `skills/` and every agent's name in the roster join them, so a new skill or a renamed session is covered at once.
 The guarded org's own name always passes.
@@ -129,7 +129,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - Every session in the dashboard sidebar has a roster entry with a task, and every finished worker shows `ended` and is closed, its checkers with it, once its chore is done.
 - Research and plans run in the Planner and its research workers, building in the Builder's workers, ops in Ops' runners and jobs; the dispatcher runs none of them.
 - Each open Playground PR is one bundle, a fast-lane fix, or a priority of the owner's that could not wait for its bundle.
-- cmux shows one `Managers` workspace and one workspace per live worker, with no checker or probe in a workspace of its own.
+- herdr shows one workspace per live worker, its checkers in columns beside it, and no checker in a workspace of its own.
 - Every working worker's ETA shows on its sidebar row's hover, and few have passed it.
 - No agent sits on a prompt or a picker for longer than one sweep, unless the picker waits on the owner in its own pane.
 - No session waits on a prompt for a delete Claude Code stops on: an `rm` or `rmdir` whose target has two or more parts that start with an unguarded variable, or a name directly in `/`, is turned back with a fix (the `no-prompt-stop` hook), and the session runs it again as a literal path (`playground rm <literal path>` for anything outside its worktree and scratchpad),
@@ -151,7 +151,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A session resumed with `--brief <file>` starts by reading that brief; without one, its first prompt has it act on the after-resume hook's instruction, so it re-arms its background tasks and re-sends its unanswered messages.
   A resumed session restarts any dev stack it served and re-arms its watches, CronList before CronCreate, since the resume kept its crons and dropped its background tasks.
   The factory no longer moves sessions to GLM at 98% usage (retired on Inbox #i827): the account rotation moves it between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
-- A session started with no `--runtime`, from any terminal, or with `--runtime herdr`, opens in herdr in place of cmux, in a pane labelled with its name, and its next resume opens there too.
+- A session started with no `--runtime`, from any terminal, or with `--runtime herdr`, opens in herdr, in a pane labelled with its name, and its next resume opens there too.
   spawn.sh starts nothing in cmux: it refuses `--runtime cmux` and a column started beside a cmux surface, and a session that ran in cmux resumes in herdr.
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
@@ -161,7 +161,6 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A factory session can only read from herdr: the `no-raw-spawn` hook refuses any herdr call that types into, closes or speaks for another pane, since herdr lets anything on the machine control it.
   The one exception is a scratch herdr server the session starts for a test, its socket in the session's own temporary folder, which it can drive through that socket alone, but never to start Claude.
   So a herdr session ends through `spawn.sh close <name>`, which closes only the pane spawn.sh opened under that name, never the caller's own, and marks the session ended on the roster.
-  A live cmux session moves to herdr with `spawn.sh move <name>`: it skips the memory and load checks, since the copy it closes frees what the new one takes, keeps the usage check, closes the cmux surface only after every check passes, and resumes the session in herdr once the old process has exited.
 - A new session's name reads like `k3m9px-worker`: a new 6-letter id, then what the session is, so no name is ever used twice, and its checkers get ids of their own, as `b7k2mq-reviewer` and `h4n8zt-tester`.
 - Every session starts at high effort; another effort is the owner's choice alone, which a lead sets with spawn.sh's `--effort` at a start or a resume, on the owner's word relayed in the **override** shape.
 - Every session runs on `models.default` (Opus) unless it was started on GLM or with spawn.sh's `--model` naming another of `models.claude`, and every subagent it starts for work runs on Sonnet unless its call names a model,

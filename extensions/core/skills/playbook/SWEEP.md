@@ -20,7 +20,7 @@ Done when it printed `quiet` and your sweep has ended (Ops' after step 2), or yo
 Ops' sweep takes every probe (its roster kind `probe`, else a `probe-*` or `<id>-probe` name) into step 3 as its own.
 The outbox's ops lines reach their `to` through the relay, runner-plain-relay, which runs `outbox/relay.py` and owns its cursor ([LIFECYCLE.md](LIFECYCLE.md#starts-and-ends), ops-tick's relay watch and the line that starts "The relay, runner-plain-relay"), so the sweep runs neither relay.py nor `drain.py` beside it (`drain.py` fights relay.py's cursor and sends lines twice).
 On a machine with no `outbox/relay.py`, the sweep is the relay: it runs `bun run --cwd <main checkout> ops:outbox`, which prints each line queued since its last run as JSON, oldest first, and sends each one's `text` to its `to` with `SendMessage`; its first run prints nothing and starts the cursor at every queue's end, and it refuses an outbox where relay.py sits.
-It also runs `python3 -I <main checkout>/scripts/ops/up.py --sessions` and sends each session that a `runs without the factory's hooks` line names (one cmux restored where its own folder's settings lack the hooks) to the one it reports to (the dispatcher's to Ops), to respawn by [SESSIONS.md](SESSIONS.md#spawn).
+It also runs `python3 -I <main checkout>/scripts/ops/up.py --sessions` and sends each session that a `runs without the factory's hooks` line names (one herdr restored where its own folder's settings lack the hooks) to the one it reports to (the dispatcher's to Ops), to respawn by [SESSIONS.md](SESSIONS.md#spawn).
 
 Done when every probe is in step 3's list, every line `ops:outbox` printed has gone to its `to`, and every session a `runs without the factory's hooks` line names is with the one it reports to.
 

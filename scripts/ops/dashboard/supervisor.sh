@@ -202,7 +202,7 @@ dev_reason() {
 
 check_dev() {
   wait_dashboard
-  # the launcher's own dev: notes (cmux's refusal names an ERROR) pass over to the line that stopped the stack, a refusal kept
+  # the launcher's own dev: notes pass over to the line that stopped the stack, a refusal kept
   if ! alive dashboard-dev; then echo "dev=DOWN ($(dev_reason < "$DEVLOG" | cut -c1-140))"; return 1; fi
   sleep 3; "$D/procs.sh" record dashboard-dev >> "$LOG" 2>&1
   local version v ok=0
@@ -318,7 +318,7 @@ finish_roll() {
     "$OPS/notify.sh" dashboard "roll to $(git rev-parse --short HEAD) failed after a migration; not falling back"
   else
     # bad-builds first: a supervisor the fallback reloads into keeps off the target at its start; a refusal dev_reason names is no bad build, but the head's own, its settings refusal (its env schema asks for what .env lacks), counts in refused, its third joining bad-builds
-    # every other refusal is the machine's or the checkout's (cmux, the database, another stack, portless's proxy, whose `portless service install` needs the owner's sudo), so a retry each ROLL_GAP is all the supervisor can do, and a refusal no one listed stays out of bad-builds
+    # every other refusal is the machine's or the checkout's (the database, another stack, portless's proxy, whose `portless service install` needs the owner's sudo), so a retry each ROLL_GAP is all the supervisor can do, and a refusal no one listed stays out of bad-builds
     local refusal="" n note="not the head's, no bad build"
     [ "$pulled" -ne 0 ] || refusal=$(dev_reason < "$DEVLOG" 2>/dev/null | sed -n 's/^dev: refusing to start: //p')
     if [ -z "$refusal" ]; then

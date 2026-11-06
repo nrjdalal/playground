@@ -224,7 +224,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 
 Playground's sessions run as a factory: the dispatcher manages, the Builder leads the workers (`<id>-worker`), Ops leads the runners (`<id>-runner`) and the ops jobs, and a probe (`<id>-probe`) lives for one test.
 
-- ALWAYS: Load [playbook](./extensions/core/skills/playbook/SKILL.md) when you are one of those sessions, or before you spawn, brief, rename or end a cmux session.
+- ALWAYS: Load [playbook](./extensions/core/skills/playbook/SKILL.md) when you are one of those sessions, or before you spawn, brief, rename or end a session.
   Its roles, chain, lifecycle, sweep and standing rules bind every session in the factory.
 - ALWAYS: Signal only processes you started; never select pids by name or pattern.
   A pattern matches the live dashboard and every worker's stack.
@@ -252,15 +252,13 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
     Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung or the one their route names (stack.md's hosted rule).
   - ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: each stored session's transcript, line by line, Playground's own alone unless the stack opts in) in the dashboard's local Postgres on 127.0.0.1, never a shared database.
   - ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, and every file the dashboard keeps outside the database from its data folder, `dataDir()`.
-- Cmux: read `.agents/dashboard/cmux.md` before you change a cmux or herdr call, how a session counts as live, how often the board refreshes or the System panel's commands.
-  cmux is deprecated: it takes no new work, only a fix for a break, and herdr is the terminal.
-  - ALWAYS: Keep every cmux call inside `api/hono/src/lib/dashboard/cmux.ts`, whose code no route calls now, since the dashboard reads, sends and answers through herdr.
+- Herdr: read `.agents/dashboard/herdr.md` before you change a herdr call, how a session counts as live, how often the board refreshes or the System panel's commands.
   - ALWAYS: Route every herdr call through `api/hono/src/lib/dashboard/herdr.ts`, the terminal the dashboard reads every session from.
   - ALWAYS: Count a session record as live only through `liveRecords()`, which `listLive` applies to herdr's records before any read.
   - ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, whose `COMMANDS` holds each one's fixed argv.
 - Messages: read `.agents/dashboard/messages.md` before you change how a message, a file or an answer reaches a session, the composer, the session the dashboard hosts on the Agent SDK, how a transcript renders, or the outbox and the stream's scroll.
   - ALWAYS: Send anything to a session through `deliver()` in `api/hono/src/lib/dashboard/deliver.ts`, and only for the owner's own clicks, since its text reads as the owner's.
-  - ALWAYS: Send a herdr session (cmux.md) the message as one `agent.prompt` through `prompt()` in herdr.ts, from `deliver()` alone.
+  - ALWAYS: Send a herdr session (herdr.md) the message as one `agent.prompt` through `prompt()` in herdr.ts, from `deliver()` alone.
   - ALWAYS: Reach the session the dashboard hosts on the Claude Agent SDK only through `api/hono/src/lib/dashboard/sdk.ts`.
   - ALWAYS: Keep a message's files in the owner-only attachments folder, never in a database.
   - ALWAYS: Render text from a session's transcript through `TranscriptMarkdown`, or give your own Streamdown its `TRANSCRIPT_COMPONENTS` and `transcriptUrlTransform`.

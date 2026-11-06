@@ -1,8 +1,6 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { writeFileSync } from "node:fs"
-import { join } from "node:path"
 
-import { capacityLog, herdrPin, placing, root, spawn, transcript } from "./spawn-fake"
+import { capacityLog, placing, root, spawn } from "./spawn-fake"
 
 // Every case runs spawn.sh, which starts fake processes and waits on them; one took 19.9s on the loaded runner box, so each gets twice that.
 setDefaultTimeout(40_000)
@@ -74,7 +72,7 @@ describe.skipIf(process.platform !== "darwin")(
       expect(r.code, r.err).toBe(0)
     })
 
-    test("a move finds its live session and sees it still running through the kernel's table", async () => {
+    test("a live session that holds the name is seen through the kernel's table, and refused", async () => {
       const SESSION = "0b6e3c1a-4d2f-4e8a-9c7b-1f2e3d4c5b6a"
       const live = Bun.spawn(["sleep", "60"])
       try {
@@ -85,46 +83,27 @@ describe.skipIf(process.platform !== "darwin")(
           .trim()
           .split(/\s+/)
           .join(" ")
-        const pin = herdrPin()
         const r = await spawn(
-          ["move", "worker-x"],
+          worker,
           [
             {
               pid: live.pid,
               raw: JSON.stringify({
                 cwd: root,
-                name: "worker-x",
+                name: "worker-brave-otter",
                 pid: live.pid,
                 procStart: lstart,
                 sessionId: SESSION,
               }),
             },
           ],
-          { FAKE_PS_BROKEN: "1", PLAYGROUND_MOVE_WAIT: "1" },
-          undefined,
-          { name: "worker-x", backend: "claude" },
-          (home) => {
-            pin(home)
-            transcript(home, SESSION)
-            writeFileSync(
-              join(home, "cmux.sessions"),
-              JSON.stringify({
-                sessions: [
-                  {
-                    agent: "claude",
-                    cwd: root,
-                    pid: live.pid,
-                    session_id: SESSION,
-                    surface_id: "98189861-69DE-4CB5-B8B4-329E07BE1ADF",
-                    workspace_id: "330A92BC-6C45-4884-B203-017ED4F7E6F1",
-                  },
-                ],
-              }),
-            )
-          },
+          { FAKE_PS_BROKEN: "1" },
         )
-        expect(r.code).not.toBe(0)
-        expect(r.err).toContain(`pid ${live.pid} still runs 1s after cmux closed its surface`)
+        expect(r.code).toBe(3)
+        expect(r.err).toContain(
+          `a live session already holds the name worker-brave-otter (pid ${live.pid})`,
+        )
+        expect(placing(r)).toEqual([])
       } finally {
         live.kill()
       }

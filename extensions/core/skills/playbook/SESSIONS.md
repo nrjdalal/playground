@@ -1,8 +1,7 @@
 # Sessions
 
-The cmux commands behind the factory's lifecycle; a herdr session's are under Spawn and End.
-A cmux session's place is its workspace (`workspace:N`) and its split, the surface (`surface:N`), both in its roster entry; `cmux tree --workspace workspace:N` shows every surface in a workspace.
-Sessions that work together share a workspace, so every command aimed at one session names its surface as well as its workspace: a command naming the workspace alone lands on whichever split has focus.
+The commands behind the factory's lifecycle, for the sessions it runs in herdr.
+A session's place is its herdr pane, labelled with its name (Spawn); sessions that work together share a workspace, each in a pane of its own, so a command aimed at one session names its pane.
 Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, an `sh -c` wrapper) and a subagent may not inherit bypass, so a session can sit waiting on a prompt.
 
 ## Spawn
@@ -16,8 +15,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A runner's title is its own name: a new one whose roster row holds none takes it, as a probe takes `Probe: <name>`, so neither row shows its first ask, and it takes no `--title`.
    A lead or manager also starts under its `sessions.names` name (`builder`, `dispatcher`, `ops`, `planner` by default, the second dispatcher the dispatcher's with `-2`), an old name `sessions.aliases` maps to its kind, `optimizer`, or one the roster gives its kind, and a resume keeps whatever name the session has.
    A session started under an old name (`worker-brave-otter`, `reviewer-brave-otter`, `probe-sdk`) keeps it, and a checker spawned again for a PR takes the name it had (**rounds**).
-   A session respawned after a cmux restore takes the name of the session it replaces, since it starts fresh from a handoff rather than resumed.
-   Live means `ListAgents` lists it or `cmux tree --all` shows a surface running it; a roster entry, or a saved record in `cmux sessions list`, proves nothing about life.
+   A session respawned after a restore takes the name of the session it replaces, since it starts fresh from a handoff rather than resumed.
+   Live means `ListAgents` lists it or `herdr pane list` shows a pane running it; a roster entry, or a resume record in `~/.playground/resume`, proves nothing about life.
 2. Spawn a new session only for a chore that needs its own context; a short job (a probe-sized check, a one-off script) runs as a background task in the session that wants it.
    Run spawn.sh by its absolute path, `"${PLAYGROUND_REPO:?}/scripts/spawn.sh"` (every launch exports `PLAYGROUND_REPO`, the main checkout), from your own folder, so your shell stays out of the main checkout, where `no-main-checkout` refuses git moves.
    A pane started by hand has no `PLAYGROUND_REPO`, so the `:?` stops the call with its name; set it there to the main checkout as the factory's hooks find it: `export PLAYGROUND_REPO="$(dirname "$(git -C <any playground worktree> rev-parse --path-format=absolute --git-common-dir)")"`.
@@ -26,7 +25,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    and a scratch world's of the session's own ([scripts/README.md](../../../../scripts/README.md#spawnsh)),
    naming the script; type every program by its literal name, since one held in a variable (`$V integration add`) reads as herdr when a herdr command group follows it.
    It holds the machine's room in code (the room is the cores in use, not a count of slots), through a capacity gate that refuses, failing closed, unless four checks pass in order, the first failure naming its gate and its reading,
-   and counts no live sessions or workers (no cap; Ops watches the live board for the risk of a cmux that stopped answering at 49 live sessions and load5 97):
+   and counts no live sessions or workers (no cap; Ops watches the live board for the risk of a terminal that stops answering, as cmux did at 49 live sessions and load5 97):
    the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`), its own and each `slots.peers` folder's, each weighing half its item's load units, under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
    less a quarter (`gates.smallReserve`) kept for small items unless the start is small (`--size small|medium|big`, else small for a reviewer or tester, else the roster's or plan.json's size, else medium; [rules/slots.md](../../rules/slots.md)), while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the checkers,
    and once over that line the CPU's busy cores plus the starts too (`top -l 2 -n 0`'s idle share of the cores, held to the same line at no more than the core count), so it refuses only when both are over or `top` gives no reading, and the refusal names both (load 24 on 15 cores read 55% idle, 22 Oct);
@@ -74,12 +73,12 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
      in the main checkout's `.claude/worktrees/leads` (`manager <name> <brief>`, the optimizer by its name or its roster kind, a new name given `kind=optimizer` first the same way;
      an orchestrator of any other manager kind in `kinds.ts`, such as the Assistant, opens there too, as a lead reporting to the session its row names, once `scripts/roster.ts set <name> kind=<kind> reportsTo=<session> task=<what it does>` has given it both, and spawn.sh refuses it naming that line until it has;
      spawn.sh refuses the second dispatcher on Claude without `--account <email>`, a second account, so it never shares the first's login, and a resume of it whose pin reads claude needs `--account` again, since nothing records the account).
-     After a cmux restart, `python3 scripts/ops/up.py --sessions` prints the `spawn.sh resume <name> <dir> <session-id>` line that brings each session back, with `--backend glm` for a session whose newest turn ran on GLM;
+     After a restart, `python3 scripts/ops/up.py --sessions` prints the `spawn.sh resume <name> <dir> <session-id>` line that brings each session back, with `--backend glm` for a session whose newest turn ran on GLM;
      `--brief <file>`, with resume alone, makes the resumed session's first prompt tell it to read `~/.playground/<file>` and follow it, so it comes back working rather than idle.
      Without it, the first prompt has the session act on the `after-resume` hook's instruction (re-arm its background tasks, re-send its unanswered messages, the **context** rule), so a session idle at the restart still takes a turn, and names whom it reports to when the prompt its start recorded in `resume/<name>.prompt` says.
      After a resume, restart any dev stack you served, then re-arm your watches: run CronList before CronCreate, since a resume keeps the session's crons and drops only its background tasks.
      Done when the restarted stack answers its `/api/health` and each watch is armed once.
-     Before a close that a resume follows (an account move, or `spawn.sh move`), wait until the session has no run-slot run in flight, since the close kills that run.
+     Before a close that a resume follows (an account move), wait until the session has no run-slot run in flight, since the close kills that run.
      Before an account move, its dispatcher tells every session that serves a dev stack, so what it serves does not go down unannounced.
      Resumes go about 2 minutes apart to start, since spawn.sh's load gate counts recent starts and refuses a burst; a refused resume waits and runs again.
 
@@ -103,7 +102,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    The pick is a smooth weighted round robin: each start adds every passing login's share to its credit in `ops/usage/split-picks.json`, takes the highest, and takes the shares' sum off it.
    With no fresh split, or none of it passing, it takes the one with the lowest week.
    It prints `no --account, so it starts on <email>, next in the account split (<share>% of new sessions)` (or `the login with the most room this week`) when that is another login, which then starts on it as `--account <email>` would, and `so it stays on <email>` when it is the machine's own.
-   A bare `resume`, `move` or `restore` picks the same way and prints the same line, so a session can come back on another login than it ran on: the resume record's exec line keeps only an `--account` you gave, while its `# account:` line names the login the session runs on, a pick included.
+   A bare `resume` or `restore` picks the same way and prints the same line, so a session can come back on another login than it ran on: the resume record's exec line keeps only an `--account` you gave, while its `# account:` line names the login the session runs on, a pick included.
    It refuses only when every login is over the gate, naming each one's reading, a stale one's file and age included.
 
    `--backend glm`, with any mode and anywhere among its words, runs the session on Z.ai's GLM through Claude Code, so its hooks, skills and transcript stay as they are: a lead picks it per spawn for the work **glm** gives GLM, and never for a reviewer or a tester, whose verdict gates a merge.
@@ -126,8 +125,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A probe on a server with no pane to split beside opens in a workspace of its own, in this checkout: `spawn.sh probe <name> <reports-to> <brief>`, with no `--runtime` or with `--runtime herdr`.
    It opens on the playground server; `PLAYGROUND_HERDR_SESSION=playground-probes` before the command puts it on the probes server.
    When herdr refuses a placement, spawn.sh quotes herdr's own error in its refusal.
-   It labels the session's pane with its name, and that label is where the session is found: the roster's `workspace` and `surface` are cmux's, so a herdr session records neither.
-   The Dashboard lists it by name, for any session to read; `herdr pane list` shows the labels only when run in a pane on the playground server, since from a cmux session herdr's reads reach another socket.
+   It labels the session's pane with its name, and that label is where the session is found, so the session's roster entry records no `workspace` or `surface`.
+   The Dashboard lists it by name, for any session to read; `herdr pane list` shows the labels only when run in a pane on the playground server, since from a pane on another server herdr's reads reach that server's socket.
    It waits for Claude's REPL with `pane wait-output`, and answers the folder trust and MCP picker for you only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else the session waits at the prompt for the owner, and spawn.sh says so.
    The start records its runtime in `~/.playground/runtimes/<name>`, and a resume whose pin reads `cmux` opens in herdr and rewrites the pin.
    With no `--runtime`, every start and resume opens in herdr, from any terminal; spawn.sh starts nothing in cmux, so it refuses `--runtime cmux` and a column anchored on a cmux `surface:N`.
@@ -139,15 +138,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A session that never took its first turn has no transcript, so its resume starts it afresh under its own id and name, with the prompt its start recorded in `resume/<name>.prompt`.
    Done when each line reads `restored`, `skipped <name>: live` or a roster row's down status, or you have acted on it (a full gate: run it again once a session closes; a broken record or a missing pin: resume the session by hand).
 
-   `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" move <name>` takes a live cmux session to herdr, so every session moves to herdr.
-   A close followed by `resume --runtime herdr` leaves the session down while the capacity gate refuses (memory pressure with under 8% free, or load over the cores), and a move swaps one copy for another, so it adds neither: it runs every check a resume runs and the usage gate, with the load and memory gates set aside and its capacity row naming the pid it moves.
-   It reads the live session holding the name from Claude's registry and its surface from cmux's record (`cmux sessions list --session <id>`), and leaves alone a session cmux holds no record of at the registry's pid (a herdr session, one outside both, or a stale record of an earlier process).
-   A session cannot move itself, since closing its own surface ends the move before the herdr copy starts: its lead moves it.
-   Only after every check and gate has passed does it close the cmux surface (the workspace when cmux refuses to close its last surface), wait up to 30 seconds (`PLAYGROUND_MOVE_WAIT`) for that process to exit, and resume it in herdr by its session id, with `--model`, `--effort`, `--account` and `--brief` as a resume takes them and `--runtime herdr` alone.
-   It signals nothing: cmux's close ends the old process, and a process that outlives the wait leaves the move refused, naming the pid and the `spawn.sh resume` line to run by hand once it exits.
-   Every other step after the close either carries the move on or refuses naming that same line, with each option the move was given.
    `--check`, with any mode but restore or close, runs every gate but the live-name one and starts or closes nothing.
-   Done when it prints `herdr pane <id> workspace <id>` and the session's roster entry carries neither a cmux `workspace` nor a `surface`.
 
    `<role>` is the session's kind: `dispatcher` (both dispatchers), `lead` (the builder, ops, the planner and `optimizer`), `worker`, `reviewer`, `tester`, `runner` or `probe`.
    It turns on the factory's guards, such as the `no-linear-ticket` hook (**tickets**); a session the owner opens himself has no role, so they leave it alone.
@@ -156,10 +147,10 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A session gets exactly one `--settings`, since Claude Code keeps only the last one given, and anything extra is merged into that file, as a GLM launch merges its telemetry off.
    Every launch merges its compact window (**context**): spawn.sh rebuilds the linked file on each launch into `factory-settings-400k.json` for every kind but a probe, `factory-settings-glm-400k.json` on GLM, so a resume keeps the same window.
    A probe takes `factory-settings-sandbox-400k.json` (`factory-settings-glm-sandbox-400k.json` on GLM), the same file plus Claude Code's sandbox around its shell commands (scripts/README.md, spawn.sh).
-   cmux restores a session after a restart without `--settings` or the role: Claude Code loads `.claude/settings.json` from the session's own folder, and in a checkout whose settings carry the same hooks they load from there and read the role from the session's name, but anywhere else (a work-org checkout, an older checkout, a subfolder) nothing does,
-   so a factory session cmux restores where its own folder's `.claude/settings.json` lacks them is respawned from its handoff through spawn.sh, never left running as restored.
+   herdr's own resume restores a session after a restart without `--settings` or the role: Claude Code loads `.claude/settings.json` from the session's own folder, and in a checkout whose settings carry the same hooks they load from there and read the role from the session's name, but anywhere else (a work-org checkout, an older checkout, a subfolder) nothing does,
+   so a factory session herdr restores where its own folder's `.claude/settings.json` lacks them is respawned from its handoff through spawn.sh, never left running as restored.
    Every Ops sweep runs `python3 -I <main checkout>/scripts/ops/up.py --sessions`, which names each one (and none once each is respawned), and sends each to the one it reports to (a checker's or probe's spawner; the dispatcher's goes to Ops), which respawns it, since a live session keeps its name:
-   the session writes a handoff ([Write a handoff](#write-a-handoff), `~/.playground/handoffs/<name>.md`: its open items, each PR with its head, its next step), its surface closes with `--force` ([End](#end)), and a spawn under the same name ([Spawn](#spawn)) briefs the respawned session with the handoff, which the respawned-session row of ROSTER.md records.
+   the session writes a handoff ([Write a handoff](#write-a-handoff), `~/.playground/handoffs/<name>.md`: its open items, each PR with its head, its next step), its pane closes ([End](#end)), and a spawn under the same name ([Spawn](#spawn)) briefs the respawned session with the handoff, which the respawned-session row of ROSTER.md records.
    A resume's `<dir>` is a folder Claude Code already trusts (the Playground checkout or a worktree under it), never a scratchpad or /tmp path.
    In a folder it has never trusted, the session stops on the folder-trust dialog, which no session may approve, and `ListAgents` never lists it.
    A resumed session, a checker included, runs in the worktree or clone it ran in: spawn.sh resume refuses to move a session into the main checkout unless it started there, and refuses a removed folder, naming its branch and, for a the dispatcher worktree, the `git worktree add` line that brings it back.
@@ -203,10 +194,10 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    Unlike the other slots, the `__SPEC__` fill replaces the backticked token together with its backticks, since the spec runs to paragraphs that inline code would break; the template keeps the backticks only so the slots test, which wants every slot backticked, stays green.
    Done when the filled brief's This PR section names the scope, the bar and the harness, or that there is none, with no `__SPEC__` token left.
    The tester template carries no such slot, since a tester drives the diff's surfaces for CI and posts PASS or FAIL, not a score against the scope.
-   A probe's brief adds that it ends by telling its spawner it is done, so the spawner closes its surface (End).
+   A probe's brief adds that it ends by telling its spawner it is done, so the spawner closes its pane (End).
    A brief that has a script written for `/bin/bash` keeps it to macOS's bash 3.2.57, which stops on a fractional `read -t 0.5` (`invalid timeout specification`): wait in whole seconds (`read -t 1`), or run the script under zsh or bun.
    A rule that changes while a checker is live goes to it at once from its worker's lead by `SendMessage`, as an addition to its brief, since a checker that never heard of the change scores it as a finding (12 Oct).
-4. Record the start by [ROSTER.md](ROSTER.md)'s start rows (a session respawned after a cmux restore, by the respawned-session row, which keeps the entry's work).
+4. Record the start by [ROSTER.md](ROSTER.md)'s start rows (a session respawned after a restore, by the respawned-session row, which keeps the entry's work).
    A worker that spawned a checker or a probe sends the Builder its name, and adds `pr=<its PR's URL>` to a checker's entry beside the `worker=` spawn.sh wrote, which the Dashboard nests it under its worker by.
 
 Send the brief with `notify_when_idle: true`, so its next idle arrives as a notice.
@@ -222,29 +213,18 @@ Done when `TZ=UTC ls -l <path>` prints the file and the report quotes that line.
 
 A session takes its name at spawn (`claude -n <name>`), and that name is the one `ListAgents` and the dashboard show.
 Nothing renames it later: typing `/rename` into its pane would read as the owner, and a `/rename` sent by `SendMessage` arrives as plain text, which Claude Code never runs.
-What a rename can still change is the tab:
-
-```bash
-cmux rename-tab --workspace workspace:N --surface surface:N <new>
-```
-
-A worker renames its workspace too, since the workspace carries its name: `cmux rename-workspace --workspace workspace:N <new>`.
+Its pane's label carries that name too, and `spawn.sh close` and `spawn.sh restore` find the session by it, so the label stays as spawn.sh set it; the `no-raw-spawn` hook refuses `herdr pane rename`, which is no read.
 
 The roster keeps the name the session took at spawn, since the dashboard pairs a roster agent with its session by that name.
-Done when the tab shows the new name.
+Done when the roster and the pane's label both carry the name the session took at spawn.
 
 ## Check a session
 
 A sweep reads each agent's state from four places:
 
 - `ListAgents`: its row says whether the session is busy, idle or waiting, and its absence means the session is down.
-- `cmux sessions list --json --agent claude --workspace <id>`, where `<id>` is the `id` of the workspace whose `ref` is the roster's `workspace:N` in `cmux --json list-workspaces`: the session's own record (in a shared workspace, the one whose `surface_id` is the session's surface UUID,
-  which `cmux list-pane-surfaces --workspace workspace:N --id-format both` prints beside the roster's `surface:N`) has `agent_lifecycle`, which reads `needsInput` while the session waits on you.
-  A record is the running session's only when `~/.claude/sessions/<pid>.json`, at the record's `pid`, names its `session_id` and its `procStart` equals `LC_ALL=C TZ=UTC ps -o lstart= -p <pid>`.
-  `stored_pid_exists: true` proves nothing alone: cmux keeps a record after its session ends, and macOS hands the freed pid to the next process that starts.
-  A dead record keeps its last state, so match by workspace.
-  Keep the read to one workspace: cmux builds every record before it applies `--limit`, so a lower limit saves nothing (about 5s of CPU at 2,800 records, measured 12 Oct): pace the reads and keep cmux's store pruned instead.
-- `cmux read-screen --workspace workspace:N --surface surface:N --lines 40` (raise `--lines` for more): what it waits on, a picker or a permission prompt.
+- `herdr pane list`, run in a pane on the session's server: the pane whose `label` is the session's name has `agent_status`, which reads `blocked` while the session waits on a person, `working` while it runs, and `idle` or `done` while it waits.
+- `herdr pane read <pane id> --source visible --lines 40` (raise `--lines` for more): what it waits on, a picker or a permission prompt; `visible` reads the screen as it shows now, where `recent` would scroll the session.
 - the session-state record at `session-state/<session id>.json` in the data folder: its `state` reads `working`, `idle`, `stuck`, `failed` or `usage-limit`.
   The way from a session's name to its id: the `~/.claude/sessions/<pid>.json` file that names the session holds its `sessionId`.
   A `stuck` or `usage-limit` record goes stale once the transcript holds a newer turn (`stateNow()` in `packages/config/src/session-state.ts` reads it as over), so the positive check is the record reading `working` with `at` after the send.
@@ -348,34 +328,23 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
   Any other has its dev stack stopped (`bun run dev:stop` there, whose refusal keeps it), goes to the 7-day trash through `playground rm --worktree` (`--pr <url>` at a merge), which keeps one a process holds, and then loses its `playground-<worktree>-db` and `-redis` containers (`docker rm -fv`, each name matched whole, never the live dashboard's database) and its local branch.
   Another repo's worktree goes through `git -C <repo> worktree remove <path>` with no force flag, then `git worktree prune` and `git branch -D`; the main checkout is never one.
 - Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one); otherwise its lead gets a `Not ended` line saying why, and the session waits.
-  A cmux session's close is refused the same way, so its lead closes it by hand below.
 - A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir>`; its `Ended` line goes to its worker too.
 
-A session ends by closing its surface, so the workspace's other sessions live on.
-cmux refuses to close a surface or workspace whose session still runs (`confirmation_required: ... has a running process`), so a finished session's close carries `--force`:
-
-```bash
-cmux close-surface --workspace workspace:N --surface surface:N --force
-```
-
-A session does not close its own surface, since that kills its claude mid-call: it tells the one it reports to that it is done (a checker or a probe, its spawner), who closes it with `--force`.
-Before you close a checker by hand, read its roster entry and ask it which rounds it still holds, since it may be serving another PR (on one PR a reviewer closed mid-round).
-cmux refuses to close a workspace's last surface (`Cannot close the last surface`), so the last session left in a workspace, a worker once its checkers and probes have gone, ends with its workspace: `cmux workspace close workspace:N --force` (cmux 0.65's name for `close-workspace`).
-
-A herdr session ends the same way, by the one it reports to, through spawn.sh, since the `no-raw-spawn` hook refuses `herdr pane close` to every factory session (herdr's socket has no access control):
+A session ends by closing its pane, so the workspace's other sessions live on, by the one it reports to, through spawn.sh, since the `no-raw-spawn` hook refuses `herdr pane close` to every factory session (herdr's socket has no access control):
 
 ```bash
 "${PLAYGROUND_REPO:?}/scripts/spawn.sh" close <name>
 ```
 
+A session does not close its own pane, since that kills its claude mid-call: it tells the one it reports to that it is done (a checker or a probe, its spawner), who closes it.
+Before you close a checker by hand, read its roster entry and ask it which rounds it still holds, since it may be serving another PR (on one PR a reviewer closed mid-round).
 It closes the one pane spawn.sh opened for that name, found by the label it set, on the server the session's resume record names (the factory's when the record has no `# server:` line), and prints `closed <name> (pane <id> on <server>)`.
 It refuses a session whose runtime pin does not read herdr or that has no resume record, a server that is down or a herdr that is not the pinned one, no pane or two panes carrying the label, and your own pane, quoting herdr's words when herdr refuses the close.
 Once the pane closes it sets the session's roster row to `ended` itself, and leaves the pins and the resume record in place, so `spawn.sh resume` can reopen the session, setting the row back to `starting`, as any new start of that name does.
 
-Record why it ended with `report <name> "<why it ended>"`, and a cmux session's close, which writes no roster, with `status=ended` on that report too (ROSTER.md, It ends).
+Record why it ended with `report <name> "<why it ended>"` (ROSTER.md, It ends).
 `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir>` reopens the session later if it is needed, in the folder it ran in, or anywhere with its session id after `<dir>`: a resume by name alone refuses a folder whose transcripts hold no session of that name.
 A herdr session's end is its roster `ended`: with any status but done, ended, parked or paused, `spawn.sh restore` brings it back after the server's next restart.
 Done for a herdr session when `bun run --cwd <dashboard checkout> verify ended <name>`, read-only against the live dashboard, which it finds through portless from that checkout (`.agents/dashboard/writes.md`), passes:
 it reads the session Ended as the Dashboard does, the roster showing `ended` and no live session holding its name, and fails while live sessions or a herdr server could not be read.
-A session that closes to be respawned after a cmux restore (Spawn) records no end, since the respawned session keeps the entry, and comes back by Spawn instead, briefed with its handoff, since a resume brings the old context back.
-Done for a cmux session when the surface is gone from `cmux tree --workspace workspace:N` (for the last session in a workspace, the workspace is gone from `cmux tree --all`) and the roster shows `ended`, or for a respawn the respawned session.
+A session that closes to be respawned after a restore (Spawn) records no end, since the respawned session keeps the entry, and comes back by Spawn instead, briefed with its handoff, since a resume brings the old context back.

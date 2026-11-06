@@ -317,7 +317,7 @@ export class DashboardHub {
       this.tails.delete(sessionId)
     }
     for (const [sessionId, path] of transcripts) {
-      // a lost change event leaves its lines past the offset, so a refresh reads an open tail again (cmux.md); a read with nothing past the offset ends at once.
+      // a lost change event leaves its lines past the offset, so a refresh reads an open tail again (herdr.md); a read with nothing past the offset ends at once.
       if (this.tails.has(sessionId)) {
         this.queueRead(sessionId)
         continue

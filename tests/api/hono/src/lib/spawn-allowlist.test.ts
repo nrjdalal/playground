@@ -9,7 +9,6 @@ const LIB = join(import.meta.dir, "../../../../../api/hono/src/lib")
 const ALLOWLIST = [
   "accounts/claude-setup.ts",
   "dashboard/agents.ts",
-  "dashboard/cmux.ts",
   "dashboard/dispatcher-start.ts",
   "dashboard/fixture.ts",
   "dashboard/repo.ts",

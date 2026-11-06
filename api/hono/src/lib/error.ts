@@ -84,7 +84,7 @@ export const errorHandler = (err: Error, c: Context) => {
     return jsonError(c, err.status, code, err.message)
   }
 
-  // process.env, which the API's own env module has loaded and validated by the time a request fails: importing that module here would validate the API's whole env in every process that imports an ApiError, the dev launcher's cmux check included
+  // process.env, which the API's own env module has loaded and validated by the time a request fails: importing that module here would validate the API's whole env in every process that imports an ApiError, the dev launcher's checks included
   const message = isLocal(process.env.NODE_ENV) ? err.message : "Internal Server Error"
   return jsonError(c, 500, "INTERNAL_SERVER_ERROR", message)
 }

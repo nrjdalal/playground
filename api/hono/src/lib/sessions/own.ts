@@ -8,7 +8,7 @@ import { readsLive } from "@/lib/dashboard/fixture"
 import { type RegistryFile, registeredSessionsOf } from "@/lib/dashboard/peers"
 import { dataDir } from "@/lib/sessions/paths"
 
-// Which of the machine's Claude sessions a stack shows. cmux and every other terminal run sessions Playground never started (the owner's own, another checkout's factory), so a stack that reads this machine shows Playground's own alone, unless it opts in to every one: the Sessions pages through the ingest and System's sampler ask here, and the board shows Playground's own alone either way.
+// Which of the machine's Claude sessions a stack shows. A terminal runs sessions Playground never started (the owner's own, another checkout's factory), so a stack that reads this machine shows Playground's own alone, unless it opts in to every one: the Sessions pages through the ingest and System's sampler ask here, and the board shows Playground's own alone either way.
 
 // The file in the hosted session's folder (PLAYGROUND_SDK_PROBE_DIR) that names its session, so the API resumes it after a restart rather than starting another (sdk.ts).
 export const SESSION_FILE = ".sdk-session"
