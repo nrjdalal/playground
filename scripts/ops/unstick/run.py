@@ -446,7 +446,7 @@ def org_owners():
     return ORGS
 
 
-# every slot run-slot.sh takes, in its clear-stale list's order, the CPU slots first as its held_units lists them, which tests hold these to; each model slot is found by its name
+# every slot run-slot.sh takes, in its clear-stale list's order, the CPU slots first as its holders lists them, which tests hold these to; each model slot is found by its name
 CPU_SLOTS = ("run-slot", "run-slot-2", "run-slot-3", "run-slot-4")
 SLOTS = (*CPU_SLOTS, "run-slot-commit", "run-slot-clone", "run-slot-quick")
 
@@ -1161,7 +1161,7 @@ def docker_check(state, timeout=20):
 
 
 # builder, 12 Oct: a waiter on a pre-edit copy of run-slot.sh held the queue's head while run-slot sat free; flag it after 2 minutes, but
-# only while run-slot.sh's can-take says that waiter could take run-slot now, since under the load units a waiter for units that are not
+# only while run-slot.sh's can-take, asked for the head's own ticket and so its own units (issue 1216), says that waiter could take run-slot now, since under the load units a waiter for units that are not
 # free waits beside a free run-slot by design (a review's round 1)
 def slot_stuck(state, now_t):
     env = os.environ | {"RUN_SLOT_OPS": OPS}
@@ -1177,7 +1177,7 @@ def slot_stuck(state, now_t):
         return None
     if now_t - sf["since"] < 120:
         return None
-    can = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "can-take", "run-slot", first[2]], env=env, capture_output=True, timeout=30)
+    can = subprocess.run(["bash", os.path.join(CODE, "run-slot.sh"), "can-take", "run-slot", head], env=env, capture_output=True, timeout=30)
     if can.returncode != 0:
         return None
     line = f"run-slot free for {int(now_t - sf['since'])}s while {first[2]} (pid {first[1]}) heads the queue, could take it and takes nothing"

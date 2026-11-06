@@ -1861,6 +1861,33 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
   })
 })
 
+describe("an unquoted value stays one word where the shell does not split it (PG-1133)", () => {
+  test.each([
+    ["ln of one variable at zsh's top level", "ln -s $X"],
+    ["GNU ln of one variable at zsh's top level", "gln -s $X"],
+    ["dd with a variable after if= at zsh's top level", "dd if=$X"],
+    ["mkdir with a mode from a variable at zsh's top level", "mkdir -m $X /tmp/x"],
+    ["ln of one quoted variable in bash -c", `bash -c 'ln -s "$X"'`],
+    ["ln of one variable in zsh -c", `zsh -c 'ln -s $X'`],
+    ["ln of a quoted command substitution", `ln -s "$(cat /tmp/f)" /tmp/l`],
+    ["cp of a command substitution to a literal last path", "cp $(cat /tmp/f) /tmp/x"],
+    ["dd with an arithmetic block size", "dd if=/dev/zero of=/tmp/y bs=$((4 * 1024)) count=1"],
+    ["ln of a variable after an npx -y", "npx -y cowsay hi; ln -s $X"],
+    ["ln of a variable after a find -type", "find . -type f -name a; ln -s $X"],
+    ["ln of a quoted default", `ln -s "\${X:-/tmp/d}"`],
+    ["dd with a quoted variable after if=", `dd if="$X"`],
+    ["ln of a quoted positional parameter", `ln -s "$1"`],
+    ["ln of a held variable", "D=/tmp/d; ln -s $D"],
+    [
+      "dd of a quoted pattern cut holding the positional parameters in bash -c",
+      `bash -c 'dd if="\${X#$@}"'`,
+    ],
+    ["dd of a quoted default holding zsh's argv", `dd if="\${X:-$argv}"`],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+})
+
 describe("a playground CLI call that changes what a guard reads is refused, naming the owner's route", () => {
   test.each([
     [
@@ -2230,5 +2257,63 @@ describe("a refusal for a value the hook does not hold names it in readable text
     const reason = await bash(command, "/tmp")
     expect(reason).toContain(named)
     expect(reason).not.toContain("\u0000")
+  })
+})
+
+describe("a held path runs past a quoted heredoc's body, which the shell expands nothing in (PG-1128)", () => {
+  test.each([
+    [
+      "cp to a held path after a quoted heredoc whose body holds arithmetic",
+      `D=/tmp/d; cat > /tmp/s.sh <<'EOF'\necho $((i + 1))\nEOF\ncp x "$D/y"`,
+    ],
+    [
+      "cp to a held path after a quoted heredoc whose body holds a [[ -eq ]] test",
+      `D=/tmp/d; cat > /tmp/s.sh <<'EOF'\n[[ $n -eq 1 ]] && echo one\nEOF\ncp x "$D/y"`,
+    ],
+    [
+      "cp to a held path after a double-quoted heredoc whose body holds a subscript",
+      `D=/tmp/d; cat > /tmp/s.sh <<"EOF"\necho \${a[i]}\nEOF\ncp x "$D/y"`,
+    ],
+    [
+      "rm of a held path after a backslashed tab-stripped heredoc whose body holds arithmetic",
+      `D=/tmp/d; cat > /tmp/s.sh <<-\\EOF\n\techo $((i))\n\tEOF\nrm -rf "$D"`,
+    ],
+    [
+      "rm of a held path after a quoted heredoc to an interpreter whose body holds an indirection",
+      `D=/tmp/d; python3 - <<'EOF'\nprint("\${!x} \${(P)y}")\nEOF\nrm -rf "$D"`,
+    ],
+    [
+      "rm of a held path after two quoted heredocs on one line",
+      `D=/tmp/d; cat <<'A' > /tmp/a <<'B'\n$((i))\nA\n\${a[i]}\nB\nrm -rf "$D"`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+})
+
+describe("a held path past any other heredoc or a quote the scan cannot place is refused (PG-1128)", () => {
+  test.each([
+    [
+      "cp after an unquoted heredoc whose body holds arithmetic",
+      `D=/tmp/d; cat > /tmp/s.sh <<EOF\necho $((i + 1))\nEOF\ncp x "$D/y"`,
+    ],
+    [
+      "cp after a quoted heredoc and an unquoted one whose body holds a subscript",
+      `D=/tmp/d; cat <<'A' > /tmp/a <<B\nok\nA\n\${a[i]}\nB\ncp x "$D/y"`,
+    ],
+    [
+      "cp after a quoted heredoc beside a single-quoted read operand with a subscript",
+      `D=/tmp/d; cat > /tmp/f <<'EOF'\nok\nEOF\nread 'a[i]' < /tmp/f; cp x "$D/y"`,
+    ],
+    [
+      "cp after a quoted heredoc beside a single-quoted printf -v operand with a subscript",
+      `D=/tmp/d; cat > /tmp/f <<'EOF'\nok\nEOF\nprintf -v 'a[i]' x; cp x "$D/y"`,
+    ],
+    [
+      "cp into the guarded folder after a quoted heredoc",
+      `cat > /tmp/s.sh <<'EOF'\necho $((i))\nEOF\ncp x ${LIST}`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeDefined()
   })
 })

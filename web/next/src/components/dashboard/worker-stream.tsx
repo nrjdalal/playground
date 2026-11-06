@@ -181,6 +181,17 @@ function Recipient({ to }: { to: string }) {
   return agentLabel(sockets?.[to] ?? withoutRef(to))
 }
 
+// A message row's tail after its bright verb, in the title's muted tone: to or from, the other session (a session when unknown), then the message's first line, so a sent and a received message read alike.
+function Addressed({ by, rest, to }: { by: "from" | "to"; rest: string; to: string | null }) {
+  return (
+    <>
+      {` ${by} `}
+      {to ? <Recipient to={to} /> : "a session"}
+      {`: ${rest}`}
+    </>
+  )
+}
+
 const recipientOf = (part: DashboardToolPart) =>
   part.toolName === "SendMessage" ? messageRecipient(part.input.summary) : null
 
@@ -204,11 +215,7 @@ function ToolLine({ icon, part }: { icon: ReactNode; part: DashboardToolPart }) 
           {part.title ?? part.toolName}
         </span>
         {message ? (
-          <>
-            {" to "}
-            <Recipient to={message.to} />
-            {`: ${message.rest}`}
-          </>
+          <Addressed by="to" rest={message.rest} to={message.to} />
         ) : part.input.summary ? (
           ` ${part.input.summary}`
         ) : null}
@@ -394,7 +401,7 @@ function Parts({
   })
 }
 
-// Another session's message, folded as a tool row: Received from its sender (plain text, since the row is one button) and its first line, opening to its whole text, its files, its sender linked and Copy. Only a test starts it open.
+// Another session's message, folded as a tool row read as a sent one is: Received, then from its sender (plain text, since the row is one button) and its first line, opening to its whole text, its files, its sender linked and Copy. Only a test starts it open.
 export function PeerStep({
   chips,
   defaultOpen,
@@ -415,10 +422,8 @@ export function PeerStep({
               <RiInboxArchiveLine />
             </TraceIcon>
             <TraceTitle>
-              <span className="text-foreground font-medium">
-                Received from {from ? <Recipient to={from} /> : "a session"}
-              </span>
-              {` ${firstLineOf(text)}`}
+              <span className="text-foreground font-medium">Received</span>
+              <Addressed by="from" rest={firstLineOf(text)} to={from} />
             </TraceTitle>
           </TraceLine>
         </TraceCollapsibleTrigger>
