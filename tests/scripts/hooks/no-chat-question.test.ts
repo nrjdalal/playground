@@ -554,6 +554,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
       "a table with one body row naming no #<n>",
       "| PR | ETA |\n|---|---|\n| #1089 | merged |\n| Restart the API | next |",
     ],
+    ["a table with no body rows", "| PR | ETA |\n|---|---|"],
   ])("refused: steps that are not all tracked work, %s", async (_name, last) => {
     const statuses = { "#i40": "approved", "#i41": "approved", "#i42": "approved" }
     expect(await stop(last, { statuses })).toStartWith(STEPS_REASON)

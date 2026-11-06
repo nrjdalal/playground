@@ -169,7 +169,7 @@ const ownLines = (reply: string) =>
 // An issue or PR a line names: a #<n> (never an Inbox #iN or an HTML entity's &#<n>) or a GitHub issue or PR link.
 const TRACKED = /(?<![\w&])#\d+\b|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+/
 
-// Pure: whether the reply keeps steps or a table the owner comes back to, 3 or more numbered lines or a markdown table, code and blockquotes left out, so a bulleted list passes; steps whose every numbered line, or a table whose every body row, names an issue or PR are progress on tracked work, which stays in chat.
+// Pure: whether the reply keeps steps or a table the owner comes back to, 3 or more numbered lines or a markdown table, code and blockquotes left out, so a bulleted list passes; steps or a table whose every step or body row names an issue or PR are progress on tracked work, which stays in chat.
 export function keepsForOwner(reply: string): boolean {
   const lines = ownLines(reply)
   const steps = lines.filter((line) => STEP.test(line))
