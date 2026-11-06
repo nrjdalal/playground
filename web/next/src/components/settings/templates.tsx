@@ -1,7 +1,7 @@
 "use client"
 
 import { SESSION_MODELS } from "@packages/config/console"
-import { RiArrowGoBackLine, RiDeleteBinLine, RiPencilLine } from "@remixicon/react"
+import { RiAddLine, RiArrowGoBackLine, RiDeleteBinLine, RiPencilLine } from "@remixicon/react"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
@@ -43,6 +43,7 @@ import { LIVE_CHECKS_QUERY_KEY } from "@/lib/onboard"
 import { EFFORT_LABELS, MODEL_LABELS } from "@/lib/session-setting"
 import {
   kindWord,
+  newDefaults,
   newTemplateId,
   readTemplateSetting,
   resetTemplate,
@@ -56,6 +57,7 @@ import {
   templateOf,
   templateRefusal,
   TEMPLATES_QUERY_KEY,
+  type TemplateState,
   templateState,
   templateWords,
   withoutTemplate,
@@ -84,7 +86,7 @@ const withStored = (options: Option[], stored: string): Option[] =>
 
 type Pending = { action: "remove" | "reset"; template: Template }
 
-// Settings > Templates: the templates the sidebar's plus starts a session from, each a default, an edited default or one you added, with Edit, Reset on an edited default and Remove on an added one, and Add template; every save goes through the settings write path, whose schema refuses a bad value at its field. The picker's Edit templates lands here, at #templates.
+// Settings > Templates: the templates the sidebar's plus starts a session from, each a default, an edited default or one you added, with Edit, Reset on an edited default and Remove on an added one, a default Playground added after the list was saved as a new default with Add, and Add template; every save goes through the settings write path, whose schema refuses a bad value at its field. The picker's Edit templates lands here, at #templates.
 export function Templates() {
   const queryClient = useQueryClient()
   const setting = useQuery({ queryKey: TEMPLATE_SETTING_QUERY_KEY, queryFn: readTemplateSetting })
@@ -138,8 +140,32 @@ export function Templates() {
     },
   })
 
+  // A click on a new default's Add is the confirmation, so it writes at once.
+  const add = useMutation({
+    mutationFn: async (template: Template) => {
+      const { defaults, rows } = setting.data!
+      await writeTemplates(
+        withTemplate(rows, template),
+        { defaults, read: rows },
+        { reason: `Added the default ${template.label} template in Settings`, scope: scope! },
+      )
+      return `${template.label} added`
+    },
+    onError: (error) => toast.add({ title: error.message, type: "error" }),
+    onSuccess: (title) => {
+      toast.add({ title, type: "success" })
+      void refresh()
+    },
+  })
+
   const rows = setting.data?.rows
   const defaults = setting.data?.defaults ?? []
+  const entries: { state: TemplateState; template: Template }[] = rows
+    ? [
+        ...rows.map((template) => ({ state: templateState(template, defaults), template })),
+        ...newDefaults(rows, defaults).map((template) => ({ state: "new" as const, template })),
+      ].sort((a, b) => a.template.label.localeCompare(b.template.label))
+    : []
   const writable = Boolean(scope && setting.data)
   const confirm = shown.current
   return (
@@ -166,10 +192,9 @@ export function Templates() {
             <EmptyDescription>{setting.error.message}</EmptyDescription>
           </EmptyHeader>
         </Empty>
-      ) : rows?.length ? (
+      ) : entries.length ? (
         <ItemGroup className="gap-2">
-          {rows.map((template) => {
-            const state = templateState(template, defaults)
+          {entries.map(({ state, template }) => {
             return (
               <Item key={template.id} variant="outline" size="sm">
                 <ItemContent>
@@ -192,17 +217,31 @@ export function Templates() {
                       </Button>
                     </Hint>
                   )}
-                  <Hint content="Edit">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={`Edit ${template.label}`}
-                      disabled={!writable}
-                      onClick={() => setEditing({ template })}
-                    >
-                      <RiPencilLine />
-                    </Button>
-                  </Hint>
+                  {state === "new" ? (
+                    <Hint content="Add to your templates">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Add ${template.label}`}
+                        disabled={!writable || add.isPending}
+                        onClick={() => add.mutate(template)}
+                      >
+                        <RiAddLine />
+                      </Button>
+                    </Hint>
+                  ) : (
+                    <Hint content="Edit">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Edit ${template.label}`}
+                        disabled={!writable}
+                        onClick={() => setEditing({ template })}
+                      >
+                        <RiPencilLine />
+                      </Button>
+                    </Hint>
+                  )}
                   {state === "added" && (
                     <Hint content="Remove">
                       <Button
@@ -416,8 +455,7 @@ function TemplateDialog({
             {isDefault
               ? "A default: your edits save over it, and Reset brings it back."
               : "The sidebar's plus starts a session from it."}{" "}
-            A save keeps the whole list as it is then, so a default added to Playground later shows
-            once the list is back to the defaults alone.
+            A default Playground adds later shows in the list as New default, and Add puts it in.
           </DialogDescription>
         </DialogHeader>
         <FieldGroup ref={fields} className="min-h-0 overflow-y-auto">
