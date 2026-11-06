@@ -100,11 +100,19 @@ const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
 // Homebrew's GNU coreutils under their g prefix (gcp, grm), each read as the remover or writer it names
 const GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/
-// A writer's options that take a value rather than name a target, BSD's and GNU's, by long name and short letter: cp's and ln's suffix, install's suffix, flags, group, mode, owner and strip program, mkdir's mode, touch's adjustment, date, reference file and stamp; cp's, install's and ln's -t names their target folder, read apart
-const WRITER_TAKES: Record<string, { long: string[]; short: string }> = {
-  cp: { long: ["no-preserve", "sparse", "suffix"], short: "S" },
-  install: { long: ["group", "mode", "owner", "strip-program", "suffix"], short: "BSfgmo" },
-  ln: { long: ["suffix"], short: "S" },
+// A writer's options that take a value rather than name a target, by short letter (GNU's -S suffix apart, a flag in macOS's install) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner and strip program, mkdir's mode, touch's adjustment, date, reference file and stamp; cp's, install's and ln's -t names their target folder, read apart
+const WRITER_TAKES: Record<
+  string,
+  { flags?: string[]; gnu?: string; long: string[]; short: string }
+> = {
+  cp: { gnu: "S", long: ["no-preserve", "sparse", "suffix"], short: "" },
+  install: {
+    flags: ["strip"],
+    gnu: "S",
+    long: ["group", "mode", "owner", "strip-program", "suffix"],
+    short: "Bfgmo",
+  },
+  ln: { gnu: "S", long: ["suffix"], short: "" },
   mkdir: { long: ["mode"], short: "m" },
   touch: { long: ["date", "reference", "time"], short: "Adrt" },
 }
@@ -222,15 +230,23 @@ function writeTargets(name: string, args: Word[], gnu: boolean): Word[] {
     const word = args[k]
     const { value } = word
     if (into && gnu && options && marked(value)) maybe.push(word)
-    if (!options || value === "-" || !value.startsWith("-")) operands.push(word)
-    else if (value === "--") options = false
+    if (!options || value === "-" || !value.startsWith("-")) {
+      operands.push(word)
+      // macOS's getopt stops at the first operand, so a later dashed word is an operand
+      if (!gnu) options = false
+    } else if (value === "--") options = false
     else if (value.startsWith("--")) {
       // a long option GNU reads by any prefix, its value attached after = or as the next word
       const [, long, attached] = /^--([^=]*)(=?)/.exec(value) ?? []
       if (into && "target-directory".startsWith(long))
         folder = attached ? after(word, long.length + 3) : args[++k]
       else if (name === "install" && "directory".startsWith(long)) folders = true
-      else if (!attached && takes?.long.some((take) => take.startsWith(long))) k++
+      else if (
+        !attached &&
+        !takes?.flags?.includes(long) &&
+        takes?.long.some((take) => take.startsWith(long))
+      )
+        k++
     } else
       // a short cluster read letter by letter up to the first that takes a value, whose value is the cluster's rest or else the next word
       for (let i = 1; i < value.length; i++) {
@@ -239,7 +255,7 @@ function writeTargets(name: string, args: Word[], gnu: boolean): Word[] {
         else if (into && letter === "t") {
           folder = i + 1 < value.length ? after(word, i + 1) : args[++k]
           break
-        } else if (takes?.short.includes(letter)) {
+        } else if (takes?.short.includes(letter) || (gnu && takes?.gnu?.includes(letter))) {
           if (i + 1 === value.length) k++
           break
         }
