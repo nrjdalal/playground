@@ -2004,12 +2004,105 @@ function singleQuotesOut(command) {
   }
   return double || docs.length ? command : out;
 }
+var META = /[\s;&|<>()]/;
+function quotedBodiesOut(command) {
+  if (command.includes("$'"))
+    return command;
+  let out = "";
+  let depth = 0;
+  let double = false;
+  const docs = [];
+  for (let i = 0;i < command.length; i++) {
+    const c = command[i];
+    if (c === "\\") {
+      out += command.slice(i, i + 2);
+      i++;
+    } else if (double) {
+      if (c === "`" || command.startsWith("$(", i))
+        return command;
+      if (c === '"')
+        double = false;
+      out += c;
+    } else if (c === '"') {
+      double = true;
+      out += c;
+    } else if (c === "'") {
+      const end = command.indexOf("'", i + 1);
+      if (end === -1)
+        return command;
+      out += command.slice(i, end + 1);
+      i = end;
+    } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
+      const end = command.indexOf(`
+`, i);
+      const stop = end === -1 ? command.length : end;
+      out += command.slice(i, stop);
+      i = stop - 1;
+    } else if (c === "`")
+      return command;
+    else if (c === "(") {
+      depth++;
+      out += c;
+    } else if (c === ")") {
+      if (--depth < 0)
+        return command;
+      out += c;
+    } else if (command.startsWith("<<<", i)) {
+      out += "<<<";
+      i += 2;
+    } else if (command.startsWith("<<", i)) {
+      if (depth > 0)
+        return command;
+      const doc = command.slice(i).match(/^<<(-?)[ \t]*((?:[\w.-]|'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])+)/);
+      if (!doc || doc[2].length < command.length - i - doc[0].length && !META.test(command[i + doc[0].length] ?? " "))
+        return command;
+      const word = doc[2];
+      docs.push({
+        delim: word.replace(/\\(.)/g, "$1").replace(/["']/g, ""),
+        quoted: /["'\\]/.test(word),
+        strip: doc[1] === "-"
+      });
+      out += doc[0];
+      i += doc[0].length - 1;
+    } else if (c === `
+` && docs.length) {
+      out += c;
+      let at = i + 1;
+      for (const { delim, quoted, strip } of docs) {
+        for (;; ) {
+          const end = command.indexOf(`
+`, at);
+          if (end === -1 && at >= command.length)
+            return command;
+          const stop = end === -1 ? command.length : end;
+          const line = command.slice(at, stop);
+          const bare = strip ? line.replace(/^\t+/, "") : line;
+          if (bare.startsWith(`${delim})`))
+            return command;
+          const last = bare === delim;
+          out += (quoted && !last ? "" : line) + (end === -1 ? "" : `
+`);
+          at = stop + 1;
+          if (last)
+            break;
+          if (end === -1)
+            return command;
+        }
+      }
+      docs.length = 0;
+      i = at - 1;
+    } else
+      out += c;
+  }
+  return double || docs.length || depth !== 0 ? command : out;
+}
 function namings(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
-  let blind = EVALUATES.some((evaluates) => evaluates.test(command)) || SUBSCRIPT.test(command) || SUBSCRIPT.test(unquoted(command)) || QUALIFIER.test(singleQuotesOut(command)) || INDIRECTS.test(command);
-  for (const [, flags, closed] of command.matchAll(/\$\{\(([^)]*)(\)?)/g))
+  const text = quotedBodiesOut(command);
+  let blind = EVALUATES.some((evaluates) => evaluates.test(text)) || SUBSCRIPT.test(text) || SUBSCRIPT.test(unquoted(text)) || QUALIFIER.test(singleQuotesOut(text)) || INDIRECTS.test(text);
+  for (const [, flags, closed] of text.matchAll(/\$\{\(([^)]*)(\)?)/g))
     if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags))
       blind = true;
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {

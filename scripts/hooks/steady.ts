@@ -86,19 +86,108 @@ function singleQuotesOut(command: string): string {
   return double || docs.length ? command : out
 }
 
+// the characters that end a heredoc's delimiter word
+const META = /[\s;&|<>()]/
+
+// The line with each body of a heredoc whose delimiter is quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`) put as an empty line, since the shell expands nothing in it, so its text reads as no evaluation, subscript or qualifier; the line as written whenever the scan cannot be sure where a body starts and ends: a `$'…'`, a substitution or backtick inside double quotes, a backtick, a heredoc inside parentheses, unbalanced parentheses, a body line that starts with its delimiter and a `)`, or a heredoc left open
+function quotedBodiesOut(command: string): string {
+  if (command.includes("$'")) return command
+  let out = ""
+  let depth = 0
+  let double = false
+  const docs: { delim: string; quoted: boolean; strip: boolean }[] = []
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]
+    if (c === "\\") {
+      out += command.slice(i, i + 2)
+      i++
+    } else if (double) {
+      // a substitution inside double quotes holds its own quoting, which this scan does not follow
+      if (c === "`" || command.startsWith("$(", i)) return command
+      if (c === '"') double = false
+      out += c
+    } else if (c === '"') {
+      double = true
+      out += c
+    } else if (c === "'") {
+      const end = command.indexOf("'", i + 1)
+      if (end === -1) return command
+      out += command.slice(i, end + 1)
+      i = end
+    } else if (c === "#" && (i === 0 || /[\s;&|(]/.test(command[i - 1]))) {
+      const end = command.indexOf("\n", i)
+      const stop = end === -1 ? command.length : end
+      out += command.slice(i, stop)
+      i = stop - 1
+    } else if (c === "`") return command
+    else if (c === "(") {
+      depth++
+      out += c
+    } else if (c === ")") {
+      if (--depth < 0) return command
+      out += c
+    } else if (command.startsWith("<<<", i)) {
+      out += "<<<"
+      i += 2
+    } else if (command.startsWith("<<", i)) {
+      // a heredoc inside a substitution or a group's parentheses may end at `delim)`, so only one at the top level is read
+      if (depth > 0) return command
+      const doc = command
+        .slice(i)
+        .match(/^<<(-?)[ \t]*((?:[\w.-]|'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])+)/)
+      if (
+        !doc ||
+        (doc[2].length < command.length - i - doc[0].length &&
+          !META.test(command[i + doc[0].length] ?? " "))
+      )
+        return command
+      const word = doc[2]
+      docs.push({
+        delim: word.replace(/\\(.)/g, "$1").replace(/["']/g, ""),
+        quoted: /["'\\]/.test(word),
+        strip: doc[1] === "-",
+      })
+      out += doc[0]
+      i += doc[0].length - 1
+    } else if (c === "\n" && docs.length) {
+      out += c
+      let at = i + 1
+      for (const { delim, quoted, strip } of docs) {
+        for (;;) {
+          const end = command.indexOf("\n", at)
+          if (end === -1 && at >= command.length) return command
+          const stop = end === -1 ? command.length : end
+          const line = command.slice(at, stop)
+          const bare = strip ? line.replace(/^\t+/, "") : line
+          if (bare.startsWith(`${delim})`)) return command
+          const last = bare === delim
+          out += (quoted && !last ? "" : line) + (end === -1 ? "" : "\n")
+          at = stop + 1
+          if (last) break
+          if (end === -1) return command
+        }
+      }
+      docs.length = 0
+      i = at - 1
+    } else out += c
+  }
+  return double || docs.length || depth !== 0 ? command : out
+}
+
 // How many times the line names each variable other than by reading it ($K, ${K}, ${K:-…} and the other READS_ONLY forms): every other spelling of the name counts, an assignment, an append, a bare word (read's, a for loop's, arithmetic's) and a name spelled across a quote or a backslash (`X\Y`, `X"Y"`, which the shell reads as XY) included, as does one attached after an option cluster's a or v (`printf -vK`), a lone flag (`-K`) aside; and the names an unquoted plain assignment sets (`K=`, where a quoted `"K=a"` is a command), read in one pass
 export function namings(command: string): Namings {
   const counts = new Map<string, number>()
   const plain = new Set<string>()
   const add = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
   // a name indirection sets or evaluates a variable whose name the hook cannot read: an assignment sets it, and a read evaluates any subscript the name's value holds (`N=a; N+=[V]; : ${!N}`), so zsh's P flag holds nothing, nor does a flag with a delimited argument (`${(j:…:)…}`), since its argument can hide a `)` and a P, nor do the e, % and # flags, which evaluate a value as shell text, a prompt or arithmetic
+  const text = quotedBodiesOut(command)
   let blind =
-    EVALUATES.some((evaluates) => evaluates.test(command)) ||
-    SUBSCRIPT.test(command) ||
-    SUBSCRIPT.test(unquoted(command)) ||
-    QUALIFIER.test(singleQuotesOut(command)) ||
-    INDIRECTS.test(command)
-  for (const [, flags, closed] of command.matchAll(/\$\{\(([^)]*)(\)?)/g))
+    EVALUATES.some((evaluates) => evaluates.test(text)) ||
+    SUBSCRIPT.test(text) ||
+    SUBSCRIPT.test(unquoted(text)) ||
+    QUALIFIER.test(singleQuotesOut(text)) ||
+    INDIRECTS.test(text)
+  for (const [, flags, closed] of text.matchAll(/\$\{\(([^)]*)(\)?)/g))
     if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags)) blind = true
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
     const [whole, expanded, key] = m
