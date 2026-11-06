@@ -44,6 +44,7 @@ Run each row as `bun <main checkout>/scripts/roster.ts <row>` (`$PLAYGROUND_REPO
   Progress text goes through `report <name> "<text>"` as `lastReport`: `set`, `report` and `assign` refuse any other `status`, naming `report`, and a row already holding text keeps it until its next `status=`.
 - `hold` names what a parked row waits on, which `playground sweep` reads to tell its lead once it closes: `#<n>` (an issue or PR), `#i<n>` (an Inbox item), or `d-<n>` (a decision, for a wait on no item, such as a lane turn or a load hold, which never closes, so its row is caught by its passed ETA alone).
   `set`, `report` and `assign` refuse any other value, and refuse a call that parks a row, or clears a parked row's `hold`, unless the row ends it holding one, naming the three forms; a call that moves a row off `parked` drops its `hold`.
+  A call that names a non-empty `hold` on a row it leaves off `parked` is refused, naming `status=parked`.
 - `pr` holds the PR's full URL, since the dashboard and code-review-loop's recovery scan read no other form.
   A bare number (`1561`, or the same with a leading `#`) is expanded to `https://github.com/<repo>/pull/<n>`, `<repo>` being the same call's `repo=`, else the entry's, else `factory.repo`; any other value is refused.
 - `prs` lists every PR a checker serves, its `pr` among them: each a PR URL, a bare number expanded as `pr`'s is, or an issue's URL for a PR not yet opened; `prs=<url>,<url>` sets it, and the last `prs-=` drops the key.

@@ -53,7 +53,7 @@ test("show --rev prints the revision's own files and state, a proposal beside an
   expect(showItem(scratch, { ...ref, key: "other" }, v2)).toBeNull()
 })
 
-// a guard row: no code before or after #1111 reads it red; it holds that another item's trailers never pick this item's side
+// guards that a revision written for another item reads this item from that tree as it stood, its accepted copy first, never from the other item's trailers
 test("show --rev of a revision that wrote another item prints this item as that revision's tree held it", () => {
   const mine = { ...ref, key: "mine" }
   const theirs = { ...ref, key: "theirs" }

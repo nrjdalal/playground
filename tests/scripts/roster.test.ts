@@ -641,14 +641,16 @@ describe("hold", () => {
     expect(agentOf(again.roster, "worker-greed")).not.toHaveProperty("hold")
   })
 
-  test("a call that leaves the park and names a hold drops it too, so a bare park after it is refused", async () => {
+  test("a hold on a row the call leaves not parked is refused naming status=parked, and stores nothing (#1102)", async () => {
+    const working = await run(configWith([WITH_PR]), ["set", "worker-greed", "hold=#5"])
+    expect(working.code).toBe(2)
+    expect(working.err).toContain("add status=parked to the same call")
+    expect(agentOf(working.roster, "worker-greed")).toEqual(WITH_PR)
     const config = configWith([{ ...WITH_PR, hold: "#12", status: "parked" }])
     const left = await run(config, ["set", "worker-greed", "status=working", "hold=#5"])
-    expect(left.code).toBe(0)
-    expect(agentOf(left.roster, "worker-greed")).not.toHaveProperty("hold")
-    const parked = await run(config, ["set", "worker-greed", "status=parked"])
-    expect(parked.code).toBe(2)
-    expect(parked.err).toContain("add hold=#<n>, hold=#i<n> or hold=d-<n>")
+    expect(left.code).toBe(2)
+    expect(left.err).toContain("add status=parked to the same call")
+    expect(agentOf(left.roster, "worker-greed")).toMatchObject({ hold: "#12", status: "parked" })
   })
 })
 

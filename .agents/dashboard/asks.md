@@ -352,7 +352,7 @@
   The route refuses a closed, dismissed or archived card with a 409, so an old card reads nothing, and the agent sign-in's account with a 403 (`refuseAgent`); it is a POST, so the relay, which carries GETs on `RELAY_GETS` alone, never carries it.
   Only a stack that reads the live machine runs `security find-generic-password -w`, the value on its stdout; a fixture or test stack shows `FIXTURE_REVEAL`, made up (`readFromKeychain` in `api/hono/src/lib/dashboard/secret-sink.ts`).
   Its choices are `Done, I have it` and `I do not need it`, so its poster hears which, and never the value; Edit is refused, since neither takes words.
-  A reply or an answer's note on it that holds the value, a Copy pasted into its own comment box, is refused before anything is sent (`holdsRevealed` reads the item again for `answerItem` and `replyItem`), and its Reply stays in that box, never the chat's composer.
+  A reply or an answer's note on it that holds the value, a Copy pasted into its own comment box, is refused before anything is sent (`holdsRevealed` reads the item again for `answerItem` and `replyItem`, and matches a value of 8 or more characters, `REVEAL_MATCH_MIN`, since a shorter one would turn up in most words), and its Reply stays in that box, never the chat's composer.
 
   ```bash
   bun run ask new <<'EOF'
