@@ -246,7 +246,7 @@ fi
 # every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
 # run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules and burst_held open it, and unit_fits passes (the
 # session's units and reserve, or a queue ticket's own when <who> names one, as ops-unstick asks for the head), else 1, so a script that takes its
-# slot itself reads them as every run here does (localci and the merge train still take theirs by their own mkdir for now); it reads neither the queue nor run-slot.priority
+# slot itself reads them as every run here does (localci and the merge train still take theirs by their own mkdir for now); it reads no queue order and no other waiter, only the ticket it is given, and run-slot.priority only through may_reserve's reserve
 CAN_TAKE=
 # run-slot.sh head: prints the queue's head, the ticket first_waiter names (<ns>-<pid>-<who>), or nothing, so ops-unstick watches the waiter the queue serves next rather than the oldest
 HEAD_ONLY=
@@ -1186,22 +1186,13 @@ first_waiter() {
   done <<< "$list"
   [ -z "$blocked" ] || echo "$blocked"
 }
-# "<slots> <lanes>": the units held on run-slot to run-slot-4, then on the commit and clone lanes (2 each, as lane_units counts them), by runs
-# that took their slot after ticket $1 was written, the runs that passed it; a lane takes its slot outside the queue, so it passes too (review round 1)
+# "<slots> <lanes>": the units of every holder the load units count (holders) that took its slot after ticket $1 was written, the runs that passed
+# it, in held_units' and lane_units' shares; one rule over holders, so a holder they count later passes by it too (review rounds 1 and 2: a lane and a peer)
 passer_units() {
-  local since s at u total=0 lanes=0
+  local since
   since=$(mtime "$QUEUE/$1") || { echo "0 0"; return; }
   since=$(date -u -r "$since" +%FT%TZ 2>/dev/null || date -u -d "@$since" +%FT%TZ)
-  for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone; do
-    [ -d "$OPS/$s" ] || continue
-    read -r _ _ at u _ 2>/dev/null < "$OPS/$s.holder" || continue
-    [[ "$at" > "$since" ]] || continue
-    case "$s" in
-      run-slot-commit | run-slot-clone) lanes=$((lanes + 2)) ;;
-      *) case "$u" in 1 | 2 | 3) ;; *) u=2 ;; esac; total=$((total + u)) ;;
-    esac
-  done
-  echo "$total $lanes"
+  holders | awk -v since="$since" '$2 > since { if ($1 == "lane") l += $3; else t += $3 } END { print t + 0, l + 0 }'
 }
 # a waiter whose script was replaced while it waits (a pull, a link-skills run) runs the new copy with its own arguments, since bash keeps
 # reading the old file (dispatcher, 18 Oct: waiters started before a run-slot change kept the old clone-allow and queue rules)
@@ -1514,47 +1505,42 @@ burst_held() {
 }
 
 # Load units: each held CPU slot's run counts the units on its holder line (2, a medium, for a line with none), and the slots the load rules open now, or a holder already has, give 2 units each. A quarter of them, at least 1, stays for small runs and the runs that gate a merge, so a big run never blocks a small one
-held_units() {
-  local s u total=0
-  for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
+held_units() { holders | awk '$1 == "slot" { t += $3 } END { print t + 0 }'; }
+# a held commit or clone lane's 2 units, which count only against a run that leaves the reserve, so a medium or big run waits beside a commit's build and a clone while a small run and one that gates a merge start beside them as before (3 Nov, 06:41Z: a next build ran on the commit lane beside a clone with no units held, and load1 reached 56)
+lane_units() { holders | awk '$1 == "lane" { t += $3 } END { print t + 0 }'; }
+# every holder the load units count, one "<slot|lane> <start> <units>" line each: run-slot to run-slot-4 (its holder line's units, 2 for none), each
+# live holder of another factory's run slots (slots.peers), read only, since that folder is theirs (ops, 31 Oct: the two pools took load1 to 77),
+# and a held commit or clone lane (2); a start that cannot be read is "-", which no ticket's time sorts before
+holders() {
+  local d s line at u
+  for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone; do
     reclaim "$OPS/$s"
     [ -d "$OPS/$s" ] || continue
-    u=$(cut -d' ' -f4 "$OPS/$s.holder" 2>/dev/null)
-    case "$u" in 1|2|3) ;; *) u=2 ;; esac
-    total=$((total + u))
+    at="" u=""
+    read -r _ _ at u _ 2>/dev/null < "$OPS/$s.holder"
+    case "$s" in run-slot-commit | run-slot-clone) echo "lane ${at:--} 2"; continue ;; esac
+    case "$u" in 1 | 2 | 3) ;; *) u=2 ;; esac
+    echo "slot ${at:--} $u"
   done
-  echo $((total + $(peer_units)))
-}
-# a held commit or clone lane's 2 units, which count only against a run that leaves the reserve, so a medium or big run waits beside a commit's build and a clone while a small run and one that gates a merge start beside them as before (3 Nov, 06:41Z: a next build ran on the commit lane beside a clone with no units held, and load1 reached 56)
-lane_units() {
-  local s total=0
-  for s in run-slot-commit run-slot-clone; do
-    reclaim "$OPS/$s"
-    [ -d "$OPS/$s" ] && total=$((total + 2))
-  done
-  echo "$total"
-}
-# the units held against a run that must leave $1 free: the CPU slots' and peers' (held_units's $2 when given), plus the lanes' less $3 when $1 is over 0
-held_for() {
-  local h=${2:-$(held_units)}
-  [ "$1" -gt 0 ] && h=$((h + $(lane_units) - ${3:-0}))
-  echo "$h"
-}
-# each live holder of another factory's run slots (slots.peers) counts its units here, read only, since that folder is theirs (ops, 31 Oct: the two pools took load1 to 77)
-peer_units() {
-  local d s line u total=0
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
       [ -d "$d/$s" ] || continue
       line=$(cat "$d/$s.holder" 2>/dev/null)
       stale "$d/$s" "$line" && continue
-      u=$(printf '%s' "$line" | cut -d' ' -f4)
-      case "$u" in 1|2|3) ;; *) u=2 ;; esac
-      total=$((total + u))
+      at="" u=""
+      read -r _ _ at u _ <<< "$line"
+      case "$u" in 1 | 2 | 3) ;; *) u=2 ;; esac
+      echo "slot ${at:--} $u"
     done
   done <<< "$PEERS"
-  echo "$total"
+}
+# the units held against a run that must leave $1 free: the CPU slots' and peers' (held_units's $2 when given), plus the lanes' less $3 when $1 is over 0, never under 0
+held_for() {
+  local h=${2:-$(held_units)}
+  [ "$1" -gt 0 ] && h=$((h + $(lane_units) - ${3:-0}))
+  [ "$h" -ge 0 ] || h=0
+  echo "$h"
 }
 # lanes_open, once per capacity() count: its slot checks share the first one's verdict, since a reading per slot counted slot 2 shut on a stale reading and slots 3 and 4 open on one that landed between them; outside a count LANES is unset, so each check reads afresh and a waiter still reads the gauges on every poll
 lanes_now() {
