@@ -427,7 +427,7 @@
   a key that names no Claude row in `usage.accounts` at that scope (a GLM row's label included) is refused as it is posted or edited, and Edit is refused.
   The card shows the email, the scope and the change, Own off to on or on to off.
   Approve takes `seen` as a guard setting's does, then reads the list, sets or drops `own` on that one row through `withOwn` (`@packages/config/accounts`), every other row and field as it was, and writes the list through `setSetting`, its reason `the owner approved it in the Inbox (#iN)`; a row already in the asked state writes nothing.
-  The answer keeps `owned: {exitCode, line}`, the line naming the state Approve found, and the card reads `Own account: <line>` green or `Own account change failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`.
+  The answer keeps `owned: {exitCode, line}`, the line naming the state Approve found, and the card reads `Own account: <line>` green or `Own account change failed (exit N): <line>` red, and Settings > Accounts reads its switch again (`ACCOUNTS_QUERY_KEY`); the poster closes it with `bun run ask ack #iN --no-link "<why>"`.
 
   ```bash
   bun run ask new <<'EOF'

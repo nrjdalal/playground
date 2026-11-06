@@ -113,6 +113,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useYardWrites } from "@/hooks/use-yard-writes"
+import { ACCOUNTS_QUERY_KEY } from "@/lib/accounts"
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
@@ -935,6 +936,9 @@ export function InboxCard({
       return false
     } finally {
       await queryClient.invalidateQueries({ queryKey: INBOX_QUERY_KEY })
+      // an own card's Approve writes usage.accounts, so Settings > Accounts reads its switch again
+      if (item.kind === "decision" && item.preview.type === "own")
+        await queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY })
       setPending(false)
     }
   }

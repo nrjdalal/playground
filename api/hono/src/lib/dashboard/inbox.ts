@@ -327,7 +327,7 @@ const guardSchema = z
 
 export type InboxGuard = z.infer<typeof guardSchema>
 
-// One Claude account's own flag, set or cleared from the Inbox in place of Settings > Accounts' switch: key is the row's email in usage.accounts at scope, own the flag Approve leaves it with. Only that row changes; a key that names no Claude row there is refused as it is posted (ownRefusal).
+// One Claude account's own flag, set or cleared from the Inbox in place of Settings > Accounts' switch: key is the row's email in usage.accounts at scope, own the flag Approve leaves it with. Only that row changes; a key that names no Claude row there is refused as it is posted (ownRefused).
 const ownSchema = z.strictObject({
   key: z.email().max(LIMITS.name),
   own: z.boolean(),
