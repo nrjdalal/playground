@@ -748,7 +748,7 @@ heavy_build() {
       while IFS= read -r line; do
         IFS=$'\x1f' read -ra words <<< "$line"
         [ ${#words[@]} -gt 0 ] || continue
-        # a verb git does not ship may be an alias in any folder's or -c's config, so a chain counts it as a commit, failing closed
+        # a verb outside git_known may be an alias in any folder's or -c's config, or a plumbing write, so a chain counts it as a commit, failing closed
         verb=$(git_verb "${words[@]}")
         { [ "$verb" = commit ] || { [ -n "$verb" ] && ! git_known "$verb"; }; } && commit=1
       done < <(chain_steps "$@")
