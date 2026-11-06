@@ -834,6 +834,9 @@ CHILD=""
 # seconds between a waiter's looks, and a held clone's (the tests shorten both)
 POLL=${RUN_SLOT_POLL:-15}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
+# the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake's line it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
+CLONE_GAP=180
+CLONE_MARGIN=4
 
 # Waiters take slots oldest first (builder, 12 Oct: a request queued at 13:28Z lost three slots in a row to later ones): each waiter leaves a
 # ticket, run-slot.waiters/<ns>-<pid>-<who>, and only the oldest ticket whose pid is alive may take a slot; a ticket goes once its slot is taken
@@ -1205,6 +1208,13 @@ lanes_open() {
   [ "$verdict" = open ]
 }
 
+# the UTC time $1 seconds ago as run-slot.runs.log writes it, by BSD date, else GNU date
+iso_ago() {
+  local now
+  now=$(date +%s)
+  date -u -r $((now - $1)) +%FT%TZ 2>/dev/null || date -u -d "@$((now - $1))" +%FT%TZ 2>/dev/null
+}
+
 # A burst of starts outruns the reading the slots open on, since load1 shows a run's load about a minute after it starts (issue 610, 2 Nov:
 # five medium suites and two clones started in 70 s at load1 16, and load1 reached 64): while run-slot.runs.log shows more runs started on
 # run-slot to run-slot-4 or the clone slot in the last minute than ended there, so the held runs grew, a medium or big run waits for the
@@ -1212,10 +1222,9 @@ lanes_open() {
 # and the dashboard's and the merge train's runs go on too, as they skip slot 2's lanes_open; prints how many runs the last
 # minute added when it holds
 burst_held() {
-  local now cutoff
+  local cutoff
   [ "$SIZE" != small ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] || return 1
-  now=$(date +%s)
-  cutoff=$(date -u -r $((now - 60)) +%FT%TZ 2>/dev/null || date -u -d "@$((now - 60))" +%FT%TZ 2>/dev/null) || return 1
+  cutoff=$(iso_ago 60) || return 1
   tail -n 3000 "$OPS/run-slot.runs.log" 2>/dev/null | CUTOFF=$cutoff awk '
     $2 == "start" && $5 ~ /^run-slot(-[234]|-clone)?$/ { run[$3 " " $4] = 1; if ($1 > ENVIRON["CUTOFF"]) n++ }
     $2 == "end" && run[$3 " " $4] { delete run[$3 " " $4]; if ($1 > ENVIRON["CUTOFF"]) n-- }
@@ -1431,6 +1440,22 @@ if [ -n "$KIND" ]; then
     ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
   while clone_held; do reread; sleep "$CLONE_POLL"; done
+  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of load_line's brake line, and while a big run holds a CPU slot, whatever clone-allow names; an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
+  clone_spaced() {
+    local brake l s last
+    brake=$(load_line)
+    l=$(load5)
+    [ -n "$l" ] && [ "$l" -ge $((brake - CLONE_MARGIN)) ] && { echo "for load5 under $((brake - CLONE_MARGIN)), $CLONE_MARGIN under the brake's $brake"; return; }
+    for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
+      reclaim "$OPS/$s"
+      [ -d "$OPS/$s" ] && [ "$(cut -d' ' -f5 "$OPS/$s.holder" 2>/dev/null)" = big ] && { echo "while a big run holds $s"; return; }
+    done
+    last=$(tail -n 3000 "$OPS/run-slot.runs.log" 2>/dev/null | CUTOFF=$(iso_ago "$CLONE_GAP") awk '
+      $2 == "start" && $5 == "run-slot-clone" { run[$3 " " $4] = 1 }
+      $2 == "end" && run[$3 " " $4] { delete run[$3 " " $4]; t = $1 }
+      END { if (ENVIRON["CUTOFF"] != "" && t > ENVIRON["CUTOFF"]) print t }')
+    [ -n "$last" ] && echo "${CLONE_GAP}s past the last clone's end at $last"
+  }
   # a commit's build, a merge or a clone is heavy, so it waits under focus; the quick slot's short runs go on
   while [ "$KIND" != quick ] && focus_holds; do reread; focus_wait; done
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
@@ -1439,10 +1464,16 @@ if [ -n "$KIND" ]; then
   # the quick slot takes no load wait: its load comes mostly from outside run-slot and one slot adds about a core at most, so a hold kept 44 quick runs waiting 201 min for 8 min of work (issue 547); ran_long sends a line that runs long to the queue
   GOT=
   while :; do
-    mkdir "$OPS/run-slot-$KIND" 2>/dev/null && { GOT=1; break; }
-    reclaim "$OPS/run-slot-$KIND"
+    spaced=
+    [ "$KIND" = clone ] && spaced=$(clone_spaced)
+    if [ -z "$spaced" ]; then
+      mkdir "$OPS/run-slot-$KIND" 2>/dev/null && { GOT=1; break; }
+      reclaim "$OPS/run-slot-$KIND"
+    fi
     reread
-    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for the $KIND slot ($(cat "$OPS/run-slot-$KIND.holder" 2>/dev/null))" >&2
+    if [ $((waited % 300)) -eq 0 ]; then
+      if [ -n "$spaced" ]; then echo "run-slot.sh: this clone waits $spaced" >&2; else echo "run-slot.sh: waiting for the $KIND slot ($(cat "$OPS/run-slot-$KIND.holder" 2>/dev/null))" >&2; fi
+    fi
     sleep 5
     waited=$((waited + 5))
   done
