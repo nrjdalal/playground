@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, readdirSync, utimesSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { SCRIPT, WAITING, machine } from "./run-slot-fake"
@@ -84,6 +84,16 @@ describe("a run that fits passes a pinned big head the open lanes cannot serve",
     m.ticket(1, "worker-big", BIG, PINNED)
     m.hold("run-slot-2", 1, "small", iso())
     m.hold("run-slot-commit", 0, "-", iso())
+    expect(await m.start("worker-s", { RUN_SLOT_SIZE: "small" }).waits()).toBe(true)
+  })
+
+  // review round 2: every holder the load units count is a passer once it took its slot after the head, another factory's (slots.peers) too
+  test("a peer's run started after the head counts among the passers, so no new run passes it", async () => {
+    const peer = join(machine().root, "peer-ops")
+    mkdirSync(join(peer, "run-slot"), { recursive: true })
+    writeFileSync(join(peer, "run-slot.holder"), `b8-worker ${process.pid} ${iso()} 1 small\n`)
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"], peers: [peer] })
+    m.ticket(1, "worker-big", BIG, PINNED)
     expect(await m.start("worker-s", { RUN_SLOT_SIZE: "small" }).waits()).toBe(true)
   })
 
