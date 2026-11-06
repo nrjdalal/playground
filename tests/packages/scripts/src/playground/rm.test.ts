@@ -364,13 +364,14 @@ test("a session's --discard on an OPEN PR's worktree, or one whose PR state read
   }
 })
 
-test("a worktree a live session holds is refused whatever its PR state, an approved decision's too", async () => {
+test("a worktree a live session holds is refused whatever its PR state: a finished PR's with no --decision, an open or unread one's with an approved decision", async () => {
   for (const state of ["MERGED", "CLOSED", "OPEN", null] as const) {
     const { deps, main } = machine()
     const { wt } = dirtyWorktree(main)
     const holder = { branch: "PG-1-thing", name: "abc123-worker", status: "working" }
     writeFileSync(join(deps.data, "roster.json"), JSON.stringify({ agents: [holder] }))
-    const { session } = statedSession(deps, state)
+    const { asked, session } = statedSession(deps, state)
+    const finished = state === "MERGED" || state === "CLOSED"
     const decision = async (): Promise<Decision> => ({
       kind: "decision",
       preview: { type: "delete", what: `the worktree ${wt}` },
@@ -380,7 +381,7 @@ test("a worktree a live session holds is refused whatever its PR state, an appro
     const error = console.error
     console.error = (line: string) => void said.push(line)
     try {
-      const words = ["--worktree", wt, "--discard", "--decision", "#i9"]
+      const words = ["--worktree", wt, "--discard", ...(finished ? [] : ["--decision", "#i9"])]
       expect(await runRm(words, { ...session, decision })).toBe(1)
     } finally {
       console.error = error
@@ -388,6 +389,7 @@ test("a worktree a live session holds is refused whatever its PR state, an appro
     expect(said).toEqual([
       `playground: ${wt} is held by abc123-worker, which the roster lists as working`,
     ])
+    expect(asked).toEqual(finished ? [[wt, undefined]] : [])
     expect(existsSync(wt)).toBe(true)
   }
 })
