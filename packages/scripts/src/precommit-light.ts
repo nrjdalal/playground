@@ -3,6 +3,10 @@ import { join } from "node:path"
 
 export const CHECKS = [
   {
+    argv: ["bun", "--no-env-file", "packages/scripts/src/conflict-markers.ts"],
+    name: "conflict-markers",
+  },
+  {
     argv: ["bun", "--no-env-file", "packages/scripts/src/docs-wrap/cli.ts", "--check"],
     name: "docs-wrap",
   },
