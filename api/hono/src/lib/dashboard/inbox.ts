@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { extname, join } from "node:path"
 import { isDeepStrictEqual } from "node:util"
 
@@ -377,6 +377,15 @@ const guardSchema = z
     if (preview.value === undefined) return
     if (JOB_KEYS.includes(preview.key) && !jobSwitch.safeParse(preview.value).success) {
       const message = `${preview.key} takes its enabled field alone, {"enabled": true} or {"enabled": false}: its command, schedule and runtime come from the registry`
+      ctx.addIssue({ code: "custom", message, path: ["value"] })
+      return
+    }
+    if (
+      preview.key === "firefighting.start.prefixes" &&
+      Array.isArray(preview.value) &&
+      preview.value.length === 0
+    ) {
+      const message = `${preview.key} takes one ticket key or more; a card with no value takes it back to its default, which starts none`
       ctx.addIssue({ code: "custom", message, path: ["value"] })
       return
     }
@@ -1767,6 +1776,31 @@ function ownWrite(data: string, preview: InboxOwn, ref: number, actor: string): 
     : { exitCode: 1, line: set.message }
 }
 
+// What a firefighting setting names that this Mac lacks, read as Approve runs, since a card is posted before it: the folder in names, the brief in the data folder, the account usage.accounts lists; undefined when it has it, or for any other key.
+function absentOnThisMac(data: string, key: string, value: unknown): string | undefined {
+  if (typeof value !== "string" || value === "") return undefined
+  if (key === "firefighting.start.in" && !isFolder(value))
+    return `${key}: no folder at ${value} on this Mac, so nothing changed`
+  if (key === "firefighting.start.brief" && !existsSync(join(data, value)))
+    return `${key}: no brief ${value} in the data folder, so nothing changed`
+  if (key === "firefighting.start.account") {
+    const accounts = readSetting(data, "usage.accounts")?.value
+    const known =
+      Array.isArray(accounts) &&
+      accounts.some((row) => (row as { email?: unknown }).email === value)
+    if (!known) return `${key}: ${value} is not an account usage.accounts lists, so nothing changed`
+  }
+  return undefined
+}
+
+const isFolder = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 // Writes a guard decision's setting into the data folder's extensions as the owner's act, the item named in its commit: its value at its scope, or no value there, which takes the key back to its default.
 function guardWrite(data: string, preview: InboxGuard, ref: number, actor: string): RunResult {
   const who = {
@@ -1782,6 +1816,8 @@ function guardWrite(data: string, preview: InboxGuard, ref: number, actor: strin
       ? { exitCode: 0, line: `took ${key} at ${scope} back to its default` }
       : { exitCode: 1, line: reset.message }
   }
+  const missing = absentOnThisMac(data, key, value)
+  if (missing) return { exitCode: 1, line: missing }
   // a job's enabled field goes over the row its scope holds, never the registry's fields, so the rest still follow the registry
   const held = readSetting(data, key)?.rows.find((row) => row.scope === scope)?.value
   const next = JOB_KEYS.includes(key)

@@ -2774,6 +2774,14 @@ var GUARD_KEYS = new Set([
   "ext.repos",
   "factory.archiveRepo",
   "factory.publicRepo",
+  "firefighting.start.account",
+  "firefighting.start.brief",
+  "firefighting.start.consultFrom",
+  "firefighting.start.daysOff",
+  "firefighting.start.freshMinutes",
+  "firefighting.start.hours",
+  "firefighting.start.in",
+  "firefighting.start.prefixes",
   "glm.readOnlyLoad5",
   "live.branch",
   "owner.names",
@@ -3110,7 +3118,7 @@ function cliWrite(words) {
       return `playground settings ${verb} with a word it cannot read`;
     if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX))
       return;
-    return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : key.startsWith(JOB_PREFIX) || key.startsWith("ticketCard.") ? `playground settings ${verb} of ${key}, a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it` : `playground settings ${verb} of ${key}, a key a guard reads`;
+    return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : key.startsWith(JOB_PREFIX) || key.startsWith("ticketCard.") || key.startsWith("firefighting.start.") ? `playground settings ${verb} of ${key}, a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it` : `playground settings ${verb} of ${key}, a key a guard reads`;
   }
   if (verb === "accept")
     return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set";

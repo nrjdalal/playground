@@ -314,13 +314,21 @@ function writeTargets(
   return [...new Set([...targets, ...maybe, ...logs, ...moved])]
 }
 
-// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, ext.repos, which names the repository each scope syncs from, and the ticket card's, which turn on what the factory shows; every jobs.<name> is refused beside them (JOB_PREFIX).
+// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, ext.repos, which names the repository each scope syncs from, and the ticket card's and ops-firefighting-start's, which turn on what the factory shows and starts; every jobs.<name> is refused beside them (JOB_PREFIX).
 export const GUARD_KEYS = new Set([
   "ext.links",
   "ext.order",
   "ext.repos",
   "factory.archiveRepo",
   "factory.publicRepo",
+  "firefighting.start.account",
+  "firefighting.start.brief",
+  "firefighting.start.consultFrom",
+  "firefighting.start.daysOff",
+  "firefighting.start.freshMinutes",
+  "firefighting.start.hours",
+  "firefighting.start.in",
+  "firefighting.start.prefixes",
   "glm.readOnlyLoad5",
   "live.branch",
   "owner.names",
@@ -739,7 +747,9 @@ function cliWrite(words: Word[]): string | undefined {
     if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX)) return
     return PRIVACY_KEYS.has(key) && !scoped
       ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}`
-      : key.startsWith(JOB_PREFIX) || key.startsWith("ticketCard.")
+      : key.startsWith(JOB_PREFIX) ||
+          key.startsWith("ticketCard.") ||
+          key.startsWith("firefighting.start.")
         ? `playground settings ${verb} of ${key}, a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it`
         : `playground settings ${verb} of ${key}, a key a guard reads`
   }
