@@ -586,8 +586,9 @@ export const zshSplits = (line: string): boolean => {
     const at = command.search(ARRAY_MAKERS)
     if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at))) return true
   }
-  if (sources(line)) return true
   const joined = line.replace(/[\\'"]/g, "")
+  // a quote the walk cannot pair (an apostrophe in a comment or a heredoc) hides the rest of the line, so the stripped text is walked too
+  if (sources(line) || sources(joined)) return true
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g
   const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g))
   return [...joined.matchAll(expansion)].some(([, name]) => named.has(name))
