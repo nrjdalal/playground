@@ -2522,10 +2522,13 @@ function programLines({ args, first }, rooted) {
   return (awkPrograms(args) ?? []).filter(({ value }) => rooted || awkRuns(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
 var SEDS = new Set(["gsed", "sed"]);
+var literal = (w) => !w.glob && !marked(w.value);
 var SED_FLAG = /^-[nErsuz]+$|^--(?:null-data|posix|quiet|regexp-extended|separate|silent|unbuffered)$/;
-var SED_RE = String.raw`/(?:[^/\\\n]|\\.)*/`;
-var SED_ADDRESS = String.raw`(?:\d+|\$|${SED_RE})`;
-var SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[pdqQnNlP=]|s${SED_RE.slice(0, -1)}${SED_RE}[gpiImM0-9]*)[ \t]*`;
+var SED_BRACKET = String.raw`\[\^?\]?[^\]/[\n]*\]`;
+var SED_BODY = String.raw`(?:[^/\\\n[]|\\.|${SED_BRACKET})*/`;
+var SED_TEXT = String.raw`(?:[^/\\\n]|\\.)*/`;
+var SED_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`;
+var SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[pdqQnNlP=]|s/${SED_BODY}${SED_TEXT}[gpiImM0-9]*)[ \t]*`;
 var SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`);
 function sedReads(args) {
   const scripts = [];
@@ -2548,13 +2551,15 @@ function sedReads(args) {
       operands.push(args[k]);
   }
   const read = scripts.length ? scripts : operands.slice(0, 1);
-  return read.length > 0 && read.every((w) => !w.glob && !marked(w.value) && SED_SCRIPT.test(w.value));
+  return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value));
 }
 var PERL_FLAG = /^-[nplaw]*[eE]?$/;
-var PERL_RE = String.raw`/(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
-var PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|\$[1-9&])*"|\$[1-9&_])`;
+var PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`;
+var PERL_RE = `/${PERL_BODY}`;
+var PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`;
+var PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-9&_])`;
 var PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:if|unless|while|for)[ \t]+${PERL_RE}[gimsx]*)?`;
-var PERL_SUB = String.raw`s${PERL_RE.slice(0, -1)}/(?:[^/\\\n@$]|\\.|\$[1-9&])*/[gimsx]*`;
+var PERL_SUB = String.raw`s/${PERL_BODY}(?:[^/\\\n@$]|\\.|${PERL_MATCH})*/[gimsx]*`;
 var PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`;
 var PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`);
 var PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/;
@@ -2580,7 +2585,7 @@ function perlReads({ args, local }, env) {
     }
   }
   const files = args.slice(k);
-  return scripts.length > 0 && scripts.every((w) => !w.glob && !marked(w.value) && PERL_SCRIPT.test(w.value)) && files.every((w) => !w.glob && !marked(w.value) && PERL_FILE.test(w.value));
+  return scripts.length > 0 && scripts.every((w) => literal(w) && PERL_SCRIPT.test(w.value)) && files.every((w) => literal(w) && PERL_FILE.test(w.value));
 }
 function ownProgram(cmd, { first, name }) {
   return ownFirst(cmd, first) && !marked(name) && /^(?:\/(?:bin|opt\/homebrew\/bin|usr\/bin|usr\/local\/bin)\/)?[^/]+$/.test(first.value);
