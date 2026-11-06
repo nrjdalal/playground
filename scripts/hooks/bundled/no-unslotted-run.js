@@ -1705,9 +1705,12 @@ function subcommand(args, takes) {
 }
 var help = (args) => args.some((a) => a.value === "-h" || a.value === "--help");
 function composeBuild(args) {
-  const { rest, sub } = subcommand(args, COMPOSE_TAKES);
+  const found = subcommand(args, COMPOSE_TAKES);
+  const { rest, sub } = found.sub?.value === "alpha" ? subcommand(found.rest, new Set) : found;
   if (!sub || help(rest))
     return;
+  if (sub.value === "watch")
+    return { kind: "compose", rest, sub: "watch" };
   if (!["build", "create", "run", "up"].includes(sub.value))
     return;
   if (rest.some((a) => a.value === "--no-build"))
@@ -1725,6 +1728,8 @@ function dockerBuild(args, compose) {
   const image = (words) => help(words) ? undefined : { kind: "image", rest: words, sub: "build" };
   if (sub.value === "build")
     return image(rest);
+  if (sub.value === "bake")
+    return help(rest) ? undefined : { kind: "bake", rest, sub: "bake" };
   if (["builder", "buildx", "image"].includes(sub.value)) {
     const inner = subcommand(rest, new Set(["--builder"]));
     if (inner.sub?.value === "build" || inner.sub?.value === "b")
@@ -1734,6 +1739,14 @@ function dockerBuild(args, compose) {
   }
 }
 var buildName = (build) => build.kind === "image" ? "a docker build" : build.kind === "bake" ? "docker buildx bake" : `docker compose ${build.sub}`;
+function atOnce(build) {
+  if (build.kind === "bake")
+    return "it builds its targets at once in the one Docker VM: build each image with docker build, one run-slot run at a time";
+  if (build.kind === "image" || build.sub === "build")
+    return;
+  const what = build.sub === "watch" ? "it builds and rebuilds its images" : "without --no-build it builds each missing image";
+  return `${what} at once in the one Docker VM: build first with run-slot.sh <your name> -- docker compose build, which builds one service at a time, then start it with docker compose up --no-build`;
+}
 function portlessCompose(name, args) {
   let words = args;
   if (name === "bun") {
@@ -2254,7 +2267,7 @@ if (false) {}
 
 // scripts/hooks/no-unslotted-run.ts
 var refuse = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
-var refuseDocker = (what, cd, command) => `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
+var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var anywhere = (what, command) => `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`;
 var BUN_SCRIPTS2 = new Set(["build", "check-types", "test"]);
 var RUNNERS2 = new Set(["bunx", "npx"]);
@@ -2319,7 +2332,7 @@ function heavy(name, args, env) {
   const compose = portlessCompose(name, args);
   if (DOCKERS.has(name) || compose) {
     const build = compose ? dockerBuild(compose, true) : dockerBuild(args, name === "docker-compose");
-    return build && { anywhere: true, dir: env.cwd, what: buildName(build) };
+    return build && { anywhere: true, dir: env.cwd, fix: atOnce(build), what: buildName(build) };
   }
   if (name === "cp") {
     const paths = args.filter((a) => !a.value.startsWith("-"));
@@ -2404,7 +2417,7 @@ function inspect(raw, environment, main) {
       const found = heavy(name, args, { ...env, cwd: undefined });
       const line = words();
       if (found?.anywhere && line !== undefined)
-        return refuseDocker(found.what, "", line);
+        return refuseDocker(found.what, "", line, found.fix);
       if (found && line !== undefined && (found.dir === undefined || inWorktree(found.dir)))
         return anywhere(found.what, line);
     }
@@ -2417,7 +2430,7 @@ function inspect(raw, environment, main) {
         return;
       const moved = here.cwd !== undefined && (directory === undefined || resolve4(here.cwd) !== resolve4(directory));
       const cd = moved ? `cd ${quotedDir(here.cwd)} && ` : "";
-      return (found.anywhere ? refuseDocker : refuse)(found.what, cd, line);
+      return found.anywhere ? refuseDocker(found.what, cd, line, found.fix) : refuse(found.what, cd, line);
     }
   };
   const env = {

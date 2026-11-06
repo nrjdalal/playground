@@ -22,7 +22,7 @@ const dockerMachine = () => {
 echo "BUILDX_BUILDER=\${BUILDX_BUILDER:-} $*" >> ${calls}
 case " $* " in
   *" info "*) [ -f ${memory} ] && cat ${memory} || echo 8391860224; exit 0 ;;
-  *" buildx inspect "*) [ -f ${made} ] || exit 1; echo "Driver Options: default-load=\"true\" memory=\"$(cat ${made})\" memory-swap=\"$(cat ${made})\""; exit 0 ;;
+  *" buildx inspect "*) [ -f ${made} ] || exit 1; echo "Driver Options: default-load=\\"true\\" memory=\\"$(cat ${made})\\" memory-swap=\\"$(cat ${made})\\""; exit 0 ;;
   *" buildx create "*) for a; do case "$a" in memory=*) echo "\${a#memory=}" > ${made} ;; esac; done; exit 0 ;;
   *" buildx rm "*) rm -f ${made}; exit 0 ;;
   *" buildx stop "*) exit 0 ;;

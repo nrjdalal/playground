@@ -1750,9 +1750,12 @@ function subcommand(args, takes) {
 }
 var help = (args) => args.some((a) => a.value === "-h" || a.value === "--help");
 function composeBuild(args) {
-  const { rest, sub } = subcommand(args, COMPOSE_TAKES);
+  const found = subcommand(args, COMPOSE_TAKES);
+  const { rest, sub } = found.sub?.value === "alpha" ? subcommand(found.rest, new Set) : found;
   if (!sub || help(rest))
     return;
+  if (sub.value === "watch")
+    return { kind: "compose", rest, sub: "watch" };
   if (!["build", "create", "run", "up"].includes(sub.value))
     return;
   if (rest.some((a) => a.value === "--no-build"))
@@ -1770,6 +1773,8 @@ function dockerBuild(args, compose) {
   const image = (words) => help(words) ? undefined : { kind: "image", rest: words, sub: "build" };
   if (sub.value === "build")
     return image(rest);
+  if (sub.value === "bake")
+    return help(rest) ? undefined : { kind: "bake", rest, sub: "bake" };
   if (["builder", "buildx", "image"].includes(sub.value)) {
     const inner = subcommand(rest, new Set(["--builder"]));
     if (inner.sub?.value === "build" || inner.sub?.value === "b")
