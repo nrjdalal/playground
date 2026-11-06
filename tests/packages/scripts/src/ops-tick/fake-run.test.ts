@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 import { run } from "../../../../../packages/scripts/src/ops-job/job"
 import { readPrs } from "../../../../../packages/scripts/src/ops-tick/nightly-clean"
-import { fakeRun, ghErrors } from "./fake-run"
+import { type Answers, fakeRun, ghErrors } from "./fake-run"
 
 // A package whose scripts are named as their commands, so bun run's "$ <command>" line reads the same from the fake.
 const pkg = mkdtempSync(join(tmpdir(), "fake-run-"))
@@ -23,7 +23,7 @@ test("a command writing to both streams answers the same out from the fake as fr
 })
 
 test("bun run's own lines read the same from the fake as from the real run, none with --silent", async () => {
-  const cases: [string[], Parameters<typeof fakeRun>[0]][] = [
+  const cases: [string[], Answers][] = [
     [["bun", "run", "--cwd", pkg, "echo", "hi"], { echo: "hi\n" }],
     [["bun", "run", "--cwd", pkg, "false"], { false: { code: 1 } }],
     [["bun", "run", "--silent", "--cwd", pkg, "false"], { false: { code: 1 } }],
