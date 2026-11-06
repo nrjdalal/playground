@@ -485,10 +485,10 @@ chain_steps() {
       script=$a; break
     fi
     [ -n "$file" ] && break
-    # an unplaced first word runs a program this cannot read, so a shell word with a -c after it is a chain it cannot read
+    # an unplaced first word runs a program this cannot read, so a shell word with a -c after it, any single-dash cluster holding c, is a chain it cannot read
     if [ -n "$unplaced" ]; then
       case " $CHAIN_SHELLS " in *" ${a##*/} "*) shell=1 ;; esac
-      [ -n "$shell" ] && case "$a" in -c | -[!-]*c) return 1 ;; esac
+      [ -n "$shell" ] && case "$a" in -c* | -[!-]*c*) return 1 ;; esac
       continue
     fi
     if [ -z "$first" ]; then
