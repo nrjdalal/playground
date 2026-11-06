@@ -71,7 +71,7 @@ export type FeedQuestion = {
   prompt: string
 }
 
-// A pending item a session left in cmux's Feed, as the dashboard shows and answers it: a picker's questions, a tool it asks to run, or a plan it asks to start. requestId is what a reply names. A permission's detail is what the tool would act on (the command or path itself), input every field it was given, and description the session's own account of it when that is a line of text; clipped says detail or input was cut short. A plan's clipped says its text was. Text a format character could disguise (a right-to-left override, a zero-width space) shows each one as its code point. whole says all of it can be shown, so it may be approved from a card; the card and the API both read it.
+// A pending prompt a session waits on, as the dashboard shows and answers it: a picker's questions, a tool it asks to run, or a plan it asks to start. requestId is what a reply names. A permission's detail is what the tool would act on (the command or path itself), input every field it was given, and description the session's own account of it when that is a line of text; clipped says detail or input was cut short. A plan's clipped says its text was. Text a format character could disguise (a right-to-left override, a zero-width space) shows each one as its code point. whole says all of it can be shown, so it may be approved from a card; the card and the API both read it.
 export type FeedItem =
   | {
       at: string
@@ -116,7 +116,7 @@ export const DISPATCHERS: readonly string[] = [...new Set([DISPATCHER, DISPATCHE
 export const dispatcherSlots = (names: readonly string[], shown: ReadonlySet<string>): number =>
   names.filter((name, i) => i === 0 || shown.has(name)).length
 
-// The header's dispatcher slot count from Claude's registry and the roster, two file reads, so /api/health never asks cmux; a crashed session's leftover file can count one row the board then drops. A stack that reads this machine without the opt-in to every session (own.ts) counts the roster's alone, where every session Playground starts lands, since the registry names every session on the machine; one that opts in reads the registry.
+// The header's dispatcher slot count from Claude's registry and the roster, two file reads, so /api/health asks no terminal; a crashed session's leftover file can count one row the board then drops. A stack that reads this machine without the opt-in to every session (own.ts) counts the roster's alone, where every session Playground starts lands, since the registry names every session on the machine; one that opts in reads the registry.
 export const readDispatcherSlots = async (): Promise<number> => {
   const [files, { roster }] = await Promise.all([
     everySession() ? readRegistry() : null,
@@ -205,7 +205,7 @@ export type Worker = {
   eta: string | null
   // Its newest reply is an API error, so its turn ended failing rather than asking anything.
   failed: boolean
-  // What it waits on in cmux's Feed, oldest first; for a herdr session, the prompt its transcript and hooks show (herdrFeed).
+  // What it waits on, oldest first: for a herdr session, the prompt its transcript and hooks show (herdrFeed); for the session the dashboard hosts, the one its callback holds (sdk.ts).
   feed: FeedItem[]
   // Set on a session herdr runs, whose picker cards are answered by keys into its pane (answerHerdr() in feed.ts) and whose permission and plan cards are answered in its terminal alone.
   herdr?: true
@@ -226,7 +226,7 @@ export type Worker = {
   role: Role
   sessionId: string
   startedAt: string | null
-  // The surface the session runs on, as cmux's tree names it (surface:<n>) or herdr's pane (herdr:<server>:<pane id>), so a roster entry can pair with it whatever else shares the workspace; null when neither names one.
+  // The herdr pane the session runs in (herdr:<server>:<pane id>), so a roster entry can pair with it whatever else shares the workspace; null when none names one.
   surface?: string | null
   task: string | null
   // Its subagents and background processes, running first, then those that ended in the last half hour.
@@ -257,32 +257,6 @@ export const nameOf = (args: unknown): string => {
   return ""
 }
 
-// A Feed item names no session; its workstream_id ends in the asking session's id, base64-encoded.
-export const sessionOfWorkstream = (workstreamId: string): string => {
-  const encoded = workstreamId.split(":").at(-1) ?? ""
-  try {
-    return Buffer.from(encoded, "base64").toString("utf8")
-  } catch {
-    return ""
-  }
-}
-
-export const questionsBySession = (feed: unknown): Map<string, Question[]> => {
-  const out = new Map<string, Question[]>()
-  for (const item of list(isRecord(feed) ? feed.items : undefined)) {
-    if (item.kind !== "question") continue
-    const session = sessionOfWorkstream(str(item.workstream_id))
-    if (!session) continue
-    const questions = list(item.questions).map((q) => ({
-      multiSelect: q.multi_select === true,
-      options: list(q.options).map((o) => str(o.label)),
-      prompt: str(q.prompt),
-    }))
-    out.set(session, [...(out.get(session) ?? []), ...questions])
-  }
-  return out
-}
-
 const parseJson = (text: string): unknown => {
   try {
     return JSON.parse(text)
@@ -301,7 +275,7 @@ const PLAN_LIMIT = 8000
 // A tool's name as Claude Code gives it (Bash, Write, mcp__server__tool); anything else is not trusted to name one.
 const TOOL_NAME = /^[\w.-]+$/
 
-// A Feed field cmux sends as JSON text, or already parsed.
+// A card's field given as JSON text, or already parsed.
 const jsonField = (value: unknown): unknown =>
   typeof value === "string" ? parseJson(value) : value
 
@@ -395,7 +369,7 @@ const waitOf = (value: unknown): HerdrWait | null =>
       }
     : null
 
-// Pure: a herdr session's prompt as a card, herdr having no Feed: the open call in its transcript that raised it, read through feedItemOf() as cmux's Feed item would be. Its hooks' stuck record (wait) names the kind and a permission's tool; with none, the newest open call is the prompt. None for a subagent's prompt (its calls are in its own transcript), an elicitation or a login, or when no open call fits.
+// Pure: a herdr session's prompt as a card, herdr having no Feed: the open call in its transcript that raised it, read through feedItemOf(), which reads every card. Its hooks' stuck record (wait) names the kind and a permission's tool; with none, the newest open call is the prompt. None for a subagent's prompt (its calls are in its own transcript), an elicitation or a login, or when no open call fits.
 export function herdrFeed(calls: OpenCall[], wait: HerdrWait | null): FeedItem[] {
   if (wait?.agentId) return []
   const reason = wait?.reason ?? null
@@ -431,28 +405,15 @@ export function herdrFeed(calls: OpenCall[], wait: HerdrWait | null): FeedItem[]
   return item ? [item] : []
 }
 
-// Each session's pending Feed items, oldest first.
-export const feedBySession = (feed: unknown): Map<string, FeedItem[]> => {
-  const out = new Map<string, FeedItem[]>()
-  for (const item of list(isRecord(feed) ? feed.items : undefined)) {
-    const session = sessionOfWorkstream(str(item.workstream_id))
-    const parsed = session ? feedItemOf(item) : null
-    if (!parsed) continue
-    out.set(session, [...(out.get(session) ?? []), parsed])
-  }
-  for (const items of out.values()) items.sort((a, b) => a.at.localeCompare(b.at))
-  return out
-}
-
 const LIGHT_ORDER: Record<Light, number> = { "needs-you": 0, working: 1, idle: 2 }
 
-// A pending Feed item of any kind (a picker, a permission, a plan) waits on the owner as surely as a question does.
+// A pending card of any kind (a picker, a permission, a plan) waits on the owner as surely as a question does.
 export const lightOf = (lifecycle: string, questions: Question[], feed: FeedItem[] = []): Light => {
   if (questions.length > 0 || feed.length > 0 || lifecycle === "needsInput") return "needs-you"
   return lifecycle === "running" ? "working" : "idle"
 }
 
-// Pure: whether an answer landed after a prompt cmux stamped at `at` went up. The Feed stamps whole seconds, so a prompt it stamped 12:00:05Z went up before 12:00:06.
+// Pure: whether an answer landed after a prompt stamped at `at` went up. A stamp in whole seconds covers all of its second, so a prompt stamped 12:00:05Z went up before 12:00:06.
 const answeredAfter = (answeredAt: string | null, at: string): boolean => {
   const answered = Date.parse(answeredAt ?? "")
   const raised = Date.parse(at)
@@ -460,31 +421,9 @@ const answeredAfter = (answeredAt: string | null, at: string): boolean => {
   return answered > (/\.\d/.test(at) ? raised : raised + 999)
 }
 
-// Pure: whether a session's transcript shows every picker it raised by `at` answered: none is still open, and the newest answer landed after that moment. cmux keeps an answered picker in its Feed, and its lifecycle at needsInput, until the session's next hook, which a turn that goes on working holds back for minutes.
+// Pure: whether a session's transcript shows every picker it raised by `at` answered: none is still open, and the newest answer landed after that moment. A session's record keeps its lifecycle at needsInput after its picker is answered, until the session's next hook, which a turn that goes on working holds back for minutes.
 export const answeredSince = (pickers: Pickers, at: string): boolean =>
   pickers.open.length === 0 && answeredAfter(pickers.answeredAt, at)
-
-// Pure: cmux's Feed without the pickers each session's transcript shows answered. A session's newest pickers, as many as its transcript holds open, stay whatever their times; an older one goes once an answer landed after it went up. Only a picker goes: a permission or a plan may come from a subagent, whose calls its parent's transcript does not hold.
-export function unansweredFeed(feed: unknown, pickersOf: (sessionId: string) => Pickers): unknown {
-  if (!isRecord(feed) || !Array.isArray(feed.items)) return feed
-  const asked = new Map<string, Json[]>()
-  for (const item of feed.items) {
-    if (!isRecord(item) || item.kind !== "question") continue
-    const session = sessionOfWorkstream(str(item.workstream_id))
-    asked.set(session, [...(asked.get(session) ?? []), item])
-  }
-  const gone = new Set<Json>()
-  for (const [session, items] of asked) {
-    const pickers = pickersOf(session)
-    const older = items
-      .toSorted((a, b) => str(b.created_at).localeCompare(str(a.created_at)))
-      .slice(pickers.open.length)
-    for (const item of older) {
-      if (answeredAfter(pickers.answeredAt, str(item.created_at))) gone.add(item)
-    }
-  }
-  return { ...feed, items: feed.items.filter((item) => !(isRecord(item) && gone.has(item))) }
-}
 
 // partial: some herdr server's read was partial (ServerRead.partial).
 export type Live = {
@@ -567,51 +506,25 @@ export const liveRecords = (sessions: unknown, proof: LiveProof | null): LiveRec
     ),
   }) as LiveRecords
 
-// Pure: cmux's tree in, each terminal surface by the UUID a session record names, with its ref (surface:<n>) and its own title, so a session in a shared workspace can be named and paired from its own pane rather than the workspace's. Surfaces with no UUID or a malformed ref are left out.
-export const surfacesOf = (tree: unknown): Map<string, { ref: string; title: string | null }> => {
-  const out = new Map<string, { ref: string; title: string | null }>()
-  const walk = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const value of node) walk(value)
-      return
-    }
-    if (!isRecord(node)) return
-    for (const surface of list(node.surfaces)) {
-      const id = str(surface.id)
-      const ref = str(surface.ref)
-      if (id && /^surface:\d+$/.test(ref)) out.set(id, { ref, title: str(surface.title) || null })
-    }
-    for (const value of Object.values(node)) walk(value)
-  }
-  walk(tree)
-  return out
-}
-
-// Pure: the session records and workspace list in, with cmux's Feed and tree, which listLive passes as null, one row per live Claude session out, the ones that need the owner first.
+// Pure: the session records and workspace list in, one row per live Claude session out, the ones that need the owner first.
 export function composeWorkers(
   sessions: LiveRecords,
   workspaces: unknown,
-  feed: unknown,
   tasks: Map<string, string | null>,
   names: Map<string, string | null> = new Map(),
   roster: RosterFacts = NO_ROSTER,
   facts: Map<string, SessionFacts | null> = new Map(),
   now = Date.now(),
   activity: Map<string, string | null> = new Map(),
-  tree: unknown = null,
 ): Live {
-  const surfacesById = surfacesOf(tree)
   const spaces = new Map(
     list(isRecord(workspaces) ? workspaces.workspaces : undefined).map((w) => [
       str(w.id),
       { ref: str(w.ref), title: str(w.custom_title) || str(w.title) || null },
     ]),
   )
-  const open = unansweredFeed(feed, (id) => (facts.get(id) ?? NO_FACTS).pickers)
-  const asked = questionsBySession(open)
-  const pending = feedBySession(open)
   const records = sessions.sessions
-  // A session cmux did not launch, on a terminal surface where one it did launch is live, is a run nested inside that worker (a headless `claude -p` a skill trial starts), not a worker of its own.
+  // A session no launcher started, on a terminal surface where a launched one is live, is a run nested inside that worker (a headless `claude -p` a skill trial starts), not a worker of its own.
   const launchedSurfaces = new Set(
     records
       .filter((r) => r.launch_backed === true && str(r.surface_id))
@@ -632,7 +545,7 @@ export function composeWorkers(
     const sessionId = str(record.session_id)
     const workspace = spaces.get(str(record.workspace_id)) ?? null
     const read = facts.get(sessionId) ?? NO_FACTS
-    // An answer resumes the session before cmux hears of it; Esc and an interrupt leave it at its prompt, with no Stop hook to say so.
+    // An answer resumes the session before its record hears of it; Esc and an interrupt leave it at its prompt, with no Stop hook to say so.
     const reported = str(record.agent_lifecycle) || "unknown"
     const lifecycle =
       reported === "needsInput" && answeredSince(read.pickers, str(record.updated_at))
@@ -640,25 +553,19 @@ export function composeWorkers(
           ? "idle"
           : "running"
         : reported
-    const questions = asked.get(sessionId) ?? []
     const path = str(record.transcript_path)
     if (path) transcripts.set(sessionId, path)
     const surface = str(record.surface_id)
     if (surface) surfaces.set(sessionId, surface)
     const herdr = isHerdrSurface(surface)
-    const feed = herdr
-      ? lifecycle === "needsInput"
-        ? herdrFeed(read.calls, waitOf(record.herdr_wait))
-        : []
-      : (pending.get(sessionId) ?? [])
-    const own = surfacesById.get(surface)
-    // A session is renamed while it runs (worker-wrath, runner-pride) with /rename, which its transcript records; its `claude -n` launch name never changes. So the transcript's newest name leads, then the launch name, then the session's own surface's title, then the title of a workspace that holds the session alone (in a shared one a session launched without a name is named for its folder rather than borrow another's role), and by its id only when it has no folder.
+    const feed =
+      herdr && lifecycle === "needsInput" ? herdrFeed(read.calls, waitOf(record.herdr_wait)) : []
+    // A session is renamed while it runs (worker-wrath, runner-pride) with /rename, which its transcript records; its `claude -n` launch name never changes. So the transcript's newest name leads, then the launch name, then the title of a workspace that holds the session alone (in a shared one a session launched without a name is named for its folder rather than borrow another's role), and by its id only when it has no folder.
     const alone = perSpace.get(str(record.workspace_id)) === 1
     const name =
       [
         names.get(sessionId),
         nameOf(record.launch_arguments),
-        own?.title,
         alone ? workspace?.title : null,
         folderName(str(record.cwd)),
       ]
@@ -680,14 +587,14 @@ export function composeWorkers(
       light:
         role === "other" && isProbe(name)
           ? lightOf(lifecycle === "needsInput" ? "idle" : lifecycle, [])
-          : lightOf(lifecycle, questions, feed),
+          : lightOf(lifecycle, [], feed),
       model: read.model,
       name,
-      questions,
+      questions: [],
       role,
       sessionId,
       startedAt: str(record.started_at) || null,
-      surface: own?.ref ?? (herdr ? surface : null),
+      surface: herdr ? surface : null,
       task: role === "dispatcher" ? null : (tasks.get(sessionId) ?? null),
       tasks: shownTasks(read.tasks, now),
       title: roster.titles.get(name) ?? null,
@@ -820,7 +727,7 @@ export const unstickProblem = (now = Date.now()): string | null =>
     ? unstickConflicts.lines.join("; ")
     : null
 
-// Every session herdr's servers run, read afresh on each board (herdr.ts). A board asks cmux nothing.
+// Every session herdr's servers run, read afresh on each board (herdr.ts).
 export async function listLive(): Promise<Live> {
   const [files, servers] = await Promise.all([readRegistry(), readHerdr()])
   const registry = registryOf(files)
@@ -850,14 +757,12 @@ export async function listLive(): Promise<Live> {
   const live = composeWorkers(
     sessions,
     workspaces,
-    null,
     tasks,
     names,
     facts,
     reads,
     Date.now(),
     activity,
-    null,
   )
   const held = live.workers.map((w) => ({
     name: w.name,
