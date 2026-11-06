@@ -4420,20 +4420,22 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       ])
     })
 
-    test("a reveal card's value under 8 characters refuses no comment, since a substring match would find it in most words (#1102)", async () => {
+    test("a reveal card's value refuses a comment from 8 characters on: 7 is no match, since a substring match of a short value would find it in most words (#1102)", async () => {
       const posted = await post({ ...decision(REVEAL), from: "dispatcher" })
       const sent: Delivery[] = []
       const deliver = async (delivery: Delivery) => {
         sent.push(delivery)
         return { at: "2026-11-05T22:00:00.000Z", ok: true as const, sessionId: "s1" }
       }
-      const replied = await store.replyItem(
-        db,
-        posted.id,
-        { text: "about the tab" },
-        { actor, deliver, reveal: async () => "ab" },
-      )
-      expect(replied.ok).toBe(true)
+      const reply = (value: string) =>
+        store.replyItem(
+          db,
+          posted.id,
+          { text: "about the tab" },
+          { actor, deliver, reveal: async () => value },
+        )
+      expect((await reply("about t")).ok).toBe(true)
+      expect(await reply("about th")).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
       expect(sent.map((delivery) => delivery.text)).toEqual([`re #i${posted.ref}: about the tab`])
     })
 
