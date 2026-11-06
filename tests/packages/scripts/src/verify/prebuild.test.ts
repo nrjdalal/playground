@@ -29,6 +29,20 @@ const {
 
 const ROOT = join(import.meta.dir, "../../../../..")
 
+// A spawned bun's start alone has run past bun's 30s a test on a loaded Mac, so each prebuild a test spawns holds a deadline of its own that names it, and the test's timeout covers its spawns.
+const SPAWN_MS = 60_000
+const within = (spawns: number): number => spawns * SPAWN_MS + 10_000
+const bounded = (
+  name: string,
+  argv: string[],
+  options: { cwd: string; env?: Record<string, string | undefined> },
+) => {
+  const run = Bun.spawnSync(argv, { ...options, timeout: SPAWN_MS })
+  if (run.exitedDueToTimeout)
+    throw new Error(`${name} ran past ${SPAWN_MS / 1000}s: ${argv.join(" ")}`)
+  return run
+}
+
 // A workspace package resolves through its built dist, which a fresh worktree lacks until something builds it.
 test("bun run verify builds the workspace packages it imports before it runs, when they are unbuilt", async () => {
   const pkg = await Bun.file(join(ROOT, "package.json")).json()
@@ -67,15 +81,23 @@ test("bun run ask and bun run thread build the workspace packages the API import
   )
 })
 
-test("prebuild given api reads the API's sources, and exits 0 once they are built", async () => {
-  const imports = workspaceImports(await sourcesIn("api"))
-  expect(imports).toContain("@packages/config/org")
-  expect(imports).toContain("@packages/env/data-dir")
-  const run = Bun.spawnSync(["bun", join(ROOT, "packages/scripts/src/verify/prebuild.ts"), "api"], {
-    cwd: ROOT,
-  })
-  expect(run.exitCode).toBe(0)
-})
+test(
+  "prebuild given api reads the API's sources, and exits 0 once they are built",
+  async () => {
+    const imports = workspaceImports(await sourcesIn("api"))
+    expect(imports).toContain("@packages/config/org")
+    expect(imports).toContain("@packages/env/data-dir")
+    const run = bounded(
+      "prebuild api",
+      ["bun", join(ROOT, "packages/scripts/src/verify/prebuild.ts"), "api"],
+      {
+        cwd: ROOT,
+      },
+    )
+    expect(run.exitCode).toBe(0)
+  },
+  within(1),
+)
 
 test("every workspace package the API imports is a dependency of @api/hono, so its build covers it", async () => {
   const pkg = await Bun.file(join(ROOT, "api/hono/package.json")).json()
@@ -87,16 +109,21 @@ test("every workspace package the API imports is a dependency of @api/hono, so i
   expect(imported.filter((name) => !declared.includes(name))).toEqual([])
 })
 
-test("prebuild given pr-merge reads pr-merge's own sources, and exits 0 once they are built", async () => {
-  expect(workspaceImports(await sourcesIn("pr-merge"))).toContain("@packages/config/verdicts")
-  const run = Bun.spawnSync(
-    ["bun", join(ROOT, "packages/scripts/src/verify/prebuild.ts"), "pr-merge"],
-    {
-      cwd: ROOT,
-    },
-  )
-  expect(run.exitCode).toBe(0)
-})
+test(
+  "prebuild given pr-merge reads pr-merge's own sources, and exits 0 once they are built",
+  async () => {
+    expect(workspaceImports(await sourcesIn("pr-merge"))).toContain("@packages/config/verdicts")
+    const run = bounded(
+      "prebuild pr-merge",
+      ["bun", join(ROOT, "packages/scripts/src/verify/prebuild.ts"), "pr-merge"],
+      {
+        cwd: ROOT,
+      },
+    )
+    expect(run.exitCode).toBe(0)
+  },
+  within(1),
+)
 
 test("isMainCheckout is the factory's main checkout alone, by real path, so a person's own clone still builds", () => {
   const dir = mkdtempSync(join(tmpdir(), "prebuild-main-"))
@@ -379,25 +406,32 @@ test("prebuildStep adds no install and no refusal on an install that matches, bu
   }
 })
 
-test("bun run pr:merge's prebuild stops on a stale install even with every dist built, and passes once it is installed", () => {
-  const dir = worktree()
-  try {
-    const verify = copyPrebuild(dir)
-    mkdirSync(join(dir, "packages/scripts/src/pr-merge"))
-    writeFileSync(join(dir, "packages/scripts/src/pr-merge/cli.ts"), "export const x = 1\n")
-    const { PLAYGROUND_REPO: _, ...env } = process.env
-    const run = () =>
-      Bun.spawnSync(["bun", join(verify, "prebuild.ts"), "pr-merge"], { cwd: dir, env })
-    const stale = run()
-    expect(stale.exitCode).toBe(1)
-    expect(stale.stderr.toString()).toContain("packages/added (tsdown)")
-    expect(stale.stderr.toString()).toContain("bun install --ignore-scripts")
-    mkdirSync(join(dir, "packages/added/node_modules/tsdown"), { recursive: true })
-    expect(run().exitCode).toBe(0)
-  } finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
-})
+test(
+  "bun run pr:merge's prebuild stops on a stale install even with every dist built, and passes once it is installed",
+  () => {
+    const dir = worktree()
+    try {
+      const verify = copyPrebuild(dir)
+      mkdirSync(join(dir, "packages/scripts/src/pr-merge"))
+      writeFileSync(join(dir, "packages/scripts/src/pr-merge/cli.ts"), "export const x = 1\n")
+      const { PLAYGROUND_REPO: _, ...env } = process.env
+      const run = () =>
+        bounded("pr:merge's prebuild", ["bun", join(verify, "prebuild.ts"), "pr-merge"], {
+          cwd: dir,
+          env,
+        })
+      const stale = run()
+      expect(stale.exitCode).toBe(1)
+      expect(stale.stderr.toString()).toContain("packages/added (tsdown)")
+      expect(stale.stderr.toString()).toContain("bun install --ignore-scripts")
+      mkdirSync(join(dir, "packages/added/node_modules/tsdown"), { recursive: true })
+      expect(run().exitCode).toBe(0)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(2),
+)
 
 // A worktree whose node_modules came from a clone, with no dist, no metrics and no .env: on 5 Nov its first test:file stopped on "Cannot find module '@packages/config/kinds'", its check-types:tests on "Cannot find module 'generated/data-table-metrics.json'", and a hand-run build without the flags on "@packages/auth:build: error: Invalid environment variables". Its turbo logs each build and writes the dist each filter names.
 const clone = (): {
@@ -483,7 +517,8 @@ const clone = (): {
     dir,
     log: () => (existsSync(log) ? readFileSync(log, "utf8") : ""),
     run: (args, main = false) => {
-      const { exitCode, stderr } = Bun.spawnSync(
+      const { exitCode, stderr } = bounded(
+        "test:file's prebuild",
         ["bun", join(verify, "prebuild.ts"), "tests", ...args],
         { cwd: dir, env: { ...env, NODE_ENV: "test", ...(main ? { PLAYGROUND_REPO: dir } : {}) } },
       )
@@ -493,195 +528,233 @@ const clone = (): {
 }
 
 // A turbo cache hit restores a dist as it was, older than the src that sent the build, so a prebuild that left it there would build it again on every run; a src saved while the build runs still needs the next one.
-test("test:file builds a package whose src is newer than its dist, when turbo's cache hit leaves the dist as it was, again only for a src saved during that build, and then nothing", () => {
-  const { dir, log, run } = clone()
-  try {
-    const pkg = join(dir, "packages/one")
-    mkdirSync(join(pkg, "dist"))
-    mkdirSync(join(pkg, "src"))
-    writeFileSync(join(pkg, "src/index.ts"), "export const one = 1\n")
-    writeFileSync(join(pkg, "dist/index.mjs"), "export const one = 1\n")
-    utimesSync(join(pkg, "dist/index.mjs"), 1000, 1000)
-    const saved = join(dir, "saved")
-    writeFileSync(
-      join(dir, "node_modules/.bin/turbo"),
-      `#!/bin/bash\necho "$*" >> ${JSON.stringify(join(dir, "build.log"))}\n[ -e ${JSON.stringify(saved)} ] || { sleep 0.05; touch packages/one/src/index.ts ${JSON.stringify(saved)}; }\n`,
-    )
-    for (let i = 0; i < 3; i++) expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
-    expect(
-      log()
-        .split("\n")
-        .filter((line) => line.startsWith("run build")),
-    ).toEqual([
-      "run build --filter=@packages/one --output-logs=errors-only",
-      "run build --filter=@packages/one --output-logs=errors-only",
-    ])
-  } finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
-})
-
-test("test:file stamps the dist of each package the built one depends on, which turbo built first, so a dependency's cache hit reads current too (#1067's nit)", () => {
-  const { dir, log, run } = clone()
-  try {
-    writeFileSync(
-      join(dir, "packages/two/package.json"),
-      JSON.stringify({
-        dependencies: { "@packages/one": "workspace:*" },
-        exports: { ".": { default: "./dist/index.mjs", types: "./dist/index.d.mts" } },
-        name: "@packages/two",
-        scripts: { build: "tsdown" },
-      }),
-    )
-    writeFileSync(
-      join(dir, "tests/uses-two.test.ts"),
-      'import { two } from "@packages/two"\nexport const t = two\n',
-    )
-    const dist = join(dir, "packages/one/dist/index.mjs")
-    mkdirSync(join(dir, "packages/one/dist"), { recursive: true })
-    writeFileSync(dist, "export const one = 1\n")
-    utimesSync(dist, 1000, 1000)
-    expect(run(["tests/uses-two.test.ts"]).exitCode).toBe(0)
-    expect(log()).not.toContain("--filter=@packages/one")
-    expect(statSync(dist).mtimeMs).toBeGreaterThan(1_000_000)
-  } finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
-})
-
-test("test:file in a cloned worktree builds only the packages its files import, under the flags a worktree with no .env needs, and then nothing", () => {
-  const { dir, log, run } = clone()
-  try {
-    const first = run(["tests/one.test.ts"])
-    expect(first.stderr).toContain("test:file: building what @packages/one needs")
-    expect(first.exitCode).toBe(0)
-    expect(log()).toBe(
-      "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
-    )
-    expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
-    expect(log().split("\n").filter(Boolean)).toHaveLength(1)
-  } finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
-})
-
-test("ask's and thread's command lines build a package whose dist is older than its src before their entry runs, and then build nothing", async () => {
-  const { dir, log } = clone()
-  try {
-    const pkg = join(dir, "packages/one")
-    mkdirSync(join(pkg, "dist"))
-    mkdirSync(join(pkg, "src"))
-    writeFileSync(join(pkg, "src/index.ts"), "export const one = 1\n")
-    writeFileSync(join(pkg, "dist/index.mjs"), "export const one = 1\n")
-    utimesSync(join(pkg, "dist/index.mjs"), 1000, 1000)
-    symlinkSync(pkg, join(dir, "node_modules/@packages/one"))
-    mkdirSync(join(dir, "api/hono/src/bin"))
-    const scripts = (await Bun.file(join(ROOT, "package.json")).json()).scripts
-    const { PLAYGROUND_REPO: _, ...env } = process.env
-    for (const name of ["ask", "thread"]) {
+test(
+  "test:file builds a package whose src is newer than its dist, when turbo's cache hit leaves the dist as it was, again only for a src saved during that build, and then nothing",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      const pkg = join(dir, "packages/one")
+      mkdirSync(join(pkg, "dist"))
+      mkdirSync(join(pkg, "src"))
+      writeFileSync(join(pkg, "src/index.ts"), "export const one = 1\n")
+      writeFileSync(join(pkg, "dist/index.mjs"), "export const one = 1\n")
+      utimesSync(join(pkg, "dist/index.mjs"), 1000, 1000)
+      const saved = join(dir, "saved")
       writeFileSync(
-        join(dir, `api/hono/src/bin/dashboard-${name}.ts`),
-        `import { appendFileSync } from "node:fs"\nimport { one } from "@packages/one"\nappendFileSync(${JSON.stringify(join(dir, "build.log"))}, "ran ${name} " + one + "\\n")\n`,
+        join(dir, "node_modules/.bin/turbo"),
+        `#!/bin/bash\necho "$*" >> ${JSON.stringify(join(dir, "build.log"))}\n[ -e ${JSON.stringify(saved)} ] || { sleep 0.05; touch packages/one/src/index.ts ${JSON.stringify(saved)}; }\n`,
       )
+      for (let i = 0; i < 3; i++) expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
+      expect(
+        log()
+          .split("\n")
+          .filter((line) => line.startsWith("run build")),
+      ).toEqual([
+        "run build --filter=@packages/one --output-logs=errors-only",
+        "run build --filter=@packages/one --output-logs=errors-only",
+      ])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
     }
-    const run = (name: string) =>
-      Bun.spawnSync(["bash", "-c", scripts[name]], { cwd: dir, env: { ...env, NODE_ENV: "test" } })
-        .exitCode
-    for (const name of ["ask", "ask", "thread"]) expect(run(name)).toBe(0)
-    expect(log().split("\n").filter(Boolean)).toEqual([
-      "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
-      "ran ask 1",
-      "ran ask 1",
-      "ran thread 1",
-    ])
-  } finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
-})
+  },
+  within(3),
+)
 
-test("check-types:tests builds the packages its files import for their types alone too, and then nothing", () => {
-  const { dir, log, run } = clone()
-  try {
-    expect(run(["tests/one.test.ts", "tests/two.test.ts"]).exitCode).toBe(0)
-    expect(log()).toBe(
-      "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
-    )
-    const types = run(["--types", "tests/one.test.ts", "tests/two.test.ts"])
-    expect(types.stderr).toContain("check-types:tests: building what @packages/two needs")
-    expect(types.exitCode).toBe(0)
-    expect(log().split("\n").filter(Boolean)).toEqual([
-      "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
-      "run build --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
-    ])
-    expect(run(["--types", "tests/one.test.ts", "tests/two.test.ts"]).exitCode).toBe(0)
-    expect(log().split("\n").filter(Boolean)).toHaveLength(2)
-    expect(log()).not.toContain("@packages/three")
-  } finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
-})
+test(
+  "test:file stamps the dist of each package the built one depends on, which turbo built first, so a dependency's cache hit reads current too (#1067's nit)",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      writeFileSync(
+        join(dir, "packages/two/package.json"),
+        JSON.stringify({
+          dependencies: { "@packages/one": "workspace:*" },
+          exports: { ".": { default: "./dist/index.mjs", types: "./dist/index.d.mts" } },
+          name: "@packages/two",
+          scripts: { build: "tsdown" },
+        }),
+      )
+      writeFileSync(
+        join(dir, "tests/uses-two.test.ts"),
+        'import { two } from "@packages/two"\nexport const t = two\n',
+      )
+      const dist = join(dir, "packages/one/dist/index.mjs")
+      mkdirSync(join(dir, "packages/one/dist"), { recursive: true })
+      writeFileSync(dist, "export const one = 1\n")
+      utimesSync(dist, 1000, 1000)
+      expect(run(["tests/uses-two.test.ts"]).exitCode).toBe(0)
+      expect(log()).not.toContain("--filter=@packages/one")
+      expect(statSync(dist).mtimeMs).toBeGreaterThan(1_000_000)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(1),
+)
+
+test(
+  "test:file in a cloned worktree builds only the packages its files import, under the flags a worktree with no .env needs, and then nothing",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      const first = run(["tests/one.test.ts"])
+      expect(first.stderr).toContain("test:file: building what @packages/one needs")
+      expect(first.exitCode).toBe(0)
+      expect(log()).toBe(
+        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
+      )
+      expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toHaveLength(1)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(2),
+)
+
+test(
+  "ask's and thread's command lines build a package whose dist is older than its src before their entry runs, and then build nothing",
+  async () => {
+    const { dir, log } = clone()
+    try {
+      const pkg = join(dir, "packages/one")
+      mkdirSync(join(pkg, "dist"))
+      mkdirSync(join(pkg, "src"))
+      writeFileSync(join(pkg, "src/index.ts"), "export const one = 1\n")
+      writeFileSync(join(pkg, "dist/index.mjs"), "export const one = 1\n")
+      utimesSync(join(pkg, "dist/index.mjs"), 1000, 1000)
+      symlinkSync(pkg, join(dir, "node_modules/@packages/one"))
+      mkdirSync(join(dir, "api/hono/src/bin"))
+      const scripts = (await Bun.file(join(ROOT, "package.json")).json()).scripts
+      const { PLAYGROUND_REPO: _, ...env } = process.env
+      for (const name of ["ask", "thread"]) {
+        writeFileSync(
+          join(dir, `api/hono/src/bin/dashboard-${name}.ts`),
+          `import { appendFileSync } from "node:fs"\nimport { one } from "@packages/one"\nappendFileSync(${JSON.stringify(join(dir, "build.log"))}, "ran ${name} " + one + "\\n")\n`,
+        )
+      }
+      const run = (name: string) =>
+        bounded(`bun run ${name}`, ["bash", "-c", scripts[name]], {
+          cwd: dir,
+          env: { ...env, NODE_ENV: "test" },
+        }).exitCode
+      for (const name of ["ask", "ask", "thread"]) expect(run(name)).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toEqual([
+        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+        "ran ask 1",
+        "ran ask 1",
+        "ran thread 1",
+      ])
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(3),
+)
+
+test(
+  "check-types:tests builds the packages its files import for their types alone too, and then nothing",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      expect(run(["tests/one.test.ts", "tests/two.test.ts"]).exitCode).toBe(0)
+      expect(log()).toBe(
+        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
+      )
+      const types = run(["--types", "tests/one.test.ts", "tests/two.test.ts"])
+      expect(types.stderr).toContain("check-types:tests: building what @packages/two needs")
+      expect(types.exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toEqual([
+        "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+        "run build --filter=@packages/two --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+      ])
+      expect(run(["--types", "tests/one.test.ts", "tests/two.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toHaveLength(2)
+      expect(log()).not.toContain("@packages/three")
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(3),
+)
 
 // 5 Nov: a fresh worktree's check-types:tests stopped on 329 TS errors, "Cannot find module '@api/hono'", since the web's files take the API's types from its emitted declarations
-test("check-types:tests in a cloned worktree builds @api/hono, whose declarations the web's types import, before tsc, and then nothing", () => {
-  const { dir, log, run } = clone()
-  try {
-    expect(run(["tests/plan.test.ts"]).exitCode).toBe(0)
-    expect(log()).toBe("")
-    const types = run(["--types", "tests/plan.test.ts"])
-    expect(types.stderr).toContain("check-types:tests: building what @api/hono needs")
-    expect(types.exitCode).toBe(0)
-    expect(log()).toBe(
-      "run build --filter=@api/hono --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
-    )
-    expect(existsSync(join(dir, "api/hono/dist/index.d.mts"))).toBe(true)
-    expect(run(["--types", "tests/plan.test.ts"]).exitCode).toBe(0)
-    expect(log().split("\n").filter(Boolean)).toHaveLength(1)
-  } finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
-})
+test(
+  "check-types:tests in a cloned worktree builds @api/hono, whose declarations the web's types import, before tsc, and then nothing",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      expect(run(["tests/plan.test.ts"]).exitCode).toBe(0)
+      expect(log()).toBe("")
+      const types = run(["--types", "tests/plan.test.ts"])
+      expect(types.stderr).toContain("check-types:tests: building what @api/hono needs")
+      expect(types.exitCode).toBe(0)
+      expect(log()).toBe(
+        "run build --filter=@api/hono --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
+      )
+      expect(existsSync(join(dir, "api/hono/dist/index.d.mts"))).toBe(true)
+      expect(run(["--types", "tests/plan.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toHaveLength(1)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(3),
+)
 
 // round 2 of review: a path naming a file no build makes would rebuild its package on every run; round 1: with packages/env/dist moved aside, test-sandbox.test.ts alone gave 4 fails, since it, gaps.test.ts, keys.test.ts and redis's index.test.ts reach a dist file by its path
-test("test:file builds a package whose dist a test names by path once, a file no build makes included, and builds nothing for a workspace with no build", () => {
-  const { dir, log, run } = clone()
-  try {
-    const first = run(["tests/path.test.ts"])
-    expect(first.stderr).toContain("test:file: building what packages/three/dist/index.mjs")
-    expect(first.exitCode).toBe(0)
-    expect(log()).toBe(
-      "run build --filter=@packages/three --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
-    )
-    expect(run(["tests/path.test.ts"]).exitCode).toBe(0)
-    expect(log().split("\n").filter(Boolean)).toHaveLength(1)
-  } finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
-})
+test(
+  "test:file builds a package whose dist a test names by path once, a file no build makes included, and builds nothing for a workspace with no build",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      const first = run(["tests/path.test.ts"])
+      expect(first.stderr).toContain("test:file: building what packages/three/dist/index.mjs")
+      expect(first.exitCode).toBe(0)
+      expect(log()).toBe(
+        "run build --filter=@packages/three --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true\n",
+      )
+      expect(run(["tests/path.test.ts"]).exitCode).toBe(0)
+      expect(log().split("\n").filter(Boolean)).toHaveLength(1)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(2),
+)
 
-test("a test reaching the data table's metrics writes them when they are missing, and then leaves them", () => {
-  const { dir, log, run } = clone()
-  try {
-    expect(run(["tests/table.test.ts"]).exitCode).toBe(0)
-    expect(log()).toBe("metrics\n")
-    expect(existsSync(join(dir, ".generated/data-table-metrics.json"))).toBe(true)
-    expect(run(["tests/table.test.ts"]).exitCode).toBe(0)
-    expect(log()).toBe("metrics\n")
-  } finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
-})
+test(
+  "a test reaching the data table's metrics writes them when they are missing, and then leaves them",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      expect(run(["tests/table.test.ts"]).exitCode).toBe(0)
+      expect(log()).toBe("metrics\n")
+      expect(existsSync(join(dir, ".generated/data-table-metrics.json"))).toBe(true)
+      expect(run(["tests/table.test.ts"]).exitCode).toBe(0)
+      expect(log()).toBe("metrics\n")
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(2),
+)
 
-test("in the factory's main checkout test:file's prebuild stops before any build and says where to run it", () => {
-  const { dir, log, run } = clone()
-  try {
-    const main = run(["tests/one.test.ts"], true)
-    expect(main.exitCode).toBe(1)
-    expect(main.stderr).toContain("run it from your own worktree")
-    expect(log()).toBe("")
-  } finally {
-    rmSync(dir, { force: true, recursive: true })
-  }
-})
+test(
+  "in the factory's main checkout test:file's prebuild stops before any build and says where to run it",
+  () => {
+    const { dir, log, run } = clone()
+    try {
+      const main = run(["tests/one.test.ts"], true)
+      expect(main.exitCode).toBe(1)
+      expect(main.stderr).toContain("run it from your own worktree")
+      expect(log()).toBe("")
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  },
+  within(1),
+)
 
 test("test:file and check-types:tests run the prebuild before their tests and types", async () => {
   const pkg = await Bun.file(join(ROOT, "package.json")).json()

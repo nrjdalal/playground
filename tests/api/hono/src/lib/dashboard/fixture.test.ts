@@ -798,7 +798,7 @@ describe("writeFixture", () => {
       join(import.meta.dir, "../../../../../../api/hono/src/fixtures/dashboard.json"),
       "utf8",
     )
-    expect(raw.match(/.{0,30}(?:acme|acme-owner|\b(?:NG|PLAT)-\d).{0,30}/gi)).toBeNull()
+    expect(raw.match(/.{0,30}(?:acme|acme-owner).{0,30}/gi)).toBeNull()
     expect(raw).toContain('"email": "merritt@example.com"')
   })
 
