@@ -272,6 +272,7 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     }
     const CHAIN = "refuses a chain that builds a docker image"
     const CANNOT = "cannot read this chain's steps, so it refuses one that names docker or portless"
+    const GLOB = "a program word written as a glob or a brace that can expand to docker or podman"
 
     test("a wrapper with an option value before sh -c", async () => {
       const r = await run(["nice", "-n", "5", "sh", "-c", "docker build ."])
@@ -422,6 +423,45 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       expect(r.code).toBe(0)
       expect(r.ran).toBe(true)
     })
+
+    // #1209: a program word written as an unquoted glob or brace runs whatever the shell expands it to, so one that can expand to a shell reads as a chain run-slot cannot read
+    for (const script of [
+      'echo "docker build ." | /bin/s[h]',
+      '/bin/s? -c "docker build ."',
+      'nice /bin/ba?h -c "docker build ."',
+      '/bin/{s,x}h -c "docker build ."',
+    ])
+      test(`a globbed shell program word: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CANNOT)
+      })
+
+    // #1209: and one that can expand to docker or podman is refused, though no word names either
+    for (const script of [
+      "/usr/local/bin/doc?er build .",
+      'printf "FROM scratch\\n" | /usr/local/bin/doc*r build -',
+      "nice /opt/homebrew/bin/pod[m]an build .",
+      "/usr/local/bin/doc{k,}er build .",
+    ])
+      test(`a globbed docker program word: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(GLOB)
+      })
+
+    // #1209: a glob or brace in an argument, or a quoted glob program word, reads as before
+    for (const script of [
+      'ls doc?er > /dev/null 2>&1; touch "$MARKER"',
+      'ls doc{k,}er > /dev/null 2>&1; touch "$MARKER"',
+      'echo docker; ls /bin/s[h] > /dev/null; touch "$MARKER"',
+      '"/usr/local/bin/doc?er" build . 2> /dev/null; touch "$MARKER"',
+    ])
+      test(`while a glob that is no program word runs as before: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(0)
+        expect(r.ran).toBe(true)
+      })
 
     test("while a nested chain that names no docker runs as before", async () => {
       const r = await run(["sh", "-c", `echo hi; sh -c 'touch "$MARKER"'`])
