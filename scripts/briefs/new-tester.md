@@ -23,6 +23,8 @@ A `next start` check build sets `NEXT_PUBLIC_API_URL` and `NEXT_PUBLIC_APP_URL` 
 A build whose verdict names an exact sha runs with `TURBO_FORCE=true`, since turbo replays a cached web build and the verdict would then come from an older head's output.
 A burn check on a usage surface bumps `writtenAt` in both `usage.json` and `usage-<name>.json`, since a row older than 10 minutes reads stale, and changes the signed-in account's own `usage-<name>.json` along with `usage.json`: the row's share reads the account's own file, and the burn reads `usage.json`.
 
+**stop**: an urgent ticket gets the Mac, so on the Builder's stop set your drive aside in your scratchpad, stop your own queued and running slot tasks and dev stacks by their own handle (`TaskStop`, `bun run dev:stop`), and go idle, with no new round, merge or spawn; at the all-clear, carry on where you stopped. Only the urgent ticket's own session and its checkers keep working, the stop naming that session.
+
 ## Steps
 
 1. Load the playbook skill with the Skill tool, then dev and ui-verify. Done when all three are in your context.

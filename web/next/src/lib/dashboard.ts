@@ -597,7 +597,7 @@ export function useDashboardSocket(enabled: boolean) {
       }
     }
 
-    // The hosted build reaches the Mac through the relay, which carries reads alone until live frames come, so it reads the board every BOARD_POLL_MS in place of the socket.
+    // The hosted build reaches the Mac through the relay, which carries requests and no live frames yet, so it reads the board every BOARD_POLL_MS in place of the socket.
     if (config.hosted) {
       const read = async () => {
         const { data } = await unwrap(apiClient.v1.board.$get())

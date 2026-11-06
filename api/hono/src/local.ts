@@ -2,6 +2,7 @@ import { site } from "@packages/config/site"
 import { db } from "@packages/db"
 import { getBuildVersion } from "@packages/env"
 import { env } from "@packages/env/api-hono"
+import { answerKind } from "@packages/message"
 import { describeRoute, openAPIRouteHandler, resolver } from "hono-openapi"
 import { HTTPException } from "hono/http-exception"
 import { z } from "zod"
@@ -10,6 +11,7 @@ import { apiReference, serveScalarBundle } from "@/lib/api-reference"
 import { baseApp } from "@/lib/base-app"
 import { keepSweeping } from "@/lib/dashboard/attachments"
 import { readsLive } from "@/lib/dashboard/fixture"
+import { getItem } from "@/lib/dashboard/inbox"
 import { startSdkProbe } from "@/lib/dashboard/sdk"
 import { globalErrorResponses } from "@/lib/error"
 import { DB_TIMEOUT_MS, healthData } from "@/lib/health"
@@ -32,8 +34,10 @@ import {
   inboxRouter,
   localYardRouter,
   onboardRouter,
+  remoteRouter,
   sessionsRouter,
   settingsRouter,
+  templatesRouter,
   v1Router,
   waitlistRouter,
 } from "@/routers"
@@ -182,6 +186,8 @@ socket.addEventListener("message", (event) => {
   .route("/v1/ext", extRouter)
   .route("/v1/extensions", extensionsRouter)
   .route("/v1/inbox", inboxRouter)
+  .route("/v1/remote", remoteRouter)
+  .route("/v1/sessions/templates", templatesRouter)
   .route("/v1/sessions", sessionsRouter)
   .route("/v1/settings", settingsRouter)
   .route("/v1/yard", localYardRouter)
@@ -288,7 +294,7 @@ startSdkProbe()
 // Yard's mentions of the owner into the Inbox, once a minute, when YARD_API_URL names a hosted Yard.
 startYardPoll(db, yardClient)
 
-// The relay to the hosted Yard, on a stack that reads this Mac alone, never a fixture's: with YARD_API_URL set and the Keychain token, the owner's browser on Yard reads this dashboard through one socket this API dials out, each read run here as the one local owner.
+// The relay to the hosted Yard, on a stack that reads this Mac alone, never a fixture's: with YARD_API_URL set and the Keychain token, the owner's browser on Yard reads this dashboard through one socket this API dials out, and sends the writes its paired key signs, each run here as the one local owner.
 if (env.YARD_API_URL && readsLive()) {
   const api = env.YARD_API_URL
   let made: Promise<string> | null = null
@@ -310,6 +316,12 @@ if (env.YARD_API_URL && readsLive()) {
       const response = await app.fetch(request)
       if (response.status === 401) made = null
       return response
+    },
+    // a card's kind (answerKind) by its id, as its answer, schedule and dismiss read it, or by the exact `#iN` a message's reply names, never a bare `iN`
+    kindOf: async (key) => {
+      const item = await getItem(db, key)
+      if (!item || (key !== item.id && key !== `#i${item.ref}`)) return null
+      return answerKind(item)
     },
     login: async (token) => (await yardClient(api, token).me()).login,
     token: () => keychain().read(),

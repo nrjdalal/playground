@@ -8,11 +8,14 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## spawn.sh
 
+- While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start, naming focus's session and its end, but three: a move, a reviewer or tester that reports to the focused session (a resume's, the worker its roster row names),
+  and a `--firefighting` start while `firefighting-stop.json` or `firefighting-headstart.json` stands in the data folder (with neither, a `--firefighting` start is refused).
 - A factory session starts another only through `scripts/spawn.sh` (playbook's SESSIONS.md, Spawn), which runs a capacity gate that refuses, failing closed, unless four checks pass in order, the first failure naming its gate and its reading,
   and counts no live sessions or workers (no count is capped; Ops watches the live board for the risk of cmux no longer answering, as it once stopped at 49 live sessions and load5 97): the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`) in its own `capacity.jsonl` and in each `slots.peers` folder's,
   each weighing half its item's load units (small 1, medium 2, big 3; `--size`, else small for a reviewer or tester, else what `scripts/ops/run-slot.sh size <name>` reads from the roster and plan.json), under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
   less a quarter of that (`gates.smallReserve`) kept for small items unless the start is small, so a big plan never blocks the small ones, while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the reviewers and testers, which start small, so a held review starts ahead of a new worker,
-  and once over that line the CPU's busy cores plus the starts too (`top -l 2 -n 0`'s idle share of the cores, held to the same line at no more than the core count), refusing only when both are over or `top` gives no reading, the refusal naming both; memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, room for its runs:
+  refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores so a worker or two can be closed to make room, the refusal naming the load, the starts and the line,
+  while a `--firefighting` start passes it with its trigger file standing (above), its row's `readings.firefighting` naming the file, since firefighting comes first; memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, room for its runs:
   `scripts/ops/run-slot.sh room`'s lanes, held lanes, free lanes (open, unheld and with the load units for a medium run, `slots.peers`' holders counted) and live waiters, refusing while no lane is free and a run waits in the queue, or when room gives no reading, so a new worker never joins a queue it has no room in, while a reviewer, tester,
   resume or move skips it and work already admitted finishes; and the launching backend's usage:
   Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, which never sits below one day's share of 14.3 points, so a week that has just reset passes its first day,
@@ -22,7 +25,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   naming it, and refuses only when every login is over, naming each one's reading;
   a bare start runs on the login in Claude Code's config (`.claude.json`'s `oauthAccount.emailAddress`), so while `usage.json` reads another account, the factory's, that login is judged by `ops/usage/stored-login.json` (ops-usage's full reading of it, written in the last 15 minutes and naming that login, else it fails)
   and the factory account counts as another login, reached by `--account`;
-  `--account` skips it, since the other login's usage is not this machine's, but refuses a week a reading names at 100% until its `resets_at`) or GLM's from `zai-usage.json` (the 5-hour window under 95% of its credits, with no week check, since its credits run on the 5-hour window alone, and no empty `balance`, which an hour after the failure that set it lets GLM starts try again),
+  `--account` skips it, since the other login's usage is not this machine's, but refuses a week a reading names at 100% until its `resets_at`, `usage.json`'s `accounts` map among those readings (its `week` until its `weekReset`), naming the account with the most room, the lowest `week` under 100, as ops-unstick's limit alert names it)
+  or GLM's from `zai-usage.json` (the 5-hour window under 95% of its credits, with no week check, since its credits run on the 5-hour window alone, and no empty `balance`, which an hour after the failure that set it lets GLM starts try again),
   only while the ops-zai-usage job's last beat is ok and within 3 cycles,
   so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once).
   A GLM session takes its own load and memory gate in place of the load and memory checks above: load5 (the third field of `sysctl -n vm.loadavg`) under 30 (`gates.glmLoad5Max`), memory pressure level 1, and swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), so it starts while Claude's gate holds; Claude's gate stays as above.
@@ -162,7 +166,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 - A new worktree can take `node_modules` as an APFS clone of a sibling worktree's with the same `bun.lock` (`~/.playground/ops/run-slot.sh <your name> -- cp -cR <sibling>/node_modules <worktree>/`, through run-slot since a clone is a heavy run: three load spikes on 13 Oct, fseventsd near 100%, came from clones),
   and once that clone succeeds, run-slot clones each workspace's own `node_modules` from the sibling with the same flags (`CLONE_WORKSPACES` in `scripts/ops/run-slot.sh`, run in the clone's own process group), so the worktree is ready for its checks with no install.
+  The clone has no `dist` folders and no data table metrics: `bun run test:file` and `bun run check-types:tests` build the unbuilt packages their files import, and write the metrics when missing, before they run (`prebuildTests` in `packages/scripts/src/verify/prebuild.ts`), so a clone runs either one directly.
   While the clone runs, its holder line (`run-slot-clone.holder` in the ops folder) names the sibling it reads from and the worktree it copies into, so `playground rm --worktree` refuses either one, naming the clone, until the clone ends (`clone_ends` in `scripts/ops/run-slot.sh`, `clonesOf` in `packages/scripts/src/playground/rm.ts`).
+  rm reads the line again right before its move, so a clone that starts while rm counts the worktree's files still keeps it.
   When the copy prints any error, run `~/.playground/ops/run-slot.sh <your name> -- bun install --force --ignore-scripts --cwd <worktree>`, since a plain install then looks healthy while check-types fails on a missing module.
   Tests: `bun run test:file tests/scripts/ops/run-slot-nested-clone.test.ts tests/packages/scripts/src/playground/rm.test.ts tests/packages/safe-delete/src/index.test.ts`.
   A review worktree that only reads (no test run, no commit) takes no clone at all.
@@ -175,6 +181,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - `bun run test:skills` runs Playground's checks, as CI's `auto-test.yml` does, through `packages/scripts/src/test-skills.ts`: every Python step runs under `uv run --python 3.13` (the system `python3` is 3.9 on a Mac, too old for the skills' Python), every step runs even after one fails, and a red run ends naming each failed step and its first `FAIL` line.
   Each step runs in the suite's sandbox (`packages/scripts/src/sandbox.ts`, shared with `test-sandbox.ts`), with uv's Pythons and cache and Docker's config kept in the real home, so a step never writes the real `~/.claude` and a second run downloads nothing.
   Its `steps` list in [packages/scripts/src/test-skills.ts](../packages/scripts/src/test-skills.ts) names every step.
+- Run the touched tests before every push, beside `test:skills`: its steps leave out a test that pins a skill's wording, which only CI then catches (code-review-loop's **The touched tests** lists them with `state.py touched-tests`).
 
 ## bun run hooks:differential
 

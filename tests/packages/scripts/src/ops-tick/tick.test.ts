@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import {
+  appendFileSync,
   chmodSync,
   existsSync,
   mkdirSync,
@@ -29,6 +30,7 @@ import {
 } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
+import { fakeRun } from "./fake-run"
 
 // A machine whose sessions.names keep the old names, which this file's fallbacks name.
 beforeAll(() => setSessionNames(OLD_AS_NAMES))
@@ -50,28 +52,20 @@ const scratch = (): string => {
 // Machine wall time, as the old crons read it.
 const at = (hour: number, minute: number) => new Date(2026, 9, 19, hour, minute, 10)
 
-// A fake context: each script's output by a word of its argv, every run and every line sent recorded; a line holding a word of fails throws, as notify.sh failing does.
+// A fake context: each script's answer by a word of its argv (fakeRun), every run and every line sent recorded; a line holding a word of fails throws, as notify.sh failing does.
 const fake = (
   ops: string,
   now: Date,
-  outputs: Record<string, string> = {},
+  answers: Parameters<typeof fakeRun>[0] = {},
   fails: string[] = [],
-  exits: Record<string, number> = {},
 ) => {
-  const runs: string[][] = []
-  const inputs: string[] = []
+  const { inputs, run, runs } = fakeRun(answers)
   const sent: { text: string; to: string }[] = []
   const ctx: Context = {
     now,
     ops,
     repo: "/repo",
-    run: async (argv, _timeoutMs, stdin) => {
-      runs.push(argv)
-      if (stdin) inputs.push(stdin)
-      const key = Object.keys(outputs).find((k) => argv.join(" ").includes(k))
-      const exit = Object.keys(exits).find((k) => argv.join(" ").includes(k))
-      return { code: exit ? exits[exit]! : 0, out: key ? outputs[key]! : "" }
-    },
+    run,
     send: async (to, text) => {
       if (fails.some((word) => text.includes(word))) throw new Error("notify.sh exited 1")
       sent.push({ text, to })
@@ -89,11 +83,8 @@ const QUIET_LOAD = { "vm.loadavg": "{ 2.10 3.40 4.00 }" }
 const PS =
   "  300.0  4242 /Users/acme/.bun/bin/bun\n   90.0   311 /Applications/cmux.app/Contents/MacOS/cmux\n   10.0   12 launchd\n    0.0  1 kernel_task\n    0.0  2 idle"
 
-// bun run ask new's output, the posted item's id on a line of its own
-const ASKED = {
-  "ask new":
-    "$ bun api/hono/src/bin/dashboard-ask.ts new\nf167b6b9-f570-4f15-a4b4-eb15b8c4876f\n#i601\n",
-}
+// bun run ask new's stdout, the posted item's id on a line of its own
+const ASKED = { "ask new": "f167b6b9-f570-4f15-a4b4-eb15b8c4876f\n#i601\n" }
 
 // The Inbox alerts a beat posted, by their titles
 const alertTitles = (inputs: string[]) => inputs.map((input) => JSON.parse(input).title)
@@ -239,16 +230,15 @@ describe("tick", () => {
       { text: "week passed 80% on pride@", to: "dispatcher" },
     ])
     expect(alertTitles(inputs)).toEqual(["ALERT 98 pride@example.com: week at 98%, past 98%"])
+    expect(JSON.parse(inputs[0]!).preview.text).toContain("[System page](/dashboard/system)")
   })
 
   test("an Inbox alert that fails to post is named to the builder, and its line still goes", async () => {
-    const { ctx, sent } = fake(
-      scratch(),
-      at(13, 3),
-      { ...QUIET_LOAD, "ask new": "error: the dashboard is down\n", "week-marks.py": MARKS },
-      [],
-      { "ask new": 1 },
-    )
+    const { ctx, sent } = fake(scratch(), at(13, 3), {
+      ...QUIET_LOAD,
+      "ask new": { code: 1, err: "error: the dashboard is down\n" },
+      "week-marks.py": MARKS,
+    })
     await beat("tick").run(ctx)
     expect(sent.slice(0, 3)).toEqual([
       { text: "ALERT 90 acme@example.com: week at 91%, past 90%", to: "builder" },
@@ -1227,9 +1217,10 @@ describe("relay watch", () => {
     else rmSync(queue, { force: true })
     const asks: { argv: string[]; stdin?: string }[] = []
     const { ctx, sent } = fake(ops, now)
-    ctx.run = async (argv, _timeoutMs, stdin) => {
+    const { run } = fakeRun({ ask: { code, out: `${ID}\n#i601\n` } })
+    ctx.run = async (argv, timeoutMs, stdin) => {
       asks.push({ argv, stdin })
-      return { code, out: `$ bun api/hono/src/bin/dashboard-ask.ts new\n${ID}\n#i601\n` }
+      return run(argv, timeoutMs, stdin)
     }
     return { asks, ctx, sent }
   }
@@ -1246,11 +1237,14 @@ describe("relay watch", () => {
     const first = watch(ops, at(14, 30), "pending: ops-unstick.jsonl")
     await beat("relay-watch").run(first.ctx)
     expect(first.asks).toHaveLength(1)
-    expect(first.asks[0]!.argv).toEqual(["bun", "run", "--cwd", "/repo", "ask", "new"])
+    expect(first.asks[0]!.argv).toEqual(["bun", "run", "--silent", "--cwd", "/repo", "ask", "new"])
     expect(JSON.parse(first.asks[0]!.stdin!)).toEqual({
       from: OLD.ops,
       kind: "update",
-      preview: { outcome: "alert" },
+      preview: {
+        outcome: "alert",
+        text: "- 🔎 The relay's row is under AI Runners in the sidebar (runner-plain-relay on hover), and this Mac's state is on the [System page](/dashboard/system).",
+      },
       title: `The ops relay is down: no ops line has gone out since ${at(14, 7)
         .toISOString()
         .replace(/\.\d{3}Z$/, "Z")}. Resume runner-plain-relay.`,
@@ -1262,8 +1256,13 @@ describe("relay watch", () => {
     outbox(ops, at(14, 38))
     const back = watch(ops, at(14, 40), "timeout")
     await beat("relay-watch").run(back.ctx)
-    expect(back.asks.map((a) => a.argv.slice(4))).toEqual([
+    expect(back.asks.map((a) => a.argv)).toEqual([
       [
+        "bun",
+        "run",
+        "--silent",
+        "--cwd",
+        "/repo",
         "ask",
         "resolve",
         ID,
@@ -1278,22 +1277,149 @@ describe("relay watch", () => {
     expect(existsSync(join(ops, "tick", "relay-watch.json"))).toBe(false)
   })
 
-  test("a machine with no relay, neither its roster row nor its resume record, posts nothing however long a line waits, since the Ops sweep relays there", async () => {
+  const iso = (date: Date) => date.toISOString().replace(/\.\d{3}Z$/, "Z")
+
+  test("a machine with no relay judges Ops' sweep: a line may wait two sweeps, then the alert names the sweep and no relay session", async () => {
+    const ops = scratch()
+    outbox(ops, at(14, 7), false)
+    const early: unknown[] = []
+    for (const minute of [20, 25, 35, 45]) {
+      const tick = watch(ops, at(14, minute), "pending: ops-session-resume.jsonl")
+      await beat("relay-watch").run(tick.ctx)
+      early.push(...tick.asks)
+    }
+    expect(early).toEqual([])
+    const late = watch(ops, at(14, 50), "pending: ops-session-resume.jsonl")
+    await beat("relay-watch").run(late.ctx)
+    expect(late.asks).toHaveLength(1)
+    const { title } = JSON.parse(late.asks[0]!.stdin!)
+    expect(title).toBe(
+      `Ops' sweep is late: no ops line has gone out since ${iso(at(14, 7))}. Ops runs its sweep, whose step 2 runs ops:outbox.`,
+    )
+    expect(title).not.toContain("runner-plain-relay")
+    expect(JSON.parse(late.asks[0]!.stdin!).preview.text).toBe(
+      "- 🔎 Ops' row is under Orchestrators in the sidebar, since its sweep relays here, and this Mac's state is on the [System page](/dashboard/system).",
+    )
+    expect(late.sent).toEqual([])
+  })
+
+  test("a machine with no relay posts nothing while Ops' sweep drains within its cadence", async () => {
     const ops = scratch()
     outbox(ops, at(14, 7), false)
     const asks: unknown[] = []
-    for (const minute of [20, 25, 30, 45]) {
-      const tick = watch(ops, at(14, minute), "pending: ops-session-resume.jsonl")
+    for (const minute of [20, 35, 50, 65, 80]) {
+      const tick = watch(ops, at(14, minute), "pending: ops-unstick.jsonl")
       await beat("relay-watch").run(tick.ctx)
       asks.push(...tick.asks)
+      outbox(ops, at(14, minute + 2), false)
     }
     expect(asks).toEqual([])
+  })
+
+  test("a resume record alone makes it a relay machine, whose alert names the relay as today", async () => {
+    const ops = scratch()
+    outbox(ops, at(14, 7), false)
     mkdirSync(join(ops, "..", "resume"), { recursive: true })
     writeFileSync(join(ops, "..", "resume", "runner-plain-relay.sh"), "exit 0\n")
-    await beat("relay-watch").run(watch(ops, at(14, 50), "pending: ops-session-resume.jsonl").ctx)
-    const recorded = watch(ops, at(15, 0), "pending: ops-session-resume.jsonl")
-    await beat("relay-watch").run(recorded.ctx)
-    expect(recorded.asks).toHaveLength(1)
+    await beat("relay-watch").run(watch(ops, at(14, 20), "pending: ops-session-resume.jsonl").ctx)
+    const due = watch(ops, at(14, 30), "pending: ops-session-resume.jsonl")
+    await beat("relay-watch").run(due.ctx)
+    expect(due.asks).toHaveLength(1)
+    expect(JSON.parse(due.asks[0]!.stdin!).title).toBe(
+      `The ops relay is down: no ops line has gone out since ${iso(at(14, 7))}. Resume runner-plain-relay.`,
+    )
+  })
+
+  test("a relay that has never run, with no cursor at all, alerts on the lines queued since the watch began, and a caught-up relay reads none", async () => {
+    const ops = scratch()
+    mkdirSync(join(ops, "outbox"), { recursive: true })
+    writeFileSync(
+      join(ops, "..", "roster.json"),
+      JSON.stringify({ agents: [{ kind: "ops", name: OLD.ops, role: "manager" }] }),
+    )
+    const queue = join(ops, "outbox", "ops-session-resume.jsonl")
+    const line = (date: Date) =>
+      `${JSON.stringify({ at: iso(date), job: "session-resume", text: "carry on", to: "w" })}\n`
+    writeFileSync(queue, line(at(13, 0)))
+    const before = watch(ops, at(14, 0), "timeout")
+    await beat("relay-watch").run(before.ctx)
+    expect(before.asks).toEqual([])
+    appendFileSync(queue, line(at(14, 5)))
+    const quiet: unknown[] = []
+    for (const minute of [10, 25]) {
+      const tick = watch(ops, at(14, minute), "timeout")
+      await beat("relay-watch").run(tick.ctx)
+      quiet.push(...tick.asks)
+    }
+    expect(quiet).toEqual([])
+    const due = watch(ops, at(14, 40), "timeout")
+    await beat("relay-watch").run(due.ctx)
+    expect(due.asks).toHaveLength(1)
+    expect(JSON.parse(due.asks[0]!.stdin!).title).toBe(
+      "The outbox relay has never run: no ops line has gone out since the watch began, and this machine relays through Ops' sweep. Ops runs its sweep, whose step 2 runs ops:outbox.",
+    )
+    writeFileSync(
+      join(ops, "outbox", "cursor.json"),
+      JSON.stringify({ "ops-session-resume.jsonl": readFileSync(queue).length }),
+    )
+    utimesSync(join(ops, "outbox", "cursor.json"), at(14, 45), at(14, 45))
+    const resolved = watch(ops, at(14, 50), "timeout")
+    await beat("relay-watch").run(resolved.ctx)
+    expect(resolved.asks.map((a) => a.argv)).toEqual([
+      [
+        "bun",
+        "run",
+        "--silent",
+        "--cwd",
+        "/repo",
+        "ask",
+        "resolve",
+        ID,
+        "--by",
+        OLD.ops,
+        "--note",
+        `The relay moved its cursor again at ${at(14, 45)
+          .toISOString()
+          .replace(/\.\d{3}Z$/, "Z")}`,
+      ],
+    ])
+    const caughtUp = watch(ops, at(15, 30), "timeout")
+    await beat("relay-watch").run(caughtUp.ctx)
+    expect(caughtUp.asks).toEqual([])
+    expect(existsSync(join(ops, "tick", "relay-watch-start"))).toBe(false)
+  })
+
+  test("a relay that has never run counts no line queued before the watch began, and on a relay machine names the relay", async () => {
+    const ops = scratch()
+    mkdirSync(join(ops, "outbox"), { recursive: true })
+    writeFileSync(
+      join(ops, "..", "roster.json"),
+      JSON.stringify({
+        agents: [
+          { kind: "ops", name: OLD.ops, role: "manager" },
+          { kind: "runner", name: "runner-plain-relay", role: "runner" },
+        ],
+      }),
+    )
+    const queue = join(ops, "outbox", "ops-session-resume.jsonl")
+    const line = (date: Date) =>
+      `${JSON.stringify({ at: iso(date), job: "session-resume", text: "carry on", to: "w" })}\n`
+    writeFileSync(queue, line(at(13, 0)))
+    const old: unknown[] = []
+    for (const minute of [0, 10, 20, 30]) {
+      const tick = watch(ops, at(14, minute), "timeout")
+      await beat("relay-watch").run(tick.ctx)
+      old.push(...tick.asks)
+    }
+    expect(old).toEqual([])
+    appendFileSync(queue, line(at(14, 35)))
+    await beat("relay-watch").run(watch(ops, at(14, 40), "timeout").ctx)
+    const due = watch(ops, at(14, 50), "timeout")
+    await beat("relay-watch").run(due.ctx)
+    expect(due.asks).toHaveLength(1)
+    expect(JSON.parse(due.asks[0]!.stdin!).title).toBe(
+      "The ops relay has never run: no ops line has gone out since the watch began. Resume runner-plain-relay.",
+    )
   })
 
   test("posts nothing while nothing waits, and times the wait itself, not the cursors' age", async () => {
@@ -1354,7 +1480,7 @@ describe("relay watch", () => {
     await beat("relay-watch").run(watch(ops, at(14, 30), "pending: ops-unstick.jsonl").ctx)
     outbox(ops, at(14, 38))
     const gone = watch(ops, at(14, 40), "timeout")
-    gone.ctx.run = async () => ({ code: 1, out: `dashboard-ask: no inbox item ${ID}\n` })
+    gone.ctx.run = fakeRun({ ask: { code: 1, err: `dashboard-ask: no inbox item ${ID}\n` } }).run
     await beat("relay-watch").run(gone.ctx)
     expect(existsSync(join(ops, "tick", "relay-watch.json"))).toBe(false)
     await beat("relay-watch").run(watch(ops, at(15, 0), "pending: ops-unstick.jsonl").ctx)
@@ -1405,15 +1531,14 @@ describe("the relay's own resume", () => {
       join(ops, "ops-linear-dm.json"),
       JSON.stringify({ lastBeatAt: at(14, 7).toISOString(), lastResult: "ok" }),
     )
-    const refuse = (f: ReturnType<typeof fake>) => {
-      const run = f.ctx.run
-      f.ctx.run = async (argv, timeoutMs) =>
-        argv[1] === "resume"
-          ? { code: 2, out: "spawn.sh: refused: load 40 over 16\n" }
-          : run(argv, timeoutMs)
-      return f
-    }
-    const first = refuse(fake(ops, at(14, 7), { ...QUIET_LOAD, "--sessions": UP }))
+    const first = fake(ops, at(14, 7), {
+      "--brief brief-runner-plain-relay.md": {
+        code: 2,
+        err: "spawn.sh: refused: load 40 over 16\n",
+      },
+      ...QUIET_LOAD,
+      "--sessions": UP,
+    })
     await beat("sweep").run(first.ctx)
     expect(first.sent).toEqual([
       {
@@ -1431,6 +1556,57 @@ test("the switch watch reads no account on a machine with no extensions, so it s
   const data = mkdtempSync(join(tmpdir(), "ops-tick-switch-"))
   expect(await switchAccount(join(data, "ops"))).toBe("")
   rmSync(data, { force: true, recursive: true })
+})
+
+describe("the focus card", () => {
+  test("posts one Inbox update under the ops manager's name once focus.json has lapsed, and none while it stands (#974)", async () => {
+    const ops = scratch()
+    const focus = (until: string) =>
+      writeFileSync(
+        join(ops, "..", "focus.json"),
+        JSON.stringify({
+          reason: "a timed demo",
+          session: "worker-f",
+          since: "2026-10-19T08:00:00.000Z",
+          until,
+        }),
+      )
+    focus("2026-10-19T09:00:00.000Z")
+    const standing = fake(ops, new Date("2026-10-19T08:30:00.000Z"))
+    await beat("focus-card").run(standing.ctx)
+    expect(standing.runs).toEqual([])
+    const ended = fake(ops, new Date("2026-10-19T09:00:30.000Z"))
+    await beat("focus-card").run(ended.ctx)
+    expect(ended.runs).toEqual([["bun", "run", "--silent", "--cwd", "/repo", "ask", "new"]])
+    expect(JSON.parse(ended.inputs[0]!)).toMatchObject({
+      from: OLD.ops,
+      kind: "update",
+      preview: { outcome: "finding" },
+      title: "Focus for worker-f ended: 0 runs queued while it stood, 0m0s in all",
+    })
+    await beat("focus-card").run(ended.ctx)
+    expect(ended.runs).toHaveLength(1)
+  })
+
+  test("a post that fails throws, so the beat names it and the next one tries again", async () => {
+    const ops = scratch()
+    writeFileSync(
+      join(ops, "..", "focus.json"),
+      JSON.stringify({
+        reason: "r",
+        session: "worker-f",
+        since: "2026-10-19T08:00:00.000Z",
+        until: "2026-10-19T09:00:00.000Z",
+      }),
+    )
+    const failing = fake(ops, new Date("2026-10-19T09:01:00.000Z"), {
+      "ask new": { code: 1, err: "ask: refused\n" },
+    })
+    await expect(beat("focus-card").run(failing.ctx)).rejects.toThrow(
+      "bun run ask new: ask: refused",
+    )
+    expect(existsSync(join(ops, "..", "focus.json"))).toBe(true)
+  })
 })
 
 // 31 Oct: tick ran five helpers no checkout held, and the beats' stubs above passed, so their alerts never fired on a real machine.

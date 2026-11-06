@@ -13,6 +13,7 @@ import {
   type Roots,
 } from "@packages/safe-delete"
 
+import { targetWords } from "../../../../api/hono/src/lib/dashboard/delete-targets"
 import { procOf, sessionAbove, type Proc as Process } from "../../../../scripts/hooks/session-state"
 import STATUSES from "../../../../scripts/roster-statuses.json"
 import { mainCheckout } from "../main-checkout"
@@ -255,10 +256,7 @@ export const discardRefusal = async (
   try {
     paths.add(realpathSync(path))
   } catch {}
-  const named = (item.preview.what ?? "")
-    .split(/\s+/)
-    .map((word) => word.replace(/^[`'"(]+|[`'",.;:)]+$/g, "").replace(/(.)\/$/, "$1"))
-  if (!named.some((word) => paths.has(word)))
+  if (!targetWords(item.preview.what ?? "").some((word) => paths.has(word)))
     return `--decision ${id}'s delete names another path, not ${resolve(path)}: ${route}`
   return null
 }
@@ -297,7 +295,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
             session,
             worktree: args.worktree
               ? {
-                  clones: deps.clones(),
+                  clones: deps.clones,
                   discard: args.discard,
                   live: STATUSES.live,
                   merged: deps.merged,

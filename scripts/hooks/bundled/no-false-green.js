@@ -59,6 +59,7 @@ var ROSTER_KINDS = [
   "dispatcher",
   "ops",
   "optimizer",
+  "orchestrator",
   "planner",
   "probe",
   "researcher",
@@ -74,6 +75,7 @@ var FACTORY_ROLE_OF_KIND = {
   dispatcher: "dispatcher",
   ops: "lead",
   optimizer: "lead",
+  orchestrator: "lead",
   planner: "lead",
   probe: "probe",
   researcher: "worker",
@@ -249,6 +251,7 @@ var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
   builtin: ["", ""],
+  busybox: ["", ""],
   caffeinate: ["-d -i -m -s -u", "-t -w"],
   command: ["-p -V -v", ""],
   doas: ["-L -n -s", "-a -C -u"],
@@ -299,8 +302,8 @@ var ROOT_SHELLS = new Map([
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
 var COUNTED = new Set(["repeat", "timeout"]);
-var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
-var BUSYBOX_SHELLS = new Set([...SHELLS, "ash", "hush"]);
+var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
+var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
 var GIT_TAKES = new Set([
@@ -446,7 +449,71 @@ function decode(raw) {
 function lex(src, known = {}) {
   const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
+  calledAgain(lx.commands, src);
+  braced(lx.commands);
   return { commands: lx.commands, scopes: lx.scopes };
+}
+var BRACED = new Set([
+  "elif",
+  "else",
+  "for",
+  "foreach",
+  "if",
+  "repeat",
+  "select",
+  "until",
+  "while"
+]);
+function braced(commands) {
+  for (const [k, c] of commands.entries()) {
+    const head = c.words[0];
+    if (!head || head.quoted || !BRACED.has(head.value))
+      continue;
+    const at = c.words.findIndex((w, i) => i > 0 && !w.quoted && w.value === "{");
+    if (at < 0 || markers(c.words).length > at)
+      continue;
+    if (commands.slice(k + 1).some((d) => d.words.some((w) => !w.quoted && w.value === "}")))
+      c.opaque = true;
+  }
+}
+function calledAgain(commands, src) {
+  for (const [k, open] of commands.entries()) {
+    const [first, second] = open.words;
+    if (!open.held || !first || first.quoted)
+      continue;
+    const before = commands[k - 1]?.words;
+    const word = first.value === "function" ? second : open.group && before?.length === 1 ? before[0] : undefined;
+    if (!word)
+      continue;
+    let end = k;
+    for (let balance = 0;end < commands.length; end++) {
+      const reserved = markers(commands[end].words);
+      balance += reserved.filter((w) => OPENS.has(w)).length - reserved.filter((w) => CLOSES.has(w)).length;
+      if (balance <= 0)
+        break;
+    }
+    const body = commands.slice(k, end + 1);
+    const name = word.value.replace(/\(\)$/, "");
+    if (word.quoted || !/^[\w.:-]+$/.test(name)) {
+      for (const c of body)
+        c.repeated = true;
+      continue;
+    }
+    const outside = commands.filter((_, at) => at < k - 1 || at > end).map(callee);
+    const calls = outside.filter((w) => w?.value === name);
+    const others = outside.some((w) => w !== undefined && (w.unknown !== undefined || !w.quoted && (w.value === "eval" || w.value === "source" || w.value === ".")));
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const files = commands.flatMap((c) => c.redirects).filter((r) => r.target?.value === name).length;
+    const mentions = (src.match(new RegExp(`(?<![\\w.:-])${escaped}(?![\\w.:-])`, "g"))?.length ?? 0) - files;
+    const call = commands.find((c, at) => (at < k - 1 || at > end) && callee(c)?.value === name);
+    const once = mentions === 2 && calls.length === 1 && !others && !call?.repeated && !call?.kept;
+    if (!once)
+      for (const c of body)
+        c.repeated = true;
+  }
+}
+function callee(cmd) {
+  return cmd.words.find((w) => w.quoted || !(ASSIGN.test(w.value) || MARKERS.has(w.value) || BUILTIN.has(w.value) || w.value.startsWith("-")));
 }
 function nest(lx, inherit) {
   list(lx, lx.scopes.push(lx.scope) - 1, true, inherit);
@@ -470,6 +537,7 @@ function walk(lx, scope, nested, inherit) {
   let loops = 0;
   let after = "";
   const bodies = [];
+  const heads = [];
   const end = (op) => {
     const done = cmd;
     const pipe = op === "|" || op === "|&";
@@ -495,18 +563,36 @@ function walk(lx, scope, nested, inherit) {
       if (after === "&&")
         done.chained = true;
       done.chain = lx.token;
-      if (reserved.some((w) => HELD.has(w)))
+      const last = lx.commands[lx.commands.length - 1]?.words;
+      const compound = !!done.group && last?.length === 1 && OPENS.has(reserved[0] ?? "") && !HELD.has(reserved[0] ?? "");
+      if (reserved.some((w) => HELD.has(w)) || compound)
         done.held = true;
       if (done.held || bodies.includes(true))
         done.kept = true;
-      for (const w of reserved) {
+      for (const [at, w] of reserved.entries()) {
         if (OPENS.has(w))
-          bodies.push(HELD.has(w));
+          bodies.push(HELD.has(w) || compound && at === 0);
         else if (CLOSES.has(w))
           bodies.pop();
       }
-      if (loops > 0 || loop)
+      const each = done.words[0]?.quoted ? undefined : done.words[0]?.value;
+      const outer = heads.length === 0 && loops === 0;
+      let head = heads.length > 0;
+      for (const w of reserved) {
+        if (w === "while" || w === "until" || w === "for" || w === "select")
+          heads.push(w === "while" || w === "until");
+        else if (w === "do")
+          heads.pop();
+        head ||= heads.length > 0;
+      }
+      if (each === "foreach")
+        heads.push(false);
+      else if (each === "end" && heads.length > 0 && !loop)
+        heads.pop();
+      if (loops > 0 || loop || head || each === "foreach")
         done.repeated = true;
+      if (outer && !loop && reserved.some((w) => w === "while" || w === "until"))
+        done.atLeastOnce = true;
       depth = Math.max(0, depth + opened - closed);
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
       if (depth === 0 && FREES.has(op))
@@ -982,8 +1068,6 @@ function shellOperand(args, shell) {
     const v = args[k].value;
     if (takes.has(v))
       k++;
-    else if (v === "-" && args[k - 1]?.value !== "--")
-      return { inline, operand: args[k + 1] ?? (inline ? args[k] : undefined) };
     else if (/^[-+][A-Za-z]+$/.test(v))
       inline ||= v.startsWith("-") && v.includes("c");
     else if (!v.startsWith("--"))

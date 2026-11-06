@@ -1,7 +1,6 @@
-import { dataDirOf } from "@packages/env/data-dir"
-import { readPolicy, slackSettings } from "@packages/settings"
-
-import { check } from "../../../../scripts/hooks/no-playground-leak"
+import { dataDirOf } from "../../../../../packages/env/src/data-dir"
+import { readPolicy, slackSettings } from "../../../../../packages/settings/src"
+import { check } from "../../../../../scripts/hooks/no-playground-leak"
 import {
   call,
   history,
@@ -12,6 +11,7 @@ import {
   recordSent,
   type Slack,
   slackOf,
+  tokenOf,
   USER,
 } from "./slack"
 
@@ -83,9 +83,7 @@ export const leakOf = (channel: string) => (body: string) =>
 // its errors as one plain line, which dm send's caller reads whole
 const main = async () => {
   const file = process.argv[2]
-  const token = process.env.SLACK_TOKEN
-  if (!file || !token)
-    throw new Error("usage: SLACK_TOKEN=<token> send.ts <file>, run by playground dm send")
+  if (!file) throw new Error("usage: send.ts <file>, run by playground dm send")
   const policy = await readPolicy(dataDirOf(process.env))
   if (policy.refusal !== undefined) throw new Error(`the settings refuse: ${policy.refusal}`)
   const channel = slackSettings.get(policy.settings, "slack.dmChannel")
@@ -97,7 +95,7 @@ const main = async () => {
     dir: dataDirOf(process.env),
     leak: leakOf(channel),
     owner,
-    slack: slackOf(token),
+    slack: slackOf(await tokenOf()),
   })
   console.log(`dm send: posted, body at ${ts}`)
 }

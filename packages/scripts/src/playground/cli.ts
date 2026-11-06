@@ -145,11 +145,16 @@ const managerAlone = async (kind: ManagerVerb): Promise<number> => {
   return 1
 }
 
-// Loaded only for sweep, since sweep.ts reaches past this folder into ops-tick.
+// Loaded only for sweep, since sweep.ts reaches past this folder into ops-tick; its holds read through gh and the Dashboard's checkout.
 const sweep = async (lead: string): Promise<number> => {
-  const { runSweep } = await import("./sweep")
+  const { readHold, runSweep } = await import("./sweep")
+  const { factoryRepoOf } = await import("./setting")
   try {
-    console.log((await runSweep(lead, dataDir())).join("\n"))
+    // with no factory.repo to read, each issue or PR hold reads as unreadable rather than stopping the sweep
+    const factory = await factoryRepoOf().catch(() => "")
+    console.log(
+      (await runSweep(lead, dataDir(), undefined, undefined, readHold(REPO, factory))).join("\n"),
+    )
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error))
   }
@@ -367,6 +372,23 @@ const alertsWaitFor = async (name: string): Promise<number> => {
   return 0
 }
 
+// playground focus's reads and writes: the data folder, held-prs.json, the clock and this checkout's run-slot.sh, loaded only for this command.
+const focusDeps = async () => {
+  const { heldPath } = await import("../pr-merge/held")
+  return {
+    data: dataDir(),
+    heldPath: heldPath(),
+    now: () => new Date(),
+    runSlot: (args: string[]) => {
+      const run = Bun.spawnSync(["bash", join(REPO, "scripts", "ops", "run-slot.sh"), ...args], {
+        stderr: "pipe",
+        stdout: "pipe",
+      })
+      return { code: run.exitCode, err: run.stderr.toString() }
+    },
+  }
+}
+
 // playground rm: the trash (rm.ts), loaded only for this command.
 const rm = async (words: string[]): Promise<number> => {
   const { rmDeps, runRm } = await import("./rm")
@@ -442,28 +464,32 @@ const code =
                                     ? await orgsCommand(rest, orgsIo(REPO, dataDir()))
                                     : command === "accounts"
                                       ? await runAccounts(rest, accountsIo(dataDir()))
-                                      : command === "rm"
-                                        ? await rm(rest)
-                                        : command === "yard"
-                                          ? await (
-                                              await import("./yard")
-                                            ).runYard(
-                                              rest,
-                                              await (
+                                      : command === "focus"
+                                        ? await (
+                                            await import("./focus")
+                                          ).runFocus(rest, await focusDeps())
+                                        : command === "rm"
+                                          ? await rm(rest)
+                                          : command === "yard"
+                                            ? await (
                                                 await import("./yard")
-                                              ).yardIo(REPO, accountsIo(dataDir()).readSecret),
-                                            )
-                                          : command === "herdr" && rest[0] === "stop"
-                                            ? (await opsHerdr(["stop-all"]).exited) === 0
-                                              ? 0
-                                              : 1
-                                            : command === "herdr" && rest[0] === "pin"
-                                              ? await (
-                                                  await import("./herdr-pin")
-                                                ).runHerdrPin(rest.slice(1))
-                                              : VERBS.includes(command)
-                                                ? await verb(command, rest)
-                                                : fail(
-                                                    `no command ${command}; playground --help lists them`,
-                                                  )
+                                              ).runYard(
+                                                rest,
+                                                await (
+                                                  await import("./yard")
+                                                ).yardIo(REPO, accountsIo(dataDir()).readSecret),
+                                              )
+                                            : command === "herdr" && rest[0] === "stop"
+                                              ? (await opsHerdr(["stop-all"]).exited) === 0
+                                                ? 0
+                                                : 1
+                                              : command === "herdr" && rest[0] === "pin"
+                                                ? await (
+                                                    await import("./herdr-pin")
+                                                  ).runHerdrPin(rest.slice(1))
+                                                : VERBS.includes(command)
+                                                  ? await verb(command, rest)
+                                                  : fail(
+                                                      `no command ${command}; playground --help lists them`,
+                                                    )
 process.exit(code)
