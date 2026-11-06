@@ -1,4 +1,4 @@
-// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, or keeps steps or a table the owner comes back to (keepsForOwner), until it is an open item in the owner's Inbox (playbook's ask rule), so nothing the owner needs scrolls away in chat; every manager but the dispatcher sends steps to the dispatcher as a draft instead. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
+// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, or keeps steps or a table the owner comes back to (keepsForOwner), until it is an open item in the owner's Inbox (playbook's ask rule), so nothing the owner needs scrolls away in chat; every manager but the dispatcher sends steps to the dispatcher as a draft instead. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, a lead's with the route up to the dispatcher, who posts it, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
 
 import "../../packages/env/src/aliases"
 import { join } from "node:path"
@@ -16,6 +16,9 @@ import { loadNames, MANAGER_ROLES, registryName, roleOfName, rosterNames, roster
 
 export const REASON =
   "name the open #iN on the same thing if one exists (bun run ask open lists them), else post it with bun run ask new, then say in chat that it's in the inbox as #iN"
+// A lead's line: a lead sends an owner decision up the chain, and the dispatcher posts it (playbook's Chain)
+export const LEAD_REASON =
+  "send the decision to the dispatcher with SendMessage, which posts it to the Inbox, and keep the question out of chat; once the dispatcher names its #iN, say in chat that it's in the inbox as #iN"
 // Chat scrolls, so steps the owner comes back to go in one card whose progress is edited in place.
 export const STEPS_REASON =
   "put these steps in one Inbox card (bun run ask new; the open #iN on the same thing if one exists, bun run ask open lists them), edit each step's progress into that card, then name it in chat as #iN in one line"
@@ -304,7 +307,8 @@ async function inspect(raw: string, env: Record<string, string | undefined>, dep
   if (!asks && !keeps) return
   const role = await managerRole(env, sessionId, deps)
   if (!role) return
-  if (asks && asksDecision(reply, await rosterNames(env), owner)) return gate(reply, deps, REASON)
+  if (asks && asksDecision(reply, await rosterNames(env), owner))
+    return gate(reply, deps, role === "lead" ? LEAD_REASON : REASON)
   if (!keeps) return
   if (role === "dispatcher") return gate(reply, deps, STEPS_REASON)
   if (DRAFT_HANDED.test(ownLines(reply).join("\n"))) return
