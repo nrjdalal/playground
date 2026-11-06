@@ -211,9 +211,9 @@
   `orderByStatus` applies this once in the dashboard, after the agents board is read, so the System page's table follows the same order.
   A light moves its row only once it has held for `LIGHT_HOLD_MS` (a wait at once, into it and out of it, since leaving it means it was answered), so a session pausing between steps stays put.
   A session's record can read `needsInput` after its picker is answered, until the session's turn ends, so the transcript clears it first, the transcript's word counting over the record's:
-  `factsIn` in `api/hono/src/lib/dashboard/transcript.ts` keeps each session's open AskUserQuestion calls and when the newest was answered, and `unansweredFeed` and `answeredSince` in `workers.ts` drop a Feed picker raised before that answer (cmux's Feed, which no board reads now),
-  keeping a session's newest pickers as many as it still holds open, and read a `needsInput` the record set before the answer, once none is open, as running,
-  or as idle when an interrupt followed the answer (Esc on a picker runs no Stop hook); a permission or a plan stays, since it may be a subagent's. The hub re-reads the board the moment a session waiting on them writes a line.
+  `factsIn` in `api/hono/src/lib/dashboard/transcript.ts` keeps each session's open AskUserQuestion calls and when the newest was answered, and `answeredSince` in `workers.ts` reads a `needsInput` the record set before that answer, once none is open, as running,
+  or as idle when an interrupt followed the answer (Esc on a picker runs no Stop hook).
+  The hub re-reads the board the moment a session waiting on them writes a line.
   AI Runners holds the runner sessions alone.
   Scripts, after it, lists the ops jobs Ops runs as scripts with no Claude session, A to Z, collapsed until its label is clicked, so the jobs never read as a crowd of runners, a Failing or Down script still showing, in red,
   under the collapsed label (`scriptsShown` in `web/next/src/lib/ops.ts`; its open state lives in `DashboardProvider`, as Other's does, kept across reloads as every group's is).

@@ -173,6 +173,85 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     )
   })
 
+  // a script chain_steps cannot read (a raw \x02 to \x07 byte, which it holds quoted globs as, or one shlex cannot split) gave no steps, so its docker step ran past the lane
+  describe("a chain run-slot cannot read that names docker is refused", () => {
+    const run = async (shell: string, script: string) => {
+      const m = dockerMachine()
+      const marker = join(m.root, "ran")
+      const p = Bun.spawn(["bash", SCRIPT, "worker-d", "--", shell, "-c", script], {
+        cwd: m.root,
+        env: m.env({ MARKER: marker }),
+        stderr: "pipe",
+      })
+      return {
+        code: await p.exited,
+        err: await new Response(p.stderr).text(),
+        ran: existsSync(marker),
+      }
+    }
+    const CANNOT = "cannot read this chain's steps, so it refuses one that names docker or portless"
+
+    test("a raw \\x02 byte before a docker build", async () => {
+      const r = await run("sh", "echo \x02; docker build .")
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CANNOT)
+    })
+
+    test("a script shlex cannot split", async () => {
+      const r = await run("sh", "echo 'open; docker build .")
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CANNOT)
+    })
+
+    test("a quoted \\x02 byte before a compose build, under bash", async () => {
+      const r = await run("bash", 'echo "\x02" && docker compose build web')
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CANNOT)
+    })
+
+    // a script file read through `bash <file>`, named so the command's words name docker
+    const file = async (args: string[], script: string) => {
+      const m = dockerMachine()
+      writeFileSync(join(m.root, "docker-steps.sh"), script)
+      const p = Bun.spawn(["bash", SCRIPT, "worker-d", "--", "bash", ...args, "docker-steps.sh"], {
+        cwd: m.root,
+        env: m.env(),
+        stderr: "pipe",
+      })
+      return { code: await p.exited, err: await new Response(p.stderr).text() }
+    }
+
+    test("an option word before a script file", async () => {
+      const r = await file(["-x"], "docker build .\n")
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CANNOT)
+    })
+
+    test("while a script file it reads keeps the chain's refusal", async () => {
+      const r = await file([], "echo hi\ndocker build .\n")
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("refuses a chain that builds a docker image")
+    })
+
+    test("while a chain it reads keeps its own refusal", async () => {
+      const r = await run("sh", "echo hi; docker build .")
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("refuses a chain that builds a docker image")
+    })
+
+    test("and a \\x02 byte in a chain that names no docker runs as before", async () => {
+      const r = await run("sh", 'echo \x02 && touch "$MARKER"')
+      expect(r.code).toBe(0)
+      expect(r.ran).toBe(true)
+    })
+
+    test("as does a chain with no such byte", async () => {
+      const r = await run("sh", 'echo hi && touch "$MARKER"')
+      expect(r.code).toBe(0)
+      expect(r.ran).toBe(true)
+    })
+  })
+
   test("a docker build runs in the capped builder, made when missing at half the VM's memory, and stopped after", async () => {
     const m = dockerMachine()
     expect(await m.start("worker-d", {}, SCRIPT, ["docker", "build", "."]).ran()).toBe(true)
