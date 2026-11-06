@@ -1707,8 +1707,9 @@ function subcommand(args, takes) {
   return { rest: args.slice(k + 1), sub: args[k] };
 }
 var help = (args) => args.some((a) => a.value === "-h" || a.value === "--help");
+var COMPOSE_ROOT_TAKES = new Set([...COMPOSE_TAKES, ...DOCKER_TAKES]);
 function composeBuild(args) {
-  const found = subcommand(args, COMPOSE_TAKES);
+  const found = subcommand(args, COMPOSE_ROOT_TAKES);
   const { rest, sub } = found.sub?.value === "alpha" ? subcommand(found.rest, new Set) : found;
   if (!sub)
     return;
