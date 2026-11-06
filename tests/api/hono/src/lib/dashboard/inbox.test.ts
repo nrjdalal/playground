@@ -3135,8 +3135,9 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { actor, deliver: reached },
       )
       // a second after the row's stamp, which the comment moved past the post's, so the edit can only stamp the time it was given (#1028, and #1037's nit)
-      const commented = (await store.getItem(db, posted.id))?.updatedAt ?? posted.updatedAt
-      const later = new Date(Date.parse(commented) + 1000)
+      const commented = await store.getItem(db, posted.id)
+      if (!commented) throw new Error("the commented card is gone")
+      const later = new Date(Date.parse(commented.updatedAt) + 1000)
       const edited = await store.editItem(
         db,
         posted.id,

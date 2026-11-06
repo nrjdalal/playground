@@ -511,7 +511,7 @@ test("test:file builds a package whose src is newer than its dist, when turbo's 
 })
 
 test("test:file stamps the dist of each package the built one depends on, which turbo built first, so a dependency's cache hit reads current too (#1067's nit)", () => {
-  const { dir, run } = clone()
+  const { dir, log, run } = clone()
   try {
     writeFileSync(
       join(dir, "packages/two/package.json"),
@@ -531,6 +531,7 @@ test("test:file stamps the dist of each package the built one depends on, which 
     writeFileSync(dist, "export const one = 1\n")
     utimesSync(dist, 1000, 1000)
     expect(run(["tests/uses-two.test.ts"]).exitCode).toBe(0)
+    expect(log()).not.toContain("--filter=@packages/one")
     expect(statSync(dist).mtimeMs).toBeGreaterThan(1_000_000)
   } finally {
     rmSync(dir, { force: true, recursive: true })

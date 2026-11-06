@@ -475,18 +475,22 @@ describe("writeFixture", () => {
   test("a launcher matched once is asked about by its pid alone, so a later read spawns no ps, and one that has ended reads as gone (#1072's nit)", async () => {
     const dir = scratch("launcher-matched")
     const launcher = Bun.spawn(["sleep", "30"])
-    markLaunched(dir, launcher.pid, "then")
-    let asked = 0
-    const start = () => {
-      asked++
-      return "then"
+    try {
+      markLaunched(dir, launcher.pid, "then")
+      let asked = 0
+      const start = () => {
+        asked++
+        return "then"
+      }
+      expect([launcherRuns(dir, start), launcherRuns(dir, start)]).toEqual([true, true])
+      expect(asked).toBe(1)
+      launcher.kill()
+      await launcher.exited
+      expect(launcherRuns(dir, start)).toBe(false)
+      expect(asked).toBe(1)
+    } finally {
+      launcher.kill()
     }
-    expect([launcherRuns(dir, start), launcherRuns(dir, start)]).toEqual([true, true])
-    expect(asked).toBe(1)
-    launcher.kill()
-    await launcher.exited
-    expect(launcherRuns(dir, start)).toBe(false)
-    expect(asked).toBe(1)
   })
 
   test("replaces its own folder whole, so a stack starts from the fixture again", () => {

@@ -387,7 +387,7 @@ export function markLaunched(dir: string, pid = process.pid, started = startOf(p
   writeEntry(join(dir, LAUNCHER), { pid, started })
 }
 
-// Each launcher record this process has matched by ps, so a later read asks only whether its pid still runs, and a follower that reads the fixture on every call spawns no ps for it.
+// Each launcher record this process has matched by ps, so a later read asks only whether its pid still runs, and a follower that reads the fixture on every call spawns no ps for it; a pid reused after the match reads as the launcher, so this process keeps the copy until it restarts.
 const matched = new Set<string>()
 
 // Whether dir's copy belongs to a launcher that still runs; start reads a pid's start, ps by default.
