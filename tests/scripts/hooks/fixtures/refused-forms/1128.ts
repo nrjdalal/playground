@@ -154,6 +154,30 @@ export const groups: Group[] = [
         "cp of a held variable past a quoted delimiter inside a parameter substitution",
         `${READS}; : \${V/x/<<'1' }\n${SETS}\n1\ncp g "$X"`,
       ],
+      [
+        "cp of a held variable past a quoted heredoc whose body a PS4 prompt runs under promptsubst with set -x",
+        `${READS}; setopt promptsubst; read -r l <<'E'\n${SETS}\nE\nPS4="$l"; set -x; true; set +x; cp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc whose body a PS4 prompt runs with set -x and no reset",
+        `${READS}; setopt promptsubst; read -r l <<'E'\n${SETS}\nE\nPS4="$l"; set -x; cp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a PS4 prompt whose quoted heredoc ends after the setter line",
+        `${READS}; setopt promptsubst; read -r l <<'E'; PS4="$l"; set -x; true; set +x; cp g "$X"\n${SETS}\nE`,
+      ],
+      [
+        "cp of a held variable past a PS4 prompt reading a file a quoted heredoc wrote",
+        `${READS}; cat > r3p <<'E'\n${SETS}\nE\nsetopt promptsubst; read -r l < r3p; PS4="$l"; set -x; true; set +x; cp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a select loop's prompt run under promptsubst",
+        `${READS}; setopt promptsubst; select v in a; do PS4="$REPLY"; break; done <<'E'\n${SETS}\nE\nset -x; true; set +x; cp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a PROMPT4 prompt whose quoted heredoc body it runs under promptsubst",
+        `${READS}; setopt promptsubst; read -r l <<'E'\n${SETS}\nE\nPROMPT4="$l"; set -x; true; set +x; cp g "$X"`,
+      ],
     ],
   },
 ]
