@@ -331,7 +331,7 @@ var oneWord = (written) => {
   const plain = ONE_WORD.exec(written);
   return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "");
 };
-var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?:(?::?[-+=?]|[#%]{1,2}|\/{1,2})[^}]*)?\}|\(.*\))|`.*`)$/s;
+var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?:(?::?[-+=?]|[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
@@ -800,8 +800,11 @@ function word(lx) {
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
       const written = src.slice(from, lx.i);
-      if (marked(text.value) && !written.startsWith("$(("))
-        merge(out, { splits: oneWord(written) ? "sh" : "always", value: "" });
+      if (marked(text.value))
+        merge(out, {
+          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
+          value: ""
+        });
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir3();
       lx.i++;

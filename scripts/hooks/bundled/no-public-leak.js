@@ -6987,6 +6987,14 @@ var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "ksh", "sh", "tcsh"]);
 var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|\bread\b[^;&|\n]*\s-[A-Za-z]*[aA]|\b(?:declare|export|float|integer|local|readonly|typeset)\b[^;&|\n]*\s[-+][A-Za-z]*[aA]/;
+var zshSplits = (line) => {
+  if (ZSH_SPLITS.test(line))
+    return true;
+  const joined = line.replace(/[\\'"]/g, "");
+  const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
+  const rest = joined.replace(expansion, " ");
+  return [...joined.matchAll(expansion)].some(([, name]) => new RegExp(`(?<![\\w$])${name}(?!\\w)`).test(rest));
+};
 var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
 var ZSH_ARRAYS = new Set([
   "argv",
@@ -7017,7 +7025,7 @@ var oneWord = (written) => {
   const plain = ONE_WORD.exec(written);
   return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "");
 };
-var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?:(?::?[-+=?]|[#%]{1,2}|\/{1,2})[^}]*)?\}|\(.*\))|`.*`)$/s;
+var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?:(?::?[-+=?]|[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
@@ -7496,8 +7504,11 @@ function word(lx) {
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
       const written = src.slice(from, lx.i);
-      if (marked(text.value) && !written.startsWith("$(("))
-        merge2(out, { splits: oneWord(written) ? "sh" : "always", value: "" });
+      if (marked(text.value))
+        merge2(out, {
+          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
+          value: ""
+        });
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir2();
       lx.i++;
@@ -8157,7 +8168,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
   const { inline, operand } = shellOperand(args, name);
-  const splits = (script) => SPLITTERS.has(name) || name === "zsh" && (ZSH_SPLITS.test(script) || args.some((a) => /^[-+]/.test(a.value) && a.value !== "-c"));
+  const splits = (script) => SPLITTERS.has(name) || name === "zsh" && (zshSplits(script) || args.some((a) => /^[-+]/.test(a.value) && a.value !== "-c"));
   if (operand && inline) {
     let script = operand.value;
     if (xargs?.replace && script.includes(xargs.replace)) {

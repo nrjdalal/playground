@@ -96,7 +96,7 @@ export type Env = {
   // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
   oldFrom?: string[]
   process: Record<string, string | undefined>
-  // Set where an unquoted plain parameter may split into words (`Word.splits`'s `sh`): a script bash, csh, dash, ksh, sh or tcsh runs, a zsh line or run that may set an option or make an array (`ZSH_SPLITS`), and every line a runner the hook cannot name may hand to sh
+  // Set where an unquoted plain parameter may split into words (`Word.splits`'s `sh`): a script bash, csh, dash, ksh, sh or tcsh runs, a zsh line or run that may set an option, make an array or name a parameter it expands (`zshSplits`), and every line a runner the hook cannot name may hand to sh
   splits?: boolean
   vars: Map<string, Text>
 }
@@ -540,8 +540,18 @@ export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh
 // The shells that split an unquoted parameter into words; zsh keeps one word unless the line may change that (`ZSH_SPLITS`)
 const SPLITTERS = new Set(["bash", "csh", "dash", "ksh", "sh", "tcsh"])
 // A zsh line that may make an unquoted plain parameter several words: one that sets an option (setopt, unsetopt, emulate, the options array, set's -o, +o, -y or -A) or makes an array (an `X=(` or `X+=(` assignment, read's or a declaring builtin's -a or -A, mapfile, readarray, zparseopts)
-export const ZSH_SPLITS =
+const ZSH_SPLITS =
   /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|\bread\b[^;&|\n]*\s-[A-Za-z]*[aA]|\b(?:declare|export|float|integer|local|readonly|typeset)\b[^;&|\n]*\s[-+][A-Za-z]*[aA]/
+// Whether a zsh line may make an unquoted plain parameter several words: it may set an option or make an array (`ZSH_SPLITS`), or it names a parameter it expands other than by expanding it, since a builtin `ZSH_SPLITS` does not list may fill that name as an array
+export const zshSplits = (line: string): boolean => {
+  if (ZSH_SPLITS.test(line)) return true
+  const joined = line.replace(/[\\'"]/g, "")
+  const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g
+  const rest = joined.replace(expansion, " ")
+  return [...joined.matchAll(expansion)].some(([, name]) =>
+    new RegExp(`(?<![\\w$])${name}(?!\\w)`).test(rest),
+  )
+}
 // An unquoted expansion zsh reads as one word unless the line splits it (`Text.splits`'s `sh`): a plain parameter by name or digit, braced or not, but one of zsh's own arrays (`ZSH_ARRAYS`)
 const ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/
 // The arrays zsh sets or ties itself, each several words unquoted (zsh 5.9's zshparam(1) and zshmodules(1)'s zsh/parameter)
@@ -577,7 +587,7 @@ const oneWord = (written: string): boolean => {
 }
 // A double-quoted expansion every shell reads as one word: a plain parameter, one with an operator after its name (a default, a pattern cut, a replacement), arithmetic, a command substitution or a backtick; a zsh flag, a subscript, `$@` or `$*` is none
 const QUOTED_ONE_WORD =
-  /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?:(?::?[-+=?]|[#%]{1,2}|\/{1,2})[^}]*)?\}|\(.*\))|`.*`)$/s
+  /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?:(?::?[-+=?]|[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/
 // The script names a shell or a source reads stdin through
 const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
@@ -1116,9 +1126,12 @@ function word(lx: Lexer): Word {
       merge(out, text)
       if (GLOB_CHARS.test(text.value)) out.glob = true
       const written = src.slice(from, lx.i)
-      // arithmetic gives one number; a plain parameter splits only where the shell splits one
-      if (marked(text.value) && !written.startsWith("$(("))
-        merge(out, { splits: oneWord(written) ? "sh" : "always", value: "" })
+      // a plain parameter or arithmetic splits only where the shell splits one
+      if (marked(text.value))
+        merge(out, {
+          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
+          value: "",
+        })
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir()
       lx.i++
@@ -2013,7 +2026,7 @@ async function shell(
   const splits = (script: string) =>
     SPLITTERS.has(name) ||
     (name === "zsh" &&
-      (ZSH_SPLITS.test(script) || args.some((a) => /^[-+]/.test(a.value) && a.value !== "-c")))
+      (zshSplits(script) || args.some((a) => /^[-+]/.test(a.value) && a.value !== "-c")))
   if (operand && inline) {
     let script = operand.value
     if (xargs?.replace && script.includes(xargs.replace)) {

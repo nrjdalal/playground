@@ -37,7 +37,7 @@ import {
   type Visit,
   withDeadline,
   type Word,
-  ZSH_SPLITS,
+  zshSplits,
 } from "./shell"
 import { held, heldWord, namings, NONE, type Steady, steadyNames, unquoted } from "./steady"
 
@@ -1073,7 +1073,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
     process: environment,
-    splits: ZSH_SPLITS.test(command),
+    splits: zshSplits(command),
     vars: new Map(),
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
