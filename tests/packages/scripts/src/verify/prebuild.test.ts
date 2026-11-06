@@ -55,6 +55,17 @@ test("bun run dev checks for a running stack, then builds the workspace packages
   )
 })
 
+// A lead's `bun run ask` once stopped on "Export named 'ANSWER_LEAD' not found in packages/config/dist/inbox.mjs", from a worktree whose dist predated that export.
+test("bun run ask and bun run thread build the workspace packages the API imports when they are unbuilt, before their entry runs", async () => {
+  const pkg = await Bun.file(join(ROOT, "package.json")).json()
+  expect(pkg.scripts.ask).toBe(
+    "bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun api/hono/src/bin/dashboard-ask.ts",
+  )
+  expect(pkg.scripts.thread).toBe(
+    "bun --no-env-file packages/scripts/src/verify/prebuild.ts api && bun api/hono/src/bin/dashboard-thread.ts",
+  )
+})
+
 test("prebuild given api reads the API's sources, and exits 0 once they are built", async () => {
   const imports = workspaceImports(await sourcesIn("api"))
   expect(imports).toContain("@packages/config/org")
@@ -520,6 +531,40 @@ test("test:file in a cloned worktree builds only the packages its files import, 
     )
     expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
     expect(log().split("\n").filter(Boolean)).toHaveLength(1)
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test("ask's and thread's command lines build a package whose dist is older than its src before their entry runs, and then build nothing", async () => {
+  const { dir, log } = clone()
+  try {
+    const pkg = join(dir, "packages/one")
+    mkdirSync(join(pkg, "dist"))
+    mkdirSync(join(pkg, "src"))
+    writeFileSync(join(pkg, "src/index.ts"), "export const one = 1\n")
+    writeFileSync(join(pkg, "dist/index.mjs"), "export const one = 1\n")
+    utimesSync(join(pkg, "dist/index.mjs"), 1000, 1000)
+    symlinkSync(pkg, join(dir, "node_modules/@packages/one"))
+    mkdirSync(join(dir, "api/hono/src/bin"))
+    const scripts = (await Bun.file(join(ROOT, "package.json")).json()).scripts
+    const { PLAYGROUND_REPO: _, ...env } = process.env
+    for (const name of ["ask", "thread"]) {
+      writeFileSync(
+        join(dir, `api/hono/src/bin/dashboard-${name}.ts`),
+        `import { appendFileSync } from "node:fs"\nimport { one } from "@packages/one"\nappendFileSync(${JSON.stringify(join(dir, "build.log"))}, "ran ${name} " + one + "\\n")\n`,
+      )
+    }
+    const run = (name: string) =>
+      Bun.spawnSync(["bash", "-c", scripts[name]], { cwd: dir, env: { ...env, NODE_ENV: "test" } })
+        .exitCode
+    for (const name of ["ask", "ask", "thread"]) expect(run(name)).toBe(0)
+    expect(log().split("\n").filter(Boolean)).toEqual([
+      "run build --filter=@packages/one --output-logs=errors-only NODE_ENV=production SKIP_ENV_VALIDATION=true",
+      "ran ask 1",
+      "ran ask 1",
+      "ran thread 1",
+    ])
   } finally {
     rmSync(dir, { force: true, recursive: true })
   }

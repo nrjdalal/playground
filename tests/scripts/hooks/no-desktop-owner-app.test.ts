@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { readFileSync } from "node:fs"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -254,10 +255,10 @@ describe("passes", () => {
 describe("a bun run ask/thread note reads as data only from the main checkout", () => {
   const askNote = `bun run ask x "note; agent-desktop 1.0 ok"`
   const threadNote = `bun run thread title t1 "note; agent-desktop 1.0 ok"`
-  const GOOD = {
-    ask: "bun api/hono/src/bin/dashboard-ask.ts",
-    thread: "bun api/hono/src/bin/dashboard-thread.ts",
-  }
+  const { scripts } = JSON.parse(
+    readFileSync(join(import.meta.dir, "../../../package.json"), "utf8"),
+  )
+  const GOOD = { ask: scripts.ask, thread: scripts.thread }
   const gitc = (dir: string, ...args: string[]) =>
     Bun.spawnSync([
       "git",
@@ -339,6 +340,15 @@ describe("a bun run ask/thread note reads as data only from the main checkout", 
     const bad = await makeMain("ndo-bad", { ask: "echo hi", thread: "agent-desktop launch Slack" })
     expect(await withMain(bad, askNote, bad)).toContain("no-desktop-owner-app hook refused")
     expect(await withMain(bad, threadNote, bad)).toContain("no-desktop-owner-app hook refused")
+  })
+
+  test("stays refused where the main checkout's package.json runs the entry with no prebuild", async () => {
+    const bare = await makeMain("ndo-bare", {
+      ask: "bun api/hono/src/bin/dashboard-ask.ts",
+      thread: "bun api/hono/src/bin/dashboard-thread.ts",
+    })
+    expect(await withMain(bare, askNote, bare)).toContain("no-desktop-owner-app hook refused")
+    expect(await withMain(bare, threadNote, bare)).toContain("no-desktop-owner-app hook refused")
   })
 
   test("stays refused where the Playground entry file is absent", async () => {
