@@ -54,7 +54,7 @@ How the Dashboard shows each role, how a session is named and when a dev stack r
   The model and effort of a dispatcher, the Assistant and the hosted session (the one the Dashboard runs on the Agent SDK) are the owner's pick in the menu left of Send in that session's Dashboard composer.
   Any other session's model or effort changes when a lead starts or resumes it with spawn.sh's `--model` or `--effort`, on the owner's word relayed through the dispatcher in the **override** shape (SESSIONS.md).
   The hosted session's permission mode is the owner's pick in its composer's mode menu, while approvals are on.
-  Any other session's permission mode and settings stay as the factory's settings set them, and a change to them is a PR to those settings, until the Dashboard control on a session's row lands (the issue "every step that needs the owner is one GUI action").
+  Any other session's permission mode and settings stay as spawn.sh's launch flags and the factory's settings set them, and a change to them is a PR to those, until the Dashboard control on a session's row lands (the issue "every step that needs the owner is one GUI action").
 
 ## Standing rules
 
