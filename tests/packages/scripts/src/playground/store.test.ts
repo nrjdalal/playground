@@ -444,6 +444,28 @@ describe("playground ext", () => {
     expect((await ext(at, ["which"])).code).toBe(2)
   })
 
+  test("show --rev of a proposal beside an accepted copy prints the proposal's body and its state", async () => {
+    const at = folder("show-rev")
+    const put = async (body: string, role?: string) =>
+      JSON.parse(
+        (await ext(at, ["put", "tester", "doc", "notes", "-", "--reason", "r"], body, role)).out,
+      ) as { rev: string; state: string }
+    const first = await put("accepted\n")
+    const accept = await ext(at, ["accept", "tester", "doc", "notes", first.rev, "--reason", "r"])
+    const accepted = { rev: accept.out.split(" ")[1]!, state: accept.out.split(" ").at(-1) }
+    const proposed = await put("proposed\n", "worker")
+    expect([accepted.state, proposed.state]).toEqual(["accepted", "proposed"])
+    const show = async (rev: string) =>
+      JSON.parse((await ext(at, ["show", "tester", "doc", "notes", "--rev", rev])).out)
+    expect(await show(proposed.rev)).toMatchObject({
+      content: { body: "proposed\n" },
+      state: "proposed",
+    })
+    expect(await show(accepted.rev)).toMatchObject({
+      content: { body: "accepted\n" },
+      state: "accepted",
+    })
+  })
   test("search finds the words in accepted items, and diff shows an item's change between two commits", async () => {
     const at = folder("search")
     writeFileSync(join(scratch, "one.json"), '["first"]')
