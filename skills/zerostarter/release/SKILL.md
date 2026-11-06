@@ -104,7 +104,7 @@ bun run release:notes vX.Y.W vX.Y.Z > /tmp/notes-vX.Y.Z.md   # vX.Y.W is the las
 gh release create vX.Y.Z --verify-tag --latest --notes-file /tmp/notes-vX.Y.Z.md
 ```
 
-When a guard refuses the notes for a contributor's name or login, delete that contributor's line from the file, or the whole Contributors section when none passes, and create the release again.
+When a guard refuses the notes for a contributor's name, as no-public-leak refuses a person's name on a public repo, cut that line to `- @<login>`; when it refuses the login, delete the line, or the whole Contributors section when none passes; then create the release again.
 Done when `gh release list -L 1` shows `vX.Y.Z` marked Latest, and its page opens with the compare link.
 
 ## 5. Pull the main checkout
