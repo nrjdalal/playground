@@ -6,6 +6,9 @@ const BUILT = `$(printf '%s/.play%sground/exten%ssions/.no-such-folder/x' "$HOME
 // The setup each row shares: X held at a scratch path, and N set to X's name by a substitution the hook cannot read, so the P-flag line sets X unseen.
 const HELD = `X=/tmp/a; N=$(printf '\\x58')`
 
+// The same setup on a line of plain words alone, N read from a file, so only the part under test takes the line off the scan's list.
+const READS = `X=/tmp/a; read N < /tmp/n`
+
 // The P-flag line that sets X past every quoted-heredoc shape below.
 const SETS = `: \${(P)N::=${BUILT}}`
 
@@ -94,6 +97,62 @@ export const groups: Group[] = [
       [
         "cp of a held variable past a fake quoted heredoc inside a real one whose operator a backslash-newline splits",
         `${HELD}; cat <\\\n<'Q'\n: <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc after a comment-like word inside arithmetic substitution",
+        `${HELD}; false && : $(( 1 # )) <<'Q'\n)) <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc after a comment-like word inside an arithmetic command",
+        `${HELD}; false && (( 1 # )) <<'Q'\n)) <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc after a double quote inside arithmetic",
+        `${HELD}; false && : $(( " )) <<'Q'\n" )) <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc after a single quote inside arithmetic",
+        `${HELD}; false && : $(( ' )) <<'Q'\n' )) <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc after a hash inside a glob group",
+        `${HELD}; false && echo a(#x) <<'Q'\n) <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc after a glob qualifier's hash",
+        `${HELD}; false && echo *(#q.) <<'Q'\n) <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc after a hash inside a condition's regex group",
+        `${HELD}; false && [[ a =~ (#) ]] <<'Q'\n) ]] <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc after a hash inside a case pattern's parentheses",
+        `${HELD}; case a in (#) ;; esac <<'Q'\n) <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc after a spaced hash inside a condition's regex group",
+        `${HELD}; false && [[ a =~ ( #) ]] <<'Q'\n) ]] <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc after a spaced hash inside a case pattern's parentheses",
+        `${HELD}; case a in ( #) ;; esac <<'Q'\n) <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc fed to a command a variable names",
+        `${READS}; Y=source; $Y /dev/stdin <<'1'\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc fed to a command a braced variable names after a redirection",
+        `${READS}; Y=source; 2>/dev/null \${Y} /dev/stdin <<'1'\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc fed to a command a variable names after if",
+        `${READS}; Y=source; if $Y /dev/stdin <<'1'\n${SETS}\n1\nthen :; fi; cp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted delimiter inside a parameter substitution",
+        `${READS}; : \${V/x/<<'1' }\n${SETS}\n1\ncp g "$X"`,
       ],
     ],
   },
