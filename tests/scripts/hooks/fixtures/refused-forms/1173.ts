@@ -54,6 +54,26 @@ export const groups: Group[] = [
         "rsync with a relative batch-only file attached after a cd to a variable",
         `cd "$D"; rsync -a --only-write-batch=x /tmp/a /tmp/b`,
       ],
+      [
+        "macOS rsync with a relative partial folder by a shortened long option after a cd to a variable",
+        `cd "$D"; /usr/bin/rsync -a --partial-d=x /tmp/a /tmp/b`,
+      ],
+      [
+        "rsync with a relative temp folder by a shortened long option after a cd to a variable",
+        `cd "$D"; rsync -a --te=x /tmp/a /tmp/b`,
+      ],
+      [
+        "rsync with a relative backup folder by a shortened long option after a cd to a variable",
+        `cd "$D"; rsync -a --backup-d=x /tmp/a /tmp/b`,
+      ],
+      [
+        "rsync with a relative batch file by a shortened long option after a cd to a variable",
+        `cd "$D"; rsync -a --wr=x /tmp/a /tmp/b`,
+      ],
+      [
+        "rsync with a relative batch-only file by a shortened long option after a cd to a variable",
+        `cd "$D"; rsync -a --onl=x /tmp/a /tmp/b`,
+      ],
     ],
   },
 ]

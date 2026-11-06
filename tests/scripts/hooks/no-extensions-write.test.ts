@@ -1753,6 +1753,18 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "rsync with a filter rule holding a T after a cd to a variable",
       `cd "$X"; rsync -a -f'+ Tx' /tmp/a /tmp/b`,
     ],
+    [
+      "rsync with an absolute partial folder by a shortened long option after a cd to a variable",
+      `cd "$X"; rsync -a --partial-d=/tmp/p /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a log format by a shortened long option after a cd to a variable",
+      `cd "$X"; rsync -a --log-file-f=x /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a relative link folder it only reads after a cd to a variable",
+      `cd "$X"; rsync -a --link-dest=prev /tmp/a /tmp/b`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
