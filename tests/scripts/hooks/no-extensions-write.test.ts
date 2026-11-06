@@ -1641,6 +1641,8 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["GNU ln with a suffix from a variable", `gln -S "$B" /tmp/src /tmp/dst`],
     ["GNU cp with a long suffix from a variable", `gcp --suffix "$B" x /tmp/y`],
     ["git commit with a variable git does not read from a variable", `FOO="$F" git commit -m x`],
+    ["GNU mkdir with a mode from a variable after its first operand", `gmkdir /tmp/x -m "$M"`],
+    ["macOS install of folders past a destdir from a variable", `install -d -D "$R" /tmp/a`],
     [
       "GNU cp by its gnubin path of a variable after the end of options",
       `/opt/homebrew/opt/coreutils/libexec/gnubin/cp -- "$S" /tmp/y`,

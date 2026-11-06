@@ -143,6 +143,29 @@ export const groups: Group[] = [
       ["macOS install to a variable past a -m after its first operand", `install x /tmp/y -m "$D"`],
       ["GNU install to a variable past its strip flag", `ginstall x --strip "$D"`],
       ["macOS install of a folder from a variable past its safe-copy flag", `install -d -S "$D"`],
+      [
+        "macOS install of a folder from a variable past a destdir ending in g",
+        `install -d -Dxg "$D"`,
+      ],
+      ["macOS install of a folder from a variable past a hash ending in g", `install -d -hg "$D"`],
+      [
+        "macOS install of a folder from a variable past link flags ending in g",
+        `install -d -lg "$D"`,
+      ],
+      ["macOS install of a folder from a variable past tags ending in g", `install -d -Tg "$D"`],
+      ["macOS install with a metalog from a variable", `install -M "$D" x /tmp/y`],
+      [
+        "macOS install with a relative metalog after a cd to a variable",
+        `cd "$D"; install -Mlog x /tmp/y`,
+      ],
+      [
+        "GNU mkdir of a variable after its first operand under POSIXLY_CORRECT in the call",
+        `POSIXLY_CORRECT=1 gmkdir /tmp/x -m "$D"`,
+      ],
+      [
+        "GNU touch of a variable after its first operand under POSIXLY_CORRECT exported",
+        `export POSIXLY_CORRECT=1; gtouch /tmp/x -r "$D"`,
+      ],
     ],
   },
   {
