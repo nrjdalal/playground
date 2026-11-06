@@ -350,6 +350,25 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
         expect(r.err).toContain(CANNOT)
       })
 
+    // #1152: a step that runs a chain shell with its own -c script holds a chain this reads only one level of, so it reads as one it cannot read
+    for (const script of [
+      'echo hi; sh -c "docker build ."',
+      'echo hi; D=docker; bash -c "$D build ."',
+      'echo hi; nice sh -c "docker build ."',
+      'echo hi; sh -ce "docker build ."',
+    ])
+      test(`a nested chain: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CANNOT)
+      })
+
+    test("while a nested chain that names no docker runs as before", async () => {
+      const r = await run(["sh", "-c", `echo hi; sh -c 'touch "$MARKER"'`])
+      expect(r.code).toBe(0)
+      expect(r.ran).toBe(true)
+    })
+
     // a command substitution that reads portless's URL starts no container, so it keeps its lane
     test("while a portless URL read in a substitution keeps its lane", async () => {
       const m = dockerMachine()
