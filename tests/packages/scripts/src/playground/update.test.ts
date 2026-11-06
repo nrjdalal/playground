@@ -497,6 +497,7 @@ test("a real update whose swap fails at its git add leaves the checkout at HEAD,
   }
   const bundled = join("scripts", "hooks", "bundled")
   write(join(origin, "scripts", "link-skills.sh"), "true\n")
+  write(join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"), "\n")
   write(join(origin, bundled, "no-raw-delete.js"), "export const old = 1\n")
   git(root, "init", "-q", "-b", "main", origin)
   git(origin, "add", ".")
