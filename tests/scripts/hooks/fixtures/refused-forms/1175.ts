@@ -208,6 +208,51 @@ export const groups: Group[] = [
       ],
     ],
   },
+  // The round-3 review's probe: a group's input redirect wins over a pipe into the group, and a queued job fed through a `>&` duplication is fed
+  {
+    folders: ["checkout", "process data folder", "process home", "process worktree"],
+    guards: ["no-raw-delete"],
+    rows: () => [
+      [
+        "a recursive delete in a brace group's here-string, a pipe into the group, to bash",
+        `echo ls | { bash; } <<< '${D}'`,
+      ],
+      [
+        "a recursive delete in a subshell's here-string, a pipe into the subshell, to bash",
+        `echo ls | ( bash ) <<< '${D}'`,
+      ],
+      [
+        "a recursive delete in a loop's here-string, a pipe into the loop, to bash",
+        `echo ls | while read l; do bash; done <<< '${D}'`,
+      ],
+      [
+        "a recursive delete in a brace group's here-string, a pipe into the group, to sudo's root shell",
+        `echo ls | { sudo -s; } <<< '${D}'`,
+      ],
+      [
+        "a recursive delete for at on descriptor 3 duplicated onto descriptor 0 by >&",
+        `at now 3<<< '${D}' 0>&3`,
+      ],
+      [
+        "a recursive delete for batch on descriptor 3 duplicated onto descriptor 0 by >&",
+        `batch 3<<< '${D}' 0>&3`,
+      ],
+    ],
+  },
+  {
+    folders: ["process home"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a removal in a brace group's here-string, a pipe into the group, to bash",
+        `echo ls | { bash; } <<< '${D}'`,
+      ],
+      [
+        "a removal in a subshell's here-string, a pipe into the subshell, to bash",
+        `echo ls | ( bash ) <<< '${D}'`,
+      ],
+    ],
+  },
   // The round-2 review's probe: a here-string holding an echo substitution keeps the rest of its text readable, as on canary
   {
     folders: ["checkout", "process data folder", "process home", "process worktree"],
