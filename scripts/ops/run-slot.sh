@@ -662,7 +662,7 @@ set_flags() { local w; for w in "$@"; do case "$w" in pipefail) ;; [-+] | [-+]*[
 bare_dir() { local d=$1; while [ ${#d} -gt 1 ] && [ "${d%/}" != "$d" ]; do d=${d%/}; done; printf '%s' "$d"; }
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
-# Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form a reading of cd, ~ or env let through): a git add, commit or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add, commit or push after it or as `git -C <that kind of folder>`, `bun run precommit:light` in run-slot's own repo, and a script's `set` of shell options, each word plain. CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
+# Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form a reading of cd, ~ or env let through): a git add, commit, merge or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add, commit, merge or push after it or as `git -C <that kind of folder>`, `bun run precommit:light` in run-slot's own repo, and a script's `set` of shell options, each word plain. CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
 CHAIN_SAFE="" CHAIN_BAD=""
 chain_safe() {
   local line words cdir="" folder verb rest=()
@@ -691,6 +691,7 @@ chain_safe() {
     case "$verb" in
       add) plain ${rest[@]+"${rest[@]}"} && add_flags ${rest[@]+"${rest[@]}"} || return 1 ;;
       commit) commit_words ${rest[@]+"${rest[@]}"} || return 1 ;;
+      merge) merge_words ${rest[@]+"${rest[@]}"} || return 1 ;;
       push) plain ${rest[@]+"${rest[@]}"} || return 1 ;;
       *) return 1 ;;
     esac
@@ -698,13 +699,25 @@ chain_safe() {
   done < <(chain_steps "$@")
   CHAIN_BAD=""
 }
-# a chain's lane: `commit` when it commits or pushes and chain_safe takes every step, so it ends in seconds as a bare commit does (4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue); `general <step>` for one that commits or pushes with a step outside that list, which run-slot says, so its worker can run the commit on its own; else nothing
+# a git merge's words: --no-edit, --ff, --ff-only or --no-ff and one or more plain refs, since a merge runs commit-msg alone, never pre-commit's build, and any other option (-s, -X, -m) is off the list
+merge_words() {
+  local w refs=""
+  for w in "$@"; do
+    case "$w" in
+      --no-edit | --ff | --ff-only | --no-ff) ;;
+      -*) return 1 ;;
+      *) plain "$w" || return 1; refs=1 ;;
+    esac
+  done
+  [ -n "$refs" ]
+}
+# a chain's lane: `commit` when it commits, merges or pushes and chain_safe takes every step, so it ends in seconds as a bare commit does (4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue); `general <step>` for one that commits, merges or pushes with a step outside that list, which run-slot says, so its worker can run the commit on its own; else nothing
 chain_lane() {
   local line words commits=""
   while IFS= read -r line; do
     IFS=$'\x1f' read -ra words <<< "$line"
     [ ${#words[@]} -gt 0 ] || continue
-    case "$(git_verb "${words[@]}")" in commit|push) commits=1 ;; esac
+    case "$(git_verb "${words[@]}")" in commit|merge|push) commits=1 ;; esac
   done < <(chain_steps "$@")
   [ -n "$commits" ] || return
   if chain_safe "$@"; then echo commit; else echo "general $(shown "$CHAIN_BAD")"; fi
@@ -835,7 +848,7 @@ runs_program() {
 }
 # a commit whose pre-commit build runs next build goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56): a git commit but -n, in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every one is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one; and, failing closed, a git run with a word outside these lists, or a verb that is an alias
 heavy_build() {
-  local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir=""
+  local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir="" merged=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with what its git add steps stage, and when an add runs in another folder than a commit, whose paths it would misread
   first=$(first_word "$@")
   case " $CHAIN_SHELLS " in
@@ -853,7 +866,10 @@ heavy_build() {
         while IFS= read -r line; do
           IFS=$'\x1f' read -ra words <<< "$line"
           [ ${#words[@]} -gt 0 ] || continue
+          # an add or commit after a merge counts as a build, since a merge that stops on a conflict leaves the other side's files for them to stage
+          case "${words[3]}:$merged" in add:1 | commit:1) CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0 ;; esac
           case "${words[3]}" in
+            merge) merged=1 ;;
             add) adir=${adir:-${words[2]}}; [ "$adir" = "${words[2]}" ] && chain_add "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0; } ;;
             commit) { [ -z "$adir" ] || [ "$adir" = "${words[2]}" ]; } && ! heavy_build "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0; } ;;
           esac
@@ -984,7 +1000,7 @@ if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
   WHY=$(chain_lane "$@")
   case "$WHY" in
     "general "*)
-      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since \`${WHY#general }\` is not a form the commit lane takes (git add, commit or push in run-slot's folder, or after a cd or as git -C to an absolute folder in the repo, and bun run precommit:light); run the commit as one of those to take the commit lane" >&2
+      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since \`${WHY#general }\` is not a form the commit lane takes (git add, commit, push, or merge with --no-edit, --ff, --ff-only or --no-ff, in run-slot's folder, or after a cd or as git -C to an absolute folder in the repo, and bun run precommit:light); run the commit or merge as one of those to take the commit lane, or run an off-list merge and its push as two calls" >&2
       rlog why "general: \`${WHY#general }\` is outside the commit lane's forms" ;;
   esac
 fi
