@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 
 // The router's auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets; any secret serves requests that carry no session. Set before the router loads.
 process.env.BETTER_AUTH_SECRET ||= "inbox-router-test-secret-not-for-use-anywhere"
@@ -122,7 +123,7 @@ describe("marking updates read", () => {
   })
 })
 
-describe("an Approve the dashboard carries out: an accept, an apps change or a grant (PG-658)", () => {
+describe("an Approve the dashboard carries out: an accept, an apps change, a grant or a guard setting (PG-658, PG-1090)", () => {
   // the same answer such a card's Approve posts; past every guard it runs the decision's step (stepOf), so each refusal below is one that runs nothing
   const approve = (headers: Record<string, string>, server?: ReturnType<typeof peer>) =>
     inboxRouter.request(
@@ -146,6 +147,16 @@ describe("an Approve the dashboard carries out: an accept, an apps change or a g
   })
 
   test("is refused with no session, so only the signed-in owner's click reaches it", async () => {
+    expect((await approve({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
+  })
+
+  test("a guard setting's Approve takes the same guards, and the route hands it this machine's data folder alone", async () => {
+    const source = await Bun.file(
+      join(import.meta.dir, "../../../../../api/hono/src/routers/inbox.ts"),
+    ).text()
+    expect(source).toContain("settings: dataDir(),")
+    expect((await approve({ origin: "http://evil.localhost" }, peer("127.0.0.1"))).status).toBe(403)
+    expect((await approve({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
     expect((await approve({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
   })
 })

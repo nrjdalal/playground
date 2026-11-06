@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { GUARD_SETTING_KEYS } from "../../../packages/settings/src/guard-keys"
 import { check, GUARD_KEYS, guarded } from "../../../scripts/hooks/no-extensions-write"
 import { overBaseline, stepsOf } from "./pace"
 
@@ -1867,6 +1868,25 @@ describe("the gated keys are every key the guards read", () => {
     expect(await read("scripts/spawn.sh")).toContain("setting_text paths.codeRoot")
     expect(GUARD_KEYS.has("paths.codeRoot")).toBe(true)
   })
+})
+
+// PG-1090: the Inbox's guard decision takes the keys GUARD_SETTING_KEYS names, so the two lists are one, and a session's own write of each stays refused.
+describe("a guard decision's keys are the keys the hook gates (PG-1090)", () => {
+  test("GUARD_KEYS holds GUARD_SETTING_KEYS, no more and no fewer", () => {
+    expect([...GUARD_KEYS].sort()).toEqual([...GUARD_SETTING_KEYS].sort())
+  })
+
+  test.each([...GUARD_SETTING_KEYS])(
+    "a session's own settings set and reset of %s are refused",
+    async (key) => {
+      expect(
+        await bash(`playground settings set ${key} '{}' --scope acme-test --reason r`),
+      ).toContain("no-extensions-write hook refuses")
+      expect(await bash(`playground settings reset ${key} --scope acme-test --reason r`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+    },
+  )
 })
 
 describe("a refusal for a value the hook does not hold names it in readable text", () => {
