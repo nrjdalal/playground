@@ -6741,7 +6741,6 @@ var ROOT_SHELLS = new Map([
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
 var BARE_ROOT = new Set(["pkexec"]);
-var BARE_EXITS = new Set(["--help", "--version"]);
 function stdinShell(cmd) {
   cmd = spreadSplit(cmd);
   const parsed = parse3(cmd);
@@ -6857,7 +6856,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   }
   if (first && wrappers.length)
     return "root";
-  if (!first && wrappers.some((wrapper) => BARE_ROOT.has(wrapper)) && !before.some((w) => !w.quoted && BARE_EXITS.has(w.value)))
+  if (!first && wrappers.some((wrapper) => BARE_ROOT.has(wrapper)))
     return "root";
   return fed && first ? "shell" : undefined;
 }

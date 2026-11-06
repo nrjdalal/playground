@@ -283,9 +283,8 @@ const ROOT_SHELLS = new Map([
   ["pkexec", new Set<string>()],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
-// The privilege wrappers that start a root shell when no program follows them (pkexec(1): "If no program is specified, the default shell will be run")
+// The privilege wrappers that start a root shell when no program follows them (pkexec(1): "If no program is specified, the default shell will be run"); a bare `pkexec --help` or `pkexec --version` reads as one too, a refusal kept on purpose so no text canary refused as its program's stdin is newly let run
 const BARE_ROOT = new Set(["pkexec"])
-const BARE_EXITS = new Set(["--help", "--version"])
 // Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper or su among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell or su not handed a command (`sudo -s`, `nice doas -s`, `su root`, `busybox su`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; "code" for an interpreter of another language (`python3`, `node18`) that a pipe or xargs feeds, whatever its options or inline program, unless it runs a script file or a module of its own; a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): StdinKind | undefined {
   cmd = spreadSplit(cmd)
@@ -412,13 +411,7 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
   }
   // a program the hook cannot read, behind a wrapper, may be a root shell
   if (first && wrappers.length) return "root"
-  // `--help` and `--version` print and exit, starting no shell
-  if (
-    !first &&
-    wrappers.some((wrapper) => BARE_ROOT.has(wrapper)) &&
-    !before.some((w) => !w.quoted && BARE_EXITS.has(w.value))
-  )
-    return "root"
+  if (!first && wrappers.some((wrapper) => BARE_ROOT.has(wrapper))) return "root"
   // a program the hook cannot read (`$SHELL`, `"$X"`) may be a shell
   return fed && first ? "shell" : undefined
 }

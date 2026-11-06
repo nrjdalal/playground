@@ -299,7 +299,6 @@ var ROOT_SHELLS = new Map([
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
 var BARE_ROOT = new Set(["pkexec"]);
-var BARE_EXITS = new Set(["--help", "--version"]);
 var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
 var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var BODY_FED = new WeakSet;
