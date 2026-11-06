@@ -1007,7 +1007,7 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
     // the Archive shelf's one click is each card's own Dismiss, a waiting ask included; Done's marks read and tells no poster
     const bulkDismiss = source.slice(source.indexOf("onDismiss={(ids) =>"))
     expect(bulkDismiss).toMatch(
-      /all\.each\s+\? dismissEach\(shelf\.filter\(\(item\) => ids\.includes\(item\.id\)\)\)\s+: dismissItems\(ids\),/,
+      /row\.bulk\.each\s+\? dismissEach\(shelf\.filter\(\(item\) => ids\.includes\(item\.id\)\)\)\s+: dismissItems\(ids\),/,
     )
   })
 
