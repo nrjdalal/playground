@@ -1777,6 +1777,14 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "rsync with a dash-led block size after its short option after a cd to a variable",
       `cd "$X"; rsync -a -B -1 /tmp/a /tmp/b`,
     ],
+    [
+      "rsync with its partial flag, a prefix of its partial folder option, after a cd to a variable",
+      `cd "$X"; rsync -a --partial --progress /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with its backup flag, a prefix of its backup folder option, after a cd to a variable",
+      `cd "$X"; rsync -a --backup --suffix=.bak /tmp/a /tmp/b`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
