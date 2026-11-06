@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { extname, join } from "node:path"
 
+import { withOwn } from "@packages/config/accounts"
 import {
   ANSWER_LEAD,
   type AnswerPayload,
@@ -20,6 +21,7 @@ import {
   GUARD_SETTING_KEYS,
   itemKeySchema,
   KINDS,
+  readSetting,
   resetSetting,
   SCOPE_NAME,
   setSetting,
@@ -32,7 +34,7 @@ import { fileNameOf } from "../download"
 import { KEYCHAIN_ITEM_NAMES, keychainSpec, PLAYGROUND_SERVICE } from "../keychain-items"
 import { ID_PATTERN } from "./attachments"
 
-// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, an apps change's, a grant's or a guard setting's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
+// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, an apps change's, a grant's, a guard setting's or an own account change's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
 
 const LIMITS = { line: 200, name: 120, prs: 50, text: 4000 }
 
@@ -325,6 +327,38 @@ const guardSchema = z
 
 export type InboxGuard = z.infer<typeof guardSchema>
 
+// One Claude account's own flag, set or cleared from the Inbox in place of Settings > Accounts' switch: key is the row's email in usage.accounts at scope, own the flag Approve leaves it with. Only that row changes; a key that names no Claude row there is refused as it is posted (ownRefusal).
+const ownSchema = z.strictObject({
+  key: z.email().max(LIMITS.name),
+  own: z.boolean(),
+  scope: extScopeSchema,
+  type: z.literal("own"),
+  why: words,
+})
+
+export type InboxOwn = z.infer<typeof ownSchema>
+
+const ACCOUNTS = "usage.accounts"
+
+// usage.accounts as it is stored at one scope: undefined when that scope sets none.
+const accountsAt = (data: string, scope: string): unknown =>
+  readSetting(data, ACCOUNTS)?.rows.find((row) => row.scope === scope)?.value
+
+// Pure: whether a stored usage.accounts value holds a Claude row with this email.
+const claudeRow = (value: unknown, key: string): Record<string, unknown> | undefined =>
+  Array.isArray(value)
+    ? (value as Record<string, unknown>[]).find(
+        (row) => (row.provider ?? "claude") === "claude" && row.email === key,
+      )
+    : undefined
+
+// Why an own card cannot be posted: no data folder to read, or no Claude row of usage.accounts at its scope with its email (a GLM row's label is never one).
+export const ownRefusal = (preview: InboxOwn, data?: string): string | undefined => {
+  if (!data) return "This dashboard cannot read usage.accounts, so an own card is refused"
+  if (!claudeRow(accountsAt(data, preview.scope), preview.key))
+    return `${preview.key} is no Claude account in ${ACCOUNTS} at ${preview.scope}`
+}
+
 // Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 
@@ -336,7 +370,7 @@ export type KeychainRead = (item: string) => Promise<string | null>
 
 const OPTIONS_MESSAGE = `An ask offers 1 to ${MAX_OPTIONS} options, each with a label: one for a yes or no, two or more for lettered choices`
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change, a grant's System Settings pane or a guard setting, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in ELI5 / ASD-STE100, one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere. A reveal shows the owner a Keychain item's value on the owner's click instead, kept nowhere either.
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change, a grant's System Settings pane, a guard setting or an own account change, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in ELI5 / ASD-STE100, one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere. A reveal shows the owner a Keychain item's value on the owner's click instead, kept nowhere either.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
@@ -406,6 +440,7 @@ export const previewSchema = z.discriminatedUnion("type", [
   appsSchema,
   grantSchema,
   guardSchema,
+  ownSchema,
 ])
 
 const link = z
@@ -531,7 +566,7 @@ export type InboxAction = (typeof ACTIONS)[number]
 // What an answer holds: every action but Archive and Move back, which answer nothing, and Dismiss, which a waiting item records as clear.
 export type InboxChoice = Exclude<InboxAction, "archive" | "dismiss" | "unarchive">
 
-// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, listed, opened and set: what the dashboard ran on an accept's, an apps change's, a grant's and a guard setting's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
+// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, listed, opened, owned and set: what the dashboard ran on an accept's, an apps change's, a grant's, an own card's and a guard setting's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
 export type InboxAnswer = {
   accepted?: RunResult
   ackedAt?: string
@@ -547,6 +582,7 @@ export type InboxAnswer = {
   note?: string
   opened?: RunResult
   option?: number
+  owned?: RunResult
   set?: RunResult
   uploaded?: number
 }
@@ -799,6 +835,7 @@ function answerOf(
       (item.preview.type === "apps" ||
         item.preview.type === "grant" ||
         item.preview.type === "guard" ||
+        item.preview.type === "own" ||
         item.preview.type === "reveal") &&
       action === "edit"
     ) {
@@ -877,14 +914,16 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
     case "approve":
     case "edit":
       // a step the dashboard ran on Approve leaves only its close, and a grant's recheck once its pane opened (asks.md)
-      if (answer.accepted || answer.listed || answer.opened || answer.set) {
+      if (answer.accepted || answer.listed || answer.opened || answer.owned || answer.set) {
         const ran = answer.accepted
           ? { accepted: answer.accepted }
           : answer.listed
             ? { listed: answer.listed }
-            : answer.set
-              ? { set: answer.set }
-              : { opened: answer.opened! }
+            : answer.owned
+              ? { owned: answer.owned }
+              : answer.set
+                ? { set: answer.set }
+                : { opened: answer.opened! }
         return {
           ...head,
           ...comment,
@@ -1181,11 +1220,14 @@ export async function postItem(
   input: unknown,
   threadId?: string,
   now = new Date(),
+  settingsData?: string,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const parsed = inboxInputSchema.safeParse(input)
   if (!parsed.success) {
     return { code: "VALIDATION_ERROR", message: zodMessage(parsed.error), ok: false }
   }
+  const unowned = ownRefused(parsed.data, settingsData)
+  if (unowned) return unowned
   if (threadId !== undefined) {
     const [found] = await db.select({ id: thread.id }).from(thread).where(eq(thread.id, threadId))
     if (!found) return { code: "NOT_FOUND", message: `no thread ${threadId}`, ok: false }
@@ -1203,6 +1245,16 @@ export async function postItem(
   return { item: toItem(row as Row), ok: true }
 }
 
+// An own card whose key names no Claude row at its scope, refused as it is posted or edited, so the card never offers an Approve that cannot write.
+const ownRefused = (
+  input: z.infer<typeof inboxInputSchema>,
+  settingsData?: string,
+): Refused | undefined => {
+  if (input.kind !== "decision" || input.preview.type !== "own") return
+  const message = ownRefusal(input.preview, settingsData)
+  return message ? { code: "VALIDATION_ERROR", message, ok: false } : undefined
+}
+
 // Pure: an item its poster can no longer edit: done or dismissed by the owner, settled, resolved, or closed by its poster's ack.
 const closed = (item: InboxItem): boolean => {
   const answer = item.answer
@@ -1218,11 +1270,14 @@ export async function editItem(
   key: string,
   input: unknown,
   now = new Date(),
+  settingsData?: string,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const parsed = inboxInputSchema.safeParse(input)
   if (!parsed.success) {
     return { code: "VALIDATION_ERROR", message: zodMessage(parsed.error), ok: false }
   }
+  const unowned = ownRefused(parsed.data, settingsData)
+  if (unowned) return unowned
   const item = await getItem(db, key)
   if (!item) return NOT_FOUND
   if (parsed.data.from !== item.from) {
@@ -1405,12 +1460,12 @@ export async function answerItem(
       ok: false,
     }
   }
-  // a guard setting is written as the card he read shows it, so its Approve names that reading
+  // a guard setting or an own flag is written as the card he read shows it, so its Approve names that reading
   if (
     input.action === "approve" &&
     input.seen === undefined &&
     current.kind === "decision" &&
-    current.preview.type === "guard"
+    (current.preview.type === "guard" || current.preview.type === "own")
   ) {
     return {
       code: "VALIDATION_ERROR",
@@ -1436,7 +1491,7 @@ export async function answerItem(
     input.action === "dismiss"
       ? { ...checked.answer, at, dismissed: true, dismissedAt: at }
       : { ...checked.answer, at }
-  // an accept's, an apps change's, a grant's or a guard setting's Approve runs its step, so one with nothing to run it is refused before it is recorded
+  // an accept's, an apps change's, a grant's, a guard setting's or an own account change's Approve runs its step, so one with nothing to run it is refused before it is recorded
   const step =
     current.kind === "decision" && answer.choice === "approve"
       ? stepOf(current.preview, current.ref, {
@@ -1550,7 +1605,7 @@ async function archive(
   return row ? { item: toItem(row), ok: true } : CHANGED
 }
 
-// The step an Approve runs, by the decision's kind, and the answer key its result is kept under: an accept's `ext accept`, an apps change's write of the owner's list, a grant's System Settings pane, a guard setting's write at its scope; undefined for a decision whose poster carries it out, and a refusal when this dashboard has nothing to run it with.
+// The step an Approve runs, by the decision's kind, and the answer key its result is kept under: an accept's `ext accept`, an apps change's write of the owner's list, a grant's System Settings pane, a guard setting's write at its scope, an own account change's write of usage.accounts; undefined for a decision whose poster carries it out, and a refusal when this dashboard has nothing to run it with.
 function stepOf(
   preview: InboxPreview,
   ref: number,
@@ -1568,7 +1623,7 @@ function stepOf(
     settingsData?: string
   },
 ):
-  | { key: "accepted" | "listed" | "opened" | "set"; run: () => Promise<RunResult> }
+  | { key: "accepted" | "listed" | "opened" | "owned" | "set"; run: () => Promise<RunResult> }
   | { refusal: string }
   | undefined {
   if (preview.type === "accept") {
@@ -1619,7 +1674,40 @@ function stepOf(
     if (!settingsData) return { refusal: "This dashboard cannot write a guard setting" }
     return { key: "set", run: async () => guardWrite(settingsData, preview, ref, actor) }
   }
+  if (preview.type === "own") {
+    if (!settingsData) return { refusal: "This dashboard cannot write usage.accounts" }
+    return { key: "owned", run: async () => ownWrite(settingsData, preview, ref, actor) }
+  }
   return undefined
+}
+
+// Writes an own card's flag on its one row of usage.accounts at its scope as the owner's act, the list read whole and every other row put back as it was; a value that is not a list, or a row gone since the post, writes nothing.
+function ownWrite(data: string, preview: InboxOwn, ref: number, actor: string): RunResult {
+  const { key, own, scope } = preview
+  const value = accountsAt(data, scope)
+  if (!Array.isArray(value))
+    return { exitCode: 1, line: `${ACCOUNTS} at ${scope} is not a list, so nothing changed` }
+  const row = claudeRow(value, key)
+  if (!row)
+    return {
+      exitCode: 1,
+      line: `${key} is no longer in ${ACCOUNTS} at ${scope}, so nothing changed`,
+    }
+  if ((row.own === true) === own)
+    return { exitCode: 0, line: `${key} ${own ? "is" : "is not"} your own account already` }
+  const who = {
+    actor,
+    author: "owner",
+    inboxRef: ref,
+    reason: `the owner approved it in the Inbox (${itemTag(ref)})`,
+  }
+  const set = setSetting(data, { key: ACCOUNTS, scope, value: withOwn(value, key, own) }, who)
+  return set.ok
+    ? {
+        exitCode: 0,
+        line: `${key} ${own ? "is now" : "is no longer"} your own account at ${scope}`,
+      }
+    : { exitCode: 1, line: set.message }
 }
 
 // Writes a guard decision's setting into the data folder's extensions as the owner's act, the item named in its commit: its value at its scope, or no value there, which takes the key back to its default.

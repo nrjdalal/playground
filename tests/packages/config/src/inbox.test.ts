@@ -20,6 +20,14 @@ describe("choicesOf", () => {
         { permission: "accessibility", type: "grant" },
         ["Open the accessibility settings", "Not now"],
       ],
+      [
+        { key: "pat@example.com", own: true, type: "own" },
+        ["Mark pat@example.com as your own account", "Keep it as it is"],
+      ],
+      [
+        { key: "pat@example.com", own: false, type: "own" },
+        ["Unmark pat@example.com as your own account", "Keep it as it is"],
+      ],
       [{ type: "schema" }, ["Apply this schema", "Do not apply it"]],
       [{ sha: "3f9a2c1d", type: "ship" }, ["Ship 3f9a2c1 to main", "Hold the ship"]],
       [{ to: "@Merritt", type: "slack" }, ["Send it to @Merritt", "Do not send it"]],

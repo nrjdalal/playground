@@ -21,7 +21,7 @@ export const ANSWER_VERBS = [
 // What a step the dashboard ran on Approve gave: its exit code and its first line.
 const ranSchema = z.strictObject({ exitCode: z.number().int(), line: z.string() })
 
-// The line's JSON: what the owner chose, what to do next and the exact command that closes the item, which an update's done or dismiss and a card its poster already closed leave out, since nothing is left to close; a relay to the dispatcher sets relay, and a step the dashboard ran on Approve (an accept, an apps change, a grant's pane, a guard setting) rides as accepted, listed, opened or set, and a secret's results carry each sink's status, never its value.
+// The line's JSON: what the owner chose, what to do next and the exact command that closes the item, which an update's done or dismiss and a card its poster already closed leave out, since nothing is left to close; a relay to the dispatcher sets relay, and a step the dashboard ran on Approve (an accept, an apps change, a grant's pane, an own flag, a guard setting) rides as accepted, listed, opened, owned or set, and a secret's results carry each sink's status, never its value.
 export const answerPayloadSchema = z.strictObject({
   accepted: ranSchema.optional(),
   at: z.iso.datetime(),
@@ -41,6 +41,7 @@ export const answerPayloadSchema = z.strictObject({
       letter: z.string().length(1),
     })
     .optional(),
+  owned: ranSchema.optional(),
   ref: z.string().regex(/^#i\d+$/),
   relay: z.strictObject({ for: z.string().min(1), why: z.literal("poster-ended") }).optional(),
   results: z
@@ -103,6 +104,7 @@ export type ChoicePreview =
   | { type: "delete" }
   | { permission: string; type: "grant" }
   | { key: string; type: "guard"; value?: unknown }
+  | { key: string; own: boolean; type: "own" }
   | { type: "reveal" }
   | { type: "schema" }
   | { type: "secret" }
@@ -132,6 +134,10 @@ const defaultLabels = (
       return preview.value === undefined
         ? [`Take ${preview.key} back to its default`, "Keep it as it is"]
         : [`Set ${preview.key}`, "Keep it as it is"]
+    case "own":
+      return preview.own
+        ? [`Mark ${preview.key} as your own account`, "Keep it as it is"]
+        : [`Unmark ${preview.key} as your own account`, "Keep it as it is"]
     case "reveal":
       return ["Done, I have it", "I do not need it"]
     case "schema":

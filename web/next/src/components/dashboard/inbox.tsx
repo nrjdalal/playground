@@ -39,6 +39,7 @@ import {
   RiSlackLine,
   RiTableLine,
   RiTicketLine,
+  RiUserStarLine,
   RiWindowLine,
   RiZzzLine,
   type RemixiconComponentType,
@@ -188,6 +189,7 @@ const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   delete: RiDeleteBinLine,
   grant: RiShieldKeyholeLine,
   guard: RiShieldCheckLine,
+  own: RiUserStarLine,
   reveal: RiKey2Line,
   schema: RiTableLine,
   secret: RiKey2Line,
@@ -723,6 +725,20 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
               {JSON.stringify(preview.value, null, 2)}
             </pre>
           )}
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "own":
+      // the one row and the change Approve asks for; Approve's result line says what it found there
+      return (
+        <>
+          <p>
+            On Approve, the dashboard {preview.own ? "marks" : "unmarks"}{" "}
+            <code className="font-mono">{preview.key}</code> as your own account in{" "}
+            <code className="font-mono">usage.accounts</code> at{" "}
+            <code className="font-mono">{preview.scope}</code>: Own{" "}
+            {preview.own ? "off → on" : "on → off"}. Every other account stays as it is.
+          </p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
       )
