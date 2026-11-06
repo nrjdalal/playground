@@ -5301,6 +5301,9 @@ var ZodEmail = /* @__PURE__ */ $constructor("ZodEmail", (inst, def) => {
   $ZodEmail.init(inst, def);
   ZodStringFormat.init(inst, def);
 });
+function email2(params) {
+  return _email(ZodEmail, params);
+}
 var ZodGUID = /* @__PURE__ */ $constructor("ZodGUID", (inst, def) => {
   $ZodGUID.init(inst, def);
   ZodStringFormat.init(inst, def);
@@ -5934,10 +5937,10 @@ var extOrderSchema = array(extScopeSchema).refine((names) => new Set(names).size
 var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
 
 // packages/settings/src/accounts.ts
-var email2 = string2().email();
+var email3 = string2().email();
 var label = string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a label of lowercase letters, digits, dots, dashes and underscores");
 var claudeAccount = strictObject({
-  email: email2,
+  email: email3,
   ends: string2().datetime({ offset: true }).nullable().optional(),
   endsFirst: boolean2().optional(),
   label: label.optional(),
@@ -5971,7 +5974,7 @@ var accountSettings = defineSettings({
   "usage.switchAccount": {
     default: "",
     description: "The account whose full week the ops tick tells the dispatchers and leads about, so the factory moves off it; empty for none.",
-    schema: union([email2, literal("")])
+    schema: union([email3, literal("")])
   }
 });
 // packages/settings/src/channel.ts
@@ -6051,6 +6054,34 @@ var factorySettings = defineSettings({
     default: "",
     description: "The repository the factory's pull requests land in, the checkout's origin when unset: pr:merge needs GitGuardian's check there, Checks reads its PRs, and the roster links a bare PR number into it.",
     schema: repo
+  }
+});
+// packages/settings/src/firefighting.ts
+var firefightingSettings = defineSettings({
+  "firefighting.start.account": {
+    default: "",
+    description: "The Claude account a firefighting worker logs in as (spawn.sh's --account), an email whose token the Keychain keeps; empty starts it on spawn.sh's own pick.",
+    schema: union([literal(""), email2()])
+  },
+  "firefighting.start.brief": {
+    default: "brief-ff-ticket-template.md",
+    description: "The standing brief under the data folder that ops-firefighting-start fills for each ticket, its {TICKET} and {NAME} replaced by the ticket's ID and the new worker's name.",
+    schema: string2().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder")
+  },
+  "firefighting.start.freshMinutes": {
+    default: 10,
+    description: "How many minutes old firefighting.json's lines may be (its lastTry, else its file time) for a start; older ones are a closed window's or a stopped relay's, so the job starts nothing and tells the Builder once.",
+    schema: number2().int().min(1).max(120)
+  },
+  "firefighting.start.in": {
+    default: "",
+    description: "The folder a firefighting worker opens in (spawn.sh's --in), an absolute path; empty starts none, and the job tells the Builder this key is unset.",
+    schema: union([literal(""), string2().regex(/^\/.+/, "an absolute path")])
+  },
+  "firefighting.start.prefixes": {
+    default: [],
+    description: "The ticket keys the job starts for (MADE for MADE-1), each a tracker team's key; empty starts none.",
+    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "a ticket key, upper case"))
   }
 });
 // packages/settings/src/gates.ts
@@ -6158,6 +6189,10 @@ var JOBS = {
   "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
     description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
     schedule: { every: 86400 }
+  }),
+  "ops-firefighting-start": terminal("ops-firefighting-start", `${bunJob("ops-firefighting-start")} --data {data}`, {
+    description: "Starts a firefighting worker for each open ticket no session holds, Urgent first, and holds focus for an Urgent one's.",
+    schedule: { every: 60 }
   }),
   "ops-flow": launchd("ops-flow", {
     description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",

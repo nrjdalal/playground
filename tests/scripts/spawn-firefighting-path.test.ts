@@ -71,7 +71,7 @@ const job = () => {
       ctx: { ...ctx, now: new Date() },
       data,
       linearStates: async () => ({}),
-      name: async () => `ffmade${++n}-worker`,
+      name: async () => `bcdfg${++n + 1}-worker`,
     })
   return { data, machine, pass, placed, spawned }
 }
@@ -106,14 +106,14 @@ describe("a ticket's firefighting start on a busy machine (#1150)", () => {
     const until = new Date(Date.now() + 60 * 60_000).toISOString()
     j.machine.focus = {
       reason: "Urgent SLA MADE-9 open",
-      session: "ffmade9-worker",
+      session: "bcdfg9-worker",
       since: new Date().toISOString(),
       until,
     }
     relayWrites(j.data, "MADE-1", "Medium")
     await j.pass()
     expect(j.spawned[0]?.code).not.toBe(0)
-    expect(j.spawned[0]?.err).toContain("focus stands for ffmade9-worker")
+    expect(j.spawned[0]?.err).toContain("focus stands for bcdfg9-worker")
     expect(placing(j.spawned[0]!)).toEqual([])
     delete j.machine.focus
     await j.pass()
@@ -126,7 +126,7 @@ describe("a ticket's firefighting start on a busy machine (#1150)", () => {
     const until = new Date(Date.now() + 60 * 60_000).toISOString()
     j.machine.focus = {
       reason: "the owner's demo",
-      session: "ffmade9-worker",
+      session: "bcdfg9-worker",
       since: new Date().toISOString(),
       until,
     }
