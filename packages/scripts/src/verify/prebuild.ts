@@ -314,7 +314,7 @@ const builtWith = (names: string[]): string[] => {
   return all.filter(({ pkg }) => pkg.name && seen.has(pkg.name)).map(({ path }) => path)
 }
 
-// Runs prebuildStep and builds what it names: each package by name (turbo builds its dependencies first) under the flags a worktree with no .env needs, then the data table's metrics when they are missing; the exit code.
+// Runs prebuildStep and builds what it names: each package by name (turbo builds its dependencies first) under the flags a worktree with no .env needs, then the data table's metrics when they are missing, then stamps every dist the build covered, its dependencies' included, with the build's start; the exit code.
 const prebuild = (target: string, missing: string[]): number => {
   const step = prebuildStep(target, missing, ROOT, process.env.PLAYGROUND_REPO)
   if ("refused" in step) {

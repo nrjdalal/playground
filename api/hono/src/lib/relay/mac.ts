@@ -151,9 +151,9 @@ async function runWrite(
   write: RelayWrite,
   { cookie, dispatch, kindOf }: Pick<AnswerDeps, "cookie" | "dispatch" | "kindOf">,
 ): Promise<RelayResponse> {
-  const cards = cardsOf(write)
-  if (cards === null) return json(write.id, 403, "FORBIDDEN", "Answer it on the Mac")
-  for (const card of cards) {
+  const reached = cardsOf(write)
+  if ("refuse" in reached) return json(write.id, 403, "FORBIDDEN", "Answer it on the Mac")
+  for (const card of reached.cards) {
     const kind = await (kindOf?.(card) ?? Promise.resolve(null)).catch(() => null)
     if (kind === null || !(RELAY_ANSWER_KINDS as readonly string[]).includes(kind))
       return json(write.id, 403, "FORBIDDEN", "Answer it on the Mac")
