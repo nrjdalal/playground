@@ -518,6 +518,7 @@ test("runRm --restore refuses a worktree whose branch now points at another comm
   expect(said).toHaveLength(1)
   expect(said[0]).toContain(sha)
   expect(said[0]).toContain(moved)
+  expect(said[0]).not.toContain("branch -f")
   expect(existsSync(wt)).toBe(false)
   expect(git(main, "rev-parse", "PG-1-thing")).toBe(moved)
 })
