@@ -1627,6 +1627,7 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["jq of policy.json", `jq . ${join(ROOT, "policy.json")}`],
     ["ls of the root by ~", "ls -la ~/.playground/extensions ~/.playground/extensions/hooks"],
     ["grep in the root", `grep -rn Slack ${ROOT}`],
+    ["grep named in capitals over the home, a read like grep's", "GREP -rn foo ."],
     ["head and wc", `head -5 ${LIST} && wc -l ${LIST}`],
     ["find without an action", `find ${ROOT} -name '*.json'`],
     ["git log in a scope", `git -C ${SCOPE} log --oneline -5`],
@@ -1668,6 +1669,10 @@ describe("a read of the root, and writes elsewhere, run", () => {
 
   test("a reader inside the root", async () => {
     expect(await bash("cat policy.json", ROOT)).toBeUndefined()
+  })
+
+  test("grep named in capitals over the data folder, a read like grep's", async () => {
+    expect(await bash("GREP -rn foo .", DATA)).toBeUndefined()
   })
 
   test.each([
