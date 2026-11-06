@@ -186,6 +186,15 @@ describe("a node_modules clone waits for its spacing", () => {
     expect(await clone(machine({ cores: 8, load1: 2, load5: 3 }))).toBe("ran")
   })
 
+  // with 4 cores or fewer the brake minus 4 is 0 or less, which would hold every clone, so the line keeps a floor of half the cores
+  test("and on 4 cores a clone at low load starts", async () => {
+    expect(await clone(machine({ cores: 4, load1: 1, load5: 1 }))).toBe("ran")
+  })
+
+  test("while one at half the cores waits", async () => {
+    expect(await clone(machine({ cores: 4, load1: 2, load5: 2 }))).toBe("waited")
+  })
+
   // 6 Nov, 06:52Z to 07:03Z: a run-slot.load5-cap of 1, set to shut lane 2, held every clone, since the brake read that cap
   test("and run-slot.load5-cap moves no clone: a cap of 1 still lets one start under the brake", async () => {
     const m = machine({ load1: 2, load5: 10 })
