@@ -219,7 +219,6 @@ describe("a docker build outside run-slot is refused from any folder, naming the
     ["docker buildx build", "docker buildx build ."],
     ["docker buildx b", "docker buildx b ."],
     ["docker buildx build past buildx's --builder", "docker buildx --builder x build ."],
-    ["docker buildx bake", "docker buildx bake"],
     ["docker build past docker's --context", "docker --context desktop-linux build ."],
     ["docker build past docker's -c", "docker -c desktop-linux build ."],
     ["docker build past docker's -H", "docker -H unix:///var/run/docker.sock build ."],
@@ -248,17 +247,11 @@ describe("a docker build outside run-slot is refused from any folder, naming the
     ["docker compose build past --progress", "docker compose --progress plain build"],
     ["docker compose build past its flags", "docker compose --all-resources --compatibility build"],
     ["docker compose build past docker's own options", "docker --context x compose build"],
-    ["docker compose up --build", "docker compose up --build"],
-    ["docker compose up, which builds a missing image", "docker compose up -d"],
-    ["docker compose run --build", "docker compose run --build api"],
-    ["docker compose create --build", "docker compose create --build"],
-    ["portless's compose up through bunx", "bunx portless compose up -d"],
     ["portless's compose build", "portless compose build"],
     [
       "portless's compose build through npx and a versioned portless",
       "npx -y portless@0.16.0 compose build web",
     ],
-    ["portless's compose up through bun x", "bun x portless compose up"],
   ])("%s", async (_name, command) => {
     for (const cwd of [WORKTREE, OUTSIDE]) {
       const reason = await bash(command, cwd)
@@ -269,6 +262,39 @@ describe("a docker build outside run-slot is refused from any folder, naming the
   })
 
   test.each([
+    ["docker buildx bake", "docker buildx bake", "one run-slot run at a time"],
+    [
+      "docker bake, the docker CLI's alias for buildx bake",
+      "docker bake",
+      "one run-slot run at a time",
+    ],
+    ["docker bake of one target", "docker bake web", "one run-slot run at a time"],
+    ["docker compose up --build", "docker compose up --build", "up --no-build"],
+    ["docker compose up, which builds a missing image", "docker compose up -d", "up --no-build"],
+    ["docker compose run --build", "docker compose run --build api", "up --no-build"],
+    ["docker compose create --build", "docker compose create --build", "up --no-build"],
+    ["docker compose watch, which builds and rebuilds", "docker compose watch", "up --no-build"],
+    [
+      "docker compose watch --no-up, which still rebuilds",
+      "docker compose watch --no-up",
+      "up --no-build",
+    ],
+    ["docker compose alpha watch", "docker compose alpha watch", "up --no-build"],
+    ["portless's compose up through bunx", "bunx portless compose up -d", "up --no-build"],
+    ["portless's compose up through bun x", "bun x portless compose up", "up --no-build"],
+  ])(
+    "%s, which builds its images at once, is refused with run-slot's own fix",
+    async (_name, command, fix) => {
+      for (const cwd of [WORKTREE, OUTSIDE]) {
+        const reason = await bash(command, cwd)
+        expect(reason).toContain("no-unslotted-run hook refuses")
+        expect(reason).toContain("from any folder, which run-slot refuses too")
+        expect(reason).toContain(fix)
+      }
+    },
+  )
+
+  test.each([
     ["docker --version", "docker --version"],
     ["docker -v", "docker -v"],
     ["docker version", "docker version"],
@@ -277,6 +303,8 @@ describe("a docker build outside run-slot is refused from any folder, naming the
     ["docker buildx version", "docker buildx version"],
     ["docker compose build --help", "docker compose build --help"],
     ["docker compose version", "docker compose version"],
+    ["docker bake --help", "docker bake --help"],
+    ["docker compose watch --help", "docker compose watch --help"],
     ["docker compose up --no-build", "docker compose up --no-build -d"],
     ["docker run", "docker run --rm alpine true"],
     ["portless get", "bunx portless get api"],

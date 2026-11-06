@@ -718,27 +718,23 @@ heavy_build() {
   # runs the build bare inside the commit's own slot, so a big one stays in the queue); the cache folder is lefthook.yml's pre-commit default
   ! turbo_cached build "$top" "TURBO_CACHE_DIR=${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" ${vars[@]+"${vars[@]}"}
 }
-# A docker build, as packages/scripts/src/docker-build.ts reads it on the hooks' own reading: run (one image), each (a compose build naming no
-# service or several, which run_command builds one service at a time), refuse <why> (a build that builds its images at once), or nothing; a chain
-# with a docker build in any step is refused, so each build is a run of its own
+# packages/scripts/src/docker-build.ts, the docker build reader run-slot shares with the hooks
+docker_reader() { "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" "$@" </dev/null; }
+# A docker build, as docker_reader reads it past the hooks' wrappers: run (one image), each (a compose build of no service or several, built one at a time), refuse <why>, or nothing; a chain with a docker build in any step is refused, so each build is a run of its own
 docker_kind() {
-  local a first="" line words
-  for a in "$@"; do case "$a" in env|*=*) continue ;; esac; first=$a; break; done
-  case "$(basename -- "$first")" in
-    docker|docker-compose)
-      "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" kind -- "$@" </dev/null | sed 's/^none$//'
-      return ;;
-    bun|bunx|npx|portless)
-      case " $* " in *portless*" compose "*) "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" kind -- "$@" </dev/null | sed 's/^none$//'; return ;; esac ;;
-  esac
+  local found line words
+  # the reader starts only for a command that names docker or portless, so every other run skips its bun start
+  case " $* " in *docker*|*portless*) ;; *) return ;; esac
+  found=$(docker_reader kind -- "$@")
+  [ "$found" != none ] && { echo "$found"; return; }
   while IFS= read -r line; do
     IFS=$'\x1f' read -ra words <<< "$line"
     [ ${#words[@]} -gt 0 ] || continue
-    case "$("$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" kind -- "${words[@]}" </dev/null)" in
+    case "$(docker_reader kind -- "${words[@]}")" in
       none) ;;
       *) echo "refuse run-slot.sh refuses a chain that builds a docker image (${words[*]}): run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"; return ;;
     esac
-  done < <(chain_steps "$@" | grep -E "(^|$(printf '\x1f')|/)docker(-compose)?($(printf '\x1f')|$)|portless[^$(printf '\x1f')]*$(printf '\x1f')compose")
+  done < <(chain_steps "$@" | grep -E "docker|portless")
 }
 # a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
 light_run() {
@@ -785,6 +781,8 @@ heavy_build "$@" && HEAVY=1
 light_run "$@" && SIZE=small UNITS=1
 DOCKER=$(docker_kind "$@")
 case "$DOCKER" in refuse\ *) echo "${DOCKER#refuse }" >&2; rlog refused "docker"; exit 2 ;; ?*) HEAVY=1 ;; esac
+# a model-bound run skips the queue's lanes, run-slot-docker among them, and a build fills the VM rather than waiting on a model
+[ -n "$DOCKER" ] && [ -n "$MODEL_BOUND" ] && { echo "run-slot.sh refuses --model-bound for a docker build, which fills the Docker VM rather than waiting on a model: run it without --model-bound, so it takes run-slot-docker, one docker build at a time" >&2; rlog refused "docker"; exit 2; }
 [ -n "$HEAVY" ] && SIZE=big UNITS=3
 # Merging keeps going: a run that gates a merge (Checks, local CI, the merge train, the dashboard's build) goes before the
 # rest and may use the small reserve, as may an org's run (below) and the run-slot.priority pick. A checker's run is ranked by its worker's size (size_of), and
@@ -993,6 +991,8 @@ free() {
   fi
   SLOT=""
   if [ -n "$DOCKER_SLOT" ] && [ "$(cut -d' ' -f2 "$DOCKER_SLOT.holder" 2>/dev/null)" = "$$" ]; then
+    # however the build ended, a TERM included, its builder stops before the next build may start, so its idle memory goes back to the VM
+    env -u BUILDX_BUILDER docker buildx stop "$DOCKER_BUILDER" >/dev/null 2>&1
     rm -f "$DOCKER_SLOT.holder"
     rmdir "$DOCKER_SLOT" 2>/dev/null
   fi
@@ -1077,16 +1077,25 @@ clone_ends() {
 }
 absolute() { (cd -- "$1" 2>/dev/null && pwd -P) || case "$1" in /*) printf %s "$1" ;; *) printf %s "$PWD/$1" ;; esac; }
 
-# A docker build runs in playground-capped, a docker-container BuildKit capped at 1536 MiB, half the 3072 MiB VM, which leaves the engine, the
-# kernel and the live dashboard's Postgres (187 MiB at 01:1xZ, 6 Nov) room, so a step that grows past it dies in that container, not the VM
-# (6 Nov 01:03Z: one web build run alone restarted the live db); it is made when missing, never made the default (no --use), loads its image
-# into the engine's store (default-load), and is stopped after each build, so its idle memory goes back while its cache volume stays
+# A docker build runs in playground-capped, a docker-container BuildKit capped at half the Docker VM's memory, made when missing and never the default (no --use), loading its image into the engine's store
 DOCKER_BUILDER=playground-capped
-DOCKER_MEMORY=1536m
+# half the VM, as the engine reports it, so the cap follows the VM's size (6 Nov 01:38Z: the VM went from 3 GiB to 8 GiB) and the other half stays for the engine, the kernel and the live dashboard's Postgres
+docker_memory() {
+  local total
+  total=$(docker info --format '{{.MemTotal}}' 2>/dev/null)
+  case "$total" in ''|*[!0-9]*) return 1 ;; esac
+  echo "$((total / 2 / 1048576))m"
+}
 capped_builder() {
-  docker buildx inspect "$DOCKER_BUILDER" >/dev/null 2>&1 && return
-  docker buildx create --name "$DOCKER_BUILDER" --driver docker-container --driver-opt "memory=$DOCKER_MEMORY" \
-    --driver-opt "memory-swap=$DOCKER_MEMORY" --driver-opt default-load=true >/dev/null
+  local memory have
+  memory=$(docker_memory) || return 1
+  if have=$(docker buildx inspect "$DOCKER_BUILDER" 2>/dev/null); then
+    case "$have" in *"memory=\"$memory\""*) return ;; esac
+    # a builder made under another VM size keeps its old cap, so it is made again at this one's
+    docker buildx rm "$DOCKER_BUILDER" >/dev/null 2>&1 || return 1
+  fi
+  docker buildx create --name "$DOCKER_BUILDER" --driver docker-container --driver-opt "memory=$memory" \
+    --driver-opt "memory-swap=$memory" --driver-opt default-load=true >/dev/null
 }
 
 # runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code; where Claude Code's sandbox refuses the new group or the nice, it says so on stderr and runs the command without it
@@ -1095,7 +1104,7 @@ run_command() {
   [ "${KIND:-}" = clone ] && set -- python3 -I -c "$CLONE_WORKSPACES" "$@"
   if [ -n "${DOCKER:-}" ]; then
     capped_builder || { echo "run-slot.sh: could not make the capped builder $DOCKER_BUILDER, so this docker build does not run uncapped" >&2; rlog end "rc=1 ran=0s"; exit 1; }
-    export BUILDX_BUILDER=$DOCKER_BUILDER
+    export BUILDX_BUILDER=$DOCKER_BUILDER DOCKER_BUILDKIT=1
   fi
   [ "${DOCKER:-}" = each ] && set -- "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" each -- "$@"
   python3 -I -c '
@@ -1114,7 +1123,6 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
   [ -n "$SLOT" ] && [ "$(cat "$SLOT.preempted" 2>/dev/null)" = "$CHILD" ] && echo "run-slot.sh: focus preempted this run for $(focus_holder || echo a session that has since ended); ask again once its focus ends" >&2
   reap "$CHILD"
   CHILD=""
-  [ -n "${DOCKER:-}" ] && unset BUILDX_BUILDER && docker buildx stop "$DOCKER_BUILDER" >/dev/null 2>&1
   rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
   exit "$code"
 }
@@ -1375,10 +1383,7 @@ if [ -n "$MODEL_BOUND" ]; then
   TOOK=$(date +%s); rlog start "$(basename "$SLOT") waited=$((TOOK - ASKED))s"
   run_command "$@"
 fi
-# A docker build fills the one Docker VM every folder shares, the live dashboard's Postgres among them (6 Nov 00:38Z: a parallel compose build
-# outside run-slot got it killed), so one runs at a time on the machine: it takes run-slot-docker before its ticket, so a second waits here with no
-# place in the queue (its ticket goes while it waits, and a fresh one follows), reclaims it only once its holder's pid has gone, and free gives it
-# back however the run ends
+# One docker build at a time on the machine, since each fills the Docker VM the live dashboard's Postgres shares (6 Nov 00:38Z: a parallel compose build got it killed): run-slot-docker is taken before the ticket, so a waiting build holds no place in the queue, and reclaimed only once its holder's pid has gone
 if [ -n "$DOCKER" ]; then
   [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
   waited=0

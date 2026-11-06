@@ -1,7 +1,7 @@
 // PreToolUse hook: refuses a worktree install, node_modules clone, build, type check or whole suite outside run-slot, since five worktree installs at once drove load1 to 66.8 on 18 Oct, and a docker build from any folder, since one fills the Docker VM the live dashboard's Postgres shares.
 import { join, resolve, sep } from "node:path"
 
-import { buildName, DOCKERS, dockerBuild, portlessCompose } from "./docker-build"
+import { atOnce, buildName, DOCKERS, dockerBuild, portlessCompose } from "./docker-build"
 import { bunCall, cwdFlag, mainCheckout, turboWords } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
@@ -22,8 +22,10 @@ const refuse = (what: string, cd: string, command: string) =>
   `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`
 
 // A docker build fills the one Docker VM every folder shares, the live dashboard's Postgres included, so it goes through run-slot from any folder, one at a time.
-const refuseDocker = (what: string, cd: string, command: string) =>
-  `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`
+const refuseDocker = (what: string, cd: string, command: string, fix?: string) =>
+  fix
+    ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}`
+    : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`
 
 // A line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run in any folder, a worktree included, so a heavy run on it goes through run-slot too.
 const anywhere = (what: string, command: string) =>
@@ -104,13 +106,13 @@ function heavy(
   name: string,
   args: Word[],
   env: Env,
-): { anywhere?: true; dir: string | undefined; what: string } | undefined {
+): { anywhere?: true; dir: string | undefined; fix?: string; what: string } | undefined {
   const compose = portlessCompose(name, args)
   if (DOCKERS.has(name) || compose) {
     const build = compose
       ? dockerBuild(compose, true)
       : dockerBuild(args, name === "docker-compose")
-    return build && { anywhere: true, dir: env.cwd, what: buildName(build) }
+    return build && { anywhere: true, dir: env.cwd, fix: atOnce(build), what: buildName(build) }
   }
   if (name === "cp") {
     const paths = args.filter((a) => !a.value.startsWith("-"))
@@ -205,7 +207,8 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     if (env.cwdAnywhere) {
       const found = heavy(name, args, { ...env, cwd: undefined })
       const line = words()
-      if (found?.anywhere && line !== undefined) return refuseDocker(found.what, "", line)
+      if (found?.anywhere && line !== undefined)
+        return refuseDocker(found.what, "", line, found.fix)
       if (found && line !== undefined && (found.dir === undefined || inWorktree(found.dir)))
         return anywhere(found.what, line)
     }
@@ -221,7 +224,9 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
         here.cwd !== undefined &&
         (directory === undefined || resolve(here.cwd) !== resolve(directory))
       const cd = moved ? `cd ${quotedDir(here.cwd as string)} && ` : ""
-      return (found.anywhere ? refuseDocker : refuse)(found.what, cd, line)
+      return found.anywhere
+        ? refuseDocker(found.what, cd, line, found.fix)
+        : refuse(found.what, cd, line)
     }
   }
   const env: Env = {

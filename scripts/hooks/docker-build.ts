@@ -91,12 +91,15 @@ export function subcommand(args: Word[], takes: Set<string>): { rest: Word[]; su
 
 export const help = (args: Word[]) => args.some((a) => a.value === "-h" || a.value === "--help")
 
-// An image build: `image` for docker build and its aliases (one image), `bake` for buildx bake, and `compose` for compose build, or a compose up, create or run that builds a missing image (each one without --no-build), with the subcommand and the words after it.
+// An image build: `image` for docker build and its aliases (one image), `bake` for bake (docker bake, buildx bake), and `compose` for compose build, a compose up, create or run that builds a missing image (each one without --no-build), or a compose watch, which builds and rebuilds its images as files change, with the subcommand and the words after it.
 export type DockerBuild = { kind: "bake" | "compose" | "image"; rest: Word[]; sub: string }
 
 function composeBuild(args: Word[]): DockerBuild | undefined {
-  const { rest, sub } = subcommand(args, COMPOSE_TAKES)
+  const found = subcommand(args, COMPOSE_TAKES)
+  // compose alpha's experimental subcommands, watch among them on an older compose
+  const { rest, sub } = found.sub?.value === "alpha" ? subcommand(found.rest, new Set()) : found
   if (!sub || help(rest)) return
+  if (sub.value === "watch") return { kind: "compose", rest, sub: "watch" }
   if (!["build", "create", "run", "up"].includes(sub.value)) return
   if (rest.some((a) => a.value === "--no-build")) return
   return { kind: "compose", rest, sub: sub.value }
@@ -111,6 +114,8 @@ export function dockerBuild(args: Word[], compose: boolean): DockerBuild | undef
   const image = (words: Word[]): DockerBuild | undefined =>
     help(words) ? undefined : { kind: "image", rest: words, sub: "build" }
   if (sub.value === "build") return image(rest)
+  // docker bake, the docker CLI's own alias for buildx bake
+  if (sub.value === "bake") return help(rest) ? undefined : { kind: "bake", rest, sub: "bake" }
   if (["builder", "buildx", "image"].includes(sub.value)) {
     const inner = subcommand(rest, new Set(["--builder"]))
     if (inner.sub?.value === "build" || inner.sub?.value === "b") return image(inner.rest)
@@ -126,6 +131,18 @@ export const buildName = (build: DockerBuild): string =>
     : build.kind === "bake"
       ? "docker buildx bake"
       : `docker compose ${build.sub}`
+
+// Why a build that builds its images at once is refused even under run-slot, with its fix, or undefined for one run-slot runs: a bake builds its targets at once, and a compose up, create, run or watch each missing image at once.
+export function atOnce(build: DockerBuild): string | undefined {
+  if (build.kind === "bake")
+    return "it builds its targets at once in the one Docker VM: build each image with docker build, one run-slot run at a time"
+  if (build.kind === "image" || build.sub === "build") return
+  const what =
+    build.sub === "watch"
+      ? "it builds and rebuilds its images"
+      : "without --no-build it builds each missing image"
+  return `${what} at once in the one Docker VM: build first with run-slot.sh <your name> -- docker compose build, which builds one service at a time, then start it with docker compose up --no-build`
+}
 
 // The compose words a portless call passes on to docker compose (`portless compose up`, portless 0.16's compose support), by name or through bunx, npx or bun x past their options and a versioned portless@x, else undefined.
 export function portlessCompose(name: string, args: Word[]): Word[] | undefined {
