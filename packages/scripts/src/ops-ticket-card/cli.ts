@@ -15,10 +15,9 @@ import { cardOf, dayOf, inWindow, type Line, type Pr, type Seen, stepLinesOf } f
 
 const GITHUB_MS = 5 * 60_000
 
-// The job's own memory: the day's card (its id and poster, and the text last written), the day its seen record is for with each step's first-seen time, and each ticket's last GitHub read.
+// The job's own memory: the day's card (its id and poster, and the text last written), each listed ticket's step first-seen times, kept across days, and each ticket's last GitHub read.
 export type State = {
   card?: { day: string; from: string; id: string; text: string }
-  day?: string
   prs: Record<string, { at: number; pr?: Pr }>
   seen: Seen
 }
@@ -185,7 +184,11 @@ export const beat = async (
     })
     state.prs[line.id] = { at: now, pr }
   }
-  const before = state.day === day ? state.seen : {}
+  // a step goes in the steps file on the day it is first seen alone, so first-seen times carry across days, kept to the tickets the lines file still lists
+  const listed = new Set(lines.map((line) => line.id))
+  const before: Seen = Object.fromEntries(
+    Object.entries(state.seen).filter(([id]) => listed.has(id)),
+  )
   const { seen, text } = cardOf(
     {
       approvals: get("ticketCard.approvals"),
@@ -203,7 +206,7 @@ export const beat = async (
     now,
   )
   const save = (card: State["card"]) =>
-    writeAtomic(path, JSON.stringify({ card, day, prs: state.prs, seen } satisfies State))
+    writeAtomic(path, JSON.stringify({ card, prs: state.prs, seen } satisfies State))
   await save(state.card)
   const steps = stepLinesOf(before, seen, zone)
   if (steps.length) {

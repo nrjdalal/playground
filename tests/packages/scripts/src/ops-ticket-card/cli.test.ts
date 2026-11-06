@@ -188,6 +188,16 @@ describe("the beat", () => {
     expect(w.asks().filter((a) => a === "new")).toHaveLength(4)
   })
 
+  test("a ticket still open the next day keeps its first-seen times and adds no line to that day's steps file", async () => {
+    const w = world("next-day")
+    await w.go(0)
+    await w.go(1440)
+    expect(existsSync(join(w.data, "diary", "2026-11-06-steps.md"))).toBe(false)
+    const card = JSON.parse(w.ran.filter((r) => r.argv.includes("new")).at(-1)!.stdin!)
+    expect(card.preview.text).toContain("✅ PR open     draft, 10:00 am")
+    expect(w.asks()).toEqual(["new", "new"])
+  })
+
   test("each step first seen goes once into the day's steps file under diaryDir", async () => {
     const w = world("steps")
     await w.go(0)

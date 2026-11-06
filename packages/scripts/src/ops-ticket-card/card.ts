@@ -1,3 +1,5 @@
+import { ASK_CODE_COLUMNS } from "@packages/config/inbox"
+
 // The ticket progress card, pure: the day's watched tickets in, the card's text and each step's first-seen time out, with nothing read or written here (cli.ts does the reading and writing).
 
 // A ticket's line as the lines file holds it: whose it is, whether it is still open, when it first showed, its tracker state by name, and its urgency.
@@ -132,8 +134,15 @@ export const stepsOf = (
 const row = (mark: string, step: string, right: string) =>
   `${mark} ${step.padEnd(12)}${right}`.trimEnd()
 
+// A row cut to the card's code width, so a long id or skip area never wraps the block.
+const fit = (row: string) =>
+  row.length > ASK_CODE_COLUMNS ? `${row.slice(0, ASK_CODE_COLUMNS - 1)}…` : row
+
 // One ticket's block: its head, then each step's mark with its detail and the time it was first seen done; the step after the last one done is in flight, and none once the ticket is deployed or closed.
-const blockOf = (line: Line, inputs: Inputs, seen: Seen): string[] => {
+const blockOf = (line: Line, inputs: Inputs, seen: Seen): string[] =>
+  rowsOf(line, inputs, seen).map(fit)
+
+const rowsOf = (line: Line, inputs: Inputs, seen: Seen): string[] => {
   if (line.theirs) return [`${line.id} · a colleague's`]
   const skip = inputs.skips[line.id]
   if (skip) return [`${line.id} · skipped, ${skip}`]
