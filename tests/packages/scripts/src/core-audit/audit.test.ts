@@ -93,7 +93,7 @@ describe("a clean tree", () => {
   test("reports zero on both legs", () => {
     const files: File[] = [
       { path: "src/app.ts", text: "export const answer = 42\n" },
-      { path: "docs/page.md", text: "Use a made-up key such as PG-1 in a doc.\n" },
+      { path: "docs/page.md", text: "Use a placeholder key such as PG-1 in a doc.\n" },
     ]
     expect(leg1(files, orgTerms(linked())!)).toEqual([])
     expect(leg2(files)).toEqual([])

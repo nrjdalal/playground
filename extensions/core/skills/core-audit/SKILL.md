@@ -55,6 +55,7 @@ Write the report of step 3 as a file at mode 600 in your scratchpad, and hand it
 
 - Leg 2 reads no `tests/` yet: a test's made-up ids and homes do not hold a placeholder shape today, so a real id in a test is found only by leg 1's list.
 - Leg 2 has no shape for a tracker key, a company or a person's name, since a made-up one reads like a real one without a list: leg 1 covers those once an org is linked.
+- A bare tracker key that is also a word or an abbreviation hits in plain prose too: give each such hit a verdict in step 3 before step 4 swaps it.
 
 ## Keep the skills learning
 
