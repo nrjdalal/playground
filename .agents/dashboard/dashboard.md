@@ -41,7 +41,8 @@
   Privacy (`components/settings/privacy.tsx`) reads `owner.names` and `factory.archiveRepo` through `GET /api/v1/settings/:key` and writes each field that holds a value or was cleared through `PUT /api/v1/settings/:key` to the same `scope` (`privacyWrites` in `web/next/src/lib/privacy.ts`),
   so a Save also rebuilds an unparseable `policy.json`; before `/api/v1/accounts` names a login it shows Set up settings.
   Jobs (`components/settings/jobs.tsx`) lists every registry job from `GET /api/v1/settings` (its `keys` for the registry, its `values` for what your login reads, a row over its registry entry), A to Z, with what it does, when it runs and whether your settings set it (`jobRows` in `web/next/src/lib/jobs.ts`),
-  and its switch writes the job's `enabled` field alone, over any other field your scope's row holds and never a registry field, through `PUT /api/v1/settings/:key` to the same `scope` (`jobToggleWrite`), so the job keeps following the registry; before `/api/v1/accounts` names a login it shows Set up settings.
+  and its switch writes the job's `enabled` field alone, over any other field your scope's row holds and never a registry field, through `PUT /api/v1/settings/:key` to the same `scope` (`jobToggleWrite`), so the job keeps following the registry, and reads its switches again after an Inbox guard card's answer (`settle` in `components/dashboard/inbox.tsx`);
+  before `/api/v1/accounts` names a login it shows Set up settings.
   Each section is a component of its own under `components/settings/`.
   Its words say Dashboard, never dashboard.
   A place that has only an agent's name names it by `agentLabel`, the name alone with no @ (`web/next/src/lib/agent-label.ts`): `worker-gluttony` reads Gluttony and `k3m9px-worker` K3m9px, a reviewer or tester keeping its role (`k3m9px-reviewer` K3m9pxReviewer);

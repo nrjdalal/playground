@@ -173,6 +173,7 @@ import {
   verbs,
   waiting,
 } from "@/lib/inbox"
+import { JOBS_QUERY_KEY } from "@/lib/jobs"
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
 import { insertPaste } from "@/lib/paste"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
@@ -958,6 +959,9 @@ export function InboxCard({
       // an own card's Approve writes usage.accounts, so Settings > Accounts reads its switch again
       if (item.kind === "decision" && item.preview.type === "own")
         await queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY })
+      // a guard card's Approve may turn a job on or off, so Settings > Jobs reads its switches again
+      if (item.kind === "decision" && item.preview.type === "guard")
+        await queryClient.invalidateQueries({ queryKey: JOBS_QUERY_KEY })
       setPending(false)
     }
   }
