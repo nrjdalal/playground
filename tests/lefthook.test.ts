@@ -1,14 +1,17 @@
-import { expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
   unlinkSync,
   utimesSync,
+  writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -979,3 +982,123 @@ test("pre-commit runs the native-title and dashboard-map tests when a file they 
     rmSync(dir, { force: true, recursive: true })
   }
 }, 60_000)
+
+// The pre-commit hooks-bundle job, as lefthook.yml holds it.
+const hooksBundleJob = async () =>
+  (
+    Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+      "pre-commit": { commands: Record<string, Record<string, unknown> | undefined> }
+    }
+  )["pre-commit"].commands["hooks-bundle"]
+
+test("a pre-commit job runs hooks-bundle --check after lint-staged, skipped in a merge", async () => {
+  expect(await hooksBundleJob()).toMatchObject({
+    priority: 4,
+    run: "bun --no-env-file packages/scripts/src/hooks-bundle.ts --check",
+    skip: ["merge"],
+  })
+})
+
+// Each committed bundle names every module it holds in a `// <path>` comment, so the folders the job must watch are read from the bundles themselves: a guard that starts importing another folder fails here until the glob holds it.
+test("the hooks-bundle job's glob holds every folder a committed bundle imports", async () => {
+  const glob = ((await hooksBundleJob())?.glob ?? []) as string[]
+  const bundled = join(ROOT, "scripts", "hooks", "bundled")
+  const inputs = new Set<string>()
+  for (const name of readdirSync(bundled).filter((n) => n.endsWith(".js")))
+    for (const [, path] of (await Bun.file(join(bundled, name)).text()).matchAll(
+      /^\/\/ (\S+\.[cm]?[jt]sx?)$/gm,
+    )) {
+      const pkg = /^(packages\/[^/]+\/src)\//.exec(path!)
+      if (path!.startsWith("node_modules/")) inputs.add("bun.lock")
+      else if (pkg) inputs.add(`${pkg[1]}/*`)
+      else if (/^scripts\/hooks\/[^/]+\.ts$/.test(path!)) inputs.add("scripts/hooks/*.ts")
+      else inputs.add(path!)
+    }
+  expect(inputs).toContain("scripts/hooks/*.ts")
+  expect([...inputs].filter((input) => !glob.includes(input)).sort()).toEqual([])
+})
+
+// lefthook on the job as lefthook.yml holds it, in a scratch repo holding hooks-bundle.ts and one guard, role.ts, with its bundle committed
+describe("the pre-commit hooks-bundle job", () => {
+  const checkout = async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "lefthook-bundle-")))
+    const run = (argv: string[]) => {
+      const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
+      return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+    }
+    const git = (...args: string[]) =>
+      expect(run(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args])).toMatchObject({
+        code: 0,
+      })
+    for (const file of ["hooks-bundle.ts", "ops-tick/guard-probe.ts", "write-atomic.ts"]) {
+      const to = join(dir, "packages", "scripts", "src", file)
+      mkdirSync(join(to, ".."), { recursive: true })
+      copyFileSync(join(ROOT, "packages", "scripts", "src", file), to)
+    }
+    mkdirSync(join(dir, "scripts", "hooks"), { recursive: true })
+    writeFileSync(
+      join(dir, "scripts", "factory-settings.json"),
+      `${JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: "bun scripts/hooks/bundled/role.js" }] }] } })}\n`,
+    )
+    writeFileSync(join(dir, "scripts", "hooks", "role.ts"), 'console.log("a")\n')
+    writeFileSync(join(dir, "scripts", "hooks", "no-extensions-write-worker.ts"), "export {}\n")
+    // JSON is YAML, so the job goes in as lefthook read it
+    writeFileSync(
+      join(dir, "lefthook.yml"),
+      JSON.stringify({ "pre-commit": { commands: { "hooks-bundle": await hooksBundleJob() } } }),
+    )
+    const bundle = () =>
+      expect(
+        run(["bun", "--no-env-file", join(dir, "packages", "scripts", "src", "hooks-bundle.ts")]),
+      ).toMatchObject({ code: 0 })
+    bundle()
+    git("init", "-q", "-b", "main")
+    git("add", "-A")
+    git("commit", "-q", "--no-verify", "-m", "start")
+    const hook = () => run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+    const edit = () => writeFileSync(join(dir, "scripts", "hooks", "role.ts"), 'console.log("b")\n')
+    return { bundle, dir, edit, git, hook }
+  }
+
+  test("refuses a commit of a guard whose bundle is stale, naming the fix, and skips one that touches no input", async () => {
+    const { bundle, dir, edit, git, hook } = await checkout()
+    try {
+      edit()
+      writeFileSync(join(dir, "README.md"), "docs\n")
+      git("add", "README.md")
+      expect(hook().code).toBe(0)
+      git("add", "scripts/hooks/role.ts")
+      const stale = hook()
+      expect(stale.code).not.toBe(0)
+      expect(stale.out).toContain("hooks-bundle: stale in scripts/hooks/bundled: role.js")
+      expect(stale.out).toContain("run `bun run hooks:bundle` and commit scripts/hooks/bundled")
+      bundle()
+      git("add", "-A")
+      expect(hook()).toMatchObject({ code: 0 })
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  }, 60_000)
+
+  test("passes a merge commit with a stale bundle, which hooks-merge-canary rebuilds in a commit of its own", async () => {
+    const { dir, edit, git, hook } = await checkout()
+    try {
+      git("checkout", "-q", "-b", "side")
+      writeFileSync(join(dir, "side.txt"), "side\n")
+      git("add", "side.txt")
+      git("commit", "-q", "--no-verify", "-m", "side")
+      git("checkout", "-q", "main")
+      git("merge", "-q", "--no-commit", "--no-ff", "side")
+      edit()
+      git("add", "scripts/hooks/role.ts")
+      expect(hook().code).toBe(0)
+      // the same stale bundle, once the merge is committed, is refused on the next commit
+      git("commit", "-q", "--no-verify", "--no-edit")
+      writeFileSync(join(dir, "scripts", "hooks", "role.ts"), 'console.log("c")\n')
+      git("add", "scripts/hooks/role.ts")
+      expect(hook().code).not.toBe(0)
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  }, 60_000)
+})
