@@ -22,7 +22,7 @@ const run: Run = async (argv) => {
 
 const said = (text: string) => text.trim().split("\n").at(-1) ?? ""
 
-// Pure: spawn.sh's two steps, a close by the pane's label and a resume of the same session id in its folder, with --account only when one is named.
+// Pure: spawn.sh's two steps, a close by the pane's label and a resume of the same session id in its folder, with --account only when one is named and --pr with a checker's prs, since the close ends its row.
 export const restartArgv = (
   root: string,
   session: { account?: string; cwd: string; name: string; prs?: string[]; sessionId: string },
@@ -37,6 +37,7 @@ export const restartArgv = (
       session.cwd,
       session.sessionId,
       ...(session.account ? ["--account", session.account] : []),
+      ...(session.prs?.length ? ["--pr", session.prs.join(",")] : []),
     ],
   ]
 }

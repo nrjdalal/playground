@@ -97,6 +97,7 @@ import {
   assistantSeat,
   DISPATCHER,
   DISPATCHERS,
+  kindOf,
   listLive,
   type Live,
 } from "@/lib/dashboard/workers"
@@ -1023,7 +1024,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Restart a live session whose Claude login expired, with no terminal step: spawn.sh closes the pane it opened and resumes the same conversation in its folder, on `account` (a Claude account added in Settings > Accounts, with its token kept) or, with none, on this Mac's own login. A fixture stack runs nothing and clears the session's login block. A refusal names its reason: NOT_FOUND for no such live session or no such kept account, ERROR for spawn.sh's own words.",
+        "Restart a live session whose Claude login expired, with no terminal step: spawn.sh closes the pane it opened and resumes the same conversation in its folder, a reviewer or tester naming the PRs its roster row lists (`--pr`), on `account` (a Claude account added in Settings > Accounts, with its token kept) or, with none, on this Mac's own login. A fixture stack runs nothing and clears the session's login block. A refusal names its reason: NOT_FOUND for no such live session or no such kept account, ERROR for spawn.sh's own words.",
       responses: {
         200: {
           description: "Restarted: the session runs again on the account named",
@@ -1068,10 +1069,14 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
       )
       if (account && !kept)
         throw new ApiError(404, "NOT_FOUND", `No Claude account ${account} is kept`)
+      // The close ends the row, which parseRoster then drops, so a checker's prs are read first: its resume names them with --pr, or spawn.sh refuses it.
+      const row = (await readRoster()).roster?.agents.find((a) => a.name === worker.name)
+      const checker = ["reviewer", "tester"].includes(kindOf(worker.name, row) ?? "")
       const restarted = await restartSession({
         account,
         cwd: worker.cwd,
         name: worker.name,
+        prs: checker ? row?.prs : undefined,
         sessionId,
       })
       if (restarted.status === "refused") throw new ApiError(502, "ERROR", restarted.detail)
