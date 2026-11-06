@@ -205,18 +205,32 @@ export async function worktreesOf(target: Target, projectsDir: string): Promise<
   return [...dirs]
 }
 
-// Why the work in a worktree the session used is not saved, or null.
-export async function unsavedLive(target: Target, projectsDir: string): Promise<string | null> {
+// Why the work in a worktree the session used is not saved, or null; a Playground worktree whose PR has merged or closed holds no end, since its cleanup discards it.
+export async function unsavedLive(
+  target: Target,
+  projectsDir: string,
+  done?: Pick<CleanupDeps, "finished" | "main">,
+): Promise<string | null> {
   const dirs = await worktreesOf(target, projectsDir)
   if (!dirs) return `could not check its transcript in ${projectsDir}`
   // A failed read is no proof the work is saved, so it holds the end too.
   for (const dir of dirs) {
     const status = await git(dir, ["status", "--porcelain"])
     if (status === null) return `could not check ${dir}`
-    if (status) return `uncommitted work in ${dir}`
-    const ahead = await git(dir, ["rev-list", "--count", "HEAD", "--not", "--remotes"])
-    if (ahead === null) return `could not check ${dir}`
-    if (Number(ahead) > 0) return `unpushed commits in ${dir}`
+    const ahead = status
+      ? null
+      : await git(dir, ["rev-list", "--count", "HEAD", "--not", "--remotes"])
+    if (!status && ahead === null) return `could not check ${dir}`
+    const unsaved = status ? "uncommitted work" : Number(ahead) > 0 ? "unpushed commits" : null
+    if (!unsaved) continue
+    const common = await git(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+    const ours =
+      done &&
+      common &&
+      dirname(common) === done.main &&
+      dirname(dir) === join(done.main, ".claude", "worktrees")
+    if (ours && (await done.finished(dir, target.pr))) continue
+    return `${unsaved} in ${dir}`
   }
   return null
 }
@@ -251,7 +265,7 @@ export const containersFor = (
   return [`playground-${name}-db`, `playground-${name}-redis`].filter((c) => !live(c))
 }
 
-// One worktree a closed session used, cleaned once its work is saved or its PR has merged or closed (then through --discard, whatever it holds), a hold by its PR's number alone from another session of that PR (the merging worker, a sibling checker) not counting, and a commit pushed counts as saved (a PR's head GitHub keeps after its branch is deleted on merge): a Playground worktree's dev stack stopped, the worktree moved to the trash by playground rm (which refuses one a live session or a process holds), then its containers removed by exact name; another repo's worktree removed by git with no force flag, then pruned; then its branch deleted. The line saying what went, or why it stayed.
+// One worktree a closed session used, cleaned once its work is saved or, for a Playground worktree, its PR has merged or closed (then through --discard to the trash, whatever it holds), a hold by its PR's number alone from another session of that PR (the merging worker, a sibling checker) not counting, and a commit pushed counts as saved (a PR's head GitHub keeps after its branch is deleted on merge): a Playground worktree's dev stack stopped, the worktree moved to the trash by playground rm (which refuses one a live session or a process holds), then its containers removed by exact name; another repo's worktree removed by git with no force flag, then pruned; then its branch deleted. The line saying what went, or why it stayed.
 export async function cleanWorktree(
   path: string,
   reason: string,
@@ -283,9 +297,9 @@ export async function cleanWorktree(
       ])
   if (!status && ahead === null) return `kept ${path}: could not count its unpushed commits`
   const unsaved = status ? "uncommitted work" : Number(ahead) > 0 ? "unpushed commits" : null
-  const discard = unsaved !== null && (await deps.finished(path, pr))
-  if (unsaved && !discard) return `kept ${path}: ${unsaved}`
   const repo = dirname(commonDir)
+  const discard = unsaved !== null && repo === deps.main && (await deps.finished(path, pr))
+  if (unsaved && !discard) return `kept ${path}: ${unsaved}`
   const gone: string[] = []
   let listed: string[] | null = []
   if (repo === deps.main) {
@@ -405,7 +419,7 @@ export const liveDeps = (projectsDir: string): EndDeps => ({
       text,
       "status=ended",
     ])),
-  unsaved: (target) => unsavedLive(target, projectsDir),
+  unsaved: async (target) => unsavedLive(target, projectsDir, (await cleanupDeps()) ?? undefined),
 })
 
 // pr:merge's and the train's end of a merged PR's sessions on the live machine, each line sent to its lead.

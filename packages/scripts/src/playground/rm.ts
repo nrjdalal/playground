@@ -204,11 +204,16 @@ const merged = (sha: string, at: string): boolean | null => {
   return run.exitCode === 0 && (out === "true" || out === "false") ? out === "true" : null
 }
 
-// Pure: a worktree's PR state, counted only when exactly one PR answers, since a branch name used twice can find another's, and that PR's head is the worktree's HEAD or an ancestor of it; else null.
+// Pure: a worktree's PR state, counted only when exactly one PR answers, since a branch name used twice can find another's, that PR is this worktree's own (its branch is the worktree's, or its head is HEAD, so a stacked child does not pass under its parent's PR), and its head is HEAD or an ancestor of it; else null.
 export const prStateOf = (
-  prs: { headRefOid: string; state: PrState }[] | null,
+  prs: { headRefName: string; headRefOid: string; state: PrState }[] | null,
+  at: { branch: string | null; head: string },
   holds: (sha: string) => boolean,
-): PrState | null => (prs?.length === 1 && holds(prs[0]!.headRefOid) ? prs[0]!.state : null)
+): PrState | null => {
+  const only = prs?.length === 1 ? prs[0]! : null
+  if (!only || (only.headRefName !== at.branch && only.headRefOid !== at.head)) return null
+  return only.headRefOid === at.head || holds(only.headRefOid) ? only.state : null
+}
 
 // A worktree's PR state from gh in it, the --pr URL's else its branch's, by prStateOf, or null when gh or git cannot answer.
 const prState = async (path: string, pr?: string): Promise<PrState | null> => {
@@ -220,15 +225,22 @@ const prState = async (path: string, pr?: string): Promise<PrState | null> => {
       return null
     }
   }
-  const fields = ["--json", "headRefOid,state"]
-  const branch = pr ? null : gitIn(path, "symbolic-ref", "--quiet", "--short", "HEAD")
-  if (branch && !branch.ok) return null
-  const list = branch
-    ? gh(["pr", "list", "--head", branch.out, "--state", "all", "--limit", "2", ...fields])
-    : gh(["pr", "view", pr!, ...fields, "--jq", "[.]"])
+  const head = gitIn(path, "rev-parse", "HEAD")
+  if (!head.ok) return null
+  const named = gitIn(path, "symbolic-ref", "--quiet", "--short", "HEAD")
+  const branch = named.ok ? named.out : null
+  if (!pr && !branch) return null
+  const fields = ["--json", "headRefName,headRefOid,state"]
+  const list = pr
+    ? gh(["pr", "view", pr, ...fields, "--jq", "[.]"])
+    : gh(["pr", "list", "--head", branch!, "--state", "all", "--limit", "2", ...fields])
   const states = new Set(["CLOSED", "MERGED", "OPEN"])
   const prs = Array.isArray(list) && list.every((p) => states.has(p?.state)) ? list : null
-  return prStateOf(prs, (sha) => gitIn(path, "merge-base", "--is-ancestor", sha, "HEAD").ok)
+  return prStateOf(
+    prs,
+    { branch, head: head.out },
+    (sha) => gitIn(path, "merge-base", "--is-ancestor", sha, "HEAD").ok,
+  )
 }
 
 // An Inbox item from bun run ask get in the Dashboard's checkout, which holds the Inbox's database, or null when none reads.
