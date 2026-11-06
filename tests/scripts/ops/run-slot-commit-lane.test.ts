@@ -9,7 +9,7 @@ setDefaultTimeout(60_000)
 
 // Playground's own lefthook.yml, whose pre-commit runs the build
 const LEFTHOOK = readFileSync(join(import.meta.dir, "../../../lefthook.yml"), "utf8")
-// A machine whose fake git fails on a `-C` folder that is not one, answers `git config --get alias.<verb>` by whether the root's `aliases` file lists that key, answers `git rev-parse --show-toplevel` with its folder (the root, from `docs`, `web` or a folder under it), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths (each pathspec read from the `-C` folder, `.` included), `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, every one for `:/`, as git prints them), and touches its last argument for anything else, as a commit's marker
+// A machine whose fake git fails on a `-C` folder that is not one, answers `git config --get alias.<verb>` by whether the root's `aliases` file lists that key, answers `git rev-parse --show-toplevel` with its folder's physical path, as git does (the root's, from `docs`, `web` or a folder under it), which holds `lefthook` unless it is null, `git diff --cached --name-only` with `staged`, a plain `git diff --name-only` with `unstaged`, a `git diff --name-only [HEAD] -- <paths>` with each of either under one of the paths (each pathspec read from the `-C` folder, `.` included), `git ls-files --others` with `untracked` (under the paths after a `--`, relative to a `-C` folder under the root unless `--full-name`, every one for `:/`, as git prints them), and touches its last argument for anything else, as a commit's marker
 const repo = (
   setup: Setup,
   staged: string[],
@@ -25,7 +25,7 @@ const repo = (
 [ "$1" = -C ] && { [ -d "$2" ] || exit 128; }
 d=$PWD; [ "$1" = -C ] && d=$2
 case " $* " in *" config --get "*) grep -qxF -- "\${@: -1}" ${m.root}/aliases 2>/dev/null; exit ;; esac
-case " $* " in *" rev-parse --show-toplevel "*) case "$d" in ${m.root}/web | ${m.root}/web/* | ${m.root}/docs) echo ${m.root} ;; *) cd "$d"; pwd ;; esac; exit 0 ;; esac
+case " $* " in *" rev-parse --show-toplevel "*) case "$d" in ${m.root}/web | ${m.root}/web/* | ${m.root}/docs) cd ${m.root} ;; *) cd "$d" ;; esac; pwd -P; exit 0 ;; esac
 pre=""; case "$d" in ${m.root}/*) pre=\${d#${m.root}/}/ ;; esac
 full=""; case " $* " in *" --full-name "*) full=1 ;; esac
 case " $* " in *" :/ "*) pre="" ;; esac
