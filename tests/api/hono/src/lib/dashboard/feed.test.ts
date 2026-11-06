@@ -21,7 +21,6 @@ import {
   planItem,
   QUESTION_ID,
   questionItem,
-  sessionOf,
   TWO_QUESTION_ID,
   twoQuestionItem,
 } from "./feed-fixtures"
@@ -45,17 +44,15 @@ const PERMISSION = [
 ].join("\n")
 const DONE = "● Red it is.\n\n> "
 
-// A board of herdr sessions s-1 (dispatcher, at herdr:probes:w1:p1) and s-2 (builder) waiting on the prompts `items` holds, and a pane whose screens `screens` gives, one a read (the last kept); each Enter or number key moves it on, as Claude Code does.
+// A board of herdr sessions s-1 (dispatcher, at herdr:probes:w1:p1) and s-2 (builder) waiting on the prompts `items` and `builders` hold, and a pane whose screens `screens` gives, one a read (the last kept); each Enter or number key moves it on, as Claude Code does.
 function fakes(
   items: Record<string, unknown>[],
   screens: string[] = [PICKER, DONE],
   approvals = false,
+  builders: Record<string, unknown>[] = [],
 ) {
-  const cards = (sessionId: string) =>
-    items
-      .filter((item) => sessionOf(item) === sessionId)
-      .map(feedItemOf)
-      .filter((card): card is FeedItem => card !== null)
+  const cards = (prompts: Record<string, unknown>[]) =>
+    prompts.map(feedItemOf).filter((card): card is FeedItem => card !== null)
   const recorded: string[] = []
   const typed: KeyStep[][] = []
   const reads: string[] = []
@@ -79,14 +76,14 @@ function fakes(
       transcripts: new Map(),
       workers: [
         {
-          feed: cards("s-1"),
+          feed: cards(items),
           herdr: true,
           name: "dispatcher",
           sessionId: "s-1",
           surface: "herdr:probes:w1:p1",
         },
         {
-          feed: cards("s-2"),
+          feed: cards(builders),
           herdr: true,
           name: "builder",
           sessionId: "s-2",
@@ -114,7 +111,7 @@ const once: FeedAnswer = { kind: "permission", mode: "once" }
 
 describe("answerFeed", () => {
   test("the person's own words stand in for a choice, trimmed", async () => {
-    const { deps, typed } = fakes([questionItem("s-1")])
+    const { deps, typed } = fakes([questionItem()])
     const words: FeedAnswer = {
       answers: [{ choices: [], text: "  green, please\t" }],
       kind: "question",
@@ -126,7 +123,7 @@ describe("answerFeed", () => {
   })
 
   test("only the owner may answer, before the sessions are read", async () => {
-    const { deps, typed } = fakes([questionItem("s-1")])
+    const { deps, typed } = fakes([questionItem()])
     let read = false
     deps.listLive = async () => {
       read = true
@@ -139,7 +136,7 @@ describe("answerFeed", () => {
   })
 
   test("a prompt that waits on another live session, or a session that is not live, gets no key", async () => {
-    const { deps, reads, typed } = fakes([questionItem("s-1"), permissionItem("s-2")])
+    const { deps, reads, typed } = fakes([questionItem()], undefined, undefined, [permissionItem()])
     expect(await answerFeed(ask(red, QUESTION_ID, "s-2"), deps)).toMatchObject({
       code: "NOT_PENDING",
     })
@@ -152,7 +149,7 @@ describe("answerFeed", () => {
 
   // The board's own item decides, so an answer that calls itself a question cannot reach a permission.
   test("a question-kind answer aimed at a permission is answered in its terminal alone", async () => {
-    const { deps, typed } = fakes([permissionItem("s-1")], [PERMISSION])
+    const { deps, typed } = fakes([permissionItem()], [PERMISSION])
     expect(await answerFeed(ask(red, PERMISSION_ID), deps)).toMatchObject({
       code: "TERMINAL_ONLY",
     })
@@ -160,7 +157,7 @@ describe("answerFeed", () => {
   })
 
   test("sessions that cannot be read are CMUX_FAILED, and nothing is typed", async () => {
-    const { deps, typed } = fakes([questionItem("s-1")])
+    const { deps, typed } = fakes([questionItem()])
     deps.listLive = async () => {
       throw new Error("herdr down")
     }
@@ -169,7 +166,7 @@ describe("answerFeed", () => {
   })
 
   test("a record that cannot be written throws, and nothing is typed", async () => {
-    const { deps, typed } = fakes([questionItem("s-1")])
+    const { deps, typed } = fakes([questionItem()])
     deps.record = async () => {
       throw new Error("database down")
     }
@@ -178,7 +175,7 @@ describe("answerFeed", () => {
   })
 
   test("one prompt is answered once at a time, and is free again after a throw or a refusal", async () => {
-    const { deps, typed } = fakes([questionItem("s-1")], [PICKER])
+    const { deps, typed } = fakes([questionItem()], [PICKER])
     const [first, second] = await Promise.all([
       answerFeed(ask(red), deps),
       answerFeed(ask(red), deps),
@@ -198,10 +195,10 @@ describe("answerFeed", () => {
 })
 
 describe("replyFor", () => {
-  const item = feedItemOf(questionItem("s-1"))!
+  const item = feedItemOf(questionItem())!
   const multi = feedItemOf({
-    ...questionItem("s-1"),
-    questions: [{ ...questionItem("s-1").questions[0], multi_select: true }],
+    ...questionItem(),
+    questions: [{ ...questionItem().questions[0], multi_select: true }],
   })!
   const answers = (choices: string[], text: string | null): FeedAnswer => ({
     answers: [{ choices, text }],
@@ -229,12 +226,12 @@ describe("replyFor", () => {
   // A permission is allowed only when the card could show all of what the tool would do; it can always be denied.
   test("a permission cut short, or with nothing to show, cannot be allowed from here", () => {
     const long = feedItemOf({
-      ...permissionItem("s-1"),
+      ...permissionItem(),
       tool_input: JSON.stringify({ content: "y".repeat(7000), file_path: "/x" }),
     })!
     expect(replyFor(long, once)).toMatchObject({ code: "INVALID" })
     expect(replyFor(long, deny)).toMatchObject({ kind: "permission", mode: "deny" })
-    const blank = feedItemOf({ ...permissionItem("s-1"), tool_input: undefined })!
+    const blank = feedItemOf({ ...permissionItem(), tool_input: undefined })!
     expect(replyFor(blank, once)).toMatchObject({ code: "INVALID" })
     expect(replyFor(blank, deny)).toMatchObject({ mode: "deny" })
   })
@@ -243,11 +240,11 @@ describe("replyFor", () => {
   test("a plan cut short, or empty, cannot be started from here", () => {
     const start: FeedAnswer = { feedback: null, kind: "plan", mode: "manual" }
     const clipped = feedItemOf({
-      ...planItem("s-1"),
+      ...planItem(),
       plan: JSON.stringify({ plan: "z".repeat(9000) }),
     })!
     expect(replyFor(clipped, start)).toMatchObject({ code: "INVALID" })
-    const empty = feedItemOf({ ...planItem("s-1"), plan: "" })!
+    const empty = feedItemOf({ ...planItem(), plan: "" })!
     expect(replyFor(empty, start)).toMatchObject({ code: "INVALID" })
     expect(replyFor(clipped, { feedback: null, kind: "plan", mode: "deny" })).toMatchObject({
       kind: "plan",
@@ -257,8 +254,8 @@ describe("replyFor", () => {
 })
 
 describe("the activity row", () => {
-  const plan = feedItemOf(planItem("s-1"))!
-  const permission = feedItemOf(permissionItem("s-1"))!
+  const plan = feedItemOf(planItem())!
+  const permission = feedItemOf(permissionItem())!
 
   test("names what was answered, never with what words or command", () => {
     const note = answerSummary("dispatcher", plan, {
@@ -288,7 +285,7 @@ test("only the owner may answer, until a login only Merritt can use narrows it",
 
 describe("answerFeed for a herdr session", () => {
   test("a picker's answer goes as keys into its pane, is recorded, and lands once the prompt leaves it", async () => {
-    const { deps, reads, recorded, typed } = fakes([questionItem("s-1")], [PICKER, DONE])
+    const { deps, reads, recorded, typed } = fakes([questionItem()], [PICKER, DONE])
     const blue: FeedAnswer = { answers: [{ choices: ["Blue"], text: null }], kind: "question" }
     expect(await answerFeed(ask(blue), deps)).toEqual({ at: "2026-10-06T03:00:00.000Z", ok: true })
     expect(typed).toEqual([[{ key: "down" }, { key: "enter" }]])
@@ -297,7 +294,7 @@ describe("answerFeed for a herdr session", () => {
   })
 
   test("each question of a picker in turn, then its Submit", async () => {
-    const { deps, typed } = fakes([twoQuestionItem("s-1")], [PICKER, EXTRAS, REVIEW, DONE])
+    const { deps, typed } = fakes([twoQuestionItem()], [PICKER, EXTRAS, REVIEW, DONE])
     const both: FeedAnswer = {
       answers: [
         { choices: ["Red"], text: null },
@@ -322,7 +319,7 @@ describe("answerFeed for a herdr session", () => {
 
   test("a pane that no longer shows the prompt gets no key and no record", async () => {
     const { deps, recorded, typed } = fakes(
-      [questionItem("s-1")],
+      [questionItem()],
       [PICKER.replace("Pick a color?", "Pick a size?")],
     )
     expect(await answerFeed(ask(red), deps)).toMatchObject({ code: "NOT_PENDING", ok: false })
@@ -332,13 +329,13 @@ describe("answerFeed for a herdr session", () => {
 
   test("own words whose Enter did not land read INTERRUPTED, though the words now show in the last row", async () => {
     const typedIn = PICKER.replace("3. Type something.", "3. teal please")
-    const { deps } = fakes([questionItem("s-1")], [PICKER, typedIn])
+    const { deps } = fakes([questionItem()], [PICKER, typedIn])
     const teal: FeedAnswer = { answers: [{ choices: [], text: "teal please" }], kind: "question" }
     expect(await answerFeed(ask(teal), deps)).toMatchObject({ code: "INTERRUPTED", ok: false })
   })
 
   test("keys that leave the prompt on screen read INTERRUPTED, with the attempt recorded", async () => {
-    const { deps, recorded, typed } = fakes([questionItem("s-1")], [PICKER])
+    const { deps, recorded, typed } = fakes([questionItem()], [PICKER])
     deps.herdr = { ...deps.herdr!, type: async (_, keys) => void typed.push(keys) }
     expect(await answerFeed(ask(red), deps)).toMatchObject({ code: "INTERRUPTED", ok: false })
     expect(typed).toEqual([[{ key: "enter" }]])
@@ -346,7 +343,7 @@ describe("answerFeed for a herdr session", () => {
   })
 
   test("a pane that cannot be read before the keys types nothing; after them, the answer is unconfirmed", async () => {
-    const before = fakes([questionItem("s-1")], [PICKER])
+    const before = fakes([questionItem()], [PICKER])
     before.deps.herdr = {
       ...before.deps.herdr!,
       read: async () => {
@@ -355,7 +352,7 @@ describe("answerFeed for a herdr session", () => {
     }
     expect(await answerFeed(ask(red), before.deps)).toMatchObject({ code: "CMUX_FAILED" })
     expect(before.typed).toEqual([])
-    const after = fakes([questionItem("s-1")], [PICKER])
+    const after = fakes([questionItem()], [PICKER])
     let reads = 0
     after.deps.herdr = {
       ...after.deps.herdr!,
@@ -369,13 +366,13 @@ describe("answerFeed for a herdr session", () => {
 
   test("a herdr session's permission or plan is not answered here: nothing is read, typed or recorded, whatever approvals say", async () => {
     const plan: FeedAnswer = { feedback: null, kind: "plan", mode: "manual" }
-    const on = fakes([permissionItem("s-1"), planItem("s-1")], [PERMISSION, DONE], true)
+    const on = fakes([permissionItem(), planItem()], [PERMISSION, DONE], true)
     expect(await answerFeed(ask(deny, PERMISSION_ID), on.deps)).toMatchObject({
       code: "TERMINAL_ONLY",
       ok: false,
     })
     expect(await answerFeed(ask(plan, PLAN_ID), on.deps)).toMatchObject({ code: "TERMINAL_ONLY" })
-    const off = fakes([permissionItem("s-1"), planItem("s-1")], [PERMISSION, DONE])
+    const off = fakes([permissionItem(), planItem()], [PERMISSION, DONE])
     expect(await answerFeed(ask(once, PERMISSION_ID), off.deps)).toMatchObject({ code: "DISABLED" })
     expect(await answerFeed(ask(plan, PLAN_ID), off.deps)).toMatchObject({ code: "DISABLED" })
     for (const { reads, recorded, typed } of [on, off]) {
@@ -388,12 +385,12 @@ describe("answerFeed for a herdr session", () => {
   // A dispatcher has no manager to answer through the chat, so its refusal names its terminal.
   test("a herdr session's refusal names its manager, and a dispatcher's its own terminal", async () => {
     const plan: FeedAnswer = { feedback: null, kind: "plan", mode: "manual" }
-    const worker = fakes([planItem("s-1")], [DONE], true)
+    const worker = fakes([planItem()], [DONE], true)
     expect(await answerFeed(ask(plan, PLAN_ID), worker.deps)).toMatchObject({
       reason:
         "The Dashboard answers only a herdr session's pickers: for this plan, ask Playground in the chat, and dispatcher's manager answers it.",
     })
-    const own = fakes([planItem("s-1")], [DONE], true)
+    const own = fakes([planItem()], [DONE], true)
     const board = own.deps.listLive
     own.deps.listLive = async () => {
       const live = await board()

@@ -17,6 +17,14 @@ export const groups: Group[] = [
       ["cmux by its path", "/Applications/cmux.app/Contents/Resources/bin/cmux tree --all"],
       ["cmux behind env", "env CMUX_QUIET=1 cmux tree --all"],
       ["a bare cmux", "cmux"],
+      ["cmux in capitals", "CMUX tree"],
+      ["cmux capitalised", "Cmux tree --all"],
+      ["cmux in capitals by its path", "/usr/local/bin/CMUX tree"],
+      ["cmux in capitals opening claude", "CMUX new-workspace --command claude"],
+      [
+        "a program it cannot read before a cmux split (D4's form 11)",
+        "$X new-split right --workspace workspace:3",
+      ],
     ],
   },
 ]

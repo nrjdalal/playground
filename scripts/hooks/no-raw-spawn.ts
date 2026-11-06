@@ -1,4 +1,4 @@
-// PreToolUse hook: refuses a Claude Code session not started through scripts/spawn.sh, since only spawn.sh holds the factory to its capacity gate (load, memory, slots for a new worker, and usage). It refuses every cmux call but its help and version, cmux by any path or a program it cannot read followed by one of cmux's session commands, since every session runs in herdr and no factory session calls cmux; a `claude --resume` or `--continue`; and every herdr call but its reads and a scratch world of the session's own, herdr by any path or a program it cannot read followed by a herdr group, since herdr's socket has no access control.
+// PreToolUse hook: refuses a Claude Code session not started through scripts/spawn.sh, since only spawn.sh holds the factory to its capacity gate (load, memory, slots for a new worker, and usage). It refuses every cmux call but its help and version, cmux in any case and by any path or a program it cannot read followed by one of cmux's session commands, since every session runs in herdr and no factory session calls cmux; a `claude --resume` or `--continue`; and every herdr call but its reads and a scratch world of the session's own, herdr by any path or a program it cannot read followed by a herdr group, since herdr's socket has no access control.
 import "../../packages/env/src/aliases"
 import { join, resolve, sep } from "node:path"
 
@@ -42,8 +42,8 @@ const HEADS = new Set([
 // cmux's global options that take a value, which come before its command.
 const GLOBAL_TAKES = new Set(["--id-format", "--password", "--socket", "--window"])
 const REOPENS = new Set(["-c", "-r", "--continue", "--resume"])
-// cmux's program, by its name, and the words that alone print its help or version and open nothing.
-const TERMINAL = /^cmux$/
+// cmux's program, by its name in any case, since macOS's filesystem ignores case (CMUX runs it), and the words that alone print its help or version and open nothing.
+const TERMINAL = /^cmux$/i
 const CMUX_READS = new Set(["--help", "-h", "--version", "version"])
 
 // herdr 0.9.5's command groups; a program the hook cannot read is judged as herdr when one of these follows it.
@@ -287,12 +287,13 @@ const REOPEN = /\bclaude\b[\s\S]*(?:\s-[cr]\b|--resume|--continue)/
 const candidate = (command: string): boolean =>
   command.includes("$'") ||
   OPENS.test(BARE(command)) ||
+  /\bcmux\b/i.test(BARE(command)) ||
   REOPEN.test(BARE(command)) ||
   UNIX.test(BARE(command))
 
 const spawnCall = (command: string): boolean =>
   /\b(?:herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/.test(BARE(command)) ||
-  (/\bcmux\b/.test(BARE(command)) &&
+  (/\bcmux\b/i.test(BARE(command)) &&
     /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(
       BARE(command),
     )) ||

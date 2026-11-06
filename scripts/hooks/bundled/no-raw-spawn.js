@@ -1818,7 +1818,7 @@ var HEADS = new Set([
 ]);
 var GLOBAL_TAKES = new Set(["--id-format", "--password", "--socket", "--window"]);
 var REOPENS = new Set(["-c", "-r", "--continue", "--resume"]);
-var TERMINAL = /^cmux$/;
+var TERMINAL = /^cmux$/i;
 var CMUX_READS = new Set(["--help", "-h", "--version", "version"]);
 var HERDR_HEADS = new Set([
   "agent",
@@ -2016,8 +2016,8 @@ var visit = async (cmd, { args, first, local, name }, env) => {
 var BARE = (command) => command.replace(/[\\'"]/g, "");
 var OPENS2 = new RegExp(`\\b(?:cmux|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS].join("|")})\\b`);
 var REOPEN = /\bclaude\b[\s\S]*(?:\s-[cr]\b|--resume|--continue)/;
-var candidate = (command) => command.includes("$'") || OPENS2.test(BARE(command)) || REOPEN.test(BARE(command)) || UNIX.test(BARE(command));
-var spawnCall = (command) => /\b(?:herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/.test(BARE(command)) || /\bcmux\b/.test(BARE(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE(command)) || REOPEN.test(BARE(command));
+var candidate = (command) => command.includes("$'") || OPENS2.test(BARE(command)) || /\bcmux\b/i.test(BARE(command)) || REOPEN.test(BARE(command)) || UNIX.test(BARE(command));
+var spawnCall = (command) => /\b(?:herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/.test(BARE(command)) || /\bcmux\b/i.test(BARE(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE(command)) || REOPEN.test(BARE(command));
 function commandOf(raw) {
   try {
     const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);

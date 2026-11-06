@@ -152,6 +152,14 @@ describe("cmux runs only for its help or version", () => {
     ["cmux behind env", "env CMUX_QUIET=1 cmux tree --all"],
     ["a bare cmux", "cmux"],
     ["help with more words", "cmux --help tree"],
+    ["cmux in capitals", "CMUX tree"],
+    ["cmux capitalised", "Cmux tree --all"],
+    ["cmux in capitals by its path", "/usr/local/bin/CMUX tree"],
+    ["cmux in capitals opening claude", "CMUX new-workspace --command claude"],
+    [
+      "a program it cannot read before a cmux split (D4's form 11)",
+      "$X new-split right --workspace workspace:3",
+    ],
   ])("%s is refused", async (_name, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-raw-spawn hook refuses a cmux")
@@ -168,11 +176,24 @@ describe("cmux runs only for its help or version", () => {
     expect(await bash(command)).toBeUndefined()
   })
 
-  // D4's form 12: a call the hook cannot read that names cmux beside a word that opens or restores a session is refused, and any other runs.
-  test("a call it cannot read is refused when it names cmux and a restore", async () => {
-    const deep = "$(".repeat(200_000)
+  // D4's form 12: a call the hook cannot read that names cmux, in any case, beside a word that opens or restores a session is refused, and any other runs.
+  const deep = "$(".repeat(200_000)
+  test.each([
+    ["claude"],
+    ["claude-teams"],
+    ["fork"],
+    ["omc"],
+    ["recover"],
+    ["restore"],
+    ["restore-session"],
+    ["wake"],
+  ])("a call it cannot read is refused when it names cmux and %s", async (word) => {
+    expect(await bash(`cmux ${word} x && echo ${deep}`)).toContain("could not read this call")
+    expect(await bash(`CMUX ${word} x && echo ${deep}`)).toContain("could not read this call")
+  })
+
+  test("a call it cannot read runs when it names cmux and no such word", async () => {
     expect(await bash(`cmux --version && echo ${deep}`)).toBeUndefined()
-    expect(await bash(`cmux restore x && echo ${deep}`)).toContain("could not read this call")
   })
 })
 

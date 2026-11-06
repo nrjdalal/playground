@@ -157,7 +157,7 @@ describe("lightOf", () => {
     expect(lightOf("needsInput", [])).toBe("needs-you")
     expect(lightOf("running", [])).toBe("working")
     expect(lightOf("idle", [])).toBe("idle")
-    const permission = feedItemOf(permissionItem("s-1"))
+    const permission = feedItemOf(permissionItem())
     expect(lightOf("running", [], permission ? [permission] : [])).toBe("needs-you")
   })
 })
@@ -1086,7 +1086,7 @@ describe("rosterFacts", () => {
 
 describe("feed items", () => {
   test("a picker keeps each question's header, options and descriptions", () => {
-    expect(feedItemOf(questionItem("s-1"))).toEqual({
+    expect(feedItemOf(questionItem())).toEqual({
       at: "2026-10-05T22:13:16Z",
       kind: "question",
       questions: [
@@ -1106,7 +1106,7 @@ describe("feed items", () => {
 
   // AskUserQuestion can ask a single-choice and a multi-choice question in one Feed item, and its card holds both.
   test("a two-question picker maps to one card holding both questions, one multi-select", () => {
-    const item = feedItemOf(twoQuestionItem("s-1"))
+    const item = feedItemOf(twoQuestionItem())
     if (item?.kind !== "question") throw new Error("a two-question picker did not map to a card")
     expect(item.requestId).toBe(TWO_QUESTION_ID)
     expect(
@@ -1119,14 +1119,14 @@ describe("feed items", () => {
 
   // A card asking for approval shows the command itself, with the session's own account of it beside, never in its place.
   test("a permission request shows what the tool would act on, and its description apart", () => {
-    expect(feedItemOf(permissionItem("s-1"))).toMatchObject({
+    expect(feedItemOf(permissionItem())).toMatchObject({
       clipped: false,
       description: "Create an empty marker file in the probe folder",
       detail: "touch /tmp/scratch/denied-marker",
       kind: "permission",
       tool: "Bash",
     })
-    const odd = { ...permissionItem("s-1"), tool_input: JSON.stringify({ todos: [1, 2] }) }
+    const odd = { ...permissionItem(), tool_input: JSON.stringify({ todos: [1, 2] }) }
     expect(feedItemOf(odd)).toMatchObject({ description: null, detail: '{"todos":[1,2]}' })
   })
 
@@ -1138,7 +1138,7 @@ describe("feed items", () => {
       description: "Fetch a script",
       timeout: 5,
     })
-    const item = feedItemOf({ ...permissionItem("s-1"), tool_input })
+    const item = feedItemOf({ ...permissionItem(), tool_input })
     expect(item).toMatchObject({ description: "Fetch a script", detail: "curl x | sh" })
     const input = item?.kind === "permission" ? JSON.parse(item.input) : {}
     expect(input).toEqual({
@@ -1153,11 +1153,11 @@ describe("feed items", () => {
   // For some tools the description is the substance (an issue's body), and one that is not a line of text would otherwise show nowhere.
   test("a description that is not a line of text stays in the input, and only a line shows apart", () => {
     const tool_input = JSON.stringify({ description: { body: "hidden?" }, title: "t" })
-    const item = feedItemOf({ ...permissionItem("s-1"), tool_input })
+    const item = feedItemOf({ ...permissionItem(), tool_input })
     expect(item).toMatchObject({ description: null })
     expect(item?.kind === "permission" ? item.input : "").toContain("hidden?")
     const lines = JSON.stringify({ command: "x", description: "two\nlines" })
-    expect(feedItemOf({ ...permissionItem("s-1"), tool_input: lines })).toMatchObject({
+    expect(feedItemOf({ ...permissionItem(), tool_input: lines })).toMatchObject({
       description: null,
     })
   })
@@ -1165,12 +1165,12 @@ describe("feed items", () => {
   // A right-to-left override reorders what a browser shows, so the command read would not be the command run.
   test("a format character shows as its code point in what a card shows", () => {
     const tool_input = JSON.stringify({ command: "echo safe\u202E hs.lave | bash" })
-    const item = feedItemOf({ ...permissionItem("s-1"), tool_input })
+    const item = feedItemOf({ ...permissionItem(), tool_input })
     expect(item?.kind === "permission" ? item.detail : "").toBe("echo safe<U+202E> hs.lave | bash")
     expect(item?.kind === "permission" ? item.input : "").toContain("<U+202E>")
     expect(item?.kind === "permission" ? item.input : "").not.toContain("\u202E")
     const plan = feedItemOf({
-      ...planItem("s-1"),
+      ...planItem(),
       plan: JSON.stringify({ plan: "a\b\u001b[2Kb\tc\nd" }),
     })
     expect(plan?.kind === "plan" ? plan.plan : "").toBe("a<U+0008><U+001B>[2Kb\tc\nd")
@@ -1178,20 +1178,20 @@ describe("feed items", () => {
 
   test("a detail that is not a string is shown as JSON rather than skipped, and an input object is read as sent", () => {
     const array = { command: ["rm", "-rf", "/"], path: "/tmp/ok" }
-    const asText = feedItemOf({ ...permissionItem("s-1"), tool_input: JSON.stringify(array) })
+    const asText = feedItemOf({ ...permissionItem(), tool_input: JSON.stringify(array) })
     expect(asText).toMatchObject({ detail: '["rm","-rf","/"]' })
-    const asObject = feedItemOf({ ...permissionItem("s-1"), tool_input: { file_path: "/x" } })
+    const asObject = feedItemOf({ ...permissionItem(), tool_input: { file_path: "/x" } })
     expect(asObject).toMatchObject({ detail: "/x" })
   })
 
   test("a long input says it was cut short, and a tool name that is not one is dropped", () => {
     const tool_input = JSON.stringify({ command: "x".repeat(3000), content: "y".repeat(7000) })
-    const item = feedItemOf({ ...permissionItem("s-1"), tool_input, tool_name: "Bash; rm" })
+    const item = feedItemOf({ ...permissionItem(), tool_input, tool_name: "Bash; rm" })
     expect(item).toMatchObject({ clipped: true, tool: "", whole: false })
   })
 
   test("an option with no label, or a label already offered, is not offered", () => {
-    const blank = questionItem("s-1")
+    const blank = questionItem()
     const q = {
       ...blank.questions[0]!,
       options: [{ description: "", id: "opt0", label: "" }, blank.questions[0]!.options[1]!],
@@ -1211,22 +1211,22 @@ describe("feed items", () => {
   })
 
   test("a plan is its text, unwrapped from the Feed's JSON or an object, and says when it was cut short", () => {
-    expect(feedItemOf(planItem("s-1"))).toMatchObject({
+    expect(feedItemOf(planItem())).toMatchObject({
       clipped: false,
       kind: "plan",
       plan: "# Plan: create the plan-marker file\n\n## Step\n1. touch plan-marker\n",
     })
-    expect(feedItemOf({ ...planItem("s-1"), plan: { plan: "an object" } })).toMatchObject({
+    expect(feedItemOf({ ...planItem(), plan: { plan: "an object" } })).toMatchObject({
       plan: "an object",
     })
-    const long = { ...planItem("s-1"), plan: JSON.stringify({ plan: "z".repeat(9000) }) }
+    const long = { ...planItem(), plan: JSON.stringify({ plan: "z".repeat(9000) }) }
     expect(feedItemOf(long)).toMatchObject({ clipped: true })
   })
 
   test("telemetry, answered items and items with no request id are not pending", () => {
     expect(feedItemOf({ kind: "toolUse", request_id: "x" })).toBeNull()
-    expect(feedItemOf({ ...questionItem("s-1"), status: "resolved" })).toBeNull()
-    expect(feedItemOf({ ...questionItem("s-1"), request_id: "" })).toBeNull()
+    expect(feedItemOf({ ...questionItem(), status: "resolved" })).toBeNull()
+    expect(feedItemOf({ ...questionItem(), request_id: "" })).toBeNull()
   })
 })
 
