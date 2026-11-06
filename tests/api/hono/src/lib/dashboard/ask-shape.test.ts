@@ -8,6 +8,10 @@ import {
   shapeHints,
 } from "../../../../../../api/hono/src/lib/dashboard/ask-shape"
 import {
+  deleteRefusal,
+  targetWords,
+} from "../../../../../../api/hono/src/lib/dashboard/delete-targets"
+import {
   attachmentSourceSchema,
   inboxInputSchema,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
@@ -167,6 +171,18 @@ describe("ASK_EXAMPLES", () => {
       ["before", true],
       ["after", true],
     ])
+  })
+
+  // PG-1066: playground rm --decision matches a delete's what by the worktree's full path, so the template leads with one
+  test("the delete template is a valid delete decision naming its worktree by the full path ask new and playground rm --decision read", () => {
+    const example = ASK_EXAMPLES.delete
+    expect(inboxInputSchema.safeParse(example).error?.issues ?? []).toEqual([])
+    expect(example.preview.type).toBe("delete")
+    const [path] = targetWords(example.preview.what)
+    expect(path).toMatch(/^\/.+\/\.claude\/worktrees\/[^/]+$/)
+    const worktrees = path!.slice(0, path!.lastIndexOf("/"))
+    const machine = { cwd: "/", exists: () => true, home: "/Users/you", worktrees }
+    expect(deleteRefusal(example, machine)).toBeNull()
   })
 
   test("the slack template is a valid slack decision led by its thread so far (#2287)", () => {

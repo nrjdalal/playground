@@ -220,7 +220,7 @@ test("runRm --worktree refuses a worktree with uncommitted work, naming --discar
     console.error = error
   }
   expect(said).toEqual([
-    `playground: a session (role worker) passes --discard only with --decision <id>: post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`,
+    `playground: a session (role worker) passes --discard only with --decision <id>: post an Inbox delete decision with bun run ask new naming ${wt} and why (bun run ask example delete prints one to start from), then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`,
   ])
   expect(existsSync(wt)).toBe(true)
   const approved = async (id: string): Promise<Decision | null> =>
@@ -256,7 +256,7 @@ test("a session's --discard passes only on an approved delete decision whose wha
       decision: async () => found,
       prState: async () => null,
     })
-  const route = `post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`
+  const route = `post an Inbox delete decision with bun run ask new naming ${wt} and why (bun run ask example delete prints one to start from), then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`
   expect(await refusal(item("approved"))).toBeNull()
   expect(await refusal(item("denied"))).toBe(`--decision #i9 is denied, not approved: ${route}`)
   expect(await refusal(item("open"))).toBe(`--decision #i9 is open, not approved: ${route}`)
@@ -303,7 +303,7 @@ const dirtyWorktree = (main: string) => {
   const wt = join(main, ".claude", "worktrees", "pg-1")
   git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
   writeFileSync(join(wt, "wip.txt"), "x")
-  const route = `post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`
+  const route = `post an Inbox delete decision with bun run ask new naming ${wt} and why (bun run ask example delete prints one to start from), then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`
   return { route, wt }
 }
 
@@ -415,6 +415,35 @@ test("a worktree's PR state counts only when exactly one PR answers, as a branch
   const detached = { branch: null, head: "head" }
   expect(prStateOf([pr("head", "MERGED")], detached, holds)).toBe("MERGED")
   expect(prStateOf([pr("older", "MERGED")], detached, holds)).toBeNull()
+})
+
+// PG-1066: a folder outside the worktrees folder takes plain playground rm, which no --discard gate guards
+test("a session's --worktree --discard on a folder outside the worktrees folder is refused naming playground rm, not a decision route it cannot follow", async () => {
+  const { deps, home } = machine()
+  const outside = join(home, "scratch", "old-site")
+  mkdirSync(outside, { recursive: true })
+  writeFileSync(join(outside, "index.html"), "x")
+  const session = { ...deps, caller: async () => "a session (role worker)" }
+  const worktrees = join(deps.main, ".claude", "worktrees")
+  for (const words of [
+    ["--worktree", outside, "--discard"],
+    ["--worktree", outside, "--discard", "--decision", "#i9"],
+  ]) {
+    const said: string[] = []
+    const error = console.error
+    console.error = (line: string) => void said.push(line)
+    try {
+      expect(await runRm(words, session)).toBe(1)
+    } finally {
+      console.error = error
+    }
+    expect(said).toEqual([
+      `playground: --worktree takes a folder in ${worktrees}, not ${outside}: playground rm ${outside} moves a folder outside it to the trash, with no --worktree or --discard`,
+    ])
+    expect(existsSync(outside)).toBe(true)
+  }
+  expect(await runRm([outside], session)).toBe(0)
+  expect(existsSync(outside)).toBe(false)
 })
 
 // PG-825: a Bash prefix drops PLAYGROUND_ROLE, but not the claude process above the call
