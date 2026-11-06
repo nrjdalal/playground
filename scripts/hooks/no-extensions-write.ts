@@ -976,7 +976,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const operands = remover
       ? args.filter((word, k) => (end !== -1 && k > end) || !word.value.startsWith("-"))
       : WRITERS.has(tool)
-        ? writeTargets(tool, args, gnu)
+        ? writeTargets(tool, args, gnu, posix)
         : []
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
     if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
