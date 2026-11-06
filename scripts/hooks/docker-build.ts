@@ -99,8 +99,11 @@ export const help = (args: Word[]) => args.some((a) => a.value === "-h" || a.val
 // An image build: `image` for docker build and its aliases (one image), `bake` for bake (docker bake, buildx bake), and `compose` for compose build, a compose up, create or run that builds a missing image (each one without --no-build), or a compose watch, which builds and rebuilds its images as files change, with the subcommand and the words after it.
 export type DockerBuild = { kind: "bake" | "compose" | "image"; rest: Word[]; sub: string }
 
+// the standalone docker-compose takes the docker CLI's root options too (--host, --context, --log-level, the TLS files), so its subcommand is read past both
+const COMPOSE_ROOT_TAKES = new Set([...COMPOSE_TAKES, ...DOCKER_TAKES])
+
 function composeBuild(args: Word[]): DockerBuild | undefined {
-  const found = subcommand(args, COMPOSE_TAKES)
+  const found = subcommand(args, COMPOSE_ROOT_TAKES)
   // compose alpha's experimental subcommands, watch among them on an older compose
   const { rest, sub } = found.sub?.value === "alpha" ? subcommand(found.rest, new Set()) : found
   if (!sub) return

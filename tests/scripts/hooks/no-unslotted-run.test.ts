@@ -247,6 +247,11 @@ describe("a docker build outside run-slot is refused from any folder, naming the
     ["docker compose build past --progress", "docker compose --progress plain build"],
     ["docker compose build past its flags", "docker compose --all-resources --compatibility build"],
     ["docker compose build past docker's own options", "docker --context x compose build"],
+    [
+      "docker-compose build past the docker CLI's --log-level",
+      "docker-compose --log-level debug build web",
+    ],
+    ["docker-compose build past the docker CLI's -H", "docker-compose -H tcp://h build"],
     ["portless's compose build", "portless compose build"],
     [
       "portless's compose build through npx and a versioned portless",
@@ -303,6 +308,11 @@ describe("a docker build outside run-slot is refused from any folder, naming the
       "up --no-build",
     ],
     ["docker compose alpha watch", "docker compose alpha watch", "up --no-build"],
+    [
+      "docker-compose up past the docker CLI's --context",
+      "docker-compose --context x up -d",
+      "up --no-build",
+    ],
     ["portless's compose up through bunx", "bunx portless compose up -d", "up --no-build"],
     ["portless's compose up through bun x", "bun x portless compose up", "up --no-build"],
   ])(
