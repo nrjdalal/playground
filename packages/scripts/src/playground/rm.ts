@@ -267,7 +267,11 @@ export const discardRefusal = async (
 
 const gitIn = (cwd: string, ...args: string[]) => {
   const run = Bun.spawnSync(["git", "-C", cwd, ...args], { stderr: "pipe", stdout: "pipe" })
-  return { ok: run.exitCode === 0, out: run.stdout.toString().trim() }
+  return {
+    err: run.stderr.toString().trim(),
+    ok: run.exitCode === 0,
+    out: run.stdout.toString().trim(),
+  }
 }
 
 // A worktree's git record, read before its move, or undefined when git cannot read it.
@@ -279,7 +283,7 @@ export const worktreeGit = (path: string): WorktreeGit | undefined => {
   return { branch: branch.ok ? branch.out : null, gitdir: gitdir.out, sha: sha.out }
 }
 
-// Why restoring a worktree would leave it on another commit or one git cannot read, or null: its branch now points at another commit, or its branch and its commit have both gone; a record folder still there is kept as it is.
+// Why a worktree's restore would leave it on another commit or unreadable, or null; a record folder still there is kept as it is.
 const relinkRefusal = (main: string, git: WorktreeGit): string | null => {
   if (existsSync(git.gitdir)) return null
   const at = git.branch
@@ -288,12 +292,12 @@ const relinkRefusal = (main: string, git: WorktreeGit): string | null => {
   if (at?.ok && at.out !== git.sha)
     return `the branch ${git.branch} now points at ${at.out}, not ${git.sha}, the commit the worktree held, so the restore leaves both as they are`
   if (at?.ok || gitIn(main, "cat-file", "-e", `${git.sha}^{commit}`).ok) return null
-  return `the commit ${git.sha} the worktree held is gone from ${main}, so its restore would leave a folder git cannot read: fetch that commit, run git -C ${main} branch ${git.branch ?? "<branch>"} ${git.sha}, then restore it again`
+  return `the commit ${git.sha} the worktree held is gone from ${main}, so its restore would leave a folder git cannot read: ${git.branch ? `fetch that commit, run git -C ${main} branch ${git.branch} ${git.sha}, then restore it again` : "fetch that commit, then restore it again"}`
 }
 
-// Writes a restored worktree's git record back into the main checkout when it has gone, recreating its branch at the commit it held when the branch has gone too, then rebuilds its index from HEAD, which keeps its files; a record still there, with its index and HEAD, is left as it is.
-const relink = (path: string, main: string, git: WorktreeGit) => {
-  if (existsSync(git.gitdir)) return
+// Writes a gone git record back, recreates a gone branch at its commit and rebuilds the index from HEAD, keeping the files: null when done, else the step that failed.
+const relink = (path: string, main: string, git: WorktreeGit): string | null => {
+  if (existsSync(git.gitdir)) return null
   mkdirSync(git.gitdir, { recursive: true })
   writeFileSync(
     join(git.gitdir, "HEAD"),
@@ -301,9 +305,15 @@ const relink = (path: string, main: string, git: WorktreeGit) => {
   )
   writeFileSync(join(git.gitdir, "commondir"), "../..\n")
   writeFileSync(join(git.gitdir, "gitdir"), `${join(path, ".git")}\n`)
-  if (git.branch && !gitIn(main, "show-ref", "--verify", "--quiet", `refs/heads/${git.branch}`).ok)
-    gitIn(main, "branch", git.branch, git.sha)
-  gitIn(path, "reset", "-q")
+  if (
+    git.branch &&
+    !gitIn(main, "show-ref", "--verify", "--quiet", `refs/heads/${git.branch}`).ok
+  ) {
+    const made = gitIn(main, "branch", git.branch, git.sha)
+    if (!made.ok) return `git branch ${git.branch} ${git.sha} failed: ${made.err}`
+  }
+  const reset = gitIn(path, "reset", "-q")
+  return reset.ok ? null : `git reset -q failed: ${reset.err}`
 }
 
 // playground rm: one quarantine, list or restore against the deps' HOME, main checkout and trash; a protected or tripwire refusal goes to the dispatcher; exit 0 done, 1 refused, 2 a usage error.
@@ -329,11 +339,11 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
       )
     return 0
   }
-  const kept =
+  const keptGit =
     "restore" in args
       ? listTrash(roots.trash).find((entry) => entry.id === args.restore)?.git
       : undefined
-  const relinkRefused = kept && relinkRefusal(roots.main, kept)
+  const relinkRefused = keptGit && relinkRefusal(roots.main, keptGit)
   if (relinkRefused) {
     console.error(`playground: ${relinkRefused}`)
     return 1
@@ -370,7 +380,11 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     return 1
   }
   if ("path" in done) {
-    if (kept) relink(done.path, roots.main, kept)
+    const relinked = keptGit ? relink(done.path, roots.main, keptGit) : null
+    if (relinked) {
+      console.error(`playground: restored ${done.path}, but git cannot read it yet: ${relinked}`)
+      return 1
+    }
     console.log(`Restored ${done.path}`)
     return 0
   }

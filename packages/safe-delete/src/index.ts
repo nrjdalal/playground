@@ -47,7 +47,7 @@ export const isAgentBrowser = (command: string): boolean =>
 
 export type Quarantined = { files: number; id: string; size: number; to: string }
 
-// A worktree's git record as the trash keeps it, since the prune after its move deletes the main checkout's record folder, which holds its HEAD: the branch it held (null when detached), that folder, and its HEAD's commit.
+// A worktree's git record, kept in the trash since the prune after its move deletes it: its branch (null when detached), record folder and commit.
 export type WorktreeGit = { branch: string | null; gitdir: string; sha: string }
 
 export type TrashEntry = {
