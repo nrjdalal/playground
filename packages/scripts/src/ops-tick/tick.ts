@@ -542,16 +542,14 @@ const canaryPull = async (ctx: Context) => {
       const [old, up] = [await sha("HEAD"), await sha("@{u}")]
       const incoming = await ctx.run(["git", "-C", tree, "diff", "--name-only", old, up])
       const install = owed.has(tree) || /(^|\/)(bun\.lock|package\.json)$/m.test(incoming.out)
-      // a main checkout that follows canary is the one the guards load their bundles from, so its changed bundles are swapped in whole before the fast-forward (swap-bundles.ts), put back if the fast-forward fails; a swap that fails is put back, and the pull goes on as before
+      // a main checkout that follows canary is the one the guards load their bundles from, so its changed bundles are swapped in whole before the fast-forward (swap-bundles.ts), put back if the fast-forward fails; a swap that fails puts back what it wrote, and the pull goes on as before
       const git = (...args: string[]) => ctx.run(["git", "-C", tree, ...args])
       let swapped: string[] = []
       if (
         realpathSync(tree) === realpathSync(ctx.repo) &&
         (await git("merge-base", "--is-ancestor", old, up)).code === 0
       ) {
-        const swap = await swapBundles(tree, git, up)
-        if (swap.code === 0) swapped = swap.swapped
-        else if (swap.swapped.length) await unswapBundles(git, swap.swapped)
+        swapped = (await swapBundles(tree, git, up)).swapped
       }
       const step = install
         ? await ctx.run(
@@ -570,7 +568,7 @@ const canaryPull = async (ctx: Context) => {
           )
         : await ctx.run(["git", "-C", tree, "merge", "--ff-only", "-q", up], 120_000)
       if (step.code !== 0 && swapped.length && (await sha("HEAD")) === old)
-        await unswapBundles(git, swapped)
+        await unswapBundles(tree, git, swapped)
       const why = lines(step.out).at(-1) ?? `exit ${step.code}`
       if (step.code === 0) {
         if (install) owed.delete(tree)

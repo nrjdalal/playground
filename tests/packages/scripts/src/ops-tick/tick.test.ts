@@ -30,6 +30,7 @@ import {
 } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
+import { watchTorn } from "../torn-reads"
 import { type Answers, fakeRun } from "./fake-run"
 
 // A machine whose sessions.names keep the old names, which this file's fallbacks name.
@@ -915,21 +916,10 @@ describe("canary pull", () => {
     git(seed, "add", ".")
     git(seed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "two")
     git(seed, "push", "-q", origin, "canary")
-    const ready = join(root, "ready")
-    const stop = join(root, "stop")
-    const counts = join(root, "counts.json")
-    const reader = join(root, "reader.ts")
-    writeFileSync(
-      reader,
-      `import { existsSync, statSync, writeFileSync } from "node:fs"\nconst [path, ...sizes] = ${JSON.stringify([join(repo, bundle), before.length, after.length])}\nlet reads = 0\nlet torn = 0\nwriteFileSync(${JSON.stringify(ready)}, "")\nwhile (!existsSync(${JSON.stringify(stop)})) {\n  reads++\n  try {\n    if (!sizes.includes(statSync(path as string).size)) torn++\n  } catch {\n    torn++\n  }\n}\nwriteFileSync(${JSON.stringify(counts)}, JSON.stringify({ reads, torn }))\n`,
-    )
-    const watcher = Bun.spawn([process.execPath, reader])
-    while (!existsSync(ready)) await Bun.sleep(5)
+    const stopWatch = await watchTorn(join(repo, bundle), [before.length, after.length], root)
     const { ctx, sent } = fake(scratch(), at(14, 5))
     await beat("canary-pull").run({ ...ctx, repo, run: realRun })
-    writeFileSync(stop, "")
-    await watcher.exited
-    const { reads, torn } = JSON.parse(readFileSync(counts, "utf8"))
+    const { reads, torn } = await stopWatch()
     expect(reads).toBeGreaterThan(0)
     expect({ torn }).toEqual({ torn: 0 })
     expect(git(repo, "rev-parse", "HEAD")).toBe(git(origin, "rev-parse", "canary"))

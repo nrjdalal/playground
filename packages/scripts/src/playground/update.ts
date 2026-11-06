@@ -151,18 +151,17 @@ export const runUpdate = async (
       ...manifestsChanged,
     )
   }
-  // the guards load their bundles from this checkout, so the move finds each changed one swapped in whole first (swap-bundles.ts), where stages() allows, and a move that fails puts them back
+  // the guards load their bundles from this checkout, so the move finds each changed one swapped in whole first (swap-bundles.ts), where stages() allows; a swap that fails puts back what it wrote, and a move that fails puts the swap back
   let swapped: string[] = []
   const swap = async (): ReturnType<Run> => {
     if (!(await stages())) return ok
     const result = await swapBundles(repo, git, target)
     swapped = result.swapped
-    if (result.code !== 0 && swapped.length) await unswapBundles(git, swapped)
     return result
   }
   const swappedMove = (step: () => ReturnType<Run>) => async (): ReturnType<Run> => {
     const moved = await step()
-    if (moved.code !== 0 && swapped.length) await unswapBundles(git, swapped)
+    if (moved.code !== 0 && swapped.length) await unswapBundles(repo, git, swapped)
     return moved
   }
   const prelinked =
