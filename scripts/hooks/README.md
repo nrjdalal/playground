@@ -603,6 +603,8 @@ Only the first reading moves the folder, sets variables and records files for th
   and an alias for one), through `git -C`, a wrapper, `bash -c` or run-slot.sh, and a value it cannot read beside one, naming the fix: `git merge origin/canary`, resolving each conflict with both sides' meaning.
   It fails closed only on a call that reads as a merge with ours, and its tests are in `bun run test:file tests/scripts/hooks` too.
 - A merge resolved by hand can still drop a line `canary` added in a file git merged clean, which no-ours-merge cannot see: lefthook's pre-push command `keeps-canary` refuses that push, naming each file and merge in the words of pr:merge's keeps canary gate (`packages/scripts/src/pr-merge/README.md`), and its tests are `bun run test:file tests/packages/scripts/src/pr-merge/prepush.test.ts`.
+- A merge committed with its hooks off can carry git's conflict markers past pre-commit: lefthook's pre-push command `conflict-markers` (`packages/scripts/src/conflict-markers.ts --push`) refuses a push whose refs add a `<<<<<<<` or `>>>>>>>` line, read from each ref's remote sha or, for a new branch, its merge-base with `origin/canary`, naming each file and line,
+  and `bun run precommit:light` runs the staged check before a commit lane's commit; its tests are `bun run test:file tests/lefthook.test.ts tests/packages/scripts/src/precommit-light.test.ts`.
 
 ## no-prompt-stop
 
