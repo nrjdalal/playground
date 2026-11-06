@@ -797,6 +797,7 @@ TITLE_ARG=
 IN_DIR=
 CHECK=
 FIREFIGHTING=
+NAME_PROJECT=
 SIZE=
 RUNTIME=
 words=()
@@ -1209,12 +1210,8 @@ case "$MODE" in
         refuse "$DIR is the main checkout, and $NAME ran in ${ran:-another folder}: $back"
       fi
     fi
-    # With no id, Claude's resume picker looks the name up only in the transcripts of the folder it starts in (its project folder, named from the folder's real path), so in a folder the session never ran in it finds nothing and the launch waits out its timeout.
-    if [ $# -eq 2 ]; then
-      project=$(project_of "$(cd -P "$DIR" && pwd -P)")
-      grep -l -m 1 -F -e "\"customTitle\":\"$NAME\"" -e "\"agentName\":\"$NAME\"" "$project"/*.jsonl > /dev/null 2>&1 ||
-        refuse "no session named $NAME ran in $DIR, so Claude's resume picker would find nothing there: pass its session id, or resume it in the folder it ran in"
-    fi
+    # With no id, the folder's project folder, whose transcripts the name check reads once the capacity gate has read as --check does (below).
+    [ $# -ne 2 ] || NAME_PROJECT=$(project_of "$(cd -P "$DIR" && pwd -P)")
     ;;
   *) NAME=${MODE:-session}; usage ;;
 esac
@@ -1393,6 +1390,12 @@ PY
   # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --firefighting start goes on while its trigger file stands
   [ -n "$FF_TRIGGER" ] || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
     refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
+fi
+# With no id, Claude's resume picker looks the name up only in the transcripts of the folder it starts in (its project folder, named from the folder's real path), so in a folder the session never ran in it finds nothing and the launch waits out its timeout; that check reads every transcript there, so the gate reads first as --check does, logging no start, and the gate proper runs after it.
+if [ -n "$NAME_PROJECT" ]; then
+  (CHECK=1 && gate_capacity) > /dev/null || exit $?
+  grep -l -m 1 -F -e "\"customTitle\":\"$NAME\"" -e "\"agentName\":\"$NAME\"" "$NAME_PROJECT"/*.jsonl > /dev/null 2>&1 ||
+    refuse "no session named $NAME ran in $DIR, so Claude's resume picker would find nothing there: pass its session id, or resume it in the folder it ran in"
 fi
 gate_capacity
 if [ "$RUNTIME" = herdr ]; then

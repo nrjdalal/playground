@@ -120,6 +120,12 @@ echo "    free  pageins  pageout  swapins swapouts"
 echo "    8023  346118K   502178  9966113 12153731"
 echo "    7698      542        0  \${FAKE_SWAPINS:-0}        0"`,
 )
+// grep as it is, but a resume's name check over a folder's transcripts, its one call naming customTitle, is logged to grep.calls first, so a case sees whether that read ran.
+fake(
+  "grep",
+  `case "$*" in *customTitle*) printf '%s\\n' "$*" >> "$HOME/grep.calls" ;; esac
+exec /usr/bin/grep "$@"`,
+)
 
 export let homes = 0
 // A brief's text, which must never reach herdr's argv, the roster or the output.
