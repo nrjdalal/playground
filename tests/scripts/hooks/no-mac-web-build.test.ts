@@ -78,6 +78,7 @@ describe("a web image build on the Mac is refused while the live dashboard's Pos
     ["compose options before build", "docker compose -f docker-compose.yml -p x build web"],
     ["compose up --build", "docker compose up --build"],
     ["compose up, which builds a missing image", "docker compose up"],
+    ["portless's compose up through bunx (#1083)", "bunx portless compose up -d"],
     ["compose up -d web", "docker compose up -d web"],
     ["compose create", "docker compose create"],
     ["compose run web", "docker compose run --rm -e X=1 web sh"],

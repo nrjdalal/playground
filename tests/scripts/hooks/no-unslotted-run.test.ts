@@ -252,6 +252,13 @@ describe("a docker build outside run-slot is refused from any folder, naming the
     ["docker compose up, which builds a missing image", "docker compose up -d"],
     ["docker compose run --build", "docker compose run --build api"],
     ["docker compose create --build", "docker compose create --build"],
+    ["portless's compose up through bunx", "bunx portless compose up -d"],
+    ["portless's compose build", "portless compose build"],
+    [
+      "portless's compose build through npx and a versioned portless",
+      "npx -y portless@0.16.0 compose build web",
+    ],
+    ["portless's compose up through bun x", "bun x portless compose up"],
   ])("%s", async (_name, command) => {
     for (const cwd of [WORKTREE, OUTSIDE]) {
       const reason = await bash(command, cwd)
@@ -272,6 +279,8 @@ describe("a docker build outside run-slot is refused from any folder, naming the
     ["docker compose version", "docker compose version"],
     ["docker compose up --no-build", "docker compose up --no-build -d"],
     ["docker run", "docker run --rm alpine true"],
+    ["portless get", "bunx portless get api"],
+    ["portless's compose up --no-build", "bunx portless compose up --no-build -d"],
     ["docker compose build through run-slot", `${SLOT} docker compose build`],
     ["docker build through run-slot", `${SLOT} docker build .`],
   ])("%s runs", async (_name, command) => {

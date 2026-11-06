@@ -2,7 +2,14 @@
 import { join } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
-import { DOCKERS, type DockerBuild, dockerBuild, positionals, SERVICE_TAKES } from "./docker-build"
+import {
+  DOCKERS,
+  type DockerBuild,
+  dockerBuild,
+  portlessCompose,
+  positionals,
+  SERVICE_TAKES,
+} from "./docker-build"
 import { fromFactory } from "./role"
 import {
   type Env,
@@ -123,6 +130,8 @@ const visit: Visit = async (_cmd, { args, first, name }, env) => {
     return what ? dashboardRuns(what, env.process) : undefined
   }
   if (DOCKERS.has(name)) return judge(args, name === "docker-compose")
+  const compose = portlessCompose(name, args)
+  if (compose) return judge(compose, true)
   if (first && (first.unknown || marked(first.value)) && webBuild(args, false))
     return judge(args, false)
   if (PRINTERS.has(name) || name === "ssh") return

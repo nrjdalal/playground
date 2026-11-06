@@ -1,5 +1,5 @@
 // The docker and docker-compose calls that build an image, read once for the hooks (no-mac-web-build, no-unslotted-run) and for run-slot.sh (packages/scripts/src/docker-build.ts), so each reads the same forms.
-import type { Word } from "./shell"
+import { program, type Word } from "./shell"
 
 export const DOCKERS = new Set(["docker", "docker-compose"])
 // Options that take the next word as their value: docker's own before its subcommand, compose's before build, create, run or up, and those of compose build, create, run and up, one set for all four (so `-p` is run's publish here and compose's project name above).
@@ -126,3 +126,21 @@ export const buildName = (build: DockerBuild): string =>
     : build.kind === "bake"
       ? "docker buildx bake"
       : `docker compose ${build.sub}`
+
+// The compose words a portless call passes on to docker compose (`portless compose up`, portless 0.16's compose support), by name or through bunx, npx or bun x past their options and a versioned portless@x, else undefined.
+export function portlessCompose(name: string, args: Word[]): Word[] | undefined {
+  let words = args
+  if (name === "bun") {
+    if (args[0]?.value !== "x") return
+    words = args.slice(1)
+  }
+  if (name !== "portless") {
+    if (!["bun", "bunx", "npx"].includes(name)) return
+    let k = 0
+    while (k < words.length && words[k].value.startsWith("-"))
+      k += ["--package", "-p"].includes(words[k].value) ? 2 : 1
+    if (program(words[k]?.value ?? "").replace(/@.*$/, "") !== "portless") return
+    words = words.slice(k + 1)
+  }
+  return words[0]?.value === "compose" ? words.slice(1) : undefined
+}

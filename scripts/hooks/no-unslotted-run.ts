@@ -1,7 +1,7 @@
 // PreToolUse hook: refuses a worktree install, node_modules clone, build, type check or whole suite outside run-slot, since five worktree installs at once drove load1 to 66.8 on 18 Oct, and a docker build from any folder, since one fills the Docker VM the live dashboard's Postgres shares.
 import { join, resolve, sep } from "node:path"
 
-import { buildName, DOCKERS, dockerBuild } from "./docker-build"
+import { buildName, DOCKERS, dockerBuild, portlessCompose } from "./docker-build"
 import { bunCall, cwdFlag, mainCheckout, turboWords } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
@@ -105,8 +105,11 @@ function heavy(
   args: Word[],
   env: Env,
 ): { anywhere?: true; dir: string | undefined; what: string } | undefined {
-  if (DOCKERS.has(name)) {
-    const build = dockerBuild(args, name === "docker-compose")
+  const compose = portlessCompose(name, args)
+  if (DOCKERS.has(name) || compose) {
+    const build = compose
+      ? dockerBuild(compose, true)
+      : dockerBuild(args, name === "docker-compose")
     return build && { anywhere: true, dir: env.cwd, what: buildName(build) }
   }
   if (name === "cp") {

@@ -4,6 +4,7 @@ import {
   buildName,
   DOCKERS,
   dockerBuild,
+  portlessCompose,
   positionals,
 } from "../../../scripts/hooks/docker-build"
 import { program, type Word } from "../../../scripts/hooks/shell"
@@ -15,9 +16,10 @@ export function read(argv: string[]) {
   let at = 0
   while (at < argv.length && (argv[at] === "env" || ASSIGN.test(argv[at]))) at++
   const name = program(argv[at] ?? "")
-  if (!DOCKERS.has(name)) return
   const words: Word[] = argv.slice(at + 1).map((value) => ({ quoted: false, value }))
-  const build = dockerBuild(words, name === "docker-compose")
+  const compose = portlessCompose(name, words)
+  if (!DOCKERS.has(name) && !compose) return
+  const build = compose ? dockerBuild(compose, true) : dockerBuild(words, name === "docker-compose")
   if (!build) return
   // the subcommand's place in argv: its words are the last ones, so it sits just before them
   const sub = argv.length - build.rest.length - 1
@@ -29,6 +31,9 @@ export function kind(argv: string[]): string {
   const found = read(argv)
   if (!found) return "none"
   const { build, services } = found
+  // run-slot runs every build in its capped builder (BUILDX_BUILDER), which a builder of the build's own would leave
+  if (argv.some((word) => word === "--builder" || /^(?:--builder=|BUILDX_BUILDER=)/.test(word)))
+    return `refuse run-slot.sh refuses ${buildName(build)} that names its own builder: run-slot runs every docker build in playground-capped, whose memory cap keeps a build from filling the Docker VM, so leave out --builder and BUILDX_BUILDER`
   if (build.kind === "image") return "run"
   if (build.kind === "bake")
     return "refuse run-slot.sh refuses docker buildx bake, which builds its targets at once in the one Docker VM: build each image with docker build, one run-slot run at a time"

@@ -12,10 +12,17 @@ setDefaultTimeout(60_000)
 const dockerMachine = () => {
   const m = machine()
   const log = join(m.root, "docker.log")
+  // every docker call with the builder it runs under, and the marker the fake's buildx create leaves
+  const calls = join(m.root, "docker-calls.log")
+  const made = join(m.root, "builder-made")
   writeFileSync(
     join(m.bin, "docker"),
     `#!/bin/bash
+echo "BUILDX_BUILDER=\${BUILDX_BUILDER:-} $*" >> ${calls}
 case " $* " in
+  *" buildx inspect "*) [ -f ${made} ] ; exit ;;
+  *" buildx create "*) touch ${made}; exit 0 ;;
+  *" buildx stop "*) exit 0 ;;
   *" config --services "*) printf 'api\\nweb\\n'; exit 0 ;;
   *" compose "*" build"*) shift; while [ "$1" != build ]; do shift; done; shift
     echo "start $*" >> ${log}; sleep 0.3; echo "end $*" >> ${log}; exit 0 ;;
@@ -44,7 +51,9 @@ touch "\${@: -1}"
     }
     return { done, p, stderr: () => err }
   }
-  return { ...m, builds, docker, holdDocker }
+  const dockerCalls = () =>
+    existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n") : []
+  return { ...m, builds, docker, dockerCalls, holdDocker, made }
 }
 
 describe("run-slot runs one docker build at a time on the machine (#1083)", () => {
@@ -104,6 +113,20 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     expect(m.builds()).toEqual([])
   })
 
+  test("portless's compose up through bunx is refused with the same fix", async () => {
+    const m = dockerMachine()
+    const p = Bun.spawn(
+      ["bash", SCRIPT, "worker-d", "--", "bunx", "portless", "compose", "up", "-d"],
+      {
+        cwd: m.root,
+        env: m.env(),
+        stderr: "pipe",
+      },
+    )
+    expect(await p.exited).toBe(2)
+    expect(await new Response(p.stderr).text()).toContain("--no-build")
+  })
+
   test("a chain that builds an image is refused, so each build is a run of its own", async () => {
     const m = dockerMachine()
     const p = Bun.spawn(
@@ -118,6 +141,57 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     expect(await new Response(p.stderr).text()).toContain(
       "refuses a chain that builds a docker image",
     )
+  })
+
+  test("a docker build runs in the capped builder, made when missing with its memory cap, and stopped after", async () => {
+    const m = dockerMachine()
+    expect(await m.start("worker-d", {}, SCRIPT, ["docker", "build", "."]).ran()).toBe(true)
+    const calls = m.dockerCalls()
+    expect(calls[0]).toBe("BUILDX_BUILDER= buildx inspect playground-capped")
+    expect(calls[1]).toBe(
+      "BUILDX_BUILDER= buildx create --name playground-capped --driver docker-container --driver-opt memory=1536m --driver-opt memory-swap=1536m --driver-opt default-load=true",
+    )
+    expect(calls[2]).toStartWith("BUILDX_BUILDER=playground-capped build . ")
+    expect(calls[3]).toBe("BUILDX_BUILDER= buildx stop playground-capped")
+  })
+
+  test("a compose build's services each build in the capped builder, which is made once", async () => {
+    const m = dockerMachine()
+    writeFileSync(m.made, "")
+    expect((await m.docker("worker-d", ["compose", "build"]).done()).code).toBe(0)
+    const builds = m.dockerCalls().filter((call) => call.includes(" build "))
+    expect(builds).toEqual([
+      "BUILDX_BUILDER=playground-capped compose build api",
+      "BUILDX_BUILDER=playground-capped compose build web",
+    ])
+    expect(m.dockerCalls().some((call) => call.includes("buildx create"))).toBe(false)
+  })
+
+  test.each([
+    ["--builder", ["buildx", "--builder", "default", "build", "."]],
+    ["--builder=", ["build", "--builder=default", "."]],
+    ["compose build --builder", ["compose", "build", "--builder", "default"]],
+  ])(
+    "a docker build naming its own builder with %s is refused, since it would leave the cap",
+    async (_name, words) => {
+      const m = dockerMachine()
+      const { code, err } = await m.docker("worker-d", words).done()
+      expect(code).toBe(2)
+      expect(err).toContain("names its own builder")
+      expect(m.dockerCalls()).toEqual([])
+    },
+  )
+
+  test("a docker build does not run uncapped when the capped builder cannot be made", async () => {
+    const m = dockerMachine()
+    writeFileSync(
+      join(m.bin, "docker"),
+      `#!/bin/bash\necho "$*" >> ${join(m.root, "docker-calls.log")}\ncase " $* " in *" buildx "*) exit 1 ;; esac\ntouch "\${@: -1}"\n`,
+    )
+    const run = m.start("worker-d", {}, SCRIPT, ["docker", "build", "."])
+    expect(await run.ran()).toBe(false)
+    expect(run.p.exitCode).toBe(1)
+    expect(m.dockerCalls().some((call) => call.startsWith("build "))).toBe(false)
   })
 
   test("a docker build that ends gives run-slot-docker back, so the next one starts at once", async () => {

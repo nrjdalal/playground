@@ -728,6 +728,8 @@ docker_kind() {
     docker|docker-compose)
       "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" kind -- "$@" </dev/null | sed 's/^none$//'
       return ;;
+    bun|bunx|npx|portless)
+      case " $* " in *portless*" compose "*) "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" kind -- "$@" </dev/null | sed 's/^none$//'; return ;; esac ;;
   esac
   while IFS= read -r line; do
     IFS=$'\x1f' read -ra words <<< "$line"
@@ -736,7 +738,7 @@ docker_kind() {
       none) ;;
       *) echo "refuse run-slot.sh refuses a chain that builds a docker image (${words[*]}): run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"; return ;;
     esac
-  done < <(chain_steps "$@" | grep -E "(^|$(printf '\x1f')|/)docker(-compose)?($(printf '\x1f')|$)")
+  done < <(chain_steps "$@" | grep -E "(^|$(printf '\x1f')|/)docker(-compose)?($(printf '\x1f')|$)|portless[^$(printf '\x1f')]*$(printf '\x1f')compose")
 }
 # a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
 light_run() {
@@ -1075,10 +1077,26 @@ clone_ends() {
 }
 absolute() { (cd -- "$1" 2>/dev/null && pwd -P) || case "$1" in /*) printf %s "$1" ;; *) printf %s "$PWD/$1" ;; esac; }
 
+# A docker build runs in playground-capped, a docker-container BuildKit capped at 1536 MiB, half the 3072 MiB VM, which leaves the engine, the
+# kernel and the live dashboard's Postgres (187 MiB at 01:1xZ, 6 Nov) room, so a step that grows past it dies in that container, not the VM
+# (6 Nov 01:03Z: one web build run alone restarted the live db); it is made when missing, never made the default (no --use), loads its image
+# into the engine's store (default-load), and is stopped after each build, so its idle memory goes back while its cache volume stays
+DOCKER_BUILDER=playground-capped
+DOCKER_MEMORY=1536m
+capped_builder() {
+  docker buildx inspect "$DOCKER_BUILDER" >/dev/null 2>&1 && return
+  docker buildx create --name "$DOCKER_BUILDER" --driver docker-container --driver-opt "memory=$DOCKER_MEMORY" \
+    --driver-opt "memory-swap=$DOCKER_MEMORY" --driver-opt default-load=true >/dev/null
+}
+
 # runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code; where Claude Code's sandbox refuses the new group or the nice, it says so on stderr and runs the command without it
 run_command() {
   local code
   [ "${KIND:-}" = clone ] && set -- python3 -I -c "$CLONE_WORKSPACES" "$@"
+  if [ -n "${DOCKER:-}" ]; then
+    capped_builder || { echo "run-slot.sh: could not make the capped builder $DOCKER_BUILDER, so this docker build does not run uncapped" >&2; rlog end "rc=1 ran=0s"; exit 1; }
+    export BUILDX_BUILDER=$DOCKER_BUILDER
+  fi
   [ "${DOCKER:-}" = each ] && set -- "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" each -- "$@"
   python3 -I -c '
 import os, sys
@@ -1096,6 +1114,7 @@ os.execvp(sys.argv[1], sys.argv[1:])' "$@" <&3 3<&- &
   [ -n "$SLOT" ] && [ "$(cat "$SLOT.preempted" 2>/dev/null)" = "$CHILD" ] && echo "run-slot.sh: focus preempted this run for $(focus_holder || echo a session that has since ended); ask again once its focus ends" >&2
   reap "$CHILD"
   CHILD=""
+  [ -n "${DOCKER:-}" ] && docker buildx stop "$DOCKER_BUILDER" >/dev/null 2>&1
   rlog end "rc=$code ran=$(($(date +%s) - TOOK))s"
   exit "$code"
 }
