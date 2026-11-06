@@ -5549,6 +5549,14 @@ var ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
     return required(ZodNonOptional, this, args[0]);
   }
 });
+function object(shape, params) {
+  const def = {
+    type: "object",
+    shape: shape ?? {},
+    ...normalizeParams(params)
+  };
+  return new ZodObject(def);
+}
 function strictObject(shape, params) {
   return new ZodObject({
     type: "object",
@@ -6188,6 +6196,10 @@ var JOBS = {
     description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
     schedule: { every: 60 }
   }),
+  "ops-ticket-card": terminal("ops-ticket-card", bunJob("ops-ticket-card"), {
+    description: "Keeps one Inbox card of the day's watched tickets, edited in place on every change.",
+    schedule: { every: 60 }
+  }),
   "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
     description: "Reads every live session's screen and clears a factory session stuck on a prompt.",
     neverPause: true,
@@ -6465,6 +6477,66 @@ var slotSettings = defineSettings({
     default: [],
     description: "The ops folders of other factories on this machine, each an absolute path: run-slot counts each live holder of their run slots against this factory's load units, and spawn.sh's load gate counts their starts beside its own, both reading only.",
     schema: array(string2().regex(/^\/.+/, "an absolute path"))
+  }
+});
+// packages/settings/src/ticket-card.ts
+var file = string2();
+var hhmm = string2().regex(/^(?:[01]\d|2[0-4]):[0-5]\d$/, "a UTC time, HH:MM");
+var ticketCardSettings = defineSettings({
+  "ticketCard.approvals": {
+    default: 2,
+    description: "The approvals a ticket's pull request waits for, which the card counts toward.",
+    schema: number2().int().positive()
+  },
+  "ticketCard.deployedStates": {
+    default: [],
+    description: "The tracker states, by name, that mark a ticket deployed, its last step; a line closed on any other state reads closed, and with none set every closed line does.",
+    schema: array(string2().min(1))
+  },
+  "ticketCard.diaryDir": {
+    default: "diary",
+    description: "The folder, absolute or in the data folder, where the card's job appends each step it first sees to that day's <YYYY-MM-DD>-steps.md.",
+    schema: string2().min(1)
+  },
+  "ticketCard.linesFile": {
+    default: "",
+    description: "The file of the day's watched tickets the card reads, a JSON object whose lines record holds each ticket's line and whose clock record names the tickets the card shows; none until set, so the job keeps no card.",
+    schema: file
+  },
+  "ticketCard.linkBase": {
+    default: "",
+    description: "The URL a ticket's id is appended to for its link on the card; none until set, so the card links pull requests alone.",
+    schema: union([literal(""), string2().url()])
+  },
+  "ticketCard.prefixes": {
+    default: [],
+    description: "The ticket id prefixes the card shows; none means every prefix.",
+    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "an uppercase ticket prefix"))
+  },
+  "ticketCard.reopenedFile": {
+    default: "",
+    description: "The file whose reopened record maps a ticket's id to when it was seen reopened, which the card marks; none until set.",
+    schema: file
+  },
+  "ticketCard.skipsFile": {
+    default: "",
+    description: "The sent record whose <kind>-skip:<ticket>:<area> keys mark a ticket skipped for an area, which the card shows so; none until set.",
+    schema: file
+  },
+  "ticketCard.title": {
+    default: "Tickets today",
+    description: "The card's title.",
+    schema: string2().min(1)
+  },
+  "ticketCard.verdictsFile": {
+    default: "",
+    description: "The file mapping a ticket's id to its triage verdict, { at, kind }, which the card shows as its cause found; none until set.",
+    schema: file
+  },
+  "ticketCard.window": {
+    default: { days: [0, 1, 2, 3, 4, 5, 6], end: "24:00", start: "00:00" },
+    description: "The UTC hours on the weekdays (0 is Sunday) the card's job writes in; outside them it writes nothing.",
+    schema: object({ days: array(number2().int().min(0).max(6)), end: hhmm, start: hhmm })
   }
 });
 // packages/scripts/src/trace-count/kinds.ts
