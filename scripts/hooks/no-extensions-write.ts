@@ -98,6 +98,8 @@ const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 // Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
 const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
+// Homebrew's GNU coreutils under their g prefix (gcp, grm), each read as the remover or writer it names
+const GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/
 // A writer's options whose next word is a value rather than a target: install's group, mode and owner, mkdir's mode, touch's date, reference file and stamp
 const WRITER_TAKES: Record<string, string[]> = {
   install: ["-g", "-m", "-o"],
@@ -198,7 +200,7 @@ const after = (word: Word, cut: number): Word => ({
 })
 
 // The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install and ln (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch
-function writeTargets(name: string, args: Word[]): Word[] {
+function writeTargets(name: string, args: Word[], gnu: boolean): Word[] {
   if (name === "dd")
     return args.flatMap((word) =>
       word.value.startsWith("of=")
@@ -211,10 +213,13 @@ function writeTargets(name: string, args: Word[]): Word[] {
   const operands: Word[] = []
   let folder: Word | undefined
   let folders = false
+  // GNU's cp, install and ln read an unread word before `--` that expands to -t<folder> as their target folder
+  const maybe: Word[] = []
   for (let k = 0, options = true; k < args.length; k++) {
     const word = args[k]
     const { value } = word
     const long = /^--([a-z-]+)(=?)/.exec(value)
+    if (into && gnu && options && marked(value)) maybe.push(word)
     if (!options || value === "-" || !value.startsWith("-")) operands.push(word)
     else if (value === "--") options = false
     else if (WRITER_TAKES[name]?.includes(value)) k++
@@ -226,7 +231,8 @@ function writeTargets(name: string, args: Word[]): Word[] {
       folder = value.endsWith("t") ? args[++k] : after(word, value.indexOf("t") + 1)
   }
   if (name === "ln" && !folder && operands.length === 1) return [{ quoted: false, value: "." }]
-  return into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
+  const targets = into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
+  return [...new Set([...targets, ...maybe])]
 }
 
 // The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from.
@@ -836,7 +842,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
     const verb = name && !marked(name) ? name : "a program it cannot read"
-    const remover = REMOVERS.has(name)
+    // a GNU build named by its g prefix or reached by its gnubin path reads as the tool it builds, with GNU's options
+    const tool = GNU_NAMED.exec(name)?.[1] ?? name
+    const gnu = tool !== name || first.value.includes("/gnubin/")
+    const remover = REMOVERS.has(tool)
     // a line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run inside this root, whatever folder it started in
     if (env.cwdAnywhere)
       return refuse(
@@ -851,7 +860,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`)
       // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
-      const unheld = (remover ? args : WRITERS.has(name) ? writeTargets(name, args) : []).find(
+      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu) : []).find(
         (word) => !held(word, here, steady),
       )
       if (unheld)
@@ -922,8 +931,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const end = args.findIndex((word) => word.value === "--")
     const operands = remover
       ? args.filter((word, k) => (end !== -1 && k > end) || !word.value.startsWith("-"))
-      : WRITERS.has(name)
-        ? writeTargets(name, args)
+      : WRITERS.has(tool)
+        ? writeTargets(tool, args, gnu)
         : []
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
     if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
