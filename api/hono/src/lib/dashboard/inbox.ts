@@ -344,20 +344,13 @@ const ACCOUNTS = "usage.accounts"
 const accountsAt = (data: string, scope: string): unknown =>
   readSetting(data, ACCOUNTS)?.rows.find((row) => row.scope === scope)?.value
 
-// Pure: whether a stored usage.accounts value holds a Claude row with this email.
+// Pure: the Claude row with this email in a stored usage.accounts value, or undefined.
 const claudeRow = (value: unknown, key: string): Record<string, unknown> | undefined =>
   Array.isArray(value)
     ? (value as Record<string, unknown>[]).find(
         (row) => (row.provider ?? "claude") === "claude" && row.email === key,
       )
     : undefined
-
-// Why an own card cannot be posted: no data folder to read, or no Claude row of usage.accounts at its scope with its email (a GLM row's label is never one).
-export const ownRefusal = (preview: InboxOwn, data?: string): string | undefined => {
-  if (!data) return "This dashboard cannot read usage.accounts, so an own card is refused"
-  if (!claudeRow(accountsAt(data, preview.scope), preview.key))
-    return `${preview.key} is no Claude account in ${ACCOUNTS} at ${preview.scope}`
-}
 
 // Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
@@ -1245,13 +1238,18 @@ export async function postItem(
   return { item: toItem(row as Row), ok: true }
 }
 
-// An own card whose key names no Claude row at its scope, refused as it is posted or edited, so the card never offers an Approve that cannot write.
+// An own card refused as it is posted or edited, so the card never offers an Approve that cannot write: no data folder to read, or no Claude row of usage.accounts at its scope with its email (a GLM row's label is never one).
 const ownRefused = (
   input: z.infer<typeof inboxInputSchema>,
-  settingsData?: string,
+  data?: string,
 ): Refused | undefined => {
   if (input.kind !== "decision" || input.preview.type !== "own") return
-  const message = ownRefusal(input.preview, settingsData)
+  const { key, scope } = input.preview
+  const message = !data
+    ? "This dashboard cannot read usage.accounts, so an own card is refused"
+    : claudeRow(accountsAt(data, scope), key)
+      ? undefined
+      : `${key} is no Claude account in ${ACCOUNTS} at ${scope}`
   return message ? { code: "VALIDATION_ERROR", message, ok: false } : undefined
 }
 
@@ -1469,7 +1467,7 @@ export async function answerItem(
   ) {
     return {
       code: "VALIDATION_ERROR",
-      message: "A guard setting is approved from the card that shows it, with seen",
+      message: "A guard setting or an own card is approved from the card that shows it, with seen",
       ok: false,
     }
   }

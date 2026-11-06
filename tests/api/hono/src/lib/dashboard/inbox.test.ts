@@ -49,6 +49,7 @@ import { GUARD_SETTING_KEYS } from "../../../../../../packages/settings/src/guar
 import { loginPath } from "../../../../../../packages/settings/src/rendered"
 import {
   readSetting,
+  resetSetting,
   setSetting,
   settingHistory,
 } from "../../../../../../packages/settings/src/settings-folder"
@@ -5140,6 +5141,39 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(rows(data)).toEqual(ACCOUNTS)
       expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
         owned: { exitCode: 0, line: "sam@example.com is your own account already" },
+      })
+    })
+
+    test("an Approve after the list was reset, or after the row left it, refuses with exit 1 and writes nothing", async () => {
+      const data = folder()
+      const gone = await postOwn(OWN, data)
+      const reset = await postOwn({ ...OWN, key: "sam@example.com", own: false }, data)
+      expect(
+        setSetting(
+          data,
+          { key: "usage.accounts", scope: "made-up-me", value: ACCOUNTS.slice(1) },
+          who,
+        ).ok,
+      ).toBe(true)
+      let before = writes(data)
+      expect((await approve(gone.id, gone.updatedAt, data)).ok).toBe(true)
+      expect(writes(data)).toBe(before)
+      expect((await store.getItem(db, gone.id))?.answer).toMatchObject({
+        owned: {
+          exitCode: 1,
+          line: "pat@example.com is no longer in usage.accounts at made-up-me, so nothing changed",
+        },
+      })
+      expect(resetSetting(data, { key: "usage.accounts", scope: "made-up-me" }, who).ok).toBe(true)
+      before = writes(data)
+      expect((await approve(reset.id, reset.updatedAt, data)).ok).toBe(true)
+      expect(writes(data)).toBe(before)
+      expect(rows(data)).toBeUndefined()
+      expect((await store.getItem(db, reset.id))?.answer).toMatchObject({
+        owned: {
+          exitCode: 1,
+          line: "usage.accounts at made-up-me is not a list, so nothing changed",
+        },
       })
     })
 
