@@ -428,7 +428,9 @@ describe("status", () => {
     const { finished, live } = (await Bun.file(statuses).json()) as Record<string, string[]>
     const config = configWith([WITH_PR])
     for (const word of [...live!, ...finished!]) {
-      const r = await run(config, ["set", "worker-greed", `status=${word}`])
+      // a park names what it waits on
+      const hold = word === "parked" ? ["hold=#12"] : []
+      const r = await run(config, ["set", "worker-greed", `status=${word}`, ...hold])
       expect([r.code, agentOf(r.roster, "worker-greed")?.status]).toEqual([0, word])
     }
   })
