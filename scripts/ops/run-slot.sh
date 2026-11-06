@@ -715,7 +715,7 @@ chain_add() {
   [ -z "$tracked" ] || CHAIN_ADD_TRACKED=1
   CHAIN_ADD+=(${paths[@]+"${paths[@]}"})
 }
-# whether a verb is one of git's own commands that run-slot reads, which no alias can replace: its porcelain and the plumbing reads, never a plumbing write such as update-ref or hash-object, which a chain counts as a commit
+# whether a verb is one of git's own commands that run-slot lists, which no alias can replace: its porcelain, apply among it, and the plumbing reads below; a chain counts any other verb as a commit, a plumbing write such as update-ref or hash-object or a read off the list such as diff-tree
 git_known() {
   case "$1" in
     add | am | apply | archive | bisect | blame | branch | bundle | cat-file | checkout | cherry | cherry-pick | clean | clone | commit | config | describe | diff \
