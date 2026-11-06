@@ -586,6 +586,41 @@ describe("stalledPrs", () => {
     expect(queries[0]).not.toContain("old/")
   })
 
+  // In a repo other than the factory's, the search finds every open PR the shared account ever opened there, most of them no factory work.
+  test("outside the factory repo it alerts only on a PR a live row names in pr or prs, and searches each named repo", async () => {
+    const idle = 40
+    const { file, queries } = await stalled(
+      answer([
+        { commitAge: idle, number: 3, repo: "work/site" },
+        { commitAge: 93 * 24 * 60, number: 700, repo: "work/site" },
+        { commitAge: idle, number: 5, repo: "work/other" },
+        { commitAge: idle, number: 9 },
+      ]),
+      [
+        { name: "abcdef-worker", pr: "https://github.com/Work/Site/pull/3", status: "working" },
+        {
+          name: "abcdef-reviewer",
+          prs: ["https://github.com/work/other/pull/5", "https://github.com/work/other/issues/6"],
+          status: "working",
+        },
+        { name: "ghjkmn-worker", pr: "https://github.com/work/site/pull/700", status: "ended" },
+      ],
+    )
+    expect(file?.alerts.map((a) => a.name).sort()).toEqual([
+      "acme/app#9",
+      "work/other#5",
+      "work/site#3",
+    ])
+    expect(queries[0]).toContain("repo:work/other")
+  })
+
+  test("in the factory repo it alerts on every open PR of ours, named by a row or not", async () => {
+    const { file } = await stalled(answer([{ commitAge: 600, number: 9 }]), [
+      { name: "abcdef-worker", pr: "https://github.com/acme/app/pull/12", status: "working" },
+    ])
+    expect(file?.alerts.map((a) => a.name)).toEqual(["acme/app#9"])
+  })
+
   test("an answer it cannot read is stalled-check-unreadable, and leaves the file as it was (#454)", async () => {
     const { file, found } = await stalled("not json")
     expect(found).toEqual(["stalled-check-unreadable"])
