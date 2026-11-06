@@ -57,7 +57,7 @@ describe("one row a page, its older versions in a dropdown", () => {
     ...preview,
     modifiedAt: at,
     name,
-    page: { ...page, at, title: "Plat 2668 report" },
+    page: { ...page, at, title: "Made 2668 report" },
   })
   const pages = [
     version("dune-2668-3.html", "2026-10-26T10:00:00.000Z"),
@@ -100,7 +100,7 @@ describe("one row a page, its older versions in a dropdown", () => {
       createElement(PageList, { apiUrl: "https://api.test", now: Date.now(), onOpen, pages }),
     )
     expect(html.match(/data-slot="item"/g)).toHaveLength(2)
-    expect(html).toContain(">Plat 2668 report</button>")
+    expect(html).toContain(">Made 2668 report</button>")
     expect(html).toContain("3 versions")
     expect(html.match(/versions<svg/g) ?? []).toHaveLength(1)
   })

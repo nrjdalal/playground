@@ -325,7 +325,7 @@ describe("the queue's order", () => {
     })
     if (priority) writeFileSync(join(m.ops, "run-slot.priority"), `${priority}\n`)
     m.hold("run-slot", 1, "small")
-    const own = m.start("worker-lm", { RUN_SLOT_SIZE: "small" })
+    const own = m.start("worker-made", { RUN_SLOT_SIZE: "small" })
     expect(await own.saw(WAITING)).toBe(true)
     const org = m.start("reviewer-lw", { RUN_SLOT_SIZE: "small" })
     expect(await org.saw(WAITING)).toBe(true)
@@ -339,12 +339,12 @@ describe("the queue's order", () => {
   }
 
   test("an org's waiter takes the freed slot before an older one of the factory's", async () => {
-    expect(await order()).toEqual(["reviewer-lw", "worker-lm"])
+    expect(await order()).toEqual(["reviewer-lw", "worker-made"])
   })
 
   test("a waiter on an org ext.links does not guard keeps its place", async () => {
     expect(await order(undefined, "https://github.com/other-co/web/pull/1")).toEqual([
-      "worker-lm",
+      "worker-made",
       "reviewer-lw",
     ])
   })
@@ -369,7 +369,7 @@ describe("the queue's order", () => {
   })
 
   test("but not before the run-slot.priority pick", async () => {
-    expect(await order("worker-lm")).toEqual(["worker-lm", "reviewer-lw"])
+    expect(await order("worker-made")).toEqual(["worker-made", "reviewer-lw"])
   })
 
   // 4 Nov: a commit's build queued as commit-<worktree> waited 2 h while the priority named the session committing in that worktree

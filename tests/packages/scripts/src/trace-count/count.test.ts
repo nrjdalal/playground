@@ -504,6 +504,18 @@ describe("the commit's list gate", () => {
     expect(await listGate(treeWith(`Filed as ${key("MADE")}.`), listAt(made))).toBe("")
   })
 
+  // the files whose own tests once named the real prefixes to keep them out: the gate counts each, none of them left out of linearKeys
+  test.each([
+    "api/hono/src/fixtures/dashboard.json",
+    "packages/scripts/src/verify/dashboard-map.json",
+    "extensions/core/skills/pr/SKILL.md",
+  ])("a listed key in %s fails, named by its path and line", async (path) => {
+    const root = join(scratch, `tree-${crypto.randomUUID()}`)
+    mkdirSync(join(root, path, ".."), { recursive: true })
+    writeFileSync(join(root, path), `{\n  "title": "${key("QZX")} report"\n}\n`)
+    expect(await listGate(root, listAt(made))).toContain(`${path}:2: linearKeys`)
+  })
+
   test("a partial list still gates the keys it holds", async () => {
     const partial = { ...EMPTY_LIST, linearKeys: ["QZX"] }
     expect(await listGate(treeWith(`Filed as ${key("QZX")}.`), listAt(partial))).toContain(

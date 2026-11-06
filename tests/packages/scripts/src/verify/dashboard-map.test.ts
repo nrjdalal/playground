@@ -27,10 +27,7 @@ describe("the dashboard map", () => {
   test("names no real person, org or team", async () => {
     for (const file of [MAP_PATH, "packages/scripts/src/verify/checks.ts"]) {
       const text = await Bun.file(join(ROOT, file)).text()
-      expect([file, text.match(/.{0,30}(?:acme|acme-owner|\b(?:NG|PLAT)-\d).{0,30}/gi)]).toEqual([
-        file,
-        null,
-      ])
+      expect([file, text.match(/.{0,30}(?:acme|acme-owner).{0,30}/gi)]).toEqual([file, null])
     }
   })
 

@@ -15,8 +15,8 @@ let scratch = ""
 let config = ""
 // The hook's lists: its terms as the repo holds them, and made-up cleared conversations.
 let lists = ""
-// Checkouts: Acme's (`lw`), one whose unpushed commit names a session (`leaky`), one on a branch named for one (`named`), one on an ordinary probe branch (`infra`), one with a tag whose message names OLD.dispatcher (`tagged`), and OLD.dispatcher's own (`lm`).
-const dirs = { infra: "", leaky: "", lm: "", lw: "", named: "", tagged: "" }
+// Checkouts: Acme's (`lw`), one whose unpushed commit names a session (`leaky`), one on a branch named for one (`named`), one on an ordinary probe branch (`infra`), one with a tag whose message names OLD.dispatcher (`tagged`), and OLD.dispatcher's own (`made`).
+const dirs = { infra: "", leaky: "", made: "", lw: "", named: "", tagged: "" }
 
 function git(dir: string, ...args: string[]): void {
   const proc = Bun.spawnSync(
@@ -51,7 +51,11 @@ beforeAll(async () => {
   dirs.infra = await checkout("infra", lw, "Raise the probe timeout", "fix/probe-timeout")
   dirs.tagged = await checkout("tagged", lw, "Fix")
   git(dirs.tagged, "tag", "-a", "v1", "-m", `Shipped by ${OLD.dispatcher}`)
-  dirs.lm = await checkout("lm", "https://github.com/acme/archive.git", `${OLD.dispatcher}: init`)
+  dirs.made = await checkout(
+    "made",
+    "https://github.com/acme/archive.git",
+    `${OLD.dispatcher}: init`,
+  )
   config = join(scratch, "config")
   await Bun.write(
     join(config, "playground", "roster.json"),
@@ -106,7 +110,7 @@ describe("the guarded orgs", () => {
     const write = (command: string, environment: Record<string, string>) =>
       check(
         JSON.stringify({
-          cwd: dirs.lm,
+          cwd: dirs.made,
           hook_event_name: "PreToolUse",
           tool_input: { command },
           tool_name: "Bash",
@@ -545,9 +549,9 @@ describe("writes elsewhere pass, terms and all", () => {
   })
 
   test(`a commit and a push in ${OLD.dispatcher}'s checkout`, async () => {
-    expect(await bash(`git commit -m "${OLD.dispatcher}: worker-envy"`, dirs.lm)).toBeUndefined()
-    expect(await bash("git push origin HEAD:worker-envy/fix", dirs.lm)).toBeUndefined()
-    expect(await bash(`gh pr comment 1 --body "${OLD.ops}"`, dirs.lm)).toBeUndefined()
+    expect(await bash(`git commit -m "${OLD.dispatcher}: worker-envy"`, dirs.made)).toBeUndefined()
+    expect(await bash("git push origin HEAD:worker-envy/fix", dirs.made)).toBeUndefined()
+    expect(await bash(`gh pr comment 1 --body "${OLD.ops}"`, dirs.made)).toBeUndefined()
   })
 
   test("a commit in a checkout with no remote", async () => {
@@ -1032,7 +1036,7 @@ describe("a write it cannot place", () => {
   ])(
     "%s with no --repo, from a directory it cannot follow, is refused whatever its text",
     async (_, command) => {
-      const reason = await bash(command(), dirs.lm)
+      const reason = await bash(command(), dirs.made)
       expect(reason).toContain("cannot tell which repository it writes to")
       expect(reason).toContain("--repo <owner>/<name>")
       expect(reason).toContain(NOT_RUN)
@@ -1041,31 +1045,37 @@ describe("a write it cannot place", () => {
 
   test("the same write behind a literal cd is judged on its body", async () => {
     expect(
-      await bash(`cd ${dirs.lw} && gh pr create -d -B develop -t t -F "$S/x"`, dirs.lm),
+      await bash(`cd ${dirs.lw} && gh pr create -d -B develop -t t -F "$S/x"`, dirs.made),
     ).toContain("cannot read its text")
-    expect(await bash(`cd ${dirs.lw} && gh pr comment 5613 --body ok`, dirs.lm)).toBeUndefined()
+    expect(await bash(`cd ${dirs.lw} && gh pr comment 5613 --body ok`, dirs.made)).toBeUndefined()
   })
 
   test("a write naming --repo behind cd $W is judged on its body", async () => {
-    expect(await bash(lost(`gh pr comment 5613 ${LW} -F "$S/x"`), dirs.lm)).toContain(
+    expect(await bash(lost(`gh pr comment 5613 ${LW} -F "$S/x"`), dirs.made)).toContain(
       "cannot read its text",
     )
-    expect(await bash(lost(`gh pr comment 5613 ${LW} --body ok`), dirs.lm)).toBeUndefined()
+    expect(await bash(lost(`gh pr comment 5613 ${LW} --body ok`), dirs.made)).toBeUndefined()
     expect(
-      await bash(lost(`gh pr comment 5613 --repo acme/archive --body ${OLD.dispatcher}`), dirs.lm),
+      await bash(
+        lost(`gh pr comment 5613 --repo acme/archive --body ${OLD.dispatcher}`),
+        dirs.made,
+      ),
     ).toBeUndefined()
     expect(
       await bash(
         lost(`gh api repos/acme/archive/issues/5/comments -f body=${OLD.dispatcher}`),
-        dirs.lm,
+        dirs.made,
       ),
     ).toBeUndefined()
     expect(
-      await bash(lost(`gh pr comment https://github.com/acme-blue/app/pull/5 -F "$S/x"`), dirs.lm),
+      await bash(
+        lost(`gh pr comment https://github.com/acme-blue/app/pull/5 -F "$S/x"`),
+        dirs.made,
+      ),
     ).toContain("cannot read its text")
-    expect(await bash(lost(`GH_REPO=acme-blue/app gh pr comment 5 -F "$S/x"`), dirs.lm)).toContain(
-      "cannot read its text",
-    )
+    expect(
+      await bash(lost(`GH_REPO=acme-blue/app gh pr comment 5 -F "$S/x"`), dirs.made),
+    ).toContain("cannot read its text")
   })
 
   test("passes when its text holds none, readable or not", async () => {
@@ -1360,7 +1370,7 @@ describe("an org whose extension gates its Slack sends", () => {
     const asCurl = async (command: string, environment: Record<string, string>) =>
       check(
         JSON.stringify({
-          cwd: dirs.lm,
+          cwd: dirs.made,
           hook_event_name: "PreToolUse",
           tool_input: { command },
           tool_name: "Bash",
@@ -1424,7 +1434,7 @@ describe("an org whose extension gates its Slack sends", () => {
     const asBash = (command: string) =>
       check(
         JSON.stringify({
-          cwd: dirs.lm,
+          cwd: dirs.made,
           hook_event_name: "PreToolUse",
           tool_input: { command },
           tool_name: "Bash",

@@ -30,6 +30,6 @@ describe("the pr skill", () => {
 
   test("names no ticket scheme in its Links line", async () => {
     const text = await Bun.file(join(SKILL, "SKILL.md")).text()
-    expect(text).not.toMatch(/PLAT|#n\b/)
+    expect(text).not.toMatch(/#n\b/)
   })
 })
