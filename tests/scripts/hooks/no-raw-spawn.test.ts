@@ -481,7 +481,7 @@ describe("a scratch herdr world of the session's own runs", () => {
     ],
     [
       "(c) a session that is not a word",
-      `HERDR_SESSION=Lm_Probe HERDR_SOCKET_PATH=${TMP}x/s.sock herdr server`,
+      `HERDR_SESSION=Made_Probe HERDR_SOCKET_PATH=${TMP}x/s.sock herdr server`,
       "not a word of its own",
     ],
     [
