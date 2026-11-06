@@ -630,6 +630,7 @@ Only the first reading moves the folder, sets variables and records files for th
   It reads a delete wherever the shell runs one, through `shell.ts`'s walk (wrappers such as `nohup` and `sudo`, `sh -c`, `eval`, substitutions), and more ways:
   the words after run-slot's `--`, each word of `screen` or `tmux` that starts no option as the command it runs, the script `at` or `batch` takes from stdin or `-f`, and every program it judges named among another program's words (`arch -arm64 rm -rf`, `busybox rm`, `npx rimraf`);
   a printer's or a search's words stay text.
+  A root shell's here-string, heredoc, input file or process substitution (`sudo -s <<< '…'`, `su <<'EOF'`) is read as its script, as the shared reader runs a piped one, each part it cannot read (an unset variable, a download's output) taken as a line break so the rest is still judged, as a plain shell's script is.
   A job a redirect, a pipe or `-f` feeds `at` or `batch` that it cannot read is refused, a program's output included (`at now < "$F"`, `ls | at now`), while `at -l` runs.
   A word it cannot read among those words, given `-r` after it (`arch -arm64 $R -rf`), is refused as a program it cannot read; a data program's words stay text (`gh pr checks $N -R <repo>`).
   A plain `rm` met that way is judged for recursion alone, so `docker rm -fv "$ID"` and `bun rm <package>` run.
