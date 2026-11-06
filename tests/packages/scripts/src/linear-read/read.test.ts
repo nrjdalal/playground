@@ -44,17 +44,24 @@ beforeAll(() => {
     fetch: async (req) => {
       const { query, variables } = (await req.json()) as Omit<Call, "auth">
       calls.push({ auth: req.headers.get("Authorization"), query, variables })
-      const data = query.includes("issue(")
-        ? { issue: ISSUE }
-        : query.includes("project(")
-          ? { project: PROJECT }
-          : query.includes("projects(")
-            ? { projects: { nodes: [{ id: "proj-1", name: "Listings" }] } }
-            : query.includes("searchIssues(")
-              ? { searchIssues: { nodes: [{ identifier: "DUNE-3", title: "Covering" }] } }
-              : query.includes("users(")
-                ? { users: { nodes: [{ ...merritt, active: true }] } }
-                : null
+      const data = query.includes("t0: issue(")
+        ? Object.fromEntries(
+            Object.entries(variables).map(([name, id]) => [
+              `t${name.slice(1)}`,
+              { identifier: id, state: { type: id === "DUNE-1" ? "started" : "completed" } },
+            ]),
+          )
+        : query.includes("issue(")
+          ? { issue: ISSUE }
+          : query.includes("project(")
+            ? { project: PROJECT }
+            : query.includes("projects(")
+              ? { projects: { nodes: [{ id: "proj-1", name: "Listings" }] } }
+              : query.includes("searchIssues(")
+                ? { searchIssues: { nodes: [{ identifier: "DUNE-3", title: "Covering" }] } }
+                : query.includes("users(")
+                  ? { users: { nodes: [{ ...merritt, active: true }] } }
+                  : null
       return data ? Response.json({ data }) : Response.json({ errors: [{ message: "unknown" }] })
     },
     port: 0,
@@ -94,6 +101,19 @@ describe("linear-read", () => {
     expect(await read(gql(), "search", "parking import")).toEqual({
       searchIssues: { nodes: [{ identifier: "DUNE-3", title: "Covering" }] },
     })
+  })
+
+  test("reads many tickets' state types in one query", async () => {
+    const before = calls.length
+    expect(await read(gql(), "states", "DUNE-1,DUNE-2")).toEqual({
+      "DUNE-1": "started",
+      "DUNE-2": "completed",
+    })
+    expect(calls.length - before).toBe(1)
+    expect(calls.at(-1)?.variables).toEqual({ i0: "DUNE-1", i1: "DUNE-2" })
+    await expect(read(gql(), "states", "DUNE-1,} mutation {")).rejects.toThrow(
+      "states takes ticket IDs",
+    )
   })
 
   test("sends no mutation", async () => {
