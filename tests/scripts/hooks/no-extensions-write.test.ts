@@ -1741,7 +1741,7 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
   })
 })
 
-describe("an unquoted variable stays one word where the shell does not split it (PG-1133)", () => {
+describe("an unquoted value stays one word where the shell does not split it (PG-1133)", () => {
   test.each([
     ["ln of one variable at zsh's top level", "ln -s $X"],
     ["GNU ln of one variable at zsh's top level", "gln -s $X"],
@@ -1749,6 +1749,9 @@ describe("an unquoted variable stays one word where the shell does not split it 
     ["mkdir with a mode from a variable at zsh's top level", "mkdir -m $X /tmp/x"],
     ["ln of one quoted variable in bash -c", `bash -c 'ln -s "$X"'`],
     ["ln of one variable in zsh -c", `zsh -c 'ln -s $X'`],
+    ["ln of a quoted command substitution", `ln -s "$(cat /tmp/f)" /tmp/l`],
+    ["cp of a command substitution to a literal last path", "cp $(cat /tmp/f) /tmp/x"],
+    ["dd with an arithmetic block size", "dd if=/dev/zero of=/tmp/y bs=$((4 * 1024)) count=1"],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
