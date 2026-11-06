@@ -60,7 +60,7 @@ export type Setup = {
   topDelay?: number
 }
 
-// A scratch state folder and config folder, with a fake sysctl on PATH giving the load asked for (load5 and load15 as load1 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, a fake vm_stat whose last row reads the swap-ins asked for, and a fake iostat whose second sample reads disk0's transfers/s and MB/s asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
+// A scratch state folder and config folder, with a fake sysctl on PATH giving the load asked for (load5 and load15 as load1 unless given), the core count asked for (15 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, a fake vm_stat whose last row reads the swap-ins asked for, and a fake iostat whose second sample reads disk0's transfers/s and MB/s asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
 export const machine = ({
   cores = 15,
   disk = [120, 3.5],

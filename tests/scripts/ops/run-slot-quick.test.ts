@@ -179,7 +179,7 @@ describe("a node_modules clone waits for its spacing", () => {
 
   // the owner's load rule, 5 Nov: load5 under the core count, one per core
   test("while load5 is within 4 of the brake, one per core", async () => {
-    expect(await clone(machine({ cores: 8, load1: 2, load5: 5 }))).toBe("waited")
+    expect(await clone(machine({ cores: 8, load1: 2, load5: 4 }))).toBe("waited")
   })
 
   test("but starts under it", async () => {
@@ -200,8 +200,12 @@ describe("a node_modules clone waits for its spacing", () => {
   })
 
   // under Claude Code's sandbox sysctl is refused, so the brake falls back to this Mac's 15 cores
-  test("and a core count it cannot read is 15", async () => {
-    expect(await clone(machine({ load1: 2, load5: 12, sandboxed: true }))).toBe("waited")
+  test("and a core count it cannot read is 15: within 4 of it waits", async () => {
+    expect(await clone(machine({ load1: 2, load5: 11, sandboxed: true }))).toBe("waited")
+  })
+
+  test("and under it starts", async () => {
+    expect(await clone(machine({ load1: 2, load5: 10, sandboxed: true }))).toBe("ran")
   })
 
   test("while a big run holds a lane", async () => {
