@@ -166,6 +166,10 @@ export const groups: Group[] = [
         "GNU touch of a variable after its first operand under POSIXLY_CORRECT exported",
         `export POSIXLY_CORRECT=1; gtouch /tmp/x -r "$D"`,
       ],
+      [
+        "GNU mkdir of a relative folder after its first operand under POSIXLY_CORRECT after a cd to a variable",
+        `cd "$D"; POSIXLY_CORRECT=1 gmkdir /tmp/x -m sub`,
+      ],
     ],
   },
   {
