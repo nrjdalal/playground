@@ -5301,6 +5301,9 @@ var ZodEmail = /* @__PURE__ */ $constructor("ZodEmail", (inst, def) => {
   $ZodEmail.init(inst, def);
   ZodStringFormat.init(inst, def);
 });
+function email2(params) {
+  return _email(ZodEmail, params);
+}
 var ZodGUID = /* @__PURE__ */ $constructor("ZodGUID", (inst, def) => {
   $ZodGUID.init(inst, def);
   ZodStringFormat.init(inst, def);
@@ -5942,10 +5945,10 @@ var extOrderSchema = array(extScopeSchema).refine((names) => new Set(names).size
 var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
 
 // packages/settings/src/accounts.ts
-var email2 = string2().email();
+var email3 = string2().email();
 var label = string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a label of lowercase letters, digits, dots, dashes and underscores");
 var claudeAccount = strictObject({
-  email: email2,
+  email: email3,
   ends: string2().datetime({ offset: true }).nullable().optional(),
   endsFirst: boolean2().optional(),
   label: label.optional(),
@@ -5979,7 +5982,7 @@ var accountSettings = defineSettings({
   "usage.switchAccount": {
     default: "",
     description: "The account whose full week the ops tick tells the dispatchers and leads about, so the factory moves off it; empty for none.",
-    schema: union([email2, literal("")])
+    schema: union([email3, literal("")])
   }
 });
 // packages/settings/src/channel.ts
@@ -6059,6 +6062,52 @@ var factorySettings = defineSettings({
     default: "",
     description: "The repository the factory's pull requests land in, the checkout's origin when unset: pr:merge needs GitGuardian's check there, Checks reads its PRs, and the roster links a bare PR number into it.",
     schema: repo
+  }
+});
+// packages/settings/src/firefighting.ts
+var firefightingSettings = defineSettings({
+  "firefighting.start.account": {
+    default: "",
+    description: "The Claude account a firefighting worker logs in as (spawn.sh's --account), an email whose token the Keychain keeps; empty starts it on spawn.sh's own pick.",
+    schema: union([literal(""), email2()])
+  },
+  "firefighting.start.brief": {
+    default: "brief-ff-ticket-template.md",
+    description: "The standing brief under the data folder that ops-firefighting-start fills for each ticket, its {TICKET} and {NAME} replaced by the ticket's ID and the new worker's name.",
+    schema: string2().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder")
+  },
+  "firefighting.start.consultFrom": {
+    default: "",
+    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts nothing and tells the dispatcher "consult <id>" once per ticket, so the owner decides; empty never consults.',
+    schema: union([literal(""), string2().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM in UTC")])
+  },
+  "firefighting.start.daysOff": {
+    default: [],
+    description: "The UTC dates (YYYY-MM-DD) ops-firefighting-start starts nothing on, as a day off; empty starts on every day.",
+    schema: array(string2().regex(/^\d{4}-\d{2}-\d{2}$/, "a YYYY-MM-DD date"))
+  },
+  "firefighting.start.freshMinutes": {
+    default: 10,
+    description: "How many minutes old firefighting.json's lines may be (its lastTry, else its file time) for a start; older ones are a closed window's or a stopped relay's, so the job starts nothing and tells the Builder once.",
+    schema: number2().int().min(1).max(120)
+  },
+  "firefighting.start.hours": {
+    default: "",
+    description: "The UTC window ops-firefighting-start starts in, HH:MM-HH:MM (one past midnight wraps); outside it the job starts nothing and tells the Builder once; empty starts at any time.",
+    schema: union([
+      literal(""),
+      string2().regex(/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/, "HH:MM-HH:MM in UTC")
+    ])
+  },
+  "firefighting.start.in": {
+    default: "",
+    description: "The folder a firefighting worker opens in (spawn.sh's --in), an absolute path; empty starts none, and the job tells the Builder this key is unset.",
+    schema: union([literal(""), string2().regex(/^\/.+/, "an absolute path")])
+  },
+  "firefighting.start.prefixes": {
+    default: [],
+    description: "The ticket keys the job starts for (MADE for MADE-1), each a tracker team's key; empty starts none.",
+    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "a ticket key, upper case"))
   }
 });
 // packages/settings/src/gates.ts
@@ -6166,6 +6215,10 @@ var JOBS = {
   "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
     description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
     schedule: { every: 86400 }
+  }),
+  "ops-firefighting-start": terminal("ops-firefighting-start", `${bunJob("ops-firefighting-start")} --data {data}`, {
+    description: "Starts a firefighting worker for each open ticket no session holds, Urgent first, and holds focus for an Urgent one's.",
+    schedule: { every: 60 }
   }),
   "ops-flow": launchd("ops-flow", {
     description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",
@@ -7058,14 +7111,20 @@ function codeFed(commands) {
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|\bread\b[^;&|\n]*\s-[A-Za-z]*[aA]|\b(?:declare|export|float|integer|local|readonly|typeset)\b[^;&|\n]*\s[-+][A-Za-z]*[aA]/;
+var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/;
+var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
 var zshSplits = (line) => {
   if (ZSH_SPLITS.test(line))
     return true;
+  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
+    const at = command.search(ARRAY_MAKERS);
+    if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at)))
+      return true;
+  }
   const joined = line.replace(/[\\'"]/g, "");
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
-  const rest = joined.replace(expansion, " ");
-  return [...joined.matchAll(expansion)].some(([, name]) => new RegExp(`(?<![\\w$])${name}(?!\\w)`).test(rest));
+  const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
+  return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
 };
 var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
 var ZSH_ARRAYS = new Set([
@@ -7074,6 +7133,9 @@ var ZSH_ARRAYS = new Set([
   "builtins",
   "cdpath",
   "commands",
+  "comppostfuncs",
+  "compprefuncs",
+  "compstate",
   "dirstack",
   "dis_aliases",
   "dis_builtins",
@@ -7100,6 +7162,7 @@ var ZSH_ARRAYS = new Set([
   "jobstates",
   "jobtexts",
   "keymaps",
+  "killring",
   "langinfo",
   "mailpath",
   "manpath",
@@ -7115,6 +7178,8 @@ var ZSH_ARRAYS = new Set([
   "path",
   "pipestatus",
   "psvar",
+  "region_highlight",
+  "registers",
   "reply",
   "reswords",
   "saliases",
@@ -7126,6 +7191,9 @@ var ZSH_ARRAYS = new Set([
   "usergroups",
   "watch",
   "widgets",
+  "words",
+  "zle_bracketed_paste",
+  "zle_highlight",
   "zsh_eval_context",
   "zsh_scheduled_events"
 ]);

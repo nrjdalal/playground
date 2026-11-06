@@ -96,12 +96,16 @@ Done when the PR reads `MERGED` and `MERGE` holds its merge commit. A refusal fo
 
 The tag is the last tag's patch plus one (`v0.0.98` is followed by `v0.0.99`); the root `package.json` version is not moved and does not decide it.
 
+The notes take ZeroStarter's shape: the compare link, one emoji section per commit type, then the contributors' logins. `bun run release:notes <last tag> vX.Y.Z` renders them from GitHub's compare of the two tags (`packages/scripts/src/release-notes/`) and prints them. Write them to a file outside the checkout, and name it by its literal absolute path in `--notes-file`, since the leak guards read a notes file only through a literal path:
+
 ```bash
 gh api -X POST repos/{owner}/{repo}/git/refs -f ref=refs/tags/vX.Y.Z -f sha="$MERGE"
-gh release create vX.Y.Z --verify-tag --latest --generate-notes
+bun run release:notes vX.Y.W vX.Y.Z > /tmp/notes-vX.Y.Z.md   # vX.Y.W is the last tag
+gh release create vX.Y.Z --verify-tag --latest --notes-file /tmp/notes-vX.Y.Z.md
 ```
 
-Done when `gh release list -L 1` shows `vX.Y.Z` marked Latest.
+When a guard refuses the notes for a contributor's login, delete that login's line from the file, or the whole Contributors section when none passes, and create the release again.
+Done when `gh release list -L 1` shows `vX.Y.Z` marked Latest, and its page opens with the compare link.
 
 ## 5. Pull the main checkout
 
@@ -135,5 +139,5 @@ Done when the main checkout's `HEAD` equals `origin/main`, `playground update` e
 ## Notes
 
 - **Merge method is load-bearing.** `canary` PRs squash; the ship PR merges with a **merge commit** so `main` keeps shared history with `canary` and the next ship's diff stays clean.
-- **The notes are GitHub's.** `--generate-notes` lists the PRs since the last tag, so a ship makes no changelog commit on `canary`.
+- **The notes are rendered, never committed.** `release:notes` groups the commits since the last tag as ZeroStarter's changelogen notes do, with `ci` hidden as ZeroStarter's `changelog.config.json` hides it, and the release keeps them, so a ship makes no changelog commit on `canary` or `main`.
 - **Each tag is made once.** A tag that already exists fails the `git/refs` call: read the last tag again and take the next number.
