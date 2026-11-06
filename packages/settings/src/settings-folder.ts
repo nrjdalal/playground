@@ -7,6 +7,7 @@ import { guardedOrgs } from "./ext"
 import { deriveHooks, extGit, extLog, scopesIn, writeFiles, writeRoot } from "./folder"
 import { CORE, extensionsDir, loginOf, scopeDir } from "./rendered"
 import {
+  checkAgainst,
   checkSetting,
   CORE_READ_ONLY,
   extScopeSchema,
@@ -113,6 +114,12 @@ const badScope = (data: string, scope: string): Result<never> | undefined =>
           }
         : undefined
 
+// Every scope's rows once the scope's settings.json holds values.
+const rowsWith = (data: string, scope: string, values: Record<string, unknown>): Row[] => [
+  ...settingRows(data).filter((row) => row.scope !== scope),
+  ...Object.entries(values).map(([key, value]) => ({ key, scope, value })),
+]
+
 // One commit of the scope's new settings.json, with policy.json rebuilt at the root from every scope.
 const commit = (
   data: string,
@@ -121,10 +128,7 @@ const commit = (
   values: Record<string, unknown>,
   who: Who,
 ) => {
-  const rows = [
-    ...settingRows(data).filter((row) => row.scope !== scope),
-    ...Object.entries(values).map(([name, value]) => ({ key: name, scope, value })),
-  ]
+  const rows = rowsWith(data, scope, values)
   const trailers: [string, string][] = [
     ["Setting", key],
     ["Actor", who.actor],
@@ -150,6 +154,12 @@ export const setSetting = (
   if (!checked.ok) return { message: checked.message, ok: false, status: 400 }
   const values = readValues(data, input.scope)
   values[checked.key] = checked.value
+  const refused = checkAgainst(
+    checked.key,
+    checked.value,
+    settingsFor(rowsWith(data, input.scope, values), loginOf(data)),
+  )
+  if (refused) return { message: refused, ok: false, status: 400 }
   commit(data, input.scope, checked.key, values, who)
   return { key: checked.key, ok: true, scope: input.scope, value: checked.value }
 }

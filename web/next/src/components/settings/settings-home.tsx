@@ -8,6 +8,7 @@ import { Extensions } from "@/components/settings/extensions"
 import { MacChecks } from "@/components/settings/mac-checks"
 import { Privacy } from "@/components/settings/privacy"
 import { Remote } from "@/components/settings/remote"
+import { Templates } from "@/components/settings/templates"
 import { PageHeader } from "@/components/shell/page-header"
 import { config } from "@/lib/config"
 
@@ -18,7 +19,7 @@ export function SettingsHome() {
     <>
       <PageHeader
         title="Settings"
-        description="This Mac's accounts, extensions, privacy and how the Dashboard runs."
+        description="Accounts, templates, extensions, privacy and how the Dashboard runs."
       />
       {allowed && config.hosted ? (
         <div className="flex flex-col gap-6">
@@ -29,6 +30,7 @@ export function SettingsHome() {
         <div className="flex flex-col gap-6">
           <MacChecks />
           <Accounts />
+          <Templates />
           <Extensions />
           <Privacy />
           <Remote />

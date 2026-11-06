@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { GUARD_SETTING_KEYS } from "../../../packages/settings/src/guard-keys"
 import { check, GUARD_KEYS, guarded } from "../../../scripts/hooks/no-extensions-write"
 import { overBaseline, stepsOf } from "./pace"
 
@@ -646,6 +647,45 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["cut at a quoted brace", "cut -d'{' -f1 /dev/null"],
     ["sort keyed at a quoted bracket", "sort -t'[' -k2 /dev/null"],
     ["awk matching a regex that starts at / and holds a glob", "awk '/^a*b/' /dev/null"],
+    ["sed printing a bold list item's lines", "sed -n '/^- \\*\\*/p' ~/.playground/x.md"],
+    [
+      "sed printing a bold list item's text",
+      "sed -n 's/^- \\*\\*\\([^*]*\\)\\*\\*.*/\\1/p' ~/.playground/x.md",
+    ],
+    [
+      "sed printing a range between two regex addresses",
+      "sed -n '/## latest (proposal, round 2/,/^## Notes/p' notes.md",
+    ],
+    [
+      "awk printing a range between two regexes by a flag",
+      "awk '/^## latest \\(proposal, round 2/{f=1} /^## Notes/{f=0} f' notes.md",
+    ],
+    ["sed printing from a regex to the last line", "sed -n '/[Nn]it/,$p' notes.md"],
+    ["sed printing a regex and the six lines after it", "sed -n '/[Rr]eviewer/,+6p' notes.md"],
+    ["sed printing a function's lines", "sed -n '/^f() {/,/^}/p' notes.md"],
+    [
+      "awk printing a function's range from git show's output",
+      "git show c668f859:scripts/ops/run-slot.sh | awk '/^memstat\\(\\)/,/^}/' | head -30",
+    ],
+    [
+      "sed printing a function's range from git show's output",
+      "git show c668f859:scripts/ops/run-slot.sh | sed -n '/^memstat()/,/^}/p'",
+    ],
+    [
+      "awk after a sed that prints a line naming a shell",
+      "sed -n '/sh -c/p' /dev/null; awk '$3 ~ /runner/' /dev/null",
+    ],
+    [
+      "perl printing each match of a /g regex",
+      `perl -ne 'print "$1\\n" while /#(\\d+)/g' notes.md`,
+    ],
+    ["perl printing every match with -l", "perl -lne 'print for /PG-\\d+/g' notes.md"],
+    ["perl replacing a match with its variable", "perl -pe 's/(a)/<$1>/' notes.md"],
+    [
+      "sed printing the issue's line ranges after a grep",
+      `grep -n -E "^ {0,2}(if |elif |else$|fi$)" scripts/spawn.sh | sed -n '/^13[2-9][0-9]:\\|^1[45][0-9][0-9]:/p'`,
+    ],
+    ["sed replacing a tag by a bracket class", "sed 's/<pasted_content[^>]*>/[P]/g' notes.md"],
     ["git -c with a literal pager", "git -c core.pager=less log"],
     ["rm of a glob in a build folder", "rm -rf build/*"],
     ["rm of a held folder's glob", "X=build; rm -rf $X/*"],
@@ -950,8 +990,8 @@ describe("a quoted argument is read as a command line only where a program runs 
       "exec uniq watch 'rm -rf ~/.playground/extensions/.no-such-folder'",
     ],
     [
-      "awk after a sed, which keeps canary's reading",
-      "sed -n '/sh -c/p' /dev/null; awk '$3 ~ /runner/' /dev/null",
+      "awk after a printf, which keeps canary's reading",
+      "printf '%s\\n' '/sh -c/p'; awk '$3 ~ /runner/' /dev/null",
     ],
     [
       "sed -i '' inserting a removal into a git hook",
@@ -1867,6 +1907,25 @@ describe("the gated keys are every key the guards read", () => {
     expect(await read("scripts/spawn.sh")).toContain("setting_text paths.codeRoot")
     expect(GUARD_KEYS.has("paths.codeRoot")).toBe(true)
   })
+})
+
+// PG-1090: the Inbox's guard decision takes the keys GUARD_SETTING_KEYS names, so the two lists are one, and a session's own write of each stays refused.
+describe("a guard decision's keys are the keys the hook gates (PG-1090)", () => {
+  test("GUARD_KEYS holds GUARD_SETTING_KEYS, no more and no fewer", () => {
+    expect([...GUARD_KEYS].sort()).toEqual([...GUARD_SETTING_KEYS].sort())
+  })
+
+  test.each([...GUARD_SETTING_KEYS])(
+    "a session's own settings set and reset of %s are refused",
+    async (key) => {
+      expect(
+        await bash(`playground settings set ${key} '{}' --scope acme-test --reason r`),
+      ).toContain("no-extensions-write hook refuses")
+      expect(await bash(`playground settings reset ${key} --scope acme-test --reason r`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+    },
+  )
 })
 
 describe("a refusal for a value the hook does not hold names it in readable text", () => {

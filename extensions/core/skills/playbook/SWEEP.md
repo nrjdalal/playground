@@ -10,6 +10,7 @@ Work the steps in order.
 Run `playground sweep <your name>`.
 It prints only what changed since your last sweep, one line each: a new alert from `ops/alerts-pending.json`, the merge queue when it changes, load5 (the third field of `sysctl -n vm.loadavg`) crossing 15, the single-slot flag turning on or off, each of your roster rows whose ETA has passed, and for Ops, once an hour, each ops switch on with its age and reason;
 its cursor is `sweep/<your name>.json` in the data folder.
+A parked row's passed ETA reads `parked past eta` where any other row's reads `eta passed`, and its `hold` ([ROSTER.md](ROSTER.md)) prints once when it has closed (`parked on closed hold`), and once when it reads as neither open nor closed (`parked hold unreadable`).
 For each `switch on:` line, Ops checks whether its reason still holds: one that does is set again with a fresh reason through `run-slot.sh set`, and any other is lifted by moving it to `<name>.lifted-<ts>` ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)); `run-slot.focus` alone ends with `playground focus off`, which lifts its merge hold too.
 When it prints `quiet`, the Builder's sweep ends there, and Ops' goes on to step 2 and ends after it.
 
@@ -33,7 +34,7 @@ For every agent of yours that `ListAgents` lists, or the roster shows with a sta
 - **Waiting** on a picker, which **ask** keeps factory sessions from raising: end it by a close and a resume whose brief gives the answer when a rule or a sound default decides it, or has the session post anything only the owner decides to the Inbox; otherwise leave it for the owner in that pane ([SESSIONS.md](SESSIONS.md#answer-a-picker)).
 - **Stuck** on a permission prompt: allow it when the command is needed, else deny it with a simpler shape ([SESSIONS.md](SESSIONS.md#answer-a-permission-prompt), **unstick**).
   When the command's shape prompted (a shell wrapper, a compound one-liner), deny it and have the session rerun it as plain commands.
-  When the action itself prompted and you cannot judge it (a delete, a protected path), deny it and post it as an Inbox decision (**ask**).
+  When the action itself prompted and you cannot judge it (a delete, a protected path), deny it and send it to the dispatcher as a decision, which it posts (**ask**).
   An allow is your own call as its manager, never presented as the owner's, and the action never moves to another session to dodge the prompt.
 - **Idle**, and its last turn ended without a report to you: ask it for its report, unless it idles under an urgent ticket's stop, which holds it idle until the all-clear (its brief's **stop**).
 - **Silent**: a worker with no push and no report to you for 60 minutes after a review round, the time under a stop left out (one worker chased a side bug for 3.5 hours unreported).

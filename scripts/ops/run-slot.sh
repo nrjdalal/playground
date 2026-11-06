@@ -12,6 +12,8 @@ OPS=${RUN_SLOT_OPS:-${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops}
 # this copy's path and arguments, so a waiter can run a newer copy in its place (reread, below)
 SELF=$0
 ARGS=("$@")
+# LANES is capacity()'s one lanes verdict for a count (lanes_now), so a value from the caller's env would steer every slot check outside a count
+unset LANES
 # a waiter that runs a newer copy hands it its first ask's time, so the runs log has one ask and the whole wait; the command never sees it
 REREAD=""
 case "${RUN_SLOT_ASKED:-}" in
