@@ -326,7 +326,7 @@ function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   tick()
   if (marked(word.value) || word.value.startsWith("-")) return false
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir } as Env))
-  if (program(word.value).toLowerCase() === "playground")
+  if (program(word.value) === "playground")
     return (
       !word.value.includes("/") ||
       !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory())
@@ -414,7 +414,7 @@ function awkPrograms(words: Word[]): Word[] | undefined {
 
 // The lines an awk program runs, read whatever the line: each string literal of a program that can run a command or write a file
 function programLines({ args, first }: Parsed, rooted: boolean): string[] {
-  if (!AWKS.has(program(first?.value ?? "").toLowerCase())) return []
+  if (!AWKS.has(program(first?.value ?? ""))) return []
   return (awkPrograms(args) ?? [])
     .filter(({ value }) => rooted || awkRuns(value))
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
@@ -527,7 +527,7 @@ function narrow(cmd: Command, env: Env): boolean {
     )
   }
   if (!ownProgram(cmd, parsed)) return false
-  const base = program(first.value).toLowerCase()
+  const base = program(first.value)
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))

@@ -96,7 +96,7 @@ const HERDR_READS = new Set([
 const HERDR_SOCKET = /herdr[^\s'"]*\.sock\b/
 // The programs that can open a Unix socket; any of them naming a herdr socket writes to it past the allow-list.
 const CONNECTS = /^(?:bun|curl|deno|nc|ncat|netcat|node|perl|php|python[\d.]*|ruby|socat)$/
-const UNIX = /\b(?:curl|nc|ncat|netcat|socat)\b/
+const UNIX = /\b(?:curl|nc|ncat|netcat|socat)\b/i
 // The Unix socket a connecting program is pointed at: nc's target after a U in any short-flag cluster or ncat's --unixsock, any socat address (its types take any case, and a bare path is a socket too), curl's --unix-socket or --abstract-unix-socket; a variable assigned before it loses where it came from, so one the hook cannot read is refused.
 function unixTarget(name: string, args: Word[]): Word | undefined {
   const positional = args.filter((a) => !a.value.startsWith("-") || a.value === "-")
@@ -280,10 +280,11 @@ const visit: Visit = async (cmd, { args, first, local, name }, env) => {
 const BARE = (command: string) => command.replace(/[\\'"]/g, "")
 const OPENS = new RegExp(
   `\\b(?:cmux|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS].join("|")})\\b`,
+  "i",
 )
-const REOPEN = /\bclaude\b[\s\S]*(?:\s-[cr]\b|--resume|--continue)/
+const REOPEN = /\bclaude\b[\s\S]*(?:\s-[cr]\b|--resume|--continue)/i
 
-// The cheap first look: a cmux or herdr call, a word that names one, or a claude resume, with quotes gone; $'...' can spell any word, so it always counts.
+// The cheap first look: a cmux or herdr call, a word that names one, or a claude resume, in any case as macOS runs them, with quotes gone; $'...' can spell any word, so it always counts.
 const candidate = (command: string): boolean =>
   command.includes("$'") ||
   OPENS.test(BARE(command)) ||
@@ -292,7 +293,7 @@ const candidate = (command: string): boolean =>
   UNIX.test(BARE(command))
 
 const spawnCall = (command: string): boolean =>
-  /\b(?:herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/.test(BARE(command)) ||
+  /\b(?:herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/i.test(BARE(command)) ||
   (/\bcmux\b/i.test(BARE(command)) &&
     /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(
       BARE(command),

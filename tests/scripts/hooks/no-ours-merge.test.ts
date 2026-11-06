@@ -18,6 +18,7 @@ const bash = (command: string) => check(input(command), {})
 describe("a merge or pull with ours is refused", () => {
   test.each([
     ["-s ours", "git merge -s ours origin/canary"],
+    ["git in capitals", "GIT merge -s ours origin/canary"],
     ["-sours", "git merge -sours origin/canary"],
     ["--strategy=ours", "git merge --strategy=ours origin/canary"],
     ["--strategy ours", "git merge --strategy ours origin/canary"],
