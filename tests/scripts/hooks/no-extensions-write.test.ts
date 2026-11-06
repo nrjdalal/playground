@@ -1669,6 +1669,14 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["a git author name from a variable", `GIT_AUTHOR_NAME="$N" git commit -m x`],
     ["cp to a literal path elsewhere", "cp x /tmp/y"],
     ["cp to a path the line holds", `D=/tmp/d; cp x "$D/y"`],
+    [
+      "cp to a path the line holds beside trap, sched and autoload as words",
+      `D=/tmp/d; echo trap sched autoload; cp x "$D/y"`,
+    ],
+    [
+      "cp to a path the line holds after a program named by its path",
+      `D=/tmp/d; /bin/echo hi; cp x "$D/y"`,
+    ],
     ["cp of a variable to a literal path", `cp "$S" /tmp/y`],
     ["touch with a reference file from a variable", `touch -r "$R" /tmp/y`],
     ["dd reading a variable to a literal path", `dd if="$S" of=/tmp/y`],
@@ -2091,6 +2099,11 @@ describe("a refusal for a value the hook does not hold names it in readable text
     ["a variable", "rm -f $X/x", "rm on $X/x,"],
     ["a loop variable", 'for d in a b; do rm -f "$d/x"; done', 'rm on "$d/x",'],
     ["a variable inside a nested shell's script", 'bash -c "rm -f $X/x"', "rm on $…/x,"],
+    [
+      "a held variable after a command named by a variable from the environment",
+      'D=/tmp/d; $EDITOR f; cp x "$D/y"',
+      'cp on "$D/y",',
+    ],
     [
       "git -c with a variable",
       'git -c core.pager="$P" log',
