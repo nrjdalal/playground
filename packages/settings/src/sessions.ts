@@ -1,8 +1,9 @@
 import type { RosterKind } from "@packages/config/kinds"
 import { z } from "zod"
 
+import { type Account, accountKey, accountsOf } from "@/accounts"
 import { readPolicyOrDefaults } from "@/rendered"
-import { defineSettings } from "@/settings"
+import { defineSettings, type Refusal } from "@/settings"
 
 const name = z
   .string()
@@ -64,6 +65,21 @@ export const sessionTemplates = z
     "each id is listed once",
   )
 
+// Pure: each template whose account is no Claude row of usage.accounts, refused at its account, since spawn.sh reads that account's token from the Keychain.
+export const unknownAccounts = (templates: SessionTemplate[], accounts: Account[]): Refusal[] => {
+  const known = new Set(accountsOf(accounts, "claude").map(accountKey))
+  return templates.flatMap((template, at) =>
+    template.account && !known.has(template.account)
+      ? [
+          {
+            message: `${template.account} is not in usage.accounts: add it in Settings > Accounts`,
+            path: [at, "account"],
+          },
+        ]
+      : [],
+  )
+}
+
 // The managers' session names, so a factory names its own: each kind's name, and the old names a machine's sessions and stored rows still carry, each read as its kind.
 export const sessionSettings = defineSettings({
   "sessions.aliases": {
@@ -79,6 +95,8 @@ export const sessionSettings = defineSettings({
     schema: z.strictObject({ builder: name, dispatcher: name, ops: name, planner: name }),
   },
   "sessions.templates": {
+    against: (templates, read) =>
+      unknownAccounts(templates as SessionTemplate[], read("usage.accounts") as Account[]),
     default: [
       {
         backend: "claude",
@@ -110,7 +128,7 @@ export const sessionSettings = defineSettings({
       },
     ] as SessionTemplate[],
     description:
-      "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, backend, model, effort, account and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
+      "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, backend, model, effort, account (a Claude row of usage.accounts) and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
     schema: sessionTemplates,
   },
 })
