@@ -1,0 +1,92 @@
+import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
+
+import { Templates } from "../../../../../../web/next/src/components/settings/templates"
+import { ACCOUNTS_QUERY_KEY } from "../../../../../../web/next/src/lib/accounts"
+import {
+  type Template,
+  TEMPLATE_SETTING_QUERY_KEY,
+} from "../../../../../../web/next/src/lib/templates"
+
+type Node = unknown
+type CreateElement = (type: unknown, props?: unknown, ...children: Node[]) => Node
+const web = join(import.meta.dir, "../../../../../../web/next")
+const { createElement } = (await import(Bun.resolveSync("react", web))) as {
+  createElement: CreateElement
+}
+const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server", web))) as {
+  renderToStaticMarkup: (node: Node) => string
+}
+const { QueryClient, QueryClientProvider } = (await import(
+  Bun.resolveSync("@tanstack/react-query", web)
+)) as {
+  QueryClient: new () => { setQueryData: (key: readonly unknown[], data: unknown) => void }
+  QueryClientProvider: unknown
+}
+
+const ORCHESTRATOR: Template = {
+  backend: "claude",
+  brief: "orchestrator.md",
+  id: "orchestrator",
+  kind: "orchestrator",
+  label: "Orchestrator",
+}
+const ASSISTANT: Template = {
+  backend: "claude",
+  brief: "assistant.md",
+  id: "assistant",
+  kind: "assistant",
+  label: "Assistant",
+}
+const NIGHT: Template = {
+  backend: "glm",
+  brief: "night.md",
+  id: "night-shift",
+  kind: "orchestrator",
+  label: "Night shift",
+}
+
+const render = (rows?: Template[], scope: string | null = "made-up-me") => {
+  const client = new QueryClient()
+  client.setQueryData(ACCOUNTS_QUERY_KEY, { accounts: [], login: scope !== null, scope })
+  if (rows)
+    client.setQueryData(TEMPLATE_SETTING_QUERY_KEY, { defaults: [ASSISTANT, ORCHESTRATOR], rows })
+  return renderToStaticMarkup(
+    createElement(QueryClientProvider, { client }, createElement(Templates)),
+  )
+}
+
+describe("Settings > Templates", () => {
+  test("is the section the picker's Edit templates lands on, at #templates", () => {
+    const html = render([ASSISTANT, ORCHESTRATOR])
+    expect(html).toContain('id="templates"')
+    expect(html).toContain(">Templates<")
+    expect(html).toContain(">Add template<")
+  })
+
+  test("each row says whether it is a default, an edited default or one you added, with Reset on an edited one and Remove on an added one", () => {
+    const html = render([ASSISTANT, NIGHT, { ...ORCHESTRATOR, effort: "high" }])
+    expect(html).toContain("Default · Assistant · Claude · assistant.md")
+    expect(html).toContain("Added · Orchestrator · GLM · night.md")
+    expect(html).toContain("Edited default · Orchestrator · Claude · High · orchestrator.md")
+    for (const label of ["Assistant", "Night shift", "Orchestrator"])
+      expect(html).toContain(`aria-label="Edit ${label}"`)
+    expect(html).toContain('aria-label="Reset Orchestrator"')
+    expect(html).toContain('aria-label="Remove Night shift"')
+    expect(html).not.toContain('aria-label="Reset Assistant"')
+    expect(html).not.toContain('aria-label="Remove Assistant"')
+    expect(html).not.toContain('aria-label="Remove Orchestrator"')
+  })
+
+  test("while the first read is pending, it holds an empty busy slot", () => {
+    const html = render()
+    expect(html).toContain('aria-busy="true"')
+    expect(html).not.toContain("No templates")
+  })
+
+  test("before the extensions login names a scope to write to, every action is disabled", () => {
+    const html = render([NIGHT], null)
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>\s*Add template/)
+    expect(html).toMatch(/<button(?=[^>]*aria-label="Edit Night shift")(?=[^>]*disabled="")/)
+  })
+})

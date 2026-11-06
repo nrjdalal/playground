@@ -39,8 +39,13 @@ export const itemKeySchema = z
     "an item key is lowercase letters, digits, dots, dashes and underscores",
   )
 
+// A refusal a value earns from another setting, at a path into the value, which the schema alone cannot check.
+export type Refusal = { message: string; path: (number | string)[] }
+
 export type Field<S extends z.ZodType = z.ZodType> = {
   aliases?: string[]
+  // What the value's schema cannot check alone: each refusal it earns from the settings beside it, read through read, which gives a key's value or its default.
+  against?(value: z.output<S>, read: (key: string) => unknown): Refusal[]
   default: z.output<S>
   description: string
   schema: S
@@ -89,13 +94,16 @@ export const settingFields = (): { field: Field; key: string }[] =>
 
 export type Checked = { key: string; ok: true; value: unknown } | { message: string; ok: false }
 
+// A refusal as one line, "<key>: ✖ <reason> → at <path>" for each reason, the shape the Dashboard's Templates editor reads back.
+const refusalLine = (key: string, error: z.ZodError) =>
+  `${key}: ${z.prettifyError(error).replaceAll("\n", " ")}`
+
 // A value as a write would store it: its key resolved, its value parsed by the key's schema, and nothing secret-shaped.
 export const checkSetting = (key: string, value: unknown): Checked => {
   const name = resolveKey(key)
   if (!name) return { message: `no setting ${key}; playground settings list names them`, ok: false }
   const parsed = fields.get(name)!.schema.safeParse(value)
-  if (!parsed.success)
-    return { message: `${name}: ${z.prettifyError(parsed.error).replaceAll("\n", " ")}`, ok: false }
+  if (!parsed.success) return { message: refusalLine(name, parsed.error), ok: false }
   const secret = secretIn(parsed.data)
   if (secret)
     return {
@@ -103,6 +111,21 @@ export const checkSetting = (key: string, value: unknown): Checked => {
       ok: false,
     }
   return { key: name, ok: true, value: parsed.data }
+}
+
+// A checked value against the settings it will be read beside: each refusal its field's against gives, worded as the schema's are, or undefined when none.
+export const checkAgainst = (
+  key: string,
+  value: unknown,
+  settings: Settings,
+): string | undefined => {
+  const field = fields.get(key)
+  const refusals = field?.against?.(value, (name) => settingValue(settings, name)?.value) ?? []
+  if (!refusals.length) return undefined
+  const error = new z.ZodError(
+    refusals.map(({ message, path }) => ({ code: "custom" as const, input: value, message, path })),
+  )
+  return refusalLine(key, error)
 }
 
 // An extension's links: each GitHub org, lowercase as a repo's origin is matched, whose repos read it, or * for every repo.
