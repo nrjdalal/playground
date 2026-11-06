@@ -100,17 +100,18 @@ const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
 // Homebrew's GNU coreutils under their g prefix (gcp, grm), each read as the remover or writer it names
 const GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/
-// A writer's options that take a value rather than name a target, by short letter (GNU's -S suffix apart, a flag in macOS's install) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner and strip program, mkdir's mode, touch's adjustment, date, reference file and stamp; cp's, install's and ln's -t names their target folder, read apart
+// A writer's options that take a value rather than name a target, by short letter (`gnu` for a GNU build alone, `bsd` for macOS's alone) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner, strip program, and macOS's destdir, hash, link flags, metalog and tags, mkdir's mode, touch's adjustment, date, reference file and stamp; cp's, install's and ln's -t names their target folder, and macOS install's -M its metalog, read apart
 const WRITER_TAKES: Record<
   string,
-  { flags?: string[]; gnu?: string; long: string[]; short: string }
+  { bsd?: string; flags?: string[]; gnu?: string; long: string[]; short: string }
 > = {
   cp: { gnu: "S", long: ["no-preserve", "sparse", "suffix"], short: "" },
   install: {
+    bsd: "BDfhlMT",
     flags: ["strip"],
     gnu: "S",
     long: ["group", "mode", "owner", "strip-program", "suffix"],
-    short: "Bfgmo",
+    short: "gmo",
   },
   ln: { gnu: "S", long: ["suffix"], short: "" },
   mkdir: { long: ["mode"], short: "m" },
@@ -210,7 +211,7 @@ const after = (word: Word, cut: number): Word => ({
 })
 
 // The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install and ln (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch
-function writeTargets(name: string, args: Word[], gnu: boolean): Word[] {
+function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): Word[] {
   if (name === "dd")
     return args.flatMap((word) =>
       word.value.startsWith("of=")
@@ -226,14 +227,16 @@ function writeTargets(name: string, args: Word[], gnu: boolean): Word[] {
   let folders = false
   // GNU's cp, install and ln read an unread word before `--` that expands to -t<folder> as their target folder
   const maybe: Word[] = []
+  // the file macOS's install writes its metalog to
+  const logs: Word[] = []
   for (let k = 0, options = true; k < args.length; k++) {
     const word = args[k]
     const { value } = word
     if (into && gnu && options && marked(value)) maybe.push(word)
     if (!options || value === "-" || !value.startsWith("-")) {
       operands.push(word)
-      // macOS's getopt stops at the first operand, so a later dashed word is an operand
-      if (!gnu) options = false
+      // macOS's getopt stops at the first operand, as GNU's does under POSIXLY_CORRECT, so a later dashed word is an operand
+      if (!gnu || posix) options = false
     } else if (value === "--") options = false
     else if (value.startsWith("--")) {
       // a long option GNU reads by any prefix, its value attached after = or as the next word
@@ -255,15 +258,23 @@ function writeTargets(name: string, args: Word[], gnu: boolean): Word[] {
         else if (into && letter === "t") {
           folder = i + 1 < value.length ? after(word, i + 1) : args[++k]
           break
-        } else if (takes?.short.includes(letter) || (gnu && takes?.gnu?.includes(letter))) {
-          if (i + 1 === value.length) k++
+        } else if (
+          takes?.short.includes(letter) ||
+          (gnu ? takes?.gnu : takes?.bsd)?.includes(letter)
+        ) {
+          const rest = i + 1 < value.length
+          if (!gnu && name === "install" && letter === "M") {
+            const log = rest ? after(word, i + 1) : args[k + 1]
+            if (log) logs.push(log)
+          }
+          if (!rest) k++
           break
         }
       }
   }
   if (name === "ln" && !folder && operands.length === 1) return [{ quoted: false, value: "." }]
   const targets = into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
-  return [...new Set([...targets, ...maybe])]
+  return [...new Set([...targets, ...maybe, ...logs])]
 }
 
 // The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from.
@@ -877,6 +888,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const tool = GNU_NAMED.exec(name)?.[1] ?? name
     const gnu = tool !== name || first.value.includes("/gnubin/")
     const remover = REMOVERS.has(tool)
+    // POSIXLY_CORRECT set in the call, by a prefix or on its line, makes a GNU build stop its options at the first operand
+    const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"))
     // a line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run inside this root, whatever folder it started in
     if (env.cwdAnywhere)
       return refuse(
@@ -891,9 +904,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`)
       // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
-      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu) : []).find(
-        (word) => !held(word, here, steady),
-      )
+      const unheld = (
+        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : []
+      ).find((word) => !held(word, here, steady))
       if (unheld)
         return refuse(
           `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
