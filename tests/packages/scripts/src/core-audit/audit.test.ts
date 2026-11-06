@@ -44,8 +44,8 @@ function linked(list?: string | null, policy?: string): Record<string, string> {
       JSON.stringify({
         orgs: { acme: { "firefighting.start.prefixes": ["DUNE"] } },
         values: {
-          "ext.links": { acme: ["acme-labs"], me: ["*"] },
-          "ext.repos": { acme: "me/acme-vault" },
+          "ext.links": { acme: ["dunecorp"], me: ["*"] },
+          "ext.repos": { acme: "me/vault-one" },
           "factory.publicRepo": "me/acme-site",
         },
       }),
@@ -116,9 +116,9 @@ describe("leg 1: a linked org's terms, read at run time", () => {
   test("reports the org's GitHub orgs and repository, past the public repositories trace-count reads past", async () => {
     const terms = (await orgTerms(linked())) as Terms
     const files: File[] = [
-      { path: "src/a.ts", text: "github.com/acme-labs/web\n" },
-      { path: "src/b.ts", text: "ok\nclone me/acme-vault\n" },
-      { path: "src/c.ts", text: "me/acme-site and me/acme-vaults\n" },
+      { path: "src/a.ts", text: "github.com/dunecorp/web\n" },
+      { path: "src/b.ts", text: "ok\nclone me/vault-one\n" },
+      { path: "src/c.ts", text: "me/acme-site and me/vault-ones\n" },
     ]
     expect(at(leg1(files, terms))).toEqual(["src/a.ts:1 githubName", "src/b.ts:2 githubName"])
   })
