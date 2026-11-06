@@ -132,6 +132,14 @@ export const groups: Group[] = [
         "a recursive delete echoed to sudo's shell in a quoted env's split string after argv0's long option",
         `echo 'rm -rf ${NEVER_MADE}' | 'env' --argv0 name -S 'sudo -s'`,
       ],
+      [
+        "a recursive delete echoed to sudo's shell in a quoted env's split string after a lone dash, env's -i",
+        `echo 'rm -rf ${NEVER_MADE}' | 'env' - -S 'sudo -s'`,
+      ],
+      [
+        "a recursive delete echoed to sudo's shell in a second env's split string after a lone dash, behind nice",
+        `echo 'rm -rf ${NEVER_MADE}' | env nice env - -S 'sudo -s'`,
+      ],
     ],
   },
 ]

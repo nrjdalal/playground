@@ -227,6 +227,7 @@ describe("stdinShell reads env's split string as the words it runs", () => {
     ["an abbreviated split-string option", "env --split='sudo -s'", "root"],
     ["a split string after an abbreviated unset", "env nice env --u X -S 'sudo -s'", "root"],
     ["a split string after argv0's value", "env -a name -S 'sudo -s'", "root"],
+    ["a split string after a lone dash, env's -i", "'env' - -S 'sudo -s'", "root"],
   ])("%s", (_, line, kind) => {
     expect(stdinShell(lex(line).commands[0])).toBe(kind)
   })
