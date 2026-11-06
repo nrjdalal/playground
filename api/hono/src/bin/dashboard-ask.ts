@@ -54,9 +54,10 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 in place, checked as new checks it, so one card carries a
                                                 progress to its end: an update until it is Done or dismissed,
                                                 an ask, answered or not, until it closes; one put away with Later stays put away
-       bun run ask example <code|decision|slack|ui>
+       bun run ask example <code|decision|delete|slack|ui>
                                                 prints an item to start from: an ask's picture of the point, bullets,
                                                 then what Approve does (.agents/dashboard/asks.md, The ask's shape),
+                                                a delete decision naming its worktree by its full path,
                                                 or a Slack message led by its thread so far
        bun run ask open [--from <session>]
                                                 lists each open item, oldest first: its #iN, kind, sender and title;
