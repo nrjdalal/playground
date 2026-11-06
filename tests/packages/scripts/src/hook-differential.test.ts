@@ -19,6 +19,7 @@ import {
   canaryTree,
   cwdsOf,
   keyOf,
+  linesOf,
   parse,
   replay,
   resultPath,
@@ -158,6 +159,19 @@ describe("routed", () => {
   test("a start inside a ticket, or with no executable run-slot.sh, runs as it is", () => {
     expect(at({ RUN_SLOT_NICE: "10" })).toEqual(["bun", "x.ts"])
     expect(at({}, false)).toEqual(["bun", "x.ts"])
+  })
+})
+
+describe("linesOf", () => {
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i}`)
+
+  test("20 changed lines print whole, and the 21st is cut to one line naming it, unless --all", () => {
+    expect(linesOf("x", lines(20), false)).toEqual(lines(20).map((l) => `x: ${l}`))
+    expect(linesOf("x", lines(21), false)).toEqual([
+      ...lines(20).map((l) => `x: ${l}`),
+      "x: 1 more changed lines not shown (--all prints them)",
+    ])
+    expect(linesOf("x", lines(21), true)).toEqual(lines(21).map((l) => `x: ${l}`))
   })
 })
 
