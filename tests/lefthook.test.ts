@@ -994,7 +994,9 @@ const hooksBundleJob = async () =>
 test("a pre-commit job runs hooks-bundle --check after lint-staged, skipped in a merge", async () => {
   expect(await hooksBundleJob()).toMatchObject({
     priority: 4,
-    run: "bun --no-env-file packages/scripts/src/hooks-bundle.ts --check",
+    run: expect.stringMatching(
+      /^if ! git diff --quiet -- scripts\/hooks\/bundled .* bun --no-env-file packages\/scripts\/src\/hooks-bundle\.ts --check$/,
+    ),
     skip: ["merge"],
   })
 })
@@ -1015,6 +1017,8 @@ test("the hooks-bundle job's glob holds every folder a committed bundle imports"
       else inputs.add(path!)
     }
   expect(inputs).toContain("scripts/hooks/*.ts")
+  // an edit to a bundle alone, which no source comment names, runs the job too
+  expect(glob).toContain("scripts/hooks/bundled/*")
   expect([...inputs].filter((input) => !glob.includes(input)).sort()).toEqual([])
 })
 
@@ -1060,7 +1064,7 @@ describe("the pre-commit hooks-bundle job", () => {
     return { bundle, dir, edit, git, hook }
   }
 
-  test("refuses a commit of a guard whose bundle is stale, naming the fix, and skips one that touches no input", async () => {
+  test("refuses a commit of a guard whose bundle is stale or left unstaged, naming the fix, and skips one that touches no input", async () => {
     const { bundle, dir, edit, git, hook } = await checkout()
     try {
       edit()
@@ -1073,6 +1077,10 @@ describe("the pre-commit hooks-bundle job", () => {
       expect(stale.out).toContain("hooks-bundle: stale in scripts/hooks/bundled: role.js")
       expect(stale.out).toContain("run `bun run hooks:bundle` and commit scripts/hooks/bundled")
       bundle()
+      // the rebuilt bundle left unstaged: the commit would carry the old one, which --check alone, reading the disk, passes
+      const unstaged = hook()
+      expect(unstaged.code).not.toBe(0)
+      expect(unstaged.out).toContain("run git add scripts/hooks/bundled, then commit again")
       git("add", "-A")
       expect(hook()).toMatchObject({ code: 0 })
     } finally {
