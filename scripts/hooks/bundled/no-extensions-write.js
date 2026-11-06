@@ -2680,18 +2680,13 @@ var splitIn = (word, splitting = false) => word.splits === "always" || word.spli
 function writeTargets(name, args, gnu, posix = false, splitting = false) {
   const splits = args.filter((word) => splitIn(word, splitting));
   if (name === "dd")
-<<<<<<< HEAD
     return [
       ...new Set([
         ...args.flatMap((word) => word.value.startsWith("of=") ? [after(word, 3)] : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value) ? [word] : []),
         ...splits
       ])
     ];
-  const into = name === "cp" || name === "install" || name === "ln";
-=======
-    return args.flatMap((word) => word.value.startsWith("of=") ? [after(word, 3)] : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value) ? [word] : []);
   const into = name === "cp" || name === "install" || name === "ln" || name === "mv";
->>>>>>> origin/canary
   const takes = WRITER_TAKES[name];
   const operands = [];
   let folder;
@@ -3285,10 +3280,7 @@ async function inspect(raw, environment, unknown = false) {
     const end = args.findIndex((word) => word.value === "--");
     const option = (word) => /^-./.test(word.value);
     const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(args[0]?.value === "--") : args.findIndex((word) => !option(word));
-<<<<<<< HEAD
-    const operands = remover ? args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)) : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, env.splits) : [];
-=======
-    const values = tool === "mv" ? writeTargets(tool, args, gnu, posix) : tool === "rsync" ? args.flatMap((word, k) => {
+    const values = tool === "mv" ? writeTargets(tool, args, gnu, posix, env.splits) : tool === "rsync" ? args.flatMap((word, k) => {
       const long = /^--([^=]+)=?/.exec(word.value);
       const path = long && !RSYNC_FLAGS.has(long[1]) && RSYNC_PATHS.some((name) => name.startsWith(long[1]));
       const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length;
@@ -3301,8 +3293,7 @@ async function inspect(raw, environment, unknown = false) {
     const operands = remover ? [
       ...args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)),
       ...values
-    ] : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : [];
->>>>>>> origin/canary
+    ] : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, env.splits) : [];
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined;
     if (loose)
       return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`));
