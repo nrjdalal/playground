@@ -1711,6 +1711,24 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "GNU cp by its gnubin path of a variable after the end of options",
       `/opt/homebrew/opt/coreutils/libexec/gnubin/cp -- "$S" /tmp/y`,
     ],
+    [
+      "rm past an option before its first operand after a cd to a variable",
+      `cd "$X"; rm -f /tmp/x`,
+    ],
+    [
+      "GNU rm past an option after its first operand after a cd to a variable",
+      `cd "$X"; grm /tmp/x -f`,
+    ],
+    [
+      "unlink of an absolute path past its end of options after a cd to a variable",
+      `cd "$X"; unlink -- /tmp/x`,
+    ],
+    ["find with its expression after a cd to a variable", `cd "$X"; find /tmp/x -delete`],
+    ["rsync of absolute paths after a cd to a variable", `cd "$X"; rsync -a /tmp/a /tmp/b`],
+    [
+      "GNU rm by its gnubin path past an option after its first operand after a cd to a variable",
+      `cd "$X"; /opt/homebrew/opt/coreutils/libexec/gnubin/rm /tmp/x -f`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })

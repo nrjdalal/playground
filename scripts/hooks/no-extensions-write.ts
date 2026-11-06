@@ -96,6 +96,8 @@ const GIT_READS = new Set([
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
+// The removers whose macOS build reads options as getopt does, stopping at the first operand, so every later word, a dashed one too, is an operand
+const GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"])
 // Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
 const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
 // Homebrew's GNU coreutils under their g prefix (gcp, grm), each read as the remover or writer it names
@@ -973,8 +975,19 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     }
     // after a cd the hook cannot read, a remover's operand or a writer's target the hook can place only by the shell's own folder may be in the root
     const end = args.findIndex((word) => word.value === "--")
+    // a dash with more after it is an option, while a lone dash is an operand
+    const option = (word: Word) => /^-./.test(word.value)
+    // macOS unlink reads no option but a leading --
+    const stop =
+      !GETOPT_REMOVERS.has(tool) || (gnu && !posix)
+        ? -1
+        : tool === "unlink" && !gnu
+          ? Number(args[0]?.value === "--")
+          : args.findIndex((word) => !option(word))
     const operands = remover
-      ? args.filter((word, k) => (end !== -1 && k > end) || !word.value.startsWith("-"))
+      ? args.filter(
+          (word, k) => (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !option(word),
+        )
       : WRITERS.has(tool)
         ? writeTargets(tool, args, gnu, posix)
         : []
