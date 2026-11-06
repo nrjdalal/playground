@@ -9,6 +9,7 @@ import {
   containersFor,
   type EndDeps,
   endMerged,
+  endOne,
   sweep,
   type Target,
   unsavedLive,
@@ -551,6 +552,52 @@ describe("unsavedLive: the worktrees a session used, read for unsaved work", () 
     expect(await unsavedLive(target, projects)).toBe(`unpushed commits in ${dir}`)
   })
 
+  // PG-1165: the post-merge cleanup discards a finished PR's worktree, so its unsaved work holds no end
+  test("a Playground worktree whose PR merged or closed holds no end, while an open or unreadable one, or another repo's, still does", async () => {
+    const { dir, main, projects, target } = scratch()
+    const wt = join(main, ".claude", "worktrees", "pg-1")
+    sh(main, "git", "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+    writeFileSync(join(wt, "wip.txt"), "x\n")
+    writeFileSync(
+      join(projects, "-scratch", "sess-1.jsonl"),
+      `${JSON.stringify({ cwd: main })}\n${JSON.stringify({ cwd: wt })}\n`,
+    )
+    const url = "https://github.com/o/r/pull/1"
+    const merged = { ...target, pr: url }
+    const asked: string[] = []
+    const done = (finished: boolean) => ({
+      finished: async (path: string, pr?: string) => (asked.push(`${path} ${pr}`), finished),
+      main,
+    })
+    expect(await unsavedLive(merged, projects, done(true))).toBeNull()
+    expect(asked).toEqual([`${wt} ${url}`])
+    expect(await unsavedLive(merged, projects, done(false))).toBe(`uncommitted work in ${wt}`)
+    expect(await unsavedLive(merged, projects)).toBe(`uncommitted work in ${wt}`)
+    writeFileSync(join(dir, "b.txt"), "b\n")
+    writeFileSync(join(projects, "-scratch", "sess-1.jsonl"), `${JSON.stringify({ cwd: dir })}\n`)
+    expect(await unsavedLive(merged, projects, done(true))).toBe(`uncommitted work in ${dir}`)
+    const lines = await endOne(merged, "worker-prs-done", {
+      cleanup: async () => [`removed ${wt}`],
+      close: async () => ({ ok: true, out: "" }),
+      report: async () => {},
+      unsaved: (t) => unsavedLive(t, projects, done(true)),
+    })
+    expect(lines[0]!.text).toStartWith("Not ended k3m9px-reviewer")
+    writeFileSync(
+      join(projects, "-scratch", "sess-1.jsonl"),
+      `${JSON.stringify({ cwd: main })}\n${JSON.stringify({ cwd: wt })}\n`,
+    )
+    const ended = await endOne(merged, "worker-prs-done", {
+      cleanup: async () => [`removed ${wt}`],
+      close: async () => ({ ok: true, out: "" }),
+      report: async () => {},
+      unsaved: (t) => unsavedLive(t, projects, done(true)),
+    })
+    expect(ended).toEqual([
+      { text: `Ended k3m9px-reviewer: worker-prs-done; cleanup: removed ${wt}`, to: "builder" },
+    ])
+  })
+
   test("the main checkout every session starts in is never read: its untracked files hold no end", async () => {
     const { main, projects, target } = scratch()
     writeFileSync(join(main, "par.out"), "x\n")
@@ -616,6 +663,7 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
         const r = Bun.spawnSync(["git", "-C", dir, ...args], { env: ENV })
         return r.exitCode === 0 ? r.stdout.toString().trim() : null
       },
+      finished: async () => false,
       held: async () => null,
       live,
       liveBranch: "live/dashboard",
@@ -722,6 +770,72 @@ describe("cleanWorktree: each worktree a closed session used, removed with its c
       `removed ${wt}, branch PG-1-thing`,
     )
     expect(asked).toEqual([url, url])
+  })
+
+  // PG-1165
+  test("a merged or closed PR's worktree goes through playground rm --discard whatever it holds, while one whose PR is open or unreadable keeps its work", async () => {
+    const { main, wt } = machine()
+    const url = "https://github.com/o/r/pull/1"
+    const asked: (string | undefined)[] = []
+    const open = fakes(main, [], undefined, {
+      finished: async (path, pr) => (asked.push(`${path} ${pr}`), false),
+    })
+    writeFileSync(join(wt, "wip.txt"), "x\n")
+    expect(await cleanWorktree(wt, "r ended", open.deps, { pr: url })).toBe(
+      `kept ${wt}: uncommitted work`,
+    )
+    expect(open.calls).toEqual([])
+    const moved: string[] = []
+    const done = fakes(main, [], undefined, {
+      finished: async (path, pr) => (asked.push(`${path} ${pr}`), true),
+      rm: async (path, reason, pr, discard) => {
+        moved.push(`rm ${path} (${reason}) ${pr} discard=${discard}`)
+        return { ok: true, out: "" }
+      },
+    })
+    expect(await cleanWorktree(wt, "r ended", done.deps, { pr: url })).toBe(`removed ${wt}`)
+    expect(moved).toEqual([`rm ${wt} (r ended) ${url} discard=true`])
+    expect(asked).toEqual([`${wt} ${url}`, `${wt} ${url}`])
+  })
+
+  test("another repo's worktree keeps its unpushed commits though its PR merged, since git worktree remove and branch -D leave no trash to restore from", async () => {
+    const playground = machine()
+    const other = machine()
+    const asked: string[] = []
+    const { calls, deps } = fakes(playground.main, [], undefined, {
+      finished: async (path) => (asked.push(path), true),
+    })
+    writeFileSync(join(other.wt, "wip.txt"), "x\n")
+    run(other.wt, "git", "add", "wip.txt")
+    run(other.wt, "git", "commit", "-qm", "wip")
+    expect(await cleanWorktree(other.wt, "r ended", deps)).toBe(
+      `kept ${other.wt}: unpushed commits`,
+    )
+    expect(asked).toEqual([])
+    expect(calls).toEqual([])
+    expect(branches(other.main)).toContain("PG-1-thing")
+  })
+
+  test("a clean worktree rm refuses for work not on canary goes through --discard once its PR merged or closed, and stays while it is open", async () => {
+    const { main, wt } = machine()
+    const unlanded = `${wt}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): playground rm --worktree ${wt} --discard removes it anyway`
+    for (const finished of [false, true]) {
+      const moved: string[] = []
+      const { deps } = fakes(main, [], undefined, {
+        finished: async () => finished,
+        rm: async (path, _reason, _pr, discard) => {
+          moved.push(`rm ${path} discard=${discard}`)
+          return discard ? { ok: true, out: "" } : { ok: false, out: unlanded }
+        },
+      })
+      expect(await cleanWorktree(wt, "r ended", deps)).toBe(
+        finished ? `removed ${wt}` : `kept ${wt}: ${unlanded}`,
+      )
+      expect(moved).toEqual([
+        `rm ${wt} discard=false`,
+        ...(finished ? [`rm ${wt} discard=true`] : []),
+      ])
+    }
   })
 
   test("a dev:stop refusal keeps the worktree, while no recorded stack lets it go", async () => {

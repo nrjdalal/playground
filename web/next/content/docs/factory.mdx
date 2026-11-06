@@ -45,7 +45,7 @@ Every start passes a capacity check first: the Mac's load, its free memory, and 
 A refusal names the check and its reading, so you can wait or free room.
 
 A worker, reviewer or tester ends on its own once its work is done: right after its pull request merges, or, when `jobs.opsTick` is on ([Turn a job on](/docs/jobs#turn-a-job-on)), at the 5-minute check that finds it finished.
-It stays open while it is working, for its first 10 quiet minutes, and while a worktree it used holds uncommitted or unpushed work.
+It stays open while it is working, for its first 10 quiet minutes, and while a worktree it used holds uncommitted or unpushed work, unless it is one of Playground's own worktrees whose pull request has merged or closed, which the cleanup moves to the trash.
 A manager, the dispatcher, a runner or a probe never ends this way, and each end is one line to the session's lead.
 
 ## Standing rules
