@@ -715,18 +715,19 @@ chain_add() {
   [ -z "$tracked" ] || CHAIN_ADD_TRACKED=1
   CHAIN_ADD+=(${paths[@]+"${paths[@]}"})
 }
-# whether a verb is one of git's own commands, which no alias can replace
-git_builtin() {
+# whether a verb is one of git's own commands that run-slot lists, which no alias can replace: its porcelain, apply among it, and the plumbing reads below; a chain counts any other verb as a commit, a plumbing write such as update-ref or hash-object or a read off the list such as diff-tree
+git_known() {
   case "$1" in
-    add | am | apply | archive | bisect | blame | branch | bundle | checkout | cherry | cherry-pick | clean | clone | commit | config | describe | diff \
-      | difftool | fetch | format-patch | fsck | gc | grep | help | init | log | ls-files | ls-remote | ls-tree | merge | mergetool | mv | notes | pull \
+    add | am | apply | archive | bisect | blame | branch | bundle | cat-file | checkout | cherry | cherry-pick | clean | clone | commit | config | describe | diff \
+      | difftool | fetch | for-each-ref | format-patch | fsck | gc | grep | help | init | log | ls-files | ls-remote | ls-tree | merge | merge-base | mergetool \
+      | mv | notes | pull \
       | push | range-diff | rebase | reflog | remote | repack | replace | reset | restore | revert | rev-list | rev-parse | rm | shortlog | show \
       | show-ref | sparse-checkout | stash | status | submodule | switch | tag | version | whatchanged | worktree) return 0 ;;
   esac
   return 1
 }
 # whether a git verb is an alias in that folder's config, which may run a commit (`git ci`); git ignores an alias that names one of its own commands
-aliased() { ! git_builtin "$1" && git ${2:+-C "$2"} config --get "alias.$1" >/dev/null 2>&1; }
+aliased() { ! git_known "$1" && git ${2:+-C "$2"} config --get "alias.$1" >/dev/null 2>&1; }
 # the first word past env and VAR=x, the command box_fits finds
 first_word() { local a; for a in "$@"; do case "$a" in env | *=*) continue ;; esac; printf '%s' "$a"; return; done; }
 # a git -c key that runs a program or a hook (core.hooksPath, an alias, an include), which counts as a build for any verb
@@ -747,9 +748,9 @@ heavy_build() {
       while IFS= read -r line; do
         IFS=$'\x1f' read -ra words <<< "$line"
         [ ${#words[@]} -gt 0 ] || continue
-        # a verb git does not ship may be an alias in any folder's or -c's config, so a chain counts it as a commit, failing closed
+        # a verb outside git_known may be an alias in any folder's or -c's config, or a plumbing write, so a chain counts it as a commit, failing closed
         verb=$(git_verb "${words[@]}")
-        { [ "$verb" = commit ] || { [ -n "$verb" ] && ! git_builtin "$verb"; }; } && commit=1
+        { [ "$verb" = commit ] || { [ -n "$verb" ] && ! git_known "$verb"; }; } && commit=1
       done < <(chain_steps "$@")
       if [ -n "$commit" ]; then
         chain_safe "$@" || return 0
