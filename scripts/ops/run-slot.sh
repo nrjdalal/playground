@@ -423,22 +423,23 @@ if [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" 
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# A `sh -c`, `bash -c` or `zsh -c` chain's steps, or a `bash <script file>`'s, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, an option word before a file, or a script shlex cannot split or over 64 KB
+# A `sh -c`, `bash -c` or `zsh -c` chain's steps, or a `bash <script file>`'s, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command (exit 0) or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB)
 chain_steps() {
   local a first="" script="" next="" file="" opt="" lead="" oval=""
   for a in "$@"; do
     if [ -n "$next" ]; then
-      if [ -n "$oval" ]; then [ "$a" = pipefail ] || return; oval=""; continue; fi
-      case "$a" in -o | +o) oval=1; continue ;; - | + | [-+]*[!euxv]*) return ;; [-+]*) continue ;; esac
+      if [ -n "$oval" ]; then [ "$a" = pipefail ] || return 1; oval=""; continue; fi
+      case "$a" in -o | +o) oval=1; continue ;; - | + | [-+]*[!euxv]*) return 1 ;; [-+]*) continue ;; esac
       script=$a; break
     fi
     [ -n "$file" ] && break
     case "$a" in env|*=*) [ -z "$first" ] && { lead+=$a$'\x1f'; continue; } ;; esac
-    if [ -z "$first" ]; then first=$(basename -- "$a"); case "$first" in sh|bash|zsh) continue ;; *) return ;; esac; fi
-    case "$a" in -c | -[!-]*c) next=1 ;; -*) opt=1 ;; *) [ -z "$opt" ] || return; file=$a ;; esac
+    if [ -z "$first" ]; then first=$(basename -- "$a"); case "$first" in sh|bash|zsh) continue ;; *) return 0 ;; esac; fi
+    case "$a" in -c | -[!-]*c) next=1 ;; -*) opt=1 ;; *) [ -z "$opt" ] || return 1; file=$a ;; esac
   done
-  if [ -n "$file" ]; then plain "$file" && [ -f "$file" ] && [ -r "$file" ] || return; fi
-  [ -n "$script$file" ] || return
+  [ -n "$first" ] || return 0
+  if [ -n "$file" ]; then plain "$file" && [ -f "$file" ] && [ -r "$file" ] || return 1; fi
+  [ -n "$script$file" ] || return 1
   python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" <<'PY'
 import shlex, sys
 
@@ -840,11 +841,13 @@ heavy_build() {
 docker_reader() { "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" "$@" </dev/null; }
 # A docker build, as docker_reader reads it past the hooks' wrappers: run (one image), each (a compose build of no service or several, built one at a time), refuse <why>, or nothing; a chain with a docker build in any step is refused, so each build is a run of its own
 docker_kind() {
-  local found line words
+  local found line words steps
   # the reader starts only for a command that names docker or portless, so every other run skips its bun start
   case " $* " in *docker*|*portless*) ;; *) return ;; esac
   found=$(docker_reader kind -- "$@")
   [ "$found" != none ] && { echo "$found"; return; }
+  # a chain whose steps chain_steps cannot read may hold a docker build, so it is refused rather than read as no steps
+  steps=$(chain_steps "$@") || { echo "refuse run-slot.sh cannot read this chain's steps, so it refuses one that names docker or portless: run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"; return; }
   while IFS= read -r line; do
     IFS=$'\x1f' read -ra words <<< "$line"
     [ ${#words[@]} -gt 0 ] || continue
@@ -852,7 +855,7 @@ docker_kind() {
       none) ;;
       *) echo "refuse run-slot.sh refuses a chain that builds a docker image (${words[*]}): run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"; return ;;
     esac
-  done < <(chain_steps "$@" | grep -E "docker|portless")
+  done < <(printf '%s\n' "$steps" | grep -E "docker|portless")
 }
 # a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
 light_run() {
