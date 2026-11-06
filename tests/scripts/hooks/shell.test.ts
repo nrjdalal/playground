@@ -12,6 +12,7 @@ import {
   stdinShell,
   type StdinKind,
   withDeadline,
+  zshSplits,
 } from "../../../scripts/hooks/shell"
 import { type Paths, REFUSED_FORMS } from "./fixtures/refused-forms"
 
@@ -244,5 +245,17 @@ describe("stdinShell reads su with no command of its own as a root shell", () =>
     ["su with a user given a command of its own", "su root -c 'ls -la'", undefined],
   ])("%s", (_, line, kind) => {
     expect(stdinShell(lex(line).commands[0])).toBe(kind)
+  })
+})
+
+describe("zshSplits reads a long line in linear time (PG-1222)", () => {
+  test.each([
+    ["read words", "read ".repeat(40_000)],
+    ["declaring builtins", "declare ".repeat(25_000)],
+    ["expansions", Array.from({ length: 25_000 }, (_, i) => `$v${i}`).join(" ")],
+  ])("200 KB of %s", (_, line) => {
+    const start = performance.now()
+    zshSplits(line)
+    expect(performance.now() - start).toBeLessThan(1000)
   })
 })
