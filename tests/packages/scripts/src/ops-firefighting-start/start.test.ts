@@ -386,6 +386,89 @@ describe("ops-firefighting-start", () => {
     )
   })
 
+  test("a row that ends at 13:00Z, outside the window, holds its ticket that day alone, so it starts at 04:00Z the next day (#1160)", async () => {
+    const config = { ...CONFIG, hours: "04:00-12:00" }
+    const roster = (status: string) => ({ agents: [{ name: "a", status, ticket: "MADE-1" }] })
+    const s = setup(line("MADE-1", "Medium", 1), {
+      "ops/ops-firefighting-start.state.json": RUNNING,
+      "roster.json": roster("working"),
+    })
+    await s.pass(config)
+    s.later(5 * 60)
+    writeFileSync(join(s.data, "roster.json"), JSON.stringify(roster("ended")))
+    await s.pass(config)
+    s.later(15 * 60)
+    writeFileSync(
+      join(s.data, "firefighting.json"),
+      relayFile(line("MADE-1", "Medium", 1), NOW.getTime() + 20 * 60 * MINUTE),
+    )
+    await s.pass(config)
+    expect(s.titles()).toEqual(["MADE-1 firefight"])
+  })
+
+  test("in the last stretch, a ticket whose row ended today is told to the Builder as not starting, and is no consult (#1160)", async () => {
+    const config = { ...CONFIG, consultFrom: "11:00", hours: "04:00-12:00" }
+    const roster = (status: string) => ({ agents: [{ name: "a", status, ticket: "MADE-1" }] })
+    const s = setup(line("MADE-1", "Medium", 1), {
+      "ops/ops-firefighting-start.state.json": RUNNING,
+      "roster.json": roster("working"),
+    })
+    await s.pass(config)
+    writeFileSync(join(s.data, "roster.json"), JSON.stringify(roster("ended")))
+    await s.pass(config)
+    s.later(3 * 60 + 5)
+    writeFileSync(
+      join(s.data, "firefighting.json"),
+      relayFile(line("MADE-1", "Medium", 1), NOW.getTime() + (3 * 60 + 5) * MINUTE),
+    )
+    await s.pass(config)
+    expect(s.sentTo).toEqual(["builder"])
+    expect(s.sent).toEqual(["Not starting MADE-1 again today: a, its session, ended today"])
+  })
+
+  test("in the last stretch, a ticket the cap holds waits and is no consult (#1160)", async () => {
+    const s = setup(
+      {
+        ...line("MADE-1", "Medium", 1),
+        ...line("MADE-2", "Medium", 2),
+        ...line("MADE-3", "Medium", 3),
+      },
+      {
+        "roster.json": {
+          agents: [
+            { name: "a", status: "working", ticket: "MADE-1" },
+            { name: "b", status: "working", ticket: "MADE-2" },
+          ],
+        },
+      },
+      { wrote: NOW.getTime() + 179 * MINUTE },
+    )
+    s.later(180)
+    await s.pass({ ...CONFIG, consultFrom: "11:00", hours: "04:00-12:00" })
+    expect(s.sentTo).toEqual(["builder"])
+    expect(s.sent[0]).toStartWith("Waiting on MADE-3 (Medium): 2 in progress")
+  })
+
+  test("a window that wraps past midnight reads its last stretch up to its end: 23:00Z starts, 05:00Z is a consult (#1160)", async () => {
+    const config = { ...CONFIG, consultFrom: "05:00", hours: "22:00-06:00" }
+    const at = (minutes: number) => {
+      const s = setup(
+        line("MADE-1", "High", 1),
+        {},
+        { wrote: NOW.getTime() + (minutes - 1) * MINUTE },
+      )
+      s.later(minutes)
+      return s
+    }
+    const late = at(15 * 60)
+    await late.pass(config)
+    expect(late.titles()).toEqual(["MADE-1 firefight"])
+    const early = at(21 * 60)
+    await early.pass(config)
+    expect(early.spawns()).toEqual([])
+    expect(early.sentTo).toEqual(["dispatcher"])
+  })
+
   test("theirs, busy, closed and other prefixes start nothing; theirs is told once as a skip", async () => {
     const s = setup({
       ...line("MADE-1", "High", 1, { theirs: true }),

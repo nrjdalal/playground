@@ -48,13 +48,13 @@ type Row = { name?: string; status?: string; ticket?: string; title?: string }
 export type State = {
   closedSeen: Record<string, string>
   ended: Record<string, string>
-  // when the job first finished a fresh pass inside its window; a stale or out-of-window pass saves state but is no first beat
-  watchingSince?: string
   linearAt?: string
   named: Record<string, string>
   reopened: Record<string, string>
   started: Record<string, string>
   told: Record<string, string>
+  // when the job first finished a fresh pass inside its window; a stale or out-of-window pass saves state but is no first beat
+  watchingSince?: string
 }
 
 // linearStates reads each ticket's Linear state type (backlog, unstarted, started, completed, canceled, triage), a ticket Linear does not find left out; it throws when Linear cannot be read.
@@ -109,6 +109,17 @@ export async function startPass({
   const ticket = new RegExp(
     `^(?:${config.prefixes.map((p) => p.replace(/[^A-Za-z0-9]/g, "")).join("|")})-\\d+$`,
   )
+  // The roster keeps no end time, so the job notes the day it first sees each row ended, on every beat, stale or outside the window too; a ticket whose row ended today never starts again today. A row already ended on the first beat ended before the job ran and counts on no day.
+  const day = ctx.now.toISOString().slice(0, 10)
+  const rows = (await readJson<{ agents?: Row[] }>(join(data, "roster.json")))?.agents ?? []
+  const rowOf = (session: string) => rows.find((r) => r.name === session)
+  const rowsFor = (id: string) =>
+    rows.filter((r) => r.ticket === id || r.title === id || (r.title ?? "").startsWith(`${id} `))
+  const firstBeat = state.watchingSince === undefined
+  for (const r of rows)
+    if (r.name && ENDED.has(r.status ?? "")) state.ended[r.name] ??= firstBeat ? "" : day
+  for (const name of Object.keys(state.ended))
+    if (!rows.some((r) => r.name === name && ENDED.has(r.status ?? ""))) delete state.ended[name]
   const relay = join(data, "firefighting.json")
   const ff = await readJson<{
     clock?: Record<string, unknown>
@@ -128,11 +139,11 @@ export async function startPass({
       `Starting nothing: firefighting.json's lines are stale since ${wrote === undefined ? "never written" : new Date(wrote).toISOString()}`,
     )
     await rm(join(data, START_FILE), { force: true })
+    await save()
     return
   }
   delete state.told[""]
   // The owner takes tickets only inside the start window: outside it, or on a day off, nothing starts and the start file goes, while a focus already standing is left to its session.
-  const day = ctx.now.toISOString().slice(0, 10)
   if (!inWindow(config, ctx.now)) {
     await tell(
       "window",
@@ -144,7 +155,7 @@ export async function startPass({
   }
   delete state.told.window
   // A ticket taken in the window's last stretch cannot be finished before it ends, so from consultFrom on the job asks the owner through the dispatcher instead of starting one; on the owner's yes the dispatcher hands it to the Builder, who starts it with spawn.sh worker … --firefighting.
-  const consult = !!config.consultFrom && ctx.now.toISOString().slice(11, 16) >= config.consultFrom
+  const consult = lastStretch(config, ctx.now)
   const all = Object.values(ff?.lines ?? {})
   const matched = config.prefixes.length
     ? all.filter((l): l is Line & { id: string } => typeof l?.id === "string" && ticket.test(l.id))
@@ -155,16 +166,6 @@ export async function startPass({
     if (!listed.has(line.id))
       await tell(line.id, `Skipped ${line.id}: no digest of the tracker lists it`)
   const lines = matched.filter((l) => listed.has(l.id))
-  const rows = (await readJson<{ agents?: Row[] }>(join(data, "roster.json")))?.agents ?? []
-  const rowOf = (session: string) => rows.find((r) => r.name === session)
-  const rowsFor = (id: string) =>
-    rows.filter((r) => r.ticket === id || r.title === id || (r.title ?? "").startsWith(`${id} `))
-  // The roster keeps no end time, so the job notes the day it first sees each row ended; a ticket whose row ended today never starts again today. A row already ended on the first beat ended before the job ran and counts on no day.
-  const firstBeat = state.watchingSince === undefined
-  for (const r of rows)
-    if (r.name && ENDED.has(r.status ?? "")) state.ended[r.name] ??= firstBeat ? "" : day
-  for (const name of Object.keys(state.ended))
-    if (!rows.some((r) => r.name === name && ENDED.has(r.status ?? ""))) delete state.ended[name]
   const endedToday = (id: string) => rowsFor(id).find((r) => r.name && state.ended[r.name] === day)
   // A ticket is held by a live row that carries it or whose title it leads, or by the session this job started for it while that row is not ended, or not yet written.
   const held = (id: string) =>
@@ -207,14 +208,6 @@ export async function startPass({
   let heldBy: string | undefined
   for (const line of queue) {
     const id = line.id
-    if (consult) {
-      await tell(
-        id,
-        `consult ${id} (${line.urgency ?? "no urgency"}): it came in after ${config.consultFrom}Z, the start window's last stretch, so the owner decides whether to take it; a yes goes to the Builder, who starts it`,
-        "dispatcher",
-      )
-      continue
-    }
     const ended = endedToday(id)
     if (ended) {
       await tell(id, `Not starting ${id} again today: ${ended.name}, its session, ended today`)
@@ -224,6 +217,15 @@ export async function startPass({
       await tell(
         id,
         `Waiting on ${id} (${line.urgency ?? "no urgency"}): ${inProgress} in progress, the cap is ${CAP}`,
+      )
+      continue
+    }
+    // a ticket ended today or held by the cap is no ticket to ask the owner about
+    if (consult) {
+      await tell(
+        id,
+        `consult ${id} (${line.urgency ?? "no urgency"}): it came in after ${config.consultFrom}Z, the start window's last stretch, so the owner decides whether to take it; a yes goes to the Builder, who starts it`,
+        "dispatcher",
       )
       continue
     }
@@ -365,14 +367,24 @@ async function reopen(
   }
 }
 
+// From `from` up to `to`, both HH:MM, wrapping past midnight when `to` is the earlier.
+const within = (at: string, from: string, to: string) =>
+  from <= to ? at >= from && at < to : at >= from || at < to
+
 // Inside config.hours at `now` (UTC), and on no day of config.daysOff.
 const inWindow = (config: StartConfig, now: Date): boolean => {
   const iso = now.toISOString()
   if ((config.daysOff ?? []).includes(iso.slice(0, 10))) return false
   const [from, to] = (config.hours ?? "").split("-")
-  if (!from || !to) return true
-  const at = iso.slice(11, 16)
-  return from <= to ? at >= from && at < to : at >= from || at < to
+  return !from || !to || within(iso.slice(11, 16), from, to)
+}
+
+// From config.consultFrom to the window's end, read inside the window: up to midnight with no hours set.
+const lastStretch = (config: StartConfig, now: Date): boolean => {
+  if (!config.consultFrom) return false
+  const at = now.toISOString().slice(11, 16)
+  const to = (config.hours ?? "").split("-")[1]
+  return to ? within(at, config.consultFrom, to) : at >= config.consultFrom
 }
 
 const focus = (ctx: Context, args: string[]) =>
