@@ -774,9 +774,29 @@ export const visible = (value: string): string =>
   value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ")
 
 export const marked = (value: string): boolean => value.includes(UNKNOWN) || value.includes(READ)
-// Whether a word holds a part the hook cannot read: an unknown part, a value it marks, or a glob, whose file names it cannot see
-export const unreadWord = (word: Word): boolean =>
-  word.unknown !== undefined || !!word.glob || marked(word.value)
+// The characters an eval word may hold bare and still read as written whatever options the shell sets: letters, digits and _ . / = - , : @ %, which no glob option makes an operator without a paren
+const PLAIN = /^[\w./=,:@%-]$/
+// Whether an eval takes a word as other than written: it holds a part the hook cannot read, or a part outside quotes (', ", one escaped character) that is no PLAIN character, since a shell option can make any other character a glob operator (zsh's ^, # and ~, a ksh or bash pattern's paren) whose file names the shell then runs as code
+export const unreadWord = (word: Word): boolean => {
+  if (word.unknown !== undefined || marked(word.value)) return true
+  const src = word.source
+  if (src === undefined) return ![...word.value].every((c) => PLAIN.test(c))
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]
+    if (c === "\\") i++
+    else if (c === "'") {
+      i = src.indexOf("'", i + 1)
+      if (i === -1) return true
+    } else if (c === '"') {
+      for (i++; i < src.length && src[i] !== '"'; i++)
+        if (src[i] === "\\") i++
+        else if (src[i] === "$" && src[i + 1] === "(") i = balanced(src, i + 1, "(", ")") - 1
+        else if (src[i] === "`") i = src.indexOf("`", i + 1)
+      if (i === -1 || i >= src.length) return true
+    } else if (!PLAIN.test(c)) return true
+  }
+  return false
+}
 
 // The shell's own builtins whose effect a hook follows (its folder, its variables, its aliases, a name's lookup): the shell matches them by their exact case, and in another case one runs no builtin (macOS's /usr/bin/cd and the like run `builtin cd` in a child), so it changes nothing of the shell's
 const SHELL_OWN = new Set([
@@ -1793,7 +1813,7 @@ async function examineReading(
         run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins),
       ))
   } else if (name === "eval") {
-    // an eval of a word the hook cannot read, a glob's file names included, runs code the hook never sees, so a hook judges the eval itself, as it does a source of a script it cannot read
+    // an eval of a word the hook cannot read (`unreadWord`), whose text a glob or an expansion may fill with code, runs code the hook never sees, so a hook judges the eval itself, as it does a source of a script it cannot read
     verdict =
       (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ??
       (await nested(cmd, env, () =>

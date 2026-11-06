@@ -804,7 +804,36 @@ var slice = (word, from) => {
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
-var unreadWord = (word) => word.unknown !== undefined || !!word.glob || marked(word.value);
+var PLAIN = /^[\w./=,:@%-]$/;
+var unreadWord = (word) => {
+  if (word.unknown !== undefined || marked(word.value))
+    return true;
+  const src = word.source;
+  if (src === undefined)
+    return ![...word.value].every((c) => PLAIN.test(c));
+  for (let i = 0;i < src.length; i++) {
+    const c = src[i];
+    if (c === "\\")
+      i++;
+    else if (c === "'") {
+      i = src.indexOf("'", i + 1);
+      if (i === -1)
+        return true;
+    } else if (c === '"') {
+      for (i++;i < src.length && src[i] !== '"'; i++)
+        if (src[i] === "\\")
+          i++;
+        else if (src[i] === "$" && src[i + 1] === "(")
+          i = balanced(src, i + 1, "(", ")") - 1;
+        else if (src[i] === "`")
+          i = src.indexOf("`", i + 1);
+      if (i === -1 || i >= src.length)
+        return true;
+    } else if (!PLAIN.test(c))
+      return true;
+  }
+  return false;
+};
 var SHELL_OWN = new Set([
   ".",
   "alias",
@@ -3434,7 +3463,7 @@ async function inspect(raw, environment, unknown = false) {
     const vars = !reader && first ? since(varsRead, env.vars, "") : [];
     const unreadEval = name === "eval" && args.find(unreadWord);
     if (unreadEval)
-      return refuse(`an eval of ${shown(unreadEval)}, a value the hook cannot read; run its commands as calls of their own, with no eval`);
+      return refuse(`an eval of ${shown({ ...unreadEval, raw: unreadEval.raw ?? unreadEval.source })}, a value the hook cannot read; run its commands as calls of their own, with no eval`);
     const script = [];
     if (stdinShell(cmd) === "root") {
       const text = await stdinOf(cmd, env);
