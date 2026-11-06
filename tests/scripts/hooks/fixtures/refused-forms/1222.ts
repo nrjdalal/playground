@@ -13,6 +13,10 @@ export const groups: Group[] = [
       ["dd of zsh's compstate hash", "dd if=$compstate"],
       ["dd of zsh's killring array", "dd if=$killring"],
       ["ln -s of zsh's registers hash", "ln -s $registers"],
+      ["ln -s of zsh's zle_bracketed_paste array", "ln -s $zle_bracketed_paste"],
+      ["ln -s of zsh's zle_highlight array", "ln -s $zle_highlight"],
+      ["ln -s of zsh's comppostfuncs array", "ln -s $comppostfuncs"],
+      ["ln -s of zsh's compprefuncs array", "ln -s $compprefuncs"],
       [
         "read -A split from its builtin by a line continuation, then ln of a variable",
         "read \\\n-A \"$(printf '\\x58')\" <<< 'a b'; ln -s $X",

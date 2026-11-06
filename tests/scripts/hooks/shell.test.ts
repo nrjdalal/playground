@@ -15,6 +15,7 @@ import {
   zshSplits,
 } from "../../../scripts/hooks/shell"
 import { type Paths, REFUSED_FORMS } from "./fixtures/refused-forms"
+import { overBaseline } from "./pace"
 
 const HOOKS = join(import.meta.dir, "..", "..", "..", "scripts", "hooks")
 
@@ -254,9 +255,8 @@ describe("zshSplits reads a long line in linear time (PG-1222)", () => {
     ["declaring builtins", "declare ".repeat(25_000)],
     ["expansions", Array.from({ length: 25_000 }, (_, i) => `$v${i}`).join(" ")],
     ["newlines", "\n".repeat(200_000)],
-  ])("200 KB of %s", (_, line) => {
-    const start = performance.now()
-    zshSplits(line)
-    expect(performance.now() - start).toBeLessThan(1000)
+    ["newlines each followed by a space", "\n ".repeat(100_000)],
+  ])("200 KB of %s", async (_, line) => {
+    expect(await overBaseline(async (c) => zshSplits(c), line)).toBeLessThan(50)
   })
 })

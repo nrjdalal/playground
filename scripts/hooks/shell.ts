@@ -545,7 +545,7 @@ const ZSH_SPLITS =
   /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/
 // The builtins whose -a or -A makes an array: read and the declaring builtins
 const ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/
-// Whether a zsh line may make an unquoted plain parameter several words: it may set an option, make an array or source a file (`ZSH_SPLITS`), give read or a declaring builtin -a or -A (`ARRAY_MAKERS`), or name a parameter it expands other than by expanding it, since a builtin neither list names may fill that name as an array; each scan reads the line once, so a long line costs linear time
+// Whether a zsh line may make an unquoted plain parameter several words: it may set an option, make an array or source a file (`ZSH_SPLITS`), give read or a declaring builtin -a or -A (`ARRAY_MAKERS`), or name a parameter it expands other than by expanding it, since a builtin neither list names may fill that name as an array; each pass is linear in the line, so a long line costs linear time
 export const zshSplits = (line: string): boolean => {
   if (ZSH_SPLITS.test(line)) return true
   for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
