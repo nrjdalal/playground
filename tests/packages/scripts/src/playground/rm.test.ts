@@ -392,19 +392,29 @@ test("a worktree a live session holds is refused whatever its PR state, an appro
   }
 })
 
-test("a worktree's PR state counts only when exactly one PR answers, as a branch used twice finds two, and its head is the worktree's HEAD or an ancestor of it", () => {
+test("a worktree's PR state counts only when exactly one PR answers, as a branch used twice finds two, that PR is the worktree's own by branch or head, and its head is HEAD or an ancestor of it", () => {
   const holds = (sha: string) => sha === "head" || sha === "older"
-  expect(prStateOf([{ headRefOid: "head", state: "MERGED" }], holds)).toBe("MERGED")
-  expect(prStateOf([{ headRefOid: "older", state: "CLOSED" }], holds)).toBe("CLOSED")
-  expect(prStateOf([{ headRefOid: "other", state: "MERGED" }], holds)).toBeNull()
-  const twice = [
-    { headRefOid: "head", state: "MERGED" },
-    { headRefOid: "older", state: "OPEN" },
-  ] as const
-  expect(prStateOf([...twice], holds)).toBeNull()
-  expect(prStateOf([], holds)).toBeNull()
-  expect(prStateOf(null, holds)).toBeNull()
+  const at = { branch: "PG-1-thing", head: "head" }
+  const pr = (headRefOid: string, state: PrState, headRefName = "PG-1-thing") => ({
+    headRefName,
+    headRefOid,
+    state,
+  })
+  expect(prStateOf([pr("head", "MERGED")], at, holds)).toBe("MERGED")
+  expect(prStateOf([pr("older", "CLOSED")], at, holds)).toBe("CLOSED")
+  expect(prStateOf([pr("other", "MERGED")], at, holds)).toBeNull()
+  expect(prStateOf([pr("head", "MERGED"), pr("older", "OPEN")], at, holds)).toBeNull()
+  expect(prStateOf([], at, holds)).toBeNull()
+  expect(prStateOf(null, at, holds)).toBeNull()
+  // a stacked child: its parent's PR is another branch's, whose head is only an ancestor of HEAD
+  expect(prStateOf([pr("older", "MERGED", "PG-0-parent")], at, holds)).toBeNull()
+  // a review clone on its own review-<n> branch, or detached, counts by the exact head alone
+  expect(prStateOf([pr("head", "MERGED", "PG-0-parent")], at, holds)).toBe("MERGED")
+  const detached = { branch: null, head: "head" }
+  expect(prStateOf([pr("head", "MERGED")], detached, holds)).toBe("MERGED")
+  expect(prStateOf([pr("older", "MERGED")], detached, holds)).toBeNull()
 })
+
 // PG-825: a Bash prefix drops PLAYGROUND_ROLE, but not the claude process above the call
 test("a caller with no role, or whose role a prefix dropped, is still a session when a claude process runs above it, and --discard needs its decision", async () => {
   const { deps, main, root } = machine()
