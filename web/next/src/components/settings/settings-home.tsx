@@ -19,7 +19,7 @@ export function SettingsHome() {
     <>
       <PageHeader
         title="Settings"
-        description="This Mac's accounts, templates, extensions, privacy and how the Dashboard runs."
+        description="Accounts, templates, extensions, privacy and how the Dashboard runs."
       />
       {allowed && config.hosted ? (
         <div className="flex flex-col gap-6">

@@ -93,10 +93,15 @@ export function Templates() {
   const shown = React.useRef<Pending | null>(null)
   if (pending) shown.current = pending
   const section = React.useRef<HTMLElement>(null)
+  const landed = React.useRef(false)
+  const settled = !setting.isPending && !accounts.isPending
 
+  // Accounts above reads the same accounts list, so once both reads settle the section stays where the scroll puts it.
   React.useEffect(() => {
+    if (!settled || landed.current) return
+    landed.current = true
     if (window.location.hash === "#templates") section.current?.scrollIntoView()
-  }, [])
+  }, [settled])
 
   const refresh = () =>
     Promise.all([
@@ -275,6 +280,13 @@ function TemplateDialog({
   template?: Template
 }) {
   const [refusal, setRefusal] = React.useState<ReturnType<typeof templateRefusal> | null>(null)
+  const fields = React.useRef<HTMLDivElement>(null)
+
+  // A refusal can sit under a field below the scrolled fields' fold, so the first one scrolls into view.
+  React.useEffect(() => {
+    if (refusal)
+      fields.current?.querySelector('[role="alert"]')?.scrollIntoView({ block: "nearest" })
+  }, [refusal])
 
   const save = useMutation({
     mutationFn: async (
@@ -394,7 +406,7 @@ function TemplateDialog({
               : "The sidebar's plus starts a session from it."}
           </DialogDescription>
         </DialogHeader>
-        <FieldGroup className="min-h-0 overflow-y-auto">
+        <FieldGroup ref={fields} className="min-h-0 overflow-y-auto">
           {text("label", "Label", "The name the sidebar's list shows.")}
           {select("kind", "Kind", KINDS)}
           {select("backend", "Backend", BACKENDS)}
