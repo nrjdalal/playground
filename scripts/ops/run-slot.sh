@@ -1153,18 +1153,18 @@ slot_open() {
   # pressure 1 with 43% free), pressure normal and swap-ins under SWAPINS_MAX (mem_ok), and the 5-minute load under 22 as a backstop
   if [ "$s" != run-slot ] && switch_on run-slot.single && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ]; then
     if [ "$s" = run-slot-2 ] && [ "$(load5)" -lt "$(load_line)" ] && mem_ok; then :; else return 1; fi
-  elif [ "$s" = run-slot-2 ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && ! lanes_open; then
+  elif [ "$s" = run-slot-2 ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && ! lanes_now; then
     return 1
   fi
   # a third slot, approved by dispatcher (8 Oct), opens only while lanes_open does; a holder that took it finishes either way
   # run-slot.3-off closes it too (dispatcher, 18 Oct: the owner's machine loud at load1 29.6; two slots until load5 holds under 12 for 10 minutes)
-  if [ "$s" = run-slot-3 ] && { switch_on run-slot.3-off || ! lanes_open; }; then
+  if [ "$s" = run-slot-3 ] && { switch_on run-slot.3-off || ! lanes_now; }; then
     return 1
   fi
   # a fourth slot, dispatcher's factory call (18 Oct, a two-way door: 14 waiters at 12:40Z, 5/5 PRs to merge within 30 minutes): it opens
   # only while lanes_open does and run-slot.4-off is absent; Ops creates run-slot.4-off when load5 holds over 25 for
   # 10 minutes or the owner's dictation shows a delay
-  if [ "$s" = run-slot-4 ] && { switch_on run-slot.4-off || ! lanes_open; }; then
+  if [ "$s" = run-slot-4 ] && { switch_on run-slot.4-off || ! lanes_now; }; then
     return 1
   fi
   return 0
@@ -1263,8 +1263,17 @@ peer_units() {
   done <<< "$PEERS"
   echo "$total"
 }
+# lanes_open, once per capacity() count: its slot checks share the first one's verdict, since a reading per slot counted slot 2 shut on a stale reading and slots 3 and 4 open on one that landed between them; outside a count LANES is unset, so each check reads afresh and a waiter still reads the gauges on every poll
+lanes_now() {
+  case "${LANES-}" in
+    open) return 0 ;;
+    shut) return 1 ;;
+    unread) if lanes_open; then LANES=open; else LANES=shut; return 1; fi ;;
+    *) lanes_open ;;
+  esac
+}
 capacity() {
-  local s n=0
+  local s n=0 LANES=unread
   for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
     { [ -d "$OPS/$s" ] || slot_open "$s"; } && n=$((n + 1))
   done
