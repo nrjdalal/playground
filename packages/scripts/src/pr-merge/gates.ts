@@ -174,7 +174,7 @@ function upToDate(facts: PrFacts): Gate {
 }
 
 // Pure: the gate that refuses a squash deleting lines canary added that a merge of canary into the PR dropped from git's own merge, as a merge with -s ours does while canary still reads as merged in.
-function keepsCanary(lost: Lost): Gate {
+export function keepsCanary(lost: Lost): Gate {
   const name = "keeps canary"
   if (typeof lost === "string")
     return { detail: `could not read what the squash deletes: ${lost}`, name, ok: false }

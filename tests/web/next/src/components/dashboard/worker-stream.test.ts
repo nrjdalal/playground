@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
+import { DashboardContext } from "../../../../../../web/next/src/components/dashboard/dashboard"
 import {
   OlderSteps,
+  PeerStep,
   ReasoningStep,
   sameTool,
   StepRow,
@@ -253,15 +255,74 @@ test("a typed message's Dismiss waits on its own hold", async () => {
   expect(source).toContain("pendingAction(message, { busy, held: dismissHeld })")
 })
 
-// Copy on another session's message gives the words the bubble shows, so copying never hands back the sender's name line the bubble hides.
-test("another session's Copy takes the words the bubble shows, not the raw text", async () => {
+// Copy on another session's message gives the words its row shows, so copying never hands back the sender's name line the row hides.
+test("another session's Copy takes the words its row shows, not the raw text", async () => {
   const source = await Bun.file(join(web, "src/components/dashboard/worker-stream.tsx")).text()
   const peer = source.slice(source.indexOf("const peer ="), source.indexOf("const ROOM_UNDER"))
   expect(peer).toContain("const shown = peer && sender ? withoutSenderName(text, sender) : text")
-  expect(peer.match(/<CopyMessage text=\{shown\}/g)).toHaveLength(2)
-  expect(peer).toContain("copy={shown}")
-  expect(peer).not.toContain("<CopyMessage text={text}")
+  expect(peer).toContain("<PeerStep chips={chips} from={from} text={shown} />")
   expect(peer).not.toContain("copy={text}")
+  const row = source.slice(
+    source.indexOf("export function PeerStep"),
+    source.indexOf("const Step = memo"),
+  )
+  expect(row).toContain("<CopyMessage text={text} />")
+})
+
+// Another session's message reads as something the session received, folded as a tool row, so the chat reads as the owner and the session they talk to.
+describe("another session's message", () => {
+  const T0 = "2026-10-06T00:00:00.000Z"
+  const TEXT = "PR #12 merged.\n\nThe sha is abc123, and the next PR is #13."
+  const wrap = (node: Node) =>
+    renderToStaticMarkup(createElement(QueryClientProvider, { client: new QueryClient() }, node))
+  const row = (text = TEXT) =>
+    wrap(
+      createElement(StepRow, {
+        composer: "composer",
+        marker: null,
+        message: {
+          id: "p1",
+          metadata: { at: T0, from: "builder", kind: "peer" },
+          parts: [{ text, type: "text" }],
+          role: "user",
+        },
+        newest: true,
+        now: new Date(T0),
+        outbox: {},
+        sent: null,
+        waiting: false,
+        worker: { name: "dispatcher", sessionId: "s1", tasks: [] },
+      }),
+    )
+
+  test("draws closed as a tool row: Received from its sender, then its first line", () => {
+    const html = row()
+    expect(html).toContain('data-slot="trace-collapsible-trigger"')
+    expect(html).toMatch(/data-slot="trace-line"[^>]*class="[^"]*\btext-xs\b/)
+    expect(html).toContain("Received from Builder</span> PR #12 merged.")
+    expect(html).not.toContain("The sha is abc123")
+    expect(html).not.toContain('data-slot="message"')
+  })
+
+  test("a sender's own name line stays out of its row", () => {
+    expect(row("builder: PR #12 merged.\nmore")).toContain(
+      "Received from Builder</span> PR #12 merged.",
+    )
+  })
+
+  test("opens to its whole text, its sender linked", () => {
+    const html = wrap(
+      createElement(
+        DashboardContext,
+        {
+          value: { workers: [{ name: "builder", sessionId: "s2" }] } as unknown as DashboardContext,
+        },
+        createElement(PeerStep, { chips: [], defaultOpen: true, from: "builder", text: TEXT }),
+      ),
+    )
+    expect(html).toContain("The sha is abc123, and the next PR is #13.")
+    expect(html).toMatch(/From <a [^>]*>Builder<\/a>/)
+  })
 })
 
 // A message keeps its ticks across a reload: a reload keeps only unsent records, so the owner's message the transcript holds draws Delivered with no record.

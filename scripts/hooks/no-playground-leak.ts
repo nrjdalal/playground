@@ -1,11 +1,12 @@
-// PreToolUse hook for the factory's sessions, loaded from the factory settings file and, for a session herdr restored, the project settings, acting only for a factory session (role.ts): refuses a write to a guarded org's surface (Linear, Slack, a repository of an org ext.links guards, through gh, git, curl or the GitHub MCP) whose text holds a factory term, since the factory is private and stays out of every company write in any shape; a Slack MCP chat posting tool's post to a conversation in slack-cleared.json passes, signed where its entry names a signature.
+// PreToolUse hook for the factory's sessions, loaded from the factory settings file and, for a session herdr restored, the project settings, acting only for a factory session (role.ts): refuses a write to a guarded org's surface (Linear, Slack, a repository of an org ext.links guards, through gh, git, curl or the GitHub MCP) whose text holds a factory term, since the factory is private and stays out of every company write in any shape; a Slack MCP chat posting tool's post to a conversation in slack-cleared.json passes, signed where its entry names a signature; on the servers of an org whose extension gates its Slack sends (slack.gatedSends), every Slack write but a post to that org's self-DM is refused, and so is a curl that writes to Slack's API.
 import "../../packages/env/src/aliases"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, join } from "node:path"
 
 import { dataDir, dataDirOf } from "../../packages/env/src/data-dir"
 import { guardedOrgs } from "../../packages/settings/src/ext"
-import { coreDir, readPolicy } from "../../packages/settings/src/rendered"
+import { coreDir, readPolicy, readPolicySync } from "../../packages/settings/src/rendered"
+import { gatedSendsSchema } from "../../packages/settings/src/slack"
 import { implicitRepos, type Repo, remoteRepo, remotes, repoOf } from "./github"
 import { guardList, isRecord, isStrings } from "./lists"
 import { readOnly } from "./read-only"
@@ -57,6 +58,7 @@ export type Hit = { detail: string; fix: string }
 export type Policy = {
   anyWrite?: true
   find: (text: string) => Hit | undefined
+  gates?: Gate[]
   git: boolean
   guard: string
   guarded: (repo: Repo) => boolean
@@ -65,6 +67,11 @@ export type Policy = {
   what: string
   why: string
 }
+// An org whose extension gates its Slack sends (slack.gatedSends): a post on its servers passes only to its self-DM, and a declaration that does not read refuses every posting call, since the hook cannot tell which servers it covers.
+type Gate = { org: string } & (
+  | { broken: string }
+  | { path: string; selfDm: string; servers: string[] }
+)
 type Terms = {
   aliases: string[]
   everyday: string[]
@@ -877,14 +884,22 @@ function conversation(route: string): boolean {
   return segments[0] === "pulls" && !segments.some((s) => s === "merge" || s === "update-branch")
 }
 
+// A URL's host, lowercased, past any user info and with no trailing dot.
+const hostOf = (url: string): string | undefined =>
+  /^[a-z][a-z\d+.-]*:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i
+    .exec(url)?.[1]
+    ?.toLowerCase()
+    .replace(/\.+$/, "")
+const slackHost = (host: string | undefined): boolean =>
+  host === "slack.com" || !!host?.endsWith(".slack.com")
+
 // A URL on Linear's or Slack's API is a guarded org's; GitHub's API is judged by the repository in its path.
 function hostTarget(url: string): Target | undefined {
-  const host = /^[a-z][a-z\d+.-]*:\/\/([^/?#:]+)/i.exec(url)?.[1]?.toLowerCase()
+  const host = hostOf(url)
   if (!host || !policy.hosts) return
   if (host === "linear.app" || host.endsWith(".linear.app"))
     return { label: "Linear", where: "guarded" }
-  if (host === "slack.com" || host.endsWith(".slack.com"))
-    return { label: "Slack", where: "guarded" }
+  if (slackHost(host)) return { label: "Slack", where: "guarded" }
 }
 
 async function curl(
@@ -934,6 +949,10 @@ async function curl(
   const target =
     targets.find((t) => t.where === "guarded") ?? targets.find((t) => t.where === "unknown")
   if (!target) return
+  if (targets.some((t) => t.label === "Slack")) {
+    const gated = gatedCurl(urls)
+    if (gated) return gated
+  }
   const data = await curlData(flags, cmd, env)
   // A read (no data, or -G turning data into a query) names a channel without writing to it; a chat method writes even from its query alone.
   const get = flags.some((f) => f.name === "-G" || f.name === "--get")
@@ -1329,6 +1348,60 @@ async function push(
   return judge("git push", target, texts, env)
 }
 
+// The gates' verdict on a Slack MCP tool: why it is refused, or undefined when it reads, when no gate covers its server, or when it is a posting tool whose one destination is the gate's self-DM, which the rest of the check then judges; a declaration that does not read refuses every Slack write, since the hook cannot tell which servers it covers.
+// Two Slack reads READ_TOOL's shape misses, which a gate lets through while the rest of the hook still judges their input's terms.
+const GATED_READS = new Set(["usergroups_me", "users_conversations"])
+function gatedPost(
+  tool: string,
+  server: string,
+  name: string,
+  input: Record<string, unknown> | undefined,
+): string | undefined {
+  const read = name.replace(/^slack_/, "")
+  if (READ_TOOL.test(read) || GATED_READS.has(read)) return
+  const connector = name === CONNECTOR_TOOL
+  const posting = CHAT_TOOL.test(name) || connector
+  const what = tool.replace(/^mcp__/, "")
+  for (const gate of policy.gates ?? []) {
+    if ("broken" in gate) {
+      if (/slack/i.test(server)) return brokenGate(what, gate)
+      continue
+    }
+    if (!gate.servers.includes(server)) continue
+    const keys = connector ? CONNECTOR_KEYS : POST_KEYS
+    const alone =
+      posting &&
+      input !== undefined &&
+      input[keys.channel] === gate.selfDm &&
+      !Object.keys(input).some((k) => k !== keys.channel && OTHER_DESTINATION.test(k))
+    if (!alone)
+      return `no-playground-leak hook refused ${what}: the ${gate.org} extension gates its Slack sends on ${server}, so every write there goes through ${gate.path}; only a post whose one destination is its self-DM (${gate.selfDm}) passes here. Send it through that path.`
+  }
+}
+
+const brokenGate = (what: string, gate: { broken: string; org: string }): string =>
+  `no-playground-leak hook refused ${what}: the ${gate.org} extension's slack.gatedSends does not read (${gate.broken}), so the hook cannot tell which Slack writes its gate covers. Tell your lead: it is set in that extension's settings as {"path": "<its send path>", "selfDm": "D…", "servers": ["<MCP server>"]}, or "" for no gate; then run the call again.`
+
+// While any org gates its Slack sends, a curl to any Slack URL is refused, since the hook cannot tell which workspace its token posts to: only /api/<a read method> (conversations.history, users.info, search.messages) and /api/auth.test pass.
+const SLACK_READ_METHOD =
+  /^(?:auth\.test|search\.[a-z]+|(?:[a-z]+\.)+(?:history|info|list|replies|unreads|get[A-Za-z]*|lookup[A-Za-z]*))$/
+function gatedCurl(urls: Word[]): string | undefined {
+  const gates = policy.gates ?? []
+  if (!gates.length) return
+  const writes = urls.some((u) => {
+    const value = visible(u.value)
+    const url = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `http://${value}`
+    if (!slackHost(hostOf(url))) return false
+    const method = /^[a-z][a-z\d+.-]*:\/\/[^/?#]*\/api\/([^/?#]+)(?:[?#]|$)/i.exec(url)?.[1]
+    return !method || !SLACK_READ_METHOD.test(method)
+  })
+  if (!writes) return
+  const broken = gates.find((g) => "broken" in g)
+  if (broken && "broken" in broken) return brokenGate("curl", broken)
+  const paths = gates.flatMap((g) => ("path" in g ? [`${g.org}'s ${g.path}`] : []))
+  return `no-playground-leak hook refused curl to Slack's API: an org gates its Slack sends (slack.gatedSends), so a Slack write goes through ${paths.join(" or ")}, and curl passes only a read method on /api/. Send it through that path.`
+}
+
 function strings(node: unknown): string[] {
   if (typeof node === "string") return [node]
   if (Array.isArray(node)) return node.flatMap(strings)
@@ -1338,6 +1411,8 @@ function strings(node: unknown): string[] {
 
 function mcp(tool: string, input: Record<string, unknown> | undefined): string | undefined {
   const [, server = "", name = ""] = MCP_TOOL.exec(tool) ?? []
+  const gated = gatedPost(tool, server, name, input)
+  if (gated) return gated
   const surface = /linear/i.test(server)
     ? "Linear"
     : /slack/i.test(server)
@@ -1426,7 +1501,28 @@ export async function check(
       raw,
       `no-playground-leak hook refused this call: ${read.refusal}, then run the call again.`,
     )
-  return inspectAs(leakPolicy(new Set(guardedOrgs(read.settings.values))), raw, environment)
+  const orgs = guardedOrgs(read.settings.values)
+  const gates = orgs.flatMap((org) =>
+    gateOf(org, readPolicySync(dataDir(environment), org).settings?.values ?? {}),
+  )
+  return inspectAs({ ...leakPolicy(new Set(orgs)), gates }, raw, environment)
+}
+
+// An org's declared gate, none when it declares none, or why its declaration does not read.
+function gateOf(org: string, values: Record<string, unknown>): Gate[] {
+  const value = values["slack.gatedSends"]
+  if (value === undefined || value === "") return []
+  const parsed = gatedSendsSchema.safeParse(value)
+  return [
+    parsed.success
+      ? { org, ...parsed.data }
+      : {
+          broken: parsed.error.issues
+            .map((i) => `${i.path.join(".") || "its value"}: ${i.message}`)
+            .join("; "),
+          org,
+        },
+  ]
 }
 
 // A list's refusal, given only to a call that may write somewhere: one that names a writing command or tool and does more than read (read-only.ts).

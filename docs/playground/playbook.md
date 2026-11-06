@@ -12,7 +12,7 @@ It lives in the repo rather than in one session's memory, so every session loads
 | Spawn, brief, rename, check or end a session                                                                             | the lifecycle (`LIFECYCLE.md`) and the herdr commands (`SESSIONS.md`)          |
 | Update Claude Code                                                                                                       | the update steps in `LIFECYCLE.md`                                             |
 | Route a new ask, or run a lead's sweep                                                                                   | `DISPATCH.md` and `SWEEP.md`                                                   |
-| Answer the owner's DM while Slack mode is on                                                                             | `DISPATCH.md`'s Slack mode and `playground dm send`                            |
+| Answer the owner's DM while Slack mode is on                                                                             | the `slack` skill (`extensions/slack`) and `playground dm send`                |
 | Merge a Playground PR, or release `canary` to `main`                                                                     | the **gate** rule (`bun run pr:merge <n>`, `bun run pr:train`) and **release** |
 | Comment or review on a repo whose owner `release-owners.json` lists                                                      | the **comments** rule                                                          |
 | Touch the live dashboard or the roster                                                                                   | the **dashboard** and **roster** rules (`ROSTER.md`)                           |
@@ -64,7 +64,7 @@ A lane's item aims at about 1,000 changed lines or fewer, and a bigger diff spli
 Anything else bundles into one PR or sequences one PR after the other.
 A worker is spawned for one chore and ends when the chore is done, so the room it held fills again as work finishes: a fix for live breakage or security first, then a queued org ticket, else the next item of the planner's first lane with no worker, where his own asks sit ahead of the chores the factory proposed.
 Before a lead spawns a worker it reads the machine's room, the Dashboard's System panel through `bun run verify system`, so the factory grows as far as the Mac allows, counting every membership rather than holding for usage.
-Every factory session starts through one script, `scripts/spawn.sh`, which refuses when the machine has no room for it (its gate reads the load and the processor's busy cores against the cores, memory pressure, for a new worker a free run slot with the load room for a run, or an empty run queue, and the model's usage windows, and names the reading that failed),
+Every factory session starts through one script, `scripts/spawn.sh`, which refuses when the machine has no room for it (its gate reads the load against the cores, memory pressure, for a new worker a free run slot with the load room for a run, or an empty run queue, and the model's usage windows, and names the reading that failed),
 or a live session already holds the name it would start;
 it counts no sessions, so Ops watches the live board, since cmux once stopped answering at 49 live sessions and load 97; a hook turns back a session started any other way; a worker runs its dev stack only while it tests.
 A heavy run, such as a suite, takes one of a few run slots and gives it back when it ends, so nothing long-lived holds one.
@@ -75,6 +75,8 @@ as the session-state hook does for one it did,
 and the Dashboard shows each one it finds as Stuck, with a red alarm, or as Paused · usage limit, with gray pause bars, when the usage limit alone holds it.
 Another, ops-loom-relay, passes Claude Code's usage on to the org's Loom as counts alone once the usage export points at it rather than straight at Loom, so no skill, agent, tool or subagent name leaves the Mac, with no prompt, summary or other text, and every login's usage on the Mac under the one login its settings name,
 each person's own.
+Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup reached: worktrees and branches of merged or closed PRs, exited containers of worktrees that are gone, Docker's dangling images and build cache, and turbo cache files over 2 days old.
+It posts an Inbox update when it freed 1 GB or more, and asks the owner, in one delete decision, before it removes anything that holds work no merge landed.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).
 A probe lives for one test and never waits on the owner.
 The dispatcher, the Planner and the two leads never close, except to be started again with their settings after a restore or from a handoff once their guidance changes; they compact their own context in one 400k window (`autoCompactWindow` 400000) and keep their pane and name.
@@ -92,6 +94,17 @@ The Builder also chases any open PR of ours that has seen no opening, commit, ve
 An ops job reminds the poster of every answer of the owner's in the Inbox that its poster has not confirmed within 15 minutes, whether it failed to reach the session or reached it and was never carried out, and a lead hears only when that poster is down, so an answer he gave is never left undone.
 An agent confirms a go only with a link to where it landed (the Slack message, the pull request, the Linear ticket) or a reason there is none, and every draft or decision that will post somewhere names that place before he answers.
 No factory session blocks on him: one that posted a decision carries on or ends its turn, and reads Waiting on your inbox, in orange, until he answers; Playground itself is always free, running nothing long and waiting on nothing.
+
+## Focus
+
+For a focused stretch, such as a timed test, a demo or an hour of deep work, `playground focus on --session <name> --reason "<why>"` gives one session the Mac for up to 180 minutes.
+While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep and that session's own reviewer and tester keep running.
+For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
+A firefighting start (spawn.sh's `--firefighting`) passes focus and the load gate while a firefighting trigger file stands, and the memory gate still applies to it.
+What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
+Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
+`playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
+Once focus ends, either way, one Inbox card says the same, and the quiet items count again.
 
 ## Tickets
 
@@ -115,6 +128,7 @@ The guarded org's own name always passes.
 Plain words such as "dashboard", "worker" or "envy" pass, so an org's work is not blocked by everyday language, and the refusal names the term it found so the session can rephrase.
 Writes to Playground's own repo pass, and so do Slack posts made through the Slack MCP's chat tools in the conversations the owner cleared for talk about Playground:
 the factory's channel the owner shares with a colleague and the direct messages listed in `extensions/core/lists/slack-cleared.json`.
+An org whose extension gates its Slack sends (`slack.gatedSends`) gets no such pass on its own Slack servers: there only a post to its self-DM passes, a curl to any Slack URL but an `/api/` read is refused, and every other write goes through the extension's own send path.
 The channel is where the owner's and the colleague's Playgrounds talk:
 a post there speaks as Playground and ends with an italic _Sent via Playground_, since it goes out through the owner's Slack account, and the hook refuses a Slack MCP chat post there without it, and refuses any curl write that names the channel.
 Its links go as link chips: rich text of plain words and links alone, each link labelled with its address and shortened, ending in the italic signature, and the hook refuses any other rich content there.
@@ -137,7 +151,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   or in its own scratchpad.
 - A manager starts no hidden helper: the `no-manager-subagent` hook refuses it the Agent and Workflow tools, so every build, read or research it hands off shows as a worker in the sidebar.
 - A heavy run in a worktree (an install, a `node_modules` copy, a build, a type check or the whole test suite) waits for a free run slot, so the machine runs a few at a time: the `no-unslotted-run` hook refuses one typed without `run-slot.sh`, naming the form to use.
-- No factory session starts unless the machine has room: `scripts/spawn.sh` refuses while the load and the busy cores are both at the core count, while memory pressure is critical or free memory is under 8%, for a new worker while no run slot can take a run and other runs wait for one, or while the model's usage window is near its cap, naming what it read,
+- No factory session starts unless the machine has room: `scripts/spawn.sh` refuses while the load is at or over the core count, while memory pressure is critical or free memory is under 8%, for a new worker while no run slot can take a run and other runs wait for one, or while the model's usage window is near its cap, naming what it read,
   and when a live session already holds the name, so a respawned session starts only once the old one has closed,
   and the `no-raw-spawn` hook refuses a session not started through it.
   A session started with `--account <email>` runs on that account, and its token shows in no command, message or log.
@@ -183,7 +197,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
 - Every mention in the Inbox reads as a name (@colleague, @platform-team): `playground ask` refuses Slack's raw tokens (`<@U...>`, `<!subteam^...>`, `<#C...>`, `<!here>`), and the poster resolves each name to its ID when it posts.
 - An ask that has the owner quit, restart, close or stop something says what still depends on it, since a quit of cmux once left the app not working: `playground ask` refuses it until it carries `checked`, one line from four checks (the ops jobs, the processes and sessions running under the target, and the Dashboard's health), `none` when nothing does.
 - An ask leads with a picture of the point (a diff or an ASCII flow; before and after pictures once the Inbox takes them), then short bullets, then what Approve does.
-  `playground ask example` prints a template for each, and `playground ask new` posts a wall of prose or a too-wide code line with a hint on how to shape it.
+  `playground ask example` prints a template for each, and `playground ask new` posts a wall of prose, an unlinked PR, ticket or commit, or a too-wide code line with a hint on how to shape it.
 - Each decision is one Inbox item, with its sub-choices inside it, and a changed plan closes its old item before the new one goes up.
 - Every session compacts itself in one 400k window, GLM's included, which spawn.sh sets on every start and resume (Inbox #i706), with a summary shaped by AGENTS.md's Compact Instructions.
   It keeps its surface and name; after a compaction it gets the glance lines from a hook, loads the factory skill again, and rereads its roster entry, its open Inbox items, its PRs and the register of settled decisions before it acts.

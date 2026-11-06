@@ -9,6 +9,7 @@ const API = join(ROOT, "api/hono")
 const HOSTED = join(API, "src/hosted.ts")
 const MIGRATIONS = join(ROOT, "packages/db/drizzle")
 const SCENARIO = join(import.meta.dir, "yard-scenario.ts")
+const RELAY = join(import.meta.dir, "yard-relay-scenario.ts")
 const GITHUB = join(import.meta.dir, "yard-github.ts")
 const WEB = "http://127.0.0.1:3000"
 const PASSWORD = crypto.randomUUID()
@@ -130,8 +131,8 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       ottVerify: 404,
       posted: [201, "sent"],
       socket: "open",
-      socketNoOrigin: 403,
-      socketNoToken: 401,
+      socketNoOrigin: 4403,
+      socketNoToken: 4401,
       tokenOnWebOnly: 403,
       waiting: [{ items: [] }, 400],
     })
@@ -150,6 +151,61 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
         type: "message",
       },
     ])
+  })
+
+  test("the relay carries the owner's reads, pair request and signed writes to a Mac on its socket and back, and refuses a member, a wrong Origin, an unsigned write and the first-run routes", async () => {
+    await sql`insert into "user" (id, name, email, login, role) values ('ow', 'ow', ${["ow", "example.com"].join("@")}, 'ow', 'owner')`
+    await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update("yard_ow").digest("hex")}, ${"mac"}, 'ow')`
+    const run = child(await Bun.file(RELAY).text(), {
+      MEMBER_ID: "bo",
+      MEMBER_TOKEN: "yard_bo",
+      OWNER_ID: "ow",
+      OWNER_TOKEN: "yard_ow",
+      POSTGRES_URL: url,
+    })
+    expect(run.err).not.toContain("error:")
+    expect(JSON.parse(last(run.out))).toEqual({
+      afterClose: 503,
+      cookieSocket: 4403,
+      macSocket: "open",
+      member: 403,
+      memberSocket: 4403,
+      offline: 503,
+      onboard: 403,
+      pair: [202, { fingerprint: "a0a2 32c2 f194 a535" }],
+      pairMember: 403,
+      pairNoOrigin: 403,
+      pairNotAKey: 400,
+      pairs: [
+        {
+          key: {
+            crv: "P-256",
+            kty: "EC",
+            x: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+            y: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+          },
+          login: "ow",
+          type: "pair",
+        },
+      ],
+      read: [200, { data: ["w1"] }, "no-store", "inline", "default-src 'none'; sandbox", "nosniff"],
+      requests: [{ login: "ow", method: "GET", path: "/api/v1/workers?x=1" }],
+      status: { online: true, since: null },
+      statusAfter: { online: false, since: "string" },
+      signedWrite: [201, { sent: true }],
+      write: 404,
+      writeMember: 403,
+      writeNoOrigin: 403,
+      writeNotAFrame: 400,
+      writeOffList: 403,
+      writeOtherLogin: 403,
+      writeWrongOrigin: 403,
+      writes: [{ login: "ow", path: "/api/v1/messages", type: "write" }],
+      wrongOrigin: 403,
+    })
+    // the hub forwards a write's body from memory alone: no log line of the hosted side holds it
+    expect(`${run.out}${run.err}`).not.toContain("body-kept-nowhere")
+    expect(run.out).toMatch(/\[relay\] write [0-9a-f-]{36} \/api\/v1\/messages 201 \d{4}-/)
   })
 
   // A member of its own with a token, so a test's posts meet no other test's one-a-second limit.

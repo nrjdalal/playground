@@ -1,4 +1,4 @@
-import type { Message, Slack } from "../../../../../packages/scripts/src/dm/slack"
+import type { Message, Slack } from "../../../../../../extensions/slack/skills/slack/scripts/slack"
 
 export const OWNER = "U0OWNER"
 export const DM = "D0FIXTURE"

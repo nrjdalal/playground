@@ -200,4 +200,14 @@ describe("takeHanded", () => {
     expect(takeHanded("typed", handed, "builder", null)).toBeNull()
     expect(takeHanded("typed", null, "dispatcher", null)).toBeNull()
   })
+
+  // A card's Reply (#1045) hands its ref alone to Playground's composer, which no other session's box or a thread's takes.
+  test("a card's Reply puts re #iN: before the words, swapping another item's ref, in the named session's box alone", () => {
+    const reply = { attachments: [], ref: 41, text: "", to: "dispatcher" }
+    expect(takeHanded("", reply, "dispatcher", null)).toBe("re #i41: ")
+    expect(takeHanded("hold it", reply, "dispatcher", null)).toBe("re #i41: hold it")
+    expect(takeHanded("re #i40: hold it", reply, "dispatcher", null)).toBe("re #i41: hold it")
+    expect(takeHanded("hold it", reply, "builder", null)).toBeNull()
+    expect(takeHanded("re #i41: ", reply, "dispatcher", reply)).toBeNull()
+  })
 })

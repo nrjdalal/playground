@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 
 import { ConfirmDialog } from "@/components/common/confirm-dialog"
+import { useAsideDocs } from "@/components/dashboard/aside-docs"
 import { Hint } from "@/components/hint"
 import { Button } from "@/components/ui/button"
 import {
@@ -29,15 +30,10 @@ import {
 import { CenterSpinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { agentLabel } from "@/lib/agent-label"
+import { pageDoc } from "@/lib/aside-docs"
 import { config } from "@/lib/config"
 import { useNow } from "@/lib/dashboard"
-import {
-  deletePage,
-  fetchPages,
-  PREVIEWS_QUERY_KEY,
-  previewDownloadUrl,
-  previewUrl,
-} from "@/lib/previews"
+import { deletePage, fetchPages, PREVIEWS_QUERY_KEY, previewDownloadUrl } from "@/lib/previews"
 import { fullTime, relativeTime } from "@/lib/time"
 
 const keptAt = (preview: Preview) => preview.page?.at ?? preview.modifiedAt
@@ -121,16 +117,18 @@ export const deleteDescription = (name: string, older: number, pdf = false): str
 // The row a delete asks about: its newest version, and how many older versions stay.
 type Deleting = { older: number; preview: Preview }
 
-// Each page as a row that opens its newest version in a new tab through the Previews route: its title, who made it, for whom, and when it was kept; the older versions sit in the row's dropdown, its Download saves the newest version, and its delete button asks to delete it.
+// Each page as a row that opens its newest version in an aside tab of its own: its title, who made it, for whom, and when it was kept; the older versions sit in the row's dropdown, each opening the same way, its Download saves the newest version, and its delete button asks to delete it.
 export function PageList({
   apiUrl,
   now,
   onDelete,
+  onOpen,
   pages,
 }: {
   apiUrl: string
   now: number
   onDelete?: (deleting: Deleting) => void
+  onOpen: (page: Preview) => void
   pages: Preview[]
 }) {
   return (
@@ -140,7 +138,7 @@ export function PageList({
         return (
           <Item
             key={latest.name}
-            className="hover:bg-muted has-[a:focus-visible]:border-ring has-[a:focus-visible]:ring-ring/50 relative has-[a:focus-visible]:ring-[3px]"
+            className="hover:bg-muted has-[[data-page-open]:focus-visible]:border-ring has-[[data-page-open]:focus-visible]:ring-ring/50 relative has-[[data-page-open]:focus-visible]:ring-[3px]"
             size="sm"
             variant="outline"
           >
@@ -149,14 +147,14 @@ export function PageList({
             </ItemMedia>
             <ItemContent>
               <ItemTitle>
-                <a
-                  className="after:absolute after:inset-0 after:rounded-[inherit] focus-visible:outline-none"
-                  href={previewUrl(apiUrl, latest.name)}
-                  rel="noreferrer"
-                  target="_blank"
+                <button
+                  className="text-left after:absolute after:inset-0 after:rounded-[inherit] focus-visible:bg-transparent focus-visible:outline-none"
+                  data-page-open=""
+                  onClick={() => onOpen(latest)}
+                  type="button"
                 >
                   {pageTitle(latest)}
-                </a>
+                </button>
               </ItemTitle>
               <ItemDescription>
                 {page && `By ${agentLabel(page.by)}`}
@@ -181,13 +179,7 @@ export function PageList({
                         <DropdownMenuItem
                           key={preview.name}
                           className="justify-between gap-4"
-                          render={
-                            <a
-                              href={previewUrl(apiUrl, preview.name)}
-                              rel="noreferrer"
-                              target="_blank"
-                            />
-                          }
+                          onClick={() => onOpen(preview)}
                         >
                           <span className="truncate">{preview.name}</span>
                           <span className="text-muted-foreground text-xs">
@@ -230,6 +222,7 @@ export function Pages({ all, session }: { all: boolean; session: string }) {
     refetchInterval: 30_000,
   })
   const [deleting, setDeleting] = React.useState<Deleting | null>(null)
+  const openInAside = useAsideDocs()
   // the dialog keeps its title through its close animation
   const shown = React.useRef<Deleting | null>(null)
   if (deleting) shown.current = deleting
@@ -253,7 +246,13 @@ export function Pages({ all, session }: { all: boolean; session: string }) {
       ) : error ? (
         <p className="text-destructive text-sm">{error.message}</p>
       ) : data.previews.length ? (
-        <PageList apiUrl={config.api.url} now={now} onDelete={setDeleting} pages={data.previews} />
+        <PageList
+          apiUrl={config.api.url}
+          now={now}
+          onDelete={config.hosted ? undefined : setDeleting}
+          onOpen={(page) => openInAside?.(pageDoc(config.api.url, page.name, pageTitle(page)))}
+          pages={data.previews}
+        />
       ) : (
         <Empty>
           <EmptyHeader>
