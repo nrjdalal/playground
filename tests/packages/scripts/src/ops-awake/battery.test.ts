@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import { batteryOf, checkBattery } from "../../../../../packages/scripts/src/ops-awake/battery"
+import { fakeRun } from "../ops-tick/fake-run"
 
 const scratch = mkdtempSync(join(tmpdir(), "ops-awake-battery-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -196,6 +197,25 @@ test("a post that fails is told to ops once in 15 minutes, and tried again each 
   expect(await check(1_000_000)).toBe("battery alert: ask not posted to the Inbox: no database")
   expect(await check(1_060_000)).toBeUndefined()
   expect(await check(1_000_000 + 15 * 60_000)).toStartWith("battery alert:")
+})
+
+test("ask runs under bun run --silent, so a refusal reads as ask's own line, not bun's echo and exit line (#1102)", async () => {
+  const mac = machine("silent")
+  const { run, runs } = fakeRun({
+    "ask new": { code: 1, err: "ask: refused\n" },
+    pmset: ON_BATTERY(8),
+  })
+  const line = await checkBattery({ now: new Date(1_000_000), ops: mac.ops, repo: "/r", run })
+  expect(runs.filter((argv) => argv.includes("ask"))[0]).toEqual([
+    "bun",
+    "run",
+    "--silent",
+    "--cwd",
+    "/r",
+    "ask",
+    "new",
+  ])
+  expect(line).toBe("battery alert: ask not posted to the Inbox: ask: refused")
 })
 
 test("a Mac with no pmset is left alone", async () => {
