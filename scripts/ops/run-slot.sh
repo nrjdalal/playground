@@ -670,27 +670,36 @@ def can_be(w, names):
 
 reserved = {"!", "{", "coproc", "do", "elif", "else", "function", "if", "then", "until", "while"}
 unread = any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3])
-# a command substitution's script ($( ) or a backquote, outside single quotes), split at blanks, quotes and ; | & ( ) < > with backslashes dropped: a glob or brace in it that can expand to docker, podman or a chain shell reads as one it cannot read, wherever it sits (a case word or pattern, or a word it does not lead), so docker_kind reads its pieces
+# a command substitution's script ($( ) or a backquote, outside single quotes and $'…', where a backslash escapes a quote), split at blanks, quotes and ; | & ( ) < > with backslashes dropped: a glob or brace in it that can expand to docker, podman or a chain shell reads as one it cannot read, wherever it sits (a case word or pattern, or a word it does not lead), so docker_kind reads its pieces
 subs, j, quote = [], 0, ""
 while j < len(raw):
     c = raw[j]
     if c == "\\" and quote != "'":
         j += 2
         continue
-    if c in "'\"" and quote in ("", c):
+    if not quote and raw.startswith("$'", j):
+        quote, j = "$", j + 2
+        continue
+    if (c == "'" and quote == "$") or (c in "'\"" and quote in ("", c)):
         quote = "" if quote else c
-    elif quote != "'" and (c == "`" or raw.startswith("$(", j)):
-        end, depth = j + (1 if c == "`" else 2), 1
+    elif quote not in ("'", "$") and (c == "`" or raw.startswith("$(", j)):
+        end, depth, inner = j + (1 if c == "`" else 2), 1, ""
         while end < len(raw) and depth:
-            if raw[end] == "\\":
+            if raw[end] == "\\" and inner != "'":
                 end += 1
+            elif inner:
+                inner = "" if raw[end] == ("'" if inner == "$" else inner) else inner
+            elif c != "`" and raw.startswith("$'", end):
+                inner, end = "$", end + 1
+            elif raw[end] in "'\"" and c != "`":
+                inner = raw[end]
             elif c == "`":
                 depth -= raw[end] == "`"
             else:
                 depth += (raw[end] == "(") - (raw[end] == ")")
             end += 1
-        # a case inside it closes its patterns with a ) the count reads as the substitution's end, so it reads to the script's end, failing closed
-        if re.search(r"(^|[\s;&|(`])case\s", raw[j + 1 : end]):
+        # a ) its count cannot place (a case pattern's, a heredoc body's, a comment's, one in a ${…}) may end it early, so one holding case, <<, # or ${ reads to the script's end, failing closed
+        if re.search(r"(^|[\s;&|()`])(case(\s|$)|#)|<<|\$\{", raw[j + 1 : end]):
             end = len(raw)
         subs.append(raw[j + 1 : end])
         j = end
