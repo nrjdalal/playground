@@ -2110,7 +2110,6 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
   })
 
   test("an answer to a card its poster edited since he read it is refused, and one to the card as it stands lands (PG-2547)", async () => {
-    // seen is compared as the stored string, so two edits inside one millisecond would read the same; negligible for a CLI write
     const posted = await post(decision(SLACK))
     const edited = await store.editItem(
       db,
@@ -4960,7 +4959,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const data = folder()
       const posted = await post(decision(GUARD))
       const other = { ...GATE, selfDm: "D0MADEUP2" }
-      const edited = await store.editItem(db, posted.id, decision({ ...GUARD, value: other }))
+      // edited inside the millisecond it was posted in, as CI's fast runner once did, so only a fresh stamp tells the two readings apart
+      const edited = await store.editItem(
+        db,
+        posted.id,
+        decision({ ...GUARD, value: other }),
+        new Date(posted.updatedAt),
+      )
       expect(edited.ok && edited.item.version).toBeGreaterThan(posted.version)
       expect(await approve(posted.id, posted.updatedAt, data)).toMatchObject({
         code: "CONFLICT",
