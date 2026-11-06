@@ -1790,14 +1790,18 @@ async function examineReading(
         run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins),
       ))
   } else if (name === "eval") {
-    verdict = await nested(cmd, env, () =>
-      run(
-        again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed),
-        here,
-        visit,
-        builtins,
-      ),
-    )
+    // an eval of a word the hook cannot read runs code the hook never sees, so a hook judges the eval itself, as it does a source of a script it cannot read
+    const unread = args.some((a) => a.unknown !== undefined || marked(a.value))
+    verdict =
+      (unread ? await visit(cmd, parsed, here) : undefined) ??
+      (await nested(cmd, env, () =>
+        run(
+          again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed),
+          here,
+          visit,
+          builtins,
+        ),
+      ))
   } else verdict = await visit(cmd, parsed, here)
   await record(cmd, name, args, here)
   return verdict

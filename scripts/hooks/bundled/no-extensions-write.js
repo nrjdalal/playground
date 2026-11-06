@@ -1663,7 +1663,8 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     const script = await scriptOf(args[0], cmd, here);
     verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
   } else if (name === "eval") {
-    verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    const unread = args.some((a) => a.unknown !== undefined || marked(a.value));
+    verdict = (unread ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record(cmd, name, args, here);
@@ -3331,6 +3332,9 @@ async function inspect(raw, environment, unknown = false) {
     if (write)
       return refuse(write);
     const vars = !reader && first ? since(varsRead, env.vars, "") : [];
+    const unreadEval = name === "eval" && args.find((a) => a.unknown !== undefined || marked(a.value));
+    if (unreadEval)
+      return refuse(`an eval of ${shown(unreadEval)}, a value the hook cannot read; run its commands as calls of their own, with no eval`);
     const script = [];
     if (stdinShell(cmd) === "root") {
       const text = await stdinOf(cmd, env);

@@ -889,6 +889,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (write) return refuse(write)
     // a command with no program runs nothing that reads the environment, so only its own assignments count
     const vars = !reader && first ? since(varsRead, env.vars, "") : []
+    // an eval's words are its script, so one the hook cannot read is refused
+    const unreadEval =
+      name === "eval" && args.find((a) => a.unknown !== undefined || marked(a.value))
+    if (unreadEval)
+      return refuse(
+        `an eval of ${shown(unreadEval)}, a value the hook cannot read; run its commands as calls of their own, with no eval`,
+      )
     // a root shell's stdin is its script, so one the hook cannot read is refused
     const script: string[] = []
     if (stdinShell(cmd) === "root") {
