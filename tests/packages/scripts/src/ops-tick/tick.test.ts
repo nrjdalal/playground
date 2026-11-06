@@ -30,6 +30,7 @@ import {
 } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
+import { fakeRun } from "./fake-run"
 
 // A machine whose sessions.names keep the old names, which this file's fallbacks name.
 beforeAll(() => setSessionNames(OLD_AS_NAMES))
@@ -51,28 +52,20 @@ const scratch = (): string => {
 // Machine wall time, as the old crons read it.
 const at = (hour: number, minute: number) => new Date(2026, 9, 19, hour, minute, 10)
 
-// A fake context: each script's output by a word of its argv, every run and every line sent recorded; a line holding a word of fails throws, as notify.sh failing does.
+// A fake context: each script's answer by a word of its argv (fakeRun), every run and every line sent recorded; a line holding a word of fails throws, as notify.sh failing does.
 const fake = (
   ops: string,
   now: Date,
-  outputs: Record<string, string> = {},
+  answers: Parameters<typeof fakeRun>[0] = {},
   fails: string[] = [],
-  exits: Record<string, number> = {},
 ) => {
-  const runs: string[][] = []
-  const inputs: string[] = []
+  const { inputs, run, runs } = fakeRun(answers)
   const sent: { text: string; to: string }[] = []
   const ctx: Context = {
     now,
     ops,
     repo: "/repo",
-    run: async (argv, _timeoutMs, stdin) => {
-      runs.push(argv)
-      if (stdin) inputs.push(stdin)
-      const key = Object.keys(outputs).find((k) => argv.join(" ").includes(k))
-      const exit = Object.keys(exits).find((k) => argv.join(" ").includes(k))
-      return { code: exit ? exits[exit]! : 0, out: key ? outputs[key]! : "" }
-    },
+    run,
     send: async (to, text) => {
       if (fails.some((word) => text.includes(word))) throw new Error("notify.sh exited 1")
       sent.push({ text, to })
@@ -90,11 +83,8 @@ const QUIET_LOAD = { "vm.loadavg": "{ 2.10 3.40 4.00 }" }
 const PS =
   "  300.0  4242 /Users/acme/.bun/bin/bun\n   90.0   311 /Applications/cmux.app/Contents/MacOS/cmux\n   10.0   12 launchd\n    0.0  1 kernel_task\n    0.0  2 idle"
 
-// bun run ask new's output, the posted item's id on a line of its own
-const ASKED = {
-  "ask new":
-    "$ bun api/hono/src/bin/dashboard-ask.ts new\nf167b6b9-f570-4f15-a4b4-eb15b8c4876f\n#i601\n",
-}
+// bun run ask new's stdout, the posted item's id on a line of its own
+const ASKED = { "ask new": "f167b6b9-f570-4f15-a4b4-eb15b8c4876f\n#i601\n" }
 
 // The Inbox alerts a beat posted, by their titles
 const alertTitles = (inputs: string[]) => inputs.map((input) => JSON.parse(input).title)
@@ -244,13 +234,11 @@ describe("tick", () => {
   })
 
   test("an Inbox alert that fails to post is named to the builder, and its line still goes", async () => {
-    const { ctx, sent } = fake(
-      scratch(),
-      at(13, 3),
-      { ...QUIET_LOAD, "ask new": "error: the dashboard is down\n", "week-marks.py": MARKS },
-      [],
-      { "ask new": 1 },
-    )
+    const { ctx, sent } = fake(scratch(), at(13, 3), {
+      ...QUIET_LOAD,
+      "ask new": { code: 1, err: "error: the dashboard is down\n" },
+      "week-marks.py": MARKS,
+    })
     await beat("tick").run(ctx)
     expect(sent.slice(0, 3)).toEqual([
       { text: "ALERT 90 acme@example.com: week at 91%, past 90%", to: "builder" },
@@ -1229,9 +1217,10 @@ describe("relay watch", () => {
     else rmSync(queue, { force: true })
     const asks: { argv: string[]; stdin?: string }[] = []
     const { ctx, sent } = fake(ops, now)
-    ctx.run = async (argv, _timeoutMs, stdin) => {
+    const { run } = fakeRun({ ask: { code, out: `${ID}\n#i601\n` } })
+    ctx.run = async (argv, timeoutMs, stdin) => {
       asks.push({ argv, stdin })
-      return { code, out: `$ bun api/hono/src/bin/dashboard-ask.ts new\n${ID}\n#i601\n` }
+      return run(argv, timeoutMs, stdin)
     }
     return { asks, ctx, sent }
   }
@@ -1248,7 +1237,7 @@ describe("relay watch", () => {
     const first = watch(ops, at(14, 30), "pending: ops-unstick.jsonl")
     await beat("relay-watch").run(first.ctx)
     expect(first.asks).toHaveLength(1)
-    expect(first.asks[0]!.argv).toEqual(["bun", "run", "--cwd", "/repo", "ask", "new"])
+    expect(first.asks[0]!.argv).toEqual(["bun", "run", "--silent", "--cwd", "/repo", "ask", "new"])
     expect(JSON.parse(first.asks[0]!.stdin!)).toEqual({
       from: OLD.ops,
       kind: "update",
@@ -1267,8 +1256,13 @@ describe("relay watch", () => {
     outbox(ops, at(14, 38))
     const back = watch(ops, at(14, 40), "timeout")
     await beat("relay-watch").run(back.ctx)
-    expect(back.asks.map((a) => a.argv.slice(4))).toEqual([
+    expect(back.asks.map((a) => a.argv)).toEqual([
       [
+        "bun",
+        "run",
+        "--silent",
+        "--cwd",
+        "/repo",
         "ask",
         "resolve",
         ID,
@@ -1371,7 +1365,24 @@ describe("relay watch", () => {
     utimesSync(join(ops, "outbox", "cursor.json"), at(14, 45), at(14, 45))
     const resolved = watch(ops, at(14, 50), "timeout")
     await beat("relay-watch").run(resolved.ctx)
-    expect(resolved.asks.map((a) => a.argv[5])).toEqual(["resolve"])
+    expect(resolved.asks.map((a) => a.argv)).toEqual([
+      [
+        "bun",
+        "run",
+        "--silent",
+        "--cwd",
+        "/repo",
+        "ask",
+        "resolve",
+        ID,
+        "--by",
+        OLD.ops,
+        "--note",
+        `The relay moved its cursor again at ${at(14, 45)
+          .toISOString()
+          .replace(/\.\d{3}Z$/, "Z")}`,
+      ],
+    ])
     const caughtUp = watch(ops, at(15, 30), "timeout")
     await beat("relay-watch").run(caughtUp.ctx)
     expect(caughtUp.asks).toEqual([])
@@ -1469,7 +1480,7 @@ describe("relay watch", () => {
     await beat("relay-watch").run(watch(ops, at(14, 30), "pending: ops-unstick.jsonl").ctx)
     outbox(ops, at(14, 38))
     const gone = watch(ops, at(14, 40), "timeout")
-    gone.ctx.run = async () => ({ code: 1, out: `dashboard-ask: no inbox item ${ID}\n` })
+    gone.ctx.run = fakeRun({ ask: { code: 1, err: `dashboard-ask: no inbox item ${ID}\n` } }).run
     await beat("relay-watch").run(gone.ctx)
     expect(existsSync(join(ops, "tick", "relay-watch.json"))).toBe(false)
     await beat("relay-watch").run(watch(ops, at(15, 0), "pending: ops-unstick.jsonl").ctx)
@@ -1520,15 +1531,14 @@ describe("the relay's own resume", () => {
       join(ops, "ops-linear-dm.json"),
       JSON.stringify({ lastBeatAt: at(14, 7).toISOString(), lastResult: "ok" }),
     )
-    const refuse = (f: ReturnType<typeof fake>) => {
-      const run = f.ctx.run
-      f.ctx.run = async (argv, timeoutMs) =>
-        argv[1] === "resume"
-          ? { code: 2, out: "spawn.sh: refused: load 40 over 16\n" }
-          : run(argv, timeoutMs)
-      return f
-    }
-    const first = refuse(fake(ops, at(14, 7), { ...QUIET_LOAD, "--sessions": UP }))
+    const first = fake(ops, at(14, 7), {
+      "--brief brief-runner-plain-relay.md": {
+        code: 2,
+        err: "spawn.sh: refused: load 40 over 16\n",
+      },
+      ...QUIET_LOAD,
+      "--sessions": UP,
+    })
     await beat("sweep").run(first.ctx)
     expect(first.sent).toEqual([
       {
@@ -1567,7 +1577,7 @@ describe("the focus card", () => {
     expect(standing.runs).toEqual([])
     const ended = fake(ops, new Date("2026-10-19T09:00:30.000Z"))
     await beat("focus-card").run(ended.ctx)
-    expect(ended.runs).toEqual([["bun", "run", "--cwd", "/repo", "ask", "new"]])
+    expect(ended.runs).toEqual([["bun", "run", "--silent", "--cwd", "/repo", "ask", "new"]])
     expect(JSON.parse(ended.inputs[0]!)).toMatchObject({
       from: OLD.ops,
       kind: "update",
@@ -1589,13 +1599,9 @@ describe("the focus card", () => {
         until: "2026-10-19T09:00:00.000Z",
       }),
     )
-    const failing = fake(
-      ops,
-      new Date("2026-10-19T09:01:00.000Z"),
-      { "ask new": "ask: refused" },
-      [],
-      { "ask new": 1 },
-    )
+    const failing = fake(ops, new Date("2026-10-19T09:01:00.000Z"), {
+      "ask new": { code: 1, err: "ask: refused\n" },
+    })
     await expect(beat("focus-card").run(failing.ctx)).rejects.toThrow(
       "bun run ask new: ask: refused",
     )

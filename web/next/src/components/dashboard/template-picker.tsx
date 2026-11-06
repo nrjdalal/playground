@@ -86,7 +86,7 @@ export function TemplatePicker({
           </CommandList>
         </Command>
         <Link
-          href="/dashboard/settings"
+          href="/dashboard/settings#templates"
           onClick={() => setOpen(false)}
           className="text-muted-foreground hover:text-foreground border-t px-2 pt-1.5 pb-1 text-xs"
         >

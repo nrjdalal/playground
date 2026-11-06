@@ -7,7 +7,9 @@ import { ROSTER_KINDS, ROSTER_ROLE_OF_KIND } from "../../../../packages/config/s
 import {
   readSessionNames,
   readSessionTemplates,
+  readSetting,
   sessionTemplates,
+  setSetting,
   TEMPLATE_KINDS,
 } from "../../../../packages/settings/src"
 
@@ -88,5 +90,59 @@ describe("sessions.templates", () => {
     })
     expect(byId.get("second-dispatcher-claude")?.brief).toBe("dispatcher-2.md")
     expect(byId.get("second-dispatcher-glm")?.brief).toBe("dispatcher-2.md")
+  })
+})
+
+describe("saving sessions.templates", () => {
+  const who = { actor: "dashboard", author: "owner", inboxRef: null, reason: "a made-up edit" }
+  const machine = () => {
+    const data = mkdtempSync(join(scratch, "save-"))
+    mkdirSync(join(data, "extensions"), { recursive: true })
+    writeFileSync(join(data, "extensions", "login"), "made-up-me\n")
+    return data
+  }
+  const save = (data: string, value: unknown) =>
+    setSetting(data, { key: "sessions.templates", scope: "made-up-me", value }, who)
+  const orchestrator = () =>
+    readSessionTemplates(mkdtempSync(join(scratch, "templates-"))).find(
+      (t) => t.id === "orchestrator",
+    )!
+
+  test("an edit saves over the defaults, and the machine reads it", () => {
+    const data = machine()
+    const edited = { ...orchestrator(), effort: "high" as const, model: "opus" }
+    expect(save(data, [edited])).toMatchObject({ ok: true })
+    expect(readSetting(data, "sessions.templates")?.value).toEqual([edited])
+  })
+
+  test("a bad brief is refused at its field, in the words the editor places beside it", () => {
+    expect(save(machine(), [{ ...orchestrator(), brief: "briefs/x.md" }])).toEqual({
+      message: "sessions.templates: ✖ a brief is a file name, with no /   → at [0].brief",
+      ok: false,
+      status: 400,
+    })
+  })
+
+  test("an account usage.accounts does not name is refused at its field, and one it names saves", () => {
+    const data = machine()
+    setSetting(
+      data,
+      {
+        key: "usage.accounts",
+        scope: "made-up-me",
+        value: [{ email: "pat@example.com" }, { label: "zai", provider: "glm" }],
+      },
+      who,
+    )
+    expect(save(data, [{ ...orchestrator(), account: "sam@example.com" }])).toEqual({
+      message:
+        "sessions.templates: ✖ sam@example.com is not in usage.accounts: add it in Settings > Accounts   → at [0].account",
+      ok: false,
+      status: 400,
+    })
+    expect(readSetting(data, "sessions.templates")?.rows).toEqual([])
+    expect(save(data, [{ ...orchestrator(), account: "pat@example.com" }])).toMatchObject({
+      ok: true,
+    })
   })
 })
