@@ -6078,7 +6078,7 @@ var firefightingSettings = defineSettings({
   },
   "firefighting.start.consultFrom": {
     default: "",
-    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts nothing and tells the dispatcher "consult <id>" once per ticket, so the owner decides; empty never consults.',
+    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts no listed ticket and tells the dispatcher "consult <id>" once per ticket, so the owner decides, while a prepare-only worker still starts; empty never consults.',
     schema: union([literal(""), string2().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM in UTC")])
   },
   "firefighting.start.daysOff": {
