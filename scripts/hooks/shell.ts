@@ -316,7 +316,7 @@ function spreadSplit(cmd: Command): Command {
       spreadOne = true
       continue
     }
-    // a lone `-` is env's `-i`, as BSD and GNU env read it, so env's options go on after it; it is written as `-i` for parse
+    // a lone `-` is env's `-i`, and BSD env reads its options on after it (GNU env's end there, so this reads more than GNU runs); it is written as `-i` for parse
     if (inEnvOptions && v === "-") {
       out.push({ ...w, value: "-i" })
       continue
