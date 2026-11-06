@@ -96,7 +96,7 @@ describe("the hosted dashboard writes only what a paired key signs", () => {
       /\{!config\.hosted && \(\n\s+<Hint\n\s+content=\{\n\s+held \?\?\n\s+\(secretAsk \|\| !chat/,
     )
     expect(source).toContain("{config.hosted ? null : clearing === 0 ? (")
-    expect(source).toContain("{row.bulk && !config.hosted && (")
+    expect(source).toContain("{sweep && !config.hosted && (")
   })
 
   test("every other write button on the dashboard stands down on the hosted build", async () => {
