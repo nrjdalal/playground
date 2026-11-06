@@ -199,19 +199,66 @@ export const sinkArgv = (
 ]
 
 // An extension proposal the owner accepts from the Inbox in place of a terminal: its scope, kind and key, and the rev he reads, which the accept holds to, so a proposal written after he read it is refused. Each word is one the store takes, none can start as a flag, and no session supplies the argv.
-const acceptSchema = z.strictObject({
+const proposalSchema = z.strictObject({
   key: z.string().max(LIMITS.name).pipe(itemKeySchema),
   kind: z.enum(KINDS),
   rev: z.string().regex(/^[0-9a-f]{7,40}$/, "Must be a commit SHA"),
   scope: z.string().max(LIMITS.name).regex(SCOPE_NAME, "Must be a login, an org or core"),
+})
+
+export type InboxProposal = z.infer<typeof proposalSchema>
+
+// An accept decision: its own proposal first, then more, the ones accepted after it in the order they land, so one card holds a set the owner reads as one change.
+const acceptSchema = z.strictObject({
+  key: proposalSchema.shape.key,
+  kind: proposalSchema.shape.kind,
+  more: z.array(proposalSchema).min(1).max(20).optional(),
+  rev: proposalSchema.shape.rev,
+  scope: proposalSchema.shape.scope,
   type: z.literal("accept"),
   why: words,
 })
 
 export type InboxAccept = z.infer<typeof acceptSchema>
 
-// Pure: the one command Approve runs for an accept, as `playground ext <args>`: the preview's words, and a reason naming the item.
-export const acceptArgs = (preview: InboxAccept, ref: number): string[] => [
+// Pure: an accept's proposals in the order Approve accepts them, a single accept's one alone.
+export const proposalsOf = (preview: InboxAccept): InboxProposal[] => [
+  { key: preview.key, kind: preview.kind, rev: preview.rev, scope: preview.scope },
+  ...(preview.more ?? []),
+]
+
+// Accepts each proposal in order through `playground ext accept`, stopping at the first that fails: a list of one gives the CLI's own result, a longer one a line naming those accepted, the one that failed with its reason and those not tried.
+async function acceptAll(accept: ExtRun, preview: InboxAccept, ref: number): Promise<RunResult> {
+  const proposals = proposalsOf(preview)
+  if (proposals.length === 1) return runResult(await accept(acceptArgs(proposals[0]!, ref)))
+  const name = (proposal: InboxProposal) => `${proposal.kind} ${proposal.key}`
+  const accepted: string[] = []
+  for (const [at, proposal] of proposals.entries()) {
+    const ran = await accept(acceptArgs(proposal, ref))
+      .then(runResult)
+      .catch((error: unknown) =>
+        runResult({
+          code: 1,
+          err: error instanceof Error ? error.message : String(error),
+          out: "",
+        }),
+      )
+    if (ran.exitCode !== 0) {
+      const rest = proposals.slice(at + 1).map(name)
+      const done = accepted.length ? `accepted ${accepted.join(", ")}; ` : ""
+      const untried = rest.length ? `; not tried: ${rest.join(", ")}` : ""
+      return {
+        exitCode: ran.exitCode,
+        line: `${done}${name(proposal)} failed: ${ran.line}${untried}`,
+      }
+    }
+    accepted.push(name(proposal))
+  }
+  return { exitCode: 0, line: `accepted ${accepted.join(", ")}` }
+}
+
+// Pure: the one command Approve runs for a proposal, as `playground ext <args>`: the preview's words, and a reason naming the item.
+export const acceptArgs = (preview: InboxProposal, ref: number): string[] => [
   "accept",
   preview.scope,
   preview.kind,
@@ -1573,7 +1620,7 @@ function stepOf(
   | undefined {
   if (preview.type === "accept") {
     if (!accept) return { refusal: "This dashboard cannot run an accept" }
-    return { key: "accepted", run: async () => runResult(await accept(acceptArgs(preview, ref))) }
+    return { key: "accepted", run: () => acceptAll(accept, preview, ref) }
   }
   if (preview.type === "apps") {
     if (!apps)
