@@ -2100,6 +2100,11 @@ describe("a refusal for a value the hook does not hold names it in readable text
     ["a loop variable", 'for d in a b; do rm -f "$d/x"; done', 'rm on "$d/x",'],
     ["a variable inside a nested shell's script", 'bash -c "rm -f $X/x"', "rm on $…/x,"],
     [
+      "a held variable after a command named by a variable from the environment",
+      'D=/tmp/d; $EDITOR f; cp x "$D/y"',
+      'cp on "$D/y",',
+    ],
+    [
       "git -c with a variable",
       'git -c core.pager="$P" log',
       'git -c core.pager="$P", a value built from',

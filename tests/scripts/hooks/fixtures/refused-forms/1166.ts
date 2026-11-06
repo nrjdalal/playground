@@ -58,6 +58,39 @@ export const groups: Group[] = [
         `mkdir -p /tmp/fp; printf '%s\\n' ${BUILT} > /tmp/fp/f; fpath+=/tmp/fp; autoload -U f; XY=/tmp/a; f; cp g "$XY"`,
       ],
       [
+        "cp of a held variable after an alias, expanded on the next line, that sources a file the line writes",
+        `printf '%s\\n' ${BUILT} > /tmp/t; XY=/tmp/a; shopt -s expand_aliases; alias q='source /tmp/t'\nq; cp g "$XY"`,
+      ],
+      [
+        "cp of a held variable after bash's enable -f loads a builtin from a file",
+        `XY=/tmp/a; enable -f /tmp/m.so x; x; cp g "$XY"`,
+      ],
+      [
+        "cp of a held variable after fc runs a history event read from a file the line writes",
+        `printf '%s\\n' ${BUILT} > /tmp/t; XY=/tmp/a; fc -R /tmp/t; fc -e - -1; cp g "$XY"`,
+      ],
+      [
+        "cp of a held variable after mapfile's -C callback sources a file the line writes",
+        `printf '%s\\n' ${BUILT} > /tmp/t; XY=/tmp/a; mapfile -c 1 -C 'source /tmp/t' a < /tmp/t; cp g "$XY"`,
+      ],
+      ["cp of a held variable after zsh's r runs a history event", `XY=/tmp/a; r; cp g "$XY"`],
+      [
+        "cp of a held variable after readarray's -C callback sources a file the line writes",
+        `printf '%s\\n' ${BUILT} > /tmp/t; XY=/tmp/a; readarray -c 1 -C 'source /tmp/t' a < /tmp/t; cp g "$XY"`,
+      ],
+      [
+        "cp of a held variable after zsh's zmodload -a loads a builtin from a path",
+        `XY=/tmp/a; zmodload -a /tmp/m x; x; cp g "$XY"`,
+      ],
+      [
+        "cp of a held variable after a zregexparse action sources a file the line writes",
+        `printf '%s\\n' ${BUILT} > /tmp/t; XY=/tmp/a; zregexparse p q x /x/ ':source /tmp/t'; cp g "$XY"`,
+      ],
+      [
+        "cp of a held variable after a zstyle -e value, looked up, sources a file the line writes",
+        `printf '%s\\n' ${BUILT} > /tmp/t; XY=/tmp/a; zstyle -e ':x' y 'source /tmp/t'; zstyle -s ':x' y z; cp g "$XY"`,
+      ],
+      [
         "cp of a held variable after a command whose name is a substitution",
         `XY=/tmp/a; $(printf ex%sport "") ${BUILT}; cp g "$XY"`,
       ],
