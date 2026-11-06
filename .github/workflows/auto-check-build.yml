@@ -50,8 +50,8 @@ jobs:
         run: |
           bun run format:check
           bun run lint
-          # turbo's tasks for the packages this PR changes and those that depend on them alone, from its cache otherwise
-          bunx turbo run check-types build --filter='...[origin/${{ github.base_ref }}]'
+          # turbo's tasks for the packages this PR changes, their dependents and @packages/scripts (turbo.json's @packages/scripts#check-types says why), each from its cache when its inputs are unchanged
+          bunx turbo run check-types build --filter='...[origin/${{ github.base_ref }}]' --filter=@packages/scripts
           # the root checks import packages/* and @api/hono through dist, and web/next's tests the generated data-table metrics, which a PR changing none of them leaves unmade on a clean checkout
           bunx turbo run build --filter='./packages/*' --filter=@api/hono
           bun packages/scripts/src/data-table-metrics.ts
