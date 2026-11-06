@@ -373,7 +373,7 @@ describe("ops-firefighting-start", () => {
     expect(noon.spawns()).toEqual([])
     expect(noon.startFile()).toBeUndefined()
     expect(noon.sent).toEqual([
-      "Starting nothing: 2026-11-06 12:00Z is outside the start window (04:00-12:00)",
+      "Starting nothing: outside the start window (hours 04:00-12:00, days off none)",
     ])
     const early = at(-4 * 60 - 1)
     await early.pass(hours)
@@ -385,7 +385,7 @@ describe("ops-firefighting-start", () => {
     await off.pass({ ...hours, daysOff: ["2026-11-06"] })
     expect(off.spawns()).toEqual([])
     expect(off.sent).toEqual([
-      "Starting nothing: 2026-11-06 08:00Z is outside the start window (04:00-12:00, and a day off)",
+      "Starting nothing: outside the start window (hours 04:00-12:00, days off 2026-11-06)",
     ])
   })
 
@@ -414,8 +414,8 @@ describe("ops-firefighting-start", () => {
     const noon = at(240)
     await noon.pass(config)
     expect(noon.spawns()).toEqual([])
-    expect(noon.sent[0]).toStartWith(
-      "Starting nothing: 2026-11-06 12:00Z is outside the start window",
+    expect(noon.sent[0]).toBe(
+      "Starting nothing: outside the start window (hours 04:00-12:00, days off none)",
     )
   })
 
@@ -697,7 +697,7 @@ describe("ops-firefighting-start", () => {
     expect(s.state().named).toEqual({})
   })
 
-  test("a High, Medium or Low line waits while any focus stands, with no name or brief, told once, and starts once it lifts (#1160)", async () => {
+  test("a High, Medium or Low line waits while any focus stands or an Urgent session the job started lives, with no name or brief, told once, and starts once both lift (#1160)", async () => {
     // MADE-9, an open Urgent, holds the focus ff-first-worker works under, so the job's own focus is no all-clear's to lower
     for (const reason of [`${REASON} MADE-9 open`, "the owner's demo"]) {
       const s = setup(
@@ -726,6 +726,17 @@ describe("ops-firefighting-start", () => {
           NOW.getTime() + 31 * MINUTE,
         ),
       )
+      await s.pass()
+      expect(s.spawns()).toEqual([])
+      expect(s.sent).toEqual(["Waiting on MADE-1 (Medium): focus stands for ff-first-worker"])
+      writeFileSync(
+        join(s.data, "roster.json"),
+        JSON.stringify({
+          agents: [{ name: "ff-first-worker", status: "ended", ticket: "MADE-9" }],
+        }),
+      )
+      // the beat that sees the Urgent's session ended lowers the focus raised for it, and the next starts the line
+      await s.pass()
       await s.pass()
       expect(s.titles()).toEqual(["MADE-1 firefight"])
     }
@@ -892,7 +903,7 @@ const CASES: Case[] = [
     config: { hours: "04:00-12:00" },
     expect: "none",
     id: "W2a",
-    told: "Starting nothing: 2026-11-07 03:59Z is outside the start window (04:00-12:00)",
+    told: "Starting nothing: outside the start window (hours 04:00-12:00, days off none)",
   },
   { at: "2026-11-07T04:00:00Z", config: { hours: "04:00-12:00" }, expect: "start", id: "W2b" },
   { at: "2026-11-07T04:00:01Z", config: { hours: "04:00-12:00" }, expect: "start", id: "W2c" },
@@ -930,7 +941,7 @@ const CASES: Case[] = [
     expect: "start",
     id: "C4",
   },
-  { at: "2026-11-06T23:00:00Z", config: { consultFrom: "11:00" }, expect: "consult", id: "C2" },
+  { at: "2026-11-06T23:00:00Z", config: { consultFrom: "11:00" }, expect: "consult", id: "C2a" },
   { at: "2026-11-06T21:59:59Z", config: { hours: "22:00-06:00" }, expect: "none", id: "W3a" },
   { at: "2026-11-06T22:00:00Z", config: { hours: "22:00-06:00" }, expect: "start", id: "W3b" },
   { at: "2026-11-07T02:00:00Z", config: { hours: "22:00-06:00" }, expect: "start", id: "W3c" },
@@ -953,7 +964,7 @@ const CASES: Case[] = [
     config: { daysOff: ["2026-11-07"], hours: "04:00-12:00" },
     expect: "none",
     id: "W5a",
-    told: "Starting nothing: 2026-11-07 08:00Z is outside the start window (04:00-12:00, and a day off)",
+    told: "Starting nothing: outside the start window (hours 04:00-12:00, days off 2026-11-07)",
   },
   {
     at: "2026-11-08T08:00:00Z",
@@ -989,6 +1000,7 @@ const CASES: Case[] = [
   { at: "2026-11-06T09:00:00Z", ended: "2026-11-05", expect: "start", id: "E4" },
   { at: "2026-11-06T09:00:00Z", ended: "first beat", expect: "start", id: "E1" },
   { at: "2026-11-06T09:00:00Z", expect: "start", id: "F1a", relay: 5 * MINUTE },
+  { at: "2026-11-06T10:59:59Z", config: { consultFrom: "11:00" }, expect: "start", id: "C2b" },
   { at: "2026-11-06T09:00:00Z", config: { hours: "09:00-09:00" }, expect: "none", id: "W4" },
   {
     at: "2026-11-06T23:00:00Z",
@@ -1067,13 +1079,15 @@ describe("ops-firefighting-start's date and window flows", () => {
       relayFile(line("MADE-1", "High", 1, extra), NOW.getTime() + minutes * MINUTE),
     )
 
-  test("W7: outside the window the start file goes, the line is told once, and a standing focus is left", async () => {
+  test("W7: outside the window the start file goes, the line is told once across beats a minute apart, and a standing focus is left", async () => {
     const config = { ...CONFIG, hours: "04:00-07:00" }
     const s = setup(line("MADE-1", "High", 1), {
       [START_FILE]: { ids: ["MADE-1"], since: NOW.toISOString(), updatedAt: NOW.toISOString() },
       "focus.json": focusFile(`${REASON} MADE-9 open`, 60),
     })
     await s.pass(config)
+    s.later(1)
+    relayAt(s, 1)
     await s.pass(config)
     expect(s.startFile()).toBeUndefined()
     expect(s.focus()).toEqual([])
@@ -1141,7 +1155,7 @@ describe("ops-firefighting-start's date and window flows", () => {
     expect(s.spawns()).toEqual([])
   })
 
-  test("R1: a line first seen closed exactly 3 days ago is still asked, and one a minute past is not", async () => {
+  test("R1: a line first seen closed exactly 3 days ago is still asked, and 6 minutes past, with the Linear throttle spent, is not", async () => {
     const s = setup(
       line("MADE-1", "High", 1, { open: false }),
       { "ops/ops-firefighting-start.state.json": RUNNING },
@@ -1151,10 +1165,90 @@ describe("ops-firefighting-start's date and window flows", () => {
     s.later(3 * 24 * 60)
     relayAt(s, 3 * 24 * 60, { open: false })
     await s.pass()
-    s.later(1)
-    relayAt(s, 3 * 24 * 60 + 1, { open: false })
+    s.later(6)
+    relayAt(s, 3 * 24 * 60 + 6, { open: false })
     await s.pass()
     expect(s.asked).toEqual([["MADE-1"], ["MADE-1"]])
+  })
+
+  test("W8: the next day's close tells the window once more, after an open stretch clears it", async () => {
+    const config = { ...CONFIG, hours: "04:00-12:00" }
+    const s = setup(line("MADE-1", "High", 1, { busy: true }))
+    let total = 0
+    const at = async (minutes: number) => {
+      s.later(minutes)
+      relayAt(s, (total += minutes), { busy: true })
+      await s.pass(config)
+    }
+    await at(4 * 60)
+    await at(1)
+    await at(20 * 60)
+    await at(4 * 60)
+    expect(s.sent.filter((t) => t.includes("outside the start window"))).toHaveLength(2)
+  })
+
+  test("F6: a beat both stale and outside the window tells the stale line alone", async () => {
+    const s = setup(line("MADE-1", "High", 1), {}, { wrote: NOW.getTime() - 11 * MINUTE })
+    await s.pass({ ...CONFIG, hours: "04:00-07:00" })
+    expect(s.sent).toEqual([
+      `Starting nothing: firefighting.json's lines are stale since ${new Date(NOW.getTime() - 11 * MINUTE).toISOString()}`,
+    ])
+  })
+
+  test("U8: two Urgents started in one beat fill the cap, so the Medium after them waits on the cap, told once across beats", async () => {
+    const s = setup({
+      ...line("MADE-1", "Urgent", 1),
+      ...line("MADE-2", "Urgent", 2),
+      ...line("MADE-3", "Medium", 3),
+    })
+    await s.pass()
+    s.later(1)
+    relayAt(s, 1)
+    writeFileSync(
+      join(s.data, "roster.json"),
+      JSON.stringify({
+        agents: [
+          { name: "worker-made-up-1", status: "working", ticket: "MADE-1" },
+          { name: "worker-made-up-2", status: "working", ticket: "MADE-2" },
+        ],
+      }),
+    )
+    await s.pass()
+    expect(s.titles()).toEqual(["MADE-1 firefight", "MADE-2 firefight"])
+    expect(s.sent.filter((t) => t.startsWith("Waiting on MADE-3"))).toEqual([
+      "Waiting on MADE-3 (Medium): the cap of 2 in progress is reached",
+    ])
+  })
+
+  test("U9: the job's own focus is re-armed with under 10 minutes left, not at exactly 10", async () => {
+    for (const [left, calls] of [
+      [10, []],
+      [9 + 59 / 60, ["on"]],
+    ] as const) {
+      const s = setup(line("MADE-1", "Urgent", 1), {
+        "focus.json": focusFile(`${REASON} MADE-1 open`, left, "ff-first-worker"),
+        "ops/ops-firefighting-start.state.json": FIRST,
+        "roster.json": {
+          agents: [{ name: "ff-first-worker", status: "working", ticket: "MADE-1" }],
+        },
+      })
+      await s.pass()
+      expect(s.focus().map((args) => args[0])).toEqual([...calls])
+    }
+  })
+
+  test("F7: a relay file that does not parse reads as stale, told once, and starts nothing", async () => {
+    const s = setup(line("MADE-1", "High", 1), {
+      [START_FILE]: { ids: ["MADE-1"], since: NOW.toISOString(), updatedAt: NOW.toISOString() },
+    })
+    const relay = join(s.data, "firefighting.json")
+    writeFileSync(relay, "{ half written")
+    utimesSync(relay, new Date(NOW.getTime() - MINUTE), new Date(NOW.getTime() - MINUTE))
+    await s.pass()
+    await s.pass()
+    expect(s.spawns()).toEqual([])
+    expect(s.startFile()).toBeUndefined()
+    expect(s.sent).toEqual(["Starting nothing: firefighting.json does not parse"])
   })
 
   test("R2: Linear is asked at most every 5 minutes", async () => {

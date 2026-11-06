@@ -131,16 +131,20 @@ export async function startPass({
     lines?: Record<string, Line>
   }>(relay)
   // The relay writes lastTry on every pass inside its window, quiet ones included, and nothing outside it, so lines older than freshMinutes are a closed window's or a stopped relay's: none starts from them, and a focus already standing is left to the session working its ticket.
+  // a file that does not parse holds no lines to trust, so it reads as stale, not by its mtime
+  const exists = await Bun.file(relay).exists()
   const wrote =
     typeof ff?.lastTry === "number"
       ? ff.lastTry
-      : (await Bun.file(relay).exists())
+      : ff && exists
         ? Bun.file(relay).lastModified
         : undefined
   if (wrote === undefined || ctx.now.getTime() - wrote > config.freshMinutes * 60_000) {
     await tell(
       "",
-      `Starting nothing: firefighting.json's lines are stale since ${wrote === undefined ? "never written" : new Date(wrote).toISOString()}`,
+      wrote === undefined && exists
+        ? "Starting nothing: firefighting.json does not parse"
+        : `Starting nothing: firefighting.json's lines are stale since ${wrote === undefined ? "never written" : new Date(wrote).toISOString()}`,
     )
     await rm(join(data, START_FILE), { force: true })
     await save()
@@ -148,10 +152,11 @@ export async function startPass({
   }
   delete state.told[""]
   // The owner takes tickets only inside the start window: outside it, or on a day off, nothing starts and the start file goes, while a focus already standing is left to its session.
+  // the line names the window, never the beat's time or day, so a closed stretch is told once, and the next close once more
   if (!inWindow(config, ctx.now)) {
     await tell(
       "window",
-      `Starting nothing: ${day} ${ctx.now.toISOString().slice(11, 16)}Z is outside the start window (${config.hours || "any time"}${(config.daysOff ?? []).includes(day) ? ", and a day off" : ""})`,
+      `Starting nothing: outside the start window (hours ${config.hours || "any time"}, days off ${(config.daysOff ?? []).join(", ") || "none"})`,
     )
     await rm(join(data, START_FILE), { force: true })
     await save()
@@ -210,6 +215,11 @@ export async function startPass({
     .sort((a, b) => rankOf(a) - rankOf(b) || (a.shownAt ?? Infinity) - (b.shownAt ?? Infinity))
   // An Urgent start passes this job's own focus, which spawn.sh's start file never does: the focus is lowered for the start and raised again for the session that held it.
   let heldBy: string | undefined
+  // an Urgent session this job started that is still live holds every lower line, focus file or not, since an Urgent ticket outranks the rest
+  const liveUrgent = open
+    .filter(isUrgent)
+    .map((l) => state.started[l.id])
+    .find((s) => s !== undefined && !ENDED.has(rowOf(s)?.status ?? ""))
   // an Urgent that reaches its start in this pass holds every later High, Medium or Low in it, named as the focus raised after the loop will name it: the session of the last such ticket by ID
   let urgentId: string | undefined
   let urgentStarted: string | undefined
@@ -253,7 +263,7 @@ export async function startPass({
     }
     // spawn.sh lets every --firefighting start past focus while the relay's stop file stands, and cannot tell an Urgent from the rest, so the job holds its own: a High, Medium or Low waits while any focus stands.
     const f = await standing(data, ctx.now)
-    const holder = f?.session ?? heldBy ?? urgentStarted
+    const holder = f?.session ?? heldBy ?? urgentStarted ?? liveUrgent
     if (holder && !isUrgent(line)) {
       await tell(
         id,
