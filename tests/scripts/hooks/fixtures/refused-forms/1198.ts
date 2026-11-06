@@ -29,6 +29,16 @@ export const groups: Group[] = [
       ["an eval of a ? glob", "cd /tmp/g && eval ?*"],
       ["an eval of a bracket glob", "cd /tmp/g && eval [c]*"],
       ["an eval of a glob by its path", "eval /tmp/g/*"],
+      // a shell option turns more characters into glob operators, so only plain characters read as written
+      ["an eval of a zsh extendedglob negation", "cd /tmp/g && setopt extendedglob && eval ^x"],
+      ["an eval of a negation by its path after setopt", "setopt extendedglob; eval /tmp/g/^x"],
+      ["an eval of a negation by its path after set -o", "set -o extendedglob; eval /tmp/g/^x"],
+      ["an eval of a zsh extendedglob repeat", "cd /tmp/g && setopt extendedglob && eval x#"],
+      ["an eval of a zsh extendedglob exclusion", "cd /tmp/g && setopt extendedglob && eval x~y"],
+      ["an eval of a ksh pattern of one or more", "cd /tmp/g && setopt kshglob && eval +(x)"],
+      ["an eval of a ksh pattern of exactly one", "cd /tmp/g && setopt kshglob && eval @(x)"],
+      ["an eval of a bash extglob negation", "bash -c 'shopt -s extglob; cd /tmp/g && eval !(x)'"],
+      ["an eval of a bash extglob option", "bash -c 'shopt -s extglob; cd /tmp/g && eval ?(x)'"],
     ],
   },
 ]
