@@ -417,6 +417,71 @@ test("runRm --worktree refuses a worktree a running clone reads from, naming the
   expect(existsSync(wt)).toBe(false)
 })
 
+// A main checkout with a remote and a worktree on PG-1-thing holding one commit of its own, which the deps call merged, so rm --worktree moves it; and the trash id of each move.
+const trashedWorktree = async () => {
+  const { deps, main, root } = machine()
+  git(root, "init", "--bare", "-q", join(root, "remote.git"))
+  git(main, "init", "-q", "-b", "canary")
+  writeFileSync(join(main, "README.md"), "x")
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  git(main, "remote", "add", "origin", join(root, "remote.git"))
+  git(main, "push", "-q", "origin", "canary")
+  const wt = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+  writeFileSync(join(wt, "work.txt"), "work")
+  git(wt, "add", ".")
+  git(wt, "commit", "-qm", "work")
+  const sha = git(wt, "rev-parse", "HEAD")
+  const merged = { ...deps, merged: () => true }
+  expect(await runRm(["--worktree", wt], merged)).toBe(0)
+  expect(existsSync(wt)).toBe(false)
+  const [batch] = readdirSync(join(deps.data, "trash"))
+  return { deps: merged, id: `${batch}/1`, main, sha, wt }
+}
+
+// What git reads in a restored worktree: its status, its branch, its HEAD, and whether the main checkout lists it.
+const gitSees = (main: string, wt: string) => ({
+  branch: git(wt, "symbolic-ref", "--short", "HEAD"),
+  head: git(wt, "log", "-1", "--format=%H"),
+  listed: git(main, "worktree", "list", "--porcelain").includes(`worktree ${wt}\n`),
+  status: git(wt, "status", "--porcelain"),
+})
+
+test("runRm --restore brings a worktree back as git reads it: on its branch, at the commit it held, listed", async () => {
+  const { deps, id, main, sha, wt } = await trashedWorktree()
+  expect(await runRm(["--restore", id], deps)).toBe(0)
+  expect(gitSees(main, wt)).toEqual({ branch: "PG-1-thing", head: sha, listed: true, status: "" })
+})
+
+test("runRm --restore recreates the worktree's branch at the commit it held when the branch has gone", async () => {
+  const { deps, id, main, sha, wt } = await trashedWorktree()
+  git(main, "branch", "-D", "PG-1-thing")
+  expect(await runRm(["--restore", id], deps)).toBe(0)
+  expect(gitSees(main, wt)).toEqual({ branch: "PG-1-thing", head: sha, listed: true, status: "" })
+  expect(git(main, "rev-parse", "PG-1-thing")).toBe(sha)
+})
+
+test("runRm --restore refuses a worktree whose branch and commit have both gone, naming the commit, and moves nothing", async () => {
+  const { deps, id, main, sha, wt } = await trashedWorktree()
+  git(main, "branch", "-D", "PG-1-thing")
+  git(main, "reflog", "expire", "--expire=now", "--all")
+  git(main, "gc", "-q", "--prune=now")
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--restore", id], deps)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toHaveLength(1)
+  expect(said[0]).toContain(sha)
+  expect(said[0]).toContain(`git -C ${main} branch PG-1-thing ${sha}`)
+  expect(existsSync(wt)).toBe(false)
+  expect(readdirSync(join(deps.data, "trash", id))).toEqual(["pg-1"])
+})
+
 test("clonesOf reads run-slot's clone holder line while its pid lives, and a line with no source as none", () => {
   const line = "k3m9px-worker 4242 2026-11-03T05:21:53Z\t/a/src\t/a/dst\n"
   expect(clonesOf(line, () => true)).toEqual([
