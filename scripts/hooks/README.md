@@ -273,7 +273,7 @@ Only the first reading moves the folder, sets variables and records files for th
   Such an option counts behind any wrapper and quoted or not (`'-s'`, `-su'root'`, `'sudo' -s`), and an option or a program in a variable counts as one.
   `su`, busybox's `su` applet and one behind any wrapper included, is a root shell when it is not handed a command (`<reader> | su`, `<reader> | su -s /bin/sh root`, `<reader> | busybox su`).
   `su` reads as handed one only by `-c` or `--command` with its command, after option words of `-f`, `-l`, `-m` and `-` alone, so any other option word, one taking a value included, and any word before the `-c` it cannot read (a variable, a substitution, a glob) reads as a root shell.
-  A line that runs its own command after another option (`su -lc <cmd>`) is then read as a root shell, a false refusal the hook accepts so an option's value never hides a `-c`.
+  A line that runs its own command after another option (`su -lc <cmd>`) is then read as a root shell on purpose, so an option's value never hides a `-c`.
   Each word is read as an option of every privilege wrapper before it: the first unquoted word naming one, and any word whose unquoted value is `sudo` or `doas` (`'doas' sudo -i`, `doas sudo -i`); any other word ending in a wrapper's name (a quoted path, or a path after the first wrapper) is read as an option, never as a wrapper.
   A long option's unambiguous prefix counts as that option, as sudo's getopt_long reads it (`--sh`, `--lo`), while sudo itself refuses the ambiguous `--s` and `--l`.
   The root shell is looked for under each reading of the wrapper's options (above); once the parse runs out of readings, any sudo, doas or su among the command's words counts as a root shell and any shell's name as a shell.
@@ -552,7 +552,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A pipe into an interpreter there is refused from the main checkout whatever it carries, since the hook reads no other language, while one that runs a script file or a module of its own past options its family's table names (`| node x.js`, `| python3 -m json.tool`) runs, that file's text being outside the line.
   For bun and deno that file is a JavaScript or TypeScript name, since they run a bare name off PATH (`| bun run sh`).
   A root shell there is one as [no-extensions-write](#no-extensions-write) reads it (`<reader> | sudo '-s'`, `<reader> | sudo --sh`, `<reader> | env -S 'sudo -s'`, `<reader> | sudo su`, `<reader> | su root`).
-  A script it reads is judged command by command, a root shell's by this hook and a plain shell's by the shared reader, which runs it itself.
+  A script it reads is judged command by command: a root shell's here-string, heredoc, file or process substitution by this hook, and a plain shell's script and a root shell's piped one by the shared reader, which runs them itself.
   It fails open on a call it cannot read.
   Its tests are in `bun run test:file tests/scripts/hooks`.
   The backstop behind it is `lefthook.yml`'s pre-commit step `main-checkout`, alone at priority 1 so it runs first, before any step that writes (lefthook runs a tie in any order).

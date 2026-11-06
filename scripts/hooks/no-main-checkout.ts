@@ -432,7 +432,7 @@ async function unreadScript(
 // The builtins run() hands visit beside a bare wrapper and a bare copy of a followed command, each with no command of its own to judge.
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 
-// The shell a here-string, a heredoc, a pipeline, a file or a process substitution feeds runs that text as its script: one the hook cannot read is refused where the shell would run in the main checkout, and a root shell's, which the shared reader leaves, is judged command by command (the reader runs a plain shell's itself).
+// The shell a here-string, a heredoc, a pipeline, a file or a process substitution feeds runs that text as its script: one the hook cannot read is refused where the shell would run in the main checkout, and a root shell's here-string, heredoc, file or process substitution, which the shared reader leaves, is judged command by command (the reader runs a plain shell's itself, and a root shell's piped script).
 async function fedScript(
   cmd: Command,
   here: Env,
