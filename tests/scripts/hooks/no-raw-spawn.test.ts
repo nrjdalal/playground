@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-raw-spawn"
+import { groups as inAnotherCase } from "./fixtures/refused-forms/1123"
+import type { Paths } from "./fixtures/refused-forms/_shared"
 
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-raw-spawn.ts")
@@ -199,6 +201,20 @@ describe("cmux runs only for its help or version", () => {
 
 const PANE = "w9:p9"
 const ID = "00000000-0000-0000-0000-000000000000"
+
+// #1123: macOS runs herdr named in any case, so each of #1123's herdr rows gets the refusal of the same call in lower case.
+describe("herdr named in another case", () => {
+  const rows = inAnotherCase
+    .filter((g) => g.guards.includes("no-raw-spawn"))
+    .flatMap((g) => g.rows({} as Paths))
+    .filter(([what]) => what.startsWith("herdr"))
+    .map(([what, call]) => [what, String(call)] as const)
+  test.each(rows)("%s gets herdr's own refusal", async (_, call) => {
+    const refusal = await bash(call.toLowerCase())
+    expect(refusal).toBeDefined()
+    expect(await bash(call)).toBe(refusal)
+  })
+})
 
 // HO3's cases (comment 6241491508), with its allow-list: herdr's socket has no access control, so only its reads run.
 describe("a herdr call that is not one of herdr's reads is refused", () => {

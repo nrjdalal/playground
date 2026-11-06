@@ -909,6 +909,34 @@ describe("a quoted argument is read as a command line only where a program runs 
       "busybox running another harmless applet",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | busybox cat",
     ],
+    [
+      "env's lone dash ahead of a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - ls",
+    ],
+    [
+      "env's lone dash and an unset ahead of a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - -u X ls",
+    ],
+    [
+      "genv running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | genv -u X ls",
+    ],
+    [
+      "gnice running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | gnice -n 5 ls",
+    ],
+    [
+      "gnohup running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | gnohup ls",
+    ],
+    [
+      "gstdbuf running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | gstdbuf -o0 ls",
+    ],
+    [
+      "gtimeout running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | gtimeout -k 1 5 ls",
+    ],
     ["a quoted ~- used as a literal folder name", "mkdir '~-' && touch '~-/f'"],
     ["a write under ~+, the worktree itself", "touch ~+/f"],
     ["a write under ~- after a cd out of the worktree", "cd /usr; touch ~-/f"],
@@ -930,6 +958,14 @@ describe("a quoted argument is read as a command line only where a program runs 
     const env = { HOME: homedir(), TMPDIR: tmpdir() }
     const raw = JSON.stringify({ cwd: homedir(), tool_input: { command }, tool_name: "Bash" })
     expect(await check(raw, env)).toBeUndefined()
+  })
+
+  // #1123: the hook reads a plain mktemp's folder by its exact name, so one named in another case reads as a folder it cannot know, and a miss fails closed
+  test("rm of a folder made by mktemp in capitals is refused from the home with TMPDIR set", async () => {
+    const env = { HOME: homedir(), TMPDIR: tmpdir() }
+    const command = 'T=$(MKTEMP -d); rm -rf "$T"'
+    const raw = JSON.stringify({ cwd: homedir(), tool_input: { command }, tool_name: "Bash" })
+    expect(await check(raw, env)).toBeDefined()
   })
 
   test("the dispatcher brief's call that finds the Dashboard's checkout runs from a worktree", async () => {
