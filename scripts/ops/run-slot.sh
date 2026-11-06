@@ -665,16 +665,28 @@ def can_be(w, names):
 
 reserved = {"!", "{", "coproc", "do", "elif", "else", "function", "if", "then", "until", "while"}
 unread = any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3])
-cases = 0
+# each open case's state: pat while its patterns run (after `case … in`, or after ;;, ;& or ;;&, through each | up to the closing )), cmd for the arm's commands after that )
+cases = []
 for k, step in enumerate(steps):
     # past VAR=x and the reserved words that lead a command (if, then, do, !, coproc, function and its name, and the rest)
     i = 0
     while i < len(step) and (re.match(r"[A-Za-z_][A-Za-z0-9_]*=", step[i]) or step[i] in reserved):
         i += 2 if step[i] == "function" else 1
-    cases += (step[i : i + 1] == ["case"]) - (step[i : i + 1] == ["esac"])
-    # inside a case, a pattern (a word before ) or | that follows a ;, ;;, ;&, ;;& or |) names no program, so `*)` reads as no glob of a program
-    if cases > 0 and seps[k + 1] in (")", "|") and seps[k] in ("", ";", ";;", ";&", ";;&", "|"):
+    head = step[i] if i < len(step) else None
+    if head == "esac" and cases:
+        cases.pop()
+        if cases and seps[k + 1] in (";;", ";&", ";;&"):
+            cases[-1] = "pat"
         continue
+    # a pattern names no program, so `*)` reads as no glob of one; the case line itself names none either, and may hold the first pattern
+    if (cases and cases[-1] == "pat") or head == "case":
+        if head == "case":
+            cases.append("pat")
+        if step and seps[k + 1] == ")" and (head != "case" or len(step) - i > 3):
+            cases[-1] = "cmd"
+        continue
+    if cases and seps[k + 1] in (";;", ";&", ";;&"):
+        cases[-1] = "pat"
     hidden = lambda w: w == "eval" or "$" in w
     if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
         unread = True
