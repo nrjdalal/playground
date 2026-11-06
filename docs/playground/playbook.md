@@ -102,7 +102,7 @@ No factory session blocks on him: one that posted a decision carries on or ends 
 For a focused stretch, such as a timed test, a demo or an hour of deep work, `playground focus on --session <name> --reason "<why>"` gives one session the Mac for up to 180 minutes.
 While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep and that session's own reviewer and tester keep running.
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
-A firefighting start (spawn.sh's `--firefighting`) passes focus, the load gate and a full run-slot queue at the slots gate while a firefighting trigger file stands, and the memory gate still applies to it.
+A firefighting start (spawn.sh's `--firefighting`) passes the load gate and a full run-slot queue at the slots gate while a firefighting trigger file stands, and the memory gate still applies to it; it passes focus too on a stop or head-start file, while the starter job's own file never does, and the job itself holds its High, Medium and Low starts while focus stands.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
