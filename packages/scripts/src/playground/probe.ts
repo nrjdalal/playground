@@ -22,7 +22,6 @@ import {
   type Dispatcher,
   type Probes,
 } from "./plan"
-import { insideTerminal } from "./terminal"
 
 // The data folder spawn.sh keeps its briefs and backend pins in: PLAYGROUND_DATA_DIR, else ~/.playground, never CLAUDE_CONFIG_DIR.
 export const homeDataDir = (): string => dataDirOf(process.env)
@@ -236,6 +235,5 @@ export const probe = async (urls: Urls | null): Promise<Probes> => ({
   dispatchers: liveDispatchers(),
   follower: followerRunning(),
   glm: await glmSetUp(),
-  terminal: insideTerminal(),
   web: await webUp(urls),
 })

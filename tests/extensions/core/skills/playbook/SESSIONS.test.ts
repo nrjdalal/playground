@@ -16,14 +16,6 @@ describe("SESSIONS.md", () => {
     )
   })
 
-  test("closes a session that still runs with --force", async () => {
-    const closes = (await Bun.file(SESSIONS).text()).match(
-      /cmux (?:close-surface|workspace close) [^`\n]*/g,
-    )
-    expect(closes?.length).toBeGreaterThanOrEqual(2)
-    for (const close of closes ?? []) expect(close).toEndWith(" --force")
-  })
-
   test("holds the brief templates' fill rule (#1664)", async () => {
     const text = await Bun.file(SESSIONS).text()
     expect(text).toContain("a fill replaces those tokens alone")

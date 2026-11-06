@@ -854,7 +854,7 @@ export const endedResult = (
   return pass("ended", `${name} is down and the roster reads ended`)
 }
 
-// A session's end, as the Dashboard reads it (Ended), so a lead in cmux can check a herdr session whose server its own herdr reads cannot reach.
+// A session's end, as the Dashboard reads it (Ended), so a lead can check a herdr session whose server its own herdr reads cannot reach.
 export const ended = async (
   { api, web }: Target,
   cookie: string,

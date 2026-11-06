@@ -3,16 +3,17 @@
 
 A job ops starts in a terminal (one whose `runtime` names one, or that names none and has a command and no launchd label) runs as a pane of the Ops
 workspace on the factory herdr server (the binary pin.json names, as spawn.sh reaches it). An old `runtime` of cmux or auto reads
-as herdr, so a copy still running under cmux is stopped by its recorded pid and started in herdr on the next pass.
+as herdr.
 
   up.py                      check every job once; start each unhealthy terminal job as a pane of herdr's Ops workspace
-  up.py --once-per-cmux      does nothing: an old ~/.zshrc hook's call, which starts no pass
   up.py --restarted <a,b>    a plain pass, once any running pass ends, with those jobs' starts dropped first, so GRACE holds
                              back no job ops-restart stopped (packages/scripts/src/ops-restart)
   up.py --sessions           list, never run, the commands that bring the factory's Claude sessions back
 
+Any other argument is refused with the usage line, exit 1, and runs no pass.
+
 Healthy means the job's heartbeat (ops/<name>.json) is fresh (within three cycles), its pid is alive, its last result
-is not an exit and, for a terminal job, its pid runs under no cmux app (ptable.py). An unhealthy job's old herdr pane, which ops
+is not an exit. An unhealthy job's old herdr pane, which ops
 opened, is closed first (ops-dashboard then waits until its recorded process groups are gone, stopping them through procs.sh);
 nothing is ever selected by name or pattern. A launchd job is only reported: launchd keeps it alive. A job whose holder runs an
 executable an update deleted, or whose heartbeat pid does while a holder or launchd holds it, (lsof, once a pass) is unhealthy: a
@@ -74,7 +75,7 @@ def alive(pid):
         return False
 
 
-def healthy(job, procs):
+def healthy(job):
     try:
         b = json.load(open(os.path.join(OPS, f"{job['heartbeat']}.json")))
     except Exception:
@@ -86,9 +87,6 @@ def healthy(job, procs):
         return False, "process gone"
     if "exited" in str(b.get("lastResult", "")):
         return False, str(b["lastResult"])
-    # a pid the snapshot lacks started after it was read (a restart during this pass): it cannot be judged, so it is left to the next pass
-    if is_herdr(job) and int(b["pid"]) in procs and ptable.cmux_of(int(b["pid"]), procs):
-        return False, f"pid {b['pid']} runs under cmux, and its runtime is herdr"
     return True, "ok"
 
 
@@ -126,15 +124,6 @@ def in_factory(names):
 def one_line_answer(out):
     """An answer whole, on one line."""
     return " ".join(line.strip() for line in out.splitlines() if line.strip()) or "no answer"
-
-
-def elsewhere(job, holder, procs, stale=""):
-    """Why a job's live holder must stop, else "": a terminal job's under a cmux, or any job's on a deleted executable (stale)."""
-    if not holder or holder not in procs:
-        return ""
-    if stale:
-        return stale
-    return "runs under cmux, and its runtime is herdr" if is_herdr(job) and ptable.cmux_of(holder, procs) else ""
 
 
 def beat_pid(job):
@@ -325,7 +314,7 @@ def up(quiet):
             continue
         if job["name"] == skip or time.time() - (starts.get(job["name"]) or 0) < GRACE:
             continue
-        ok, why = healthy(job, procs)
+        ok, why = healthy(job)
         # a heartbeat pid counts only with a holder to stop, or for a job ops-up never starts; with neither, a start would run a second copy beside it
         stale = stale_of(holder, beats.get(job["name"]) if holder or not job.get("command") else None, gone)
         if ok and stale:
@@ -341,9 +330,10 @@ def up(quiet):
                 if not quiet:
                     print(f"{job['name']} is down, and herdr cannot start it: {refused}")
                 continue
-        moved = elsewhere(job, holder, procs, stale)
+        # a holder on a deleted executable stops; a pid the snapshot lacks started after it was read (a restart during this pass), so it is left to the next pass
+        moved = stale if holder and holder in procs else ""
         if moved:
-            # left under cmux, or on a deleted executable: ops-up started it through once.py, so its recorded pid is ours to signal; its trap stops its children
+            # on a deleted executable: ops-up started it through once.py, so its recorded pid is ours to signal; its trap stops its children
             os.kill(holder, 15)
             for _ in range(60):
                 if not alive(holder):
@@ -421,7 +411,7 @@ def covered(cwd):
 
 
 def unguarded(command_of=command_of):
-    """[(name, pid, cwd)] for each live factory session whose --settings and project settings both lack the factory's hooks: one cmux restored in a folder whose project settings do not carry them."""
+    """[(name, pid, cwd)] for each live factory session whose --settings and project settings both lack the factory's hooks: one a terminal restored in a folder whose project settings do not carry them."""
     rows = []
     for f in sorted(glob.glob(os.path.join(REGISTRY, "sessions", "*.json"))):
         try:
@@ -486,7 +476,7 @@ def sessions():
         print(f"{SPAWN} resume {n} {main or cwd} {sid}{backend}")
         if not main:
             print(f"  ({cwd} is no git checkout; it resumes there as it is)")
-        print(f'  then SendMessage {n}: "cmux restarted; you were resumed from your transcript. Re-read your roster task and continue."')
+        print(f'  then SendMessage {n}: "your terminal restarted; you were resumed from your transcript. Re-read your roster task and continue."')
     for name, pid, cwd in unguarded():
         print(f"{name} (pid {pid}, {cwd}) runs without the factory's hooks: respawn it from its handoff through {SPAWN} (playbook SESSIONS.md)")
 
@@ -496,9 +486,10 @@ def main():
     if args == ["--sessions"]:
         sessions()
         return
-    if args == ["--once-per-cmux"]:
-        return
     restarted = args[1].split(",") if len(args) == 2 and args[0] == "--restarted" else []
+    if args and not restarted:
+        print("usage: up.py [--restarted <a,b> | --sessions]", file=sys.stderr)
+        sys.exit(1)
     lock = open(os.path.join(OPS, "up.lock"), "w")
     try:
         # a restart waits for a running pass, whose own write of STARTS would put back the starts it drops
