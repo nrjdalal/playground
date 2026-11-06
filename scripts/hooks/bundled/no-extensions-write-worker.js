@@ -3088,6 +3088,16 @@ async function inspect(raw, environment, unknown = false) {
       const into = cmd.redirects.find((r) => r.target && writer(r) && (inRoot(pathOf(r.target, here)) || GLOB.test(r.target.value) && !!names(r.target, here, true)));
       if (into?.target)
         return refuse(`a write to ${pathOf(into.target, here)}`);
+      for (const r of cmd.redirects) {
+        if (!r.target || !writer(r) || !marked(r.target.value))
+          continue;
+        const word = heldWord(r.target, here, steadyAt(cmd));
+        if (!word)
+          return refuse(`a write to ${shown(r.target)}, a value the hook does not hold; hold it in the same call (X=<path>; echo x > "$X") or write the path literally`);
+        const named = names(word, here, false);
+        if (named)
+          return refuse(`a write to ${named}`);
+      }
     }
     const blind = env.cwdAnywhere ? cmd.redirects.find((r) => r.target && writer(r) && pathOf(r.target, { ...env, cwd: undefined }) === undefined) : undefined;
     if (blind?.target)

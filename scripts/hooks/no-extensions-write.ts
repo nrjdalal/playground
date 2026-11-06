@@ -831,6 +831,17 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
             (GLOB.test(r.target.value) && !!names(r.target, here, true))),
       )
       if (into?.target) return refuse(`a write to ${pathOf(into.target, here)}`)
+      // a writing redirect's target through a variable is judged as a writer's target is: refused when the hook holds no value for it, else by the path it holds
+      for (const r of cmd.redirects) {
+        if (!r.target || !writer(r) || !marked(r.target.value)) continue
+        const word = heldWord(r.target, here, steadyAt(cmd))
+        if (!word)
+          return refuse(
+            `a write to ${shown(r.target)}, a value the hook does not hold; hold it in the same call (X=<path>; echo x > "$X") or write the path literally`,
+          )
+        const named = names(word, here, false)
+        if (named) return refuse(`a write to ${named}`)
+      }
     }
     // past the cap the root may be a folder places() dropped, so a writing redirect whose target leans on the shell's own folder is refused before a reader or an echo lets it run
     const blind = env.cwdAnywhere
