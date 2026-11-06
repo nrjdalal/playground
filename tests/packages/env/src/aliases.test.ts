@@ -12,10 +12,6 @@ describe("renamedEnv", () => {
     expect(renamedEnv("DESK_DEBUG_MIC_DIR")).toBe("PLAYGROUND_DEBUG_MIC_DIR")
   })
 
-  test("takes a name renamed whole to its new name", () => {
-    expect(renamedEnv("PLAYGROUND_CMUX_SESSIONS")).toBe("PLAYGROUND_ALL_SESSIONS")
-  })
-
   test("leaves a constant's name and every other name alone", () => {
     expect(renamedEnv("DESK_MAP")).toBeUndefined()
     expect(renamedEnv("PATH")).toBeUndefined()
@@ -27,12 +23,6 @@ describe("applyEnvAliases", () => {
     const env: Record<string, string | undefined> = { DESK_LIVE_READS: "true" }
     applyEnvAliases(env)
     expect(env.PLAYGROUND_LIVE_READS).toBe("true")
-  })
-
-  test("fills PLAYGROUND_ALL_SESSIONS from PLAYGROUND_CMUX_SESSIONS, a live .env's old opt-in", () => {
-    const env: Record<string, string | undefined> = { PLAYGROUND_CMUX_SESSIONS: "true" }
-    applyEnvAliases(env)
-    expect(env.PLAYGROUND_ALL_SESSIONS).toBe("true")
   })
 
   test("keeps a new name already set", () => {
