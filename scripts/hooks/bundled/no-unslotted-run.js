@@ -1452,8 +1452,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     const script = await scriptOf(args[0], cmd, here);
     verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
   } else if (name === "eval") {
-    const unread = args.some((a) => a.unknown !== undefined || marked(a.value));
-    verdict = (unread ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record(cmd, name, args, here);
@@ -2202,6 +2201,9 @@ function sessionOf(raw) {
 }
 
 // scripts/hooks/steady.ts
+var READ2 = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(?!\[)/.source;
+var TEXT = /[^"$`\\]/.source;
+var WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ2})+|'[^']*'|"(?:${TEXT}|${READ2})*")`);
 var SHELL_SETS = new Set([
   "ARGC",
   "BASH",

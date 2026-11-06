@@ -1663,8 +1663,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     const script = await scriptOf(args[0], cmd, here);
     verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
   } else if (name === "eval") {
-    const unread = args.some((a) => a.unknown !== undefined || marked(a.value));
-    verdict = (unread ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record(cmd, name, args, here);
@@ -2152,12 +2151,98 @@ function singleQuotesOut(command) {
   }
   return double || docs.length ? command : out;
 }
+var READ2 = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(?!\[)/.source;
+var TEXT = /[^"$`\\]/.source;
+var WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ2})+|'[^']*'|"(?:${TEXT}|${READ2})*")`);
+var REDIRECT2 = /^(?:[<>]&(?:\d+|-)|<<<|&>>?|>>?\|?|<>?)/;
+var KEEPS_PROGRAM = /^(?:builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/;
+var PROMPT_PARAM = /^(?:PS[0-4]|PROMPT[2-4]?|RPROMPT2?|RPS[12]|SPROMPT)(?!\w)/;
+var QUOTED_DOC = /^<<(-?)[ \t]*((?:[\w.-]*(?:'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])[\w.-]*)+)(?=[\s;&|<>]|$)/;
+function quotedBodiesOut(command) {
+  let out = "";
+  const docs = [];
+  let program = true;
+  let target = false;
+  let word = "";
+  const endWord = () => {
+    if (word && target)
+      target = false;
+    else if (word && !/^[A-Za-z_]\w*=/.test(word) && !KEEPS_PROGRAM.test(word))
+      program = false;
+    word = "";
+  };
+  for (let i = 0;i < command.length; ) {
+    const rest = command.slice(i);
+    let token;
+    let doc = null;
+    if (rest[0] === `
+`) {
+      endWord();
+      out += `
+`;
+      i++;
+      for (const { delim, strip } of docs)
+        for (;; ) {
+          if (i >= command.length)
+            return command;
+          const end = command.indexOf(`
+`, i);
+          const stop = end === -1 ? command.length : end;
+          const line = command.slice(i, stop);
+          const last = (strip ? line.replace(/^\t+/, "") : line) === delim;
+          out += (last ? line : "") + (end === -1 ? "" : `
+`);
+          i = stop + 1;
+          if (last)
+            break;
+        }
+      docs.length = 0;
+      program = true;
+      continue;
+    } else if (token = rest.match(/^[ \t]+/)?.[0])
+      endWord();
+    else if (token = rest.match(/^(?:&&|\|\||[;|])/)?.[0]) {
+      endWord();
+      program = true;
+    } else if (rest.startsWith("<<") && !rest.startsWith("<<<")) {
+      doc = rest.match(QUOTED_DOC);
+      if (!doc)
+        return command;
+      if (/^\d+$/.test(word))
+        word = "";
+      endWord();
+      token = doc[0];
+      docs.push({
+        delim: doc[2].replace(/\\(.)/g, "$1").replace(/["']/g, ""),
+        strip: doc[1] === "-"
+      });
+    } else if (token = rest.match(REDIRECT2)?.[0]) {
+      if (/^\d+$/.test(word))
+        word = "";
+      endWord();
+      target = !/&(?:\d+|-)$/.test(token);
+    } else if (token = rest.match(WORD)?.[0]) {
+      word += token;
+      if (program && !target && token.includes("$") && !/^[A-Za-z_]\w*=/.test(word))
+        return command;
+      if (PROMPT_PARAM.test(word))
+        return command;
+    }
+    if (!token || docs.length && token.includes(`
+`))
+      return command;
+    out += token;
+    i += token.length;
+  }
+  return docs.length ? command : out;
+}
 function namings(command) {
   const counts = new Map;
   const plain = new Set;
   const add = (key) => counts.set(key, (counts.get(key) ?? 0) + 1);
-  let blind = EVALUATES.some((evaluates) => evaluates.test(command)) || SUBSCRIPT.test(command) || SUBSCRIPT.test(unquoted(command)) || QUALIFIER.test(singleQuotesOut(command)) || INDIRECTS.test(command);
-  for (const [, flags, closed] of command.matchAll(/\$\{\(([^)]*)(\)?)/g))
+  const text = quotedBodiesOut(command);
+  let blind = EVALUATES.some((evaluates) => evaluates.test(text)) || SUBSCRIPT.test(text) || SUBSCRIPT.test(unquoted(text)) || QUALIFIER.test(singleQuotesOut(text)) || INDIRECTS.test(text);
+  for (const [, flags, closed] of text.matchAll(/\$\{\(([^)]*)(\)?)/g))
     if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags))
       blind = true;
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
@@ -3332,9 +3417,6 @@ async function inspect(raw, environment, unknown = false) {
     if (write)
       return refuse(write);
     const vars = !reader && first ? since(varsRead, env.vars, "") : [];
-    const unreadEval = name === "eval" && args.find((a) => a.unknown !== undefined || marked(a.value));
-    if (unreadEval)
-      return refuse(`an eval of ${shown(unreadEval)}, a value the hook cannot read; run its commands as calls of their own, with no eval`);
     const script = [];
     if (stdinShell(cmd) === "root") {
       const text = await stdinOf(cmd, env);
