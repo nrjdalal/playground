@@ -244,9 +244,9 @@ if [ "${1:-}" = set ]; then
   exit 0
 fi
 # every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
-# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules and burst_held open it, and the load units (with that
-# session's reserve) fit, else 1, so a script that takes its slot itself reads them as every run here does (ops-unstick does; localci and
-# the merge train still take theirs by their own mkdir for now); it reads neither the queue nor run-slot.priority
+# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules and burst_held open it, and unit_fits passes (the
+# session's units and reserve, or a queue ticket's own when <who> names one, as ops-unstick asks for the head), else 1, so a script that takes its
+# slot itself reads them as every run here does (localci and the merge train still take theirs by their own mkdir for now); it reads neither the queue nor run-slot.priority
 CAN_TAKE=
 # run-slot.sh head: prints the queue's head, the ticket first_waiter names (<ns>-<pid>-<who>), or nothing, so ops-unstick watches the waiter the queue serves next rather than the oldest
 HEAD_ONLY=
@@ -262,7 +262,7 @@ if [ "${1:-}" = slots ]; then
   SLOTS_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
-# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many a medium run could take now (the open, unheld ones while its load units fit beside the held runs' and slots.peers', less the reserve), and the live tickets in the queue, which spawn.sh's slots gate reads
+# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start), and the live tickets in the queue, which spawn.sh's slots gate reads
 # run-slot.sh kind -- <command>: print the lane run-slot picks for that command (refuse for a run it refuses, docker for a docker build, else quick_kind's clone, commit, quick, or nothing for the queue) and exit, with no ask line, ticket or holder and nothing run, so a lane question reads run-slot's own pick
 KIND_ONLY=
 if [ "${1:-}" = kind ]; then
@@ -276,10 +276,13 @@ if [ "${1:-}" = room ]; then
   ROOM_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
+CAN_TICKET=
 if [ "${1:-}" = can-take ]; then
   [ $# -eq 3 ] || { echo "usage: run-slot.sh can-take <slot> <who>" >&2; exit 2; }
   case "$2" in run-slot|run-slot-2|run-slot-3|run-slot-4) CAN_TAKE=$2 ;; *) echo "run-slot.sh: no slot $2" >&2; exit 2 ;; esac
-  set -- "$3" -- true
+  w=$3
+  if [ -f "$OPS/run-slot.waiters/$3" ]; then CAN_TICKET=$3; w=${3#*-*-}; fi
+  set -- "$w" -- true
 fi
 MODEL_BOUND=
 AFTER=
@@ -1161,20 +1164,38 @@ ordered_waiters() {
   done | sort -s -k1,1n -k2,2n -k3,3n -k4,4 | cut -d' ' -f5,6
 }
 first_waiter() {
-  # the first waiter in that order whose run fits the units free now, so a run too big for them never holds back a smaller one behind it,
-  # or the first pinned one, fitting or not; with s2, only among the waiters that can take run-slot-2 (builder, 12 Oct: older copies at
+  # the first waiter in that order whose run fits the units free now (unit_fits), so a run too big for them never holds back a smaller one behind it;
+  # a pinned one that does not fit holds its place while it is a wall (no rank) or the runs that passed it are all that keep it out, and is named
+  # when no run behind it fits, so it starts once its lanes open and is never starved (issue 1216: a pinned 3-unit head kept 11 smaller waiters
+  # behind it for 25 minutes with 2 lanes free); with s2, only among the waiters that can take run-slot-2 (builder, 12 Oct: older copies at
   # the head left slot 2 idle)
-  local p t f c r m held list mode=${1:-}
-  c=$(capacity); r=$(reserve "$c"); held=$(held_units)
+  local p t f c held list mode=${1:-} blocked=""
+  c=$(capacity); held=$(held_units)
   list=$(ordered_waiters)
   while read -r p t; do
     [ -n "$t" ] || continue
     f=$(cat "$QUEUE/$t" 2>/dev/null)
     [ "$mode" = s2 ] && [ -z "$f" ] && continue
     set -- $f
-    m=$(may_reserve "${2:-22}" "${4:-medium}" "${t#*-*-}" "$r")
-    if [ "$p" = 1 ] || fits "$(held_for "$m" "$held")" "${3:-2}" $((c - m)); then echo "$t"; return; fi
+    if unit_fits "${2:-22}" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" "$held"; then echo "$t"; return; fi
+    [ "$p" = 1 ] || continue
+    if [ -z "${2:-}" ] || unit_fits "$2" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" $((held - $(passer_units "$t"))); then echo "$t"; return; fi
+    [ -n "$blocked" ] || blocked=$t
   done <<< "$list"
+  [ -z "$blocked" ] || echo "$blocked"
+}
+# the units held on run-slot to run-slot-4 by runs that took their slot after ticket $1 was written, the runs that passed it
+passer_units() {
+  local since s at u total=0
+  since=$(mtime "$QUEUE/$1") || { echo 0; return; }
+  since=$(date -u -r "$since" +%FT%TZ 2>/dev/null || date -u -d "@$since" +%FT%TZ)
+  for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
+    [ -d "$OPS/$s" ] || continue
+    read -r _ _ at u _ 2>/dev/null < "$OPS/$s.holder" || continue
+    case "$u" in 1 | 2 | 3) ;; *) u=2 ;; esac
+    [[ "$at" > "$since" ]] && total=$((total + u))
+  done
+  echo "$total"
 }
 # a waiter whose script was replaced while it waits (a pull, a link-skills run) runs the new copy with its own arguments, since bash keeps
 # reading the old file (dispatcher, 18 Oct: waiters started before a run-slot change kept the old clone-allow and queue rules)
@@ -1424,6 +1445,8 @@ slot_open() {
 # counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither
 lanes_open() {
   local idle swap tps mbs load need="" verdict=shut why="" seen free level
+  # a read subcommand takes the verdict a waiter wrote in the last 30 s, so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
+  if [ -n "$CAN_TAKE" ] && seen=$(fresh_lanes); then [ "$seen" = open ]; return; fi
   read -r idle swap tps mbs _ <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
   case "$idle" in
@@ -1441,12 +1464,24 @@ lanes_open() {
     verdict=open
   fi
   seen=$(cat "$OPS/run-slot.lanes" 2>/dev/null)
-  if [ -z "$CAN_TAKE" ] && [ "$seen" != "$verdict" ]; then
-    echo "$verdict" > "$OPS/run-slot.lanes"
-    free=$(memstat level); level=$(memstat vm_pressure_level)
-    rlog lanes "$verdict${why:+ why=$why} idle=$idle% load1=$load free=${free:--}${free:+%} pressure=${level:--} swapins=$swap disk0_tps=${tps:--} disk0_mbs=${mbs:--}"
+  if [ -z "$CAN_TAKE" ]; then
+    # every waiter's reading rewrites the verdict, so its age says how fresh it is (fresh_lanes)
+    echo "$verdict" > "$OPS/run-slot.lanes.$$" && mv -f "$OPS/run-slot.lanes.$$" "$OPS/run-slot.lanes"
+    if [ "$seen" != "$verdict" ]; then
+      free=$(memstat level); level=$(memstat vm_pressure_level)
+      rlog lanes "$verdict${why:+ why=$why} idle=$idle% load1=$load free=${free:--}${free:+%} pressure=${level:--} swapins=$swap disk0_tps=${tps:--} disk0_mbs=${mbs:--}"
+    fi
   fi
   [ "$verdict" = open ]
+}
+# the lanes verdict a waiter wrote in the last 30 s, two of its looks; an older one, as a copy from before every look rewrote it leaves, reads as none
+fresh_lanes() {
+  local m age v
+  m=$(mtime "$OPS/run-slot.lanes") || return 1
+  age=$(($(date +%s) - m))
+  [ "$age" -ge 0 ] && [ "$age" -lt 30 ] || return 1
+  v=$(cat "$OPS/run-slot.lanes" 2>/dev/null)
+  case "$v" in open | shut) echo "$v" ;; *) return 1 ;; esac
 }
 
 # the UTC time $1 seconds ago as run-slot.runs.log writes it, by BSD date, else GNU date
@@ -1530,6 +1565,12 @@ capacity() {
     { [ -d "$OPS/$s" ] || slot_open "$s"; } && n=$((n + 1))
   done
   echo $((2 * n))
+}
+# the one gate: whether a run of rank $1, $2 units and size $3, for $4, fits the load units free now, beside $6 held within capacity $5 when given; the wait loop, first_waiter, room and can-take all read it, so a lane room counts as free is one the queue's next run can take (issue 1216)
+unit_fits() {
+  local c=${5:-$(capacity)} m
+  m=$(may_reserve "$1" "$3" "$4" "$(reserve "$c")")
+  fits "$(held_for "$m" ${6:+"$6"})" "$2" $((c - m))
 }
 # whether a run of $2 units fits beside $1 held within a limit of $3; any run fits while no slot is held, so a big run still starts on a quiet machine
 fits() { [ "$1" -eq 0 ] || [ $(($1 + $2)) -le "$3" ]; }
@@ -1742,17 +1783,29 @@ if [ -n "$ROOM_ONLY" ]; then
   done
   c=$(capacity)
   free=0
-  r=$(reserve "$c")
-  fits "$(held_for "$r")" 2 $((c - r)) && free=$((c / 2 - held))
-  echo "$((c / 2)) $held $free $(ordered_waiters | grep -c .)"
+  waiters=$(ordered_waiters | grep -c .)
+  # the free lanes are the ones the queue's next run can take: first_waiter's own units, none while no waiter can start, a medium's with no waiter
+  t=$(first_waiter)
+  if [ -n "$t" ]; then
+    set -- $(cat "$QUEUE/$t" 2>/dev/null)
+    unit_fits "${2:-22}" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" && free=$((c / 2 - held))
+  elif [ "$waiters" = 0 ]; then
+    unit_fits 22 2 medium "" "$c" && free=$((c / 2 - held))
+  fi
+  echo "$((c / 2)) $held $free $waiters"
   exit 0
 fi
 
 if [ -n "$CAN_TAKE" ]; then
+  if [ -n "$CAN_TICKET" ]; then
+    rank="" UNITS="" SIZE=""
+    read -r _ rank UNITS SIZE _ 2>/dev/null < "$QUEUE/$CAN_TICKET"
+    case "$rank" in [0-2][1-3]) CLASS=${rank%?} ;; *) CLASS=2 ;; esac
+    case "$UNITS" in 1 | 2 | 3) ;; *) UNITS=2 SIZE=medium ;; esac
+  fi
   reclaim "$OPS/$CAN_TAKE"
   [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" && ! burst_held > /dev/null || exit 1
-  c=$(capacity); m=$(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")")
-  fits "$(held_for "$m")" "$UNITS" $((c - m))
+  unit_fits "$CLASS$UNITS" "$UNITS" "$SIZE" "$WHO"
   exit
 fi
 
@@ -1782,8 +1835,9 @@ while :; do
     continue
   fi
   # this run's own units must fit beside what the slots hold now (the queue's order checked them for a waiter at its head)
-  c=$(capacity); m=$(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")")
-  if ! fits "$(held_for "$m")" "$UNITS" $((c - m)); then
+  c=$(capacity)
+  if ! unit_fits "$CLASS$UNITS" "$UNITS" "$SIZE" "$WHO" "$c"; then
+    m=$(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")")
     [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for $UNITS free load units ($SIZE; $(held_for "$m") of $c held)" >&2
     sleep "$POLL"
     waited=$((waited + 15))
