@@ -382,17 +382,35 @@ const writeEntry = (path: string, content: unknown): void => {
   }
 }
 
-// Marks dir's copy as the running launcher's own, by its pid and start, which a reused pid never matches.
-export function markLaunched(dir: string, pid = process.pid): void {
-  writeEntry(join(dir, LAUNCHER), { pid, started: startOf(pid) })
+// Marks dir's copy as the running launcher's own, by its pid and start, which a reused pid never matches; the launcher passes the start it already read.
+export function markLaunched(dir: string, pid = process.pid, started = startOf(pid)): void {
+  writeEntry(join(dir, LAUNCHER), { pid, started })
 }
 
-const launcherRuns = (dir: string): boolean => {
+// Each launcher record this process has matched by ps, so a later read asks only whether its pid still runs, and a follower that reads the fixture on every call spawns no ps for it.
+const matched = new Set<string>()
+
+// Whether dir's copy belongs to a launcher that still runs; start reads a pid's start, ps by default.
+export const launcherRuns = (dir: string, start = startOf): boolean => {
   try {
     const { pid, started } = JSON.parse(readFileSync(join(dir, LAUNCHER), "utf8"))
-    return Number.isInteger(pid) && typeof started === "string" && startOf(pid) === started
+    if (!Number.isInteger(pid) || typeof started !== "string") return false
+    if (matched.has(`${pid} ${started}`)) return running(pid)
+    if (start(pid) !== started) return false
+    matched.add(`${pid} ${started}`)
+    return true
   } catch {
     return false
+  }
+}
+
+// Signal 0 delivers nothing: it only asks whether the pid exists (EPERM means it does, under another user).
+const running = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
   }
 }
 
