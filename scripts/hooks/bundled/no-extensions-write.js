@@ -2240,7 +2240,24 @@ var NAME_SETTERS = new Set([
 var PRINTS = new Set(["print", "printf"]);
 var NUMERIC = new Set(["float", "integer"]);
 var TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"]);
-var RUNS_TEXT = new Set([".", "eval", "source"]);
+var RUNS_TEXT = new Set([
+  ".",
+  "alias",
+  "autoload",
+  "emulate",
+  "enable",
+  "eval",
+  "fc",
+  "mapfile",
+  "r",
+  "readarray",
+  "sched",
+  "source",
+  "trap",
+  "zmodload",
+  "zregexparse",
+  "zstyle"
+]);
 var TESTS = new Set(["[", "[[", "test"]);
 var PLAIN_NAME = /^[A-Za-z_]\w*$/;
 var EXPANDS = /\$(?![A-Za-z_]\w*|\{[A-Za-z_]\w*\})|`|[<>]\(/;
@@ -2285,7 +2302,7 @@ function steadyNames(named, commands) {
   const parses = commands.map((cmd) => parse(cmd));
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at];
-    if (RUNS_TEXT.has(name))
+    if (RUNS_TEXT.has(name) || marked(name))
       return () => NONE;
     const flagged = (letters) => cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value));
     if (NUMERIC.has(name) || TYPESETS.has(name) && flagged(/[EFin]/))
@@ -2524,7 +2541,6 @@ var READERS = new Set([
   "wc"
 ]);
 var FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/;
-var FIND_WRITES = /^-(?:fls|fprint|fprint0|fprintf)$/;
 var GIT_READS = new Set([
   "blame",
   "cat-file",
@@ -2539,8 +2555,18 @@ var GIT_READS = new Set([
 var EXPORTS3 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"]);
+var RSYNC_PATHS = [
+  "backup-dir",
+  "log-file",
+  "only-write-batch",
+  "partial-dir",
+  "temp-dir",
+  "write-batch"
+];
+var RSYNC_FLAGS = new Set(["backup", "partial"]);
+var RSYNC_TEMP = /^-[^-@BefMT]*T/;
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
-var GNU_NAMED = /^g(cp|dd|find|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink|xargs)$/;
+var GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/;
 var WRITER_TAKES = {
   cp: { gnu: "S", long: ["no-preserve", "sparse", "suffix"], short: "" },
   install: {
@@ -2552,6 +2578,7 @@ var WRITER_TAKES = {
   },
   ln: { gnu: "S", long: ["suffix"], short: "" },
   mkdir: { long: ["mode"], short: "m" },
+  mv: { gnu: "S", long: ["suffix"], short: "" },
   touch: { long: ["date", "reference", "time"], short: "Adrt" }
 };
 var DUPLICATE = /^(?:\d+|-)$/;
@@ -2641,7 +2668,7 @@ var after = (word, cut) => ({
 function writeTargets(name, args, gnu, posix = false) {
   if (name === "dd")
     return args.flatMap((word) => word.value.startsWith("of=") ? [after(word, 3)] : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value) ? [word] : []);
-  const into = name === "cp" || name === "install" || name === "ln";
+  const into = name === "cp" || name === "install" || name === "ln" || name === "mv";
   const takes = WRITER_TAKES[name];
   const operands = [];
   let folder;
@@ -3128,12 +3155,6 @@ async function inspect(raw, environment, unknown = false) {
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
     const { args, first, name, xargs } = parsed;
-    const findutils = GNU_NAMED.exec(name)?.[1];
-    if (first && (findutils === "find" || findutils === "xargs"))
-      return examine({
-        ...cmd,
-        words: cmd.words.map((word) => word === first ? { ...word, value: findutils } : word)
-      }, env, visit, false);
     for (const here of places(env)) {
       const into = cmd.redirects.find((r) => r.target && writer(r) && (inRoot(pathOf(r.target, here)) || GLOB.test(r.target.value) && !!names(r.target, here, true)));
       if (into?.target)
@@ -3240,7 +3261,16 @@ async function inspect(raw, environment, unknown = false) {
     const end = args.findIndex((word) => word.value === "--");
     const option = (word) => /^-./.test(word.value);
     const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(args[0]?.value === "--") : args.findIndex((word) => !option(word));
-    const values = tool === "find" ? args.flatMap((word, k) => FIND_WRITES.test(word.value) && args[k + 1] ? [args[k + 1]] : []) : [];
+    const values = tool === "mv" ? writeTargets(tool, args, gnu, posix) : tool === "rsync" ? args.flatMap((word, k) => {
+      const long = /^--([^=]+)=?/.exec(word.value);
+      const path = long && !RSYNC_FLAGS.has(long[1]) && RSYNC_PATHS.some((name) => name.startsWith(long[1]));
+      const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length;
+      if (!cut)
+        return [];
+      if (cut < word.value.length)
+        return [after(word, cut)];
+      return args[k + 1] ? [args[k + 1]] : [];
+    }) : [];
     const operands = remover ? [
       ...args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)),
       ...values
