@@ -89,6 +89,23 @@ export const menuResult = (check: string, inBar: boolean): Result =>
     ? { check, detail: "Menu sits in the bar", ok: true }
     : { check, detail: "no Menu square in the bar", ok: false }
 
+// How far the aside has scrolled and how far the hidden bar's handle sits above the aside's bottom edge (null with no handle drawn).
+export type DriftMeasure = { handleGap: number | null; scrollTop: number } | null
+
+// Pure: a call that scrolls every ancestor of what it reaches (a row jump to a card low in the list, a focus on a hidden square) leaves the aside where it is drawn, since a scrolled aside carried the bar and its handle up its pane until a remount.
+export const driftResult = (check: string, measure: DriftMeasure): Result => {
+  if (!measure) return { check, detail: "no tab bar beside the chat", ok: false }
+  const gap = Math.round(measure.handleGap ?? 0)
+  const scrolled = Math.round(measure.scrollTop)
+  return scrolled > SLACK || gap > SLACK
+    ? {
+        check,
+        detail: `the aside scrolled ${scrolled}px, leaving the bar's handle ${gap}px above its bottom edge`,
+        ok: false,
+      }
+    : { check, detail: "the aside stays put, the bar's handle on its bottom edge", ok: true }
+}
+
 const LIST = `document.querySelector('[role="tab"][aria-label^="Pages"]')?.closest('[role="tablist"]')`
 
 const BAR = `(() => { const list = ${LIST}; if (!list) return null; const tabs = [...list.querySelectorAll('[role="tab"]')]; const panel = list.closest('[data-slot="tabs"]').querySelector('[data-slot="tabs-content"]'); const box = list.getBoundingClientRect(); return { bar: { bottom: box.bottom, left: box.left, right: box.right, top: box.top }, firstInOrder: Boolean(panel && list.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING), names: tabs.map((tab) => tab.getAttribute("aria-label") ?? ""), reachable: tabs.some((tab) => tab.tabIndex >= 0) } })()`
@@ -107,6 +124,26 @@ const box = (selector: string) =>
 
 // the aside's bottom edge, which clips the panes and the hidden bar under it
 const EDGE = `${LIST}?.closest('[data-slot="tabs"]')?.getBoundingClientRect().bottom ?? null`
+
+const ROOT = `${LIST}?.closest('[data-slot="tabs"]')`
+
+const DRIFT = `(() => { const tabs = ${ROOT}; if (!tabs) return null; const handle = tabs.querySelector('button[aria-label="Show tabs"]'); return { handleGap: handle ? tabs.getBoundingClientRect().bottom - handle.getBoundingClientRect().bottom : null, scrollTop: tabs.scrollTop } })()`
+
+// Each call that scrolls the aside's ancestors: a sidebar row's or an answer chip's jump to a card (targetNeedsYou in lib/needs-you.ts), whose centring scrolls past the pane's end for a card low in the list, and a focus on a square while the bar hides, left before the bar shows.
+const TRIGGERS = (card: string | null) => [
+  ...(card
+    ? [
+        {
+          call: `window.dispatchEvent(new CustomEvent("needs-you:target", { detail: "needs-you-${card}" }))`,
+          name: "row jump",
+        },
+      ]
+    : []),
+  {
+    call: `${LIST}?.querySelector('[role="tab"]')?.focus(); document.activeElement?.blur()`,
+    name: "hidden square",
+  },
+]
 
 const MENU_IN_BAR = `Boolean(${LIST}?.querySelector('[data-sidebar="trigger"][aria-label="Menu"]'))`
 const COMPOSER = `document.getElementById("composer")?.closest("form")`
@@ -153,6 +190,29 @@ export const asideBar = async (
     results.push(
       topResult(`${at} ${name.split(" · ")[0]} on top`, await browser.eval<boolean | null>(ON_TOP)),
     )
+  }
+  return results
+}
+
+// On /dashboard at a wide screen, with the bar hidden, each call that scrolls the aside's ancestors leaves the aside unscrolled and the bar's handle on its bottom edge; the row jump needs a card low in the Inbox, the oldest of those posted for the check, and is skipped without it.
+export const asideDrift = async (
+  browser: Browser,
+  { web }: Target,
+  viewport: Viewport,
+  card: string | null,
+): Promise<Result[]> => {
+  const at = `aside-bar ${viewport.width}`
+  await browser.viewport(viewport)
+  await browser.visit(`${web}/dashboard`)
+  await browser.run("wait", card ? `#needs-you-${card}` : `[role="tab"][aria-label^="Pages"]`)
+  await browser.run("wait", String(SETTLE_MS))
+  const results: Result[] = []
+  for (const { call, name } of TRIGGERS(card)) {
+    await browser.eval(
+      `(() => { const tabs = ${ROOT}; if (tabs) tabs.scrollTop = 0; ${call}; return null })()`,
+    )
+    await browser.run("wait", String(SETTLE_MS))
+    results.push(driftResult(`${at} ${name}`, await browser.eval<DriftMeasure>(DRIFT)))
   }
   return results
 }

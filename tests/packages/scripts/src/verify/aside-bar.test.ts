@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   clearResult,
+  driftResult,
   menuResult,
   paneResult,
   reachResult,
@@ -159,5 +160,35 @@ describe("the on-top probe", () => {
     const show = source.indexOf("await browser.eval(SHOW)")
     expect(show).toBeGreaterThan(0)
     expect(source.indexOf("await browser.eval<boolean | null>(ON_TOP)")).toBeGreaterThan(show)
+  })
+})
+
+describe("driftResult", () => {
+  test("passes when the aside stays unscrolled and the handle sits on its bottom edge", () => {
+    const result = driftResult("aside-bar 1440 row jump", { handleGap: 0, scrollTop: 0 })
+    expect(result.ok).toBe(true)
+    expect(result.detail).toBe("the aside stays put, the bar's handle on its bottom edge")
+  })
+
+  test("fails when a row jump scrolls the aside and carries the handle up its pane", () => {
+    const result = driftResult("aside-bar 1440 row jump", { handleGap: 42, scrollTop: 42 })
+    expect(result.ok).toBe(false)
+    expect(result.detail).toBe(
+      "the aside scrolled 42px, leaving the bar's handle 42px above its bottom edge",
+    )
+  })
+
+  test("fails on a scroll alone, with no handle drawn", () => {
+    expect(driftResult("aside-bar 1440 hidden square", { handleGap: null, scrollTop: 42 }).ok).toBe(
+      false,
+    )
+  })
+
+  test("fails with no tab bar", () => {
+    expect(driftResult("aside-bar 1440 reply box", null)).toEqual({
+      check: "aside-bar 1440 reply box",
+      detail: "no tab bar beside the chat",
+      ok: false,
+    })
   })
 })
