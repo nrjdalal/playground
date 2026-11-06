@@ -8,6 +8,7 @@ import {
   type Command,
   type Env,
   examine,
+  feedsStdin,
   knownVariables,
   lex,
   marked,
@@ -20,6 +21,7 @@ import {
   run,
   slotWords,
   stdinOf,
+  stdinShell,
   UNKNOWN,
   unreadable,
   visible,
@@ -257,6 +259,14 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const { args, name } = parsed
       const verdict = await judge(cmd, parsed, at, reach)
       if (verdict) return verdict
+      // a root shell's here-string, heredoc, input file or process substitution is its script, which run() leaves to each hook; one the hook cannot read runs, as any other input does
+      if (cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root") {
+        const script = await stdinOf(cmd, at)
+        const found = script.unknown
+          ? undefined
+          : await line(script.value.replaceAll(UNKNOWN, "\n"), at)
+        if (found) return found
+      }
       const pkg = packageOf(name, args)
       // a judged program named among another's words runs as that program, behind any runner
       if (!READERS.has(name) && !JUDGED.has(name))
