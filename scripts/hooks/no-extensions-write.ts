@@ -975,14 +975,18 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     }
     // after a cd the hook cannot read, a remover's operand or a writer's target the hook can place only by the shell's own folder may be in the root
     const end = args.findIndex((word) => word.value === "--")
+    // a dash with more after it is an option, while a lone dash is an operand
+    const option = (word: Word) => /^-./.test(word.value)
+    // macOS unlink reads no option but a leading --
     const stop =
-      GETOPT_REMOVERS.has(tool) && (!gnu || posix)
-        ? args.findIndex((word) => !word.value.startsWith("-"))
-        : -1
+      !GETOPT_REMOVERS.has(tool) || (gnu && !posix)
+        ? -1
+        : tool === "unlink" && !gnu
+          ? Number(args[0]?.value === "--")
+          : args.findIndex((word) => !option(word))
     const operands = remover
       ? args.filter(
-          (word, k) =>
-            (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !word.value.startsWith("-"),
+          (word, k) => (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !option(word),
         )
       : WRITERS.has(tool)
         ? writeTargets(tool, args, gnu, posix)
