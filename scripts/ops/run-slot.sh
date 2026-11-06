@@ -524,7 +524,7 @@ chain_steps() {
   [ -n "$first" ] || return 0
   if [ -n "$file" ]; then plain "$file" && [ -f "$file" ] && [ -r "$file" ] || return 1; fi
   [ -n "$script$file" ] || return 1
-  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" "$CHAIN_WRAPPERS" <<'PY'
+  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" "$CHAIN_WRAPPERS" "$CHAIN_SHELLS" <<'PY'
 import os, re, shlex, sys
 
 try:
@@ -585,8 +585,11 @@ for i, step in enumerate(steps):
             step += [seps[i], later[0]]
     if step:
         print("\x1f".join(step))
-# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, or a command substitution in a chain whose script or lead words name docker, podman or a portless compose (shlex splits a backquote's inner script at ;, so a name split across its steps is read over the whole chain), names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
+# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, a step that runs a chain shell with its own -c script, or a command substitution in a chain whose script or lead words name docker, podman or a portless compose (shlex splits a backquote's inner script at ;, so a name split across its steps is read over the whole chain), names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
 wrappers = set(sys.argv[4].split())
+shells = set(sys.argv[5].split())
+# a single-dash option cluster holding c (-c, -ec, -ce) gives a shell its own script
+dash_c = lambda w: re.match(r"-[^-]*c", w) is not None
 if any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3]):
     sys.exit(1)
 for step in steps:
@@ -595,6 +598,13 @@ for step in steps:
         i += 1
     hidden = lambda w: w == "eval" or "$" in w
     if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
+        sys.exit(1)
+    # a step that runs a chain shell with its own -c script, as its program or behind a wrapper word, holds a chain this splits only one level of, so its inner steps go unread
+    program = os.path.basename(step[i]) if i < len(step) else ""
+    if program in shells and any(map(dash_c, step[i + 1 :])):
+        sys.exit(1)
+    # past a wrapper's options it fails closed: any later shell word with a -c after it
+    if program in wrappers and any(os.path.basename(w) in shells and any(map(dash_c, step[k + 1 :])) for k, w in enumerate(step[i + 1 :], i + 1)):
         sys.exit(1)
 PY
 }
