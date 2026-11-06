@@ -354,6 +354,7 @@ var ZSH_ARRAYS = new Set([
   "pipestatus",
   "psvar",
   "region_highlight",
+  "registers",
   "reply",
   "reswords",
   "saliases",

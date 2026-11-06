@@ -542,13 +542,13 @@ export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh
 const SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"])
 // A zsh line that may make an unquoted plain parameter several words: one that sets an option (setopt, unsetopt, emulate, the options array, set's -o, +o, -y or -A), makes an array (an `X=(` or `X+=(` assignment, mapfile, readarray, zparseopts) or sources a file (`source`, `.`), which may do either
 const ZSH_SPLITS =
-  /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)\s*(?:(?:builtin|command)\s+)?(?:source|\.)\s/
+  /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/
 // The builtins whose -a or -A makes an array: read and the declaring builtins
 const ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/
 // Whether a zsh line may make an unquoted plain parameter several words: it may set an option, make an array or source a file (`ZSH_SPLITS`), give read or a declaring builtin -a or -A (`ARRAY_MAKERS`), or name a parameter it expands other than by expanding it, since a builtin neither list names may fill that name as an array; each scan reads the line once, so a long line costs linear time
 export const zshSplits = (line: string): boolean => {
   if (ZSH_SPLITS.test(line)) return true
-  for (const command of line.split(/[;&|\n]/)) {
+  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
     const at = command.search(ARRAY_MAKERS)
     if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at))) return true
   }
@@ -612,6 +612,7 @@ const ZSH_ARRAYS = new Set([
   "pipestatus",
   "psvar",
   "region_highlight",
+  "registers",
   "reply",
   "reswords",
   "saliases",

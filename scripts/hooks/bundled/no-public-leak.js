@@ -7058,12 +7058,12 @@ function codeFed(commands) {
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)\s*(?:(?:builtin|command)\s+)?(?:source|\.)\s/;
+var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/;
 var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
 var zshSplits = (line) => {
   if (ZSH_SPLITS.test(line))
     return true;
-  for (const command of line.split(/[;&|\n]/)) {
+  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
     const at = command.search(ARRAY_MAKERS);
     if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at)))
       return true;
@@ -7126,6 +7126,7 @@ var ZSH_ARRAYS = new Set([
   "pipestatus",
   "psvar",
   "region_highlight",
+  "registers",
   "reply",
   "reswords",
   "saliases",
