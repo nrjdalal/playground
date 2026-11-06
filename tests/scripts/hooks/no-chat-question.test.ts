@@ -516,7 +516,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
       await stop(`${STEPS}\nSent these steps to the dispatcher as a draft. Should I start?`, {
         role: "lead",
       }),
-    ).toBe(REASON)
+    ).toBe(LEAD_REASON)
   })
 
   test("passed: a worker's steps, which go to its lead", async () => {
