@@ -12,6 +12,7 @@ import {
   KEPT,
   type Kept,
   list,
+  listGate,
   located,
   lowered,
   refusal,
@@ -22,7 +23,7 @@ import {
 import { publicListPath, reposOf } from "./kinds"
 import { inScope, swapTree } from "./swap"
 
-const USAGE = `Usage: bun run trace-count [--write | --report | --swap]
+const USAGE = `Usage: bun run trace-count [--write | --report | --swap | --lists]
 
 Counts each kind of private trace over the tree and fails when any count is over
 packages/scripts/src/trace-count/counts.json, less each hit kept.json keeps on purpose.
@@ -30,6 +31,8 @@ packages/scripts/src/trace-count/counts.json, less each hit kept.json keeps on p
 --report lists each file holding a list value, with its hits per kind and "swap" on the
 files the swap pass covers, and changes nothing. --swap gives each list value in those
 files (tests, the API's fixtures, the replay fixtures) a made-up stand-in.
+--lists counts the list kinds alone, as each commit's step does: with no list on this
+machine it counts nothing, and it reads no settings, so it never exits 2.
 Exits 2 when no-public-leak's list is missing or a key of it is empty, or when
 factory.archiveRepo or owner.names is unset, since their kinds would count nothing.`
 
@@ -38,6 +41,7 @@ const NOT_COUNTED = `trace-count: nothing was counted; bun run test:file tests/p
 const { values } = parseArgs({
   options: {
     help: { short: "h", type: "boolean" },
+    lists: { type: "boolean" },
     report: { type: "boolean" },
     swap: { type: "boolean" },
     write: { type: "boolean" },
@@ -49,6 +53,11 @@ if (values.help) {
 }
 
 const root = join(import.meta.dir, "..", "..", "..", "..")
+if (values.lists) {
+  const refused = await listGate(root, publicListPath())
+  if (refused) console.error(refused)
+  process.exit(refused ? 1 : 0)
+}
 const policy = await readPolicy(dataDir())
 if (policy.refusal !== undefined) {
   console.error(`trace-count: ${policy.refusal}`)
