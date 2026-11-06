@@ -13,7 +13,18 @@ import {
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
-import { extensionsDir, itemKeySchema, KINDS, SCOPE_NAME, slackSettings } from "@packages/settings"
+import {
+  checkSetting,
+  extensionsDir,
+  extScopeSchema,
+  GUARD_SETTING_KEYS,
+  itemKeySchema,
+  KINDS,
+  resetSetting,
+  SCOPE_NAME,
+  setSetting,
+  slackSettings,
+} from "@packages/settings"
 import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 
@@ -21,7 +32,7 @@ import { fileNameOf } from "../download"
 import { KEYCHAIN_ITEM_NAMES, keychainSpec, PLAYGROUND_SERVICE } from "../keychain-items"
 import { ID_PATTERN } from "./attachments"
 
-// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, an apps change's or a grant's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
+// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, an apps change's, a grant's or a guard setting's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
 
 const LIMITS = { line: 200, name: 120, prs: 50, text: 4000 }
 
@@ -297,6 +308,23 @@ export const appsChange = (list: string[], preview: InboxApps): { list: string[]
 // The owner's own apps list and the CLI that writes it: the login's scope, its list as accepted (empty when it has none, null when it is not a list of names), and `playground ext`. store/extensions.ts's ownerApps is the real one.
 export type OwnerApps = { login: string; read: () => string[] | null; run: ExtRun }
 
+// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS), the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes, or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
+const guardSchema = z
+  .strictObject({
+    key: z.enum(GUARD_SETTING_KEYS),
+    scope: extScopeSchema,
+    type: z.literal("guard"),
+    value: z.unknown().optional(),
+    why: words,
+  })
+  .superRefine((preview, ctx) => {
+    if (preview.value === undefined) return
+    const checked = checkSetting(preview.key, preview.value)
+    if (!checked.ok) ctx.addIssue({ code: "custom", message: checked.message, path: ["value"] })
+  })
+
+export type InboxGuard = z.infer<typeof guardSchema>
+
 // Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 
@@ -377,6 +405,7 @@ export const previewSchema = z.discriminatedUnion("type", [
   acceptSchema,
   appsSchema,
   grantSchema,
+  guardSchema,
 ])
 
 const link = z
@@ -502,7 +531,7 @@ export type InboxAction = (typeof ACTIONS)[number]
 // What an answer holds: every action but Archive and Move back, which answer nothing, and Dismiss, which a waiting item records as clear.
 export type InboxChoice = Exclude<InboxAction, "archive" | "dismiss" | "unarchive">
 
-// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, listed and opened: what the dashboard ran on an accept's, an apps change's and a grant's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
+// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, listed, opened and set: what the dashboard ran on an accept's, an apps change's, a grant's and a guard setting's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
 export type InboxAnswer = {
   accepted?: RunResult
   ackedAt?: string
@@ -518,6 +547,7 @@ export type InboxAnswer = {
   note?: string
   opened?: RunResult
   option?: number
+  set?: RunResult
   uploaded?: number
 }
 
@@ -768,6 +798,7 @@ function answerOf(
     if (
       (item.preview.type === "apps" ||
         item.preview.type === "grant" ||
+        item.preview.type === "guard" ||
         item.preview.type === "reveal") &&
       action === "edit"
     ) {
@@ -846,12 +877,14 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
     case "approve":
     case "edit":
       // a step the dashboard ran on Approve leaves only its close, and a grant's recheck once its pane opened (asks.md)
-      if (answer.accepted || answer.listed || answer.opened) {
+      if (answer.accepted || answer.listed || answer.opened || answer.set) {
         const ran = answer.accepted
           ? { accepted: answer.accepted }
           : answer.listed
             ? { listed: answer.listed }
-            : { opened: answer.opened! }
+            : answer.set
+              ? { set: answer.set }
+              : { opened: answer.opened! }
         return {
           ...head,
           ...comment,
@@ -1347,6 +1380,7 @@ export async function answerItem(
     grant,
     now = new Date(),
     reveal,
+    settings,
     upload,
     wait,
   }: {
@@ -1358,6 +1392,7 @@ export async function answerItem(
     grant?: ArgvRun
     now?: Date
     reveal?: KeychainRead
+    settings?: string
   } & Pick<Sending, "upload" | "wait">,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
@@ -1366,6 +1401,19 @@ export async function answerItem(
     return {
       code: "CONFLICT",
       message: "This item changed since you read it; read it again",
+      ok: false,
+    }
+  }
+  // a guard setting is written as the card he read shows it, so its Approve names that reading
+  if (
+    input.action === "approve" &&
+    input.seen === undefined &&
+    current.kind === "decision" &&
+    current.preview.type === "guard"
+  ) {
+    return {
+      code: "VALIDATION_ERROR",
+      message: "A guard setting is approved from the card that shows it, with seen",
       ok: false,
     }
   }
@@ -1387,10 +1435,16 @@ export async function answerItem(
     input.action === "dismiss"
       ? { ...checked.answer, at, dismissed: true, dismissedAt: at }
       : { ...checked.answer, at }
-  // an accept's, an apps change's or a grant's Approve runs its step, so one with nothing to run it is refused before it is recorded
+  // an accept's, an apps change's, a grant's or a guard setting's Approve runs its step, so one with nothing to run it is refused before it is recorded
   const step =
     current.kind === "decision" && answer.choice === "approve"
-      ? stepOf(current.preview, current.ref, { accept, apps, grant })
+      ? stepOf(current.preview, current.ref, {
+          accept,
+          actor: "id" in actor ? actor.id : actor.label,
+          apps,
+          grant,
+          settings,
+        })
       : undefined
   if (step && "refusal" in step)
     return { code: "VALIDATION_ERROR", message: step.refusal, ok: false }
@@ -1495,13 +1549,19 @@ async function archive(
   return row ? { item: toItem(row), ok: true } : CHANGED
 }
 
-// The step an Approve runs, by the decision's kind, and the answer key its result is kept under: an accept's `ext accept`, an apps change's write of the owner's list, a grant's System Settings pane; undefined for a decision whose poster carries it out, and a refusal when this dashboard has nothing to run it with.
+// The step an Approve runs, by the decision's kind, and the answer key its result is kept under: an accept's `ext accept`, an apps change's write of the owner's list, a grant's System Settings pane, a guard setting's write at its scope; undefined for a decision whose poster carries it out, and a refusal when this dashboard has nothing to run it with.
 function stepOf(
   preview: InboxPreview,
   ref: number,
-  { accept, apps, grant }: { accept?: ExtRun; apps?: OwnerApps; grant?: ArgvRun },
+  {
+    accept,
+    actor,
+    apps,
+    grant,
+    settings,
+  }: { accept?: ExtRun; actor: string; apps?: OwnerApps; grant?: ArgvRun; settings?: string },
 ):
-  | { key: "accepted" | "listed" | "opened"; run: () => Promise<RunResult> }
+  | { key: "accepted" | "listed" | "opened" | "set"; run: () => Promise<RunResult> }
   | { refusal: string }
   | undefined {
   if (preview.type === "accept") {
@@ -1548,7 +1608,32 @@ function stepOf(
       },
     }
   }
+  if (preview.type === "guard") {
+    if (!settings) return { refusal: "This dashboard cannot write a guard setting" }
+    return { key: "set", run: async () => guardWrite(settings, preview, ref, actor) }
+  }
   return undefined
+}
+
+// Writes a guard decision's setting into the data folder's extensions as the owner's act, the item named in its commit: its value at its scope, or no value there, which takes the key back to its default.
+function guardWrite(data: string, preview: InboxGuard, ref: number, actor: string): RunResult {
+  const who = {
+    actor,
+    author: "owner",
+    inboxRef: ref,
+    reason: `the owner approved it in the Inbox (${itemTag(ref)})`,
+  }
+  const { key, scope, value } = preview
+  if (value === undefined) {
+    const reset = resetSetting(data, { key, scope }, who)
+    return reset.ok
+      ? { exitCode: 0, line: `took ${key} at ${scope} back to its default` }
+      : { exitCode: 1, line: reset.message }
+  }
+  const set = setSetting(data, { key, scope, value }, who)
+  return set.ok
+    ? { exitCode: 0, line: `set ${key} at ${scope} to ${JSON.stringify(set.value)}` }
+    : { exitCode: 1, line: set.message }
 }
 
 // Move back: an archived item returns to the list as it was; a set-aside one (the old `clear`, or a Dismiss while it waited) goes back to open with no answer, so it can be answered again. Nothing is typed into its poster, since nothing was decided.

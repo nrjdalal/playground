@@ -216,8 +216,8 @@ export const canDraft = (item: InboxItem): boolean =>
 const chosen = (item: InboxItem) =>
   item.kind !== "update" && item.answer && "choice" in item.answer ? item.answer : null
 
-// What the dashboard's own run on an accept's, an apps change's or a grant's Approve gave, read off any answer, none for the rest.
-type Steps = Pick<InboxAnswer, "accepted" | "listed" | "opened">
+// What the dashboard's own run on an accept's, an apps change's, a grant's or a guard setting's Approve gave, read off any answer, none for the rest.
+type Steps = Pick<InboxAnswer, "accepted" | "listed" | "opened" | "set">
 const stepsOf = (answer: object | null): Steps => (answer ?? {}) as Steps
 
 // Pure: whether a card a reply collapsed opens again to its full self, its answers and Schedule back: an open decision or draft whose answer is that reply, its poster not done with it, which an answer or a Schedule from the card replaces.
@@ -554,6 +554,7 @@ export function kindWord(item: InboxItem): string {
     budget: "Budget",
     delete: "Delete",
     grant: "Permission",
+    guard: "Guard setting",
     reveal: "Show a secret",
     schema: "Schema",
     secret: "Secret",
@@ -604,9 +605,9 @@ export function itemState(item: InboxItem): ItemState {
   }
   if (sendFailed(item)) return "failed"
   if (needsYou(item)) return "open"
-  // an accept or an apps change the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out; a grant that opened nothing failed, and one that opened its pane waits on its poster's recheck
-  const { accepted, listed, opened } = stepsOf(provided)
-  const ran = accepted ?? listed
+  // an accept, an apps change or a guard setting the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out; a grant that opened nothing failed, and one that opened its pane waits on its poster's recheck
+  const { accepted, listed, opened, set } = stepsOf(provided)
+  const ran = accepted ?? listed ?? set
   if (ran) return ran.exitCode === 0 ? "done" : "failed"
   if (opened && opened.exitCode !== 0) return "failed"
   // a reply is being carried out by its poster until it is closed, then done
@@ -724,9 +725,9 @@ export function outcomeLine(item: InboxItem): string | null {
   return item.answer.noLink ? `${done} · No link: ${item.answer.noLink}` : done
 }
 
-// Pure: the result line of a step the dashboard ran on Approve that leaves its poster nothing to do: an accept's, an apps change's, or a grant that opened nothing; null for any other answer.
+// Pure: the result line of a step the dashboard ran on Approve that leaves its poster nothing to do: an accept's, an apps change's, a guard setting's, or a grant that opened nothing; null for any other answer.
 const stepLine = (answer: Steps): string | null => {
-  const { accepted, listed, opened } = answer
+  const { accepted, listed, opened, set } = answer
   if (accepted)
     return accepted.exitCode === 0
       ? `Accepted: ${accepted.line}`
@@ -735,6 +736,10 @@ const stepLine = (answer: Steps): string | null => {
     return listed.exitCode === 0
       ? `Your apps: ${listed.line}`
       : `Apps change failed (exit ${listed.exitCode}): ${listed.line}`
+  if (set)
+    return set.exitCode === 0
+      ? `Guard setting: ${set.line}`
+      : `Guard setting failed (exit ${set.exitCode}): ${set.line}`
   if (opened && opened.exitCode !== 0)
     return `Opening System Settings failed (exit ${opened.exitCode}): ${opened.line}`
   return null
