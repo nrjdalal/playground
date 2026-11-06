@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import {
   answerKeys,
+  FIXTURE_SOCKET,
   HerdrDown,
   herdrEvents,
   herdrProblem,
@@ -252,9 +253,20 @@ describe("readServer and herdrRecords", () => {
       "session.snapshot": () => ({ ...SNAPSHOT, snapshot: { ...SNAPSHOT.snapshot, panes } }),
     })
     const start = performance.now()
-    expect(await readHerdr([{ name: "hung", socket: s.path }], 300)).toEqual([])
+    expect(await readHerdr([{ name: "hung", socket: s.path }], 300)).toEqual([
+      { panes: [], partial: true, server: "hung", workspaces: [] },
+    ])
     expect(performance.now() - start).toBeLessThan(1500)
     expect(herdrProblem()).toContain("hung")
+  })
+
+  test("a pane whose processes did not answer marks its server's read partial, so a session missing from it is not taken for ended (PG-880)", async () => {
+    const s = stub({ "pane.process_info": () => ({ error: { code: "busy", message: "busy" } }) })
+    const [read] = await readHerdr([{ name: "slow", socket: s.path }], 1000)
+    expect(read?.partial).toBe(true)
+    expect(read?.panes.length).toBeGreaterThan(0)
+    const whole = await readHerdr([{ name: "whole", socket: stub().path }], 1000)
+    expect(whole[0]?.partial).toBeUndefined()
   })
 
   test("a pane holds a session when a foreground process has a registry file naming it, and is keyed by server and pane", async () => {
@@ -318,9 +330,21 @@ describe("readServer and herdrRecords", () => {
     ])
     herdrRecords([at("kept-a", "idle")], registry, "2026-10-18T10:00:00.000Z")
     herdrRecords([at("kept-a", "blocked")], registry, "2026-10-18T10:00:05.000Z")
-    // a cmux session's listSpace() reads no herdr server, and a failed server's read is left out
+    // a board whose every server failed reads none, and a failed server's read is left out
     herdrRecords([], registry, "2026-10-18T10:00:06.000Z")
     herdrRecords([at("kept-b", "idle")], registry, "2026-10-18T10:00:06.500Z")
+    // a server read cut short, whole or by a pane, keeps the times of the sessions it did not see (PG-880)
+    herdrRecords(
+      [{ panes: [], partial: true, server: "kept-a", workspaces: [] }],
+      registry,
+      "2026-10-18T10:00:06.700Z",
+    )
+    const cut = at("kept-a", "blocked")
+    herdrRecords(
+      [{ ...cut, panes: cut.panes.map((p) => ({ ...p, processes: [] })), partial: true }],
+      registry,
+      "2026-10-18T10:00:06.800Z",
+    )
     expect(
       herdrRecords([at("kept-a", "blocked")], registry, "2026-10-18T10:00:07.000Z")[0],
     ).toMatchObject({
@@ -759,15 +783,14 @@ describe("herdrServers and readScreen", () => {
     ])
   })
 
-  test("a stack reading a fixture names no server and connects to none, though one listens where the settings point", async () => {
+  test("a stack reading a fixture names the fixture's own server alone and connects to no socket, though one listens where the settings point", async () => {
     const s = stub()
     const env = { PLAYGROUND_HERDR_DIR: s.dir, PLAYGROUND_HERDR_SESSIONS: "s" }
     expect(herdrServers(env)).toEqual([{ name: "s", socket: s.path }])
     const live = process.env.PLAYGROUND_LIVE_READS
     delete process.env.PLAYGROUND_LIVE_READS
     try {
-      expect(herdrServers(env)).toEqual([])
-      expect(await readHerdr(herdrServers(env))).toEqual([])
+      expect(herdrServers(env)).toEqual([{ name: "playground", socket: FIXTURE_SOCKET }])
       const events = herdrEvents(herdrServers(env), 20)
       await Bun.sleep(100)
       events.kill()
@@ -988,7 +1011,7 @@ describe.skipIf(!existsSync(HERDR))("herdr's schema", () => {
   })
 })
 
-// Every herdr call in the dashboard goes through herdr.ts, as every cmux call goes through cmux.ts, and only deliver.ts sends a message.
+// Every herdr call in the dashboard goes through herdr.ts, and only deliver.ts sends a message.
 const API = join(import.meta.dir, "../../../../../../api/hono/src")
 const sources = () =>
   [...new Bun.Glob("**/*.ts").scanSync({ cwd: API })].map((file) => ({
@@ -1034,5 +1057,192 @@ describe("herdr's boundary", () => {
     ]) {
       expect([form, reaches.test(form)]).toEqual([form, true])
     }
+  })
+})
+
+const ROOT = join(import.meta.dir, "../../../../../..")
+const SOURCE = /\.(?:[cm]?[jt]sx?)$/
+// deadCodeElimination stays off: with it on, the transpiler inlines NODE_ENV and drops the branch that cannot run, so a dev-only import would vanish under CI's NODE_ENV=production
+const transpilers = {
+  js: new Bun.Transpiler({ deadCodeElimination: false, loader: "js" }),
+  jsx: new Bun.Transpiler({ deadCodeElimination: false, loader: "jsx" }),
+  ts: new Bun.Transpiler({ deadCodeElimination: false, loader: "ts" }),
+  tsx: new Bun.Transpiler({ deadCodeElimination: false, loader: "tsx" }),
+}
+
+// Code with its comments and types gone and its strings and imports kept, so a comment that names a writer crosses nothing.
+const codeOf = (path: string, source: string): string => {
+  const ext = path.split(".").at(-1) ?? "ts"
+  const loader = ext.includes("x")
+    ? ext.includes("t")
+      ? "tsx"
+      : "jsx"
+    : ext.includes("t")
+      ? "ts"
+      : "js"
+  try {
+    return transpilers[loader].transformSync(source)
+  } catch {
+    return source
+  }
+}
+
+// Every file git tracks or would track, read through `keep`, which takes a path and says whether to read it.
+const repoFiles = async (keep: (path: string) => boolean): Promise<Record<string, string>> => {
+  const listed = Bun.spawnSync(["git", "ls-files", "--cached", "--others", "--exclude-standard"], {
+    cwd: ROOT,
+    stdin: "ignore",
+  })
+  expect(listed.exitCode).toBe(0)
+  const files: Record<string, string> = {}
+  for (const path of listed.stdout.toString().split("\n")) {
+    if (!path || !keep(path)) continue
+    const file = Bun.file(join(ROOT, path))
+    if (await file.exists()) files[path] = await file.text()
+  }
+  return files
+}
+
+// Text typed into a pane lands as a user turn and reads as the owner's, and nothing may speak for the owner, so only herdr.ts's writes type, for the owner's own clicks; sessions talk through SendMessage. A cmux command that types is held here while cmux can still be installed, and a script's key into a herdr pane further below, to run.py's Escape and `playground picker`.
+const PANE_TYPING = [
+  /(?:^|[^\w-])[$"'{]*[\w./~-]*cmux\b[}"']?(?:\s+--?[\w-]+(?:=\S+)?)*\s+send(?:-key)?\s+(?!(?:or|and)\b)[^\s`]/i,
+  /["']cmux["']\s*,\s*["']send(?:-key)?["']/i,
+  /\bsend-key\s+--?\w/i,
+]
+// Each text file with a line that types into a pane through cmux.
+const paneTypers = (files: Record<string, string>): string[] =>
+  Object.entries(files)
+    .filter(([, text]) =>
+      text.split("\n").some((line) => PANE_TYPING.some((typing) => typing.test(line))),
+    )
+    .map(([path]) => path)
+
+describe("typing into a pane", () => {
+  test("no text in the repo types into a pane through cmux", async () => {
+    const files = await repoFiles((path) => !path.startsWith("tests/"))
+    const texts = Object.fromEntries(
+      Object.entries(files).filter(([, text]) => text.length <= 2_000_000 && !text.includes("\0")),
+    )
+    expect(paneTypers(texts)).toEqual([])
+  })
+
+  test("a command, a script's argv or a key, Escape included, types; prose about the rule does not", () => {
+    const typing = {
+      "argv.py": 'subprocess.run(["cmux", "send", "--surface", s, text])',
+      "doc.md": 'cmux send --workspace workspace:N --surface surface:N "/rename x"',
+      "flagged.sh": 'cmux --json send --surface "$S" "hi"',
+      "key.sh": 'cmux send-key --surface "$S" Enter',
+      "quoted.sh": 'cmux send "hello"',
+      "variable.sh": '"$CMUX" send-key --surface "$S" Enter',
+      "variabletext.sh": '"$CMUX" send --surface "$S" "hi"',
+      "escape.md": "cmux send-key --workspace workspace:N --surface surface:N escape",
+      "escape.py":
+        'args = ["cmux", "send-key", "--force", "--workspace", s["workspace_id"], "--surface", s["surface_id"], "escape"]',
+    }
+    const clear = {
+      "prose.md": "nothing types into a pane: no `cmux send` or `send-key`, and no deliver()",
+      "words.md": "cmux sends its Feed as JSON, and cmux send or send-key would type",
+    }
+    expect(paneTypers({ ...typing, ...clear }).sort()).toEqual(Object.keys(typing).sort())
+  })
+})
+
+// herdr's pane writes, the one way the dashboard types into a pane: herdr.ts alone names them, and of those that type, prompt() and pressEnter() reach only deliver.ts (the owner's composer, the Linear app's row actions and the owner's inbox answers) and typeKeys() only feed.ts, whose answerHerdr() serves the herdr answer route, POST /api/v1/workers/:sessionId/feed/:requestId, the owner's own Submit on a prompt's card, since an answer from the card is the owner's own Submit.
+const HERDR_TS = "api/hono/src/lib/dashboard/herdr.ts"
+const HERDR_WRITES =
+  /["'`](?:agent\.(?:prompt|send_keys)|pane\.(?:send_input|send_keys|send_text))["'`]/
+const HERDR_TYPERS: Record<string, string[]> = {
+  pressEnter: ["api/hono/src/lib/dashboard/deliver.ts"],
+  prompt: ["api/hono/src/lib/dashboard/deliver.ts"],
+  typeKeys: ["api/hono/src/lib/dashboard/feed.ts"],
+}
+
+// Each source file, other than herdr.ts, that imports or re-exports `name` from a module ending in /herdr, or takes that module whole (a star or a dynamic import).
+const HERDR_MODULE = String.raw`["'][^"']*\/herdr(?:\.[cm]?[jt]sx?)?["']`
+const herdrTypers = (files: Record<string, string>, name: string): string[] =>
+  Object.entries(files)
+    .filter(([path, source]) => {
+      if (path === HERDR_TS) return false
+      const code = codeOf(path, source)
+      const whole = new RegExp(
+        String.raw`\*\s*(?:as\s+[\w$]+\s*)?from\s*${HERDR_MODULE}|\bimport\s*\(\s*${HERDR_MODULE}\s*\)`,
+      )
+      const lists = code.matchAll(
+        new RegExp(
+          String.raw`(?:import|export)\s*(?:type\s*)?\{([^}]*)\}\s*from\s*${HERDR_MODULE}`,
+          "g",
+        ),
+      )
+      const named = [...lists].some((list) =>
+        (list[1] ?? "").split(",").some(
+          (part) =>
+            part
+              .trim()
+              .replace(/^type\s+/, "")
+              .split(/\s+as\s+/)[0] === name,
+        ),
+      )
+      return named || whole.test(code)
+    })
+    .map(([path]) => path)
+
+describe("herdr's pane writes", () => {
+  const sourceFiles = () =>
+    repoFiles((path) => SOURCE.test(path) && !path.startsWith("tests/") && !path.endsWith(".d.ts"))
+
+  test("no source but herdr.ts names a herdr method that types into a pane", async () => {
+    const files = await sourceFiles()
+    expect(HERDR_WRITES.test(files[HERDR_TS] ?? "")).toBe(true)
+    expect(
+      Object.entries(files)
+        .filter(([path, text]) => path !== HERDR_TS && HERDR_WRITES.test(text))
+        .map(([path]) => path),
+    ).toEqual([])
+  })
+
+  test("prompt() and pressEnter() reach only deliver.ts, and typeKeys() only feed.ts's herdr answer route", async () => {
+    const files = await sourceFiles()
+    for (const [name, allowed] of Object.entries(HERDR_TYPERS)) {
+      expect([name, herdrTypers(files, name)]).toEqual([name, allowed])
+    }
+  })
+
+  test("a named, renamed, dynamic or star import counts; a sibling read does not", () => {
+    const typing = {
+      "dynamic.ts": 'const h = await import("@/lib/dashboard/herdr")\nawait h.typeKeys(s, k)',
+      "named.ts": 'import { typeKeys } from "@/lib/dashboard/herdr"\nawait typeKeys(s, k)',
+      "renamed.ts": 'import { typeKeys as press } from "./herdr"\nawait press(s, k)',
+      "star.ts": 'import * as h from "../dashboard/herdr"\nh.herdrServers()',
+    }
+    const clear = {
+      "reads.ts": 'import { readScreen } from "@/lib/dashboard/herdr"\nawait readScreen(s, 40)',
+      [HERDR_TS]: "export async function typeKeys() {}",
+    }
+    expect(herdrTypers({ ...typing, ...clear }, "typeKeys").sort()).toEqual(
+      Object.keys(typing).sort(),
+    )
+  })
+})
+
+// a script's key into a herdr pane (herdr's CLI `send-keys`) or a Feed reply (`feed.<kind>.reply`) comes only from run.py's Escape on the usage-limit dialog and `playground picker`, a manager's answer to its session's permission prompt, since the managers handle those.
+describe("a script's key into a pane or answer to a prompt", () => {
+  test("comes from run.py's Escape and playground picker alone", () => {
+    const listed = Bun.spawnSync(
+      [
+        "git",
+        "grep",
+        "--untracked",
+        "-lE",
+        String.raw`["']send-keys["']|feed\.[a-z_]+\.reply`,
+        "--",
+        ":!tests",
+      ],
+      { cwd: ROOT, stdin: "ignore" },
+    )
+    const files = listed.stdout.toString().trim().split("\n").filter(Boolean)
+    expect(files.filter((path) => !path.endsWith(".md")).sort()).toEqual([
+      "packages/scripts/src/playground/picker.ts",
+      "scripts/ops/unstick/run.py",
+    ])
   })
 })

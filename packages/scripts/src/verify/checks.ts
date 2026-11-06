@@ -1,6 +1,6 @@
-import { rmSync } from "node:fs"
+import { rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { join, resolve } from "node:path"
 
 import { site } from "@packages/config/site"
 
@@ -13,6 +13,21 @@ export type Result = { check: string; detail: string; ok: boolean }
 export type Target = { api: string; web: string }
 export type Expectation = { label: string; sha: string } | { label: string; version: string }
 export type Viewport = { height: number; width: number }
+
+// The fixture's scratch folder as the launcher names it (fixtureDir in api/hono/src/lib/dashboard/fixture.ts), which a test holds this mirror to.
+export const fixtureDirOf = (
+  env: Record<string, string | undefined>,
+  root: string,
+  tmp: string = tmpdir(),
+): string => {
+  if (env.PLAYGROUND_FIXTURE_DIR) return resolve(root, env.PLAYGROUND_FIXTURE_DIR)
+  if (statSync(join(root, ".git"), { throwIfNoEntry: false })?.isFile())
+    return join(root, ".turbo", "dashboard-fixture")
+  return join(
+    tmp,
+    `playground-dashboard-fixture-${process.getuid?.() ?? 0}-${new Bun.CryptoHasher("sha256").update(root).digest("hex").slice(0, 8)}`,
+  )
+}
 
 // 1280 is the narrowest desktop the dashboard promises; 1782×972 is the ui-verify skill's default, so these screenshots pair with the ones a PR already carries.
 export const VIEWPORTS: Viewport[] = [
@@ -568,10 +583,10 @@ export const cls = async (
   return clsResult(route, load, shifts, { dispatcherLive })
 }
 
-// A chat view with no composer: a live session that is neither a dispatcher nor hosted, whose view is read-only, so its Checkpoint bar stands under the stream alone. Null when the board has none. Read from a page of the dashboard's own origin.
+// A chat view with no composer: a live session that is neither a dispatcher, the assistant nor hosted, whose view is read-only, so its Checkpoint bar stands under the stream alone. Null when the board has none. Read from a page of the dashboard's own origin.
 export const readOnlyChat = (browser: Browser, { api }: Target): Promise<string | null> =>
   browser.eval<string | null>(
-    `fetch(${JSON.stringify(`${api}/api/v1/workers`)}, { credentials: "include" }).then((response) => response.ok ? response.json() : null).then((body) => { const worker = Array.isArray(body?.data) ? body.data.find((worker) => worker.role !== "dispatcher" && !worker.hosted) : null; return worker ? "/dashboard?worker=" + encodeURIComponent(worker.sessionId) : null }).catch(() => null)`,
+    `fetch(${JSON.stringify(`${api}/api/v1/workers`)}, { credentials: "include" }).then((response) => response.ok ? response.json() : null).then((body) => { const worker = Array.isArray(body?.data) ? body.data.find((worker) => worker.role !== "dispatcher" && !worker.hosted && !worker.assistant) : null; return worker ? "/dashboard?worker=" + encodeURIComponent(worker.sessionId) : null }).catch(() => null)`,
   )
 
 // The chat's Checkpoint bar changing, each step a script so no input excuses its shift: a click turns Reading, a scroll up shows Scroll to end, its click hides it, the up arrow jumps, and a click turns Watching again.
@@ -733,6 +748,7 @@ export type SystemBody = {
   capacity?: {
     idle?: { line?: string | null; ready?: boolean }
     line?: unknown
+    orchestrators?: { line?: unknown }
     workers?: unknown
   }
   problems?: string[]
@@ -758,7 +774,7 @@ const windowWords = (label: string, window: UsageWindow, now: number): string | 
 // A sample older than this means sampling has stopped (it runs every 30s), so its room is no longer this machine's.
 export const SYSTEM_STALE_MS = 90_000
 
-// Pure: the system route's body as four lines, room, idle stacks, usage and what did not read (a probe that failed, or a timer a failed hot reload stopped, which a restart of the API mends). A body without a room line or a worker count, or one sampled over 90s ago, fails, since a lead would spawn on it; no usage passes and says so, since usage holds back no spawn.
+// Pure: the system route's body as a line each: room, the orchestrators' room when the body holds it, idle stacks, usage and what did not read (a probe that failed, or a timer a failed hot reload stopped, which a restart of the API mends). A body without a room line or a worker count, or one sampled over 90s ago, fails, since a lead would spawn on it; no usage passes and says so, since usage holds back no spawn.
 export const systemResults = (body: SystemBody, now = Date.now()): Result[] => {
   const capacity = body.capacity
   if (typeof capacity?.line !== "string" || typeof capacity.workers !== "number") {
@@ -782,6 +798,9 @@ export const systemResults = (body: SystemBody, now = Date.now()): Result[] => {
     : []
   return [
     pass("system", `${capacity.line} (sampled ${body.sampledAt})`),
+    ...(typeof capacity.orchestrators?.line === "string"
+      ? [pass("orchestrators", capacity.orchestrators.line)]
+      : []),
     pass(
       "idle",
       idle?.line ??
@@ -811,7 +830,7 @@ export const system = async ({ api, web }: Target, cookie: string): Promise<Resu
 
 export type AgentRow = { name: string; state: string; status?: string | null }
 
-// Pure: whether the agents route reads a session as ended, the roster's `ended` and no live session of its name, which is how the Dashboard reads Ended; a read with no live sessions (cmux refused) or a herdr server that did not read would show a live session as down, so either fails rather than pass on it.
+// Pure: whether the agents route reads a session as ended, the roster's `ended` and no live session of its name, which is how the Dashboard reads Ended; a read with no live sessions (the sessions read failed) or a herdr server that did not read would show a live session as down, so either fails rather than pass on it.
 export const endedResult = (
   name: string,
   agents: AgentRow[],
@@ -835,7 +854,7 @@ export const endedResult = (
   return pass("ended", `${name} is down and the roster reads ended`)
 }
 
-// A session's end, as the Dashboard reads it (Ended), so a lead in cmux can check a herdr session whose server its own herdr reads cannot reach.
+// A session's end, as the Dashboard reads it (Ended), so a lead can check a herdr session whose server its own herdr reads cannot reach.
 export const ended = async (
   { api, web }: Target,
   cookie: string,

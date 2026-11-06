@@ -1,4 +1,4 @@
-// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, cmux, brew, launchctl, Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one, and bunx is real but for pglaunch, whose stand-in starts a container published on loopback alone. claude, launched with a session name, runs the scripted session in claude.ts.
+// The stand-ins a gate box puts first on PATH, so a new user's install runs end to end with no real claude, gh, brew, launchctl, Keychain, sudo or GUI call; every call is logged to calls.log, and gh's repos are bare repos under the box's remote folder. docker is the real one, and bunx is real but for pglaunch, whose stand-in starts a container published on loopback alone. claude, launched with a session name, runs the scripted session in claude.ts.
 
 import { join } from "node:path"
 
@@ -29,7 +29,6 @@ echo "postgres://postgres:postgres@localhost:$port/postgres"
 [ "$1 $2" = "auth status" ] && { echo '{"loggedIn": true}'; exit 0; }
 HERDR_AGENT=claude exec bun "${join(import.meta.dir, "claude.ts")}" "$@"
 `,
-  cmux: `${logged(box, "cmux")}exit 1\n`,
   gh: `${logged(box, "gh")}case "$1 $2" in
   "api user") echo gate-user ;;
   "auth status") exit 0 ;;

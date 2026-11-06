@@ -334,7 +334,7 @@ describe("a resume keeps a session out of the main checkout and out of a removed
     })
     expect(r.out).toContain("restored worker-a\n")
     expect(r.out).toContain(
-      `not restored: spawn.sh refuses worker-x: ${tree} is not a folder, and its branch is pg-9-x`,
+      `not restored worker-x: ${tree} is not a folder, and its branch is pg-9-x`,
     )
     expect(r.code).toBe(1)
   })
@@ -379,7 +379,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       listed,
     )
-    expect(r.out).toBe("restored worker-a\nskipped worker-d: live\n")
+    expect(r.out).toBe(
+      "restored worker-a\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nskipped worker-d: live\n",
+    )
     expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "run")).toEqual([
       ["pane", "run", "w5:p1", `exec bash '${lw(r.home, "launch", "worker-a.sh")}'`],
@@ -390,6 +392,29 @@ describe("restore resumes the herdr sessions its resume files list", () => {
     expect(execLine(r, "worker-a")).toBe(
       `exec spawn.sh resume worker-a ${root} ${ids.a} --account acme@example.net --model claude-sonnet-5-5`,
     )
+  })
+
+  test("a session whose roster row reads done stays down, as an ended one does", async () => {
+    const r = await spawn(
+      ["restore"],
+      [{ name: "worker-d", pid: 5100 }],
+      {
+        ROSTER_JSON: JSON.stringify({
+          agents: [
+            { name: "worker-b", role: "worker", status: "ended", task: "t" },
+            { name: "worker-a", role: "worker", status: "done", task: "t" },
+          ],
+        }),
+      },
+      undefined,
+      undefined,
+      listed,
+    )
+    expect(r.out).toBe(
+      "skipped worker-a: its roster row reads done\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nskipped worker-d: live\n",
+    )
+    expect(r.code).toBe(0)
+    expect(placing(r).filter((c) => c[1] === "run")).toEqual([])
   })
 
   test("under inscope it reads the roster roster.ts writes, ~/.claude's", async () => {
@@ -406,7 +431,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       listed,
     )
     expect(r.out).toContain("restored worker-a")
-    expect(r.out).not.toContain("worker-b")
+    expect(r.out).toContain("skipped worker-b: its roster row reads ended\n")
   })
 
   test("a resume that fails is named and the run exits 1", async () => {
@@ -418,9 +443,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       listed,
     )
-    expect(r.out).toContain(
-      "not restored: spawn.sh refuses worker-a: herdr opened no session for worker-a",
-    )
+    expect(r.out).toContain("not restored worker-a: herdr opened no session for worker-a")
     expect(r.code).toBe(1)
   })
 
@@ -439,7 +462,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
         )
       },
     )
-    expect(r.out).toBe("restored worker-d\n")
+    expect(r.out).toBe(
+      "skipped worker-a: its exec line is not a resume restore runs\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nrestored worker-d\n",
+    )
   })
 
   const onProbes = (home: string) => {
@@ -459,7 +484,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       onProbes,
     )
-    expect(factory.out).toBe("restored worker-a\n")
+    expect(factory.out).toBe(
+      "restored worker-a\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\n",
+    )
     const probes = await spawn(
       ["restore"],
       [],
@@ -752,5 +779,82 @@ describe("a resume with no id finds its session by name in its folder (#1201)", 
       ranIn(join(home, ".claude"), root, "worker-x"),
     )
     expect(r.code).toBe(0)
+  })
+})
+
+// the checker reaper ends a checker whose roster worker has ended, so one resumed to serve another worker with its old row would be ended again on its next pass
+describe("a resume of a checker whose roster worker has ended", () => {
+  const SESSION = "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b"
+  const roster = (name: string, kind: string, status: string) => ({
+    NO_SESSION_TRANSCRIPT: "1",
+    ROSTER_JSON: JSON.stringify({
+      agents: [
+        { kind, name, worker: "v2pq8t-worker" },
+        { kind: "worker", name: "v2pq8t-worker", status },
+      ],
+    }),
+  })
+
+  test.each([
+    ["k3m9px-reviewer", "reviewer"],
+    ["k3m9px-tester", "tester"],
+  ])(
+    "%s refuses before any pane opens, naming the assign to a live worker, else ending its row",
+    async (name, kind) => {
+      const r = await spawn(
+        ["resume", name, root, SESSION],
+        [],
+        roster(name, kind, "ended"),
+        undefined,
+        {
+          name,
+          backend: "claude",
+        },
+      )
+      expect(r.code).toBe(1)
+      expect(r.err).toContain(
+        `spawn.sh refuses ${name}: its roster row names v2pq8t-worker as its worker, which has ended`,
+      )
+      expect(r.err).toContain(
+        `bun scripts/roster.ts assign ${name} "<title>" review worker=<live worker> pr=<url>`,
+      )
+      expect(r.err).toContain(`bun scripts/roster.ts set ${name} status=ended`)
+      expect(r.cmux).toBeUndefined()
+      expect(existsSync(lw(r.home, "resume", `${name}.sh`))).toBe(false)
+    },
+  )
+
+  test.each([
+    ["no worker= on its row", [{ kind: "reviewer", name: "k3m9px-reviewer" }]],
+    [
+      "a worker the roster has no row for",
+      [{ kind: "reviewer", name: "k3m9px-reviewer", worker: "v2pq8t-worker" }],
+    ],
+  ])("a checker with %s resumes as before", async (_, agents) => {
+    const name = "k3m9px-reviewer"
+    const env = { NO_SESSION_TRANSCRIPT: "1", ROSTER_JSON: JSON.stringify({ agents }) }
+    const r = await spawn(["resume", name, root, SESSION], [], env, undefined, {
+      name,
+      backend: "claude",
+    })
+    expect(r.err).toBe("")
+    expect(r.code).toBe(0)
+  })
+
+  test("a checker whose worker is live resumes as before", async () => {
+    const name = "k3m9px-reviewer"
+    const r = await spawn(
+      ["resume", name, root, SESSION],
+      [],
+      roster(name, "reviewer", "working"),
+      undefined,
+      {
+        name,
+        backend: "claude",
+      },
+    )
+    expect(r.err).toBe("")
+    expect(r.code).toBe(0)
+    expect(launchOf(r)).toContain(`claude --session-id ${SESSION} -n ${name} `)
   })
 })

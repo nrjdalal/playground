@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  type CleanupDeps,
+  cleanWorktree,
+  containersFor,
   type EndDeps,
   endMerged,
   sweep,
@@ -131,9 +134,12 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     ])
   })
 
-  test("a reviewer idle 30+ minutes on a scored head ends with its resume named; a tester does not", async () => {
+  test("a reviewer idle 30+ minutes on a scored head ends with its resume named and its worktrees left for that resume; a tester does not", async () => {
     const scored: PrState = { head: "abc1234567", state: "open", verdicts: ["abc1234"] }
-    const { closed, deps } = fakes()
+    const cleaned: string[] = []
+    const { closed, deps } = fakes({
+      cleanup: async (target) => (cleaned.push(target.name), [`removed /wt/${target.name}`]),
+    })
     const lines = await sweep(
       input({
         prState: async () => scored,
@@ -151,6 +157,7 @@ describe("sweep: ops-tick ends what the detector flags", () => {
       deps,
     )
     expect(closed).toEqual(["k8wjf3-reviewer"])
+    expect(cleaned).toEqual([])
     const text =
       "Ended k8wjf3-reviewer: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume k8wjf3-reviewer <dir>"
     expect(lines).toEqual([
@@ -432,6 +439,65 @@ describe("endMerged: right after a merge", () => {
   })
 })
 
+// 3 Nov, 05:35Z: a reviewer whose row named #689 was ended when #689 merged, while it still held #683, #693 and #106.
+describe("a checker's prs list (#706)", () => {
+  const A = "https://github.com/o/r/pull/2120"
+  const B = "https://github.com/o/r/pull/2121"
+  const C = "https://github.com/o/r/pull/2122"
+  const OPEN: PrState = { head: "bbb2222", ref: "pg-2100-y", state: "open", verdicts: [] }
+  const world = (prs?: string[]) =>
+    input({
+      prState: async (url) => (url === URL ? MERGED : [A, B, C].includes(url) ? OPEN : null),
+      roster: {
+        "x7rv2k-reviewer": {
+          kind: "reviewer",
+          name: "x7rv2k-reviewer",
+          pr: URL,
+          ...(prs ? { prs } : {}),
+          worker: "x7rv2k-worker",
+        },
+      },
+      sessions: {
+        "x7rv2k-reviewer": live("x7rv2k-reviewer"),
+        "x7rv2k-worker": live("x7rv2k-worker", { status: "busy" }),
+      },
+      workerPrs: async (name) => (name === "x7rv2k-worker" ? [URL] : []),
+    })
+
+  test("a reviewer holding the merged PR and three open ones stays, through endMerged and the sweep", async () => {
+    const merged = fakes()
+    expect(await endMerged(URL, "daaac8e0000", world([URL, A, B, C]), merged.deps)).toEqual([])
+    const swept = fakes()
+    expect(await sweep(world([URL, A, B, C]), swept.deps)).toEqual([])
+    expect([...merged.closed, ...swept.closed]).toEqual([])
+  })
+
+  test("a row whose session is gone keeps its row while its list holds an open PR", async () => {
+    const gone = { ...world([URL, A]), sessions: {} }
+    const { deps, reported } = fakes()
+    expect(await endMerged(URL, "daaac8e0000", gone, deps)).toEqual([])
+    expect(reported).toEqual([])
+  })
+
+  test("an entry GitHub cannot read keeps a row whose session is gone", async () => {
+    const gone = { ...world([URL, "https://github.com/o/r/pull/2199"]), sessions: {} }
+    const { deps, reported } = fakes()
+    expect(await endMerged(URL, "daaac8e0000", gone, deps)).toEqual([])
+    expect(reported).toEqual([])
+  })
+
+  test("a row with no prs list, or one whose PRs are all done, ends as today", async () => {
+    for (const prs of [undefined, [URL]]) {
+      const merged = fakes()
+      await endMerged(URL, "daaac8e0000", world(prs), merged.deps)
+      expect(merged.closed).toEqual(["x7rv2k-reviewer"])
+      const swept = fakes()
+      await sweep(world(prs), swept.deps)
+      expect(swept.closed).toEqual(["x7rv2k-reviewer"])
+    }
+  })
+})
+
 describe("unsavedLive: the worktrees a session used, read for unsaved work", () => {
   const sh = (cwd: string, ...argv: string[]) => {
     const r = Bun.spawnSync(argv, {
@@ -500,5 +566,263 @@ describe("unsavedLive: the worktrees a session used, read for unsaved work", () 
     const file = join(projects, "..", "not-a-folder")
     writeFileSync(file, "")
     expect(await unsavedLive(target, file)).toBe(`could not check its transcript in ${file}`)
+  })
+})
+
+// PG-919: a merge cleans what each closed session used
+describe("cleanWorktree: each worktree a closed session used, removed with its containers and branch once its work is saved", () => {
+  const ENV = {
+    ...process.env,
+    GIT_AUTHOR_EMAIL: "t@t",
+    GIT_AUTHOR_NAME: "t",
+    GIT_COMMITTER_EMAIL: "t@t",
+    GIT_COMMITTER_NAME: "t",
+  }
+  const run = (cwd: string, ...argv: string[]) => {
+    const r = Bun.spawnSync(argv, { cwd, env: ENV })
+    if (r.exitCode !== 0) throw new Error(`${argv.join(" ")}: ${r.stderr}`)
+  }
+  const live = (container: string) => container === "playground-dashboard-db"
+  // A scratch remote and its clone as the main checkout, with a pushed worktree pg-1 in its .claude/worktrees on branch PG-1-thing.
+  const machine = (name = "pg-1", at?: (main: string) => string) => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "cleanup-")))
+    const remote = join(root, "remote.git")
+    const main = join(root, "main")
+    run(root, "git", "init", "-q", "--bare", remote)
+    run(root, "git", "clone", "-q", remote, main)
+    writeFileSync(join(main, "a.txt"), "a\n")
+    run(main, "git", "add", "a.txt")
+    run(main, "git", "commit", "-qm", "a")
+    run(main, "git", "push", "-q", "origin", "HEAD")
+    const wt = at ? at(main) : join(main, ".claude", "worktrees", name)
+    run(main, "git", "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+    run(wt, "git", "push", "-q", "origin", "PG-1-thing")
+    return { main, root, wt }
+  }
+  const branches = (repo: string) =>
+    Bun.spawnSync(["git", "-C", repo, "branch", "--format=%(refname:short)"]).stdout.toString()
+  // Real git on the scratch repos; playground rm stands in as git worktree remove in the scratch main checkout, refusing when told to; docker lists the given names.
+  const fakes = (
+    main: string,
+    listed: string[] | null,
+    refuse?: string,
+    over: Partial<CleanupDeps> = {},
+  ) => {
+    const calls: string[] = []
+    const deps: CleanupDeps = {
+      containers: async () => listed,
+      devStop: async (dir) => (calls.push(`dev:stop ${dir}`), { ok: true, out: "" }),
+      git: async (dir, args) => {
+        const r = Bun.spawnSync(["git", "-C", dir, ...args], { env: ENV })
+        return r.exitCode === 0 ? r.stdout.toString().trim() : null
+      },
+      held: async () => null,
+      live,
+      liveBranch: "live/dashboard",
+      main,
+      removeContainer: async (name) => (calls.push(`docker rm -fv ${name}`), true),
+      rm: async (path, reason) => {
+        calls.push(`rm ${path} (${reason})`)
+        if (refuse) return { ok: false, out: refuse }
+        run(main, "git", "worktree", "remove", path)
+        return { ok: true, out: "" }
+      },
+      ...over,
+    }
+    return { calls, deps }
+  }
+
+  test("a clean, pushed worktree goes, with its dev stack stopped, its two containers and its branch", async () => {
+    const { main, wt } = machine()
+    const listed = ["playground-pg-1-db", "playground-pg-1-redis", "playground-dashboard-db"]
+    const { calls, deps } = fakes(main, listed)
+    expect(await cleanWorktree(wt, "k3m9px-reviewer ended", deps)).toBe(
+      `removed ${wt}, containers playground-pg-1-db, playground-pg-1-redis, branch PG-1-thing`,
+    )
+    expect(calls).toEqual([
+      `dev:stop ${wt}`,
+      `rm ${wt} (k3m9px-reviewer ended)`,
+      "docker rm -fv playground-pg-1-db",
+      "docker rm -fv playground-pg-1-redis",
+    ])
+    expect(existsSync(wt)).toBe(false)
+    expect(branches(main)).not.toContain("PG-1-thing")
+  })
+
+  test("a dirty worktree, or one with unpushed commits, is kept with the reason, and nothing of it is touched", async () => {
+    const { main, wt } = machine()
+    const { calls, deps } = fakes(main, ["playground-pg-1-db"])
+    writeFileSync(join(wt, "wip.txt"), "x\n")
+    expect(await cleanWorktree(wt, "r ended", deps)).toBe(`kept ${wt}: uncommitted work`)
+    run(wt, "git", "add", "wip.txt")
+    run(wt, "git", "commit", "-qm", "wip")
+    expect(await cleanWorktree(wt, "r ended", deps)).toBe(`kept ${wt}: unpushed commits`)
+    expect(calls).toEqual([])
+    expect(existsSync(wt)).toBe(true)
+    expect(branches(main)).toContain("PG-1-thing")
+  })
+
+  test("a commit on no remote ref counts as pushed once named as a PR's head GitHub keeps, as after a merge deletes its branch", async () => {
+    const { main, wt } = machine()
+    const { deps } = fakes(main, [])
+    writeFileSync(join(wt, "wip.txt"), "x\n")
+    run(wt, "git", "add", "wip.txt")
+    run(wt, "git", "commit", "-qm", "wip")
+    const head = Bun.spawnSync(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.toString().trim()
+    expect(await cleanWorktree(wt, "r ended", deps, { pushed: head })).toBe(
+      `removed ${wt}, branch PG-1-thing`,
+    )
+  })
+
+  test("a worktree playground rm refuses is kept with its refusal, and its containers and branch stay", async () => {
+    const { main, wt } = machine()
+    const refusal = `${wt} is held by pid 7 (zsh) working in ${wt}`
+    const { calls, deps } = fakes(main, ["playground-pg-1-db"], refusal)
+    expect(await cleanWorktree(wt, "r ended", deps)).toBe(`kept ${wt}: ${refusal}`)
+    expect(calls).toEqual([`dev:stop ${wt}`, `rm ${wt} (r ended)`])
+    expect(branches(main)).toContain("PG-1-thing")
+  })
+
+  test("the live dashboard's checkout is kept before anything runs, even clean and pushed", async () => {
+    const { main } = machine()
+    const desk = join(main, ".claude", "worktrees", "desk")
+    run(main, "git", "worktree", "add", "-q", "-b", "live/dashboard", desk)
+    run(desk, "git", "push", "-q", "origin", "live/dashboard")
+    const { calls, deps } = fakes(main, ["playground-desk-db"])
+    expect(await cleanWorktree(desk, "r ended", deps)).toBe(
+      `kept ${desk}: the live dashboard's checkout`,
+    )
+    expect(calls).toEqual([])
+    expect(existsSync(desk)).toBe(true)
+  })
+
+  test("a worktree a live session holds is kept before its dev stack is stopped", async () => {
+    const { main, wt } = machine()
+    const holder = `${wt} is held by k3m9px-worker, which the roster lists as working`
+    const { calls, deps } = fakes(main, ["playground-pg-1-db"], undefined, {
+      held: async () => holder,
+    })
+    expect(await cleanWorktree(wt, "r ended", deps)).toBe(`kept ${wt}: ${holder}`)
+    expect(calls).toEqual([])
+  })
+
+  test("the session's PR goes to the holder check and playground rm, so the merging worker's hold by that PR's number alone does not keep a checker's review-<n>", async () => {
+    const { main, wt } = machine("review-2110")
+    const url = "https://github.com/o/r/pull/2110"
+    const asked: (string | undefined)[] = []
+    const { deps } = fakes(main, [], undefined, {
+      held: async (_path, pr) => (asked.push(pr), null),
+      rm: async (path, _reason, pr) => {
+        asked.push(pr)
+        run(main, "git", "worktree", "remove", path)
+        return { ok: true, out: "" }
+      },
+    })
+    expect(await cleanWorktree(wt, "r ended", deps, { pr: url })).toBe(
+      `removed ${wt}, branch PG-1-thing`,
+    )
+    expect(asked).toEqual([url, url])
+  })
+
+  test("a dev:stop refusal keeps the worktree, while no recorded stack lets it go", async () => {
+    const { main, wt } = machine()
+    const refusal = "dev:stop: the stack's process groups also hold pid 9, so nothing is signalled"
+    const refused = fakes(main, ["playground-pg-1-db"], undefined, {
+      devStop: async () => ({ ok: false, out: refusal }),
+    })
+    expect(await cleanWorktree(wt, "r ended", refused.deps)).toBe(`kept ${wt}: ${refusal}`)
+    expect(refused.calls).toEqual([])
+    const none = fakes(main, ["playground-pg-1-db"], undefined, {
+      devStop: async () => ({ ok: false, out: `dev:stop: no stack is recorded in ${wt}` }),
+    })
+    expect(await cleanWorktree(wt, "r ended", none.deps)).toBe(
+      `removed ${wt}, containers playground-pg-1-db, branch PG-1-thing`,
+    )
+  })
+
+  test("a docker ps that cannot list keeps the containers and says so", async () => {
+    const { main, wt } = machine()
+    const { calls, deps } = fakes(main, null)
+    expect(await cleanWorktree(wt, "r ended", deps)).toBe(
+      `removed ${wt}, its containers kept since docker ps could not list them, branch PG-1-thing`,
+    )
+    expect(calls.filter((c) => c.startsWith("docker"))).toEqual([])
+  })
+
+  test("the main checkout and a worktree outside .claude/worktrees are never targets", async () => {
+    const { main } = machine()
+    const { calls, deps } = fakes(main, [])
+    expect(await cleanWorktree(main, "r ended", deps)).toBe(`kept ${main}: not a linked worktree`)
+    const outside = machine("pg-1", (m) => join(m, "..", "elsewhere"))
+    const other = fakes(outside.main, [])
+    expect(await cleanWorktree(outside.wt, "r ended", other.deps)).toBe(
+      `kept ${outside.wt}: not a worktree in ${join(outside.main, ".claude", "worktrees")}`,
+    )
+    expect([...calls, ...other.calls]).toEqual([])
+    expect(existsSync(outside.wt)).toBe(true)
+  })
+
+  test("another repo's clean worktree goes through git worktree remove with no force flag, then prune and its branch; a dirty one is kept", async () => {
+    const ours = machine()
+    const theirs = machine("zs-1", (m) => join(m, "..", "zerostarter-wt"))
+    const { calls, deps } = fakes(ours.main, ["playground-zs-1-db"])
+    writeFileSync(join(theirs.wt, "wip.txt"), "x\n")
+    expect(await cleanWorktree(theirs.wt, "r ended", deps)).toBe(
+      `kept ${theirs.wt}: uncommitted work`,
+    )
+    run(theirs.wt, "git", "clean", "-qf")
+    expect(await cleanWorktree(theirs.wt, "r ended", deps)).toBe(
+      `removed ${theirs.wt}, branch PG-1-thing`,
+    )
+    expect(calls).toEqual([])
+    expect(existsSync(theirs.wt)).toBe(false)
+    expect(branches(theirs.main)).not.toContain("PG-1-thing")
+  })
+
+  test("the container names are the worktree's own, whole, and never the live dashboard's or first run's", () => {
+    const main = "/h/playground"
+    const wt = (name: string) => join(main, ".claude", "worktrees", name)
+    expect(containersFor(wt("pg-1"), main, live)).toEqual([
+      "playground-pg-1-db",
+      "playground-pg-1-redis",
+    ])
+    expect(containersFor(wt("dashboard"), main, live)).toEqual(["playground-dashboard-redis"])
+    expect(containersFor(main, main, live)).toEqual([])
+    expect(containersFor(join(wt("pg-1"), "sub"), main, live)).toEqual([])
+  })
+
+  test("only a listed name equal to the worktree's own is removed, never one that only starts with it", async () => {
+    const { main, wt } = machine()
+    const listed = [
+      "playground-pg-1-db-ab12",
+      "playground-pg-1-dbx",
+      "playground-pg-10-db",
+      "playground-db",
+    ]
+    const { calls, deps } = fakes(main, listed)
+    expect(await cleanWorktree(wt, "r ended", deps)).toBe(`removed ${wt}, branch PG-1-thing`)
+    expect(calls.filter((c) => c.startsWith("docker"))).toEqual([])
+  })
+})
+
+describe("endMerged: a closed session's worktrees are cleaned after its close, and only then", () => {
+  test("the cleanup's lines join the end's line, and a session whose close is refused is not cleaned", async () => {
+    const cleaned: string[] = []
+    const cleanup = async (target: Target) => (
+      cleaned.push(`${target.name} ${target.pr}`),
+      [`removed /wt/${target.name}`]
+    )
+    const roster = { "m4tqzr-reviewer": { kind: "reviewer", name: "m4tqzr-reviewer", pr: URL } }
+    const sessions = { "m4tqzr-reviewer": live("m4tqzr-reviewer") }
+    const ok = fakes({ cleanup })
+    expect(await endMerged(URL, "daaac8e0000", input({ roster, sessions }), ok.deps)).toEqual([
+      {
+        text: "Ended m4tqzr-reviewer: #2110 merged as daaac8e; cleanup: removed /wt/m4tqzr-reviewer",
+        to: "builder",
+      },
+    ])
+    const refused = fakes({ cleanup, close: async () => ({ ok: false, out: "no pane" }) })
+    await endMerged(URL, "daaac8e0000", input({ roster, sessions }), refused.deps)
+    expect(cleaned).toEqual([`m4tqzr-reviewer ${URL}`])
   })
 })

@@ -41,7 +41,7 @@ describe("the shebang", () => {
 })
 
 describe("bare dispatcher", () => {
-  // a copy of the dispatcher folder and the portless-ca.ts, store's rendered.ts, herdr pin, data-dir.ts and the dev stack's proxy.ts it imports in a scratch repo, with ops-herdr, up.py's python3 (its body given) and every command the probes run stubbed, so nothing real starts; a case adds stubs and repo files of its own
+  // a copy of the dispatcher folder and the portless-ca.ts, store's rendered.ts, herdr pin, data-dir.ts and the dev stack's proxy.ts and live-dashboard.ts it imports in a scratch repo, with ops-herdr, up.py's python3 (its body given) and every command the probes run stubbed, so nothing real starts; a case adds stubs and repo files of its own
   const dispatcher = async (
     python3: string,
     more: Record<string, string> = {},
@@ -55,10 +55,11 @@ describe("bare dispatcher", () => {
     const src = join(repo, "packages", "scripts", "src")
     cpSync(dirname(CLI), join(src, "playground"), { recursive: true })
     cpSync(join(dirname(CLI), "..", "portless-ca.ts"), join(src, "portless-ca.ts"))
-    cpSync(
-      join(dirname(CLI), "../../../../api/hono/src/lib/dev/proxy.ts"),
-      join(repo, "api/hono/src/lib/dev/proxy.ts"),
-    )
+    for (const file of ["live-dashboard.ts", "proxy.ts"])
+      cpSync(
+        join(dirname(CLI), "../../../../api/hono/src/lib/dev", file),
+        join(repo, "api/hono/src/lib/dev", file),
+      )
     cpSync(
       join(dirname(CLI), "../../../settings/src/rendered.ts"),
       join(repo, "packages/settings/src/rendered.ts"),
@@ -71,6 +72,10 @@ describe("bare dispatcher", () => {
     symlinkSync(
       join(dirname(CLI), "..", "..", "node_modules"),
       join(repo, "packages", "scripts", "node_modules"),
+    )
+    symlinkSync(
+      join(dirname(CLI), "../../../../api/hono/node_modules"),
+      join(repo, "api", "hono", "node_modules"),
     )
     await Bun.write(join(src, "ops-herdr", "cli.ts"), "")
     const bin = join(root, "bin")
@@ -113,22 +118,20 @@ describe("bare dispatcher", () => {
     expect(out).toContain(`Starting the Dashboard…\n${upPy}\n`)
   }, 15_000)
 
-  // up.py's exit 3 says a job is down only because the pass runs outside cmux, so waiting for the Dashboard would only time out
-  test("stops non-zero right after up.py exits 3, with no wait for the Dashboard", async () => {
+  // up.py exits 0 on every pass, so a jobs exit of 3 is a failed step like any other: with no cmux present the run goes on to the dispatcher step
+  test("with no cmux present, an up.py exit of 3 no longer stops the run", async () => {
     const { child, upPy } = await dispatcher('echo "python3 $*"; exit 3')
-    let killed = false
-    const deadline = setTimeout(() => {
-      killed = true
-      child.kill()
-    }, 10_000)
-    const code = await child.exited
+    const deadline = setTimeout(() => child.kill(), 10_000)
+    let out = ""
+    const decoder = new TextDecoder()
+    for await (const chunk of child.stdout) {
+      out += decoder.decode(chunk)
+      if (out.includes(`${upPy}\nStarting `)) break
+    }
     clearTimeout(deadline)
-    const out = await new Response(child.stdout).text()
-    const err = await new Response(child.stderr).text()
-    expect(killed).toBe(false)
-    expect(code).not.toBe(0)
-    expect(out).toEndWith(`Starting the Dashboard…\n${upPy}\n`)
-    expect(err).not.toContain("supervisor.log")
+    child.kill()
+    await child.exited
+    expect(out).toContain(`Starting the Dashboard…\n${upPy}\nStarting `)
   }, 15_000)
 
   // On a fresh Mac spawn.sh printed a traceback before its refusal, and the run that exited 1 still closed on the Dashboard's own lines.
@@ -348,7 +351,7 @@ describe("a fresh machine", () => {
     ).toMatchObject({ "factory.repo": "made-up-me/copy" })
   })
 
-  test("a policy.json that does not parse refuses in one line, and the settings set it names writes it again", () => {
+  test("a policy.json that does not parse refuses in one line naming Settings, and a setting's write writes it again", () => {
     const data = fresh("broken")
     writeFileSync(join(data, "extensions", "policy.json"), "{")
     const refused = run(data, ["version"])
@@ -356,7 +359,8 @@ describe("a fresh machine", () => {
     const said = refused.stderr.toString().trim()
     expect(said.split("\n")).toHaveLength(1)
     expect(said).toStartWith("playground: the extensions' policy.json does not parse (")
-    expect(said).toContain("a setting with ! playground settings set")
+    expect(said).toContain("save Privacy on the Dashboard's Settings page")
+    expect(said).not.toContain("terminal")
     const set = run(data, ["settings", "set", "factory.repo", "made-up-me/copy", "--reason", "fix"])
     expect(set.exitCode, set.stderr.toString()).toBe(0)
     expect(

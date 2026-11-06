@@ -36,7 +36,10 @@ describe("a removal whose target has two or more parts that start with a variabl
   ])("%s", async (_name, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-prompt-stop hook refuses")
-    expect(reason).toContain("${VAR:?}")
+    // rmdir runs guarded, and no-raw-delete refuses a guarded rm, so an rm is sent to a literal path
+    const rmdir = /refuses rmdir /.test(reason ?? "")
+    expect(reason).toContain(rmdir ? "${VAR:?}" : "playground rm <literal path>")
+    expect(reason).not.toContain(rmdir ? "playground rm" : "${VAR:?}")
   })
 })
 
@@ -54,7 +57,10 @@ describe("a removal of a name directly in / is refused, with the fix", () => {
   ])("%s", async (_name, command) => {
     const reason = await bash(command)
     expect(reason).toContain("no-prompt-stop hook refuses")
-    expect(reason).toContain("$TMPDIR")
+    // no-raw-delete refuses an rm in $TMPDIR, so only an rmdir is sent there
+    expect(reason).toContain("the session's scratchpad")
+    if (/refuses rmdir /.test(reason ?? "")) expect(reason).toContain("$TMPDIR")
+    else expect(reason).not.toContain("$TMPDIR")
   })
 })
 
@@ -124,7 +130,7 @@ test("the factory settings register it for Bash", async () => {
     hooks: { PreToolUse: { hooks: { command: string }[]; matcher: string }[] }
   }
   const entry = settings.hooks.PreToolUse.find((e) =>
-    e.hooks.some((h) => h.command.includes("scripts/hooks/no-prompt-stop.ts")),
+    e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-prompt-stop.js")),
   )
   expect(entry?.matcher).toBe("^Bash$")
 })

@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
+import { ASK_CODE_COLUMNS } from "../../../../../packages/config/src/inbox"
 import { DashboardContext } from "../../../../../web/next/src/components/dashboard/dashboard"
 import {
   TranscriptMarkdown,
+  fitWidth,
   overlaysIn,
   untitle,
 } from "../../../../../web/next/src/components/transcript-markdown"
@@ -294,6 +296,38 @@ describe("code blocks and tables", () => {
       expect(html).not.toContain(stock)
   })
 
+  // Each line's variant, with the words it shows.
+  const lines = (html: string) =>
+    [
+      ...html.matchAll(
+        /data-slot="code-block-line" data-variant="(\w+)"[^>]*><span data-slot="code-block-line-content"[^>]*>([^<]*)</g,
+      ),
+    ].map((m) => [m[1], m[2]])
+
+  test("a diff block tints its added and removed lines, its sign shown once by the line's marker", () => {
+    const html = page(
+      "```diff\n--- a/limit.ts\n+++ b/limit.ts\n@@ -1 +1 @@\n- const limit = 100\n+ const limit = rows.length\n same\n```",
+    )
+    expect(lines(html)).toEqual([
+      ["default", "--- a/limit.ts"],
+      ["default", "+++ b/limit.ts"],
+      ["default", "@@ -1 +1 @@"],
+      ["removed", " const limit = 100"],
+      ["added", " const limit = rows.length"],
+      ["default", " same"],
+    ])
+    expect(html).toMatch(/data-variant="added" class="[^"]*\bbg-success\/10\b/)
+    expect(html).toMatch(/data-variant="removed" class="[^"]*\bbg-destructive\/10\b/)
+  })
+
+  test("a line starting + or - in any other block stays a plain line", () => {
+    for (const language of ["", "ts", "md"])
+      expect(lines(page(`\`\`\`${language}\n- a\n+ b\n\`\`\``))).toEqual([
+        ["default", "- a"],
+        ["default", "+ b"],
+      ])
+  })
+
   test("inline code stays Streamdown's own", () => {
     const html = page("see `inline` here")
     expect(html).toContain('data-streamdown="inline-code"')
@@ -316,6 +350,16 @@ describe("code blocks and tables", () => {
     expect(html).not.toContain('data-streamdown="table-wrapper"')
     expect(html).not.toMatch(/aria-label="(Copy|Download|Fullscreen|View fullscreen)[^"]*table/i)
     expect(html).not.toContain(" node=")
+  })
+})
+
+describe("a drawing on a card", () => {
+  test("its font shrinks from the card's 12px code size to fit its widest line, down to 10px", () => {
+    expect(fitWidth(37)).toBe("clamp(10px, calc((100cqi - 1.25rem) / 37), 12px)")
+  })
+
+  test("the widest line an ask's drawing runs is the one the narrowest card shows at 12px", () => {
+    expect(ASK_CODE_COLUMNS).toBe(37)
   })
 })
 

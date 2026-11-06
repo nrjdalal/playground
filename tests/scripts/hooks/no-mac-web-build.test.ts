@@ -75,9 +75,15 @@ describe("a web image build on the Mac is refused while the live dashboard's Pos
     ["compose build --no-cache", "docker compose build --no-cache"],
     ["compose build web", "docker compose build web"],
     ["web among the services", "docker compose build --no-cache api web"],
+    [
+      "compose build past a project option, which names no service",
+      "docker compose build --profile p",
+    ],
+    ["compose build past -f, which names no service", "docker compose build -f a.yml"],
     ["compose options before build", "docker compose -f docker-compose.yml -p x build web"],
     ["compose up --build", "docker compose up --build"],
     ["compose up, which builds a missing image", "docker compose up"],
+    ["portless's compose up through bunx (#1083)", "bunx portless compose up -d"],
     ["compose up -d web", "docker compose up -d web"],
     ["compose create", "docker compose create"],
     ["compose run web", "docker compose run --rm -e X=1 web sh"],
@@ -109,6 +115,7 @@ describe("a web image build on the Mac is refused while the live dashboard's Pos
 describe("every other build runs, and asks Docker nothing", () => {
   test.each([
     ["the api image alone", "docker compose build --no-cache api"],
+    ["the api image alone past a project option", "docker compose build --progress plain api"],
     ["the api Dockerfile", "docker build -f api/hono/Dockerfile ."],
     ["a build sent to the box", "bash ~/.playground/ops/runner-host/ci.sh web HEAD"],
     ["a build over ssh", "ssh root@203.0.113.7 docker compose build web"],
@@ -237,26 +244,33 @@ describe("the dashboard's container decides", () => {
     expect(reason).toContain("no docker on PATH")
   })
 
-  // The stub's sleep outlives the killed bash and holds its pipes, so this reaches the read's backstop too.
+  // The hook's timeout in each settings file Claude Code reads, in ms.
+  const registered = ["scripts/factory-settings.json", ".claude/settings.json"].map((settings) => {
+    const { hooks } = JSON.parse(readFileSync(join(root, settings), "utf8")) as {
+      hooks: { PreToolUse: { hooks: { command: string; timeout: number }[] }[] }
+    }
+    const timeout =
+      hooks.PreToolUse.flatMap((e) => e.hooks).find((h) =>
+        h.command.includes("scripts/hooks/bundled/no-mac-web-build.js"),
+      )?.timeout ?? NaN
+    return [settings, timeout * 1000] as const
+  })
+
+  test.each(registered)(
+    "%s registers a timeout past the inspect's, with room to answer",
+    (_, ms) => {
+      expect(ms).toBeGreaterThan(INSPECT_TIMEOUT_MS + 4000)
+    },
+  )
+
+  // The stub's sleep outlives the killed bash and holds its pipes, so this reaches the read's backstop too; a hook that waited on them would run past this test's time, the hook's registered timeout.
   test(
     "a Docker that never answers refuses inside the hook's registered timeout",
     async () => {
-      const started = performance.now()
       const reason = await dashboard("hung").bash("docker compose build web")
       expect(reason).toContain(`gave no answer in ${INSPECT_TIMEOUT_MS / 1000}s`)
       expect(reason).toContain("ci.sh web HEAD")
-      expect(performance.now() - started).toBeLessThan(INSPECT_TIMEOUT_MS + 3000)
-      for (const settings of ["scripts/factory-settings.json", ".claude/settings.json"]) {
-        const { hooks } = JSON.parse(readFileSync(join(root, settings), "utf8")) as {
-          hooks: { PreToolUse: { hooks: { command: string; timeout: number }[] }[] }
-        }
-        const timeout =
-          hooks.PreToolUse.flatMap((e) => e.hooks).find((h) =>
-            h.command.includes("scripts/hooks/no-mac-web-build.ts"),
-          )?.timeout ?? NaN
-        expect(timeout * 1000, settings).toBeGreaterThan(INSPECT_TIMEOUT_MS + 4000)
-      }
     },
-    INSPECT_TIMEOUT_MS + 10_000,
+    Math.min(...registered.map(([, ms]) => ms)),
   )
 })

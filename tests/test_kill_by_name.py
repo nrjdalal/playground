@@ -35,10 +35,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SELF = os.path.relpath(os.path.abspath(__file__), ROOT)
 SKIP = {
     "CHANGELOG.md",
+    "scripts/hooks/bundled/no-kill-by-name.js",
     "scripts/hooks/no-kill-by-name.ts",
-    "tests/scripts/hooks/fixtures/refused-forms.ts",
     "tests/scripts/hooks/no-kill-by-name.test.ts",
 }
+# The refused-forms fixture's folder, one file a source, skipped whole.
+SKIP_DIRS = ("tests/scripts/hooks/fixtures/refused-forms/",)
 NAMES_ONLY = "kill-check: names only"
 SEARCH = r"(?:pgrep|pidof|ps|lsof)"
 SOURCE = rf"(?:\$\(|<\(|`)\s*{SEARCH}\b"
@@ -331,7 +333,7 @@ def main():
     failures = []
     for rel in files:
         path = os.path.join(ROOT, rel)
-        if rel in SKIP or rel == SELF or os.path.islink(path) or not os.path.isfile(path):
+        if rel in SKIP or rel.startswith(SKIP_DIRS) or rel == SELF or os.path.islink(path) or not os.path.isfile(path):
             continue
         try:
             text = open(path, encoding="utf-8").read()

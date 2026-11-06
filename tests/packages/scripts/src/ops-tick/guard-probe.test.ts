@@ -8,12 +8,14 @@ import {
   preToolUseGuards,
 } from "../../../../../packages/scripts/src/ops-tick/guard-probe"
 import { BEATS, type Context } from "../../../../../packages/scripts/src/ops-tick/tick"
+import { fakeRun } from "./fake-run"
 
 const root = join(import.meta.dir, "..", "..", "..", "..", "..")
 // The scratch folder stays for the system to clear, since a test removes no tree.
 const scratch = mkdtempSync(join(tmpdir(), "guard-probe-"))
 
-const wrapper = (hook: string) => `R=x; cd -P "$R" && bun --no-env-file scripts/hooks/${hook}.ts`
+const wrapper = (hook: string) =>
+  `R=x; cd -P "$R" && bun --no-env-file scripts/hooks/bundled/${hook}.js`
 const repo = join(scratch, "repo")
 mkdirSync(join(repo, "scripts"), { recursive: true })
 writeFileSync(
@@ -32,23 +34,25 @@ writeFileSync(
 )
 const ops = join(scratch, "ops")
 
+// Bun's own crash output on stderr: the error, a note, then its version banner last.
+const CRASH = "error: Cannot find package 'x'\nnote: GET x\n\nBun v1.4.4 (macOS arm64)\n"
+
 // One beat run whose guards exit as codes says (0 when unnamed), recording each run and each send; no guard is ever started.
 const probe = async (codes: Record<string, number>, sendOk = true) => {
   const runs: { argv: string[]; stdin?: string }[] = []
   const sent: { text: string; to: string }[] = []
+  const { run } = fakeRun(
+    Object.fromEntries(
+      Object.entries(codes).map(([guard, code]) => [guard, { code, err: code === 1 ? CRASH : "" }]),
+    ),
+  )
   const ctx: Context = {
     now: new Date(Date.UTC(2026, 10, 2, 12, 0)),
     ops,
     repo,
-    run: async (argv, _timeout, stdin) => {
+    run: async (argv, timeout, stdin) => {
       runs.push({ argv, stdin })
-      const code = codes[argv.at(-1)!] ?? 0
-      // Bun's own crash output: the error, a note, then its version banner last.
-      const out =
-        code === 1
-          ? "error: Cannot find package 'x'\nnote: GET x\n\nBun v1.4.4 (macOS arm64)\n"
-          : ""
-      return { code, out }
+      return run(argv, timeout, stdin)
     },
     send: async (to, text) => {
       sent.push({ text, to })
@@ -73,7 +77,7 @@ test("each guard gets {} without its wrapper's tail, and a crash is told to the 
     argv: [
       "sh",
       "-c",
-      'cd -P "$1" && exec bun --no-env-file "scripts/hooks/$2.ts"',
+      'cd -P "$1" && s="scripts/hooks/bundled/$2.js" && { [ -f "$s" ] || s="scripts/hooks/$2.ts"; } && exec bun --no-env-file "$s"',
       "guard-probe",
       repo,
       "no-stash",
@@ -82,7 +86,7 @@ test("each guard gets {} without its wrapper's tail, and a crash is told to the 
   })
   expect(first.sent).toEqual([
     {
-      text: `1 of 3 PreToolUse guards cannot start, so their wrappers refuse every factory call they guard. Fix: bun install in ${repo}. no-stash (exit 1: error: Cannot find package 'x')`,
+      text: `1 of 3 PreToolUse guards cannot start, so their wrappers refuse every factory call they guard. Fix: git checkout scripts/hooks/bundled, or bun run hooks:bundle, in ${repo}. no-stash (exit 1: error: Cannot find package 'x')`,
       to: "dispatcher",
     },
   ])
@@ -106,10 +110,7 @@ test("with every real guard broken, the fix sits inside the 400 characters notif
     now: new Date(),
     ops: join(scratch, "ops-all"),
     repo: root,
-    run: async () => ({
-      code: 1,
-      out: "error: Cannot find package 'x'\nBun v1.4.4 (macOS arm64)\n",
-    }),
+    run: fakeRun({ "guard-probe": { code: 1, err: CRASH } }).run,
     send: async (_to, text) => {
       sent.push(text)
       return true
@@ -118,7 +119,9 @@ test("with every real guard broken, the fix sits inside the 400 characters notif
   expect(sent).toHaveLength(1)
   expect(sent[0]!.length).toBeGreaterThan(400)
   expect(sent[0]!.slice(0, 400)).toContain(`${guards.length} of ${guards.length} PreToolUse guards`)
-  expect(sent[0]!.slice(0, 400)).toContain(`Fix: bun install in ${root}.`)
+  expect(sent[0]!.slice(0, 400)).toContain(
+    `Fix: git checkout scripts/hooks/bundled, or bun run hooks:bundle, in ${root}.`,
+  )
 })
 
 test("a send that fails is not marked told, so the next run tells it", async () => {

@@ -27,7 +27,7 @@ const peer = (address: string) => ({
   requestIP: () => ({ address, family: address.includes(":") ? "IPv6" : "IPv4", port: 50000 }),
 })
 
-// The router behind the API's own request logger, as index.ts mounts it, each logged line kept.
+// The router behind the API's own request logger, as local.ts mounts it, each logged line kept.
 const lines: string[] = []
 const app = new Hono()
   .use(logger((line: string) => void lines.push(line)))
@@ -122,14 +122,14 @@ const folder = (login?: string) => {
 }
 
 describe("GET /api/v1/accounts' body", () => {
-  test("says whether the extensions login exists beside the accounts, in the shape its OpenAPI schema names", () => {
+  test("says whether the extensions login exists, and the scope a Settings write goes to, beside the accounts, in the shape its OpenAPI schema names", () => {
     const login = process.env.PLAYGROUND_LOGIN
     delete process.env.PLAYGROUND_LOGIN
     try {
       const none = accountsList(folder())
       const named = accountsList(folder("made-up-me"))
-      expect(none).toEqual({ accounts: [], login: false })
-      expect(named).toEqual({ accounts: [], login: true })
+      expect(none).toEqual({ accounts: [], login: false, scope: null })
+      expect(named).toEqual({ accounts: [], login: true, scope: "made-up-me" })
       for (const data of [none, named]) expect(listResponse.safeParse({ data }).success).toBe(true)
     } finally {
       if (login === undefined) delete process.env.PLAYGROUND_LOGIN

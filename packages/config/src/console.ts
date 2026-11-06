@@ -6,6 +6,7 @@ export const ACTIVITY_ACTIONS = [
   "dashboard.answer",
   "dashboard.message",
   "dashboard.mode",
+  "dashboard.setting",
   "role.change",
   "user.ban",
   "user.unban",
@@ -34,6 +35,11 @@ export const PERMISSION_MODE_LABELS = {
   plan: "Plan",
   bypassPermissions: "Bypass permissions",
 } as const
+
+// The models and efforts the composer's pickers set on a dispatcher, the assistant or the hosted session, as Claude Code's /model and /effort take them: models by alias A to Z, efforts from least to most; a dashboard.setting row names them the same way.
+export const SESSION_MODELS = ["fable", "haiku", "opus", "sonnet"] as const
+
+export const SESSION_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const
 
 // A session nothing names, as people read it (the owner's ask: give the random ids a name): `session <folder>`, from the folder it runs in, since its first ask already shows beside its name wherever it is listed. Leading with the word keeps it from matching a role by name or prefix (a folder named dispatcher, worker-x or probe-x), so it is always other. null with no folder.
 export const folderName = (cwd: string | null): string | null => {

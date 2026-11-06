@@ -12,19 +12,52 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { CARVE_OUTS } from "../../../../../packages/safe-delete/src"
 import {
+  callerOf,
+  clonesOf,
+  processesOf,
   RM_USAGE,
+  type Decision,
+  discardRefusal,
   type RmDeps,
   rmArgs,
   rmDeps,
   runRm,
 } from "../../../../../packages/scripts/src/playground/rm"
+import type { Proc } from "../../../../../scripts/hooks/session-state"
 
-test("rm takes one path, or --worktree's, with an optional reason", () => {
-  expect(rmArgs(["old"])).toEqual({ path: "old", reason: "playground rm", worktree: false })
+test("rm takes one path, or --worktree's with an optional --discard and --pr, with an optional reason", () => {
+  expect(rmArgs(["old"])).toEqual({
+    discard: false,
+    path: "old",
+    reason: "playground rm",
+    worktree: false,
+  })
   expect(rmArgs(["--worktree", "wt", "--reason", "merged"])).toEqual({
+    discard: false,
     path: "wt",
     reason: "merged",
+    worktree: true,
+  })
+  expect(rmArgs(["--worktree", "wt", "--discard"])).toEqual({
+    discard: true,
+    path: "wt",
+    reason: "playground rm",
+    worktree: true,
+  })
+  expect(rmArgs(["--worktree", "wt", "--discard", "--decision", "#i9"])).toEqual({
+    decision: "#i9",
+    discard: true,
+    path: "wt",
+    reason: "playground rm",
+    worktree: true,
+  })
+  expect(rmArgs(["--worktree", "wt", "--pr", "https://github.com/o/r/pull/1"])).toEqual({
+    discard: false,
+    path: "wt",
+    pr: "https://github.com/o/r/pull/1",
+    reason: "playground rm",
     worktree: true,
   })
 })
@@ -41,6 +74,12 @@ test.each([
   [["--force", "a"]],
   [["--list", "a"]],
   [["a", "--worktree", "b"]],
+  [["a", "--discard"]],
+  [["--worktree", "wt", "--discard", "--discard"]],
+  [["--worktree", "wt", "--decision", "#i9"]],
+  [["--worktree", "wt", "--discard", "--decision"]],
+  [["a", "--pr", "https://github.com/o/r/pull/1"]],
+  [["--worktree", "wt", "--pr"]],
 ])("rm refuses %j with its usage", (words) => {
   expect(rmArgs(words)).toEqual({ error: RM_USAGE })
 })
@@ -68,11 +107,16 @@ const machine = () => {
   writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: [] }))
   const told: string[] = []
   const deps: RmDeps = {
-    cwds: () => [],
+    caller: async () => undefined,
+    clones: () => [],
+    procs: () => [],
     data,
+    decision: async () => null,
     home,
     main,
+    merged: () => false,
     notify: (text) => void told.push(text),
+    places: () => [],
     session: async () => "j6rjgy-worker",
   }
   return { deps, home, main, root, told }
@@ -100,6 +144,19 @@ test("runRm tells the dispatcher of a protected path, and not of a missing one",
   expect(await runRm(["a", "b"], deps)).toBe(2)
 })
 
+// A carve-out is its own script's alone: playground rm names none, so an entry in each carve-out's folder stays protected and nothing moves.
+test.each(Object.entries(CARVE_OUTS))(
+  "runRm takes no carve-out: an entry in %s's folder stays protected",
+  async (_, carve) => {
+    const { deps, told } = machine()
+    const entry = join(deps.data, carve.folder, "entry")
+    mkdirSync(entry, { recursive: true })
+    expect(await runRm([entry], deps)).toBe(1)
+    expect(existsSync(entry)).toBe(true)
+    expect(told).toEqual([`j6rjgy-worker: ${entry} is inside the protected ${deps.data}`])
+  },
+)
+
 test("runRm --worktree checks the holders, moves the worktree and prunes it from git", async () => {
   const { deps, main, root } = machine()
   git(root, "init", "--bare", "-q", join(root, "remote.git"))
@@ -112,11 +169,262 @@ test("runRm --worktree checks the holders, moves the worktree and prunes it from
   const wt = join(main, ".claude", "worktrees", "pg-1")
   git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
   git(wt, "push", "-q", "origin", "PG-1-thing")
-  expect(await runRm(["--worktree", wt], { ...deps, cwds: () => [wt] })).toBe(1)
+  const held = { command: "zsh", cwd: wt, pid: 7, sockets: [] }
+  expect(await runRm(["--worktree", wt], { ...deps, procs: () => [held] })).toBe(1)
+  expect(existsSync(wt)).toBe(true)
+  const url = "https://github.com/o/r/pull/1"
+  const merging = { name: "abc123-worker", pr: url, status: "working" }
+  writeFileSync(join(deps.data, "roster.json"), JSON.stringify({ agents: [merging] }))
+  expect(await runRm(["--worktree", wt], deps)).toBe(1)
+  expect(await runRm(["--worktree", wt, "--pr", `${url}0`], deps)).toBe(1)
+  expect(existsSync(wt)).toBe(true)
+  expect(await runRm(["--worktree", wt, "--pr", url], deps)).toBe(0)
+  expect(existsSync(wt)).toBe(false)
+  expect(git(main, "worktree", "list")).not.toContain("pg-1")
+})
+
+test("runRm --worktree refuses a worktree with uncommitted work, naming --discard, which a session passes only with an approved delete decision", async () => {
+  const { deps, main, root } = machine()
+  git(root, "init", "--bare", "-q", join(root, "remote.git"))
+  git(main, "init", "-q", "-b", "canary")
+  writeFileSync(join(main, "README.md"), "x")
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  git(main, "remote", "add", "origin", join(root, "remote.git"))
+  git(main, "push", "-q", "origin", "canary")
+  const wt = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+  writeFileSync(join(wt, "wip.txt"), "x")
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--worktree", wt], deps)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toEqual([
+    `playground: ${wt} holds 1 uncommitted change (wip.txt): playground rm --worktree ${wt} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`,
+  ])
+  expect(existsSync(wt)).toBe(true)
+  said.length = 0
+  const session = { ...deps, caller: async () => "a session (role worker)" }
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--worktree", wt, "--discard"], session)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toEqual([
+    `playground: a session (role worker) passes --discard only with --decision <id>: post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`,
+  ])
+  expect(existsSync(wt)).toBe(true)
+  const approved = async (id: string): Promise<Decision | null> =>
+    id === "#i9"
+      ? {
+          kind: "decision",
+          preview: { type: "delete", what: `the worktree ${wt}` },
+          status: "approved",
+        }
+      : null
+  expect(
+    await runRm(["--worktree", wt, "--discard", "--decision", "#i9"], {
+      ...session,
+      decision: approved,
+    }),
+  ).toBe(0)
+  expect(existsSync(wt)).toBe(false)
+})
+
+test("a session's --discard passes only on an approved delete decision whose what names the path", async () => {
+  const wt = "/h/playground/.claude/worktrees/pg-1"
+  const item = (
+    status: string,
+    what = `\`${wt}/\`, its work is stale`,
+    type = "delete",
+  ): Decision => ({
+    kind: "decision",
+    preview: { type, what },
+    status,
+  })
+  const refusal = (found: Decision | null) =>
+    discardRefusal(wt, "#i9", "a session (role worker)", { decision: async () => found })
+  const route = `post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`
+  expect(await refusal(item("approved"))).toBeNull()
+  expect(await refusal(item("denied"))).toBe(`--decision #i9 is denied, not approved: ${route}`)
+  expect(await refusal(item("open"))).toBe(`--decision #i9 is open, not approved: ${route}`)
+  expect(await refusal(null)).toBe(
+    `--decision #i9 names no Inbox item the Dashboard's checkout can read: ${route}`,
+  )
+  expect(await refusal(item("approved", `${wt}-old`))).toBe(
+    `--decision #i9's delete names another path, not ${wt}: ${route}`,
+  )
+  expect(await refusal(item("approved", wt, "ask"))).toBe(
+    `--decision #i9 is not a delete decision: ${route}`,
+  )
+  expect(
+    await discardRefusal(wt, undefined, "a session (role worker)", {
+      decision: async () => item("approved"),
+    }),
+  ).toBe(`a session (role worker) passes --discard only with --decision <id>: ${route}`)
+})
+
+// A mkdtemp Claude Code registry naming session s-1 for the claude process at pid 300, started with it as its CLAUDE_CONFIG_DIR, and a process chain 100 -> 200 -> 300 -> 1 to climb; pid 400 is gone.
+const registry = (root: string) => {
+  const config = join(root, "claude")
+  mkdirSync(join(config, "sessions"), { recursive: true })
+  writeFileSync(
+    join(config, "sessions", "300.json"),
+    JSON.stringify({ pid: 300, sessionId: "s-1" }),
+  )
+  const chain: Record<number, Proc> = {
+    1: { comm: "/sbin/launchd", env: {}, ppid: 0 },
+    100: { comm: "bun", env: {}, ppid: 200 },
+    200: { comm: "/bin/zsh", env: {}, ppid: 300 },
+    300: { comm: "/opt/bin/claude", env: { CLAUDE_CONFIG_DIR: config, HOME: root }, ppid: 1 },
+  }
+  return { config, procs: (pid: number): Proc | undefined => chain[pid] }
+}
+
+// A main checkout on canary with worktree pg-1 holding one uncommitted file, and the route a --discard refusal names for it.
+const dirtyWorktree = (main: string) => {
+  git(main, "init", "-q", "-b", "canary")
+  writeFileSync(join(main, "README.md"), "x")
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  const wt = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+  writeFileSync(join(wt, "wip.txt"), "x")
+  const route = `post an Inbox delete decision with bun run ask new naming ${wt} and why, then run playground rm --worktree ${wt} --discard --decision <id> once it is approved`
+  return { route, wt }
+}
+
+// runRm's exit and what it printed to stderr.
+const discardBy = async (wt: string, deps: RmDeps) => {
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    return { code: await runRm(["--worktree", wt, "--discard"], deps), said }
+  } finally {
+    console.error = error
+  }
+}
+
+// PG-825: a Bash prefix drops PLAYGROUND_ROLE, but not the claude process above the call
+test("a caller with no role, or whose role a prefix dropped, is still a session when a claude process runs above it, and --discard needs its decision", async () => {
+  const { deps, main, root } = machine()
+  const { procs } = registry(root)
+  expect(await callerOf({}, 100, procs)).toBe("a session (session s-1)")
+  expect(await callerOf({ PLAYGROUND_ROLE: "" }, 100, procs)).toBe("a session (session s-1)")
+  expect(await callerOf({ PLAYGROUND_ROLE: "worker" }, 100, procs)).toBe("a session (role worker)")
+  const { route, wt } = dirtyWorktree(main)
+  for (const environment of [{}, { PLAYGROUND_ROLE: "" }]) {
+    const caller = () => callerOf(environment, 100, procs)
+    expect(await discardBy(wt, { ...deps, caller })).toEqual({
+      code: 1,
+      said: [
+        `playground: a session (session s-1) passes --discard only with --decision <id>: ${route}`,
+      ],
+    })
+    expect(existsSync(wt)).toBe(true)
+  }
+})
+
+// A session's call detached from it is adopted by pid 1 before rm reads its parent, so its climb would find no session
+test("a detached call, or one whose parent the system cannot read, needs the decision too", async () => {
+  const { deps, main, root } = machine()
+  const { procs } = registry(root)
+  expect(await callerOf({}, 1, procs)).toBe("a detached call (its parent is pid 1)")
+  expect(await callerOf({}, 400, procs)).toBe(
+    "a call whose parent the system cannot read (pid 400)",
+  )
+  const { route, wt } = dirtyWorktree(main)
+  const caller = () => callerOf({}, 1, procs)
+  expect(await discardBy(wt, { ...deps, caller })).toEqual({
+    code: 1,
+    said: [
+      `playground: a detached call (its parent is pid 1) passes --discard only with --decision <id>: ${route}`,
+    ],
+  })
+  expect(existsSync(wt)).toBe(true)
+})
+
+// PG-828 flipped the residual this pinned: the registry is found through the claude process's own environment, so a prefix that moves CLAUDE_CONFIG_DIR or HOME hides nothing
+test("a caller whose prefix moved the registry still reads as the session above it, and a claude process the registry does not name, or whose environment reads back empty, is a session too", async () => {
+  const { deps, main, root } = machine()
+  const { procs } = registry(root)
+  const moved = { CLAUDE_CONFIG_DIR: join(root, "elsewhere"), HOME: join(root, "elsewhere") }
+  expect(await callerOf(moved, 100, procs)).toBe("a session (session s-1)")
+  const unnamed = (pid: number): Proc | undefined =>
+    pid === 300 ? { comm: "claude", env: { HOME: join(root, "elsewhere") }, ppid: 1 } : procs(pid)
+  expect(await callerOf({}, 100, unnamed)).toBe("a session (claude pid 300)")
+  const unread = (pid: number): Proc | undefined =>
+    pid === 300 ? { comm: "claude", env: {}, ppid: 1 } : procs(pid)
+  expect(await callerOf({}, 100, unread)).toBe("a session (claude pid 300)")
+  const { route, wt } = dirtyWorktree(main)
+  const caller = () => callerOf(moved, 100, procs)
+  expect(await discardBy(wt, { ...deps, caller })).toEqual({
+    code: 1,
+    said: [
+      `playground: a session (session s-1) passes --discard only with --decision <id>: ${route}`,
+    ],
+  })
+  expect(existsSync(wt)).toBe(true)
+})
+
+// The owner's own terminal: no claude process anywhere up its chain, so --discard passes alone
+test("a terminal no claude process runs above passes --discard without a decision", async () => {
+  const { deps, main, root } = machine()
+  const { procs } = registry(root)
+  const terminal = (pid: number): Proc | undefined =>
+    pid === 200 ? { comm: "/bin/zsh", env: {}, ppid: 1 } : procs(pid)
+  expect(await callerOf({}, 100, terminal)).toBeUndefined()
+  const { wt } = dirtyWorktree(main)
+  const caller = () => callerOf({}, 100, terminal)
+  expect(await discardBy(wt, { ...deps, caller })).toEqual({ code: 0, said: [] })
+  expect(existsSync(wt)).toBe(false)
+})
+
+// run-slot's clone lane copies <source>/node_modules from its caller's folder, so only its holder record names the source (PG-699)
+test("runRm --worktree refuses a worktree a running clone reads from, naming the clone, and moves it once the record is gone", async () => {
+  const { deps, main, root } = machine()
+  git(root, "init", "--bare", "-q", join(root, "remote.git"))
+  git(main, "init", "-q", "-b", "canary")
+  writeFileSync(join(main, "README.md"), "x")
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  git(main, "remote", "add", "origin", join(root, "remote.git"))
+  git(main, "push", "-q", "origin", "canary")
+  const wt = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+  git(wt, "push", "-q", "origin", "PG-1-thing")
+  const into = join(main, ".claude", "worktrees", "pg-2")
+  const reading = { destination: into, pid: 4242, source: wt, who: "k3m9px-worker" }
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--worktree", wt], { ...deps, clones: () => [reading] })).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toEqual([
+    `playground: ${wt} is held by k3m9px-worker's node_modules clone (pid 4242) from ${wt} into ${into}`,
+  ])
   expect(existsSync(wt)).toBe(true)
   expect(await runRm(["--worktree", wt], deps)).toBe(0)
   expect(existsSync(wt)).toBe(false)
-  expect(git(main, "worktree", "list")).not.toContain("pg-1")
+})
+
+test("clonesOf reads run-slot's clone holder line while its pid lives, and a line with no source as none", () => {
+  const line = "k3m9px-worker 4242 2026-11-03T05:21:53Z\t/a/src\t/a/dst\n"
+  expect(clonesOf(line, () => true)).toEqual([
+    { destination: "/a/dst", pid: 4242, source: "/a/src", who: "k3m9px-worker" },
+  ])
+  expect(clonesOf(line, () => false)).toEqual([])
+  expect(clonesOf("k3m9px-worker 4242 2026-11-03T05:21:53Z\n", () => true)).toEqual([])
+  expect(clonesOf("", () => true)).toEqual([])
 })
 
 test("rmDeps' notify queues a safe-delete line for the dispatcher through notify.sh", () => {
@@ -134,4 +442,41 @@ test("rmDeps' notify queues a safe-delete line for the dispatcher through notify
     readFileSync(join(data, "ops", "outbox", "ops-safe-delete.jsonl"), "utf8"),
   )
   expect(line).toMatchObject({ job: "safe-delete", text: "s: /x is protected" })
+})
+
+test("rmDeps' clones reads run-slot's clone holder line from the data folder's ops, and no line as no clone", () => {
+  const { root } = machine()
+  const data = join(root, "data")
+  mkdirSync(join(data, "ops"), { recursive: true })
+  const before = process.env.PLAYGROUND_DATA_DIR
+  process.env.PLAYGROUND_DATA_DIR = data
+  try {
+    const deps = rmDeps(join(import.meta.dir, "..", "..", "..", "..", ".."))
+    expect(deps.clones()).toEqual([])
+    writeFileSync(
+      join(data, "ops", "run-slot-clone.holder"),
+      `k3m9px-worker ${process.pid} 2026-11-03T05:21:53Z\t/a/src\t/a/dst\n`,
+    )
+    expect(deps.clones()).toEqual([
+      { destination: "/a/dst", pid: process.pid, source: "/a/src", who: "k3m9px-worker" },
+    ])
+  } finally {
+    if (before === undefined) delete process.env.PLAYGROUND_DATA_DIR
+    else process.env.PLAYGROUND_DATA_DIR = before
+  }
+})
+
+test("processesOf joins lsof's working folders with ps's command lines and each process's sockets", () => {
+  const cwds = "p41\nfcwd\nn/wt/api\np43\nfcwd\nn/wt\np50\nfcwd\n"
+  const ps = "   41 bun run dev\n   43 /x/agent-browser-darwin-arm64\n   50 launchd\n"
+  const sockets = "p43\nf6\nn->0xe55b\nf10\nn/h/.agent-browser/s1.sock\n"
+  expect(processesOf(cwds, ps, sockets)).toEqual([
+    { command: "bun run dev", cwd: "/wt/api", pid: 41, sockets: [] },
+    {
+      command: "/x/agent-browser-darwin-arm64",
+      cwd: "/wt",
+      pid: 43,
+      sockets: ["/h/.agent-browser/s1.sock"],
+    },
+  ])
 })

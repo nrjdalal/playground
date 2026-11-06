@@ -11,6 +11,7 @@ import {
 } from "@/components/dashboard/app-sidebar"
 import { DashboardProvider } from "@/components/dashboard/dashboard"
 import { OwnerMenuProvider } from "@/components/dashboard/owner-menu"
+import { RelayGate } from "@/components/dashboard/relay-gate"
 import { DashboardFooter } from "@/components/dashboard/sidebar"
 import { TabDot } from "@/components/dashboard/tab-dot"
 import { FirstRun, SignInKept } from "@/components/first-run/first-run"
@@ -20,6 +21,7 @@ import { sessionOrUnavailable, UNAVAILABLE } from "@/lib/auth/session"
 import { config } from "@/lib/config"
 import { gateOf, readSetup } from "@/lib/first-run"
 import { dispatcherSlotsOf, readHealth } from "@/lib/health"
+import { localPagesOnly } from "@/lib/local-pages"
 import { thisMachine } from "@/lib/machine"
 import { tabTitle, testDataBadge, vibeBadge } from "@/lib/test-data"
 
@@ -34,20 +36,25 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: { absolute: tabTitle(badge) } }
 }
 
+// Past the cookie cache, like the console's own gate. The Console cross-link is drawn from this, and the browser holds a session snapshot for the cache window, so a cached read leaves someone you just promoted unable to see the console they now have: the link is how they would find it, and /console already lets them in. Costs a session lookup on the API side of a round trip that happens anyway.
+const readSession = () =>
+  sessionOrUnavailable(() => auth.api.getSession({ disableCookieCache: true }))
+
 // Once the API answers its setup route 404 it stays the normal app for the life of this process, so a normal stack asks once.
 let normal = false
 
 export default async function Layout({ children }: { children: React.ReactNode }) {
-  // First run comes before any session read: with no database the API serves only its setup routes, so the first-run pane stands in for the dashboard.
-  if (!normal) {
+  // the hosted build reads its session first, so the owner rung decides before anything else is read
+  const hosted = config.hosted ? await readSession() : null
+  if (hosted === UNAVAILABLE) return <ApiRetry />
+  localPagesOnly(config.hosted, hosted?.user ?? null)
+  // First run comes before any session read: with no database the API serves only its setup routes, so the first-run pane stands in for the dashboard. The hosted build has no first run.
+  if (!normal && !config.hosted) {
     const gate = gateOf(await readSetup(config.api.internalUrl || config.api.url))
     if (gate === "setup") return <FirstRun gate="setup" />
     normal = gate === "normal"
   }
-  // Past the cookie cache, like the console's own gate. The Console cross-link is drawn from this, and the browser holds a session snapshot for the cache window, so a cached read leaves someone you just promoted unable to see the console they now have: the link is how they would find it, and /console already lets them in. Costs a session lookup on the API side of a round trip that happens anyway.
-  const session = await sessionOrUnavailable(() =>
-    auth.api.getSession({ disableCookieCache: true }),
-  )
+  const session = config.hosted ? hosted : await readSession()
 
   if (session === UNAVAILABLE) return <ApiRetry />
   if (!session?.user) return <FirstRun gate="normal" />
@@ -78,7 +85,7 @@ export default async function Layout({ children }: { children: React.ReactNode }
   const badge = await readBadge()
   const machine = thisMachine(await readHealth())
 
-  return (
+  const shell = (
     // The dashboard has no use for organizations, so the sidebar carries its live status and its sessions (manager, workers, runners) instead of the org switcher.
     <DashboardProvider allowed={reachesConsole(session.user, "owner")}>
       <TabDot />
@@ -98,4 +105,6 @@ export default async function Layout({ children }: { children: React.ReactNode }
       </SidebarShell>
     </DashboardProvider>
   )
+  // the hosted build draws the dashboard only while the owner's Mac holds the relay
+  return config.hosted ? <RelayGate>{shell}</RelayGate> : shell
 }

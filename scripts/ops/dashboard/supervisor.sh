@@ -34,6 +34,10 @@ branch=$(git symbolic-ref --short HEAD 2>/dev/null)
 [ "$branch" = "$LIVE" ] || { echo "supervisor: refusing to run in $WT on ${branch:-a detached HEAD}: the dashboard's checkout is on $LIVE" >&2; exit 1; }
 
 say() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$LOG"; }
+# A folder in $S/builds goes to the trash through trash-build.ts, the dashboard-supervisor carve-out's one caller, $2 its reason; a refusal is logged and returns 1, and the folder stays for the next keep_builds
+trash_build() { [ -e "$1" ] || return 0; bun --no-env-file "$D/../../../packages/scripts/src/trash-build.ts" "$1" "$2" >> "$LOG" 2>&1 || { say "the trash refused $1, so it stays (supervisor.log has why)"; return 1; }; }
+# A folder in $S/builds moves aside as <name>.aside-<epoch> and then to the trash, so a refusal leaves only a stray that keep_builds trashes later and never fails the build; returns 1 only when the move aside fails
+set_aside() { [ -e "$1" ] || return 0; local aside; aside="$1.aside-$(date +%s)"; mv "$1" "$aside" || return 1; trash_build "$aside" "$2" || :; }
 result() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$RESULTS"; say "RESULT $*"; }
 
 # The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; NODE_ENV and SKIP_ENV_VALIDATION_SERVER let it build before first run writes its .env, whose values the stack reads at its start; a failure prints its last error line; $1 is the tree it builds, the checkout by default, or prebuild's staging worktree
@@ -51,14 +55,14 @@ build_head() {
     echo "$out" >> "$LOG"
     echo "$out" | grep -E 'error|Error|ERR' | tail -1 | cut -c1-200; return 1
   fi
-  rm -rf "$dir.tmp"; mkdir -p "$dir.tmp"
+  set_aside "$dir.tmp" "a build copy an earlier run left half made" || { echo "moving $dir.tmp aside failed"; return 1; }; mkdir -p "$dir.tmp"
   # next's standalone server leaves .next/static and public for its host to copy beside it
   cp -R "$src/web/next/.next/standalone" "$dir.tmp/web" && mkdir -p "$dir.tmp/web/web/next/.next" && cp -R "$src/web/next/.next/static" "$dir.tmp/web/web/next/.next/static" &&
     { [ ! -d "$src/web/next/public" ] || cp -R "$src/web/next/public" "$dir.tmp/web/web/next/public"; } &&
     echo "$WEB $API" > "$dir.tmp/urls" || { echo "copying the build to $dir failed"; return 1; }
   # the head's own web launcher, bundled into one file, so the web a roll swaps in runs the target's launcher, not the checkout's older one
   (cd "$src" && bun build packages/scripts/src/portless.ts --target=bun --outfile="$dir.tmp/launcher.js") >> "$LOG" 2>&1 || say "bundling ${sha:0:7}'s web launcher failed; its web starts through the checkout's portless.ts"
-  rm -rf "$dir"; mv "$dir.tmp" "$dir"
+  set_aside "$dir" "rebuilt for the Dashboard's URLs" || { echo "moving $dir aside failed"; return 1; }; mv "$dir.tmp" "$dir"
   say "built ${sha:0:7} in $(( $(date +%s) - started ))s, $(du -sh "$dir" | cut -f1)"
 }
 # Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop; a target that migrates, whose commit cannot be had here, or whose staging worktree or install fails, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; the staging worktree goes either way
@@ -86,10 +90,10 @@ prebuild() {
   tell_dispatcher "Dashboard roll to ${target:0:7} FAILED its build; nothing stopped, still on $(git rev-parse --short HEAD)"
   return 1
 }
-# After a pass: keep this head's build and the last one that passed before it, for the next fallback, and remove the rest
+# After a pass: keep this head's build and the last one that passed before it, for the next fallback, and move the rest to the trash, a stray .tmp or .aside-<epoch> folder included
 keep_builds() {
   local before d; before=$(cat "$S/builds/passed" 2>/dev/null)
-  for d in "$S/builds"/*/; do d=$(basename "$d"); [ "$d" = "$1" ] || [ "$d" = "$before" ] || rm -rf "${S:?}/builds/$d"; done
+  for d in "$S/builds"/*/; do d=$(basename "$d"); [ "$d" = "$1" ] || [ "$d" = "$before" ] || trash_build "${S:?}/builds/$d" "neither this head's build nor the last one that passed"; done
   [ "$before" = "$1" ] || echo "$1" > "$S/builds/passed"
 }
 # The API alone, from the checkout's source, under the dev launcher; the web runs on its own (web_up)
@@ -157,7 +161,7 @@ stop_all() {
   "$D/procs.sh" stop dashboard-dev >> "$LOG" 2>&1
   [ "${1:-}" = keep-web ] || stop_web
 }
-# the dashboard's URLs as portless names them for this checkout, read at every check, since portless's proxy can move (http on 1355 to https on 443)
+# the dashboard's URLs as portless names them for this checkout, read at every check, since portless's proxy can move (from 1355 to 443)
 dashboard_urls() { WEB=$(bunx portless get playground) && API=$(bunx portless get api.playground); }
 # Up to 90 tries, a second apart, for the dashboard's health to answer, its URLs read afresh each try: before portless's proxy runs, portless get names its default port
 # The branch the dashboard rolls to, read once at start, and its head on origin, read each time
@@ -172,8 +176,8 @@ setup_pending() { [ -z "${POSTGRES_URL:-}" ] && ! grep -qE "^POSTGRES_URL=[\"']?
 # an importer holds the follower's lock: a follower an earlier supervisor left running counts, so this one's "another importer holds the lock" exit is no outage; the status read gets HELD_WAIT seconds, then is stopped by its own process group (set -m gives it one), so a wedged docker child under it goes too, and exits 2, holder unknown, so a wedged Docker or database never freezes the loop
 follower_held() { local p i; bun api/hono/src/bin/dashboard-ingest.ts status > /dev/null 2>&1 & p=$!; for i in $(seq 1 "${HELD_WAIT:-20}"); do kill -0 "$p" 2>/dev/null || { wait "$p" && return 0 || return 1; }; sleep 1; done; kill -- -"$p" 2>/dev/null; wait "$p" 2>/dev/null; return 2; }
 
-# The bare aliases (playground.localhost, api.playground.localhost) hold the ports of the live stack's own routes in portless's route file, read by alias.ts and never written: its exit is 0 when they do, 1 when one points elsewhere, 2 for a missing file or route
-read_aliases() { bun --no-env-file "$D/alias.ts" "${PORTLESS_STATE_DIR:-$HOME/.portless}/routes.json" "$WEB" "$API" 2>&1; }
+# The bare aliases (playground.localhost, api.playground.localhost) hold the ports of the live stack's own routes in portless's route file, in the folder portlessDir() names, read by alias.ts and never written: its exit is 0 when they do, 1 when one points elsewhere, 2 for a missing file or route
+read_aliases() { bun --no-env-file "$D/alias.ts" "$WEB" "$API" 2>&1; }
 # A mismatch is read again after ALIAS_CONFIRM seconds (6), past the launcher's 2 s alias sync, which an alias waits on after a restart (live.md); one that holds, a missing file or a missing route is one ALIAS FAIL result (run.sh's notify_new alerts it), written again only when it changes, and ALIAS PASS once it is right, so the heartbeat reads ok again
 check_aliases() { local out rc=0; dashboard_urls || return 0; out=$(read_aliases) || rc=$?; if [ $rc -eq 1 ]; then sleep "${ALIAS_CONFIRM:-6}" & wait $!; rc=0; out=$(read_aliases) || rc=$?; fi; if [ $rc -eq 0 ]; then [ -z "${alias_said:-}" ] || result "ALIAS PASS $out"; alias_said=; return 0; fi; [ "$out" = "${alias_said:-}" ] || result "ALIAS FAIL $out"; alias_said=$out; return 1; }
 # Dev up and checked: health answers, verify passes against HEAD, approvals stay off. Prints one summary.
@@ -198,7 +202,7 @@ dev_reason() {
 
 check_dev() {
   wait_dashboard
-  # the launcher's own dev: notes (cmux's refusal names an ERROR) pass over to the line that stopped the stack, a refusal kept
+  # the launcher's own dev: notes pass over to the line that stopped the stack, a refusal kept
   if ! alive dashboard-dev; then echo "dev=DOWN ($(dev_reason < "$DEVLOG" | cut -c1-140))"; return 1; fi
   sleep 3; "$D/procs.sh" record dashboard-dev >> "$LOG" 2>&1
   local version v ok=0
@@ -314,7 +318,7 @@ finish_roll() {
     "$OPS/notify.sh" dashboard "roll to $(git rev-parse --short HEAD) failed after a migration; not falling back"
   else
     # bad-builds first: a supervisor the fallback reloads into keeps off the target at its start; a refusal dev_reason names is no bad build, but the head's own, its settings refusal (its env schema asks for what .env lacks), counts in refused, its third joining bad-builds
-    # every other refusal is the machine's or the checkout's (cmux, the database, another stack, portless's proxy, whose `portless service install` needs the owner's sudo), so a retry each ROLL_GAP is all the supervisor can do, and a refusal no one listed stays out of bad-builds
+    # every other refusal is the machine's or the checkout's (the database, another stack, portless's proxy, whose `portless service install` needs the owner's sudo), so a retry each ROLL_GAP is all the supervisor can do, and a refusal no one listed stays out of bad-builds
     local refusal="" n note="not the head's, no bad build"
     [ "$pulled" -ne 0 ] || refusal=$(dev_reason < "$DEVLOG" 2>/dev/null | sed -n 's/^dev: refusing to start: //p')
     if [ -z "$refusal" ]; then

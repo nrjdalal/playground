@@ -1,4 +1,8 @@
-// PreToolUse hook for every session run from this repo, registered in both settings files: refuses an agent-desktop call that carries --headed, that targets an app on the desktop-owner-apps guard list, or whose target it cannot read, as scripts/hooks/README.md's section states; it reads the list and nothing else, so no setting or file a session writes frees a call.
+// PreToolUse hook for every session run from this repo, registered in both settings files: refuses an agent-desktop call that carries --headed, that targets an app on the desktop-owner-apps guard list, or whose target it cannot read, as scripts/hooks/README.md's section states; it reads that list, and for the bun run ask/thread allowance the main checkout's own package.json (a tree no-main-checkout keeps a session out of), and nothing else a session writes frees a call.
+import { realpathSync } from "node:fs"
+import { join, resolve } from "node:path"
+
+import { mainCheckout } from "../../packages/scripts/src/main-checkout"
 import "../../packages/env/src/aliases"
 import { guardList, isStrings } from "./lists"
 import {
@@ -34,6 +38,35 @@ const LAUNCHERS = new Set([
   "watch",
   "yarn",
 ])
+// bun run <script> scripts whose literal arguments the hook reads as data, each mapped to the Playground entry point that takes argv as plain strings and runs nothing from it; the allowance holds only from the main checkout, where the entry's text is a file no session writes.
+const BUN_DATA_SCRIPTS = new Map([
+  ["ask", "api/hono/src/bin/dashboard-ask.ts"],
+  ["thread", "api/hono/src/bin/dashboard-thread.ts"],
+])
+
+const realOf = (path: string): string => {
+  try {
+    return realpathSync(path)
+  } catch {
+    return resolve(path)
+  }
+}
+
+// Whether the call runs script from the main checkout, where its entry point is a file no session writes (no-main-checkout keeps a session out of that tree). The main checkout is mainCheckout() (see packages/scripts/src/main-checkout.ts), resolved from the hook's own location rather than the call's cwd, so a made folder that git-inits itself and plants scripts/spawn.sh cannot pass as it. The allowance holds only when the effective cwd is itself that path (realOf(cwd) === realOf(mainCheckout()), so bun run reads the same package.json this gate checks, not a nearer one under a made folder), its package.json maps script to the entry, and the entry file is present. Every other cwd, a linked worktree, a made folder under .claude/worktrees with its own package.json, an unknown cwd (no cwd, or a cd to a variable or a substitution), keeps the verdict.
+async function mapsDataScript(cwd: string | undefined, script: string): Promise<boolean> {
+  const entry = BUN_DATA_SCRIPTS.get(script)
+  if (entry === undefined || cwd === undefined) return false
+  if (realOf(cwd) !== realOf(mainCheckout())) return false
+  const pkg = Bun.file(join(cwd, "package.json"))
+  if (!(await pkg.exists())) return false
+  try {
+    const { scripts } = JSON.parse(await pkg.text()) as { scripts?: Record<string, string> }
+    if (scripts?.[script] !== `bun ${entry}`) return false
+  } catch {
+    return false
+  }
+  return await Bun.file(join(cwd, entry)).exists()
+}
 // Wrappers a shell line may hide in: watch joins its words past its options into one sh -c line, flock -c runs its string, and a word of any of them holding a space may be one.
 const LINES = new Set(["flock", "setsid", "watch"])
 const WATCH_TAKES = new Set(["--equexit", "--interval", "--shotsdir", "-n", "-q", "-s"])
@@ -83,7 +116,7 @@ const headed = () =>
   `${GUARD} hook refused this agent-desktop call: it carries --headed, whose physical input moves the owner's own pointer and focus. --headed is the owner's alone, so ${OWNER}.`
 
 const listed = (app: string) =>
-  `${GUARD} hook refused this agent-desktop call: it targets ${app}, an app on the desktop-owner-apps guard list of the owner's own apps. Leave it alone; when the task needs it, ${OWNER}; or, to take ${app} off the list in the owner's login extension, tell your lead, and the dispatcher hands the owner the ! command that does it.`
+  `${GUARD} hook refused this agent-desktop call: it targets ${app}, an app on the desktop-owner-apps guard list of the owner's own apps. Leave it alone; when the task needs it, ${OWNER}; or, to take ${app} off the list in the owner's login extension, tell your lead, who posts an apps decision with bun run ask new (.agents/dashboard/asks.md), whose Approve takes it off.`
 
 const unread = (what: string) =>
   `${GUARD} hook refused this agent-desktop call: it cannot read ${what} before the command runs, so it cannot tell whether the call carries --headed or targets an app on the desktop-owner-apps list. Write the agent-desktop command's every word literally as a command of its own, or ${OWNER}.`
@@ -94,7 +127,7 @@ const front = (sub: string) =>
 const SCRIPT_IN_CALL =
   "a script file in a call that names agent-desktop, since the call may change it"
 
-// A list refusal's reason alone, without the fix it names, since only the owner's own ! command changes the list.
+// A list refusal's reason alone, without the fix it names, since only the owner's act changes the list.
 const reasonOf = (refusal: string) =>
   refusal.split(/: tell your lead, and the dispatcher hands the owner|\. Restore the file/)[0]
 
@@ -235,7 +268,7 @@ function lister(environment: Environment) {
     (loaded ??= guardList(GUARD, "desktop-owner-apps", isStrings, [], environment).then((l) =>
       l.refusal
         ? {
-            refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's own ! command: tell your lead, and the dispatcher hands the owner the command, then run the call again.`,
+            refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's act: tell your lead, and the dispatcher hands the owner the command that restores the list, then run the call again.`,
           }
         : { apps: new Set((l.list ?? []).map(appName)) },
     ))
@@ -303,6 +336,15 @@ async function judgeText(
       return unread(
         `the program it runs (it comes from ${first.unknown ?? "a word it cannot read"})`,
       )
+    if (
+      name === "bun" &&
+      args[0]?.value === "run" &&
+      args[1] !== undefined &&
+      !unreadable(args[1]) &&
+      args.slice(2).every((a) => !unreadable(a)) &&
+      (await mapsDataScript(here.cwd, args[1].value))
+    )
+      return
     if (INTERPRETERS.has(name))
       for (const a of args) if (await callsTool(a.value)) return unread(`what ${name} runs`)
     if (name === "source" || name === "." || first?.value.includes("/"))

@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test"
+import { join } from "node:path"
 
 // The router's auth refuses Better Auth's default secret under NODE_ENV=production, which CI's build step sets; any secret serves requests that carry no session. Set before the router loads.
 process.env.BETTER_AUTH_SECRET ||= "inbox-router-test-secret-not-for-use-anywhere"
 const { inboxRouter } = await import("../../../../../api/hono/src/routers/inbox")
 const { env } = await import("../../../../../packages/env/dist/api-hono.mjs")
+const { refuseAgent } = await import("../../../../../api/hono/src/middlewares/dashboard")
+const { site } = await import("../../../../../packages/config/src/site")
 
 // Validated, the setting is a list; with validation skipped, as in CI, it is the raw comma-separated string.
 const trusted = (): string => {
@@ -117,5 +120,89 @@ describe("marking updates read", () => {
     expect((await read({ origin: "http://evil.localhost" }, peer("127.0.0.1"))).status).toBe(403)
     expect((await read({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
     expect((await read({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
+  })
+})
+
+describe("an Approve the dashboard carries out: an accept, an apps change, a grant or a guard setting (PG-658, PG-1090)", () => {
+  // the same answer such a card's Approve posts; past every guard it runs the decision's step (stepOf), so each refusal below is one that runs nothing
+  const approve = (headers: Record<string, string>, server?: ReturnType<typeof peer>) =>
+    inboxRouter.request(
+      "http://127.0.0.1/0b9c6f1e-1111-4111-8111-000000000658/answer",
+      {
+        body: JSON.stringify({ action: "approve", seen: "2026-11-03T20:00:00.000Z" }),
+        headers: { "content-type": "application/json", ...headers },
+        method: "POST",
+      },
+      server,
+    )
+
+  test("is refused without the dashboard's own origin", async () => {
+    expect((await approve({}, peer("127.0.0.1"))).status).toBe(403)
+    expect((await approve({ origin: "http://evil.localhost" }, peer("127.0.0.1"))).status).toBe(403)
+  })
+
+  test("is refused off loopback, and where the peer cannot be read", async () => {
+    expect((await approve({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
+    expect((await approve({ origin: trusted() })).status).toBe(403)
+  })
+
+  test("is refused with no session, so only the signed-in owner's click reaches it", async () => {
+    expect((await approve({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
+  })
+
+  test("a guard setting's Approve takes the same guards, and the route hands it this machine's data folder alone", async () => {
+    const source = await Bun.file(
+      join(import.meta.dir, "../../../../../api/hono/src/routers/inbox.ts"),
+    ).text()
+    expect(source).toContain("settingsData: dataDir(),")
+    expect(source).toContain('import { dataDir } from "@/lib/sessions/paths"')
+    expect((await approve({ origin: "http://evil.localhost" }, peer("127.0.0.1"))).status).toBe(403)
+    expect((await approve({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
+    expect((await approve({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
+  })
+})
+
+describe("a secret's two routes refuse the agent sign-in (PG-1023)", () => {
+  // the agent sign-in holds the owner rung, so each route that moves a secret carries refuseAgent after it
+  test("Submit and Show each carry refuseAgent", () => {
+    for (const path of ["/:id/secret", "/:id/reveal"]) {
+      const handlers = inboxRouter.routes.filter(
+        (route) => route.method === "POST" && route.path === path,
+      )
+      expect(handlers.map((route) => route.handler)).toContain(refuseAgent)
+    }
+  })
+
+  test("refuseAgent turns away the agent's account with 403, and lets the owner's through", async () => {
+    const { Hono } = await import("hono")
+    const as = (email: string) =>
+      new Hono<{ Variables: { user: { email: string } } }>()
+        .use("/*", async (c, next) => {
+          c.set("user", { email })
+          await next()
+        })
+        .post("/reveal", refuseAgent, (c) => c.text("shown"))
+        .request("http://127.0.0.1/reveal", { method: "POST" })
+    const refused = await as(site.agent.email)
+    expect(refused.status).toBe(403)
+    expect(await refused.text()).toContain("owner's own click")
+    expect(await (await as(site.owner.email)).text()).toBe("shown")
+  })
+})
+
+describe("a reveal card's Show (PG-1023)", () => {
+  const reveal = (headers: Record<string, string>, server?: ReturnType<typeof peer>) =>
+    inboxRouter.request(
+      "http://127.0.0.1/0b9c6f1e-1111-4111-8111-000000000001/reveal",
+      { headers, method: "POST" },
+      server,
+    )
+
+  test("is a write, refused off the dashboard's origin, off loopback, and with no session", async () => {
+    expect((await reveal({}, peer("127.0.0.1"))).status).toBe(403)
+    expect((await reveal({ origin: "http://evil.localhost" }, peer("127.0.0.1"))).status).toBe(403)
+    expect((await reveal({ origin: trusted() }, peer("192.168.1.20"))).status).toBe(403)
+    expect((await reveal({ origin: trusted() })).status).toBe(403)
+    expect((await reveal({ origin: trusted() }, peer("127.0.0.1"))).status).toBe(401)
   })
 })

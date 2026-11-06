@@ -10,16 +10,18 @@ test("usage.accounts takes each account's end, lead, marks, billing day and week
       email: "third@example.test",
       ends: null,
       nearLimit: true,
+      own: true,
       weekReset: { hour: 15.5, weekday: 1 },
     },
   ]
   expect(checkSetting("usage.accounts", rows)).toMatchObject({ ok: true, value: rows })
 })
 
-test("usage.accounts refuses an account listed twice, a field it does not know and a bad reset", () => {
+test("usage.accounts refuses an account listed twice, a field it does not know, a bad reset and an own that is no boolean", () => {
   const one = { email: "first@example.test" }
   expect(checkSetting("usage.accounts", [one, one]).ok).toBe(false)
   expect(checkSetting("usage.accounts", [{ ...one, plan: "x" }]).ok).toBe(false)
+  expect(checkSetting("usage.accounts", [{ ...one, own: "yes" }]).ok).toBe(false)
   expect(checkSetting("usage.accounts", [{ ...one, weekReset: { hour: 24, weekday: 0 } }]).ok).toBe(
     false,
   )

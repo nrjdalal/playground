@@ -8,12 +8,15 @@ import {
   type Counts,
   count,
   type File,
+  changedFiles,
   KEPT,
   type Kept,
   list,
+  located,
   lowered,
   refusal,
   risen,
+  risenKinds,
   stale,
   tree,
 } from "../../../../../packages/scripts/src/trace-count/count"
@@ -211,11 +214,15 @@ describe("the ratchet", () => {
     })
   })
 
+  // a made-up owner name turns on ownerName's quote patterns, which read no real name, so a new quote fails here; the owner's own names count only in bun run trace-count
   test("no count in the tree, less the kept hits, is over counts.json", async () => {
     const baseline = (await Bun.file(COUNTS).json()) as Counts
     const kept = (await Bun.file(KEPT).json()) as Kept[]
-    const over = risen(count(await tree(root), undefined, undefined, kept), baseline)
-    expect(over.length ? refusal(over) : "").toBe("")
+    const files = await tree(root)
+    const repos = { ...UNSET_REPOS, owner: [["zq", "made", "up"].join("-")] }
+    const over = risen(count(files, undefined, repos, kept), baseline)
+    const at = () => located(files, risenKinds(over), undefined, repos, kept, changedFiles(root))
+    expect(over.length ? refusal(over, at()) : "").toBe("")
   })
 })
 
@@ -332,7 +339,7 @@ describe("no-public-leak's list", () => {
     expect(none.stdout.toString()).toBe("")
     expect(none.stderr.toString()).toContain("factory.archiveRepo and owner.names are unset")
     expect(none.stderr.toString()).toContain(
-      "tell your lead, and the dispatcher hands the owner ! playground settings set to type in the dispatcher's terminal window, which sets them",
+      "tell your lead, and the dispatcher asks the owner to fill in Privacy on the Dashboard's Settings page, which sets them",
     )
     expect(none.stderr.toString()).toContain("nothing was counted")
     expect(none.stderr.toString()).toContain(
@@ -341,6 +348,10 @@ describe("no-public-leak's list", () => {
     const named = run({ "factory.archiveRepo": "qmarsh/vault" })
     expect(named.exitCode).toBe(2)
     expect(named.stderr.toString()).toContain("owner.names is unset")
+    expect(named.stderr.toString()).toContain(
+      "Privacy on the Dashboard's Settings page, which sets it",
+    )
+    expect(none.stderr.toString() + named.stderr.toString()).not.toContain("terminal")
     expect(named.stderr.toString()).toContain("nothing was counted")
     expect(named.stderr.toString()).toContain(
       "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
@@ -379,5 +390,90 @@ describe("no-public-leak's list", () => {
     expect(run.stderr.toString()).toContain(
       "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
     )
+  })
+})
+
+// a harness's untracked output in a worktree tripped the ratchet, and the refusal named no file
+describe("the tree a count reads", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "trace-count-tree-"))
+  afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+  // nothing from this machine's git: a hook exports GIT_DIR and GIT_INDEX_FILE, which would point every git call here, tree()'s included, at the checkout being committed
+  const git = (...args: string[]) =>
+    Bun.spawnSync(["git", "-C", scratch, "-c", "user.email=t@t", "-c", "user.name=t", ...args], {
+      env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+    })
+
+  test("counts a tracked or staged file, never an untracked one", async () => {
+    const hook = Object.entries(process.env).filter(([key]) => key.startsWith("GIT_"))
+    for (const [key] of hook) delete process.env[key]
+    try {
+      expect(git("init", "-q").exitCode).toBe(0)
+      writeFileSync(join(scratch, "notes.ts"), `see ${ref(12)}\n`)
+      git("add", "notes.ts")
+      expect(git("commit", "-qm", "first").exitCode).toBe(0)
+      writeFileSync(join(scratch, "dump.txt"), `a replay of ${ref(34)}\n`)
+      expect(count(await tree(scratch)).issueRefs).toBe(1)
+      git("add", "dump.txt")
+      expect(count(await tree(scratch)).issueRefs).toBe(2)
+    } finally {
+      for (const [key, value] of hook) process.env[key] = value
+    }
+  })
+})
+
+describe("a refusal names where each hit is", () => {
+  const files: File[] = [
+    { path: "docs/a.md", text: `one\nsee ${ref(12)}\n` },
+    { path: "docs/b.md", text: `also ${ref(34)}\n` },
+    { path: "c.ts", text: "clean\n" },
+  ]
+
+  test("names each file and line holding a risen kind", () => {
+    const at = located(files, ["issueRefs"])
+    expect(at).toEqual(["docs/a.md:2: issueRefs", "docs/b.md:1: issueRefs"])
+    expect(refusal(["issueRefs: 2 in the tree, counts.json allows 0"], at)).toContain(
+      "\ndocs/a.md:2: issueRefs\ndocs/b.md:1: issueRefs",
+    )
+  })
+
+  test("leaves out a line kept.json keeps", () => {
+    const kept: Kept = {
+      hits: 1,
+      kind: "issueRefs",
+      line: `see ${ref(12)}`,
+      path: "docs/a.md",
+      reason: "made up",
+    }
+    expect(located(files, ["issueRefs"], undefined, undefined, [kept])).toEqual([
+      "docs/b.md:1: issueRefs",
+    ])
+  })
+
+  test("names a changed file's hits alone, and every file's when the changed ones hold none", () => {
+    expect(located(files, ["issueRefs"], undefined, undefined, [], ["docs/b.md"])).toEqual([
+      "docs/b.md:1: issueRefs",
+    ])
+    expect(located(files, ["issueRefs"], undefined, undefined, [], ["c.ts"])).toHaveLength(2)
+  })
+
+  test("names every risen kind, each from the changed files when they hold it and from every file when they do not", () => {
+    const two: File[] = [...files, { path: "docs/old.md", text: `ask ${OLD}\n` }]
+    expect(
+      located(two, ["issueRefs", "oldNames"], undefined, undefined, [], ["docs/b.md"]),
+    ).toEqual(["docs/b.md:1: issueRefs", "docs/old.md:1: oldNames"])
+  })
+
+  test("names a kept line once it holds more hits than kept.json keeps", () => {
+    const kept: Kept = {
+      hits: 1,
+      kind: "issueRefs",
+      line: `see ${ref(12)} and ${ref(34)}`,
+      path: "docs/a.md",
+      reason: "made up",
+    }
+    const grown: File[] = [{ path: "docs/a.md", text: `see ${ref(12)} and ${ref(34)}\n` }]
+    expect(located(grown, ["issueRefs"], undefined, undefined, [kept])).toEqual([
+      "docs/a.md:1: issueRefs",
+    ])
   })
 })

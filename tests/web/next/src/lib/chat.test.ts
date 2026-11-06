@@ -5,6 +5,7 @@ import {
   applyOutbox,
   attachmentsOf,
   DashboardChats,
+  firstLineOf,
   keepTurnIds,
   outboxMessage,
   outboxOf,
@@ -18,6 +19,7 @@ import {
 } from "../../../../../web/next/src/lib/chat"
 import { historyOf, withOlder, withSteps } from "../../../../../web/next/src/lib/dashboard"
 import { UNSENT_MARKER, type OutboxMessage } from "../../../../../web/next/src/lib/outbox"
+import { READ_ONLY_LINE } from "../../../../../web/next/src/lib/relay"
 
 const step = (fields: Partial<Entry> & Pick<Entry, "id" | "kind">): Entry => ({
   at: "2026-10-06T10:00:00.000Z",
@@ -90,9 +92,20 @@ describe("toUIMessages", () => {
     }
   })
 
-  test("a peer's message keeps its sender", () => {
-    const [message] = toUIMessages([step({ from: "builder", id: "p1", kind: "peer", text: "go" })])
+  test("a peer's message keeps its sender and its whole text, which its folded row opens to", () => {
+    const text = "PR #12 merged.\n\n- the sha is abc123\n- next is #13"
+    const [message] = toUIMessages([step({ from: "builder", id: "p1", kind: "peer", text })])
     expect(message?.metadata).toMatchObject({ from: "builder", kind: "peer" })
+    expect(message?.role).toBe("user")
+    expect(message?.parts).toEqual([{ text, type: "text" }])
+  })
+
+  // A folded row shows a message's first line, its first line with words, its thread marker aside.
+  test("firstLineOf: the first line holding words, trimmed, a leading thread marker dropped", () => {
+    expect(firstLineOf("PR #12 merged.\n\n- the sha is abc123")).toBe("PR #12 merged.")
+    expect(firstLineOf("\n\n   \n  Done, see below  \nmore")).toBe("Done, see below")
+    expect(firstLineOf("[thread:k7mq] the plan is ready\nnext")).toBe("the plan is ready")
+    expect(firstLineOf("   ")).toBe("")
   })
 
   test("a session's turn is one assistant message, its thinking, words and calls in order, named for its first step", () => {
@@ -494,7 +507,7 @@ describe("DashboardChats", () => {
     calls[0]?.resolve(refused("INTERNAL_SERVER_ERROR"))
     await settle()
     expect(chats.outbox().map((m) => m.state)).toEqual(["failed", "sending"])
-    expect(chats.outbox()[0]?.reason).toContain("look at its terminal before Retry")
+    expect(chats.outbox()[0]?.reason).toContain("reads Delivered once its transcript shows it")
   })
 
   // A dashboard restart restarts next dev too, and the page reloads when its dev socket reaches the new server: what was unsent goes again from the tab's storage, under the same id.
@@ -599,6 +612,72 @@ describe("DashboardChats", () => {
       jest.useRealTimers()
     }
   })
+
+  // Claude Code held it, then the dashboard restarted and forgot that: every try after the first carries when it was first held, through the restart's unanswered tries, so the API that comes back reads it again rather than typing it twice
+  test("a held message's tries carry when it was first held, through an API restart", async () => {
+    jest.useFakeTimers()
+    try {
+      const start = Date.now()
+      const held: (string | undefined)[] = []
+      const send = (async (
+        _to: string,
+        _text: string,
+        _files: string[],
+        _id: string,
+        { queuedAt }: { queuedAt?: string } = {},
+      ) => {
+        held.push(queuedAt)
+        const elapsed = Date.now() - start
+        if (elapsed < 10_000) return refused("CONFLICT", { delivery: "QUEUED" })
+        if (elapsed < 40_000) return refused("NETWORK_ERROR")
+        return typed
+      }) as never
+      const chats = new DashboardChats({ label: (name) => name, send })
+      chats.post("dispatcher", { attachments: [], text: "while it compacts" })
+      for (let second = 0; second <= 120; second++) {
+        await flush()
+        if (chats.outbox()[0]?.state === "typed") break
+        jest.advanceTimersByTime(1000)
+      }
+      expect(chats.outbox().map((m) => m.state)).toEqual(["typed"])
+      const first = new Date(start).toISOString()
+      expect(held[0]).toBeUndefined()
+      expect(held.slice(1)).toEqual(held.slice(1).map(() => first))
+      expect(held.length).toBeGreaterThan(3)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  // the API times the hold from the paste, which a queued_command's stamp follows, rather than from when this tab read the answer
+  test("a held message keeps the API's time for the hold, when its refusal gives one", async () => {
+    const pasted = "2026-10-18T02:29:50.000Z"
+    const held: (string | undefined)[] = []
+    let tries = 0
+    const send = (async (
+      _to: string,
+      _text: string,
+      _files: string[],
+      _id: string,
+      { queuedAt }: { queuedAt?: string } = {},
+    ) => {
+      held.push(queuedAt)
+      tries += 1
+      return tries === 1 ? refused("CONFLICT", { delivery: "QUEUED", queuedAt: pasted }) : typed
+    }) as never
+    jest.useFakeTimers()
+    try {
+      const chats = new DashboardChats({ label: (name) => name, send })
+      chats.post("dispatcher", { attachments: [], text: "while it compacts" })
+      for (let second = 0; second <= 20 && chats.outbox()[0]?.state !== "typed"; second++) {
+        await flush()
+        jest.advanceTimersByTime(1000)
+      }
+      expect(held).toEqual([undefined, pasted])
+    } finally {
+      jest.useRealTimers()
+    }
+  })
 })
 
 describe("refreshingReplies", () => {
@@ -638,5 +717,75 @@ describe("transcriptFor", () => {
 
   test("an empty slot naming the session the other slot reads fills no chat", () => {
     expect(transcriptFor({ entries: [], sessionId: null, sessionName: "dispatcher" })).toBeNull()
+  })
+})
+
+describe("the hosted build's outbox", () => {
+  // in a browser with no paired key the relay carries no send, so a message read "retry 3 · <session> is not live" and retried with no end
+  test("fails a new message at once with the read-only line, sends nothing and never retries it", async () => {
+    const { calls, send } = fakeSend()
+    const chats = new DashboardChats({ label: (name) => name, readOnly: true, send })
+    chats.post("dispatcher", { attachments: [], text: "hello" })
+    await settle()
+    const [dropped] = chats.outbox()
+    expect(dropped?.state).toBe("failed")
+    expect(dropped?.reason).toBe(READ_ONLY_LINE)
+    chats.retry("dispatcher", dropped!.id)
+    await settle()
+    expect(calls).toEqual([])
+    expect(chats.outbox().map((m) => m.state)).toEqual(["failed"])
+  })
+
+  test("drops what a reloaded tab still held, with the same reason, and sends none of it", async () => {
+    const kept = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => void kept.set(key, value),
+    }
+    const before = fakeSend()
+    const page = new DashboardChats({ label: (name) => name, send: before.send, storage })
+    page.resume()
+    page.post("dispatcher", { attachments: [], text: "held" })
+    await settle()
+    before.calls[0]?.resolve(refused("NETWORK_ERROR"))
+    await settle()
+    const after = fakeSend()
+    const hosted = new DashboardChats({
+      label: (name) => name,
+      readOnly: true,
+      send: after.send,
+      storage,
+    })
+    hosted.resume()
+    await settle()
+    expect(after.calls).toEqual([])
+    expect(hosted.outbox().map((m) => [m.state, m.reason])).toEqual([["failed", READ_ONLY_LINE]])
+  })
+
+  test("sends what a reloaded tab still held once the page reads a paired key, and drops nothing", async () => {
+    const kept = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => kept.get(key) ?? null,
+      setItem: (key: string, value: string) => void kept.set(key, value),
+    }
+    const before = fakeSend()
+    const page = new DashboardChats({ label: (name) => name, send: before.send, storage })
+    page.resume()
+    page.post("dispatcher", { attachments: [], text: "held" })
+    await settle()
+    before.calls[0]?.resolve(refused("NETWORK_ERROR"))
+    await settle()
+    const after = fakeSend()
+    const hosted = new DashboardChats({
+      label: (name) => name,
+      readOnly: true,
+      send: after.send,
+      storage,
+    })
+    hosted.setReadOnly(false)
+    hosted.resume()
+    await settle()
+    expect(after.calls.map((call) => call.text)).toEqual(["held"])
+    expect(hosted.outbox().map((m) => m.state)).toEqual(["sending"])
   })
 })

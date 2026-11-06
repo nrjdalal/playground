@@ -17,6 +17,7 @@ import { provenLocal } from "../../../../../../api/hono/src/lib/sessions/guard"
 import {
   backfill,
   connect,
+  INGEST_LOCK,
   ingestFile,
   mergeSession,
   readAll,
@@ -240,7 +241,7 @@ describe.skipIf(!dockerUp())("ingest", () => {
     writeFileSync(paths[2]!, ask(FOREIGN, "another factory's subagent"))
     const pass = async (optIn: string | undefined) => {
       const keys = [
-        "PLAYGROUND_CMUX_SESSIONS",
+        "PLAYGROUND_ALL_SESSIONS",
         "PLAYGROUND_DATA_DIR",
         "PLAYGROUND_FIXTURE",
         "PLAYGROUND_LIVE_READS",
@@ -248,8 +249,8 @@ describe.skipIf(!dockerUp())("ingest", () => {
       const saved = keys.map((key) => [key, process.env[key]] as const)
       Object.assign(process.env, { PLAYGROUND_DATA_DIR: data, PLAYGROUND_LIVE_READS: "1" })
       delete process.env.PLAYGROUND_FIXTURE
-      if (optIn === undefined) delete process.env.PLAYGROUND_CMUX_SESSIONS
-      else process.env.PLAYGROUND_CMUX_SESSIONS = optIn
+      if (optIn === undefined) delete process.env.PLAYGROUND_ALL_SESSIONS
+      else process.env.PLAYGROUND_ALL_SESSIONS = optIn
       try {
         for (const path of paths) await ingestFile(db, projects, path)
         const stored =
@@ -1134,6 +1135,39 @@ describe.skipIf(!dockerUp())("ingest", () => {
       expect(await tagOf(session, "t1")).toEqual({ thread_id: "jk9m", thread_seq: 1 })
       expect(await tagOf(session, "t2")).toEqual({ thread_id: "jk9m", thread_seq: 2 })
     })
+  })
+
+  test("a fenced client writes while its lock connection holds the lock; once the lock is gone its next chunk rolls back and it is told (#584)", async () => {
+    // Loaded here, so a checkout of canary's source (no fence) fails only this test.
+    const ingest = await import("../../../../../../api/hono/src/lib/sessions/ingest")
+    const session = "11111111-2222-4333-8444-000000000584"
+    const path = join(projects, PROJECT, `${session}.jsonl`)
+    const offset = async () =>
+      (await admin`select byte_offset from claude_transcript where path = ${path}`)[0]
+        ?.byte_offset as number
+    const holder = await new SQL(url, { max: 1 }).reserve()
+    try {
+      const [row] = await holder`select pg_advisory_lock(${INGEST_LOCK}), pg_backend_pid() as pid`
+      const fenced = connect(url)
+      const told: string[] = []
+      ingest.fence(fenced, Number(row?.pid), (why) => told.push(why))
+      writeFileSync(path, human("f1", "first", "2026-10-06T10:00:00.000Z"))
+      await ingestFile(fenced, projects, path)
+      await ingest.flushTokens(fenced)
+      expect(await entryCount(session)).toBe(1)
+      const before = await offset()
+      expect(told).toEqual([])
+
+      await holder`select pg_advisory_unlock(${INGEST_LOCK})`
+      appendFileSync(path, human("f2", "second", "2026-10-06T10:00:01.000Z"))
+      await expect(ingestFile(fenced, projects, path)).rejects.toThrow("no longer holds it")
+      for (let i = 0; i < 100 && told.length === 0; i++) await Bun.sleep(10)
+      expect(await entryCount(session)).toBe(1)
+      expect(await offset()).toBe(before)
+      expect(told).toEqual([`pid ${row?.pid} no longer holds it, so a write rolled back`])
+    } finally {
+      holder.release()
+    }
   })
 })
 

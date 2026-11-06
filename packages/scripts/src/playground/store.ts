@@ -113,6 +113,8 @@ export const contentOf = async (
 
 export type Io = {
   data: string
+  // the calling session's name in Claude Code's registry, which a write records as its author
+  name?: string
   out: Out
   // the caller's PLAYGROUND_ROLE, which a factory session sets and the owner's own terminal does not
   role?: string
@@ -120,22 +122,40 @@ export type Io = {
   write: (path: string, data: string | Uint8Array) => Promise<unknown>
 }
 
-// The terminal's Io: the data folder, stdout, stdin and the caller's PLAYGROUND_ROLE, an empty one counting as none.
-export const terminalIo = (env: Record<string, string | undefined> = process.env): Io => ({
-  data: dataDir(env),
-  out: console.log,
-  role: env.PLAYGROUND_ROLE || undefined,
-  stdin: () => Bun.stdin.text(),
-  write: Bun.write,
-})
+// The terminal's Io: the data folder, stdout, stdin, the caller's PLAYGROUND_ROLE, an empty one counting as none, and a session's name from CLAUDE_CODE_SESSION_ID.
+export const terminalIo = async (
+  env: Record<string, string | undefined> = process.env,
+): Promise<Io> => {
+  const role = env.PLAYGROUND_ROLE || undefined
+  const session = role && env.CLAUDE_CODE_SESSION_ID
+  return {
+    data: dataDir(env),
+    // loaded for a session alone, so the CLI's own import graph stays free of the hooks
+    name: session
+      ? await import("../../../../scripts/hooks/role")
+          .then(({ registryName }) => registryName(session, env))
+          .catch(() => undefined)
+      : undefined,
+    out: console.log,
+    role,
+    stdin: () => Bun.stdin.text(),
+    write: Bun.write,
+  }
+}
 
-// Who a write from the terminal is: the CLI as its actor, --by as its author (the owner when not given), with its reason.
-const whoOf = (options: Record<string, string[]>) => ({
-  actor: "cli",
-  author: one(options, "--by") ?? "owner",
-  inboxRef: null,
-  reason: need(one(options, "--reason"), "--reason"),
-})
+// Who a write from the terminal is: the CLI as its actor, the calling session as its author (its name, else its role, else the owner), with its reason.
+const whoOf = (options: Record<string, string[]>, io: Io) => {
+  if (options["--by"])
+    throw new Usage(
+      "--by is gone: a write's author is the calling session, by its name or PLAYGROUND_ROLE, and the owner with no role",
+    )
+  return {
+    actor: "cli",
+    author: io.role ? (io.name ?? io.role) : "owner",
+    inboxRef: null,
+    reason: need(one(options, "--reason"), "--reason"),
+  }
+}
 
 const done = <T>(result: Outcome<T>): T => {
   if (!result.ok) throw new Error(`${result.status} ${result.message}`)
@@ -221,7 +241,7 @@ export async function extCommand(words: string[], io: Io): Promise<number> {
         io.data,
         at,
         { body: null, files: null, value: null, ...content },
-        whoOf(options),
+        whoOf(options, io),
         false,
       ),
     )
@@ -232,28 +252,35 @@ export async function extCommand(words: string[], io: Io): Promise<number> {
   } else if (verb === "import" && options["--from-tree"]) {
     const dir = one(options, "--from-tree")!
     const who = {
-      ...whoOf({ ...options, "--reason": options["--reason"] ?? [`seeded from ${dir}`] }),
+      ...whoOf({ ...options, "--reason": options["--reason"] ?? [`seeded from ${dir}`] }, io),
     }
     for (const line of done(importLists(io.data, dir, Boolean(options["--dry-run"]), who)).lines)
       io.out(line)
   } else if (verb === "import") {
     const dir = need(positional[0], "a folder to import")
-    const who = whoOf({ ...options, "--reason": options["--reason"] ?? [`imported from ${dir}`] })
+    const who = whoOf(
+      { ...options, "--reason": options["--reason"] ?? [`imported from ${dir}`] },
+      io,
+    )
     for (const line of done(importFrom(io.data, dir, Boolean(options["--dry-run"]), who)).lines)
       io.out(line)
   } else if (verb === "score" || verb === "accept" || verb === "reject") {
     if (verb === "accept" && io.role)
       throw new Error(
-        `accept is the owner's own call, so a session with a role (${io.role}) scores a proposal instead; the owner runs \`env -u PLAYGROUND_ROLE playground ext accept …\` as a ! command in the dispatcher's terminal window, which carries PLAYGROUND_ROLE=dispatcher`,
+        `accept is the owner's own call, so a session with a role (${io.role}) scores a proposal instead, and asks for the accept as an accept decision with bun run ask new, whose Approve has the dashboard run it`,
+      )
+    // a score's author is the session by name, never its role, since two sessions of one role, or one whose registry a command redirects, would read as one author
+    if (verb === "score" && io.role && !io.name)
+      throw new Error(
+        `no name in Claude Code's registry resolves for this session (role ${io.role}), so its score is refused rather than recorded under the role; score from a named session, as every session spawn.sh starts is`,
       )
     const at = ref()
     const rev = need(positional[3], "a rev")
-    const who = whoOf(options)
+    const who = whoOf(options, io)
     const score = verb === "score" ? Number(need(positional[4], "a score from 0 to 5")) : undefined
     if (score !== undefined && !(Number.isInteger(score) && score >= 0 && score <= 5))
       throw new Usage("a score is a whole number from 0 to 5")
-    const verdict: Verdict =
-      verb === "score" ? { kind: "score", reviewer: who.author, score: score! } : { kind: verb }
+    const verdict: Verdict = verb === "score" ? { kind: "score", score: score! } : { kind: verb }
     const judged = done(judgeItem(io.data, at, rev, verdict, who))
     io.out(`rev ${judged.rev} is ${judged.state}`)
   } else if (verb === "import-scripts") {

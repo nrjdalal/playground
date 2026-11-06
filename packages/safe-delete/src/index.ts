@@ -1,5 +1,6 @@
 import {
   appendFileSync,
+  type Dirent,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -22,13 +23,33 @@ export type Roots = { home: string; main: string; trash: string }
 // protected and tripwire refusals go to the dispatcher through the ops notify line; refused is a plain no.
 export type Refusal = { kind: "protected" | "refused" | "tripwire"; refused: string }
 
-// What tells a worktree is held: every process's working folder (null when they cannot be listed), the roster's live statuses, and the roster's path.
-export type Holders = { cwds: string[] | null; live: string[]; roster: string }
+// A process with a working folder: its command line, and the unix sockets it holds open, read for an agent-browser daemon alone.
+export type Proc = { command: string; cwd: string; pid: number; sockets: string[] }
+
+// A running node_modules clone, from run-slot's clone holder record: the session that runs it, its pid, the checkout it copies from and the one it copies into.
+export type Clone = { destination: string; pid: number; source: string; who: string }
+
+// What tells a worktree is held: the running clones, a reader quarantine calls again right before its move, the roster's live statuses, the folders beyond the other worktrees read for links into it (linkPlaces), every process with a working folder (null when they cannot be listed), and the roster's path; whether a merged PR holds a commit (null when that cannot be asked), --discard, which lets uncommitted or unlanded work go, and the pull request whose session used the worktree, since another session of that PR shares its number and holds it by no more than that.
+export type Holders = {
+  clones: () => Clone[]
+  discard: boolean
+  live: string[]
+  merged: (sha: string, at: string) => boolean | null
+  places: () => string[]
+  pr?: string
+  procs: Proc[] | null
+  roster: string
+}
+
+// An agent-browser process, its daemon or a client, by its command's first word.
+export const isAgentBrowser = (command: string): boolean =>
+  /^agent-browser(?:-[\w-]+)?$/.test(basename(command.split(" ")[0]!))
 
 export type Quarantined = { files: number; id: string; size: number; to: string }
 
 export type TrashEntry = {
   at: string
+  carveOut?: string
   files: number
   id: string
   path: string
@@ -43,6 +64,21 @@ export const MARKER = ".safe-delete-scratch"
 export const LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 }
 
 export const PURGE = { days: 7, minFree: 50e9 }
+
+// One script's exception to the protected list: the entries directly in one exact folder in the data folder (the trash's parent, so it follows PLAYGROUND_DATA_DIR), each at most its files and bytes; the folder itself, its parent, a sibling and anything deeper stay protected.
+export type CarveOut = { bytes: number; files: number; folder: string }
+
+// Each script's carve-out by the script's name, one entry per script, A to Z, which only that script passes as quarantine's carveOut; playground rm takes none.
+export const CARVE_OUTS: Record<string, CarveOut> = {
+  // scripts/ops/dashboard/supervisor.sh's production builds, one folder per head; one measured 2,251 files and 78 MB on 2 Nov
+  "dashboard-supervisor": {
+    bytes: 256 * 1024 ** 2,
+    files: 4000,
+    folder: "ops/dashboard/builds",
+  },
+  // packages/scripts/src/playground/jobs.ts's rendered LaunchAgent plists, one file each, for a job jobs.json no longer holds
+  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" },
+}
 
 const HOME_DIRS = [".claude", ".config", ".gnupg", ".playground", ".ssh", "Library", "Music"]
 const BATCH = /^(\d{8}T\d{6}Z)-([A-Za-z0-9][A-Za-z0-9-]*)$/
@@ -73,15 +109,28 @@ const inside = (path: string, root: string): boolean =>
 
 const worktreesOf = (roots: Roots): string => join(real(roots.main), ".claude", "worktrees")
 
-const whyProtected = (path: string, roots: Roots): string | null => {
+// The folders under HOME that are protected whole, and the trash's parent.
+const subtreesOf = (home: string, trash: string): string[] => [
+  ...HOME_DIRS.map((dir) => real(join(home, dir))),
+  dirname(trash),
+]
+
+// Why path is or holds a protected root or the trash, or null.
+const whyHolds = (path: string, roots: Roots): string | null => {
   const home = real(roots.home)
-  const main = real(roots.main)
   const trash = real(roots.trash)
   if (inside(path, trash)) return `${path} is in the trash, which the trash-purge beat empties`
-  const subtrees = [...HOME_DIRS.map((dir) => real(join(home, dir))), dirname(trash)]
-  for (const root of [home, main, ...subtrees])
+  for (const root of [home, real(roots.main), ...subtreesOf(home, trash)])
     if (inside(root, path))
       return path === root ? `${path} is protected` : `${path} holds the protected ${root}`
+  return null
+}
+
+const whyProtected = (path: string, roots: Roots): string | null => {
+  const held = whyHolds(path, roots)
+  if (held) return held
+  const main = real(roots.main)
+  const subtrees = subtreesOf(real(roots.home), real(roots.trash))
   for (const root of subtrees)
     if (inside(path, root)) return `${path} is inside the protected ${root}`
   if (inside(path, main) && !path.startsWith(worktreesOf(roots) + sep))
@@ -94,6 +143,38 @@ export function isProtected(path: string, roots: Roots): string | null {
   const abs = resolve(path)
   const own = join(real(dirname(abs)), basename(abs))
   return whyProtected(own, roots) ?? whyProtected(real(abs), roots)
+}
+
+// The carve-out named name when path is an entry directly in its folder, symlinks resolved, that is not and holds no protected root; else the refusal's text.
+const carveOutAt = (
+  path: string,
+  name: string,
+  roots: Roots,
+  table: Record<string, CarveOut>,
+): CarveOut | string => {
+  const carve = Object.hasOwn(table, name) ? table[name]! : undefined
+  if (!carve) return `no carve-out is named ${name}`
+  const folder = real(join(dirname(roots.trash), carve.folder))
+  const abs = resolve(path)
+  const own = join(real(dirname(abs)), basename(abs))
+  if (dirname(own) !== folder || dirname(real(abs)) !== folder)
+    return `${abs} is not directly in ${folder}, the ${name} carve-out's folder`
+  return whyHolds(own, roots) ?? carve
+}
+
+// A protected path's refusal, unless carveOut names a carve-out that lets it through: then that carve-out; null for a path nothing protects.
+const carveOutOf = (
+  path: string,
+  carveOut: string | undefined,
+  roots: Roots,
+  table: Record<string, CarveOut>,
+): CarveOut | Refusal | null => {
+  const why = isProtected(path, roots)
+  if (!why) return null
+  const found = carveOut === undefined ? why : carveOutAt(path, carveOut, roots, table)
+  return typeof found === "string"
+    ? refused(found === why ? why : `${why}; ${found}`, "protected")
+    : found
 }
 
 // The files and bytes under a path, symlinks not followed; the walk stops once either passes its limit.
@@ -158,19 +239,19 @@ const refused = (text: string, kind: Refusal["kind"] = "refused"): Refusal => ({
   refused: text,
 })
 
-// Renames a path into <trash>/<UTC-ts>-<session>/<n>/ with a manifest line, after the protected list, worktreeRefusal for a worktree (which only the worktree option's holders move), the tripwire and the volume check.
+// Renames a path into <trash>/<UTC-ts>-<session>/<n>/ with a manifest line, after the protected list, worktreeRefusal for a worktree (which only the worktree option's holders move), the tripwire, the volume check and, for a worktree, the running clones read again, since the walk that counts its files takes seconds and a clone can start inside it.
 export function quarantine(
   path: string,
-  opts: { reason: string; session: string; worktree?: Holders },
+  opts: { carveOut?: string; reason: string; session: string; worktree?: Holders },
   roots: Roots,
-  io: { dev?: (path: string) => number; now?: Date } = {},
+  io: { carveOuts?: Record<string, CarveOut>; dev?: (path: string) => number; now?: Date } = {},
 ): Quarantined | Refusal {
   const abs = resolve(path)
   if (!SESSION.test(opts.session))
     return refused(`the session name ${opts.session} is not a word of letters, digits and hyphens`)
   if (!lstat(abs)) return refused(`no such path ${abs}`)
-  const why = isProtected(abs, roots)
-  if (why) return refused(why, "protected")
+  const carve = carveOutOf(abs, opts.carveOut, roots, io.carveOuts ?? CARVE_OUTS)
+  if (carve && "refused" in carve) return carve
   const isWorktree = dirname(join(real(dirname(abs)), basename(abs))) === worktreesOf(roots)
   if (isWorktree && !opts.worktree)
     return refused(`${abs} is a worktree: playground rm --worktree removes it`)
@@ -186,15 +267,20 @@ export function quarantine(
       `${opts.session} quarantined ${recent} paths in the last minute, the most one session may`,
       "tripwire",
     )
-  const { files, size } = measure(abs, opts.worktree ? undefined : LIMITS)
-  if (!opts.worktree && (files > LIMITS.files || size > LIMITS.bytes))
+  const cap = carve ?? LIMITS
+  const { files, size } = measure(abs, opts.worktree ? undefined : cap)
+  if (!opts.worktree && (files > cap.files || size > cap.bytes))
     return refused(
-      `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire`,
+      carve
+        ? `${abs} holds over ${cap.files} files or ${cap.bytes} bytes, past the ${opts.carveOut} carve-out's cap`
+        : `${abs} holds over ${LIMITS.files} files or ${LIMITS.bytes / 1024 ** 3} GB, past the tripwire`,
       "tripwire",
     )
   mkdirSync(trash, { recursive: true })
   const dev = io.dev ?? ((p: string) => lstatSync(p).dev)
   if (dev(abs) !== dev(trash)) return refused(otherVolume(abs, trash))
+  const cloned = opts.worktree && cloneHolder(real(abs), opts.worktree.clones())
+  if (cloned) return refused(cloned)
   const batch = `${stamp(now)}-${opts.session}`
   mkdirSync(join(trash, batch), { recursive: true })
   let n = 1
@@ -216,6 +302,7 @@ export function quarantine(
   const id = `${batch}/${n}`
   const entry: TrashEntry = {
     at: now.toISOString(),
+    ...(carve ? { carveOut: opts.carveOut } : {}),
     files,
     id,
     path: abs,
@@ -234,8 +321,12 @@ export function listTrash(trash: string): TrashEntry[] {
     .filter((entry) => existsSync(join(trash, entry.id)))
 }
 
-// Moves a trash item back to the path it came from, refusing a protected path, one anything stands at, and one whose folder is gone.
-export function restore(id: string, roots: Roots): { path: string } | Refusal {
+// Moves a trash item back to the path it came from, refusing a protected path (but for an item its carve-out let through, back into that carve-out's folder), one anything stands at, and one whose folder is gone.
+export function restore(
+  id: string,
+  roots: Roots,
+  carveOuts: Record<string, CarveOut> = CARVE_OUTS,
+): { path: string } | Refusal {
   const trash = roots.trash
   const match = ID.exec(id)
   if (!match) return refused(`${id} is not a trash id; playground rm --list prints them`)
@@ -243,8 +334,8 @@ export function restore(id: string, roots: Roots): { path: string } | Refusal {
   const slot = join(trash, id)
   const items = existsSync(slot) ? readdirSync(slot) : []
   if (!entry || items.length !== 1) return refused(`no trash item ${id}`)
-  const why = isProtected(entry.path, roots)
-  if (why) return refused(why, "protected")
+  const carve = carveOutOf(entry.path, entry.carveOut, roots, carveOuts)
+  if (carve && "refused" in carve) return carve
   if (lstat(entry.path)) return refused(`${entry.path} already exists; move it aside first`)
   if (!existsSync(dirname(entry.path)))
     return refused(`${dirname(entry.path)}, the folder ${id} came from, is gone`)
@@ -253,7 +344,70 @@ export function restore(id: string, roots: Roots): { path: string } | Refusal {
   return { path: entry.path }
 }
 
-// Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session or process holds it, and its HEAD is on a remote branch.
+// The running clone that reads from or copies into a worktree, as its refusal, or null; a clone's cp only reads its source and works in whatever folder run-slot was called from, so no working folder need name either end (PG-699).
+const cloneHolder = (at: string, clones: Clone[]): string | null => {
+  const clone = clones.find((c) => inside(real(c.source), at) || inside(real(c.destination), at))
+  return clone
+    ? `${at} is held by ${clone.who}'s node_modules clone (pid ${clone.pid}) from ${clone.source} into ${clone.destination}`
+    : null
+}
+
+// A folder's entries, or none when it cannot be read.
+const entriesOf = (dir: string): Dirent[] => {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+}
+
+// The folders directly in a folder, or none when it cannot be read.
+const dirsIn = (dir: string): string[] =>
+  entriesOf(dir)
+    .filter((e) => e.isDirectory())
+    .map((e) => join(dir, e.name))
+
+// The folders worktreeRefusal reads for links beyond the other worktrees: each makeScratch folder directly in a temp folder, and each session's scratchpad (<scratchpads>/<project>/<session>/scratchpad) with each folder directly in it, where a scratch copy sits.
+export function linkPlaces(
+  tmps = [tmpdir(), "/tmp"],
+  scratchpads = join("/tmp", `claude-${process.getuid?.() ?? 0}`),
+): string[] {
+  const marked = [...new Set(tmps.map(real))].flatMap((tmp) =>
+    dirsIn(tmp).filter((dir) => lstat(join(dir, MARKER))?.isFile()),
+  )
+  const pads = dirsIn(scratchpads)
+    .flatMap(dirsIn)
+    .map((session) => join(session, "scratchpad"))
+    .filter((pad) => lstat(pad)?.isDirectory())
+  return [...marked, ...pads.flatMap((pad) => [pad, ...dirsIn(pad)])]
+}
+
+// The links outside a worktree that point into it, as its refusal naming the first three, or null: the entries of each other worktree and each place, and of its node_modules one level deep, as a node_modules clone makes them; a link whose target is missing or lies outside the worktree does not count.
+const linkHolder = (at: string, roots: Roots, places: string[]): string | null => {
+  const links: string[] = []
+  for (const folder of new Set([...dirsIn(worktreesOf(roots)), ...places].map(real))) {
+    if (inside(folder, at)) continue
+    const modules = join(folder, "node_modules")
+    const dirs = lstat(modules)?.isDirectory() ? [folder, modules] : [folder]
+    for (const dir of dirs)
+      for (const entry of entriesOf(dir)) {
+        if (!entry.isSymbolicLink()) continue
+        const link = join(dir, entry.name)
+        let target: string
+        try {
+          target = realpathSync(link)
+        } catch {
+          continue
+        }
+        if (inside(target, at)) links.push(`${link} -> ${target}`)
+      }
+  }
+  if (!links.length) return null
+  const more = links.length > 3 ? `, and ${links.length - 3} more` : ""
+  return `${at} is linked into by ${links.sort().slice(0, 3).join(", ")}${more}: repoint or remove each link first`
+}
+
+// Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session, running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   if (dirname(at) !== worktreesOf(roots)) return `${at} is not a worktree in ${worktreesOf(roots)}`
@@ -266,31 +420,82 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   }
   const git = (...args: string[]) => {
     const run = Bun.spawnSync(["git", "-C", at, ...args], { stderr: "pipe", stdout: "pipe" })
-    return { ok: run.exitCode === 0, out: run.stdout.toString().trim() }
+    return { ok: run.exitCode === 0, out: run.stdout.toString().trimEnd() }
   }
   const top = git("rev-parse", "--show-toplevel")
   if (!top.ok || real(top.out) !== at) return `${at} is not a git worktree`
   const branch = git("symbolic-ref", "--quiet", "--short", "HEAD").out
   const folder = basename(at).toLowerCase()
   const where = `${folder} ${branch.toLowerCase()}`
+  // Each name's slug, after its PG-<n>- prefix: ops holds PG-12-ops-job, not PG-5-stops.
+  const slugs = [folder, branch.toLowerCase()].map((n) => n.replace(/^pg-\d+-/, ""))
   for (const agent of agents) {
     if (!agent || !holders.live.includes(String(agent.status)) || typeof agent.name !== "string")
       continue
-    const id = agent.name.split("-")[0]!
-    const tokens = [agent.name, ...(/\d/.test(id) ? [id] : [])].map((t) => t.toLowerCase())
+    const name = agent.name.toLowerCase()
+    const byName = slugs.some((s) => s === name || s.startsWith(`${name}-`))
+    const id = name.split("-")[0]!
+    const byId = /\d/.test(id) && where.includes(id)
     const byBranch =
       typeof agent.branch === "string" && agent.branch.toLowerCase() === branch.toLowerCase()
-    const pr = typeof agent.pr === "string" ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1] : undefined
+    const pr =
+      typeof agent.pr === "string" && agent.pr !== holders.pr
+        ? /\/pull\/(\d+)$/.exec(agent.pr)?.[1]
+        : undefined
     const byPr = pr !== undefined && new RegExp(`(^|\\D)${pr}(\\D|$)`).test(where)
-    if (byBranch || byPr || tokens.some((t) => where.includes(t)))
+    if (byBranch || byPr || byName || byId)
       return `${at} is held by ${agent.name}, which the roster lists as ${agent.status}`
   }
-  if (holders.cwds === null) return `the processes' folders cannot be listed, so ${at} stays`
-  const cwd = holders.cwds.find((dir) => inside(real(dir), at))
-  if (cwd) return `${at} is held by a process working in ${cwd}`
-  if (!git("branch", "-r", "--contains", "HEAD").out)
-    return `${at}'s HEAD is on no remote branch: push it first`
+  const cloned = cloneHolder(at, holders.clones())
+  if (cloned) return cloned
+  const linked = linkHolder(at, roots, holders.places())
+  if (linked) return linked
+  if (holders.procs === null) return `the processes' folders cannot be listed, so ${at} stays`
+  const held = holders.procs.filter((p) => inside(real(p.cwd), at))
+  const holder = held.find((p) => isAgentBrowser(p.command)) ?? held[0]
+  if (holder) {
+    const command =
+      holder.command.length > 120 ? `${holder.command.slice(0, 117)}...` : holder.command
+    const by = `${at} is held by pid ${holder.pid} (${command}) working in ${holder.cwd}`
+    if (!isAgentBrowser(holder.command)) return by
+    const session =
+      /(?:^| )--session[= ](\S+)/.exec(holder.command)?.[1] ??
+      holder.sockets.map((s) => /([^/]+)\.sock$/.exec(s)?.[1]).find(Boolean) ??
+      "default"
+    return `${by}: agent-browser session ${session}, which agent-browser --session ${session} close frees`
+  }
+  if (holders.discard) return null
+  const discard = `playground rm --worktree ${at} --discard removes it anyway, which a session runs with --decision <id> once an Inbox delete decision naming it is approved`
+  const changed = git("status", "--porcelain", "-z", "--no-renames").out.split("\0").filter(Boolean)
+  if (changed.length) {
+    const paths = changed.slice(0, 3).map((line) => line.slice(3))
+    const more = changed.length > 3 ? `, and ${changed.length - 3} more` : ""
+    return `${at} holds ${changed.length} uncommitted change${changed.length === 1 ? "" : "s"} (${paths.join(", ")}${more}): ${discard}`
+  }
+  if (!landed(git, holders, at))
+    return `${at}'s HEAD holds work not landed on origin/canary (fetch origin canary if it merged since): ${discard}`
   return null
+}
+
+// Whether HEAD's work is on origin/canary: each file HEAD changed since their merge-base, named raw (-z) and matched literally so no name is quoted or globbed, reads the same there, or, since canary squash-merges and may change those files again, a merged PR holds HEAD's commit.
+const landed = (
+  git: (...args: string[]) => { ok: boolean; out: string },
+  holders: Holders,
+  at: string,
+): boolean => {
+  const base = git("merge-base", "HEAD", "origin/canary")
+  if (base.ok) {
+    const files = git("diff", "--name-only", "-z", "--no-renames", base.out, "HEAD")
+    const paths = files.out.split("\0").filter(Boolean)
+    if (
+      files.ok &&
+      (!paths.length ||
+        git("--literal-pathspecs", "diff", "--quiet", "HEAD", "origin/canary", "--", ...paths).ok)
+    )
+      return true
+  }
+  const head = git("rev-parse", "HEAD")
+  return head.ok && holders.merged(head.out, at) === true
 }
 
 // A mkdtemp folder under the temp folder, marked so removeScratch will remove it.

@@ -1,7 +1,7 @@
 "use client"
 
 import { markerOf } from "@packages/config/threads"
-import { RiChatThreadLine } from "@remixicon/react"
+import { RiChatThreadLine, RiInboxLine } from "@remixicon/react"
 import { cn } from "cn"
 import Link from "next/link"
 import type { ReactNode } from "react"
@@ -11,6 +11,8 @@ import { TranscriptMarkdown, type TranscriptSurface } from "@/components/transcr
 import { Badge } from "@/components/ui/badge"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
 import { Message, MessageContent } from "@/components/ui/message"
+import { answerChipOf } from "@/lib/answer-chip"
+import { targetNeedsYou } from "@/lib/needs-you"
 import { threadHref } from "@/lib/threads"
 import { fullTime, messageTime } from "@/lib/time"
 
@@ -21,15 +23,21 @@ export const leadsWithImage = (text: string): boolean => /^(!\[|<img\b)/i.test(t
 // A message's words at text-sm, its code too (Streamdown's own size). Only his are a bubble, on the right in the stock muted bubble's own grey; a session's own words and a peer's read as full-width text.
 export function TranscriptBubble({
   className,
+  plain,
   text,
   variant,
 }: {
   className?: string
+  // Text from outside Playground (a Yard message), whose leading [thread:<id>] names no thread of ours, so it reads as written.
+  plain?: boolean
   text: string
   variant: TranscriptVariant
 }) {
   const mine = variant === "default"
-  const marker = markerOf(text)
+  const marker = plain ? { id: null, text } : markerOf(text)
+  // an Inbox answer line reads as one chip, your note after it, rather than its JSON
+  const answer = plain ? null : answerChipOf(marker.text)
+  const words = answer ? answer.note : marker.text
   return (
     <Bubble
       align={mine ? "end" : "start"}
@@ -48,7 +56,20 @@ export function TranscriptBubble({
             {marker.id}
           </Badge>
         ) : null}
-        <TranscriptMarkdown on={mine ? "muted" : "none"}>{marker.text}</TranscriptMarkdown>
+        {answer ? (
+          <Badge
+            variant="outline"
+            className={cn("max-w-full", answer.note && "mb-1.5")}
+            render={<button type="button" onClick={() => targetNeedsYou(answer.id)} />}
+          >
+            <RiInboxLine data-icon="inline-start" />
+            <span className="font-mono">{answer.ref}</span>
+            <span className="truncate">· {answer.label}</span>
+          </Badge>
+        ) : null}
+        {words ? (
+          <TranscriptMarkdown on={mine ? "muted" : "none"}>{words}</TranscriptMarkdown>
+        ) : null}
       </BubbleContent>
     </Bubble>
   )
@@ -61,6 +82,7 @@ export function TranscriptMessage({
   children,
   now,
   opensWithText,
+  plain,
   text,
   variant,
   who,
@@ -71,6 +93,7 @@ export function TranscriptMessage({
   now: Date
   // Whether the message opens with words its name can lead (a session's turn passes it from its first part); else whether its own text does.
   opensWithText?: boolean
+  plain?: boolean
   text: string
   variant: TranscriptVariant
   who: ReactNode
@@ -89,7 +112,7 @@ export function TranscriptMessage({
   ) : null
   // a message of files alone has no words to show
   const words = text.trim() ? (
-    <TranscriptBubble className={bubbleClassName} text={text} variant={variant} />
+    <TranscriptBubble className={bubbleClassName} plain={plain} text={text} variant={variant} />
   ) : null
   // A turn that opens with a tool row, a thinking row or an image puts the name on its own line, since floating it beside those would sit it inside them.
   const inline = (opensWithText ?? Boolean(words)) && !leadsWithImage(text)

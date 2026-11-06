@@ -1,10 +1,19 @@
 import { describe, expect, test } from "bun:test"
 
-import { clickFocus, focusResult } from "../../../../../packages/scripts/src/verify/reply-focus"
+import {
+  clickFocus,
+  focusResult,
+  replyButton,
+} from "../../../../../packages/scripts/src/verify/reply-focus"
 
 describe("focusResult", () => {
-  test("passes focus in the box the moment Chat about it is clicked", () => {
+  test("passes focus in the composer, reading re #iN:, the moment Reply is clicked (#1045)", () => {
     expect(focusResult("f", "composer").ok).toBe(true)
+    expect(focusResult("f", "comment").ok).toBe(false)
+  })
+
+  test("finds the card's Reply by the aria-label the Inbox gives it", () => {
+    expect(replyButton("#i1")).toBe('[aria-label="Reply to #i1"]')
   })
 
   test("fails focus left on the button, where a paste sent at once goes (PG-1015)", () => {
@@ -18,16 +27,16 @@ describe("focusResult", () => {
   })
 })
 
-// A page whose card draws at once and whose box mounts later, as on a loaded host: the click finds the box only once it is there.
-const lateBox = () => {
+// A page whose card draws late, as on a loaded host: the click waits for the card's Reply.
+const lateCard = () => {
   let mounted = false
   const mount = Bun.sleep(50).then(() => {
     mounted = true
   })
   return {
-    eval: async <T>() => (mounted ? "composer" : "body") as T,
+    eval: async <T>() => (mounted ? "composer" : "no card") as T,
     run: async (...args: string[]) => {
-      if (args[0] === "wait" && args[1] === "#composer") await mount
+      if (args[0] === "wait" && args[1] === '[aria-label="Reply to #i1"]') await mount
       return {}
     },
     viewport: async () => {},
@@ -36,7 +45,7 @@ const lateBox = () => {
 }
 
 describe("clickFocus", () => {
-  test("waits for the box before it clicks, so a box that mounts after the card still takes focus (#2373)", async () => {
-    expect((await clickFocus(lateBox(), "http://dashboard", "f", "#i1")).ok).toBe(true)
+  test("waits for the card's Reply before it clicks, so a card that draws late still takes the click (#2373)", async () => {
+    expect((await clickFocus(lateCard(), "http://dashboard", "f", "#i1")).ok).toBe(true)
   })
 })

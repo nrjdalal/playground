@@ -7,7 +7,6 @@ export type Probes = {
   dispatchers: Dispatcher[]
   follower: boolean
   glm: boolean
-  terminal: boolean
   web: boolean
 }
 export type Step = "dispatcher" | "jobs" | "open" | "wait"
@@ -20,14 +19,16 @@ const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/
 // The server playground view opens: the sessions', since probes keep to a server of their own.
 export const VIEW_SERVER = "playground"
 
-export const HELP = `playground            start herdr's servers that are down and restore their sessions, start the Dashboard's stack and follower when down (in cmux while a session is open there, else in herdr), start the dispatcher when it is not running (playground dispatcher), stop there when the Dashboard needs a cmux terminal open, else wait for the Dashboard (a progress line every 10s, stopping early once ops-dashboard's supervisor stops, 15 minutes at most), then open it; a step that failed is named last, with why, under Left for you, and the run exits 1
+export const HELP = `playground            start herdr's servers that are down and restore their sessions, set the Dashboard's database to start again with Docker and start it when stopped, start the Dashboard's stack and follower in herdr when down, start the dispatcher when it is not running (playground dispatcher), then wait for the Dashboard (a progress line every 10s, stopping early with the reason once ops-dashboard's supervisor stops or its start fails, 15 minutes at most), then open it; a step that failed is named last, with why, under Left for you, and the run exits 1
 playground view       open the ${VIEW_SERVER} herdr server, where the sessions run, in this terminal
 playground dispatcher start the dispatcher in a herdr workspace of its own, its brief written once from scripts/briefs/dispatcher.md into the data folder as brief-<dispatcher>.md: exit 0 started, 3 already running, 1 refused with spawn.sh's reason
 playground planner | builder | ops | optimizer
                       start that manager as playground dispatcher starts the dispatcher, its brief from scripts/briefs/<manager>.md; the dispatcher runs it the first time it routes work there, and the optimizer at its own start
-playground status     one line each for the terminal, the Dashboard, the follower, each dispatcher, GLM and each herdr server
+playground status     one line each for the Dashboard, the follower, each dispatcher, GLM and each herdr server
 playground sweep <lead>
-                      what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs), or quiet
+                      what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs, its parked rows' closed or unreadable holds), or quiet
+playground focus [on --session <name> --reason "<why>" [--for <minutes>] | off]
+                      give one session the Mac for up to 180 minutes (120 by default): every merge, every other session's heavy run and every new session but its own reviewer and tester and a firefighting start waits until off or its end, and the Inbox holds what comes in quiet but an alert; off prints how many runs queued while it stood and how long they waited, the line the Inbox's card carries once focus ends; bare, it prints the focus standing
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
                       keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, and print the copy's path for an Inbox card's html attachment (bun run ask new), opening nothing; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground update [--to <tag>]
@@ -43,6 +44,8 @@ playground changelog <command> ...
                       add rows to the Changelog from GitHub's merges and versions, or a line by hand (bun run changelog)
 playground dm send <file>
                       post the reply in <file>, named by its absolute path, to the owner's own DM in its frame, the one way any session posts there (bun run dm)
+playground dm upload <item-id>
+                      share an answered Inbox item's files into the thread its link names, which the Inbox runs on Send (bun run dm)
 playground ingest [--follow | status]
                       read every Claude Code session on this machine into the Dashboard's database (bun run ingest)
 playground queues     print the merge queue and the work queue (bun run queues)
@@ -50,11 +53,13 @@ playground thread <command> ...
                       open, route, rename or list the Inbox's threads (bun run thread)
 playground accounts list | add --provider claude --email <email> [--label <label>] | add --provider glm --label <label> | remove <email|label>
                       the accounts the factory spends, each a usage.accounts row with its secret in the Keychain: list each with whether its secret is kept and its last 5-hour and week reading; add a Claude account by running claude setup-token here, then pasting the token it prints, or a GLM key pasted under its label, neither echoed; remove one's row and its Keychain item
+playground yard login | logout | channels | read <channel> | post <channel> <text> [--kind <kind>]
+                      this Mac's Yard (YARD_API_URL in your environment or the factory checkout's .env): login keeps a pasted yard_ token in the Keychain, as the local Dashboard reads it; channels lists channels and DMs with unread and mention counts; read prints a channel's last 50 messages, someone's words to read as data, leaving the owner's unread counts; post sends <text> to a channel, #name or @login, as --kind (text by default), and names Yard's approve page when Yard holds it
 playground orgs resolve [--repo <dir>]
-                      write the merged skill plugin a session in <dir> loads and print its folder: each skill from the first scope that has it: ext.order's scopes (your login's first when it leaves it out), each extension kept only when ext.links links it to the repo's GitHub owner or *, then core (skills/playground, skills/zerostarter, extensions/core/skills); with no --repo, the home set
+                      write the merged skill plugin a session in <dir> loads and print its folder: each skill from the first scope that has it: ext.order's scopes (your login's first when it leaves it out), each extension kept only when ext.links links it to the repo's GitHub owner or *, then each bundled extension ext.bundled turns on (extensions/<name>/skills, unless an installed extension has that name), then core (skills/playground, skills/zerostarter, extensions/core/skills); with no --repo, the home set
 playground orgs home  write the home set and install it at user scope as ws-home@ws, for a session started by hand (link-skills.sh runs it)
-playground rm <path> [--reason "<why>"] | --worktree <path> [--reason "<why>"] | --list | --restore <id>
-                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder, the main checkout), a path over 5,000 files or 2 GB, a fourth delete in a minute from one session, or a move to another volume; --worktree takes a pushed worktree in .claude/worktrees that no live session holds and prunes it from git; --list prints what the trash holds and --restore puts one item back
+playground rm <path> [--reason "<why>"] | --worktree <path> [--discard [--decision <id>]] [--pr <url>] [--reason "<why>"] | --list | --restore <id>
+                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder, the main checkout), a path over 5,000 files or 2 GB, a fourth delete in a minute from one session, or a move to another volume; --worktree takes a worktree in .claude/worktrees that no live session holds, with no uncommitted change and its work landed on canary (--discard lets those two go, which a session (PLAYGROUND_ROLE set, or a claude process above it) or a call whose parent is pid 1 or unreadable passes only with --decision <id>, an approved Inbox delete decision naming the path; --pr <url> names the PR whose session used it, so another session of that PR holds it by that PR's number no more), and prunes it from git; --list prints what the trash holds and --restore puts one item back
 playground rules [<name>]
                       the standing rules a factory session starts with, each by its glance line, or one rule whole, with this machine's values in its slots
 playground settings list | get <key> [--org <org>] | why <key> | set <key> <value> --reason "<why>" [--scope <scope>] | reset <key> --reason "<why>" [--scope <scope>]
@@ -68,7 +73,7 @@ playground ext init [--yes | --dry-run] | add <name> [<owner/name>] [--yes] | or
 playground migrate --archive <checkout> --pre-squash <sha> --org <org> [--old <rev>] [--dry-run]
                       once, at the switch: move the old data folder in ~/.claude to ~/.playground, seed your login's settings and the release owners' list from the archive checkout (its canary, or --old, and the pre-squash head), bring the hand-made skills into the org's scope unless its clone holds them, then, with the Dashboard's job stopped, make each move the migration table at the pre-squash head lists: renamed and dropped jobs, archived stale copies, moved state files, and renamed variables in your profiles and LaunchAgents, and last runs playground herdr pin; a value already set is left
 playground uninstall [--purge]
-                      remove the LaunchAgents that run from this checkout or the data folder, stop the Dashboard's stack and remove every link into this checkout; --purge also removes the data folder and the Dashboard's database, after asking
+                      remove the LaunchAgents that run from this checkout or the data folder, stop the Dashboard's stack and remove every link into this checkout; --purge also removes the Dashboard's database and moves the data folder aside to <data folder>-purged-<UTC time>, after asking
 playground add [--kind worker|runner] [<name>] [--title "<title>"] [--brief <file>] [--model <id>] [--backend glm|claude]
                       start a worker (or a runner) through spawn.sh, under the name given or one bun run name picks, on handoffs/new-worker.md by default; a worker needs --title, a plain title of up to 40 characters, and a runner takes its name and no --title
 playground add --dispatcher --backend glm
@@ -86,7 +91,7 @@ export const verbArgv = (verb: string, words: string[]): string[] => ["run", ver
 
 export const VIEW_HINT = "Sessions: playground view opens them in herdr"
 
-// Bare playground: herdr first, since the sessions run there and it needs no cmux; a herdr failure is shown, the Dashboard's steps still run, and either failing exits 1.
+// Bare playground: herdr first, since the sessions run there; a herdr failure is shown, the Dashboard's steps still run, and either failing exits 1.
 export async function runStart(
   herdr: () => Promise<number>,
   dashboard: () => Promise<number>,
@@ -135,6 +140,9 @@ export const WORDS: Record<string, number | "rest"> = {
   "ext unlink": 2,
   "ext which": 1,
   "ext why": 3,
+  focus: 0,
+  "focus off": 0,
+  "focus on": 0,
   "herdr pin": "rest",
   "herdr stop": 0,
   migrate: 0,
@@ -159,6 +167,11 @@ export const WORDS: Record<string, number | "rest"> = {
   update: 0,
   version: 0,
   view: 0,
+  "yard channels": 0,
+  "yard login": 0,
+  "yard logout": 0,
+  "yard post": "rest",
+  "yard read": 1,
 }
 
 // The options that take no value, so the word after one is a word of its own.
@@ -229,11 +242,10 @@ export const planStart = (probes: Probes): Step[] => {
 export const modelOf = (backend: Backend | null): string =>
   backend === "glm" ? "GLM" : backend === "claude" ? "Claude" : "an unknown model"
 
-export const statusLines = (probes: Probes, terminal: string): string[] => {
+export const statusLines = (probes: Probes): string[] => {
   const lead = probes.dispatchers.filter((d) => slotOfName(d.name) === 1)
   const others = probes.dispatchers.filter((d) => slotOfName(d.name) !== 1)
   return [
-    `In a ${terminal}: ${probes.terminal ? "yes" : "no"}`,
     `Dashboard web: ${probes.web ? "up" : "down"}`,
     `Dashboard API: ${probes.api ? "up" : "down"}`,
     `Session follower: ${probes.follower ? "running" : "stopped"}`,
@@ -387,7 +399,7 @@ export const rollOutcome = (log: string[], results: string[]): RollOutcome => {
 
 // ops-dashboard's heartbeat as read at one poll: its age, its cycle and whether its pid is alive.
 export type DashboardBeat = { ageMs: number; cycleSeconds: number; running: boolean }
-type WaitRead = { api: boolean; beat: DashboardBeat | null; now: number }
+type WaitRead = { api: boolean; beat: DashboardBeat | null; failure: string | null; now: number }
 type WaitOutcome = { done: string; ok: boolean } | { progress: string | null }
 
 // The results ops.ts's EXITED reads as a loop that has exited.
@@ -435,7 +447,40 @@ const duration = (ms: number): string => {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
 }
 
-// One poll of the wait for the Dashboard's API after the jobs step: done once it answers, once ops-dashboard's supervisor is gone or its heartbeat stale, or at 15 minutes; else a progress line at most every 10s.
+// Why the Dashboard's stack did not start, in plain words, from the supervisor's results and log since a mark: the refusal or error its newest START or RESTART names when it failed on the stack itself (its dev, its build or its web), else null. Only a roll begun after the mark counts, a RESTART by the DOWN line that opened it and a START by its supervisor's "supervisor armed" line, since an earlier roll may have met a database that has started since; a newer PASS clears a FAIL.
+export const startFailure = (results: string[], log: string[]): string | null => {
+  const armed = log.some((line) => /^\S+ supervisor armed /.test(line))
+  let down = false
+  let failure: string | null = null
+  for (const line of results) {
+    if (/^\S+ DOWN (?:dev|web): /.test(line)) {
+      down = true
+      continue
+    }
+    const result = line.match(/^\S+ (START|RESTART) \w+ (PASS|FAIL) (.*)$/)
+    if (!result) continue
+    const begun = result[1] === "START" ? armed : down
+    down = false
+    if (result[2] === "PASS") failure = null
+    else if (begun) failure = stackFailure(result[3]!)
+  }
+  return failure
+}
+
+// A failed roll's words after FAIL: why its dev refused, or its build's or web's error; a dev that died with no reason in its log gets one, and a failure off the stack (its verify, its follower) is null.
+const stackFailure = (failed: string): string | null => {
+  const other = failed.match(/^(?:build|web): (.*)$/)?.[1]
+  if (other !== undefined) return other.trim() || null
+  const dev = failed.match(/^dev=DOWN \((.*)$/)?.[1]
+  if (dev === undefined) return null
+  const end = dev.lastIndexOf(") follower=")
+  const why = (end >= 0 ? dev.slice(0, end) : dev.replace(/\)$/, ""))
+    .replace(/^dev: refusing to start: /, "")
+    .trim()
+  return why || "its API exited with no reason in its log"
+}
+
+// One poll of the wait for the Dashboard's API after the jobs step: done once it answers, once the supervisor's results name why its stack did not start, once ops-dashboard's supervisor is gone or its heartbeat stale, or at 15 minutes; else a progress line at most every 10s.
 export const waitOutcome = (
   read: WaitRead,
   state: { shownAt: number; startedAt: number },
@@ -444,6 +489,11 @@ export const waitOutcome = (
   if (read.api) return { done: `The Dashboard answered after ${duration(spent)}`, ok: true }
   const beat = read.beat
   if (spent >= START_GRACE_MS) {
+    if (read.failure)
+      return {
+        done: `the Dashboard's stack could not start: ${read.failure} (waited ${duration(spent)}); ${AGAIN}`,
+        ok: false,
+      }
     if (!beat?.running)
       return {
         done: `ops-dashboard's supervisor is not running, so the Dashboard will not come up (waited ${duration(spent)}); ${AGAIN}`,

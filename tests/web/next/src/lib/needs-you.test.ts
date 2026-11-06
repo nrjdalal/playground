@@ -166,9 +166,13 @@ describe("Feed cards", () => {
   })
 
   test("a permission or plan cut short offers only refusing it", () => {
-    const cut = feedItemNeed(worker(), permission({ clipped: true, whole: false }), true)
+    const cut = feedItemNeed(
+      worker({ name: "greed", role: "worker" }),
+      permission({ clipped: true, whole: false }),
+      true,
+    )
     expect(cut.questions[0]?.options.map((o) => o.label)).toEqual(["Deny"])
-    expect(cut.context).toContain("allow it from the session's terminal")
+    expect(cut.context).toContain("ask Playground in the chat to allow it")
     const empty = feedItemNeed(worker(), permission({ detail: "", input: "", whole: false }))
     expect(empty.questions[0]?.options.map((o) => o.label)).toEqual(["Deny"])
     const long = feedItemNeed(worker(), plan({ clipped: true, whole: false }))
@@ -213,15 +217,31 @@ describe("Feed cards", () => {
 
   test("a card that cannot be approved here says where to answer it, by whether approvals are on", () => {
     const cut = permission({ clipped: true, whole: false })
-    expect(feedItemNeed(worker(), cut, true).context).toContain("or deny it here")
+    const greed = worker({ name: "greed", role: "worker" })
+    expect(feedItemNeed(greed, cut, true).context).toBe(
+      "Not all of it can be shown here: deny it here, or ask Playground in the chat to allow it, and the session's manager does.",
+    )
+    expect(feedItemNeed(greed, cut, false).context).toBe(
+      "Not all of it can be shown here: ask Playground in the chat, and the session's manager answers it.",
+    )
+    expect(feedItemNeed(greed, cut).dispatcher).toBeUndefined()
+  })
+
+  // A dispatcher has no manager to answer through the chat, so its own card keeps naming its terminal.
+  test("a dispatcher's own card says to answer it in its terminal, and is marked as the dispatcher's", () => {
+    const cut = permission({ clipped: true, whole: false })
+    expect(feedItemNeed(worker(), cut, true).context).toBe(
+      "Not all of it can be shown here: allow it from the session's terminal, or deny it here.",
+    )
     expect(feedItemNeed(worker(), cut, false).context).toBe(
       "Not all of it can be shown here: answer it in the session's terminal.",
     )
+    expect(feedItemNeed(worker(), cut).dispatcher).toBe(true)
   })
 
   // Only after a refusal that may have let the answer through does the card ask to send again deliberately.
-  test("an answer may have gone only after cmux or herdr took it and could not show it land", () => {
-    for (const code of ["CMUX_FAILED", "INTERRUPTED", "NOT_TAKEN", "UNCONFIRMED"])
+  test("an answer may have gone only after herdr took its keys and could not show them land", () => {
+    for (const code of ["CMUX_FAILED", "INTERRUPTED", "UNCONFIRMED"])
       expect(mayHaveGone(code)).toBe(true)
     for (const code of ["INVALID", "DISABLED", "NOT_PENDING", "BUSY", undefined]) {
       expect(mayHaveGone(code)).toBe(false)
@@ -249,8 +269,8 @@ describe("Feed cards", () => {
     expect(feedNeeds(busy, true).every((need) => need.onAnswer !== null)).toBe(true)
   })
 
-  // a herdr session's picker is answered here by keys; its permission or plan stays read-only, answered in its terminal, whatever approvals say
-  test("a herdr session's picker takes Submit, and its permission is answered in its terminal alone", () => {
+  // a herdr session's picker is answered here by keys; its permission or plan stays read-only, for its manager to answer, whatever approvals say
+  test("a herdr session's picker takes Submit, and its permission stays read-only for its manager", () => {
     const busy = worker({
       feed: [picker()[0]!, permission({ requestId: "B", whole: false })],
       herdr: true,
@@ -574,13 +594,22 @@ describe("lostPrompt", () => {
   test("a worker at a prompt the Feed no longer holds is stuck, a plain notice", () => {
     expect(
       lostPrompt(worker({ lifecycle: "needsInput", name: "worker-greed", role: "worker" })),
-    ).toEqual({ onYou: false, title: "Greed · Stuck" })
+    ).toEqual({
+      onYou: false,
+      text: "Its prompt is not in the Feed any more: ask Playground in the chat what it is asking.",
+      title: "Greed · Stuck",
+    })
   })
 
-  test("Playground at such a prompt waits on you, in red", () => {
+  // the chat is the stuck dispatcher itself, so its notice names its terminal
+  test("Playground at such a prompt waits on you, in red, and names its terminal", () => {
     expect(
       lostPrompt(worker({ effort: "high", lifecycle: "needsInput", model: "claude-opus-5-5" })),
-    ).toEqual({ onYou: true, title: "Alpha · Waiting on you" })
+    ).toEqual({
+      onYou: true,
+      text: "Its prompt is not in the Feed any more. Its terminal shows what it is asking.",
+      title: "Alpha · Waiting on you",
+    })
   })
 
   // a dispatcher reads Alpha or Bravo, never its session name

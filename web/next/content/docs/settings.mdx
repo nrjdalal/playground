@@ -23,14 +23,16 @@ The square with this Mac's initials, at the right end of the toolbar beside ever
 
 `/dashboard/settings` holds one section for each thing you can set up.
 Open it from the user menu, or from the Settings square after Apps in the bar beside every page.
+On the hosted Yard it shows Remote alone, under the line "Read-only on Yard: send from your Mac", since pairing is the one change Settings takes from there.
 
 ### Things to fix
 
-While something Playground needs is missing on this Mac, Settings lists it under **N things to fix** with the same rows as **Let's check this Mac**, each with the button that fixes it, and **Re-check**; the section goes once every one is fixed.
+While something Playground needs is missing on this Mac, or an optional row has a button that fixes it (such as **Set up the web address** or **Trust the certificate** for portless), Settings lists it under **N things to fix** with the same rows as **Let's check this Mac**, each with the button that fixes it, and **Re-check**; the section goes once every one is fixed.
 
 ### Accounts
 
 Accounts lists every Claude account and GLM key your sessions spend: a Claude account by its label or email, a GLM key by its label, each saying whether its token is kept, and Logged in on the one Claude Code is logged in as.
+Each Claude account has an **Own account** switch: turn it on for your personal account, and new sessions go to it at a fifth of its share until its week resets (or its plan ends) within a day, so its week is still spent before it resets; the switch sets `own` on its row in `usage.accounts`.
 Accounts are kept in your settings (`usage.accounts`), so a machine needs a GitHub login and its settings set up first: until then the section reads **Your settings aren't set up yet** over **Set up settings**, which names the private repo it reuses or makes on GitHub and sets it up once you confirm, and **Add account** stays off ([Where to start](/docs#where-to-start) gives the order).
 
 #### Add an account
@@ -47,6 +49,17 @@ The token goes to this Mac's Keychain and is never shown again, and **Remove**, 
 From a terminal, `playground accounts add --provider claude --email <email>` signs one in through Claude Code and keeps its token in the Keychain, and `playground accounts add --provider glm --label <label>` keeps a Z.ai key there under that label.
 `playground accounts list` shows each with its usage and `playground accounts remove <email|label>` takes one off; no token or key is ever shown ([The playground command](/docs/cli#accounts-playground-accounts)).
 
+### Templates
+
+Templates lists the sessions the plus on Alpha's row in the sidebar can start ([the Dashboard](/docs/dashboard)), each with its kind, its model or GLM, its effort, its account and its brief, and whether it is a **Default**, an **Edited default** or one you **Added**.
+**Edit** opens a form of its kind and backend, then on Claude its model, effort and account (**Default**, or a Claude account from Accounts), and its brief, a file name in the data folder or `scripts/briefs`; one you added also takes a new label, while a default keeps its name.
+A default's own values stay in Playground, and **Reset** puts them back.
+A save keeps the whole list as it is then: a default Playground changes later reads **Edited default**, with Reset taking the new values, and a default Playground adds later shows once the list is back to the defaults alone.
+A save that changes nothing writes nothing.
+**Add template** makes a new one, and **Remove** takes one you added away; Reset and Remove each ask first.
+Each save is the same change `playground settings set sessions.templates` makes, checked the same way: a brief that is not a file name, or an account `usage.accounts` does not list, is refused, and the reason shows beside its field.
+**Edit templates** at the foot of the plus's list opens this section.
+
 ### Extensions
 
 Extensions lists every extension in the order sessions read them, first wins: one card each with its place, name and repo, the orgs it is linked to (or everywhere), its skills, rules and lists counted, and when it last synced.
@@ -57,6 +70,28 @@ Each card's menu holds **Sync now**, **Open on GitHub**, **Why…** (which exten
 **Add extension** takes a name (a-z, 0-9 and -), a repo or none (your login's `playground-<name>`) and its links.
 As you type it checks GitHub, making nothing: a repo that is there reads whether it is private and how many skills its `skills/` holds, and one that is not reads that it will be created, private, which a confirm names again before it is made.
 Each of these is the same change `playground ext add|order|link|unlink|remove|sync|why` makes, and the check is `playground ext add --dry-run` ([Settings and extensions](/docs/extensions#extensions)).
+
+Below them, **Bundled with Playground** lists each extension Playground ships in its own checkout under `extensions/`, Slack today, each off until you turn its switch on.
+One that is on gives its skills to the sessions started after that, read after your extensions and before core, and one that is off loads none.
+The switch sets `ext.bundled` at your login's scope, so the group shows once your settings are set up ([Settings and extensions](/docs/extensions#which-scope-wins)).
+
+### Privacy
+
+Privacy holds two settings: **Names you go by**, your first name and handles, lowercase and separated by commas (`owner.names`, which the trace count and the inbox gate read), and **Private archive repository**, as owner/name, whose links count as private history (`factory.archiveRepo`, which the trace count and the leak guard read).
+**Save** writes each field that holds a value, and each one you cleared, at your login's scope, so it also rebuilds a settings file a guard could not read; a value the setting refuses shows under its field.
+Until both are set, the trace count counts nothing, and a session that runs it asks you, through its lead, to fill them in here.
+Before your settings are set up the section shows the same **Set up settings** step as Accounts.
+
+### Remote
+
+Remote pairs one browser with this Mac, so sending from the hosted Yard can count only what that browser signs.
+
+1. On the hosted Yard, open Settings and press **Pair** under Remote. The browser makes its own key, which never leaves it, sends its public half to this Mac and shows the key's fingerprint.
+2. On this Mac, open Settings: the pair request shows under Remote with the same fingerprint. Press **Approve** only if the two match.
+
+One key is paired at a time: pairing another browser replaces it, and **Revoke** removes it, so a lost device can sign nothing more.
+Once paired, that browser can send a message and answer the Inbox from Yard ([From the hosted Yard](/docs/dashboard#from-the-hosted-yard)).
+Under the key, this Mac lists the last 20 writes from Yard that your paired key signed: when, how it answered, the key's fingerprint and which kind of write, a card your Mac kept for itself included.
 
 ## From the terminal
 

@@ -796,7 +796,7 @@ describe("as Claude Code runs it", () => {
 
   const entry = async () => {
     const found = (await settings()).hooks.PreToolUse.find((e) =>
-      e.hooks.some((h) => h.command.includes("scripts/hooks/no-release-comment.ts")),
+      e.hooks.some((h) => h.command.includes("scripts/hooks/bundled/no-release-comment.js")),
     )
     if (!found) throw new Error(".claude/settings.json registers no no-release-comment hook")
     return found

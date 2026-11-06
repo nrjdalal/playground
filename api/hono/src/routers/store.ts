@@ -158,7 +158,7 @@ export const extRouter = new Hono<{ Variables: StoreVariables }>()
     describeRoute({
       tags: ["Extensions"],
       description:
-        "Judge a proposal with a reason: score records a reviewer's 0 to 5 and a 5 accepts it, accept is the owner's own call, reject removes it; each refuses unless the proposal is still the commit named",
+        "Judge a proposal with a reason: score records your 0 to 5 and a 5 accepts it, refused on a proposal you wrote, accept is your own call, reject removes it; each refuses unless the proposal is still the commit named",
       ...responses(validationErrorResponses, notFoundErrorResponses, conflictErrorResponses),
     }),
     sValidator(
@@ -166,21 +166,18 @@ export const extRouter = new Hono<{ Variables: StoreVariables }>()
       z
         .strictObject({
           ...whyFields,
-          reviewer: z.string().min(1).optional(),
           score: z.number().int().min(0).max(5).optional(),
           verdict: z.enum(["accept", "reject", "score"]),
         })
         .refine(
           (input) =>
-            input.verdict === "score"
-              ? input.score !== undefined && input.reviewer !== undefined
-              : input.score === undefined && input.reviewer === undefined,
-          "a score takes its score and reviewer, and only a score does",
+            input.verdict === "score" ? input.score !== undefined : input.score === undefined,
+          "a score takes its score, and only a score does",
         ),
       invalid,
     ),
     async (c) => {
-      const { by, inboxRef, reason, reviewer, score, verdict } = c.req.valid("json")
+      const { by, inboxRef, reason, score, verdict } = c.req.valid("json")
       const rev = revSchema.safeParse(c.req.param("rev"))
       if (!rev.success) throw new ApiError(400, "VALIDATION_ERROR", "a rev is a commit sha")
       const judged = done(
@@ -188,9 +185,7 @@ export const extRouter = new Hono<{ Variables: StoreVariables }>()
           dataDir(),
           refOf(c),
           rev.data,
-          verdict === "score"
-            ? { kind: "score", reviewer: reviewer!, score: score! }
-            : { kind: verdict },
+          verdict === "score" ? { kind: "score", score: score! } : { kind: verdict },
           await whoOf(c, { by, inboxRef, reason }),
         ),
       )

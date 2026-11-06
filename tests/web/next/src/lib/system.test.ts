@@ -134,6 +134,12 @@ export const calm = (patch: (r: SystemReport) => void = () => {}): SystemReport 
       idle: { bytes: 0, line: null, ready: true, stacks: [] },
       limitedBy: "memory",
       line: "Room for ~3 more workers, by memory",
+      orchestrators: {
+        count: 6,
+        limitedBy: "memory",
+        line: "Room for ~6 more orchestrators, by memory",
+      },
+      perOrchestrator: { bytes: 0.6 * GB, cores: 0.1 },
       perWorker: { bytes: 1.3 * GB, cores: 1 },
       workers: 3,
     },

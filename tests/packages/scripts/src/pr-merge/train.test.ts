@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import type { Check, PrFacts } from "../../../../../packages/scripts/src/pr-merge/gates"
+import { FREEZE_LAPSE_MS, heldOf } from "../../../../../packages/scripts/src/pr-merge/held"
 import type { Run, RunResult } from "../../../../../packages/scripts/src/pr-merge/merge"
 import { forecast, gatedOf, resolve } from "../../../../../packages/scripts/src/pr-merge/train"
 import "./scratch-config"
@@ -161,6 +162,33 @@ describe("pr:train", () => {
     const { held, order } = await gatedOf(h.run, REPO, local.facts, local.queue)
     expect(order.map((c) => c.n)).toEqual([5, 3, 9])
     expect(held).toEqual([{ n: 7, why: "not gated: ci" }])
+  })
+
+  // merge-on-ready picks from gatedOf, so a ship's freeze holds its pick as it holds pr:merge
+  test('a ship\'s fresh "*" line holds every pick at 5/5 with green checks, and one past its lapse holds none', async () => {
+    const w = world({ 3: { "a.txt": edit("3") }, 5: { "b.txt": edit("5") } })
+    const h = hub(w, [3, 5])
+    const local = localOf(w, h, { queue: [3, 5] })
+    const line = "v0.0.38 ships: canary is frozen until its tag lands"
+    const frozen = (ago: number) =>
+      JSON.stringify({
+        held: { "*": line },
+        since: { "*": new Date(Date.now() - ago).toISOString() },
+      })
+    const reading =
+      (text: string) =>
+      async (run: Run, repo: string, n: number): Promise<PrFacts> => ({
+        ...(await local.facts(run, repo, n)),
+        held: heldOf(text, repo, n, Date.now()),
+      })
+    const fresh = await gatedOf(h.run, REPO, reading(frozen(60_000)), local.queue)
+    expect(fresh.order).toEqual([])
+    expect(fresh.held).toEqual([
+      { n: 3, why: `not gated: held (${line})` },
+      { n: 5, why: `not gated: held (${line})` },
+    ])
+    const lapsed = await gatedOf(h.run, REPO, reading(frozen(FREEZE_LAPSE_MS)), local.queue)
+    expect(lapsed.order.map((c) => c.n)).toEqual([3, 5])
   })
 
   test("outside a scratch lock folder and a git stub, it refuses to run", async () => {

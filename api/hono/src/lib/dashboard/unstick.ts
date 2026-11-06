@@ -51,7 +51,7 @@ export async function readUnstick(now = Date.now()): Promise<Blocked[]> {
 
 export type Held = { name: string; sessionId: string; surface: string | null }
 
-// Pure: the sessions ops-unstick lists, each entry matched to a live session by its surface (cmux's surface id, as `cmux sessions list` gives it), else by its name, so an entry whose surface no session holds, a tree ref (`surface:24`) included, still finds its session. Each session keeps every entry that names it, for its kinds. `sessions` may hold sessions off the board being read, after its own, which then win. An entry whose surface and name point at two sessions marks neither and is named in `conflicts`, since a wrong Waiting on you holds back every message to that session.
+// Pure: the sessions ops-unstick lists, each entry matched to a live session by its surface (herdr's `herdr:<server>:<pane id>`), else by its name, so an entry whose surface no session holds, a tree ref (`surface:24`) included, still finds its session. Each session keeps every entry that names it, for its kinds. `sessions` may hold sessions off the board being read, after its own, which then win. An entry whose surface and name point at two sessions marks neither and is named in `conflicts`, since a wrong Waiting on you holds back every message to that session.
 export function blockedSessions(
   blocked: Blocked[],
   sessions: Held[],

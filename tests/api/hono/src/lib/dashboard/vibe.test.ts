@@ -158,7 +158,7 @@ describe("the pure parts", () => {
     expect(text).toContain("NEW_KEY=x\n")
     expect(text).toContain("POSTGRES_URL=postgresql://c\n")
     expect(text).toContain("PLAYGROUND_LIVE_READS=true\n")
-    expect(text).toContain("PLAYGROUND_CMUX_SESSIONS=\n")
+    expect(text).toContain("PLAYGROUND_ALL_SESSIONS=\n")
     expect(setKey("A=1", "B", "$2")).toBe("A=1\nB=$2\n")
   })
 
@@ -334,6 +334,24 @@ describe("Start", () => {
     expect(message).toContain("launch failed")
     expect(message).toContain("inside the main checkout")
     expect(existsSync(join(path, ".turbo/vibe.json"))).toBe(true)
+  })
+
+  test("a failed Start puts the worktree's own .env back before it moves its record, so a trash that throws leaves the .env in place, past the next Stop", async () => {
+    const path = worktree("launch-trash-throws", "OLD=3\n")
+    const blocker = join(dir, "not-a-folder")
+    writeFileSync(blocker, "")
+    const f = fake([stack(path)], {
+      launch: () => {
+        throw new Error("launch failed")
+      },
+      roots: () => ({ ...ROOTS, trash: join(blocker, "trash") }),
+    })
+    await startVibe(path, f.deps).catch(() => {})
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OLD=3\n")
+    expect(existsSync(join(path, ".env.vibe-saved"))).toBe(false)
+    // the record left behind says the .env is the worktree's own, so the Stop it offers leaves it in place
+    await stopVibe(path, fake([stack(path, { vibe: true })]).deps)
+    expect(readFileSync(join(path, ".env"), "utf8")).toBe("OLD=3\n")
   })
 
   test("the load gate and a missing live database refuse before any container starts", async () => {

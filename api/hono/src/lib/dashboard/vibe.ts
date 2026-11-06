@@ -131,11 +131,11 @@ export const setKey = (text: string, key: string, value: string): string => {
   return `${text}${text === "" || text.endsWith("\n") ? "" : "\n"}${line}\n`
 }
 
-// Pure: the stack's .env, the worktree's own .env.example with the copy's database, a fresh secret, and the live machine's reads, so a key the branch adds comes with it; cmux's sessions stay off, so it reads the sessions Playground started.
+// Pure: the stack's .env, the worktree's own .env.example with the copy's database, a fresh secret, and the live machine's reads, so a key the branch adds comes with it; every session stays off, so it reads the sessions Playground started.
 export const vibeEnv = (example: string, url: string, secret: string): string =>
   [
     ["BETTER_AUTH_SECRET", secret],
-    ["PLAYGROUND_CMUX_SESSIONS", ""],
+    ["PLAYGROUND_ALL_SESSIONS", ""],
     ["PLAYGROUND_LIVE_READS", "true"],
     ["POSTGRES_URL", url],
   ].reduce((text, [key, value]) => setKey(text, key!, value!), example)
@@ -414,9 +414,13 @@ export async function startVibe(path: string, deps: Deps = DEPS): Promise<Seeded
     // a Stop already took this Start's copy and record, and a later Start's are its own
     if (owns()) {
       await deps.docker(["rm", "-fv", copy])
-      const kept = [trash(deps, path, VIBE_RECORD)]
+      // the .env first, so a trash that throws never leaves the worktree on the copy's
+      const kept = wrote ? [restoreEnv(deps, path)] : []
+      // a record the trash then leaves behind names the .env as the worktree's own, so the Stop it offers leaves the .env alone
+      if (wrote && !kept[0])
+        writeRecord(path, { container: copy, env: false, id, started: new Date().toISOString() })
+      kept.push(trash(deps, path, VIBE_RECORD))
       rmSync(join(path, DATA), { force: true, recursive: true })
-      if (wrote) kept.push(restoreEnv(deps, path))
       const words = kept.filter(Boolean).join("; ")
       if (words) throw new VibeError(`${error instanceof Error ? error.message : error}; ${words}`)
     }

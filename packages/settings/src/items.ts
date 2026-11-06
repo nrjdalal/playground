@@ -165,12 +165,9 @@ export const putItem = (
   return { ok: true, rev: sha, state }
 }
 
-export type Verdict =
-  | { kind: "accept" }
-  | { kind: "reject" }
-  | { kind: "score"; reviewer: string; score: number }
+export type Verdict = { kind: "accept" } | { kind: "reject" } | { kind: "score"; score: number }
 
-// A proposal judged: a score below 5 is recorded as an empty commit, a 5 or the owner's accept moves it out of proposed/ over the accepted copy, and a reject removes it. Each refuses unless the proposal is still the revision named, so a judge never decides a proposal written after it read.
+// A proposal judged: a score below 5 is recorded as an empty commit, a 5 or the owner's accept moves it out of proposed/ over the accepted copy, and a reject removes it. Each refuses unless the proposal is still the revision named, so a judge never decides a proposal written after it read, and a score is its author's, refused from the proposal's own author.
 export const judgeItem = (
   data: string,
   ref: Ref,
@@ -196,6 +193,15 @@ export const judgeItem = (
       ok: false,
       status: 409,
     }
+  if (verdict.kind === "score") {
+    const writer = extGit(dir, ["log", "-1", "--format=%an", head]).out
+    if (who.author === writer)
+      return {
+        message: `${writer} wrote this proposal, so another session scores it`,
+        ok: false,
+        status: 400,
+      }
+  }
   const accepts = verdict.kind === "accept" || (verdict.kind === "score" && verdict.score === 5)
   const state = accepts ? "accepted" : verdict.kind === "reject" ? "rejected" : "proposed"
   const extra: [string, string][] = [
@@ -203,7 +209,7 @@ export const judgeItem = (
     ...(verdict.kind === "score"
       ? ([
           ["Score", String(verdict.score)],
-          ["Reviewer", verdict.reviewer],
+          ["Reviewer", who.author],
         ] as [string, string][])
       : []),
     ["State", state],
@@ -290,15 +296,31 @@ export const showItem = (data: string, ref: Ref, rev?: string) => {
     return content && { ...ref, content, state: accepted ? "accepted" : "proposed" }
   }
   const [path] = candidates(ref.kind, ref.key)
-  for (const [state, at] of [
-    ["accepted", path!],
-    ["proposed", join(PROPOSED, path!)],
-  ] as const) {
-    const listed = extGit(dir, ["ls-tree", "-r", "--name-only", rev, "--", at])
+  const proposed = join(PROPOSED, path!)
+  // a revision that wrote or judged this item reads in the state its trailers say it was written in: a proposal from proposed/, a reject from proposed/ just before it removed it
+  const trailers = extGit(dir, [
+    "log",
+    "-1",
+    "--format=%(trailers:key=Item,valueonly)%x00%(trailers:key=State,valueonly)",
+    "--end-of-options",
+    rev,
+  ])
+  const [item, written] = trailers.out.split("\0").map((part) => part.trim())
+  const ownRead = {
+    accepted: ["accepted", path!, rev],
+    proposed: ["proposed", proposed, rev],
+    rejected: ["rejected", proposed, `${rev}^`],
+  } as const
+  const reads =
+    item === `${ref.kind} ${ref.key}`
+      ? [ownRead[written === "accepted" || written === "rejected" ? written : "proposed"]]
+      : [ownRead.accepted, ownRead.proposed]
+  for (const [state, at, tree] of reads) {
+    const listed = extGit(dir, ["ls-tree", "-r", "--name-only", tree, "--", at])
     if (listed.code !== 0) return null
     const names = listed.out.split("\n").filter(Boolean)
     if (!names.length) continue
-    const show = (name: string) => mustGit(dir, ["show", `${rev}:${name}`])
+    const show = (name: string) => mustGit(dir, ["show", `${tree}:${name}`])
     const content: Content = { attachments: [], body: null, files: null, value: null }
     if (names.length > 1 || names[0] !== at)
       content.files = Object.fromEntries(names.map((name) => [relative(at, name), show(name)]))

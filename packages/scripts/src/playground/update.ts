@@ -1,7 +1,8 @@
 // playground update: the release skill's step 5 as one script, then the Dashboard's roll.
 import { basename, join } from "node:path"
 
-import { CORE_SKILLS } from "./orgs"
+import { BUNDLED_ROOT, CORE_SKILLS } from "./orgs"
+import { unlinked } from "./unlinked"
 
 // A step's argv run to its end; `show` streams its output to the terminal instead of keeping it.
 export type Run = (argv: string[], show?: boolean) => Promise<{ code: number; out: string }>
@@ -14,17 +15,22 @@ export const spawnRun: Run = async (argv, show = false) => {
   return { code: await proc.exited, out }
 }
 
+const MANIFEST = /(^|\/)(bun\.lock|package\.json)$/
+const PACKAGE = /(^|\/)package\.json$/
+// core's skill roots and each bundled extension's, whose skills a session reads once ext.bundled turns it on
+const SKILL_ROOTS = [...CORE_SKILLS, `${BUNDLED_ROOT}/[^/]+/skills`]
+
 // What the merge changed asks for: an install for a lockfile or a package.json, a build for a package with a dist (packages/scripts runs from source).
 export const updateSteps = (changed: string[]) => ({
   build: changed.some(
     (path) => path.startsWith("packages/") && !path.startsWith("packages/scripts/"),
   ),
-  install: changed.some((path) => /(^|\/)(bun\.lock|package\.json)$/.test(path)),
+  install: changed.some((path) => MANIFEST.test(path)),
   // each changed skill's folder, A to Z by name, which a live session reads the new text from (the release rule)
   skills: [
     ...new Set(
       changed.flatMap((path) =>
-        CORE_SKILLS.flatMap((root) => path.match(new RegExp(`^${root}/[^/]+(?=/)`))?.[0] ?? []),
+        SKILL_ROOTS.flatMap((root) => path.match(new RegExp(`^${root}/[^/]+(?=/)`))?.[0] ?? []),
       ),
     ),
   ].sort((a, b) => basename(a).localeCompare(basename(b))),
@@ -70,34 +76,95 @@ export const runUpdate = async (
       ? recorded
       : merged || head
   if (done && old !== recorded) await Bun.write(done, `${old}\n`)
-  // a checkout left on another branch, such as one cloned while canary was the default, moves to main when its tree is clean, so the merge below lands on main
-  const onMain = async () => {
-    const branch = (await git("branch", "--show-current")).out.trim()
-    if (branch === "main") return { code: 0, out: "" }
-    const clean = await git("diff", "--quiet", "HEAD")
-    if (clean.code !== 0) return clean
+  const ok = { code: 0, out: "" }
+  // a checkout left on another branch, such as one cloned while canary was the default, moves to main at origin/main when its tree is clean, and one on main fast-forwards; cleanTree reads the branch that prelink and move then go by
+  let branch = ""
+  const cleanTree = async () => {
+    branch = (await git("branch", "--show-current")).out.trim()
+    return branch === "main" ? ok : git("diff", "--quiet", "HEAD")
+  }
+  const move = async () => {
+    if (branch === "main") return git("merge", "--ff-only", "-q", "origin/main")
     log(
       `playground update: on ${branch || "a detached HEAD"}, not main, so moving to main at origin/main`,
     )
     return git("checkout", "-q", "-B", "main", "origin/main")
   }
-  const steps: [string, () => ReturnType<Run>][] = to
+  const installArgv = [
+    process.execPath,
+    "install",
+    "--frozen-lockfile",
+    "--ignore-scripts",
+    "--cwd",
+    repo,
+  ]
+  const target = to ? `refs/tags/${to}` : "origin/main"
+  // every hook that runs its source (all but the bundled PreToolUse guards) and every ops job run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its changed manifests and that install first, while the code is still the old commit's (the install step after the move then finds it linked); a target that deletes or moves a manifest, which the old code may still read, a tree with edits or untracked files of its own, or an install that fails there moves first as before
+  const prelink = async (): ReturnType<Run> => {
+    // a fast-forward stops on a checkout with commits of its own, so its manifests are staged only where it will move; a checkout -B moves over them either way
+    const merges = !to && branch === "main"
+    if (merges && (await git("merge-base", "--is-ancestor", "HEAD", target)).code !== 0) return ok
+    if ((await git("status", "--porcelain", "--untracked-files=all")).out.trim()) return ok
+    const lines = async (...args: string[]) => (await git(...args)).out.split("\n").filter(Boolean)
+    const manifests: Record<string, string> = {}
+    for (const path of await lines("ls-tree", "-r", "--name-only", target)) {
+      if (!PACKAGE.test(path)) continue
+      const manifest = await git("show", `${target}:${path}`)
+      if (manifest.code !== 0) return manifest
+      manifests[path] = manifest.out
+    }
+    const missing = await unlinked(repo, manifests)
+    if (!missing.length) return ok
+    // --no-renames, so a package the target moves reads as a deleted manifest and a new one, never as one new path staged beside the old
+    const changes = (await lines("diff", "--name-status", "--no-renames", "HEAD", target))
+      .map((line) => line.split("\t"))
+      .filter(([, path]) => MANIFEST.test(path ?? ""))
+    if (changes.some(([status]) => status === "D")) return ok
+    const manifestsChanged = changes.map(([, path]) => path ?? "")
+    log(
+      `playground update: install the new commit's dependencies before its code, since it declares ${missing.join(", ")}, which this checkout has not linked`,
+    )
+    if (manifestsChanged.length) {
+      const staged = await git("checkout", target, "--", ...manifestsChanged)
+      if (staged.code !== 0) return staged
+    }
+    if ((await run(installArgv, true)).code === 0) return ok
+    // an install that needs a file only the manifests were staged without (a patch, bunfig.toml) fails here, so it puts the old commit's manifests back, a manifest the old commit lacks removed, and moves first as before
+    log(
+      "playground update: the install before the move failed, so the checkout's files go back as they were and it moves first, installing after, as before",
+    )
+    if (!manifestsChanged.length) return ok
+    return git(
+      "restore",
+      "-q",
+      "--source=HEAD",
+      "--staged",
+      "--worktree",
+      "--",
+      ...manifestsChanged,
+    )
+  }
+  const prelinked =
+    "the checkout's files are as they were; fix the failure above and run playground update again"
+  const steps: [string, () => ReturnType<Run>, string?][] = to
     ? [
         ["fetch origin main and its tags", () => git("fetch", "-q", "--tags", "origin", "main")],
         [
           "a checkout with no commits of its own",
           () => git("merge-base", "--is-ancestor", "HEAD", "origin/main"),
         ],
+        ["link the new commit's dependencies", prelink, prelinked],
         [`check out ${to}`, () => git("checkout", "-q", "-B", "main", `refs/tags/${to}`)],
       ]
     : [
         ["fetch origin main", () => git("fetch", "-q", "origin", "main")],
-        ["move to main, on a tree with no uncommitted changes", onMain],
-        ["merge --ff-only origin/main", () => git("merge", "--ff-only", "-q", "origin/main")],
+        ["a tree with no uncommitted changes, off main", cleanTree],
+        ["link the new commit's dependencies", prelink, prelinked],
+        ["merge --ff-only origin/main, or move to main there", move],
       ]
-  for (const [name, step] of steps)
+  for (const [name, step, state = "the checkout is as it was"] of steps)
     if ((await step()).code !== 0) {
-      log(`playground update: ${name} failed; the checkout is as it was`)
+      log(`playground update: ${name} failed; ${state}`)
       return 1
     }
   // link-skills.sh first, as the release skill's step 5 runs it: every later step and every ops job reads the data folder it links
@@ -115,11 +182,7 @@ export const runUpdate = async (
   const turbo = join(repo, "node_modules", ".bin", "turbo")
   const restart = join(repo, "packages", "scripts", "src", "ops-restart", "cli.ts")
   const after: [string, string[]][] = []
-  if (install)
-    after.push([
-      "install",
-      [process.execPath, "install", "--frozen-lockfile", "--ignore-scripts", "--cwd", repo],
-    ])
+  if (install) after.push(["install", installArgv])
   if (build)
     after.push([
       "build",

@@ -12,7 +12,7 @@ export type OutboxAttachment = {
   size: number
 }
 
-// queued: waiting its turn, or for a retry after a refusal that can pass (reason says why). sending: its request is out. typed: the session has it, in its input or, while it is busy, in its own queue. delivered: its transcript holds it (entryId). failed: refused for good, given up on, or cut off with its fate unknown (reason says which).
+// queued: waiting its turn, for a retry after a refusal that can pass (reason says why), or held by Claude Code until the session is free (code QUEUED), which its retries read again until the API reads it delivered or lost. sending: its request is out. typed: the session has it, in its input or, while it is busy, in its own queue. delivered: its transcript holds it (entryId). failed: refused for good, given up on, or cut off with its fate unknown (reason says which).
 export type OutboxState = "delivered" | "failed" | "queued" | "sending" | "typed"
 
 export type OutboxMessage = {
@@ -25,6 +25,8 @@ export type OutboxMessage = {
   id: string
   // Sent as the first message of a new thread, which the API opens.
   newThread?: boolean
+  // When Claude Code first held it (QUEUED), kept through every later refusal and a page reload and sent with each retry, so an API that restarted since reads it again rather than typing it twice; it goes once the message is typed or reads LOST, whose Retry sends it afresh.
+  queuedAt?: string
   reason: string | null
   retryAt: number | null
   // The session has been seen on its picker since this message was refused for one.
@@ -49,14 +51,20 @@ export const MAX_ATTEMPTS = 20
 export const sentSince = (seen: ReadonlySet<string>, messages: { id: string }[]): boolean =>
   messages.some((m) => !seen.has(m.id))
 
-// Refusals the API gives before typing anything, or with the message left pasted and unsent for a retry's Enter (INPUT_NOT_EMPTY, deliver.ts), which a later try can pass: the session is on a picker, its input holds a draft, its terminal stumbled reading it, the session is between lives, or the rate limit is full. These are retried on their own.
+const QUEUED = "QUEUED"
+
+// Refusals the API gives before typing anything, or with the message left pasted and unsent for a retry's Enter (INPUT_NOT_EMPTY, deliver.ts), which a later try can pass: the session is on a picker, its input holds a draft, its terminal stumbled reading it, the session is between lives, or the rate limit is full. QUEUED is Claude Code holding it, which each try reads again and types nothing, until the API reads it delivered or lost. These are retried on their own.
 const AUTO_RETRY = new Set([
   "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
   "NOT_FOUND",
   "ON_PICKER",
+  QUEUED,
   "TOO_MANY_REQUESTS",
 ])
+
+// Claude Code holds a queued message until it is free, a compaction (up to 7 minutes measured) or a turn, so its tries are uncounted, and come at most 5s apart, so it reads delivered soon after it arrives.
+export const QUEUED_POLL_MS = 5000
 
 // No answer, one that is not the API's, or the API's own failure (deliver() throws when it cannot write its activity row, which can come after the Enter): the message may or may not have been typed, so once it fails only a person retries it, after a look at the session. The API's own failure fails at once; no answer is retried on its own first (UNREACHED).
 const UNANSWERED = new Set(["INTERNAL_SERVER_ERROR", "NETWORK_ERROR", "UNKNOWN_ERROR"])
@@ -65,9 +73,16 @@ const UNANSWERED = new Set(["INTERNAL_SERVER_ERROR", "NETWORK_ERROR", "UNKNOWN_E
 const UNREACHED = new Set(["NETWORK_ERROR", "UNKNOWN_ERROR"])
 export const UNREACHED_ATTEMPTS = 8
 
-// Whether a failed message offers Retry: one that ran out of tries on a refusal that can pass, or one whose fate is unknown. A message cut off while typing (INTERRUPTED) or refused for what it says offers Edit alone.
+// Whether a failed message offers Retry: one that ran out of tries on a refusal that can pass, one whose fate is unknown, or one Claude Code held and lost (LOST: neither its screen nor its transcript shows it). A message cut off while typing (INTERRUPTED) offers Edit and Check it for me, and one refused for what it says Edit alone.
 export const canRetry = (code: string | null): boolean =>
-  code !== null && (AUTO_RETRY.has(code) || UNANSWERED.has(code))
+  code !== null && (AUTO_RETRY.has(code) || UNANSWERED.has(code) || code === "LOST")
+
+// Whether a failed message offers Check it for me, a note asking the dispatcher whether its session got it: one cut off while typing, which may have gone, so no Retry is offered.
+export const canCheck = (code: string | null): boolean => code === "INTERRUPTED"
+
+// The note Check it for me sends the dispatcher: the session's name, and the message's first words, so it knows which to look for.
+export const checkNote = (to: string, short: string): string =>
+  `Check it for me: did my message "${short}" reach ${to}? Look at ${to}'s transcript and tell me whether it arrived.`
 
 // 2s, 4s, 8s, 16s, then every 30s.
 export const retryDelay = (attempts: number): number =>
@@ -86,6 +101,8 @@ export const waitWhy = (code: string, label: string, limited = false): string | 
       return `${label} is not live`
     case "ON_PICKER":
       return limited ? `${label} is at its usage limit` : `${label} is on a prompt`
+    case QUEUED:
+      return `${label} holds it, to take once free`
     case "TOO_MANY_REQUESTS":
       return "too many messages this minute"
     case "UNKNOWN_ERROR":
@@ -124,6 +141,7 @@ export type OutboxAction =
       attempts: number
       code: string
       id: string
+      queuedAt?: string
       reason: string
       retryAt: number
       // the thread a New thread send opened and kept, its message left pasted and unsent, which the retry sends to
@@ -165,8 +183,8 @@ export function failWithFiles(
 // The state each move starts from: a move that finds its message anywhere else is stale (a reply after a cancel, a release after the send began) and changes nothing.
 const FROM: Record<Exclude<OutboxAction["type"], "add">, readonly OutboxState[]> = {
   cancel: ["queued"],
-  // a request that went unanswered may still have landed, and its transcript then says so, a message still waiting to be sent again included
-  delivered: ["typed", "failed", "queued"],
+  // a request that went unanswered may still have landed, and its transcript then says so, a message still waiting to be sent again included; one still sending lands before its answer, which comes once the box settles
+  delivered: ["typed", "failed", "queued", "sending"],
   dismiss: ["typed"],
   fail: ["sending"],
   release: ["queued"],
@@ -187,6 +205,17 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
   }
   return messages.map((m): OutboxMessage => {
     if (m !== target) return m
+    // its line has landed, so the answer to its request, whatever it says, makes it delivered
+    if (
+      m.entryId !== null &&
+      (action.type === "typed" || action.type === "fail" || action.type === "wait")
+    ) {
+      return {
+        ...m,
+        ...(action.type === "typed" && { sessionId: action.sessionId, typedAt: action.at }),
+        state: "delivered",
+      }
+    }
     switch (action.type) {
       // A picker answered starts the count over: its wait, however long, is not a failure.
       case "release":
@@ -209,6 +238,7 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
         return {
           ...m,
           code: null,
+          queuedAt: undefined,
           reason: null,
           retryAt: null,
           sessionId: action.sessionId,
@@ -221,6 +251,7 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
           ...(action.threadId && { newThread: undefined, threadId: action.threadId }),
           attempts: action.attempts,
           code: action.code,
+          queuedAt: action.queuedAt ?? m.queuedAt,
           reason: action.reason,
           retryAt: action.retryAt,
           sawPicker: false,
@@ -234,27 +265,37 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
           ...(action.threadId && { newThread: undefined, threadId: action.threadId }),
           attachments: action.attachments ?? m.attachments,
           code: action.code,
+          queuedAt: action.code === "LOST" ? undefined : m.queuedAt,
           reason: action.reason,
           retryAt: null,
           state: "failed",
           unanswered: m.unanswered || UNANSWERED.has(action.code),
         }
+      // one still sending keeps its state, so the next message waits for its answer, while its line stands in for its pending copy
       case "delivered":
-        return { ...m, deliveredAt: action.at, entryId: action.entryId, state: "delivered" }
+        return {
+          ...m,
+          deliveredAt: action.at,
+          entryId: action.entryId,
+          state: m.state === "sending" ? "sending" : "delivered",
+        }
     }
   })
 }
 
 // What a refusal does to the message whose send it answers, at its attempts-th try: a refusal a later try can pass waits with backoff, a picker for as long as it takes (it is released once the picker is seen answered, and a person may take hours), and no answer for about 2 minutes of tries in a row, counted on their own; a draft waits like any other, after a try that came back with no answer too, since deliver() refuses it before typing anything (whether that try landed is kept as `unanswered`); anything else fails with the API's reason, and an unanswered request says to look before retrying. A picker's tries are its own (message.code is the last refusal's): the count starts over once the picker gives way to another reason, so hours on a picker cannot fail the refusal that follows, while every other reason shares one count, so two that take turns still run out. No answer counts its run of tries on its own (unreached), while each of its tries still counts toward the shared one.
 export function onRefusal(
-  message: Pick<OutboxMessage, "attempts" | "code" | "id" | "unreached">,
+  message: Pick<OutboxMessage, "attempts" | "code" | "id" | "queuedAt" | "unreached">,
   error: { code: string; message: string },
   label: string,
   now: number,
 ): OutboxAction {
   const { code } = error
   const { id } = message
-  const attempts = message.code === "ON_PICKER" && code !== "ON_PICKER" ? 1 : message.attempts
+  const attempts =
+    (message.code === "ON_PICKER" || message.code === QUEUED) && code !== message.code
+      ? 1
+      : message.attempts
   const reason = waitReason(code, label)
   if (UNREACHED.has(code)) {
     const unreached = message.unreached + 1
@@ -262,12 +303,20 @@ export function onRefusal(
       const retryAt = now + retryDelay(unreached)
       return { attempts, code, id, reason, retryAt, type: "wait", unreached }
     }
-  } else if (AUTO_RETRY.has(code) && (code === "ON_PICKER" || attempts < MAX_ATTEMPTS)) {
-    const retryAt = now + retryDelay(attempts)
-    return { attempts, code, id, reason, retryAt, type: "wait", unreached: 0 }
+  } else if (
+    AUTO_RETRY.has(code) &&
+    (code === "ON_PICKER" || code === QUEUED || attempts < MAX_ATTEMPTS)
+  ) {
+    const delay = retryDelay(attempts)
+    if (code === QUEUED) {
+      const queuedAt = message.queuedAt ?? new Date(now).toISOString()
+      const retryAt = now + Math.min(QUEUED_POLL_MS, delay)
+      return { attempts, code, id, queuedAt, reason, retryAt, type: "wait", unreached: 0 }
+    }
+    return { attempts, code, id, reason, retryAt: now + delay, type: "wait", unreached: 0 }
   }
   if (UNANSWERED.has(code)) {
-    const unknown = `the server did not answer, so ${label} may have it already: look at its terminal before Retry`
+    const unknown = `the server did not answer, so ${label} may have it already: it reads Delivered once its transcript shows it, else Retry sends it`
     return { code, id, reason: unknown, type: "fail" }
   }
   return { code, id, reason: error.message, type: "fail" }
@@ -299,9 +348,9 @@ export const sameText = (
 // A message cut off while typing may still have gone whole (a 30-line paste read failed after it landed), so the transcript can show it delivered too.
 const CUT_OFF = "INTERRUPTED"
 
-// When a message could have reached its session, if the transcript may hold it: from when it was written, for a typed message, one whose request went unanswered and one cut off while typing alike. Its entry never precedes that, while typedAt comes after the Enter, herdr's answer, the box's settle and the row's commit, which on a loaded machine run past the Enter's own stamp on a message queued mid-turn.
+// When a message could have reached its session, if the transcript may hold it: from when it was written, for a typed message, one still sending, one whose request went unanswered and one cut off while typing alike. Its entry never precedes that, while typedAt comes after the Enter, herdr's answer, the box's settle and the row's commit, which on a loaded machine run past the Enter's own stamp on a message queued mid-turn.
 const reachableSince = (m: OutboxMessage): number | null => {
-  if (m.state === "typed") return Date.parse(m.at)
+  if (m.state === "typed" || m.state === "sending") return Date.parse(m.at)
   // still waiting to be sent again after a try that got no answer, which may have landed
   if (m.state === "queued" && m.unanswered) return Date.parse(m.at)
   if (
@@ -372,7 +421,7 @@ export function findDelivery(
   )
 }
 
-// The messages the loaded entries show delivered, oldest first so two sends of the same text claim their entries in order. The entries are one session's: a typed message is matched against them when that session took it, and one whose request went unanswered (no session named in a reply) when it was sent to that session's name. Typed messages claim first, since an unanswered one may never have landed and must not take the entry of a later send of the same text.
+// The messages the loaded entries show delivered, oldest first so two sends of the same text claim their entries in order. The entries are one session's: a typed message is matched against them when that session took it, and one still sending or whose request went unanswered (no session named in a reply) when it was sent to that session's name. Typed messages claim first, since an unanswered one may never have landed and must not take the entry of a later send of the same text.
 export function matchDeliveries(
   messages: OutboxMessage[],
   entries: Entry[],
@@ -382,11 +431,15 @@ export function matchDeliveries(
   const claimed = new Set(messages.flatMap((m) => (m.entryId ? [m.entryId] : [])))
   const found: { at: string; entryId: string; id: string }[] = []
   const typed = messages.filter((m) => m.state === "typed" && m.sessionId === session.id)
+  // one still sending names no session yet, so it is read in the session it went to by name, as an unanswered one is
+  const sending = messages.filter(
+    (m) => m.state === "sending" && m.entryId === null && m.to === session.name,
+  )
   const unanswered = messages.filter(
     (m) =>
       (m.state === "failed" || (m.state === "queued" && m.unanswered)) && m.to === session.name,
   )
-  for (const m of [...typed, ...unanswered]) {
+  for (const m of [...typed, ...sending, ...unanswered]) {
     const entry = findDelivery(m, entries, claimed)
     if (!entry) continue
     claimed.add(entry.id)
@@ -463,11 +516,26 @@ export function statusLine(
   }
 }
 
-// The mark his footer draws for a state, in one fixed-width slot whatever the state: a spinner while on its way, one tick once typed, two once delivered; statusLine's words are its hover and its screen-reader text.
-export type StatusMarkKind = "delivered" | "failed" | "sending" | "sent"
+// The mark his footer draws for a message, in one fixed-width slot whatever the state: a spinner while on its way, one faint tick while Claude Code holds it (QUEUED, or typed while its session works), one tick once typed, two once delivered; statusLine's words are its hover and its screen-reader text.
+export type StatusMarkKind = "delivered" | "failed" | "queued" | "sending" | "sent"
 
-export const statusMark = (state: OutboxState): StatusMarkKind =>
-  state === "queued" || state === "sending" ? "sending" : state === "typed" ? "sent" : state
+export const statusMark = (
+  { code, state }: Pick<OutboxMessage, "code" | "state">,
+  busy = false,
+): StatusMarkKind => {
+  if (state === "queued") return code === QUEUED ? "queued" : "sending"
+  if (state === "typed") return busy ? "queued" : "sent"
+  return state
+}
+
+// The one action his pending message's footer offers in its slot: Unsend while it waits here, Dismiss once typed into an idle session and held a moment (typedHeld); none while Claude Code holds it, since it goes on its own.
+export const pendingAction = (
+  message: Pick<OutboxMessage, "code" | "state">,
+  { busy, held }: { busy: boolean; held: boolean },
+): "dismiss" | "unsend" | null => {
+  if (message.state === "queued") return message.code === QUEUED ? null : "unsend"
+  return message.state === "typed" && !busy && held ? "dismiss" : null
+}
 
 // How long a message's Dismiss stays back once it is typed, so a state the send passes through in a moment never flashes its button (LIGHT_HOLD_MS holds a light the same way).
 export const TYPED_HOLD_MS = 1000
@@ -522,17 +590,18 @@ export function undoState({
 // When his message reached the session: its outbox record's time, else its transcript time, since a reload keeps only unsent records and the transcript holds only what arrived.
 export const deliveredAt = ({
   at,
-  peer,
   sent,
 }: {
   at: string | null
-  peer: boolean
   sent: OutboxMessage | null
-}): string | null => (peer ? null : (sent?.deliveredAt ?? at))
+}): string | null => sent?.deliveredAt ?? at
+
+// Whether the transcript holds a message: delivered, or still sending with its line already landed.
+export const landed = (m: OutboxMessage): boolean => m.state === "delivered" || m.entryId !== null
 
 // Whether a message of his to the session is still on its way: anything the transcript does not hold yet, a failed one included, since one whose fate is unknown may still land. Undo's own markers are not counted.
 export const othersWaiting = (messages: OutboxMessage[]): boolean =>
-  messages.some((m) => m.state !== "delivered" && !isUnsentMarker(m.text))
+  messages.some((m) => !landed(m) && !isUnsentMarker(m.text))
 
 // The undo sent for a delivered message: the newest marker sent while it was his last to have arrived.
 export function undoOf(messages: OutboxMessage[], sent: OutboxMessage): OutboxMessage | null {
@@ -551,6 +620,7 @@ export function undoOf(messages: OutboxMessage[], sent: OutboxMessage): OutboxMe
 // A refused message's try count, then why it waits after a dot, or the count alone when the outbox has no words for its code; none for a message nothing has refused, such as one a reload caught mid-send.
 export function retryNote(message: OutboxMessage, limited = false): string | null {
   if (message.state !== "queued" || message.attempts === 0 || !message.code) return null
+  if (message.code === QUEUED) return null
   const why = queuedWhy(message, limited)
   return why ? `retry ${message.attempts} · ${why}` : `retry ${message.attempts}`
 }
@@ -567,6 +637,7 @@ export function resumable(saved: unknown): OutboxMessage[] {
     const to = text(item?.to)
     const words = text(item?.text)
     const threadId = text(item?.threadId)
+    const queuedAt = text(item?.queuedAt)
     if (!item || !id || !to || words === null || !Array.isArray(item.attachments)) return []
     const attachments = item.attachments.flatMap(
       (file: Record<string, unknown> | null): OutboxAttachment[] => {
@@ -588,6 +659,7 @@ export function resumable(saved: unknown): OutboxMessage[] {
         entryId: null,
         id,
         ...(item.newThread === true ? { newThread: true } : {}),
+        ...(queuedAt && !Number.isNaN(Date.parse(queuedAt)) ? { queuedAt } : {}),
         reason: text(item.reason),
         retryAt: null,
         sawPicker: false,

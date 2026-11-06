@@ -160,10 +160,12 @@ export const rosterLinks = (roster: Roster | null): RosterLinks => ({
 })
 
 const ROLE_OF_KIND: Record<RosterKind, Role> = {
+  assistant: "lead",
   builder: "lead",
   dispatcher: "dispatcher",
   ops: "lead",
   optimizer: "lead",
+  orchestrator: "lead",
   planner: "lead",
   probe: "probe",
   researcher: "worker",

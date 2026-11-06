@@ -15,7 +15,6 @@ import { join } from "node:path"
 import { SQL } from "bun"
 import { RouteConflictError, RouteStore } from "portless"
 
-import type { Attachment } from "../../../../../../api/hono/src/lib/dashboard/cmux"
 import {
   apiSettings,
   checkoutOf,
@@ -26,12 +25,12 @@ import {
   envGaps,
   fixtureStackEnv,
   heldBareHosts,
-  herdrAloneEnv,
   isDryRun,
   mainCheckoutOf,
   livePair,
   moveRoute,
   othersLiveDashboard,
+  pendingMigrations,
   PORTLESS,
   preflight,
   prefixOf,
@@ -63,15 +62,6 @@ describe("devEnv", () => {
       "ignoring NODE_ENV=production from the shell, so the stage comes from .env",
       "ignoring SKIP_ENV_VALIDATION=true from the shell, so .env is validated",
     ])
-  })
-
-  test("drops a PLAYGROUND_HERDR_ALONE the shell exported, so only the launcher's own herdr-alone start sets it", () => {
-    const { env, notes } = devEnv({ PLAYGROUND_HERDR_ALONE: "1" }, "abc1234")
-    expect(env.PLAYGROUND_HERDR_ALONE).toBeUndefined()
-    expect(notes).toEqual([
-      "ignoring PLAYGROUND_HERDR_ALONE=1 from the shell, so only the launcher sets it",
-    ])
-    expect(herdrAloneEnv(env).PLAYGROUND_HERDR_ALONE).toBe("1")
   })
 
   test("says nothing when the shell exported neither", () => {
@@ -676,8 +666,6 @@ describe("apiSettings", () => {
 
 const URL = "postgres://postgres:pw@127.0.0.1:33001/postgres"
 const BRANCH = { branch: "feat/a", linked: true }
-// cmux answering this process, as it answers one in a cmux terminal; the attachment tests below say otherwise
-const attach = async (): Promise<Attachment> => ({ state: "attached" })
 // The API's settings: a factory stack's, which reads the fixture, unless a test adds others.
 const FACTORY = { PLAYGROUND_ROLE: "worker" }
 const read =
@@ -686,9 +674,8 @@ const read =
 // A person's own clone, outside the factory's folders, and a worker's worktree.
 const OWN_ROOT = "/home/me/dispatcher"
 const FACTORY_ROOT = "/home/me/dispatcher/.claude/worktrees/pg-1"
-// A live-reads stack that opts in to cmux's sessions, as the attachment tests below need.
-const OPT_IN = { PLAYGROUND_CMUX_SESSIONS: "true" }
-const LIVE_READS = { ...OPT_IN, PLAYGROUND_LIVE_READS: "1" }
+// A live-reads stack, which reads this machine.
+const LIVE_READS = { PLAYGROUND_LIVE_READS: "1" }
 
 // Stand-ins for the guard: the container that publishes the port, or the guard's own refusal, and a proof that records each call.
 const located = (name: string): Located => ({
@@ -708,26 +695,18 @@ const proving = () => {
 }
 // A database the migration has filled; the empty-database tests below name the refusal instead.
 const seeded = async (): Promise<number> => 2
+// A database that holds every migration in the journal.
+const current = async (): Promise<number> => 0
 
 describe("preflight", () => {
-  // The branch comes first, so a CI runner's detached HEAD refuses before anything asks cmux.
-  test("refuses a detached HEAD, which portless gives no branch prefix, before asking cmux or reading POSTGRES_URL", async () => {
+  // The branch comes first, so a CI runner's detached HEAD refuses before anything else is read.
+  test("refuses a detached HEAD, which portless gives no branch prefix, before reading POSTGRES_URL", async () => {
     let reads = 0
-    let asked = 0
-    const checked = await preflight(
-      { branch: null, linked: true },
-      () => {
-        reads++
-        return { ok: true, settings: { POSTGRES_URL: URL } }
-      },
-      {
-        attach: async () => {
-          asked++
-          return { state: "attached" }
-        },
-      },
-    )
-    expect([asked, reads]).toEqual([0, 0])
+    const checked = await preflight({ branch: null, linked: true }, () => {
+      reads++
+      return { ok: true, settings: { POSTGRES_URL: URL } }
+    })
+    expect(reads).toBe(0)
     expect(checked.ok).toBe(false)
     if (!checked.ok) {
       expect(checked.refusal).toStartWith("this checkout is on a detached HEAD")
@@ -737,15 +716,15 @@ describe("preflight", () => {
 
   test("refuses main, master or a branch that cleans to nothing in a linked worktree, which portless gives no prefix either", async () => {
     for (const branch of ["main", "master", "feat/___"]) {
-      const checked = await preflight({ branch, linked: true }, read(URL), { attach })
+      const checked = await preflight({ branch, linked: true }, read(URL))
       expect(checked.ok).toBe(false)
       if (!checked.ok) expect(checked.refusal).toStartWith(`this worktree is on ${branch}`)
     }
     const { prove } = proving()
     const mainCheckout = await preflight({ branch: "main", linked: false }, read(URL), {
-      attach,
       bare: () => [],
       locate: () => located("playground-a-db"),
+      pending: current,
       prove,
       tables: seeded,
     })
@@ -762,7 +741,7 @@ describe("preflight", () => {
           reads++
           return { ok: true, settings: { POSTGRES_URL: URL } }
         },
-        { attach, bare: () => ["playground.localhost"] },
+        { bare: () => ["playground.localhost"] },
       )
       expect(reads).toBe(0)
       expect(checked.ok).toBe(false)
@@ -778,12 +757,12 @@ describe("preflight", () => {
     let asked = 0
     const { prove } = proving()
     const checked = await preflight(BRANCH, read(URL), {
-      attach,
       bare: () => {
         asked++
         return ["playground.localhost"]
       },
       locate: () => located("playground-a-db"),
+      pending: current,
       prove,
       tables: seeded,
     })
@@ -797,12 +776,12 @@ describe("preflight", () => {
     process.env.PORTLESS = "0"
     try {
       const checked = await preflight({ branch: "main", linked: false }, read(URL), {
-        attach,
         bare: () => {
           asked++
           return ["playground.localhost"]
         },
         locate: () => located("playground-a-db"),
+        pending: current,
         prove,
         tables: seeded,
       })
@@ -815,7 +794,7 @@ describe("preflight", () => {
 
   test("refuses a branch whose prefix would be the live dashboard's own", async () => {
     for (const branch of ["feat/Dashboard", "feat/dashboard_", "try/-dashboard-"]) {
-      const checked = await preflight({ branch, linked: true }, read(URL), { attach })
+      const checked = await preflight({ branch, linked: true }, read(URL))
       expect(checked.ok).toBe(false)
       if (!checked.ok) {
         expect(checked.refusal).toStartWith(`branch ${branch} takes portless's prefix dashboard`)
@@ -823,114 +802,24 @@ describe("preflight", () => {
     }
   })
 
-  test("refuses a live-reading start cmux would not answer while a session is live in cmux, before locating its database, naming the fix for each way", async () => {
-    const cases: [Attachment, string][] = [
-      [
-        { detail: "Start the app from a cmux terminal", state: "detached" },
-        "this process does not descend from a cmux terminal",
-      ],
-      [
-        { detail: "cmux is not installed or not on PATH", state: "missing" },
-        "cmux is not installed",
-      ],
-      [
-        { detail: "cmux list-workspaces failed: socket not found", state: "unreachable" },
-        "cmux did not answer a read (cmux list-workspaces failed: socket not found)",
-      ],
-    ]
-    for (const [reach, refusal] of cases) {
-      let locates = 0
-      const checked = await preflight(BRANCH, read(URL, LIVE_READS), {
-        attach: async () => reach,
-        held: async () => ["builder"],
-        locate: () => {
-          locates++
-          return located("playground-a-db")
-        },
-      })
-      expect(locates).toBe(0)
-      expect(checked.ok).toBe(false)
-      if (!checked.ok) {
-        expect(checked.refusal).toStartWith(refusal)
-        expect(checked.refusal).toContain(
-          "only while no factory session is live in cmux, and 1 is: builder",
-        )
-      }
-    }
-  })
-
-  // with every session on herdr, a dashboard started outside cmux reads herdr alone; ps and the registry say whether cmux holds one, since cmux will not answer
-  test("starts a live-reading stack cmux would not answer once no session is live in cmux, reading herdr alone", async () => {
-    for (const reach of [
-      { detail: "Start the app from a cmux terminal", state: "detached" },
-      { detail: "cmux is not installed or not on PATH", state: "missing" },
-    ] as const) {
-      const { prove } = proving()
-      const checked = await preflight(BRANCH, read(URL, LIVE_READS), {
-        attach: async () => reach,
-        held: async () => [],
-        locate: () => located("playground-a-db"),
-        prove,
-        tables: seeded,
-      })
-      expect(checked).toMatchObject({
-        dashboard: { cmux: false, kind: "live", reason: reach.detail },
-        ok: true,
-      })
-    }
-  })
-
-  test("refuses a live-reading start cmux would not answer when ps or the registry cannot say whether cmux holds a session", async () => {
-    const checked = await preflight(BRANCH, read(URL, LIVE_READS), {
-      attach: async () => ({ detail: "Start the app from a cmux terminal", state: "detached" }),
-      held: async () => null,
-    })
-    expect(checked.ok).toBe(false)
-    if (!checked.ok)
-      expect(checked.refusal).toContain("could not be read from ps and Claude's registry")
-  })
-
-  test("asks nothing of ps or the registry while cmux answers", async () => {
-    let asked = 0
-    const { prove } = proving()
-    const checked = await preflight(BRANCH, read(URL, LIVE_READS), {
-      attach,
-      held: async () => {
-        asked++
-        return []
-      },
-      locate: () => located("playground-a-db"),
-      prove,
-      tables: seeded,
-    })
-    expect(asked).toBe(0)
-    expect(checked).toMatchObject({ dashboard: { cmux: true, kind: "live" }, ok: true })
-  })
-
-  // A fixture stack reads no cmux, so asking whether cmux answers it would open the live socket for nothing; a detached one leaks nothing.
-  test("starts a fixture stack without asking cmux, carrying the fixture it will write", async () => {
-    let asked = 0
+  test("starts a fixture stack carrying the fixture it will write", async () => {
     const { prove } = proving()
     const checked = await preflight(BRANCH, read(URL), {
-      attach: async () => {
-        asked++
-        return { state: "attached" }
-      },
       locate: () => located("playground-a-db"),
+      pending: current,
       prove,
       tables: seeded,
     })
-    expect(asked).toBe(0)
     expect(checked.ok).toBe(true)
     if (checked.ok) {
       expect(checked.dashboard.kind).toBe("fixture")
       if (checked.dashboard.kind === "fixture") {
-        expect(checked.dashboard.fixture.cmux.sessions.length).toBeGreaterThan(0)
+        expect(checked.dashboard.fixture.herdr.panes.length).toBeGreaterThan(0)
       }
     }
   })
 
-  test("refuses a fixture that does not load, before asking cmux or locating the database", async () => {
+  test("refuses a fixture that does not load, before locating the database", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dev-fixture-"))
     writeFileSync(join(dir, "broken.json"), "{ not json")
     writeFileSync(join(dir, "shapeless.json"), JSON.stringify({ anchor: "now" }))
@@ -940,10 +829,6 @@ describe("preflight", () => {
     ] as const) {
       let touched = 0
       const checked = await preflight(BRANCH, read(URL, { PLAYGROUND_FIXTURE: file }), {
-        attach: async () => {
-          touched++
-          return { state: "attached" }
-        },
         locate: () => {
           touched++
           return located("playground-a-db")
@@ -961,7 +846,7 @@ describe("preflight", () => {
     rmSync(dir, { force: true, recursive: true })
   })
 
-  test("refuses settings that mix the live machine with a made-up one, before asking cmux", async () => {
+  test("refuses settings that mix the live machine with a made-up one", async () => {
     const cases: [typeof BRANCH, Record<string, string>, string][] = [
       [
         { branch: LIVE_DASHBOARD.branch, linked: true },
@@ -971,114 +856,67 @@ describe("preflight", () => {
       [BRANCH, { ...LIVE_READS, PLAYGROUND_FIXTURE: "x.json" }, "set one of them"],
     ]
     for (const [checkout, settings, words] of cases) {
-      let asked = 0
-      const checked = await preflight(checkout, read(URL, settings), {
-        attach: async () => {
-          asked++
-          return { state: "attached" }
-        },
-      })
-      expect(asked).toBe(0)
+      const checked = await preflight(checkout, read(URL, settings))
       expect(checked.ok).toBe(false)
       if (!checked.ok) expect(checked.refusal).toContain(words)
     }
   })
 
-  test("asks cmux on the live dashboard's branch and on a live-reads stack that opt in to cmux's sessions, and reads live there", async () => {
-    for (const [checkout, settings] of [
-      [{ branch: LIVE_DASHBOARD.branch, linked: true }, OPT_IN],
-      [BRANCH, LIVE_READS],
-    ] as const) {
-      let asked = 0
-      const { prove } = proving()
-      const checked = await preflight(checkout, read(URL, settings), {
-        attach: async () => {
-          asked++
-          return { state: "attached" }
-        },
-        locate: () => located("playground-a-db"),
-        prove,
-        tables: seeded,
-      })
-      expect(asked).toBe(1)
-      expect(checked).toMatchObject({ dashboard: { kind: "live" }, ok: true })
-    }
-  })
-
-  // cmux runs sessions Playground never started (the owner's own, another factory's), so a stack shows them only once it opts in; until then the launcher asks neither cmux nor ps, and a factory session live in cmux holds nothing up
-  test("reads the live machine through herdr alone unless the stack opts in to cmux's sessions, asking cmux nothing", async () => {
+  // The live machine is read through herdr alone, so its start asks cmux nothing, opted in to every session or not.
+  test("reads the live machine on the live dashboard's branch, a live-reads stack and a person's own clone", async () => {
     for (const [checkout, settings, root] of [
       [{ branch: LIVE_DASHBOARD.branch, linked: true }, {}, undefined],
-      [BRANCH, { PLAYGROUND_LIVE_READS: "1" }, undefined],
-      [{ branch: "main", linked: false }, { PLAYGROUND_CMUX_SESSIONS: "false" }, OWN_ROOT],
+      [BRANCH, LIVE_READS, undefined],
+      [{ branch: "main", linked: false }, { PLAYGROUND_ALL_SESSIONS: "true" }, OWN_ROOT],
     ] as const) {
       const { prove } = proving()
       const checked = await preflight(checkout, read(URL, settings), {
-        attach: async () => {
-          throw new Error("a stack that has not opted in asked cmux")
-        },
         bare: () => [],
-        held: async () => {
-          throw new Error("a stack that has not opted in read ps and the registry")
-        },
         locate: () => located("playground-a-db"),
+        pending: current,
         prove,
         root,
         tables: seeded,
       })
-      expect(checked).toMatchObject({
-        dashboard: { cmux: false, kind: "live", reason: null },
+      expect(checked).toEqual({
+        dashboard: { kind: "live", rule: expect.any(String) },
         ok: true,
+        proof: expect.any(String),
       })
     }
   })
 
-  test("reads a person's own clone live, asking cmux once it opts in, and names the rule it matched", async () => {
-    let asked = 0
+  test("reads a person's own clone live, and names the rule it matched", async () => {
     const { prove } = proving()
-    const checked = await preflight({ branch: "main", linked: false }, read(URL, OPT_IN), {
-      attach: async () => {
-        asked++
-        return { state: "attached" }
-      },
+    const checked = await preflight({ branch: "main", linked: false }, read(URL, {}), {
       bare: () => [],
       locate: () => located("playground-a-db"),
+      pending: current,
       prove,
       root: OWN_ROOT,
       tables: seeded,
     })
-    expect(asked).toBe(1)
     expect(checked).toMatchObject({ dashboard: { kind: "live", rule: "own" }, ok: true })
   })
 
-  test("reads the fixture in a worktree under .claude/worktrees/ with no role, never asking cmux", async () => {
-    let asked = 0
+  test("reads the fixture in a worktree under .claude/worktrees/ with no role", async () => {
     const { prove } = proving()
     const checked = await preflight(BRANCH, read(URL, {}), {
-      attach: async () => {
-        asked++
-        return { state: "attached" }
-      },
       locate: () => located("playground-a-db"),
+      pending: current,
       prove,
       root: FACTORY_ROOT,
       tables: seeded,
     })
-    expect(asked).toBe(0)
     expect(checked).toMatchObject({ dashboard: { kind: "fixture", rule: "factory" }, ok: true })
   })
 
-  test("refuses an own-machine start under Claude Code with no role, before asking cmux or locating the database", async () => {
-    let asked = 0
+  test("refuses an own-machine start under Claude Code with no role, before locating the database", async () => {
     let locatedCalls = 0
     const checked = await preflight(
       { branch: "main", linked: false },
       read(URL, { CLAUDECODE: "1" }),
       {
-        attach: async () => {
-          asked++
-          return { state: "attached" }
-        },
         locate: () => {
           locatedCalls++
           return located("playground-a-db")
@@ -1088,13 +926,12 @@ describe("preflight", () => {
         root: OWN_ROOT,
       },
     )
-    expect(asked).toBe(0)
     expect(locatedCalls).toBe(0)
     expect(checked.ok).toBe(false)
     if (!checked.ok) expect(checked.refusal).toContain("Claude Code")
   })
 
-  test("a launcher a test run spawns in a person's own clone, with no role, reads the fixture and never asks cmux", async () => {
+  test("a launcher a test run spawns in a person's own clone, with no role, reads the fixture", async () => {
     // the launcher drops the test run's NODE_ENV, so .env's stage decides it; the suite's PLAYGROUND_FIXTURE holds it to the fixture rule
     const { env } = devEnv({ PLAYGROUND_FIXTURE: "shipped", NODE_ENV: "test" }, "")
     expect(env.NODE_ENV).toBeUndefined()
@@ -1102,10 +939,8 @@ describe("preflight", () => {
       { branch: "main", linked: false },
       read(URL, { PLAYGROUND_FIXTURE: env.PLAYGROUND_FIXTURE ?? "", NODE_ENV: "local" }),
       {
-        attach: async () => {
-          throw new Error("a test run's launcher asked cmux")
-        },
         locate: () => located("playground-a-db"),
+        pending: current,
         prove: proving().prove,
         bare: () => [],
         root: OWN_ROOT,
@@ -1116,9 +951,7 @@ describe("preflight", () => {
   })
 
   test("refuses settings that cannot be read, with the reader's own words", async () => {
-    const checked = await preflight(BRANCH, () => ({ error: "SyntaxError: bad .env", ok: false }), {
-      attach,
-    })
+    const checked = await preflight(BRANCH, () => ({ error: "SyntaxError: bad .env", ok: false }))
     expect(checked).toEqual({
       ok: false,
       refusal: "the API's settings could not be read: SyntaxError: bad .env",
@@ -1128,7 +961,6 @@ describe("preflight", () => {
   test("a missing POSTGRES_URL starts the stack in setup mode, locating no database", async () => {
     let touched = 0
     const checked = await preflight(BRANCH, read(undefined), {
-      attach,
       locate: () => {
         touched++
         return located("playground-a-db")
@@ -1145,7 +977,6 @@ describe("preflight", () => {
       { branch: LIVE_DASHBOARD.branch, linked: true },
       read(undefined, {}),
       {
-        attach,
         containers: () => [
           { name: "playground-a-db", state: "exited" },
           { name: `${LIVE_DASHBOARD.database}-Ab123`, state: "exited" },
@@ -1169,7 +1000,7 @@ describe("preflight", () => {
       const checked = await preflight(
         { branch: LIVE_DASHBOARD.branch, linked: true },
         read(undefined, {}),
-        { attach, containers: () => [{ name: "playground-a-db", state: "running" }, held] },
+        { containers: () => [{ name: "playground-a-db", state: "running" }, held] },
       )
       expect(checked.ok).toBe(false)
       if (!checked.ok) {
@@ -1180,7 +1011,7 @@ describe("preflight", () => {
   })
 
   test("refuses a remote database before anything connects", async () => {
-    const checked = await preflight(BRANCH, read("postgres://u:p@example.com/postgres"), { attach })
+    const checked = await preflight(BRANCH, read("postgres://u:p@example.com/postgres"))
     expect(checked.ok).toBe(false)
     if (!checked.ok) {
       expect(checked.refusal).toContain("not this machine")
@@ -1202,7 +1033,6 @@ describe("preflight", () => {
     ]
     for (const [failure, message, fix] of cases) {
       const checked = await preflight(BRANCH, read(URL), {
-        attach,
         locate: failing(failure, message),
       })
       expect(checked.ok).toBe(false)
@@ -1217,7 +1047,6 @@ describe("preflight", () => {
   test("keeps the live dashboard's database to the live dashboard's own branch, refused before the proof runs anything in it", async () => {
     const elsewhere = proving()
     const refused = await preflight(BRANCH, read(URL), {
-      attach,
       locate: () => located(LIVE_DASHBOARD.database),
       prove: elsewhere.prove,
     })
@@ -1230,8 +1059,8 @@ describe("preflight", () => {
     }
     const dashboard = proving()
     const passed = await preflight({ branch: LIVE_DASHBOARD.branch, linked: true }, read(URL), {
-      attach,
       locate: () => located(LIVE_DASHBOARD.database),
+      pending: current,
       prove: dashboard.prove,
       tables: seeded,
     })
@@ -1245,8 +1074,8 @@ describe("preflight", () => {
     const { calls, prove } = proving()
     expect(
       await preflight(BRANCH, read(URL), {
-        attach,
         locate: () => located("playground-a-db"),
+        pending: current,
         prove,
         tables: seeded,
       }),
@@ -1256,7 +1085,6 @@ describe("preflight", () => {
 
   test("refuses a database with no tables, naming the migrate command", async () => {
     const checked = await preflight(BRANCH, read(URL), {
-      attach,
       locate: () => located("playground-a-db"),
       prove: proving().prove,
       tables: async () => 0,
@@ -1264,12 +1092,48 @@ describe("preflight", () => {
     expect(checked.ok).toBe(false)
     if (!checked.ok) expect(checked.refusal).toBe("database has no tables: run bun run db:migrate")
     const filled = await preflight(BRANCH, read(URL), {
-      attach,
       locate: () => located("playground-a-db"),
+      pending: current,
       prove: proving().prove,
       tables: async () => 2,
     })
     expect(filled).toMatchObject({ ok: true, proof: `${URL} is playground-a-db` })
+  })
+
+  // A worktree that merged canary keeps its container's old schema, and a stack booted on it fails its sign-in, which verify reports only as a timeout.
+  test("refuses a database that lacks a migration in the journal, naming the migrate command", async () => {
+    const lacking = (count: number) =>
+      preflight(BRANCH, read(URL), {
+        locate: () => located("playground-a-db"),
+        pending: async () => count,
+        prove: proving().prove,
+        tables: seeded,
+      })
+    expect(await lacking(1)).toEqual({
+      ok: false,
+      refusal: "database lacks 1 migration: run bun run db:migrate",
+    })
+    expect(await lacking(3)).toEqual({
+      ok: false,
+      refusal: "database lacks 3 migrations: run bun run db:migrate",
+    })
+    expect(await lacking(0)).toMatchObject({ ok: true, proof: `${URL} is playground-a-db` })
+  })
+
+  // The live dashboard's roll migrates its database itself, or holds an index migration for a quiet moment, so its restart starts on the database as it is.
+  test("starts the live dashboard's own checkout on a database that lacks a migration", async () => {
+    let asked = 0
+    const checked = await preflight({ branch: LIVE_DASHBOARD.branch, linked: true }, read(URL), {
+      locate: () => located(LIVE_DASHBOARD.database),
+      pending: async () => {
+        asked++
+        return 1
+      },
+      prove: proving().prove,
+      tables: seeded,
+    })
+    expect(checked).toMatchObject({ ok: true })
+    expect(asked).toBe(0)
   })
 })
 
@@ -1322,7 +1186,6 @@ describe.skipIf(!dockerUp())("preflight against a real container", () => {
   // A fresh container's database has no tables, so the launcher refuses rather than booting a stack whose sign-in later times out.
   test("refuses a database with no tables, naming the migrate command", async () => {
     const checked = await preflight({ branch: liveDashboard.branch, linked: true }, read(url), {
-      attach,
       liveDashboard,
     })
     expect(checked.ok).toBe(false)
@@ -1338,7 +1201,6 @@ describe.skipIf(!dockerUp())("preflight against a real container", () => {
       await sql.close()
     }
     const checked = await preflight({ branch: liveDashboard.branch, linked: true }, read(url), {
-      attach,
       liveDashboard,
     })
     expect(checked.ok).toBe(true)
@@ -1348,7 +1210,6 @@ describe.skipIf(!dockerUp())("preflight against a real container", () => {
   test("refuses any other branch on the container's name alone, before the proof runs", async () => {
     const proofs: string[] = []
     const checked = await preflight(BRANCH, read(url), {
-      attach,
       liveDashboard,
       prove: (target, found) => {
         proofs.push(found.owner.name)
@@ -1358,6 +1219,40 @@ describe.skipIf(!dockerUp())("preflight against a real container", () => {
     expect(proofs).toEqual([])
     expect(checked.ok).toBe(false)
     if (!checked.ok) expect(checked.refusal).toContain(`points at ${name}`)
+  }, 30_000)
+
+  // drizzle's migrator applies each journal entry newer than the last one it recorded, so the count of missing ones reads the same rows; with no journal named, it reads the shipped one, all of whose migrations a fresh database lacks.
+  test("counts the journal's migrations newer than the last one drizzle recorded", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dev-journal-"))
+    const journal = join(dir, "_journal.json")
+    writeFileSync(
+      journal,
+      JSON.stringify({
+        entries: [
+          { tag: "0000_a", when: 1000 },
+          { tag: "0001_b", when: 2000 },
+          { tag: "0002_c", when: 3000 },
+        ],
+      }),
+    )
+    const shipped = await Bun.file(
+      join(import.meta.dir, "../../../../../../packages/db/drizzle/meta/_journal.json"),
+    ).json()
+    const sql = new SQL(url, { max: 1 })
+    try {
+      expect(await pendingMigrations(url)).toBe(shipped.entries.length)
+      expect(await pendingMigrations(url, journal)).toBe(3)
+      await sql`create schema if not exists drizzle`
+      await sql`create table drizzle.__drizzle_migrations (id serial primary key, hash text not null, created_at bigint)`
+      expect(await pendingMigrations(url, journal)).toBe(3)
+      await sql`insert into drizzle.__drizzle_migrations (hash, created_at) values ('a', 1000)`
+      expect(await pendingMigrations(url, journal)).toBe(2)
+      await sql`insert into drizzle.__drizzle_migrations (hash, created_at) values ('b', 2000), ('c', 3000)`
+      expect(await pendingMigrations(url, journal)).toBe(0)
+    } finally {
+      await sql.close()
+      rmSync(dir, { force: true, recursive: true })
+    }
   }, 30_000)
 })
 

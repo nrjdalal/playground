@@ -17,9 +17,22 @@ export async function fetchPages(session: string) {
   return data
 }
 
+// Deletes a kept page by its name: its file, its caption and its record leave the previews folder.
+export async function deletePage(name: string) {
+  const { data, error } = await unwrap(
+    apiClient.v1.apps.previews[":name"].$delete({ param: { name } }),
+  )
+  if (error) throw new Error(error.message)
+  return data
+}
+
 // Pure: where a preview is served, on the API's own origin.
 export const previewUrl = (apiUrl: string, name: string): string =>
   `${apiUrl}/api/v1/apps/previews/${encodeURIComponent(name)}`
+
+// Pure: where a preview is served as a download, saved under its page's title.
+export const previewDownloadUrl = (apiUrl: string, name: string): string =>
+  `${previewUrl(apiUrl, name)}?download=1`
 
 // Pure: an address the Inbox's Preview frame may load: a page from Previews, or a local stack (https or http on a .localhost host).
 export const loadable = (address: string, apiUrl: string): boolean => {

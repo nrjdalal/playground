@@ -90,7 +90,7 @@ describe.skipIf(!dockerUp())("the bun run ingest CLI", () => {
       // the watcher's FSEvents can drop a change under load, so the rescan that catches it runs every 500ms rather than 30s
       INGEST_RESCAN_MS: "500",
       // every scratch transcript is stored, as on a stack opted in to every session (own.ts)
-      PLAYGROUND_CMUX_SESSIONS: "true",
+      PLAYGROUND_ALL_SESSIONS: "true",
       POSTGRES_URL: postgres,
     })
 
@@ -267,4 +267,60 @@ describe.skipIf(!dockerUp())("the bun run ingest CLI", () => {
       rmSync(fresh, { force: true, recursive: true })
     }
   }, 30_000)
+
+  // A follower started and read up to "following", with the rest of its log read on exit.
+  const following = async () => {
+    const follower = Bun.spawn([process.execPath, CLI, "--follow"], {
+      cwd: home,
+      env: env(),
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    const reader = follower.stdout.getReader()
+    let log = ""
+    while (!log.includes("following")) {
+      const { done, value } = await reader.read()
+      if (done) break
+      log += new TextDecoder().decode(value)
+    }
+    const rest = async () => {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) return log
+        log += new TextDecoder().decode(value)
+      }
+    }
+    return { follower, rest }
+  }
+  // Seconds a follower gets to notice its lost lock: the 2s check plus its 10s deadline, with room to spare, and well short of the old 30s check.
+  const exitWithin = (follower: { exited: Promise<number> }, seconds: number) =>
+    Promise.race([follower.exited, Bun.sleep(seconds * 1000).then(() => "still running")])
+
+  test("a follower whose lock connection is ended exits within seconds, and status then reads not running (#584)", async () => {
+    const { follower, rest } = await following()
+    try {
+      const ended = await admin`
+        select pg_terminate_backend(pid) as ok from pg_stat_activity
+        where application_name = 'dashboard-ingest follow'
+      `
+      expect(ended.map((row: { ok: boolean }) => row.ok)).toEqual([true])
+      expect(await exitWithin(follower, 8)).toBe(1)
+      expect(await rest()).toContain("lost the connection holding the lock")
+      expect(cli(["status"]).out).toContain("follower: not running")
+    } finally {
+      follower.kill()
+    }
+  }, 30_000)
+
+  test("a follower whose database stops answering exits within seconds, as one whose connection dropped without a reset (#584)", async () => {
+    const { follower, rest } = await following()
+    Bun.spawnSync(["docker", "pause", container], { stderr: "ignore", stdout: "ignore" })
+    try {
+      expect(await exitWithin(follower, 18)).toBe(1)
+      expect(await rest()).toContain("lost the connection holding the lock (no answer in 10s)")
+    } finally {
+      Bun.spawnSync(["docker", "unpause", container], { stderr: "ignore", stdout: "ignore" })
+      follower.kill()
+    }
+  }, 40_000)
 })

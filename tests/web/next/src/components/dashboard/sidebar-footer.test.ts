@@ -36,7 +36,7 @@ describe("the sidebar's rows", () => {
       dashboard.indexOf("export function DashboardDispatchers"),
       dashboard.indexOf("export const dispatcherSlotsShown"),
     )
-    expect(rows).toContain("row(worker, [], view, muted, { label, trailing })")
+    expect(rows).toContain("row(worker, [], view, muted, { action, label, trailing })")
     expect(rows).toContain("<DispatcherUsage")
     expect(rows).not.toContain("<SidebarGroup")
     expect(rows).not.toContain("<GroupCount")

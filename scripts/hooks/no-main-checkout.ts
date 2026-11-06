@@ -4,19 +4,26 @@ import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from "no
 
 import { fromFactory } from "./role"
 import {
+  codeFed,
+  type Command,
   type Env,
   examine,
   GIT_TAKES,
   knownVariables,
   lex,
+  marked,
   pathOf,
+  places,
   program,
   run,
   slotWords,
+  stdinOf,
+  stdinShell,
   type Text,
   type Visit,
   type Word,
 } from "./shell"
+import { heldWord, namings, steadyNames } from "./steady"
 
 // The checkout a worktree's .git file points into, or the checkout itself where .git is a directory.
 export function mainCheckout(dir: string): string {
@@ -77,6 +84,17 @@ const INSTEAD =
   "the main checkout is what every installed skill follows, so it stays clean. Run it in your own worktree under .claude/worktrees/ (git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary), or start lefthook from a script with cwd set to a scratch repo, as tests/lefthook.test.ts does."
 
 const refuse = (what: string, fix = INSTEAD) => `no-main-checkout hook refuses ${what}: ${fix}`
+
+// This hook's fail-closed rule for a command the shared reader cannot place in one folder (a cd the shell may not run or may run many times, a cd to a word it cannot read, a popd): the command is judged in every folder the shell may be in, and in the folder the line started in when a cd's landing folder cannot be named at all, so a refusal names the folder it would reach.
+const UNKNOWN_FIX =
+  "the hook cannot tell which folder it runs in, since a cd before it may not run, may run many times, or names a path it cannot read, so it reads every folder the shell may be in. Name the folder instead: git -C <your worktree>, bun --cwd <your worktree>, or cd by a literal path."
+
+// This hook's rule for a line that names more folders than the reader carries (`Env.cwdAnywhere`): the shell may be in any folder, the main checkout included, so a guarded command is refused wherever the line started.
+const ANYWHERE_FIX =
+  "the line names more folders than the hook carries, so it cannot rule out the main checkout. Name the folder on the command instead: git -C <your worktree>, bun --cwd <your worktree>, or run it as a line of its own after a cd to a literal path."
+
+// A refusal's fix: the command's own where the reader named the folder it runs in, else the one for a folder the hook cannot pin down.
+const fixFor = (sure: boolean, own = INSTEAD) => (sure ? own : UNKNOWN_FIX)
 
 // bun scripts that rebuild packages/* or write turbo's runs
 const BUN_SCRIPTS = new Set(["build", "check-types", "test", "test:file"])
@@ -190,7 +208,7 @@ const APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"])
 // The release skill's step 5 moves the main checkout by this fast-forward alone.
 const STEP_FIVE = /^(?:-q |--quiet )?--ff-only (?:-q |--quiet )?origin\/main$/
 const GIT_FIX =
-  "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made under .claude/worktrees/ by git worktree add."
+  "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made under .claude/worktrees/ by git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary."
 
 // The one reset the main checkout takes, back to origin/main from its own main with the tree clean and every commit it drops (origin/main..main) on no remote, so it removes only a stray local commit nobody else holds; --keep refuses to drop uncommitted work too.
 function keepReset(sub: string | undefined, rest: string[], cwd: string | undefined): boolean {
@@ -384,6 +402,80 @@ function writes(name: string, args: Word[]): Word[] {
   return out
 }
 
+// The files a command writes, by a redirect or by name, each one the hook can place.
+function writeTargets(cmd: Command, name: string, args: Word[]): Word[] {
+  const targets = [
+    ...cmd.redirects
+      .filter(
+        (r) =>
+          [">", ">>", ">|"].includes(r.op) ||
+          (r.op === ">&" && !DUPLICATE.test(r.target?.value ?? "")),
+      )
+      .flatMap((r) => (r.target ? [r.target] : [])),
+    ...writes(name, args),
+  ]
+  return targets.filter((t) => !["-", "/dev/null"].includes(t.value))
+}
+
+// A shell whose script the hook cannot read, refused where the shell would run in the main checkout: a script the hook reads is judged command by command by the shared reader, which runs a shell's script itself.
+async function unreadScript(
+  shell: Command,
+  here: Env,
+  sure: boolean,
+  inMain: (path: string | undefined) => boolean,
+): Promise<string | undefined> {
+  const script = await stdinOf(shell, here)
+  if (!script.unknown || !inMain(here.cwd)) return
+  return refuse(`a shell whose script (${script.unknown}) the hook cannot read`, fixFor(sure))
+}
+
+// The option words su takes before -c or --command for its line to read as a command of its own, each known exactly; any other option word reads as a root shell, so an option's value never hides a -c
+const SU_PLAIN = new Set(["-", "-f", "-l", "-m"])
+// Whether su's words hand it a command: -c or --command with its command, after option words of SU_PLAIN and words the hook reads whole alone (`su root -c <cmd>`, `su - -c <cmd>`), since a value it cannot read, or a glob, may be any option
+const suCommand = (args: Word[]) => {
+  for (const [at, word] of args.entries()) {
+    const { value } = word
+    if (word.unknown !== undefined || word.glob || marked(value)) return false
+    if (value === "-c" || value === "--command") return at + 1 < args.length
+    if (value.startsWith("--command=")) return true
+    if (value.startsWith("-") && !SU_PLAIN.has(value)) return false
+  }
+  return false
+}
+// su with no command of its own starts a root shell that reads its script from stdin, as `sudo -s` does; one with -c or --command runs that command alone
+const suShell = ({ args, name }: { args: Word[]; name: string }) =>
+  name === "su" && !suCommand(args)
+// The builtins run() hands visit beside a bare wrapper and a bare copy of a followed command, each with no command of its own to judge.
+const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
+
+// The shell a here-string, a heredoc, a pipeline, a file or a process substitution feeds runs that text as its script: one the hook cannot read is refused where the shell would run in the main checkout, and a root shell's, which the shared reader leaves, is judged command by command (the reader runs a plain shell's itself).
+async function fedScript(
+  cmd: Command,
+  here: Env,
+  sure: boolean,
+  inMain: (path: string | undefined) => boolean,
+  visit: Visit,
+  parsed?: { args: Word[]; name: string },
+): Promise<string | undefined> {
+  const shell = cmd.bareOf ?? cmd
+  const input = shell.redirects.findLast(
+    (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
+  )
+  if (input === undefined && shell.stdin === undefined) return
+  const fedKind = stdinShell(shell)
+  if (fedKind === "code") return
+  const kind = fedKind ?? (parsed && suShell(parsed) ? "root" : undefined)
+  if (!kind) return
+  const script = await stdinOf(shell, here)
+  const unread = script.unknown ?? (marked(script.value) ? "a value it cannot read" : undefined)
+  if (unread) {
+    if (!inMain(here.cwd)) return
+    return refuse(`a shell whose script (${unread}) the hook cannot read`, fixFor(sure))
+  }
+  if (kind === "root" && !cmd.bareOf)
+    return run(lex(script.value, here.known), { ...here, vars: new Map() }, visit, true)
+}
+
 function inspect(raw: string, environment: Record<string, string | undefined>, main: string) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as Record<string, unknown>
   const input = (toolInput ?? {}) as Record<string, unknown>
@@ -403,36 +495,74 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   if (tool !== "Bash") return
   const { command } = input
   if (typeof command !== "string") return
+  const known = knownVariables(command, environment, directory)
+  const lexed = lex(command, known)
+  // the shell each pipeline feeds, by the command whose output it reads, since the walk judges that command in the folder the pipeline runs in and never visits a shell of its own
+  const fed = codeFed(lexed.commands)
   const visit: Visit = async (cmd, parsed, env) => {
+    // a builtin run() hands over for this hook alone (a bare `sudo -s`, a bare copy of a followed shell, an export) is read only for the script a here-string, a heredoc or a pipeline feeds it; one that feeds a shell (a loop's `done`) is judged in full, as the reader hands it to every hook
+    if ((parsed.name === "" && !cmd.feedsShell) || EXPORTS.has(parsed.name)) {
+      for (const here of places(env, directory)) {
+        const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure
+        const verdict = await fedScript(cmd, here, sure, inMain, visit)
+        if (verdict) return verdict
+      }
+      return
+    }
     const slot = slotWords(parsed)
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, local, name } = parsed
-    const ran = runs(name, args, local, env)
-    if (ran && inMain(ran.cwd)) return refuse(ran.what, ran.fix)
-    const targets = [
-      ...cmd.redirects
-        .filter(
-          (r) =>
-            [">", ">>", ">|"].includes(r.op) ||
-            (r.op === ">&" && !DUPLICATE.test(r.target?.value ?? "")),
+    // a line that names more folders than the reader carries may run anywhere, the main checkout included, so what it guards is refused with no folder to name
+    if (env.cwdAnywhere) {
+      const blind: Env = { ...env, cwd: undefined }
+      const ran = runs(name, args, local, blind)
+      // a folder the command names itself is judged by that path, as everywhere else; one the shell gives it could be the main checkout
+      if (ran && (ran.cwd === undefined || inMain(ran.cwd))) return refuse(ran.what, ANYWHERE_FIX)
+      const blindWrite = writeTargets(cmd, name, args).find((t) => {
+        const path = pathOf(t, blind)
+        return path === undefined || inMain(path)
+      })
+      if (blindWrite) return refuse(`a write to ${blindWrite.value}`, ANYWHERE_FIX)
+    }
+    // every folder the shell may be in, so a cd the reader cannot be sure of is judged wherever it may have left the command, by the fail-closed rule above
+    for (const here of places(env, directory)) {
+      // only the folder the reader proved takes the command's own fix, so a refusal in any other folder names the fix for a folder the hook cannot pin down
+      const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure
+      // the command this command's output feeds runs whatever it prints as code, so a script the hook cannot read is refused where it would run in the main checkout, and one in another language always is
+      const pipedTo = fed.get(cmd)
+      if (pipedTo?.kind === "code" && inMain(here.cwd))
+        return refuse(
+          `a pipe into an interpreter whose script, the piped input, the hook cannot read`,
+          fixFor(sure),
         )
-        .flatMap((r) => (r.target ? [r.target] : [])),
-      ...writes(name, args),
-    ]
-    const into = targets.find(
-      (t) => !["-", "/dev/null"].includes(t.value) && inMain(pathOf(t, env)),
-    )
-    if (into) return refuse(`a write to ${pathOf(into, env)}`)
+      if (pipedTo) {
+        const verdict = await unreadScript(pipedTo.consumer, here, sure, inMain)
+        if (verdict) return verdict
+      }
+      const script = await fedScript(cmd, here, sure, inMain, visit, parsed)
+      if (script) return script
+      const ran = runs(name, args, local, here)
+      if (ran && inMain(ran.cwd)) return refuse(ran.what, fixFor(sure, ran.fix))
+      const wrote = writeTargets(cmd, name, args).find((t) => inMain(pathOf(t, here)))
+      if (wrote) return refuse(`a write to ${pathOf(wrote, here)}`, fixFor(sure))
+    }
   }
+  // a cd through a steady variable is read by the folder that variable names
+  const steadyAt = steadyNames(namings(command), lexed.commands)
   const env: Env = {
     cwd: directory,
+    // the line starts in the folder the tool names, which the reader has proved by the payload itself
+    cwdSure: directory,
     files: new Map(),
-    known: knownVariables(command, environment, directory),
+    hold: (word, cmd, here) => heldWord(word, here, steadyAt(cmd)),
+    known,
+    // zsh starts with OLDPWD at the folder it starts in
+    old: { dir: directory },
     process: environment,
     vars: new Map(),
   }
-  return run(lex(command, env.known), env, visit)
+  return run(lexed, env, visit, true)
 }
 
 // Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command or write.

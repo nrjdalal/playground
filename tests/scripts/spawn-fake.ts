@@ -34,7 +34,7 @@ afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
 export const LSTART = "Tue Oct 13 04:43:59 2026"
 
-// Fake cmux (a move's reads and closes), ps, sysctl and bun on PATH, each logging what it was asked; bun fakes spawn.sh's roster write alone.
+// Fake cmux (which spawn.sh never calls), ps, sysctl, uptime and bun on PATH, each logging what it was asked; bun fakes spawn.sh's roster write alone.
 export const bin = join(scratch, "bin")
 const sharedOrgs = join(scratch, "orgs")
 mkdirSync(sharedOrgs, { recursive: true })
@@ -43,34 +43,13 @@ export const fake = (name: string, body: string) => {
   writeFileSync(join(bin, name), `#!/bin/bash\n${body}\n`)
   chmodSync(join(bin, name), 0o755)
 }
-fake(
-  "cmux",
-  `printf '%s\\n' "$@" > "$HOME/cmux.args"
-printf '%s\\037' "$@" >> "$HOME/cmux.calls"; echo >> "$HOME/cmux.calls"
-case "$1" in
-  sessions) cat "$HOME/cmux.sessions" 2>/dev/null || echo '{"sessions":[]}' ;;
-  close-surface)
-    [ -z "$FAKE_CLOSE_FAIL" ] || { echo "ERROR: Socket closed" >&2; exit 1; }
-    [ -z "$FAKE_CLOSE_LAST" ] || { echo "ERROR: Cannot close the last surface" >&2; exit 1; }
-    : > "$HOME/cmux.closed" ;;
-  workspace)
-    [ "$2" = close ] || exit 1
-    [ -z "$FAKE_CLOSE_FAIL" ] || { echo "ERROR: Socket closed" >&2; exit 1; }
-    [ -z "$FAKE_WS_CLOSE_FAIL" ] || { echo "ERROR: Workspace busy" >&2; exit 1; }
-    : > "$HOME/cmux.closed" ;;
-esac`,
-)
+fake("cmux", `printf '%s\\n' "$@" > "$HOME/cmux.args"`)
 fake(
   "ps",
   `[ -n "$FAKE_PS_BROKEN" ] && exit 1
 while [ $# -gt 0 ]; do [ "$1" = -p ] && pids=$2; shift; done
 for pid in \${pids//,/ }; do
   case " $FAKE_DEAD " in *" $pid "*) continue ;; esac
-  if [ -e "$HOME/cmux.closed" ] && [ "$pid" = "$FAKE_EXITS_ON_CLOSE" ]; then
-    n=$(cat "$HOME/ps.after" 2>/dev/null || echo 0)
-    echo $((n + 1)) > "$HOME/ps.after"
-    [ "$n" -lt "\${FAKE_EXIT_AFTER:-0}" ] || continue
-  fi
   printf '%5s %s\\n' "$pid" "$FAKE_LSTART"
 done
 exit 0`,
@@ -84,11 +63,12 @@ fake(
 case " $* " in *" -w "*) [ -n "$FAKE_EMPTY_TOKEN" ] || echo "${TOKEN}" ;; *) echo 'keychain: "/fake.keychain-db"' ;; esac
 exit 0`,
 )
-// A leads worktree's install, bun install <args>: the args as one line to bun-install.log, failing as a frozen lockfile does under FAKE_INSTALL_FAIL. The roster write, bun <checkout>/scripts/roster.ts <args>: the script's path to roster.script, the args one a line to roster.args and as one line to roster.log. A read, roster.ts who, and the data folder's and a setting's reads (bun --no-env-file) run the real bun, but the skill resolver, orgs.ts, and the settings reader, setting.ts, run from this checkout, since a case's copy of spawn.sh sits in a scratch checkout without them.
+// A leads worktree's install, bun install <args>: the args as one line to bun-install.log, failing as a frozen lockfile does under FAKE_INSTALL_FAIL. The roster write, bun <checkout>/scripts/roster.ts <args>: the script's path to roster.script, the args one a line to roster.args and as one line to roster.log. A read, roster.ts who, and the data folder's and a setting's reads (bun --no-env-file) run the real bun, but the skill resolver, orgs.ts, the settings reader, setting.ts, and playground's cli.ts run from this checkout, since a case's copy of spawn.sh sits in a scratch checkout without them.
 fake(
   "bun",
   `[ "$1" = install ] && { printf '%s\\n' "$*" >> "$HOME/bun-install.log"; [ -z "$FAKE_INSTALL_FAIL" ] || { echo "error: lockfile had changes, but lockfile is frozen"; exit 1; }; exit 0; }
 case "$2" in */playground/orgs.ts) exec "${process.execPath}" "$1" "${join(root, "packages", "scripts", "src", "playground", "orgs.ts")}" "\${@:3}" ;; esac
+case "$2" in */playground/cli.ts) exec "${process.execPath}" "$1" "${join(root, "packages", "scripts", "src", "playground", "cli.ts")}" "\${@:3}" ;; esac
 case "$1" in */setting.ts) shift; exec "${process.execPath}" "${join(root, "packages", "scripts", "src", "playground", "setting.ts")}" "$@" ;; esac
 [ "$2" = who ] || [ "$1" = --no-env-file ] && exec "${process.execPath}" "$@"
 printf '%s' "$1" > "$HOME/roster.script"
@@ -108,6 +88,7 @@ fake(
   "sysctl",
   // spawn.sh always reads with -n, so the name is $2.
   `[ -n "$FAKE_SYSCTL_BROKEN" ] && exit 1
+[ -n "$FAKE_SYSCTL_SANDBOXED" ] && { echo "sysctl: sysctl fmt -1 1024 1: Operation not permitted" >&2; exit 1; }
 [ "$1" = -n ] || exit 1
 case "$2" in
   vm.loadavg) echo "{ \${FAKE_LOAD1:-1.00} \${FAKE_LOAD5:-2.00} 3.00 }" ;;
@@ -117,13 +98,18 @@ case "$2" in
   *) exit 1 ;;
 esac`,
 )
-// The CPU read, top -l 2 -n 0: each call logged to top.calls, idle at FAKE_CPU_IDLE (0 by default, so the load alone decides as before).
+// The CPU read, top -l 2 -n 0, which run-slot's gauges take and spawn.sh does not: each call logged to top.calls, idle at FAKE_CPU_IDLE (0 by default).
 fake(
   "top",
   `echo "$*" >> "$HOME/top.calls"
-[ -n "$FAKE_TOP_BROKEN" ] && exit 1
 echo "CPU usage: 30.00% user, 20.00% sys, 50.00% idle"
 echo "CPU usage: 60.00% user, 40.00% sys, \${FAKE_CPU_IDLE:-0.00}% idle"`,
+)
+// The load read where sysctl is refused, uptime: the line it prints inside Claude Code's sandbox, which drops the up field, at FAKE_LOAD1 and FAKE_LOAD5 as the sysctl fake gives them.
+fake(
+  "uptime",
+  `[ -n "$FAKE_UPTIME_BROKEN" ] && exit 1
+echo "22:15  2 users, load averages: \${FAKE_LOAD1:-1.00} \${FAKE_LOAD5:-2.00} 3.00"`,
 )
 // The swap-in read, vm_stat -c 2 1: its first row the totals since boot, its second the last second's, swap-ins at FAKE_SWAPINS (0 by default).
 fake(
@@ -242,11 +228,12 @@ export async function spawn(
     writeFileSync(join(home, ".playground", "backends", pin.name), `${pin.backend}\n`)
   }
   if (!env.NO_REGISTRY) mkdirSync(registry, { recursive: true })
-  // The leads worktree a manager opens in, which NO_LEADS leaves off, as on a Mac that has not made it.
-  if (!env.NO_LEADS)
-    mkdirSync(join(home, "code", "factory", ".claude", "worktrees", "leads"), {
-      recursive: true,
-    })
+  // The leads worktree a manager opens in, installed with the mark a finished install leaves, which NO_LEADS leaves off, as on a Mac that has not made it.
+  if (!env.NO_LEADS) {
+    const modules = join(home, "code", "factory", ".claude", "worktrees", "leads", "node_modules")
+    mkdirSync(modules, { recursive: true })
+    writeFileSync(join(modules, ".playground-installed"), "")
+  }
   // The roster as earlier sessions left it, which a title default reads before it writes.
   if (env.ROSTER_JSON !== undefined)
     writeFileSync(join(home, ".playground", "roster.json"), env.ROSTER_JSON)

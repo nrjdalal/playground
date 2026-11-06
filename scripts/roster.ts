@@ -10,6 +10,7 @@ import {
   kindOfName,
   MANAGER_KINDS,
   managerOf,
+  seatOf,
   ROSTER_KINDS,
   ROSTER_ROLE_OF_KIND,
   slotOfName,
@@ -20,14 +21,16 @@ import { writeAtomic } from "../packages/scripts/src/write-atomic"
 import STATUSES from "./roster-statuses.json"
 
 export const USAGE = `Usage:
-  roster.ts set <name> key=value [key=value ...]    (creates the agent if missing, its role from kind= or its name; a new one needs task=)
+  roster.ts set <name> key=value [key=value ...]    (creates the agent if missing, its role from kind= or its name; a new one needs task=; status=parked needs hold=)
   roster.ts report <name> <text> [key=value ...]    (sets lastReport, stamps lastReportAt; a new one needs task=)
-  roster.ts assign <name> <title> <task> [k=v ...]  (new task, or a checker's next PR with worker= pr=; clears pr/branch/repo/lastReport)
+  roster.ts assign <name> <title> <task> [k=v ...]  (new task, or a checker's next PR with worker= pr=, which joins its prs list; clears pr/branch/repo/owner/lastReport)
   roster.ts backlog <text>
   roster.ts backlog-done <index> <issue>            (marks the 0-based entry filed: "[#<issue>] <text>")
   roster.ts backfill                                (gives each entry with no kind the one its name's prefix gives)
   roster.ts who <kind>                              (prints the name holding a manager kind's seat; writes nothing)
   roster.ts who dispatcher [1|2]                    (prints the dispatcher in slot 1, Alpha, by default, or 2, Bravo; writes nothing)
+  roster.ts who assistant                           (prints the live session the roster gives the assistant kind, else exits 1; writes nothing)
+A checker's prs list holds every PR it serves, so auto-end keeps it while one is open: prs=<pr>,<pr> sets it, prs+=<pr> adds one, prs-=<pr> removes one, and a PR not yet opened goes in as its issue's URL.
 Times always come from the UTC clock; titles are capped at 40 chars.`
 
 type Agent = Record<string, unknown> & { name: string }
@@ -103,10 +106,39 @@ const prUrl = (raw: string, repo: string): string => {
   )
 }
 
+const ISSUE_URL_RE = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+$/
+
+// A prs entry: a PR as pr takes one, or the issue of a PR not yet opened, by its URL.
+const prsEntry = (raw: string, repo: string): string => {
+  if (ISSUE_URL_RE.test(raw)) return raw
+  try {
+    return prUrl(raw, repo)
+  } catch {
+    throw new Refusal(
+      `roster.ts: prs takes https://github.com/<owner>/<name>/pull/<n> or its number alone, or a PR not yet opened as https://github.com/<owner>/<name>/issues/<n>, not ${raw}`,
+      2,
+    )
+  }
+}
+
+const PRS_KEYS = new Set(["prs", "prs+", "prs-"])
+
 function apply(entry: Agent, pairs: [string, string][], factoryRepo: string): void {
   const given = pairs.find(([k]) => k === "repo")
   const repo = (given ? given[1] : (entry.repo as string | undefined)) || factoryRepo
   for (const [k, raw] of pairs) {
+    if (PRS_KEYS.has(k)) {
+      const named = raw
+        .split(",")
+        .filter((one) => one.trim())
+        .map((one) => prsEntry(one.trim(), repo))
+      const held = k === "prs" ? [] : ((entry.prs as string[] | undefined) ?? [])
+      const next =
+        k === "prs-" ? held.filter((u) => !named.includes(u)) : [...new Set([...held, ...named])]
+      if (next.length) entry.prs = next
+      else delete entry.prs
+      continue
+    }
     const v = k === "title" ? titled(raw) : k === "pr" && raw !== "" ? prUrl(raw, repo) : raw
     if (v === "") delete entry[k]
     else entry[k] = v
@@ -158,11 +190,52 @@ function checkEta(pairs: [string, string][]): void {
   }
 }
 
+// owner= names the owner's own ask a session works on, which run-slot.sh ranks after the merge gates: an Inbox item, an issue, a PR or a decision, never a person. An empty owner= clears it.
+const OWNER_REF =
+  /^(?:#i?\d+|PG-\d+|d-\d+|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)$/
+
+function checkOwner(pairs: [string, string][]): void {
+  const owner = pairs.find(([k, v]) => k === "owner" && v !== "" && !OWNER_REF.test(v))
+  if (owner)
+    throw new Refusal(
+      `roster.ts: owner takes the owner's ask it serves, #i<n> (an Inbox item), PG-<n>, #<n> or an issue or PR URL, or d-<n> (a decision), not ${owner[1]}`,
+      2,
+    )
+}
+
+// hold= names what a parked row waits on, which playground sweep reads to tell its lead once it closes: an issue or PR, an Inbox item, or a decision for a wait on no item (a lane turn, a load hold). An empty hold= clears it.
+const HOLD_REF = /^(?:#i?\d+|d-\d+)$/
+
+function checkHold(pairs: [string, string][]): void {
+  const hold = pairs.find(([k, v]) => k === "hold" && v !== "" && !HOLD_REF.test(v))
+  if (hold)
+    throw new Refusal(
+      `roster.ts: hold takes #<n> (an issue or PR), #i<n> (an Inbox item) or d-<n> (a decision), not ${hold[1]}`,
+      2,
+    )
+}
+
 // Every key=value check set, report and assign share.
 function checkPairs(name: string, pairs: [string, string][]): void {
   checkKind(pairs)
   checkStatus(name, pairs)
   checkEta(pairs)
+  checkOwner(pairs)
+  checkHold(pairs)
+}
+
+// a call that parks a row, or clears a parked row's hold, leaves it holding one, so the sweep can tell its lead once the wait ends; a call that moves it off parked drops its hold, one it names included, so a later park names a fresh one. A row parked before this check keeps taking writes that leave its park alone.
+function parkHold(entry: Agent, pairs: [string, string][], moved: boolean): void {
+  const touched = moved || pairs.some(([k]) => k === "status" || k === "hold")
+  if (entry.status !== "parked") {
+    if (touched) delete entry.hold
+    return
+  }
+  if (touched && !entry.hold)
+    throw new Refusal(
+      `roster.ts: ${entry.name} is parked, so add hold=#<n>, hold=#i<n> or hold=d-<n> (the issue, PR, Inbox item or decision the park waits on) to the same call`,
+      2,
+    )
 }
 
 // A checker moved by halves keeps its old worker or pr, and the sidebar nests it under that worker's ended row.
@@ -192,13 +265,21 @@ async function main(argv: string[]): Promise<void> {
   if (cmd === "who") {
     // the dispatcher takes a slot number, 1 (Alpha, the default) or 2 (Bravo), never a label, since labels can be renamed
     const slot = name === "dispatcher" && rest.length <= 1 ? (rest[0] ?? "1") : null
-    if (!(isManagerKind(name) && rest.length === 0) && slot !== "1" && slot !== "2")
+    const assistant = name === "assistant" && rest.length === 0
+    if (!(isManagerKind(name) && rest.length === 0) && !assistant && slot !== "1" && slot !== "2")
       throw new Refusal(
-        `roster.ts: who takes one of ${[...MANAGER_KINDS, "dispatcher [1|2]"].join(", ")}`,
+        `roster.ts: who takes one of ${[...MANAGER_KINDS, "dispatcher [1|2]", "assistant"].join(", ")}`,
         2,
       )
     // A roster that does not read leaves today's name, so a spawn still has someone to report to.
     const agents = (await load().catch(() => null))?.agents
+    // the assistant has no set name to fall back on, so a reader with no holder falls back on its own
+    if (assistant) {
+      const held = seatOf(agents, "assistant")
+      if (!held) throw new Refusal("roster.ts: no live session holds the assistant seat", 1)
+      console.log(held)
+      return
+    }
     console.log(
       isManagerKind(name) ? managerOf(agents, name) : dispatcherOf(agents, slot === "2" ? 2 : 1),
     )
@@ -206,7 +287,7 @@ async function main(argv: string[]): Promise<void> {
   }
   const roster = await load()
   // A bare PR number links into factory.repo, read only when one is given.
-  const factoryRepo = rest.some((word) => /^pr=#?[1-9]\d*$/.test(word))
+  const factoryRepo = rest.some((word) => /^(?:pr|prs[+-]?)=(?:.*,)?#?[1-9]\d*(?:,|$)/.test(word))
     ? await factoryRepoOf().catch((error: Error) => {
         throw new Refusal(`roster.ts: ${error.message}`, 2)
       })
@@ -223,6 +304,7 @@ async function main(argv: string[]): Promise<void> {
         1,
       )
     apply(entry, pairs, factoryRepo)
+    parkHold(entry, pairs, false)
   } else if (cmd === "report") {
     const [text, ...more] = rest
     if (text === undefined) throw new Refusal(USAGE, 2)
@@ -233,6 +315,7 @@ async function main(argv: string[]): Promise<void> {
     entry.lastReport = text
     entry.lastReportAt = now()
     apply(entry, pairs, factoryRepo)
+    parkHold(entry, pairs, false)
   } else if (cmd === "assign") {
     const [title, task, ...more] = rest
     if (title === undefined || task === undefined) throw new Refusal(USAGE, 2)
@@ -240,10 +323,28 @@ async function main(argv: string[]): Promise<void> {
     checkPairs(name!, pairs)
     const entry = agent(roster, name!, pairs, task)
     checkRetask(entry, pairs, factoryRepo, true)
-    for (const k of ["pr", "branch", "repo", "lastReport", "lastReportAt", "eta", "ticket"])
+    // A checker keeps every PR it served in its prs list, and its next PR joins it, so auto-end holds it while any is open.
+    const checker = ["reviewer", "tester"].includes(kindOf(entry.name, entry.kind) ?? "")
+    const served =
+      checker && entry.pr && !pairs.some(([k]) => PRS_KEYS.has(k)) ? [entry.pr as string] : []
+    for (const k of [
+      "pr",
+      "branch",
+      "repo",
+      "lastReport",
+      "lastReportAt",
+      "eta",
+      "ticket",
+      "owner",
+    ])
       delete entry[k]
     Object.assign(entry, { status: "working", task })
     apply(entry, [["title", title], ...pairs], factoryRepo)
+    parkHold(entry, pairs, true)
+    if (checker && entry.pr)
+      entry.prs = [
+        ...new Set([...served, ...((entry.prs as string[] | undefined) ?? []), entry.pr as string]),
+      ]
   } else if (cmd === "backlog") {
     if (rest.length > 0) throw new Refusal('usage: roster.ts backlog "<text>"', 2)
     roster.backlog = [...(roster.backlog ?? []), name!]

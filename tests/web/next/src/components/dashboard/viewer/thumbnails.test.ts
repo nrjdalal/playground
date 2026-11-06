@@ -2,12 +2,16 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
 import type { InboxAttachment } from "../../../../../../../api/hono/src/lib/dashboard/inbox"
+import { attachmentDisposition, fileNameOf } from "../../../../../../../api/hono/src/lib/download"
 import type { ViewerItem } from "../../../../../../../web/next/src/components/dashboard/viewer/registry"
 import {
   AttachmentThumbs,
   focusTarget,
 } from "../../../../../../../web/next/src/components/dashboard/viewer/thumbnails"
-import { STEP_OF_KEY } from "../../../../../../../web/next/src/components/dashboard/viewer/viewer"
+import {
+  saveItem,
+  STEP_OF_KEY,
+} from "../../../../../../../web/next/src/components/dashboard/viewer/viewer"
 
 type Node = unknown
 const web = join(import.meta.dir, "../../../../../../../web/next")
@@ -37,7 +41,7 @@ const render = (list: ViewerItem[]) =>
     ),
   )
 
-describe('an ask\'s thumbnails (the owner: "4 by 4 grid and sqaure")', () => {
+describe("an ask's thumbnails", () => {
   test("twenty files fill the grid with fifteen square thumbnails and a +5 tile", () => {
     const html = render(items(20))
     expect(html).toContain("grid-cols-4")
@@ -62,13 +66,13 @@ describe('an ask\'s thumbnails (the owner: "4 by 4 grid and sqaure")', () => {
   })
 })
 
-describe('Slider mode\'s keys (the owner: "left right up down navigate")', () => {
+describe("Slider mode's keys", () => {
   test("Left and Up go back, Right and Down go on", () => {
     expect(STEP_OF_KEY).toEqual({ ArrowDown: 1, ArrowLeft: -1, ArrowRight: 1, ArrowUp: -1 })
   })
 })
 
-describe('the thumbnail grid takes the arrows too (the owner: "so small image icons, as I said, should be naviagatable in inbox too")', () => {
+describe("the thumbnail grid takes the arrows too", () => {
   test("Left and Right step a tile, Up and Down a row of four, held at the edges", () => {
     expect(focusTarget("ArrowRight", 1, 16)).toBe(2)
     expect(focusTarget("ArrowLeft", 1, 16)).toBe(0)
@@ -92,12 +96,12 @@ describe('the thumbnail grid takes the arrows too (the owner: "so small image ic
     expect(render(items(2))).toContain('aria-label="Attached files"')
   })
 
-  test('its tiles sit gap-3 apart, its own gap, the one the files sit below the words (the owner: "gap bewteen should be same")', () => {
+  test("its tiles sit gap-3 apart, its own gap, the one the files sit below the words", () => {
     expect(render(items(2))).toContain("grid grid-cols-4 gap-3")
   })
 })
 
-// the owner: "Before: <full width image> After: <full width image>"
+// a lone before and after pair at full width, one over the other
 describe("a lone before/after pair", () => {
   test("shows at the card's full width, Before over After, each opening the pair", () => {
     const [before, after] = items(2)
@@ -182,5 +186,73 @@ describe("a lone HTML page", () => {
     ])
     expect(html).not.toContain("full screen")
     expect(html).toContain("grid-cols-4")
+  })
+})
+
+// each file on the card saves from its own tile, the viewer's Download staying (#783's Fix, the Builder's ruling on #821)
+describe("a tile's Download", () => {
+  test("every tile but +N holds a Download naming its file, and the arrows step the tiles alone", async () => {
+    const html = render(items(20))
+    expect(html.match(/aria-label="Download shot-/g)).toHaveLength(15)
+    expect(html).not.toContain('aria-label="Download 5 more"')
+    expect(html.match(/data-tile=""/g)).toHaveLength(16)
+    const source = await Bun.file(
+      join(web, "src/components/dashboard/viewer/thumbnails.tsx"),
+    ).text()
+    expect(source).toContain('querySelectorAll<HTMLButtonElement>("button[data-tile]")')
+  })
+
+  test("each side of a lone pair saves its own file", () => {
+    const [before, after] = items(2)
+    const html = render([{ ...before!, pair: { after: after!, before: before! } }])
+    expect(html).toContain('aria-label="Download shot-0.png"')
+    expect(html).toContain('aria-label="Download shot-1.png"')
+  })
+
+  test("sits in the tile's corner on the glass, shown on hover or focus and always on a touch screen", () => {
+    const html = render(items(1))
+    expect(html).toContain("group/tile relative")
+    expect(html).toContain("group-hover/tile:opacity-100")
+    expect(html).toContain("group-focus-within/tile:opacity-100")
+    expect(html).toContain("pointer-coarse:opacity-100")
+  })
+
+  test("fetches its file from the Inbox's route in download mode with the cookie, and saves it under the readable name the API gives", async () => {
+    const [file] = items(1)
+    const name = fileNameOf("Weekly plan, updated draft", "png")
+    const fetched: { credentials?: RequestCredentials; url: string }[] = []
+    const saved: { download: string; href: string }[] = []
+    const scope = globalThis as { document?: unknown; fetch: typeof fetch }
+    const [realFetch, realDocument] = [scope.fetch, scope.document]
+    scope.fetch = (async (url: string, init?: RequestInit) => {
+      fetched.push({ credentials: init?.credentials, url: String(url) })
+      return new Response("png", {
+        headers: { "content-disposition": attachmentDisposition(name) },
+      })
+    }) as typeof fetch
+    scope.document = {
+      createElement: () => {
+        const link = {
+          click: () => saved.push({ download: link.download, href: link.href }),
+          download: "",
+          href: "",
+        }
+        return link
+      },
+    }
+    try {
+      await saveItem(file!)
+    } finally {
+      scope.fetch = realFetch
+      scope.document = realDocument
+    }
+    expect(fetched).toHaveLength(1)
+    const url = new URL(fetched[0]!.url)
+    expect(url.pathname).toBe(`/api/v1/inbox/attachments/${file!.id}`)
+    expect(url.searchParams.get("download")).toBe("1")
+    expect(fetched[0]!.credentials).toBe("include")
+    expect(saved).toEqual([
+      { download: "Weekly plan, updated draft.png", href: expect.stringMatching(/^blob:/) },
+    ])
   })
 })

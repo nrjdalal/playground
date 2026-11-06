@@ -1,4 +1,4 @@
-// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, until it is an open item in the owner's Inbox (playbook's ask rule), so a question in chat is never missed. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
+// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, or keeps steps or a table the owner comes back to (keepsForOwner), until it is an open item in the owner's Inbox (playbook's ask rule), so nothing the owner needs scrolls away in chat; every manager but the dispatcher sends steps to the dispatcher as a draft instead. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, a lead's with the route up to the dispatcher, who posts it, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
 
 import "../../packages/env/src/aliases"
 import { join } from "node:path"
@@ -16,6 +16,15 @@ import { loadNames, MANAGER_ROLES, registryName, roleOfName, rosterNames, roster
 
 export const REASON =
   "name the open #iN on the same thing if one exists (bun run ask open lists them), else post it with bun run ask new, then say in chat that it's in the inbox as #iN"
+// A lead's line: a lead sends an owner decision up the chain, and the dispatcher posts it (playbook's Chain)
+export const LEAD_REASON =
+  "send the decision to the dispatcher with SendMessage, which posts it to the Inbox, and keep the question out of chat; once the dispatcher names its #iN, say in chat that it's in the inbox as #iN"
+// Chat scrolls, so steps the owner comes back to go in one card whose progress is edited in place.
+export const STEPS_REASON =
+  "put these steps in one Inbox card (bun run ask new; the open #iN on the same thing if one exists, bun run ask open lists them), edit each step's progress into that card, then name it in chat as #iN in one line"
+// Every manager but the dispatcher hands the card to the dispatcher, since a lead that also posts it races the dispatcher's post into a duplicate.
+export const DRAFT_REASON =
+  "send these steps to the dispatcher as a draft for one Inbox card rather than posting it, so the card is posted once, send each step's progress to the dispatcher as an edit to that draft, then say in chat in one line that the dispatcher has the draft"
 
 // git worktree list, then each bun run ask get (all at once), is killed past its limit; one bun run ask get took 5.9s under load.
 const GIT_TIMEOUT_MS = 3000
@@ -50,6 +59,8 @@ const ACTION = new RegExp(
 // A ? that is not inside a word or a URL's query (x?status=todo).
 const QUESTION = /\?(?![\w/=&%#-])/
 const BLOCKQUOTE = /^\s*>/
+// A fenced code block, or one left open to the reply's end.
+const FENCE = /```[\s\S]*?(?:```|$)/g
 // Someone else's words: a line that says who asked ("A colleague asks: …", "A colleague asks in Slack: …"), never I or we, whose words are the session's own.
 const QUOTED =
   /^\s*(?:[-*]\s+)?(?!(?:i|we)\s)[@\w][\w@.' -]{0,40}?\s(?:asks|asked|wrote|writes|said|says|replied|replies)(?:\s(?:in|on|via|from|over)\s[\w#@.-]+(?:\s[\w#@.-]+)?)?\s*:/i
@@ -121,7 +132,7 @@ export function asksDecision(reply: string, names: string[] = [], owner: string[
   const toAgentLine = toAgent(names, owner)
   const toOwnerLine = toOwner(owner)
   const lines = reply
-    .replace(/```[\s\S]*?(?:```|$)/g, "")
+    .replace(FENCE, "")
     .replace(CODE_SPAN, "")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
@@ -138,6 +149,36 @@ export function asksDecision(reply: string, names: string[] = [], owner: string[
       ACTION.test(own) ||
       !!toOwnerLine?.test(own)
     )
+  })
+}
+
+const STEP = /^\s*\d+[.)]\s/
+const TABLE_ROW = /^\s*\|.*\|\s*$/
+const TABLE_RULE = /^\s*\|\s*:?-{3,}/
+// A sentence saying the steps went to the dispatcher as a draft, never one that says they did not or will later (not, never, n't, be, get, gets, to or will before the verb): a past-tense hand-off verb, then the dispatcher, then "as a draft", or the reason's own "the dispatcher has the draft".
+const DRAFT_HANDED =
+  /(?<!(?:\bnot|\bnever|n't|\bbe|\bget|\bgets|\bto|\bwill)\s+(?:\w+\s+)?)\b(?:(?:forwarded|gave|handed|passed|sent)\b[^.;!?\n]*?\bdispatcher\b[^.;!?\n]*?\bas a draft\b|went to the dispatcher as a draft\b|the dispatcher has the draft\b)/i
+
+// Pure: the reply's lines with fenced code and blockquotes left out.
+const ownLines = (reply: string) =>
+  reply
+    .replace(FENCE, "")
+    .split("\n")
+    .filter((line) => !BLOCKQUOTE.test(line))
+
+// An issue or PR a line names: a #<n> (never an Inbox #iN or an HTML entity's &#<n>) or a GitHub issue or PR link.
+const TRACKED = /(?<![\w&])#\d+\b|https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+/
+
+// Pure: whether the reply keeps steps or a table the owner comes back to, 3 or more numbered lines or a markdown table, code and blockquotes left out, so a bulleted list passes; steps or a table whose every step or body row names an issue or PR are progress on tracked work, which stays in chat.
+export function keepsForOwner(reply: string): boolean {
+  const lines = ownLines(reply)
+  const steps = lines.filter((line) => STEP.test(line))
+  if (steps.length >= 3 && !steps.every((line) => TRACKED.test(line))) return true
+  return lines.some((line, i) => {
+    if (!TABLE_ROW.test(line) || !TABLE_RULE.test(lines[i + 1] ?? "")) return false
+    const rows: string[] = []
+    for (let j = i + 2; TABLE_ROW.test(lines[j] ?? ""); j++) rows.push(lines[j])
+    return rows.length === 0 || !rows.every((row) => TRACKED.test(row))
   })
 }
 
@@ -213,21 +254,27 @@ const live: Deps = {
   sessionName: registryName,
 }
 
-async function isManager(env: Record<string, string | undefined>, sessionId: unknown, deps: Deps) {
+// The session's manager role (dispatcher, lead or manager), or "" for every other session.
+async function managerRole(
+  env: Record<string, string | undefined>,
+  sessionId: unknown,
+  deps: Deps,
+): Promise<string> {
+  const manager = (role: string) => (MANAGER_ROLES.has(role) ? role : "")
   const role = env.PLAYGROUND_ROLE ?? ""
-  if (MANAGER_ROLES.has(role)) return true
-  if (role || typeof sessionId !== "string") return false
+  if (role) return manager(role)
+  if (typeof sessionId !== "string") return ""
   const name = (await deps.sessionName(sessionId)) ?? ""
   const rostered = name && (await rosterRole(name, env))
-  if (rostered) return MANAGER_ROLES.has(rostered)
+  if (rostered) return manager(rostered)
   await loadNames(env)
-  return MANAGER_ROLES.has(roleOfName(name))
+  return manager(roleOfName(name))
 }
 
 // Fails closed: the stop passes only when some #iN the reply names reads open; the reason says what each one read as.
-async function gate(reply: string, deps: Deps): Promise<string | undefined> {
+async function gate(reply: string, deps: Deps, reason: string): Promise<string | undefined> {
   const refs = [...new Set(reply.match(/#i\d+\b/g) ?? [])].slice(0, MAX_REFS)
-  if (!refs.length) return REASON
+  if (!refs.length) return reason
   const anyOpen = Promise.withResolvers<"open">()
   const reads = Promise.all(
     refs.map((ref) =>
@@ -252,7 +299,7 @@ async function gate(reply: string, deps: Deps): Promise<string | undefined> {
       ? `${r.ref} is ${r.status}, not open`
       : `${r.ref} could not be read with bun run ask (${r.error}), so it does not count as open`,
   )
-  return `${REASON} (${why.join("; ")})`
+  return `${reason} (${why.join("; ")})`
 }
 
 async function inspect(raw: string, env: Record<string, string | undefined>, deps: Deps) {
@@ -262,10 +309,17 @@ async function inspect(raw: string, env: Record<string, string | undefined>, dep
   }
   if (typeof reply !== "string") return
   const owner = await (deps.ownerNames ?? policyOwnerNames)(env)
-  if (!asksDecision(reply, [], owner)) return
-  if (!(await isManager(env, sessionId, deps))) return
-  if (!asksDecision(reply, await rosterNames(env), owner)) return
-  return gate(reply, deps)
+  const asks = asksDecision(reply, [], owner)
+  const keeps = keepsForOwner(reply)
+  if (!asks && !keeps) return
+  const role = await managerRole(env, sessionId, deps)
+  if (!role) return
+  if (asks && asksDecision(reply, await rosterNames(env), owner))
+    return gate(reply, deps, role === "lead" ? LEAD_REASON : REASON)
+  if (!keeps) return
+  if (role === "dispatcher") return gate(reply, deps, STEPS_REASON)
+  if (DRAFT_HANDED.test(ownLines(reply).join("\n"))) return
+  return gate(reply, deps, DRAFT_REASON)
 }
 
 // Fails open: an input the hook cannot read, or a session it cannot place, lets the session stop.

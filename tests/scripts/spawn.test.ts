@@ -44,6 +44,7 @@ describe("under the gates it spawns", () => {
       "set",
       "worker-brave-otter",
       "kind=worker",
+      "reportsTo=builder",
       "surface=",
       "title=Plain test work",
       "task=brief-x.md",
@@ -62,6 +63,7 @@ describe("under the gates it spawns", () => {
     expect(r.code).toBe(0)
     expect(launchOf(r)).toContain(`you report to ${manager}.`)
     expect(launchOf(r)).toContain(`(to: ${manager})`)
+    expect(r.roster).toContain(`reportsTo=${manager}`)
   })
 
   const kinds = {
@@ -391,7 +393,6 @@ describe("under the gates it spawns", () => {
 
   test.each([
     ["close", ["close", "worker-brave-otter"]],
-    ["move", ["move", "worker-brave-otter"]],
     ["restore", ["restore"]],
     ["runner", ["runner", "runner-calm-heron", "b.md"]],
   ])("a %s refuses --title", async (_, args) => {

@@ -13,17 +13,25 @@ import {
 import { dataDirOf } from "@packages/env/data-dir"
 import { z } from "zod"
 
-import { readsLive } from "@/lib/dashboard/fixture"
+import {
+  currentSource,
+  fixtureHerdrInput,
+  fixtureHerdrPane,
+  FixtureHerdrRefusal,
+  fixtureHerdrScreen,
+  readFixtureHerdr,
+  readsLive,
+} from "@/lib/dashboard/fixture"
 import type { Registry } from "@/lib/dashboard/peers"
 import type { UsageLimit } from "@/lib/dashboard/unstick"
 import { ApiError } from "@/lib/error"
 import { claudeDir, dataDir, transcriptPath } from "@/lib/sessions/paths"
 
-// The dashboard's herdr provider (C4), the one file that speaks herdr v0.9.5's socket API (herdr.test.ts holds that boundary): it lists, reads and messages the Claude sessions in herdr's servers beside cmux's, and since a server answers one request per connection in about a millisecond (measured at 30 panes: session.snapshot p50 1.2 ms, pane.process_info p50 0.2 ms, the whole server p50 4 ms), every board reads every server afresh, with no cache and no pacing, herdr's events only telling the hub when to read again, so a server that went away is read again on the next board.
+// The dashboard's herdr provider (C4), the one file that speaks herdr v0.9.5's socket API (herdr.test.ts holds that boundary): it lists, reads and messages the Claude sessions in herdr's servers, and since a server answers one request per connection in about a millisecond (measured at 30 panes: session.snapshot p50 1.2 ms, pane.process_info p50 0.2 ms, the whole server p50 4 ms), every board reads every server afresh, with no cache and no pacing, herdr's events only telling the hub when to read again, so a server that went away is read again on the next board.
 
 type Json = Record<string, unknown>
 
-// The servers Playground runs: PLAYGROUND_HERDR_SESSIONS names them (playground and playground-probes, plus the folder's other server sockets while it is blank), each serving its socket at <PLAYGROUND_HERDR_DIR>/<name>.sock, the dir herdr in the data folder, ~/.playground, unless set, following HOME and never CLAUDE_CONFIG_DIR or PLAYGROUND_DATA_DIR as ops-herdr serves them, so a session on another login reads the same servers. A stack that does not read this machine reads no herdr server.
+// The servers Playground runs: PLAYGROUND_HERDR_SESSIONS names them (playground and playground-probes, plus the folder's other server sockets while it is blank), each serving its socket at <PLAYGROUND_HERDR_DIR>/<name>.sock, the dir herdr in the data folder, ~/.playground, unless set, following HOME and never CLAUDE_CONFIG_DIR or PLAYGROUND_DATA_DIR as ops-herdr serves them, so a session on another login reads the same servers. A fixture stack reads the fixture's own playground server alone (FIXTURE_SOCKET), and a hosted or refused one reads none.
 export type HerdrServer = { name: string; socket: string }
 
 const SERVER_NAME = /^[a-z0-9][a-z0-9_-]*$/
@@ -31,7 +39,11 @@ const SERVER_NAME = /^[a-z0-9][a-z0-9_-]*$/
 export const herdrServers = (
   env: Record<string, string | undefined> = process.env,
 ): HerdrServer[] => {
-  if (!readsLive()) return []
+  if (!readsLive()) {
+    return currentSource().kind === "fixture"
+      ? [{ name: "playground", socket: FIXTURE_SOCKET }]
+      : []
+  }
   const dir =
     envValue(env, "PLAYGROUND_HERDR_DIR") || join(dataDirOf({}, env.HOME || homedir()), "herdr")
   const named = envValue(env, "PLAYGROUND_HERDR_SESSIONS")
@@ -62,10 +74,6 @@ const SURFACE = new RegExp(`^herdr:([a-z0-9][a-z0-9_-]*):(${PANE_ID})$`)
 export const herdrSurface = (server: string, pane: string): string => `herdr:${server}:${pane}`
 
 export const isHerdrSurface = (surface: string): boolean => SURFACE.test(surface)
-
-// A herdr workspace's ref on the board, `herdr:<server>:<workspace id>` (herdrWorkspaces()).
-export const isHerdrWorkspace = (ref: string): boolean =>
-  /^herdr:[a-z0-9][a-z0-9_-]*:w[0-9A-Za-z]+$/.test(ref)
 
 const paneAt = (surface: string): { pane: string; server: HerdrServer } => {
   const [, name, pane] = SURFACE.exec(surface) ?? []
@@ -128,6 +136,43 @@ const lineWriter = (line: string) => {
   }
 }
 
+// A fixture stack's herdr server, on no socket: each request is answered from the fixture's herdr.json (fixture.ts) in the shape herdr's own answer takes, so every read and write in this file runs on it as it is.
+export const FIXTURE_SOCKET = "fixture:herdr"
+
+const fixtureAnswer = (method: string, params: Json): Json => {
+  const pane = String(params.pane_id ?? params.target ?? "")
+  try {
+    switch (method) {
+      case "session.snapshot": {
+        const { panes, workspaces } = readFixtureHerdr()
+        return { snapshot: { panes, workspaces } }
+      }
+      case "pane.process_info":
+        return { process_info: { foreground_processes: fixtureHerdrPane(pane).processes } }
+      case "pane.get":
+        return { pane: fixtureHerdrPane(pane) }
+      case "pane.read": {
+        const rows = fixtureHerdrScreen(pane).split("\n")
+        return { read: { text: rows.slice(-Number(params.lines || rows.length)).join("\n") } }
+      }
+      case "agent.prompt":
+        fixtureHerdrInput(pane, { prompt: String(params.text ?? "") })
+        return {}
+      case "pane.send_keys":
+        fixtureHerdrInput(pane, { keys: (params.keys as string[] | undefined) ?? [] })
+        return {}
+      case "pane.send_text":
+        fixtureHerdrInput(pane, { text: String(params.text ?? "") })
+        return {}
+    }
+  } catch (error) {
+    if (error instanceof FixtureHerdrRefusal)
+      throw new HerdrRefused(method, error.code, error.message)
+    throw error
+  }
+  throw new HerdrRefused(method, "unknown_method", "the fixture holds no answer to it")
+}
+
 // One request on its own connection: the server writes one JSON line back and closes it.
 export async function request(
   socket: string,
@@ -135,6 +180,7 @@ export async function request(
   params: Json,
   timeoutMs = 2000,
 ): Promise<Json> {
+  if (socket === FIXTURE_SOCKET) return fixtureAnswer(method, params)
   let buffered = ""
   let settle: (value: unknown) => void = () => {}
   const answered = new Promise<unknown>((resolve) => (settle = resolve))
@@ -224,8 +270,10 @@ const each = <T>(schema: z.ZodType<T>, values: unknown[]): T[] =>
   })
 
 export type Pane = z.infer<typeof paneSchema> & { processes: z.infer<typeof processSchema>[] }
+// partial: a pane's processes, or the whole server, did not answer whole, so a session missing from this read may still be live.
 export type ServerRead = {
   panes: Pane[]
+  partial?: true
   server: string
   workspaces: z.infer<typeof workspaceSchema>[]
 }
@@ -248,6 +296,7 @@ export async function readServer(
   )
   if (!parsed.success) throw new HerdrRefused("session.snapshot", "malformed", "no snapshot")
   const panes: Pane[] = []
+  let partial = false
   for (const pane of each(paneSchema, parsed.data.snapshot.panes)) {
     const info = await request(
       server.socket,
@@ -257,11 +306,13 @@ export async function readServer(
     )
       .then((result) => processInfoSchema.safeParse(result))
       .catch(() => null)
+    if (!info?.success) partial = true
     const listed = info?.success ? (info.data.process_info.foreground_processes ?? []) : []
     panes.push({ ...pane, processes: each(processSchema, listed) })
   }
   return {
     panes,
+    ...(partial && { partial: true }),
     server: server.name,
     workspaces: each(workspaceSchema, parsed.data.snapshot.workspaces),
   }
@@ -288,7 +339,14 @@ export async function readHerdr(
       ? [`herdr's ${r.server.name} server could not be read: ${(r.error as Error).message}`]
       : [],
   )
-  return reads.flatMap((r) => ("read" in r ? [r.read] : []))
+  // a server that is up but did not answer stays in the list, empty and partial, so a reader can tell its sessions from ended ones
+  return reads.flatMap((r) =>
+    "read" in r
+      ? [r.read]
+      : r.error instanceof HerdrDown
+        ? []
+        : [{ panes: [], partial: true as const, server: r.server.name, workspaces: [] }],
+  )
 }
 
 // herdr's agent status as the lifecycle words lightOf() reads: blocked waits on a person, working runs, idle and done wait for input (the dashboard never tells done from idle, so it never calls focus, the one call that turns done into idle).
@@ -309,7 +367,7 @@ const FILED: Record<SessionState["state"], string> = {
   working: "running",
 }
 
-// Pure but for the change times (state.changed: when each session's herdr state last changed, as this process saw it, by its terminal and session, which a move does not change; herdr keeps no such time, and answeredSince() compares a picker's answer with it): every server's panes as the session records cmux's `sessions list` gives, which liveRecords() and composeWorkers() read. A pane holds a session when a process in its foreground has a registry file naming one, so a pane whose Claude has exited, or one never registered, is no session (St3); a file mid-rewrite leaves herdr's own agent_session, when it has one.
+// Pure but for the change times (state.changed: when each session's herdr state last changed, as this process saw it, by its terminal and session, which a move does not change; herdr keeps no such time, and answeredSince() compares a picker's answer with it): every server's panes as the session records liveRecords() and composeWorkers() read. A pane holds a session when a process in its foreground has a registry file naming one, so a pane whose Claude has exited, or one never registered, is no session (St3); a file mid-rewrite leaves herdr's own agent_session, when it has one.
 export function herdrRecords(reads: ServerRead[], registry: Registry, now: string): Json[] {
   const changes = new Map<string, Change>()
   const records = reads.flatMap((read) =>
@@ -354,15 +412,15 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
       ]
     }),
   )
-  // a board that did not read a server (a cmux session's listSpace(), a failed read) keeps that server's times
-  const servers = new Set(reads.map((read) => read.server))
+  // a board that did not read a server whole (a failed or partial read) keeps that server's times for every session it did not see
+  const whole = new Set(reads.filter((read) => !read.partial).map((read) => read.server))
   for (const [key, change] of state.changed)
-    if (!servers.has(change.server)) changes.set(key, change)
+    if (!whole.has(change.server) && !changes.has(key)) changes.set(key, change)
   state.changed = changes
   return records
 }
 
-// Pure: every server's workspaces as cmux's list-workspaces gives them, each id its ref too.
+// Pure: every server's workspaces in the board's workspace list, each id its ref too.
 export const herdrWorkspaces = (reads: ServerRead[]): Json[] =>
   reads.flatMap((read) =>
     read.workspaces.map((w) => {
@@ -374,7 +432,7 @@ export const herdrWorkspaces = (reads: ServerRead[]): Json[] =>
 // What a herdr session's prompt is, as its own hooks' stuck record names it: the subagent that asked (agentId), the kind (reason: permission, question, plan, elicitation, login) and the tool a permission is for. herdrFeed() in workers.ts builds its card from it.
 export type HerdrWait = { agentId: string | null; reason: string | null; tool: string | null }
 
-// Pure: a herdr session's lifecycle, its usage limit and, while it waits on a prompt its hooks named, that prompt (wait). herdr's own state comes first, since C5's hooks report every state to it (a probe); the hooks' own file (C5) speaks where herdr has none (unknown), and for what herdr's state cannot say: a usage limit and its reset. A stuck record the transcript has moved past (an Escape on a prompt fires no hook, measured) also ends the blocked state the same hook reported to herdr, which herdr keeps until the next prompt or stop, but only while it is the prompt herdr shows: written no earlier than the blocked state this process saw begin (`seenAt`), less the time a board takes to see it, since a session herdr restored runs without its hooks and its file keeps an older record; with no start seen (the dashboard started, or its reads paused, after the prompt), any stuck record is taken as that prompt, so a stale one can read a restored session's new prompt as idle until its next.
+// Pure: a herdr session's lifecycle, its usage limit and, while it waits on a prompt its hooks named, that prompt (wait). herdr's own state comes first, since C5's hooks report every state to it (a probe); the hooks' own file (C5) speaks where herdr has none (unknown), and for what herdr's state cannot say: a usage limit and its reset. A stuck record the transcript has moved past (an Escape on a prompt fires no hook, measured) also ends the blocked state the same hook reported to herdr, which herdr keeps until the next prompt or stop, but only while it is the prompt herdr shows: written no earlier than the blocked state this process saw begin (`seenAt`), less the time a board takes to see it, since a session resumed without its settings runs without its hooks and its file keeps an older record; with no start seen (the dashboard started, or its reads paused, after the prompt), any stuck record is taken as that prompt, so a stale one can read a restored session's new prompt as idle until its next.
 export function herdrState(
   status: string,
   file: SessionState | null,
@@ -414,7 +472,7 @@ export const readStates = async (sessionIds: string[]): Promise<Map<string, Sess
     ),
   )
 
-// Pure: the herdr records with herdrState() applied, each one's lifecycle, the prompt its hooks named (`herdr_wait`, which composeWorkers() builds its card from) and, while the usage limit alone holds it, `usage_limit`, which composeWorkers() reads as Worker.usageLimit. cmux's records pass as they are.
+// Pure: the herdr records with herdrState() applied, each one's lifecycle, the prompt its hooks named (`herdr_wait`, which composeWorkers() builds its card from) and, while the usage limit alone holds it, `usage_limit`, which composeWorkers() reads as Worker.usageLimit. A record without herdr's status passes as it is.
 export const withHerdrState = <T extends { sessions: Json[] }>(
   records: T,
   files: Map<string, SessionState | null>,
@@ -586,7 +644,7 @@ export function answerKeys(screen: ScreenPrompt, ask: Ask): Keys {
 // The gap between two keys, so Claude Code reads each as its own press rather than one chunk of input.
 const KEY_GAP_MS = 40
 
-// Answers a prompt with the keys answerKeys() gave, one request each (`pane.send_keys`, words by `pane.send_text`), in order. It types only for answerHerdr() in feed.ts, the owner's own Submit on the prompt's card (cmux.test.ts's "herdr's pane writes").
+// Answers a prompt with the keys answerKeys() gave, one request each (`pane.send_keys`, words by `pane.send_text`), in order. It types only for answerHerdr() in feed.ts, the owner's own Submit on the prompt's card (herdr.test.ts's "herdr's pane writes").
 export async function typeKeys(surface: string, steps: KeyStep[]): Promise<void> {
   const { pane, server } = paneAt(surface)
   for (const [i, step] of steps.entries()) {
@@ -648,6 +706,8 @@ export function herdrEvents(servers = herdrServers(), retryMs = RETRY_MS): Herdr
     timers.add(timer)
   }
   const watch = (server: HerdrServer) => {
+    // the fixture's server has no events: fixture.ts's onFixtureChange moves the hub instead
+    if (server.socket === FIXTURE_SOCKET) return
     let current: { end: () => void } | null = null
     let wait = retryMs
     const again = (ms: number) => {

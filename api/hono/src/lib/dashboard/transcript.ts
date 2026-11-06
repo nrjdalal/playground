@@ -403,7 +403,7 @@ export type SessionTask = {
 export const TASK_KEEP_MS = 30 * 60 * 1000
 export const TASK_LIMIT = 12
 
-// A session's pickers (its AskUserQuestion calls): the ones still waiting on an answer, by tool call id, when the newest answer landed, and whether the owner interrupted the turn after it (Esc on a picker), which leaves the session at its prompt with no Stop hook to tell cmux. cmux keeps a picker in its Feed until the turn ends, so the board reads these to clear one the owner has already answered.
+// A session's pickers (its AskUserQuestion calls): the ones still waiting on an answer, by tool call id, when the newest answer landed, and whether the owner interrupted the turn after it (Esc on a picker), which leaves the session at its prompt with no Stop hook to say so. A picker stays open until the turn ends, so the board reads these to clear one the owner has already answered.
 export type Pickers = { answeredAt: string | null; interrupted: boolean; open: string[] }
 
 const INTERRUPTED = "[Request interrupted by user"

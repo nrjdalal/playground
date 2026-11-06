@@ -16,14 +16,6 @@ describe("SESSIONS.md", () => {
     )
   })
 
-  test("closes a session that still runs with --force", async () => {
-    const closes = (await Bun.file(SESSIONS).text()).match(
-      /cmux (?:close-surface|workspace close) [^`\n]*/g,
-    )
-    expect(closes?.length).toBeGreaterThanOrEqual(2)
-    for (const close of closes ?? []) expect(close).toEndWith(" --force")
-  })
-
   test("holds the brief templates' fill rule (#1664)", async () => {
     const text = await Bun.file(SESSIONS).text()
     expect(text).toContain("a fill replaces those tokens alone")
@@ -65,7 +57,7 @@ describe("SESSIONS.md", () => {
     expect(brief).toContain("a PR loosening a guard puts code-review-loop's refusal table")
     expect(brief).toContain("in its Evidence before round 1")
     expect(brief).toContain(
-      "a `canary | head` row for each row it adds to `tests/scripts/hooks/fixtures/refused-forms.ts` or names in its `ALLOWED` list",
+      "a `canary | head` row for each row it adds to `tests/scripts/hooks/fixtures/refused-forms/` or names in a source file's `allowed` list",
     )
     expect(brief).toContain(
       "the refused-forms test's pass count at canary and at the head for the rest",

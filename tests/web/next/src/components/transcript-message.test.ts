@@ -93,6 +93,44 @@ describe("TranscriptMessage", () => {
     expect(html).toContain("[thread:k7mq]")
   })
 
+  test("plain text from outside Playground, a Yard message, keeps a leading marker as words, with no chip to a thread of ours", () => {
+    const html = render({ plain: true, text: "[thread:k7mq] from another member" })
+    expect(html).not.toContain("/dashboard/threads/")
+    expect(html).toContain("[thread:k7mq] from another member")
+  })
+
+  test("an [inbox-answer] line reads as a chip of its #iN and the option picked, the note after it, with no JSON", () => {
+    const answer = {
+      at: "2026-11-05T12:00:00.000Z",
+      comment: "after lunch",
+      go: true,
+      id: "i343",
+      kind: "decision",
+      next: "carry-out",
+      option: { index: 0, label: "Add all 4 lines", letter: "A" },
+      ref: "#i343",
+      title: "Lines for the brief",
+      v: 1,
+      verb: "pick",
+    }
+    const html = render({ text: `[inbox-answer] ${JSON.stringify(answer)}`, variant: "default" })
+    expect(html).toMatch(/<button [^>]*type="button"[^>]*>.*#i343.*· Add all 4 lines.*<\/button>/)
+    expect(html).toContain("after lunch")
+    expect(html).not.toContain("[inbox-answer]")
+    expect(html).not.toContain('"verb"')
+  })
+
+  test("an [inbox-answer] line that does not parse, or a Yard message, keeps its plain text", () => {
+    for (const props of [
+      { text: '[inbox-answer] {"id":"i343"' },
+      { plain: true, text: '[inbox-answer] {"id":"i343"}' },
+    ]) {
+      const html = render({ ...props, variant: "default" })
+      expect(html).not.toContain("<button")
+      expect(html).toContain("[inbox-answer]")
+    }
+  })
+
   test("a message of files alone has no bubble", () => {
     expect(render({ text: "  ", variant: "default" })).not.toContain('data-slot="bubble"')
   })
