@@ -538,8 +538,8 @@ var G_WRAPPERS = new Map([
 var program = (value) => {
   const base = basename(value.replace(/^=/, ""));
   const lower = base.toLowerCase();
-  if (lower !== base && SHELL_OWN.has(lower))
-    return base;
+  if (SHELL_OWN.has(lower) && value !== lower)
+    return value;
   return G_WRAPPERS.get(lower) ?? lower;
 };
 var UV_TAKES = new Set([
@@ -1382,7 +1382,7 @@ var throughBuiltin = (cmd, { first }) => {
   if (!first)
     return false;
   const before = cmd.words.slice(0, cmd.words.indexOf(first));
-  return before.some((w) => !w.quoted && BUILTIN.has(program(w.value))) && before.every((w) => !w.quoted && (BUILTIN.has(program(w.value)) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
+  return before.some((w) => !w.quoted && BUILTIN.has(w.value)) && before.every((w) => !w.quoted && (BUILTIN.has(w.value) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
 };
 var manyTimes = (cmd, { first }) => !!cmd.repeated || cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0).some((w) => !w.quoted && COUNTED.has(program(w.value)));
 var startFolders = (env) => [
@@ -2495,7 +2495,7 @@ function heavy(name, args, env) {
       return;
     return { dir: cwdFlag(rest, { ...env, cwd }), what: "bun install" };
   }
-  if (words[0] === "x" && words[1] === "next" && rest[0]?.value === "build")
+  if (words[0] === "x" && program(words[1] ?? "") === "next" && rest[0]?.value === "build")
     return { dir: cwd, what: "bun x next build" };
   const testFile = words[0] === "run" && words[1] === "test:file";
   if (words[0] === "test" || testFile) {

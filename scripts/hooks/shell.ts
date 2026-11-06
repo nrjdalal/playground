@@ -702,11 +702,11 @@ const G_WRAPPERS = new Map([
   ["gstdbuf", "stdbuf"],
   ["gtimeout", "timeout"],
 ])
-// A command word's program by its basename, in lower case, since macOS's filesystem ignores case and runs a program named in any case; a builtin of SHELL_OWN written in another case keeps that case, and a g-wrapper reads as its plain name
+// A command word's program by its basename, in lower case, since macOS's filesystem ignores case and runs a program named in any case; a builtin of SHELL_OWN keeps the word as written unless it is the bare lower-case name, since in another case or by a path it runs macOS's /usr/bin stand-in in a child, and a g-wrapper reads as its plain name
 export const program = (value: string): string => {
   const base = basename(value.replace(/^=/, ""))
   const lower = base.toLowerCase()
-  if (lower !== base && SHELL_OWN.has(lower)) return base
+  if (SHELL_OWN.has(lower) && value !== lower) return value
   return G_WRAPPERS.get(lower) ?? lower
 }
 
@@ -1725,16 +1725,16 @@ const onceOrMore = (cmd: Command, parsed: Parsed): boolean =>
   !cmd.unsure &&
   (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
 
-// Whether `builtin` or `command` runs the command's program, with nothing but their own options, reserved words and assignments in front of it.
+// Whether `builtin` or `command` runs the command's program, with nothing but their own options, reserved words and assignments in front of it; each counts only as its bare lower-case word, since `COMMAND` runs macOS's /usr/bin/command in a child and `BUILTIN` is not found.
 const throughBuiltin = (cmd: Command, { first }: Parsed): boolean => {
   if (!first) return false
   const before = cmd.words.slice(0, cmd.words.indexOf(first))
   return (
-    before.some((w) => !w.quoted && BUILTIN.has(program(w.value))) &&
+    before.some((w) => !w.quoted && BUILTIN.has(w.value)) &&
     before.every(
       (w) =>
         !w.quoted &&
-        (BUILTIN.has(program(w.value)) ||
+        (BUILTIN.has(w.value) ||
           w.value.startsWith("-") ||
           MARKERS.has(w.value) ||
           ASSIGN.test(w.value)),

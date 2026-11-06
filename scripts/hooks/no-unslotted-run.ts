@@ -150,7 +150,7 @@ function heavy(
     if (rest.some((a) => ["--dry-run", "--help", "-h"].includes(a.value))) return
     return { dir: cwdFlag(rest, { ...env, cwd }), what: "bun install" }
   }
-  if (words[0] === "x" && words[1] === "next" && rest[0]?.value === "build")
+  if (words[0] === "x" && program(words[1] ?? "") === "next" && rest[0]?.value === "build")
     return { dir: cwd, what: "bun x next build" }
   // bun run test:file passes its words to bun test, and with no file runs the whole suite as bun test does
   const testFile = words[0] === "run" && words[1] === "test:file"

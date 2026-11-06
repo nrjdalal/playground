@@ -20,6 +20,10 @@ export const groups: Group[] = [
         "claude in capitals resuming a session",
         "CLAUDE --resume 00000000-0000-0000-0000-000000000000",
       ],
+      [
+        "claude resuming a session behind nice in capitals",
+        "NICE claude --resume 00000000-0000-0000-0000-000000000000",
+      ],
     ],
   },
   {
@@ -50,6 +54,49 @@ export const groups: Group[] = [
       [
         "a commit after cd in capitals, which runs no builtin and leaves the main checkout as the folder",
         `CD ${WORK} && git commit --allow-empty -m x`,
+      ],
+      [
+        "a commit after cd behind command in capitals, which runs /usr/bin/command in a child",
+        `COMMAND cd ${WORK} && git commit --allow-empty -m x`,
+      ],
+      [
+        "a commit after cd behind command capitalised",
+        `Command cd ${WORK} && git commit --allow-empty -m x`,
+      ],
+      [
+        "a commit after pushd behind command in capitals",
+        `COMMAND pushd ${WORK} && git commit --allow-empty -m x`,
+      ],
+      [
+        "a commit after cd behind builtin in capitals, which is not found",
+        `BUILTIN cd ${WORK}; git commit --allow-empty -m x`,
+      ],
+      [
+        "a commit after cd by its path, which runs the builtin in a child",
+        `/usr/bin/cd ${WORK} && git commit --allow-empty -m x`,
+      ],
+      [
+        "a commit after cd behind command by its path",
+        `/usr/bin/command cd ${WORK} && git commit --allow-empty -m x`,
+      ],
+      [
+        "a commit after zsh's =cd, which expands to its path",
+        `=cd ${WORK} && git commit --allow-empty -m x`,
+      ],
+    ],
+  },
+  {
+    folders: ["worktree"],
+    guards: ["no-unslotted-run"],
+    rows: () => [["next build by bun x with next in capitals", "bun x NEXT build"]],
+  },
+  {
+    folders: ["checkout"],
+    guards: ["no-desktop-owner-app"],
+    rows: () => [
+      [
+        "the tool in capitals run through an interpreter's shell call",
+        `python3 -c "import os; os.system('AGENT-DESKTOP --headed snapshot')"`,
       ],
     ],
   },

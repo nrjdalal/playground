@@ -658,8 +658,8 @@ var G_WRAPPERS = new Map([
 var program = (value) => {
   const base = basename(value.replace(/^=/, ""));
   const lower = base.toLowerCase();
-  if (lower !== base && SHELL_OWN.has(lower))
-    return base;
+  if (SHELL_OWN.has(lower) && value !== lower)
+    return value;
   return G_WRAPPERS.get(lower) ?? lower;
 };
 var UV_TAKES = new Set([
@@ -1502,7 +1502,7 @@ var throughBuiltin = (cmd, { first }) => {
   if (!first)
     return false;
   const before = cmd.words.slice(0, cmd.words.indexOf(first));
-  return before.some((w) => !w.quoted && BUILTIN.has(program(w.value))) && before.every((w) => !w.quoted && (BUILTIN.has(program(w.value)) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
+  return before.some((w) => !w.quoted && BUILTIN.has(w.value)) && before.every((w) => !w.quoted && (BUILTIN.has(w.value) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
 };
 var manyTimes = (cmd, { first }) => !!cmd.repeated || cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0).some((w) => !w.quoted && COUNTED.has(program(w.value)));
 var startFolders = (env) => [
@@ -1843,7 +1843,7 @@ var unreadable = (text) => Boolean(text.unknown) || Boolean(text.reads?.length) 
 // scripts/hooks/no-desktop-owner-app.ts
 var GUARD = "no-desktop-owner-app";
 var TOOL = /^agent-desktop(?:@.*)?$/;
-var MENTION = /agent-desktop/;
+var MENTION = /agent-desktop/i;
 var LAUNCHERS = new Set([
   "bun",
   "bunx",
@@ -2024,7 +2024,7 @@ async function runsTool(line) {
 async function prose(text) {
   if (/['"`\\${}\n\r]/.test(text))
     return false;
-  for (const match of text.matchAll(/agent-desktop/g)) {
+  for (const match of text.matchAll(/agent-desktop/gi)) {
     const before = text.slice(0, match.index);
     const word = before.trimEnd().split(/\s+/).pop() ?? "";
     if (!/\s$/.test(before) || !/[\p{L}\p{N},:.]$/u.test(word) || word.startsWith("-"))

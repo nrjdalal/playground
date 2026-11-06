@@ -439,8 +439,8 @@ var G_WRAPPERS = new Map([
 var program = (value) => {
   const base = basename(value.replace(/^=/, ""));
   const lower = base.toLowerCase();
-  if (lower !== base && SHELL_OWN.has(lower))
-    return base;
+  if (SHELL_OWN.has(lower) && value !== lower)
+    return value;
   return G_WRAPPERS.get(lower) ?? lower;
 };
 var UV_TAKES = new Set([
