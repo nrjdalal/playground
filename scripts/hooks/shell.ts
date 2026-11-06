@@ -399,7 +399,8 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
   for (const w of before) {
     if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value))) return "root"
     // a wrapper: that first one, or a word whose unquoted value is a wrapper's bare name (`'sudo'`, `\doas`, `doas sudo`)
-    if (w === firstWrapper || ROOT_SHELLS.has(w.value)) wrappers.push(program(w.value))
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value.toLowerCase()))
+      wrappers.push(program(w.value))
   }
   // a program the hook cannot read, behind a wrapper, may be a root shell
   if (first && wrappers.length) return "root"
@@ -669,7 +670,45 @@ export const visible = (value: string): string =>
 
 export const marked = (value: string): boolean => value.includes(UNKNOWN) || value.includes(READ)
 
-export const program = (value: string): string => basename(value.replace(/^=/, ""))
+// The shell's own builtins whose effect a hook follows (its folder, its variables, its aliases, a name's lookup): the shell matches them by their exact case, and in another case one runs no builtin (macOS's /usr/bin/cd and the like run `builtin cd` in a child), so it changes nothing of the shell's
+const SHELL_OWN = new Set([
+  ".",
+  "alias",
+  "cd",
+  "declare",
+  "eval",
+  "export",
+  "hash",
+  "let",
+  "local",
+  "popd",
+  "pushd",
+  "read",
+  "readonly",
+  "set",
+  "shift",
+  "source",
+  "trap",
+  "type",
+  "typeset",
+  "unalias",
+  "unset",
+])
+// Homebrew coreutils' second copies of the wrappers, each run with its plain name's options
+const G_WRAPPERS = new Map([
+  ["genv", "env"],
+  ["gnice", "nice"],
+  ["gnohup", "nohup"],
+  ["gstdbuf", "stdbuf"],
+  ["gtimeout", "timeout"],
+])
+// A command word's program by its basename, in lower case, since macOS's filesystem ignores case and runs a program named in any case; a builtin of SHELL_OWN written in another case keeps that case, and a g-wrapper reads as its plain name
+export const program = (value: string): string => {
+  const base = basename(value.replace(/^=/, ""))
+  const lower = base.toLowerCase()
+  if (lower !== base && SHELL_OWN.has(lower)) return base
+  return G_WRAPPERS.get(lower) ?? lower
+}
 
 // uv's and uvx's options that take the next word as their value, so the word after is not the program
 export const UV_TAKES = new Set([
@@ -1362,6 +1401,9 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
         take()
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
+      } else if (wrapper === "env" && v === "-") {
+        // a lone `-` is env's -i, and BSD env reads its options on after it
+        take()
       } else if (v === "--") {
         take()
         while (ASSIGN.test(peek()?.value ?? "")) assign(local, take() as Word)

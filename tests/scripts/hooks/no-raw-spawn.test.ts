@@ -2,8 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { join } from "node:path"
 
 import { check } from "../../../scripts/hooks/no-raw-spawn"
-import { groups as inAnotherCase } from "./fixtures/refused-forms/1123"
-import type { Paths } from "./fixtures/refused-forms/_shared"
 
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-raw-spawn.ts")
@@ -202,17 +200,17 @@ describe("cmux runs only for its help or version", () => {
 const PANE = "w9:p9"
 const ID = "00000000-0000-0000-0000-000000000000"
 
-// #1123: macOS runs herdr named in any case, so each of #1123's herdr rows gets the refusal of the same call in lower case.
+// #1123: macOS runs herdr named in any case, so a session start by herdr in another case gets the refusal of the same call in lower case; the whole forms are rows of refused-forms/1123.ts.
 describe("herdr named in another case", () => {
-  const rows = inAnotherCase
-    .filter((g) => g.guards.includes("no-raw-spawn"))
-    .flatMap((g) => g.rows({} as Paths))
-    .filter(([what]) => what.startsWith("herdr"))
-    .map(([what, call]) => [what, String(call)] as const)
-  test.each(rows)("%s gets herdr's own refusal", async (_, call) => {
-    const refusal = await bash(call.toLowerCase())
+  test.each([
+    ["in capitals", "HERDR"],
+    ["capitalised", "Herdr"],
+    ["in capitals by its path", "/opt/homebrew/bin/HERDR"],
+  ])("herdr %s gets herdr's own refusal", async (_, name) => {
+    const call = `herdr agent start probe-x --kind claude --pane ${PANE}`
+    const refusal = await bash(call)
     expect(refusal).toBeDefined()
-    expect(await bash(call)).toBe(refusal)
+    expect(await bash(call.replace(/^herdr/, name))).toBe(refusal)
   })
 })
 

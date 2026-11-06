@@ -509,7 +509,7 @@ function narrow(cmd: Command, env: Env): boolean {
     )
   }
   if (!ownProgram(cmd, parsed)) return false
-  const base = program(first.value).toLowerCase()
+  const base = program(first.value)
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))

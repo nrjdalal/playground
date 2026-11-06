@@ -92,7 +92,7 @@ const BARE = (command: string) => command.replace(/[\\'"]/g, "")
 const candidate = (command: string): boolean => command.includes("$'") || /ours/.test(BARE(command))
 
 const mergeCall = (command: string): boolean =>
-  /\bgit\b/.test(BARE(command)) &&
+  /\bgit\b/i.test(BARE(command)) &&
   /\b(?:merge|pull)\b/.test(BARE(command)) &&
   /ours/.test(BARE(command))
 
