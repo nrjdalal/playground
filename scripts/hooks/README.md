@@ -18,7 +18,8 @@ A command's parse makes at most 16 other readings (`READINGS`), so a call holdin
 Only the first reading moves the folder, sets variables and records files for the commands after it; each other reading runs on its own copy of them, taken before the command.
 Every hook reads a command's stdin through `stdinOf`: the last file, here-string, heredoc or process substitution on fd 0 of its own, else its pipe, else text it cannot read, so a hook that refuses stdin it cannot read keeps that refusal.
 A script a shell reads from stdin (`scriptStdin`: a shell's or a source's, a root shell's in [no-raw-delete](#no-raw-delete), code a pipe feeds) is judged under that reading and, where it differs, the shell's own, each as a script of its own.
-The shell's own reading applies the input redirects left to right, a duplicate onto fd 0 (`<&N`, `0>&N`, `<&N-`) taking whatever last fed descriptor N (`3<<< '…' <&3`), and a brace group's, a subshell's or a loop's input redirects before each body command's own (`{ sh; } <<< '…'`).
+The shell's own reading applies the input redirects left to right, a duplicate onto fd 0 (`<&N`, `0>&N`, `<&N-`) taking whatever last fed descriptor N (`3<<< '…' <&3`), and a brace group's, a subshell's or a loop's input redirects before each body command's own (`{ sh; } <<< '…'`),
+the group's redirect taking the place of a pipe into the group (`<reader> | { sh; } <<< '…'`) while a pipe inside the body stays the command's own.
 It reads a here-string's `$(echo …)` of words it can read as those words, zsh's `\n` a line break and any other backslash unread, and a here-string of one variable the line set earlier (`S='…'; sh <<< "$S"`) as that variable's value.
 It follows no descriptor an `exec` feeds, which it reads as unfed, and no variable set other than by a plain assignment, which it reads as that assignment's value.
 
@@ -652,7 +653,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   the words after run-slot's `--`, each word of `screen` or `tmux` that starts no option as the command it runs, the script `at` or `batch` takes from stdin or `-f`, and every program it judges named among another program's words (`arch -arm64 rm -rf`, `busybox rm`, `npx rimraf`);
   a printer's or a search's words stay text.
   A root shell's here-string, heredoc, input file or process substitution (`sudo -s <<< '…'`, `su <<'EOF'`) is read as its script, as the shared reader runs a piped one, each part it cannot read (an unset variable, a download's output) taken as a line break so the rest is still judged, as a plain shell's script is.
-  A job a redirect, a pipe or `-f` feeds `at` or `batch` that it cannot read is refused, a program's output included (`at now < "$F"`, `ls | at now`), while `at -l` runs.
+  A job a redirect (a duplicate onto fd 0 included), a pipe or `-f` feeds `at` or `batch` that it cannot read is refused, a program's output included (`at now < "$F"`, `ls | at now`), while `at -l` runs.
   A word it cannot read among those words, given `-r` after it (`arch -arm64 $R -rf`), is refused as a program it cannot read; a data program's words stay text (`gh pr checks $N -R <repo>`).
   A plain `rm` met that way is judged for recursion alone, so `docker rm -fv "$ID"` and `bun rm <package>` run.
   It also reads every word holding a space, the text after an `=` and a leading `!` too, as a command line of its own.
