@@ -84,6 +84,9 @@ describe("a delete the hook lets run", () => {
     "sudo -s <<< 'ls'",
     "su <<< 'echo hi'",
     "sudo su <<'EOF'\nls -la\nEOF",
+    'sudo -s <<< "ls $NO_SUCH_VAR_1146"',
+    'su <<< "echo $(curl -s example.com)"',
+    'sudo -s < "$NO_SUCH_VAR_1146"',
   ])("%s", async (command) => {
     expect(await check(input(command))).toBeUndefined()
   })
