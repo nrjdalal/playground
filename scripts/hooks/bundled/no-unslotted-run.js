@@ -2232,6 +2232,9 @@ function sessionOf(raw) {
 }
 
 // scripts/hooks/steady.ts
+var READ2 = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(?!\[)/.source;
+var TEXT = /[^"$`\\]/.source;
+var WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ2})+|'[^']*'|"(?:${TEXT}|${READ2})*")`);
 var SHELL_SETS = new Set([
   "ARGC",
   "BASH",
