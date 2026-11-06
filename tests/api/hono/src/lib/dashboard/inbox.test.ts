@@ -3134,8 +3134,9 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { text: "Name the folders" },
         { actor, deliver: reached },
       )
-      // a second after the post's stamp: Postgres stamps the post and this process the edit, and both read to the millisecond can tie (#1028)
-      const later = new Date(Date.parse(posted.updatedAt) + 1000)
+      // a second after the row's stamp, which the comment moved past the post's, so the edit can only stamp the time it was given (#1028, and #1037's nit)
+      const commented = (await store.getItem(db, posted.id))?.updatedAt ?? posted.updatedAt
+      const later = new Date(Date.parse(commented) + 1000)
       const edited = await store.editItem(
         db,
         posted.id,
@@ -3144,7 +3145,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       )
       if (!edited.ok) throw new Error(edited.message)
       expect(edited.item).toMatchObject({ answer: null, status: "open" })
-      expect(Date.parse(edited.item.updatedAt)).toBeGreaterThan(Date.parse(posted.updatedAt))
+      expect(edited.item.updatedAt).toBe(later.toISOString())
       await store.settleItem(db, posted.id)
     })
   })
