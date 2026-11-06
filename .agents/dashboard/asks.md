@@ -51,6 +51,7 @@
   Done the rest of what settled, its header's ghost Mark all in Done as read (`ShelfDismiss`, "where is done mark as read") marking every item in it read, through `dismissItems`' `dismissedAt` on each not yet stamped, and typing nothing into any session,
   gone once none is left ("why mark as complete is available at 0 here"), as Dismiss all in Archive is, and its count everything it holds, its history too ("done show 0 and yet items?"), with `, N unread` for a screen reader,
   its row muted once none is unread, as an empty one is, though it still opens to its history, full again on hover or while open ("Why at 0 is it not muted like others?").
+  Each shelf's place (`progress`, `snoozed`, `archived`, `done`) is its key in the accordion and decides what its row does (`shelfRow` in `web/next/src/lib/inbox.ts`), while its words come from `SHELF_LABELS` alone, so renaming a row changes only what it shows.
   Under Done sits the Preview row, its icon and name with no count, starting shut and there in an empty Inbox too: opened, `PreviewPane` in `web/next/src/components/dashboard/preview-pane.tsx` fills the pane below it with a frame down to the pane's bottom edge.
   Its picker lists every project's worktrees on this machine, one group a project (`GET /api/v1/stacks`, `readStacks()` in `api/hono/src/lib/dashboard/stacks.ts`): the projects are this checkout's and each live session's folder's, their worktrees read from git's own files, each labelled by its branch and the session working in it,
   running where a portless route's process group is one its stack's record (`.turbo/dev.pgid`) names and stopped otherwise; a web stack no worktree claims lists under its app's name, and a fixture stack lists the fixture's made-up `worktrees`.
@@ -67,7 +68,7 @@
   Each item sits flat, led by one muted band the pane's full width (`KindBand`, `bg-muted` with square corners bleeding over the pane's `--pane-x` padding, which `dashboard-aside.tsx` sets on each scroll pane, its words lined up with the card's),
   which gives its kind as an icon and a word,
   its id `#i<ref>` (`ref` is an identity column, so an id is stable and never reused) and who posted it (Alpha's name `text-info`, Bravo's `text-bravo`, the theme's purple), then at its right end one time and a tick: `posted <time>`,
-  or `updated <time>` once a decision or draft changed (its `updatedAt`, stamped by the API's clock as its `createdAt` is, a second or more after its `createdAt`: an answer, a delivery, an ack, a settle, an edit or a Later, `scheduleItem` setting it too), or once its poster edited an update (`bun run ask edit`; an update's read, Dismiss or resolve leaves it `posted`;
+  or `updated <time>` once a decision or draft changed (its `updatedAt` a second or more after its `createdAt`, both stamped by the API's clock: an answer, a delivery, an ack, a settle, an edit or a Later, `scheduleItem` setting it too), or once its poster edited an update (`bun run ask edit`; an update's read, Dismiss or resolve leaves it `posted`;
   `changedAt` in `web/next/src/lib/inbox.ts`), reading `read <time>` on hover once read, and a blue `Updated` when it changed after the owner's look before this one and by the time this one began (`updatedSince`; the inbox's look mark, `inboxMark` in `web/next/src/lib/tab-dot.ts`, takes in changes too), so a change made as the owner looks shows in place, with the change's own time beside it,
   since a relative minute alone can hide an update that landed after the last look.
   Colour says what an item is and where it stands, as the sidebar's lights do: its kind's on its icon alone (a decision `warning`, a draft `info`, an update `success`, an alert `destructive`), the card's own edges plain, no thick coloured border,
@@ -136,7 +137,7 @@
   An answered card's result line names what was picked, in the card's own words (`outcomeLine` in `web/next/src/lib/inbox.ts`):
   `B · Hotfix main` for a lettered pick, `Approve · Ship 3f9a2c1 to main` for a yes or no, a bare `Approve` or `Deny` for an unlabelled ask, `Sent`, `Saved as a Slack draft`, `Discarded` or `Archived <time>`,
   then a state only where the answer did not simply go through (`Queued for <taker>`, `Send failed: <why>`, `No link: <why>`), never a word typed for its poster, since its light says the rest.
-  A go's light stays blue while its poster carries it out (an accept, an apps change or a guard setting the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line, below),
+  A go's light stays blue while its poster carries it out (an accept, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line, below),
   until its poster closes it, even once typed into its session,
   since only the ack says it landed (#i115's earlier Delivered word read as landed when it was not).
   A `<taker>` is the session that took the answer: its poster, unless the poster has ended.
@@ -159,7 +160,7 @@
   and `close`, the exact command that closes the item, naming `--no-link "<why>"` beside `--link` for a go that may leave no page (a decision whose preview names no `link`, a Save as draft), and left out where nothing is left to close: an update, or a card its poster already closed.
   A pick names its `option`, the row the card showed, by `index`, `letter` and `label` (`choicesOf`): a yes or no's Approve is A and its Deny B, and a lettered ask's None of these takes the letter after its last option.
   His comment rides as `comment`, a changed draft's words as `text`, a Slack draft's link command as `linkConverter`, what the dashboard ran on Approve as `accepted` (an accept),
-  `listed` (an apps change), `set` (a guard setting) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
+  `listed` (an apps change), `set` (a guard setting), `owned` (an own account change) or `opened` (a grant's pane, whose `next` is the recheck below) and a secret's sink results as `results`, never its value.
   A comment alone (the card's Reply or a chat reply, `re #iN`) stays his own words, typed as he wrote them.
   In every chat the line reads as one answer chip in his bubble, an outline badge holding the item's `ref` and the option's `label`, else the `verb`, with the `comment` as the bubble's words after it (`answerChipOf` in `web/next/src/lib/answer-chip.ts`, `TranscriptBubble`), and a line `payloadOf` cannot parse shows as written.
   A click on the chip opens that card in the aside's Inbox, opening the shelf that holds it first.
@@ -182,7 +183,7 @@
   Retry is offered only after a failure that comes before anything is typed, a lost one, or a stuck queued one (`RETRY_CODES`: `CMUX_FAILED`, `INPUT_NOT_EMPTY`, `LOST`, `NOT_FOUND`, `ON_PICKER`, `UPLOAD_FAILED`, and `stuckQueued`,
   so it never types an answer twice) and marks it pending in one write that holds only while it still reads failed or queued at the version read and types it again (`retryDelivery`),
   until it is delivered or they press its own Dismiss;
-  the session carries it out, and the Dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files and running only an `accept` decision's accept, an `apps` decision's list write, a `grant` decision's System Settings pane and a `guard` decision's setting write (all below).
+  the session carries it out, and the Dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files and running only an `accept` decision's accept, an `apps` decision's list write, a `grant` decision's System Settings pane, a `guard` decision's setting write and an `own` decision's accounts write (all below).
   No session row carries a count, Playground's included (Worker Lights): the Inbox tab counts what needs the owner and arrived since their last look at the Inbox (`newInInboxCount` in `web/next/src/lib/tab-dot.ts`, the rule `newInInbox` lights the tab dot by), so a look clears it with no answer given,
   its name reading `N new` (a click made only to clear the bar's dot),
   while the Inbox's first row counts every item in the list; the API's `inboxCount` (`api/hono/src/lib/dashboard/inbox.ts`), which Needs you and the sidebar read, counts the open decisions and drafts and the answers that failed to send, plus the unread updates, one put away with Later counted again only once its time has passed,
@@ -222,13 +223,13 @@
   ```
 
   `kind` is `decision` (left out, it is one), `draft` or `update`; `from` is the posting session's name as the Dashboard shows it, since the answer is typed into that session; `title` is one line.
-  A decision's `preview` is one of thirteen, each what Approve does except the `secret` ask and the `reveal` card (below), written in ELI5 / ASD-STE100 plain words: `accept` (`scope`, `kind`, `key`, `rev`, `why`, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
+  A decision's `preview` is one of fourteen, each what Approve does except the `secret` ask and the `reveal` card (below), written in ELI5 / ASD-STE100 plain words: `accept` (`scope`, `kind`, `key`, `rev`, `why`, an optional `more` list, below), `apps` (`app`, `change`, `why`, below), `ask` (`text`, what its poster does on Approve, for a decision no other shape fits:
   a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with its options labelled one line each, `options`, 1 to 5 rows of `{label, description?}`, one row for a yes or no and 2 or more for lettered choices, or the older `approve` alone, never both, and an optional `deny` naming the no-go row (Deny, or None of these past one option),
   and optional `attachments`, below), `slack` (`to`, `text`, optional `attachments`),
   `ship` (`sha`, `prs` of `{number, title, url?}`, where `bun run ask new` and `edit` fill each `url` into the factory's repo, `factory.repo` else the checkout's origin, so the card links each PR),
-  `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below), `guard` (`key`, `scope`, optional `value`, `why`, below), `secret` (`key`, `sink`) or `reveal` (`service`, `why`); a decision with none is refused.
+  `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below), `guard` (`key`, `scope`, optional `value`, `why`, below), `own` (`key`, `own`, `scope`, `why`, below), `secret` (`key`, `sink`) or `reveal` (`service`, `why`); a decision with none is refused.
   A `delete`'s `what` names each target by its full path, the one `playground rm --decision` matches, so one approval is enough: `bun run ask new` refuses a short name that is there (a relative or `~` path, a worktree's bare folder name), naming the full path to write, unless that full path stands beside it (`deleteRefusal` in `api/hono/src/lib/dashboard/delete-targets.ts`).
   An `ask`'s `attachments`, a draft's, a `slack` decision's and a read-only update's, are up to 20 files on this Mac, each `{src, kind?, label?, group?}`: `src` an absolute path, never a URL; `kind` one of `code`, `doc`, `html`, `image` or `pdf`,
   read from the extension when left out (`KIND_OF_EXTENSION` in `api/hono/src/lib/dashboard/inbox-attachments.ts`); `label` `before` or `after`; `group` a one-line section heading.
@@ -291,13 +292,13 @@
   Once the files have gone, words that then fail unconfirmed (`INTERRUPTED`, `ERROR`) or go to the dispatcher by relay leave the files in the thread with no reply yet.
   A draft, and a `slack` decision, carries `thread` whenever the reply answers a Slack conversation, so a Slack draft shows a short summary of who said what at the other end, with the drafted reply below.
   It holds 1 to 12 `{who, said}`, oldest first: `who` the display name as Slack shows it (a first name, never a raw token), `said` the gist of that message in one line of plain STE100 words.
-  The card shows them as So far above the words to send, a draft's under Your reply, each gist rendered through `TranscriptMarkdown card`; `bun run ask example slack` prints a `slack` decision with its `thread` filled.
+  The card shows them as So far above the words to send, a draft's under Your message, each gist rendered through `TranscriptMarkdown card`; `bun run ask example slack` prints a `slack` decision with its `thread` filled.
   Which Slack messages post directly (a developer's) and which come here as a draft (anyone else's) is playbook's **ask** ([rules/ask.md](../../extensions/core/rules/ask.md)).
   Before drafting a reply to a person's message, read that DM or channel from that message on, its thread and the top level both, and draft only while the owner has not answered it already (twice on 23 Oct a reply was drafted after the owner had replied, and both drafts were discarded); `bun run ask new` reminds you once when a draft's `link` is a message.
   What that read found goes in the item's `thread`, a line for each message that leads up to the reply.
   A draft, and a `slack`, `ship` or `ticket` decision, also names where it will land, upfront, not after the send: `link`, the https URL of the Slack thread, channel or DM it posts in (a DM's conversation found or opened first, read-only where it already exists), the canary compare or the pull request,
   or the Linear team or project; or, with no place yet (a brand-new DM nobody can open), `noLink`, one line saying why.
-  One of the two is required and both are refused; `accept`, `apps`, `ask`, `budget`, `delete`, `grant`, `guard`, `reveal`, `schema` and `secret` take neither.
+  One of the two is required and both are refused; `accept`, `apps`, `ask`, `budget`, `delete`, `grant`, `guard`, `own`, `reveal`, `schema` and `secret` take neither.
   A draft that asks or nudges a named person goes to that person's DM, never a public comment: its `to` names the DM and its `link` is that DM conversation, never a thread reply or a PR comment; a channel ask, such as the one in #peer-review-chat, stays in its channel.
   Its card's place line, above its title, shows the link by name (Open thread for a draft or a Slack link, `owner/repo#N`, `owner/repo compare`, a Linear ID) or `No link: <why>` (`upfrontLink` in `web/next/src/lib/inbox.ts`), until the poster's ack links where it landed.
   An update's is `{outcome, link?, text?, attachments?}`, its outcome one of `alert`, `decision`, `finding`, `merged` or `shipped`, so progress or an ETA is no outcome of its own: a session carries its progress in the one item it keeps editing with `bun run ask edit`, never a new item a step, which keeps the Inbox one card a thread.
@@ -311,10 +312,10 @@
   Delivery is `pending`, then `delivered` (`via: "session"` with `to`, the session that took it), `queued` (Claude Code holds it, above) or `failed` with the adapter's code; when it fails, or to collect the answer without waiting, the poster polls `bun run ask get <id> --ack` until `status` is not `open`, and `--ack` records `{at, status: "delivered", via: "cli"}` (`readAnswer`),
   the first delivery recorded standing.
   A go (Approve, Edit, Send, Draft) closes only once carried out, with where it landed, whatever its kind of link: `bun run ask ack <id> --link <https url>` (the Slack message, the pull request, issue or comment,
-  the Linear ticket or comment) or `--no-link "<why>"` for a go with no page (a budget, an accept, an apps change, a grant, a guard setting) or a Draft Slack refused (`draft_already_exists`), which `ack` refuses to go without, and one way alone: `--no-link` fits a go with no link recorded, and `--link` one not closed with no link;
+  the Linear ticket or comment) or `--no-link "<why>"` for a go with no page (a budget, an accept, an apps change, a grant, a guard setting, an own account change) or a Draft Slack refused (`draft_already_exists`), which `ack` refuses to go without, and one way alone: `--no-link` fits a go with no link recorded, and `--link` one not closed with no link;
   a deny, a clear, a discard or a provided secret closes when read, by `get --ack` or a bare `ack`.
   Closing stamps `answer.ackedAt`, the first close's time, even after a delivery to the session, and records `answer.link` or `answer.noLink`; until then a go's card names its pick alone under a blue light;
-  an accept, an apps change or a guard setting the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line (below),
+  an accept, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line (below),
   and once closed with no link it adds `No link: <why>`, but for a Draft, which reads, gray, `Draft not saved: <why>`.
   `bun run ask stale [--minutes 15] [--since <iso>]` prints one line for each answer of the owner's (not a settle) given since `--since` (default 24 hours ago) and at least `--minutes` ago with no `ackedAt` (a go not closed with its link or why, anything else not read), its delivery pending, failed or typed into the session alike, but for a failed one the owner dismissed,
   which the owner chose not to send (`staleItems`; an answer delivered before acks were stamped, `ACKS_STAMPED_FROM`, is not listed, since it may have been acked with no stamp, while one never delivered still is, and a go delivered before then, read through bun run ask or typed into its session, reads as closed):
@@ -323,7 +324,7 @@
   Its `key` is the environment variable's name and its `sink` one of the allowlist in code, `secretSinkSchema` in `api/hono/src/lib/dashboard/inbox.ts`, `{type: "vercel", project, scope, environments}`, each environment of `development`, `preview` and `production` named once, or `{type: "keychain", item}`,
   one of this Mac's Keychain items `keychainSpec` in `api/hono/src/lib/keychain-items.ts` allows, always as the Mac's signed-in user: a typed one by name, `slack` (the Slack user token the Slack extension reads) or `yard` (the Yard token `playground yard` and the local Dashboard read), whose value must take its shape (`KEYCHAIN_ITEMS`),
   or any other of Playground's own by its full service, `playground-` then lower-case letters, digits and hyphens (`PLAYGROUND_SERVICE`), whose value is 1 to 4096 printable characters with no quote, backslash or line break and no space at either end; every other service is refused, so no card names a browser's or the login keychain's items.
-  Its card shows what Submit does, a masked field and Submit, Enter submitting too, then the comment box, whose words go through Reply alone, never with Submit, and Reply refuses words equal to the field (`commentRefused` in `web/next/src/lib/inbox.ts`), so the value never reaches a transcript; Later, Archive and Dismiss stay, since none carries a value.
+  Its card shows what Submit does, a masked field and Submit, Enter submitting too, then the comment box, whose words go through Reply alone, never with Submit, and Reply refuses words equal to what the field holds (`commentRefused` in `web/next/src/lib/inbox.ts`), so a value still in the field never reaches a transcript through Reply; Later, Archive and Dismiss stay, since none carries a value.
   Submit posts `{value, seen}`, the value trimmed of its edge whitespace (a pasted newline), to `POST /api/v1/inbox/:id/secret`, which `provideSecret()` claims in one write that holds only while the item is open at the version read, so the sink runs once, then hands the value on stdin to `vercel env add <key> --environment <env> --project <project> --scope <scope> --yes`,
   once an environment in order,
   from the temp folder with its output dropped and only `HOME`, `PATH`, the proxy and CA variables and `VERCEL_*` in its environment (`spawnSink` in `api/hono/src/lib/dashboard/secret-sink.ts`, stopped after 60 seconds).
@@ -361,18 +362,34 @@
   EOF
   ```
 
-- An `accept` decision asks the owner to accept an extension proposal (`web/next/content/docs/extensions.mdx`'s Review), one of the four decisions whose Approve the Dashboard carries out itself, with an `apps` change, a `grant` and a `guard` setting (below), since an accept is the owner's own act and the CLI refuses one from a session with a role.
+- An `accept` decision asks the owner to accept an extension proposal (`web/next/content/docs/extensions.mdx`'s Review), one of the five decisions whose Approve the Dashboard carries out itself, with an `apps` change, a `grant`, a `guard` setting and an `own` account change (below), since an accept is the owner's own act and the CLI refuses one from a session with a role.
   Its `scope`, `kind` and `key` name the proposal in the store's own patterns, none able to start as a flag; its `rev` (7 to 40 hex) is the proposal's head the poster read, so a proposal written since is refused with a 409 (`acceptSchema` in `api/hono/src/lib/dashboard/inbox.ts`); `why` says why to accept it.
-  Its card reads `On Approve, the dashboard accepts the proposed <kind> <key> in <scope>, as it reads at <rev>.` and the why; Edit is refused, so the words approved are the words posted.
-  Approve is claimed in `answerItem`'s one versioned write, so a double click runs once, then runs `ext accept <scope> <kind> <key> <rev> --reason "the owner approved it in the Inbox (#iN)"` through `runCli()` (`api/hono/src/lib/store/extensions.ts`): one fixed argv (`acceptArgs`), no shell, no `PLAYGROUND_ROLE`, against the stack's data folder, a fixture stack's own.
-  The answer keeps `accepted: {exitCode, line}`, the CLI's first line or its error; the card reads `Accepted: <line>` green or `Accept failed (exit N): <line>` red, and the poster, or the dispatcher in an ended poster's place, is typed that result with nothing left to carry out, closing it with `bun run ask ack #iN --no-link "<why>"`.
-  Deny, Archive and Dismiss run nothing; a failed accept takes a new decision for the proposal's current rev.
+  A set the owner reads as one change is one card: `more` lists 1 to 20 further proposals, each with its own `scope`, `kind`, `key` and `rev` by the same rules, accepted after the first in the order written, so a proposal that needs another lands after it.
+  Its card reads `On Approve, the dashboard accepts the proposed <kind> <key> in <scope>, as it reads at <rev>.` and the why, or with `more` one numbered line a proposal, in order, and an Approve of `Accept the <kind> <key> and N more`; Edit is refused, so the words approved are the words posted.
+  Approve is claimed in `answerItem`'s one versioned write, so a double click runs once, then runs `ext accept <scope> <kind> <key> <rev> --reason "the owner approved it in the Inbox (#iN)"` for each proposal in order through `runCli()` (`api/hono/src/lib/store/extensions.ts`):
+  one fixed argv a proposal (`acceptArgs`), no shell, no `PLAYGROUND_ROLE`, against the stack's data folder, a fixture stack's own.
+  A list stops at its first failed accept and leaves the rest untried (`acceptAll`).
+  The answer keeps `accepted: {exitCode, line}`: for one proposal the CLI's first line or its error; for a list `accepted <kind> <key> in <scope>, …`, or on a failure the ones accepted, the failed one with its reason, then `not tried:` and the rest.
+  The card reads `Accepted: <line>` green or `Accept failed (exit N): <line>` red, and the poster, or the dispatcher in an ended poster's place, is typed that result with nothing left to carry out, closing it with `bun run ask ack #iN --no-link "<why>"`.
+  Deny, Archive and Dismiss run nothing; a failed accept takes a new decision for the proposals still unaccepted, each at its current rev.
 
   ```bash
   bun run ask new <<'EOF'
   {"from": "dispatcher", "title": "Accept the end-of-day skill in acme?",
    "preview": {"type": "accept", "scope": "acme", "kind": "skill", "key": "end-of-day",
                "rev": "3f9a2c1d", "why": "Scored 4 by two reviewers; it reads the day's merges"}}
+  EOF
+  ```
+
+  A set of proposals, accepted in the order `more` lists them after the first:
+
+  ```bash
+  bun run ask new <<'EOF'
+  {"from": "dispatcher", "title": "Accept the handover set in acme?",
+   "preview": {"type": "accept", "scope": "acme", "kind": "doc", "key": "templates", "rev": "4a0b1c2d",
+               "more": [{"scope": "acme", "kind": "skill", "key": "handover", "rev": "5b1c2d3e"},
+                        {"scope": "acme", "kind": "rule", "key": "quiet-hours", "rev": "6c2d3e4f"}],
+               "why": "The skill reads the templates, and the rule names the skill"}}
   EOF
   ```
 
@@ -421,6 +438,21 @@
   EOF
   ```
 
+- An `own` decision asks the owner to mark one Claude account in `usage.accounts` as the owner's own, or to unmark it, the flag Settings > Accounts' Own account switch sets: any session posts the card, and only the owner's Approve writes it.
+  Its `key` is the account's email, `own` the flag Approve leaves it with, `scope` the owner's login or an org, and `why` says why (`ownSchema` in `api/hono/src/lib/dashboard/inbox.ts`);
+  a key that names no Claude row in `usage.accounts` at that scope (a GLM row's label included) is refused as it is posted or edited, and Edit is refused.
+  The card shows the email, the scope and the change, Own off to on or on to off.
+  Approve takes `seen` as a guard setting's does, then reads the list, sets or drops `own` on that one row through `withOwn` (`@packages/config/accounts`), every other row and field as it was, and writes the list through `setSetting`, its reason `the owner approved it in the Inbox (#iN)`; a row already in the asked state writes nothing.
+  The answer keeps `owned: {exitCode, line}`, the line naming the state Approve found, and the card reads `Own account: <line>` green or `Own account change failed (exit N): <line>` red, and Settings > Accounts reads its switch again (`ACCOUNTS_QUERY_KEY`); the poster closes it with `bun run ask ack #iN --no-link "<why>"`.
+
+  ```bash
+  bun run ask new <<'EOF'
+  {"from": "dispatcher", "title": "Mark pat@example.com as your own?",
+   "preview": {"type": "own", "key": "pat@example.com", "own": true, "scope": "made-up-me",
+               "why": "Spend the org's accounts before your own"}}
+  EOF
+  ```
+
 - The ask's shape: an `ask` decision's text reads the way chat talks to the owner, in three parts, top to bottom:
   1. A picture of the point: a diff or code block for a code change, before and after pictures for a UI change (as `attachments` with the smart viewer), an ASCII flow in a code block for a plain decision.
      Keep each code or ASCII line within `ASK_CODE_COLUMNS` characters, the drawing width the card paragraph above names, whose source (`packages/config/src/inbox.ts`) gives the card width and character width it comes from; a `diff` block's lines may run longer, since the card wraps them.
@@ -432,7 +464,7 @@
   A factory session writes each item's words and pictures by the `to-inbox` skill (`extensions/core/skills/to-inbox/SKILL.md`), loaded before `bun run ask new`.
   A job of several steps leads with to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`).
 
-  `bun run ask example code|decision|slack|ui` prints each worked example as an item to fill in, the three asks below and the slack decision above.
+  `bun run ask example code|decision|delete|slack|ui` prints each worked example as an item to fill in, the three asks below and the delete and slack decisions above.
   `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
   a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
   or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).

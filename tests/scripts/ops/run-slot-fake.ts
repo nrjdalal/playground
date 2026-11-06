@@ -39,6 +39,8 @@ afterAll(() => {
 })
 
 export type Setup = {
+  // the core count sysctl's hw.ncpu reads
+  cores?: number
   // disk0's transfers/s and MB/s in iostat's second sample
   disk?: [number, number]
   free?: number
@@ -58,8 +60,9 @@ export type Setup = {
   topDelay?: number
 }
 
-// A scratch state folder and config folder, with a fake sysctl on PATH giving the load asked for (load5 and load15 as load1 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, a fake vm_stat whose last row reads the swap-ins asked for, and a fake iostat whose second sample reads disk0's transfers/s and MB/s asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
+// A scratch state folder and config folder, with a fake sysctl on PATH giving the load asked for (load5 and load15 as load1 unless given), the core count asked for (15 unless given) and normal memory, a fake uptime giving the same load, a fake top whose second sample reads the CPU idle share asked for, a fake vm_stat whose last row reads the swap-ins asked for, and a fake iostat whose second sample reads disk0's transfers/s and MB/s asked for; sandboxed, sysctl and ps refuse every read as Claude Code's sandbox does, so the load comes from uptime alone.
 export const machine = ({
+  cores = 15,
   disk = [120, 3.5],
   free = 80,
   idle = 80,
@@ -94,6 +97,7 @@ export const machine = ({
 echo "$2" >> ${join(root, "sysctl.log")}
 ${sandboxed ? 'echo "sysctl: sysctl fmt -1 1024 1: Operation not permitted" >&2; exit 1' : ""}
 case "$2" in
+  hw.ncpu) echo ${cores} ;;
   vm.loadavg) echo "{ ${load1.toFixed(2)} ${load5.toFixed(2)} ${load5.toFixed(2)} }" ;;
   kern.memorystatus_level) echo ${free} ;;
   kern.memorystatus_vm_pressure_level) echo ${pressure} ;;
@@ -159,12 +163,12 @@ esac
     RUN_SLOT_POLL: "0.2",
     ...extra,
   })
-  // A slot already held by this test's own process, which stays alive throughout.
-  const hold = (slot: string, units: number, size: string) => {
+  // A slot already held by this test's own process, which stays alive throughout, taken at `at`.
+  const hold = (slot: string, units: number, size: string, at = "2026-10-18T19:00:00Z") => {
     mkdirSync(join(ops, slot))
     writeFileSync(
       join(ops, `${slot}.holder`),
-      `worker-held ${process.pid} 2026-10-18T19:00:00Z ${units} ${size}\n`,
+      `worker-held ${process.pid} ${at} ${units} ${size}\n`,
     )
   }
   const release = (slot: string) => {

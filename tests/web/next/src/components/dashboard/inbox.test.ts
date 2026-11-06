@@ -23,7 +23,7 @@ import {
   Questionnaire,
   QuestionnaireItem,
 } from "../../../../../../web/next/src/components/ui/questionnaire"
-import type { Shelf } from "../../../../../../web/next/src/lib/inbox"
+import { INBOX_QUERY_KEY, SHELF_LABELS, type Shelf } from "../../../../../../web/next/src/lib/inbox"
 import { tipsOf } from "../../tooltips"
 
 // React and React Query resolve from the web app's own packages, which this directory cannot see; the calls the test makes are typed here rather than through a path into node_modules.
@@ -961,7 +961,7 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
 
   test("the rows run open items, In progress, Later, Archive, Done, and the ones put away with Later come from the API's own list, never items", () => {
     expect(source).toContain('<AccordionItem value="open" disabled={rows.length === 0}')
-    const order = ['["In progress"', '["Later"', '["Archive"', '["Done"'].map((row) =>
+    const order = ['["progress"', '["snoozed"', '["archived"', '["done"'].map((row) =>
       source.indexOf(row),
     )
     expect(order.every((at) => at > 0)).toBe(true)
@@ -1004,21 +1004,14 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
     expect(source).toContain("onBack={() => setBack(item.id)}")
     expect(source).toContain("if (back !== null && held.some((item) => item.id === back)) {")
     expect(source).toContain("setOrder([back, ...rowIds])")
-    expect(source).toMatch(
-      /label === "Archive"\s+\? "Dismiss all in Archive"\s+: "Mark all in Done as read"/,
-    )
     // the Archive shelf's one click is each card's own Dismiss, a waiting ask included; Done's marks read and tells no poster
-    expect(source).toContain('ids={(label === "Archive" ? shelf : shelf.filter(dismissable)).map(')
     const bulkDismiss = source.slice(source.indexOf("onDismiss={(ids) =>"))
     expect(bulkDismiss).toMatch(
-      /label === "Archive"\s+\? dismissEach\(shelf\.filter\(\(item\) => ids\.includes\(item\.id\)\)\)\s+: dismissItems\(ids\),/,
+      /sweep\.each\s+\? dismissEach\(shelf\.filter\(\(item\) => ids\.includes\(item\.id\)\)\)\s+: dismissItems\(ids\),/,
     )
   })
 
   test("Done's ✓✓ marks every item in it read, and is gone once all are", () => {
-    expect(source).toMatch(
-      /\{label !== "Later" &&\s+label !== "In progress" &&\s+shelf\.length > 0 &&\s+!config\.hosted && \(/,
-    )
     const button = (ids: string[]) =>
       /<button[^>]*>/.exec(
         renderToStaticMarkup(
@@ -1035,18 +1028,11 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
     expect(button([])).toBe("")
   })
 
-  test("Done with nothing left to read reads muted as an empty shelf, yet still opens, full again on hover or while open", () => {
-    expect(source).toMatch(
-      /label === "Done" &&\n\s+shelf\.filter\(dismissable\)\.length === 0 &&\n\s+"opacity-50 hover:opacity-100 aria-expanded:opacity-100"/,
-    )
+  test("an empty shelf's row is disabled", () => {
     expect(source).toContain("disabled={shelf.length === 0}")
   })
 
   test("every shelf counts what it holds, Done its history too, and Done tells a screen reader how many are unread", () => {
-    expect(source).toContain("count={shelf.length}")
-    expect(source).toContain(
-      'unread={label === "Done" ? shelf.filter(dismissable).length : undefined}',
-    )
     const html = renderToStaticMarkup(
       createElement(ShelfLabel, { count: 4, icon: () => null, label: "Done", unread: 0 }),
     )
@@ -1054,12 +1040,9 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
     expect(html).toMatch(/<span class="sr-only">, (<!-- -->)?0(<!-- -->)? unread<\/span>/)
   })
 
-  test("each row ends in its ShelfMark, the open row and every shelf, and In progress offers no ✓ since its poster closes it", () => {
+  test("each row ends in its ShelfMark, the open row and every shelf", () => {
     expect(source).toContain("<ShelfMark empty={shown.length === 0} />")
     expect(source).toContain("<ShelfMark empty={shelf.length === 0} />")
-    expect(source).toMatch(
-      /\{label !== "Later" &&\s+label !== "In progress" &&\s+shelf\.length > 0 &&\s+!config\.hosted && \(/,
-    )
   })
 
   test("the open row reads Inbox and its own count as the shelves do, zero included, the summary kept for a screen reader", () => {
@@ -1163,7 +1146,8 @@ describe("the Preview row under Done", () => {
   })
 
   test("is the accordion's last row, after Done, and holds the preview pane", () => {
-    expect(source.indexOf('["Done", RiCheckDoubleLine, done, true]')).toBeLessThan(
+    expect(source.indexOf('["done", RiCheckDoubleLine, done]')).toBeGreaterThan(-1)
+    expect(source.indexOf('["done", RiCheckDoubleLine, done]')).toBeLessThan(
       source.indexOf('<AccordionItem value="Preview"'),
     )
     expect(row.slice(0, row.indexOf("</AccordionItem>"))).toContain("<PreviewPane />")
@@ -1395,7 +1379,7 @@ describe("every kind of card on the Questionnaire", () => {
     expect(html.split("</fieldset>")[0]).toContain('aria-label="Message to Merritt DM"')
   })
 
-  test("a draft with a thread so far shows it above Your reply, and one without shows neither", () => {
+  test("a draft with a thread so far shows it above Your message, and one without shows neither, never Your reply", () => {
     const threaded = render(false, {
       ...draft,
       preview: {
@@ -1406,13 +1390,14 @@ describe("every kind of card on the Questionnaire", () => {
       },
     } as InboxItem)
     expect(threaded.indexOf("So far")).toBeGreaterThan(-1)
-    expect(threaded.indexOf("So far")).toBeLessThan(threaded.indexOf("Your reply"))
-    expect(threaded.indexOf("Your reply")).toBeLessThan(
+    expect(threaded.indexOf("So far")).toBeLessThan(threaded.indexOf("Your message"))
+    expect(threaded).not.toContain("Your reply")
+    expect(threaded.indexOf("Your message")).toBeLessThan(
       threaded.indexOf('aria-label="Message to Merritt DM"'),
     )
     const plain = render(false, draft)
     expect(plain).not.toContain("So far")
-    expect(plain).not.toContain("Your reply")
+    expect(plain).not.toContain("Your message")
   })
 
   test("an update is a question with its title alone", () => {
@@ -1628,6 +1613,37 @@ describe("a guard decision's card (PG-1090)", () => {
   })
 })
 
+describe("an own decision's card (PG-1162)", () => {
+  const own = (preview: object) =>
+    render(false, {
+      ...decision,
+      preview: {
+        key: "pat@example.com",
+        own: true,
+        scope: "made-up-me",
+        type: "own",
+        why: "A made-up reason",
+        ...preview,
+      },
+      title: "Mark pat@example.com as your own?",
+    } as InboxItem)
+
+  test("shows the email, the scope and the change Approve makes", () => {
+    const html = own({})
+    expect(html).toContain("the dashboard marks")
+    expect(html).toContain(">pat@example.com</code>")
+    expect(html).toContain(">made-up-me</code>")
+    expect(html).toContain("off → on")
+    expect(html).toContain("Why: A made-up reason")
+  })
+
+  test("a clear reads unmarks, on to off", () => {
+    const html = own({ own: false })
+    expect(html).toContain("the dashboard unmarks")
+    expect(html).toContain("on → off")
+  })
+})
+
 describe("a held Yard post's card", () => {
   test("its Approve is a link that opens Yard's approve page in a new tab, never an answer", () => {
     const html = render(false, {
@@ -1643,6 +1659,105 @@ describe("a held Yard post's card", () => {
     expect(html).toMatch(
       /<a [^>]*href="https:\/\/yard.example\/yard\/approve\/m1"[^>]*target="_blank"[^>]*>.*?Approve<\/a>/,
     )
+  })
+})
+
+// PG-1074: each shelf's row does what its place says, so renaming a row's words changes those words alone.
+describe("the shelves under the list, by place", () => {
+  const at = "2026-10-12T10:05:00.000Z"
+  const card = (ref: number, over: object) =>
+    ({ ...decision, id: `id-${ref}`, ref, title: `Fake card ${ref}`, ...over }) as InboxItem
+  const working = card(60, {
+    answer: { at, choice: "approve" },
+    delivery: { at, status: "delivered", via: "session" },
+    status: "approved",
+  })
+  // an update read before Done kept updates in the list is on Done, unread until dismissed
+  const update = {
+    kind: "update",
+    preview: { outcome: "merged" },
+    readAt: "2026-10-12T10:00:00.000Z",
+    status: "done",
+  }
+  const settled = card(61, update)
+  const read = card(62, { ...update, answer: { dismissedAt: at } })
+  const inbox = (done: InboxItem[]) => {
+    const client = new QueryClient() as { setQueryData: (key: unknown, data: unknown) => void }
+    client.setQueryData(INBOX_QUERY_KEY, {
+      archived: [card(63, { answer: { at, choice: "clear" }, status: "cleared" })],
+      items: [working, ...done],
+      snoozed: [card(64, { answer: { at, snoozedUntil: "2026-10-13T10:00:00.000Z" } })],
+    })
+    return renderToStaticMarkup(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(
+          DashboardContext,
+          { value: { allowed: true, workers: [] } as unknown as DashboardContext },
+          createElement(Inbox, { viewing: true }),
+        ),
+      ),
+    )
+  }
+  // each shelf's header, by the words its row shows
+  const header = (html: string, label: string) =>
+    html
+      .split("<h3")
+      .find((row) => row.split("</h3>")[0]!.includes(`>${label}<`))
+      ?.split("</h3>")[0] ?? ""
+  // the count badge a shelf's header shows
+  const count = (row: string) => /data-slot="badge"[^>]*>(\d+)<\/span>/.exec(row)?.[1]
+  const renamed = { archived: "Bench", done: "Tally", progress: "Forge", snoozed: "Drift" }
+  const withLabels = (labels: typeof SHELF_LABELS, render: () => string) => {
+    const kept = { ...SHELF_LABELS }
+    Object.assign(SHELF_LABELS, labels)
+    try {
+      return render()
+    } finally {
+      Object.assign(SHELF_LABELS, kept)
+    }
+  }
+
+  test("each shelf counts what it holds; Archive's ✓ dismisses each card, Done's marks what is unread as read, and In progress and Later have none", () => {
+    const html = inbox([settled])
+    expect(header(html, "Archive")).toContain('aria-label="Dismiss all in Archive"')
+    expect(header(html, "Done")).toContain('aria-label="Mark all in Done as read"')
+    expect(header(html, "Done")).toMatch(
+      /<span class="sr-only">, (<!-- -->)?1(<!-- -->)? unread<\/span>/,
+    )
+    expect(header(html, "Done")).not.toContain("opacity-50 hover:opacity-100")
+    for (const label of ["In progress", "Later", "Archive", "Done"])
+      expect(count(header(html, label))).toBe("1")
+    for (const label of ["In progress", "Later"]) {
+      expect(header(html, label)).not.toBe("")
+      expect(header(html, label)).not.toContain("aria-label=")
+    }
+  })
+
+  test("Done with nothing left to read reads muted as an empty shelf, its ✓ gone, its count its history", () => {
+    const row = header(inbox([read]), "Done")
+    expect(row).toContain("opacity-50 hover:opacity-100 aria-expanded:opacity-100")
+    // its count is its history too, the read card included
+    expect(count(row)).toBe("1")
+    expect(row).toMatch(/<span class="sr-only">, (<!-- -->)?0(<!-- -->)? unread<\/span>/)
+    expect(row).not.toContain("Mark all in Done as read")
+  })
+
+  test("renaming every row's words leaves what each row does unchanged", () => {
+    for (const done of [[settled], [read]]) {
+      const kept = inbox(done)
+      const html = withLabels(renamed, () => inbox(done))
+      expect(header(html, "Bench")).toContain('aria-label="Dismiss all in Bench"')
+      if (done[0] === settled)
+        expect(header(html, "Tally")).toContain('aria-label="Mark all in Tally as read"')
+      const back = Object.entries(renamed).reduce(
+        (text, [place, label]) =>
+          text.replaceAll(label, SHELF_LABELS[place as keyof typeof renamed]),
+        html,
+      )
+      expect(back).toBe(kept)
+    }
   })
 })
 
@@ -1705,16 +1820,10 @@ describe("one word a meaning: Later, Archive, Reply and Replying (PG-900)", () =
     expect(marked.split(">")[0]).not.toContain("bg-muted/50")
   })
 
-  test("the shelves read Later and Archive, and each header button names its shelf", () => {
+  test("the shelves read Later and Archive", () => {
     const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
     for (const old of ['"Snoozed"', '"Archived"', "Mark all done as read", "Dismiss all archived"])
       expect(source).not.toContain(old)
-    for (const now of [
-      '["Later", RiZzzLine',
-      '["Archive", RiArchive2Line',
-      '"Dismiss all in Archive"',
-      '"Mark all in Done as read"',
-    ])
-      expect(source).toContain(now)
+    expect(SHELF_LABELS).toMatchObject({ archived: "Archive", snoozed: "Later" })
   })
 })

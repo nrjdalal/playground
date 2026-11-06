@@ -200,6 +200,20 @@ describe("cmux runs only for its help or version", () => {
 const PANE = "w9:p9"
 const ID = "00000000-0000-0000-0000-000000000000"
 
+// #1123: macOS runs herdr named in any case, so a session start by herdr in another case gets the refusal of the same call in lower case; the whole forms are rows of refused-forms/1123.ts.
+describe("herdr named in another case", () => {
+  test.each([
+    ["in capitals", "HERDR"],
+    ["capitalised", "Herdr"],
+    ["in capitals by its path", "/opt/homebrew/bin/HERDR"],
+  ])("herdr %s gets herdr's own refusal", async (_, name) => {
+    const call = `herdr agent start probe-x --kind claude --pane ${PANE}`
+    const refusal = await bash(call)
+    expect(refusal).toBeDefined()
+    expect(await bash(call.replace(/^herdr/, name))).toBe(refusal)
+  })
+})
+
 // HO3's cases (comment 6241491508), with its allow-list: herdr's socket has no access control, so only its reads run.
 describe("a herdr call that is not one of herdr's reads is refused", () => {
   test.each([
@@ -467,7 +481,7 @@ describe("a scratch herdr world of the session's own runs", () => {
     ],
     [
       "(c) a session that is not a word",
-      `HERDR_SESSION=Lm_Probe HERDR_SOCKET_PATH=${TMP}x/s.sock herdr server`,
+      `HERDR_SESSION=Made_Probe HERDR_SOCKET_PATH=${TMP}x/s.sock herdr server`,
       "not a word of its own",
     ],
     [

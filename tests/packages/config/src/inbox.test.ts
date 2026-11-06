@@ -9,6 +9,10 @@ describe("choicesOf", () => {
         { key: "end-of-day", kind: "skill", type: "accept" },
         ["Accept the skill end-of-day", "Leave it unaccepted"],
       ],
+      [
+        { key: "end-of-day", kind: "skill", more: [{}, {}], type: "accept" },
+        ["Accept the skill end-of-day and 2 more", "Leave them unaccepted"],
+      ],
       [{ app: "Notes", change: "add", type: "apps" }, ["Add Notes", "Keep the list as it is"]],
       [
         { app: "Notes", change: "remove", type: "apps" },
@@ -19,6 +23,14 @@ describe("choicesOf", () => {
       [
         { permission: "accessibility", type: "grant" },
         ["Open the accessibility settings", "Not now"],
+      ],
+      [
+        { key: "pat@example.com", own: true, type: "own" },
+        ["Mark pat@example.com as your own account", "Keep it as it is"],
+      ],
+      [
+        { key: "pat@example.com", own: false, type: "own" },
+        ["Unmark pat@example.com as your own account", "Keep it as it is"],
       ],
       [{ type: "schema" }, ["Apply this schema", "Do not apply it"]],
       [{ sha: "3f9a2c1d", type: "ship" }, ["Ship 3f9a2c1 to main", "Hold the ship"]],

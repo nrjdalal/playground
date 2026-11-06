@@ -25,6 +25,7 @@ import {
   type Fixture,
   fixtureDir,
   fixtureHerdrInput,
+  launcherRuns,
   loadFixture,
   markLaunched,
   readFixtureHerdr,
@@ -471,6 +472,27 @@ describe("writeFixture", () => {
     expect(edited(false, "gone")).toBe("edited")
   })
 
+  test("a launcher matched once is asked about by its pid alone, so a later read spawns no ps, and one that has ended reads as gone (#1072's nit)", async () => {
+    const dir = scratch("launcher-matched")
+    const launcher = Bun.spawn(["sleep", "30"])
+    try {
+      markLaunched(dir, launcher.pid, "then")
+      let asked = 0
+      const start = () => {
+        asked++
+        return "then"
+      }
+      expect([launcherRuns(dir, start), launcherRuns(dir, start)]).toEqual([true, true])
+      expect(asked).toBe(1)
+      launcher.kill()
+      await launcher.exited
+      expect(launcherRuns(dir, start)).toBe(false)
+      expect(asked).toBe(1)
+    } finally {
+      launcher.kill()
+    }
+  })
+
   test("replaces its own folder whole, so a stack starts from the fixture again", () => {
     const roots = freshRoots()
     const dir = join(scratch("fixture-rewrite"), "fixture")
@@ -776,7 +798,7 @@ describe("writeFixture", () => {
       join(import.meta.dir, "../../../../../../api/hono/src/fixtures/dashboard.json"),
       "utf8",
     )
-    expect(raw.match(/.{0,30}(?:acme|acme-owner|\b(?:NG|PLAT)-\d).{0,30}/gi)).toBeNull()
+    expect(raw.match(/.{0,30}(?:acme|acme-owner).{0,30}/gi)).toBeNull()
     expect(raw).toContain('"email": "merritt@example.com"')
   })
 

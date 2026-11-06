@@ -352,7 +352,7 @@ export async function prlessBranches(ctx: Context, agents: Json[]): Promise<stri
   return []
 }
 
-// Each open PR of ours, in the factory repo or the repo of a PR a live roster row names, read in one GraphQL search into ops/alerts-prs.json, which ops-unstick folds into alerts-pending.json: one whose last REPEATS ReviewBot verdicts hold one score below 5 (a fresh round resets the idle clock, so a 3/5 every 20 minutes never idles), and one with no opening, new commit, verdict or comment for STALL_AFTER seconds that waits on neither its checks nor merge-on-ready. A PR held on purpose is left out: a park or hold label, or a line of its body or newest comment opening with Held: or Parked:.
+// Each open PR of ours in the factory repo, and each PR a live roster row names (pr or prs) in any other repo, read in one GraphQL search into ops/alerts-prs.json, which ops-unstick folds into alerts-pending.json: one whose last REPEATS ReviewBot verdicts hold one score below 5 (a fresh round resets the idle clock, so a 3/5 every 20 minutes never idles), and one with no opening, new commit, verdict or comment for STALL_AFTER seconds that waits on neither its checks nor merge-on-ready. A PR held on purpose is left out: a park or hold label, or a line of its body or newest comment opening with Held: or Parked:.
 export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]> {
   let factory: string
   try {
@@ -361,9 +361,15 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
     return ["stalled-check-unreadable"]
   }
   const repos = new Set([factory])
+  const named = new Set<string>()
   for (const a of agents) {
-    const m = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/\d+/i.exec(String(a.pr ?? ""))
-    if (m && (STATUSES.live as string[]).includes(String(a.status))) repos.add(m[1]!.toLowerCase())
+    if (!(STATUSES.live as string[]).includes(String(a.status))) continue
+    for (const url of [a.pr, ...(Array.isArray(a.prs) ? a.prs : [])]) {
+      const m = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/i.exec(String(url ?? ""))
+      if (!m) continue
+      repos.add(m[1]!.toLowerCase())
+      named.add(`${m[1]!.toLowerCase()}#${Number(m[2])}`)
+    }
   }
   const search = `is:pr is:open author:@me ${[...repos]
     .sort()
@@ -406,6 +412,7 @@ export async function stalledPrs(ctx: Context, agents: Json[]): Promise<string[]
   for (const pr of prs) {
     const repo = pr?.repository?.nameWithOwner?.toLowerCase()
     if (!repo || typeof pr.number !== "number") continue
+    if (repo !== factory && !named.has(`${repo}#${pr.number}`)) continue
     const comments = pr.comments?.nodes ?? []
     if (
       held(pr.body) ||

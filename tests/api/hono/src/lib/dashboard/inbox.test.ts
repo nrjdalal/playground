@@ -28,6 +28,7 @@ import {
   type InboxItem,
   inboxOrder,
   isGo,
+  proposalsOf,
   quietIds,
   runResult,
   savesDraft,
@@ -46,9 +47,11 @@ import {
 } from "../../../../../../packages/config/src/inbox"
 import { RELAY_ANSWER_KINDS } from "../../../../../../packages/message/src/index"
 import { GUARD_SETTING_KEYS } from "../../../../../../packages/settings/src/guard-keys"
+import { judgeItem, putItem } from "../../../../../../packages/settings/src/items"
 import { loginPath } from "../../../../../../packages/settings/src/rendered"
 import {
   readSetting,
+  resetSetting,
   setSetting,
   settingHistory,
 } from "../../../../../../packages/settings/src/settings-folder"
@@ -1169,6 +1172,10 @@ const ACCEPT = {
   why: "Scored 4 by two reviewers; it reads the day's merges",
 }
 
+// two more made-up proposals a list accepts after ACCEPT, in this order
+const MORE_B = { key: "handover", kind: "doc", rev: "4a0b1c2d", scope: "acme" }
+const MORE_C = { key: "quiet-hours", kind: "rule", rev: "5b1c2d3e", scope: "acme" }
+
 const APPS = { app: "Notes", change: "add", type: "apps", why: "It holds your own notes" }
 
 const GRANT = {
@@ -1198,6 +1205,32 @@ describe("an accept decision (PG-658)", () => {
     ]) {
       expect(takes(change), JSON.stringify(change)).toBe(false)
     }
+  })
+
+  test("takes more proposals after the first, in the order they land, each by the first one's rules, at most 20 (PG-1149)", () => {
+    const more = (list: object[]) =>
+      inboxInputSchema.safeParse(decision({ ...ACCEPT, more: list })).success
+    expect(more([MORE_B, MORE_C])).toBe(true)
+    expect(more([])).toBe(false)
+    expect(more(Array.from({ length: 21 }, () => MORE_B))).toBe(false)
+    for (const change of [
+      { scope: "--yes" },
+      { key: "--reason" },
+      { rev: "HEAD" },
+      { kind: "hook" },
+      { why: "x" },
+    ])
+      expect(more([{ ...MORE_B, ...change }]), JSON.stringify(change)).toBe(false)
+    const parsed = inboxInputSchema.parse(decision({ ...ACCEPT, more: [MORE_B, MORE_C] }))
+    if (parsed.kind !== "decision" || parsed.preview.type !== "accept") throw new Error("no accept")
+    expect(proposalsOf(parsed.preview).map((p) => `${p.kind} ${p.key}`)).toEqual([
+      "skill end-of-day",
+      "doc handover",
+      "rule quiet-hours",
+    ])
+    expect(proposalsOf(inboxInputSchema.parse(decision(ACCEPT)).preview as never)).toEqual([
+      { key: "end-of-day", kind: "skill", rev: "3f9a2c1d", scope: "acme" },
+    ])
   })
 
   test("its Approve runs one fixed argv: the preview's words and a reason naming the item", () => {
@@ -1384,6 +1417,52 @@ describe("a guard decision (PG-1090)", () => {
     expect(checkAnswer(open, { action: "deny" })).toMatchObject({ status: "denied" })
     expect(checkAnswer(open, { action: "edit", text: "another value" })).toHaveProperty("message")
     expect(RELAY_ANSWER_KINDS as readonly string[]).not.toContain("guard")
+  })
+})
+
+// Made-up accounts: two Claude rows, one of them own, and a GLM row whose label is no Claude email.
+const ACCOUNTS = [
+  { email: "pat@example.com", label: "work", renews: 17 },
+  { email: "sam@example.com", own: true },
+  { label: "zai", provider: "glm" },
+]
+const OWN = {
+  key: "pat@example.com",
+  own: true,
+  scope: "made-up-me",
+  type: "own",
+  why: "Spend the org's accounts first",
+}
+
+describe("an own decision (PG-1162)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...OWN, ...change })).success
+
+  test("carries one account's email, the flag Approve leaves it with, its scope and why", () => {
+    expect(takes({})).toBe(true)
+    expect(takes({ own: false })).toBe(true)
+    expect(takes({ scope: "acme-test" })).toBe(true)
+  })
+
+  test("refuses a key that is no email, a flag that is no boolean, core as its scope, no why and any other field", () => {
+    for (const change of [
+      { key: "zai" },
+      { key: "" },
+      { own: "yes" },
+      { own: undefined },
+      { scope: "core" },
+      { why: "" },
+      { rows: ACCOUNTS },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+
+  test("is approved, denied or cleared as it reads, never edited, and stays off the relay", () => {
+    const open = { kind: "decision", preview: OWN, status: "open" } as never
+    expect(checkAnswer(open, { action: "deny" })).toMatchObject({ status: "denied" })
+    expect(checkAnswer(open, { action: "edit", text: "another account" })).toHaveProperty("message")
+    expect(RELAY_ANSWER_KINDS as readonly string[]).not.toContain("own")
   })
 })
 
@@ -3134,8 +3213,10 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { text: "Name the folders" },
         { actor, deliver: reached },
       )
-      // a second after the post's stamp: Postgres stamps the post and this process the edit, and both read to the millisecond can tie (#1028)
-      const later = new Date(Date.parse(posted.updatedAt) + 1000)
+      // a second after the row's stamp, which the comment moved past the post's, so the edit can only stamp the time it was given (#1028, and #1037's nit)
+      const commented = await store.getItem(db, posted.id)
+      if (!commented) throw new Error("the commented card is gone")
+      const later = new Date(Date.parse(commented.updatedAt) + 1000)
       const edited = await store.editItem(
         db,
         posted.id,
@@ -3144,7 +3225,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       )
       if (!edited.ok) throw new Error(edited.message)
       expect(edited.item).toMatchObject({ answer: null, status: "open" })
-      expect(Date.parse(edited.item.updatedAt)).toBeGreaterThan(Date.parse(posted.updatedAt))
+      expect(edited.item.updatedAt).toBe(later.toISOString())
       await store.settleItem(db, posted.id)
     })
   })
@@ -4586,6 +4667,150 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       })
     })
 
+    test("a list is accepted in order on Approve and stops at the first failure, the rest not tried, its line naming each (PG-1149)", async () => {
+      const posted = await post(
+        decision({ ...ACCEPT, more: [MORE_B, MORE_C, { ...MORE_C, key: "late-reply" }] }),
+      )
+      const calls: string[] = []
+      const accept = async (args: string[]) => {
+        calls.push(`${args[2]} ${args[3]}`)
+        return args[3] === "quiet-hours"
+          ? { code: 1, err: "playground ext: 400 the revision holds a token", out: "" }
+          : { code: 0, err: "", out: `rev ${args[4]} is accepted` }
+      }
+      const answered = await store.answerItem(
+        db,
+        posted.id,
+        { action: "approve", seen: posted.updatedAt },
+        { accept, actor },
+      )
+      expect(calls).toEqual(["skill end-of-day", "doc handover", "rule quiet-hours"])
+      expect(answered.ok && answered.item.answer).toMatchObject({
+        accepted: {
+          exitCode: 1,
+          line: "accepted skill end-of-day in acme, doc handover in acme; rule quiet-hours in acme failed: playground ext: 400 the revision holds a token; not tried: rule late-reply in acme",
+        },
+      })
+      const all = await post(decision({ ...ACCEPT, more: [MORE_B] }))
+      const ok = async (args: string[]) => ({ code: 0, err: "", out: `rev ${args[4]} is accepted` })
+      const done = await store.answerItem(db, all.id, { action: "approve" }, { accept: ok, actor })
+      expect(done.ok && done.item.answer).toMatchObject({
+        accepted: { exitCode: 0, line: "accepted skill end-of-day in acme, doc handover in acme" },
+      })
+    })
+
+    test("a list runs on the owner's Approve alone: Deny, Archive and Dismiss run none of it (PG-1149)", async () => {
+      const calls: string[][] = []
+      const accept = async (args: string[]) => (
+        calls.push(args),
+        { code: 0, err: "", out: "accepted" }
+      )
+      for (const action of ["deny", "archive", "dismiss"] as const) {
+        const posted = await post(decision({ ...ACCEPT, more: [MORE_B, MORE_C] }))
+        const answered = await store.answerItem(db, posted.id, { action }, { accept, actor })
+        expect(answered.ok, action).toBe(true)
+      }
+      expect(calls).toEqual([])
+    })
+
+    test("a proposal whose rev moved after the card was posted is refused by the store, and the list stops there (PG-1149)", async () => {
+      const data = mkdtempSync(join(tmpdir(), "inbox-accept-list-"))
+      try {
+        const scope = "made-up-me"
+        setSetting(
+          data,
+          { key: "clock.ownerZone", scope, value: "Europe/Lisbon" },
+          { actor: "cli", author: "owner", inboxRef: null, reason: "seeded" },
+        )
+        const worker = {
+          actor: "cli",
+          author: "made-up-worker",
+          inboxRef: null,
+          reason: "a new version",
+        }
+        const files = (text: string) => ({
+          attachments: [],
+          body: null,
+          files: { "cli.ts": `console.log("${text}")` },
+          value: null,
+        })
+        const revOf = (outcome: ReturnType<typeof putItem>) => {
+          if (!outcome.ok) throw new Error(outcome.message)
+          return outcome.rev
+        }
+        const first = {
+          key: "relay-a",
+          kind: "script" as const,
+          rev: revOf(
+            putItem(data, { key: "relay-a", kind: "script", scope }, files("a"), worker, false),
+          ),
+          scope,
+        }
+        const moved = {
+          key: "relay-b",
+          kind: "script" as const,
+          rev: revOf(
+            putItem(data, { key: "relay-b", kind: "script", scope }, files("b"), worker, false),
+          ),
+          scope,
+        }
+        const last = {
+          key: "relay-c",
+          kind: "script" as const,
+          rev: revOf(
+            putItem(data, { key: "relay-c", kind: "script", scope }, files("c"), worker, false),
+          ),
+          scope,
+        }
+        const posted = await post(
+          decision({
+            ...first,
+            more: [moved, last],
+            type: "accept",
+            why: "Three made-up scripts that land as one change",
+          }),
+        )
+        const newer = revOf(
+          putItem(data, { key: "relay-b", kind: "script", scope }, files("b2"), worker, false),
+        )
+        // the store's own accept, as `playground ext accept` runs it, its refusal as the CLI prints one
+        const tried: string[] = []
+        const accept = async (args: string[]) => {
+          const [, s, kind, key, rev] = args as [string, string, "script", string, string]
+          tried.push(key)
+          const judged = judgeItem(
+            data,
+            { key, kind, scope: s },
+            rev,
+            { kind: "accept" },
+            { actor: "dashboard", author: "owner", inboxRef: posted.ref, reason: "approved" },
+          )
+          return judged.ok
+            ? { code: 0, err: "", out: `rev ${judged.rev.slice(0, 7)} is accepted` }
+            : { code: 1, err: `playground ext: ${judged.status} ${judged.message}`, out: "" }
+        }
+        const answered = await store.answerItem(
+          db,
+          posted.id,
+          { action: "approve" },
+          { accept, actor },
+        )
+        expect(tried).toEqual(["relay-a", "relay-b"])
+        expect(answered.ok && answered.item.answer).toMatchObject({
+          accepted: {
+            exitCode: 1,
+            line: expect.stringMatching(
+              new RegExp(
+                `^accepted script relay-a in made-up-me; script relay-b in made-up-me failed: playground ext: 409 the proposal is at ${newer.slice(0, 12)}, not ${moved.rev}; read it again; not tried: script relay-c in made-up-me$`,
+              ),
+            ),
+          },
+        })
+      } finally {
+        rmSync(data, { force: true, recursive: true })
+      }
+    })
+
     test("a runner that throws is recorded as a failed accept, never an approve with no result", async () => {
       const posted = await post(decision(ACCEPT))
       const accept = async () => {
@@ -5036,6 +5261,148 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         ok: false,
       })
       expect((await store.getItem(db, posted.id))?.status).toBe("open")
+    })
+  })
+  describe("an own decision's post and Approve (PG-1162)", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "inbox-own-"))
+    afterAll(() => rmSync(scratch, { force: true, recursive: true }))
+    let n = 0
+    const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+    // a data folder with a made-up login whose usage.accounts holds the made-up rows
+    const folder = () => {
+      const data = join(scratch, `data-${n++}`)
+      mkdirSync(dirname(loginPath(data)), { recursive: true })
+      writeFileSync(loginPath(data), "made-up-me\n")
+      expect(
+        setSetting(data, { key: "usage.accounts", scope: "made-up-me", value: ACCOUNTS }, who).ok,
+      ).toBe(true)
+      return data
+    }
+    const rows = (data: string) =>
+      readSetting(data, "usage.accounts")?.rows.find((row) => row.scope === "made-up-me")?.value
+    const writes = (data: string) => settingHistory(data, "usage.accounts")?.length ?? 0
+    const postOwn = async (preview: object, data?: string) => {
+      const posted = await store.postItem(db, decision(preview), undefined, undefined, data)
+      if (!posted.ok) throw new Error(posted.message)
+      return posted.item
+    }
+    const approve = (id: string, seen: string | undefined, data?: string) =>
+      store.answerItem(db, id, { action: "approve", seen }, { actor, settingsData: data })
+
+    test("Approve sets own on the named row alone, as the owner's act, and records the line under owned", async () => {
+      const data = folder()
+      const posted = await postOwn(OWN, data)
+      const answered = await approve(posted.id, posted.updatedAt, data)
+      expect(answered.ok && answered.item.status).toBe("approved")
+      expect(rows(data)).toEqual([{ ...ACCOUNTS[0], own: true }, ACCOUNTS[1], ACCOUNTS[2]])
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        owned: { exitCode: 0, line: "pat@example.com is now your own account at made-up-me" },
+      })
+      expect(settingHistory(data, "usage.accounts")?.[0]?.reason).toBe(
+        `the owner approved it in the Inbox (#i${posted.ref})`,
+      )
+    })
+
+    test("a second card with own false clears the flag, and every other row reads as it was", async () => {
+      const data = folder()
+      const posted = await postOwn({ ...OWN, key: "sam@example.com", own: false }, data)
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(rows(data)).toEqual([ACCOUNTS[0], { email: "sam@example.com" }, ACCOUNTS[2]])
+    })
+
+    test("a row already in the asked state writes nothing and says so", async () => {
+      const data = folder()
+      const before = writes(data)
+      const posted = await postOwn({ ...OWN, key: "sam@example.com" }, data)
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(writes(data)).toBe(before)
+      expect(rows(data)).toEqual(ACCOUNTS)
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        owned: { exitCode: 0, line: "sam@example.com is your own account already" },
+      })
+    })
+
+    test("an Approve after the list was reset, or after the row left it, refuses with exit 1 and writes nothing", async () => {
+      const data = folder()
+      const gone = await postOwn(OWN, data)
+      const reset = await postOwn({ ...OWN, key: "sam@example.com", own: false }, data)
+      expect(
+        setSetting(
+          data,
+          { key: "usage.accounts", scope: "made-up-me", value: ACCOUNTS.slice(1) },
+          who,
+        ).ok,
+      ).toBe(true)
+      let before = writes(data)
+      expect((await approve(gone.id, gone.updatedAt, data)).ok).toBe(true)
+      expect(writes(data)).toBe(before)
+      expect((await store.getItem(db, gone.id))?.answer).toMatchObject({
+        owned: {
+          exitCode: 1,
+          line: "pat@example.com is no longer in usage.accounts at made-up-me, so nothing changed",
+        },
+      })
+      expect(resetSetting(data, { key: "usage.accounts", scope: "made-up-me" }, who).ok).toBe(true)
+      before = writes(data)
+      expect((await approve(reset.id, reset.updatedAt, data)).ok).toBe(true)
+      expect(writes(data)).toBe(before)
+      expect(rows(data)).toBeUndefined()
+      expect((await store.getItem(db, reset.id))?.answer).toMatchObject({
+        owned: {
+          exitCode: 1,
+          line: "usage.accounts at made-up-me is not a list, so nothing changed",
+        },
+      })
+    })
+
+    test("a key that names no Claude row at its scope is refused as it is posted, a GLM label among them, and nothing is posted", async () => {
+      const data = folder()
+      const before = (await store.openItems(db)).length
+      for (const [preview, folderOf] of [
+        [{ ...OWN, key: "zai@example.com" }, data],
+        [{ ...OWN, key: "nobody@example.com" }, data],
+        [{ ...OWN, scope: "acme-test" }, data],
+        [OWN, undefined],
+      ] as const) {
+        const posted = await store.postItem(db, decision(preview), undefined, undefined, folderOf)
+        expect(posted, JSON.stringify(preview)).toMatchObject({
+          code: "VALIDATION_ERROR",
+          ok: false,
+        })
+      }
+      // a GLM row's label is no email, so the schema refuses it before the rows are read
+      expect(
+        await store.postItem(db, decision({ ...OWN, key: "zai" }), undefined, undefined, data),
+      ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
+      expect((await store.openItems(db)).length).toBe(before)
+      // the same card naming a Claude row posts, so the refusals above are the key's alone
+      expect((await store.postItem(db, decision(OWN), undefined, undefined, data)).ok).toBe(true)
+    })
+
+    test("only the owner's Approve with seen writes: Deny, Later, an Approve with no seen and one with no data folder write nothing", async () => {
+      const data = folder()
+      const before = writes(data)
+      const denied = await postOwn(OWN, data)
+      await store.answerItem(
+        db,
+        denied.id,
+        { action: "deny", seen: denied.updatedAt },
+        { actor, settingsData: data },
+      )
+      const later = await postOwn(OWN, data)
+      await store.answerItem(db, later.id, { action: "clear" }, { actor, settingsData: data })
+      const unseen = await postOwn(OWN, data)
+      expect(await approve(unseen.id, undefined, data)).toMatchObject({
+        code: "VALIDATION_ERROR",
+        ok: false,
+      })
+      expect(await approve(unseen.id, unseen.updatedAt)).toMatchObject({
+        code: "VALIDATION_ERROR",
+        ok: false,
+      })
+      expect((await store.getItem(db, unseen.id))?.status).toBe("open")
+      expect(writes(data)).toBe(before)
+      expect(rows(data)).toEqual(ACCOUNTS)
     })
   })
 })

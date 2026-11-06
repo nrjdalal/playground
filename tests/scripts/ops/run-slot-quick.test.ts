@@ -15,15 +15,15 @@ import { SCRIPT, WAITING, stop, machine } from "./run-slot-fake"
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang: 60s, twice the slowest case under SLOW_CHILD=1.5 but local CI's, which sets its own
 setDefaultTimeout(60_000)
 
-// review round 1: a big run let every smaller run pass it, so it could wait all night
+// review round 1: a big run let every smaller run pass it, so it could wait all night; the held run here took its slot after the ticket, a passer, so it alone keeps the ticket out (issue 1216: one held from before the ticket lets a run that fits pass, run-slot-one-gate.test.ts)
 describe("a waiter that has waited 20 minutes", () => {
   const held = () => {
     const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
-    m.hold("run-slot", 1, "small")
+    m.hold("run-slot", 1, "small", `${new Date().toISOString().slice(0, 19)}Z`)
     return m
   }
 
-  test("lets no newer run pass it", async () => {
+  test("lets no newer run pass it while only the runs that passed it keep it out", async () => {
     const m = held()
     m.ticket(1, "worker-big", "s2 23 3 big", 21 * 60)
     expect(await m.waits("worker-m", { RUN_SLOT_SIZE: "medium" })).toBe(true)
@@ -177,20 +177,44 @@ describe("a node_modules clone waits for its spacing", () => {
     expect(await clone(m)).toBe("ran")
   })
 
-  test("while load5 is within 4 of the brake's line, 22 with no cap", async () => {
-    expect(await clone(machine({ load1: 2, load5: 18 }))).toBe("waited")
+  // the owner's load rule, 5 Nov: load5 under the core count, one per core
+  test("while load5 is within 4 of the brake, one per core", async () => {
+    expect(await clone(machine({ cores: 8, load1: 2, load5: 4 }))).toBe("waited")
   })
 
-  test("and within 4 of run-slot.load5-cap's line", async () => {
+  test("but starts under it", async () => {
+    expect(await clone(machine({ cores: 8, load1: 2, load5: 3 }))).toBe("ran")
+  })
+
+  // with 4 cores or fewer the brake minus 4 is 0 or less, which would hold every clone, so the line keeps a floor of half the cores
+  test("and on 4 cores a clone at low load starts", async () => {
+    expect(await clone(machine({ cores: 4, load1: 1, load5: 1 }))).toBe("ran")
+  })
+
+  test("while one at half the cores waits", async () => {
+    expect(await clone(machine({ cores: 4, load1: 2, load5: 2 }))).toBe("waited")
+  })
+
+  // 6 Nov, 06:52Z to 07:03Z: a run-slot.load5-cap of 1, set to shut lane 2, held every clone, since the brake read that cap
+  test("and run-slot.load5-cap moves no clone: a cap of 1 still lets one start under the brake", async () => {
+    const m = machine({ load1: 2, load5: 10 })
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "1\n")
+    expect(await clone(m)).toBe("ran")
+  })
+
+  test("while one within 4 of the brake still waits under that cap", async () => {
     const m = machine({ load1: 2, load5: 11 })
-    writeFileSync(join(m.ops, "run-slot.load5-cap"), "15\n")
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "1\n")
     expect(await clone(m)).toBe("waited")
   })
 
-  test("but starts under that line", async () => {
-    const m = machine({ load1: 2, load5: 10 })
-    writeFileSync(join(m.ops, "run-slot.load5-cap"), "15\n")
-    expect(await clone(m)).toBe("ran")
+  // under Claude Code's sandbox sysctl is refused, so the brake falls back to this Mac's 15 cores
+  test("and a core count it cannot read is 15: within 4 of it waits", async () => {
+    expect(await clone(machine({ load1: 2, load5: 11, sandboxed: true }))).toBe("waited")
+  })
+
+  test("and under it starts", async () => {
+    expect(await clone(machine({ load1: 2, load5: 10, sandboxed: true }))).toBe("ran")
   })
 
   test("while a big run holds a lane", async () => {
@@ -217,6 +241,34 @@ describe("a node_modules clone waits for its spacing", () => {
 })
 
 // A fake git and bun on PATH touch their last argument, so a run through run-slot shows whether it ran while a big run holds the queue's units.
+// a lane question read from run-slot's own pick, with nothing run: a replay of the runs log's commands must never execute them
+test("run-slot.sh kind prints the lane a command takes and runs nothing", async () => {
+  const m = machine()
+  const kind = async (words: string[]) => {
+    const p = Bun.spawn(["bash", SCRIPT, "kind", "--", ...words], {
+      cwd: m.root,
+      env: m.env(),
+      stdout: "pipe",
+    })
+    expect(await p.exited).toBe(0)
+    return (await new Response(p.stdout).text()).trim()
+  }
+  expect(await kind(["cp", "-R", "node_modules", join(m.root, "made")])).toBe("clone")
+  expect(await kind(["touch", join(m.root, "made")])).toBe("")
+  // review round 1: a run run-slot refuses reads as refuse, a dev stack's among them
+  expect(await kind(["bun", "run", "dev"])).toBe("refuse")
+  // a chain's git steps take the commit lane only in a repo, so these name this checkout, which kind never runs them in
+  const repo = join(import.meta.dir, "../../..")
+  for (const shell of ["sh", "dash", "ksh"])
+    expect([
+      shell,
+      await kind([shell, "-c", `git -C ${repo} commit -m x; git -C ${repo} push origin`]),
+    ]).toEqual([shell, "commit"])
+  expect(existsSync(join(m.root, "made"))).toBe(false)
+  expect(existsSync(join(m.ops, "run-slot.runs.log"))).toBe(false)
+  expect(existsSync(join(m.ops, "run-slot.waiters"))).toBe(false)
+})
+
 describe("a quick run takes its own slot past a full queue", () => {
   // Runs argv through run-slot past a full queue and says whether it ran: once it ends, or once it prints the queue's waiting line, when it is stopped (an event, never a clock, so a loaded runner only makes it slower)
   // ran: the seconds each earlier run of the same command took, oldest first, as run-slot.runs.log records them

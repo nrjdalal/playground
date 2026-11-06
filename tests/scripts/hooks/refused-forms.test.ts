@@ -119,6 +119,10 @@ mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
 git(join(SYNCED, "extensions", "acme"), "init", "-q")
 // A fabricated main checkout (holds scripts/spawn.sh and maps ask/thread to their Playground entries) and a linked worktree of it whose package.json and entry files match byte for byte, since no-desktop-owner-app's prose allowance holds from the main checkout alone. PLAYGROUND_REPO pins mainCheckout() to NDMAIN, restored after.
 const NDMAIN = join(SCRATCH, "nd-main")
+const { ask, thread } = JSON.parse(
+  readFileSync(join(import.meta.dir, "../../../package.json"), "utf8"),
+).scripts
+const SCRIPT_LINES = { ask, thread }
 const NDWORK = join(SCRATCH, "nd-work")
 git(SCRATCH, "init", "-q", "-b", "canary", NDMAIN)
 mkdirSync(join(NDMAIN, "scripts"), { recursive: true })
@@ -126,15 +130,7 @@ writeFileSync(join(NDMAIN, "scripts", "spawn.sh"), "#!/bin/sh\n")
 mkdirSync(join(NDMAIN, "api", "hono", "src", "bin"), { recursive: true })
 writeFileSync(join(NDMAIN, "api", "hono", "src", "bin", "dashboard-ask.ts"), "")
 writeFileSync(join(NDMAIN, "api", "hono", "src", "bin", "dashboard-thread.ts"), "")
-writeFileSync(
-  join(NDMAIN, "package.json"),
-  `${JSON.stringify({
-    scripts: {
-      ask: "bun api/hono/src/bin/dashboard-ask.ts",
-      thread: "bun api/hono/src/bin/dashboard-thread.ts",
-    },
-  })}\n`,
-)
+writeFileSync(join(NDMAIN, "package.json"), `${JSON.stringify({ scripts: SCRIPT_LINES })}\n`)
 git(NDMAIN, "add", ".")
 git(NDMAIN, "commit", "-q", "-m", "base")
 git(NDMAIN, "worktree", "add", "-q", "--detach", NDWORK)
@@ -316,6 +312,8 @@ const guardsOf = (
   "no-raw-delete": {
     folders: {
       checkout: [CHECKOUT, HOME],
+      "process data folder": [join(homedir(), ".playground"), homedir()],
+      "process home": [homedir(), homedir()],
       "process worktree": [join(homedir(), "x", ".claude", "worktrees", "y"), homedir()],
     },
     run: (raw) => c.rawDelete(raw),
@@ -365,6 +363,22 @@ const CASES = REFUSED_FORMS.flatMap(({ folders, guards, rows, source }) =>
 
 const allowed = ({ id, key }: { id: string; key: string }) =>
   ALLOWED.includes(id) || ALLOWED.includes(key)
+
+// #646's refusals each name the fix a session can make at once; its #603 row that canary's redirect check refuses keeps canary's reason
+const FIX =
+  /hold it in the same call \(X=<path>; .+ "\$X"\) or write the path literally|cd to a literal path first, or name the path absolutely|write the value literally (?:with git -c|in the call)/
+const PINNED = "#646 a redirect into the root after a cd that may not run"
+
+describe("each refusal of a #646 row names its fix", () => {
+  test.each(
+    CASES.filter(
+      (c) => c.id.startsWith("#646 ") && c.guard === "no-extensions-write" && c.id !== PINNED,
+    ).map((c) => [c.key, c] as const),
+  )("%s", async (_, c) => {
+    const at = GUARDS[c.guard].folders[c.folder] as [string, string]
+    expect(await GUARDS[c.guard].run(input(c.call, at[0]), at[1])).toMatch(FIX)
+  })
+})
 
 describe("every refused form stays refused unless the allow list names it", () => {
   test.each(CASES.map((c) => [c.key, c] as const))(

@@ -429,20 +429,20 @@ commit-msg:
 // 4 Nov: a commit inside a sh -c chain counts as the bare commit would, so one that runs next build still waits as a big run
 // builder, 5 Nov: three review rounds each found one more form that a reading of cd, ~ or env let through, so a chain takes the commit lane only when every step is a form on a closed list, and any other form in a chain that commits counts as a build; a chain starts outside the repo unless it is given the repo, where a bare git step runs in run-slot's own folder
 describe("a sh -c chain of git steps", () => {
-  const start = (m: ReturnType<typeof repo>, steps: string, inRepo = false) => {
+  const start = (m: ReturnType<typeof repo>, steps: string, inRepo = false, shell = "sh") => {
     const outside = join(m.root, "outside")
     mkdirSync(outside, { recursive: true })
     return m.start(
       "worker-x",
       {},
       undefined,
-      ["sh", "-c", steps.replaceAll("ROOT", m.root)],
+      [shell, "-c", steps.replaceAll("ROOT", m.root)],
       inRepo ? m.root : outside,
     )
   }
   // the lane a chain on the closed list takes, read from its start line once it has run
-  const lane = async (m: ReturnType<typeof repo>, steps: string, inRepo = false) => {
-    await start(m, steps, inRepo).p.exited
+  const lane = async (m: ReturnType<typeof repo>, steps: string, inRepo = false, shell = "sh") => {
+    await start(m, steps, inRepo, shell).p.exited
     return log(m).match(/ start worker-x \d+ (\S+) waited=/)?.[1]
   }
 
@@ -459,6 +459,20 @@ describe("a sh -c chain of git steps", () => {
       m.hold("run-slot", 3, "big")
       expect([steps, await lane(m, steps)]).toEqual([steps, "run-slot-commit"])
     }
+  })
+
+  // review round 1 of #1132: a dash chain is read as a sh one, for its lane and for its build
+  test("a dash chain on the closed list takes run-slot-commit beside a big run", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    expect(await lane(m, "cd ROOT && git commit -m x", false, "dash")).toBe("run-slot-commit")
+  })
+
+  test("while a dash chain whose commit takes a web/next file waits as a big run", async () => {
+    const m = repo({ idle: 30 }, ["web/next/src/app/page.tsx"], [], LEFTHOOK)
+    m.hold("run-slot", 3, "big")
+    expect(await start(m, "cd ROOT && git commit -m x", false, "dash").waits()).toBe(true)
+    expect(log(m)).not.toContain("run-slot-commit")
   })
 
   // builder, 5 Nov: a bare git step runs in run-slot's own folder, so the chain the issue names takes the commit lane from inside the repo
@@ -790,6 +804,23 @@ describe("commit-lane forms that cost no build", () => {
       [PAGE],
       [],
     ],
+    // a merge runs commit-msg alone, never pre-commit, so a merge with its push builds nothing
+    [
+      "git merge --no-edit then a push",
+      "cd ROOT && git merge --no-edit origin/canary && git push origin HEAD:x",
+      [],
+      [],
+      [],
+    ],
+    ["git -C R merge --no-edit alone", "git -C ROOT merge --no-edit origin/canary", [], [], []],
+    ["git merge --ff-only", "cd ROOT && git merge --ff-only origin/canary", [], [], []],
+    [
+      "git merge --no-ff --no-edit then a push",
+      "cd ROOT && git merge --no-ff --no-edit origin/canary && git push origin x",
+      [],
+      [],
+      [],
+    ],
   ] as const)
     test(`a chain with ${what} takes run-slot-commit beside a big run`, async () => {
       const m = repo({ idle: 30 }, [...staged], [...unstaged], LEFTHOOK, [...untracked])
@@ -860,6 +891,29 @@ describe("commit-lane forms that cost no build", () => {
       [PAGE],
       [],
     ],
+    // a merge option past --no-edit, --ff, --ff-only and --no-ff, or a ref sh expands, is off the list
+    [
+      "git merge -s ours",
+      "cd ROOT && git merge -s ours origin/canary && git push origin x",
+      [],
+      [],
+    ],
+    ["git merge -X theirs", "cd ROOT && git merge --no-edit -X theirs origin/canary", [], []],
+    ["git merge -m <msg>", "cd ROOT && git merge --no-edit -m x origin/canary", [], []],
+    ["git merge of a $REF", 'cd ROOT && git merge --no-edit "$REF"', [], []],
+    // a merge that stops on a conflict leaves the other side's files for a later add or commit, so either after a merge counts as a build
+    [
+      "an add and commit after a merge, joined by ;",
+      "cd ROOT && git merge --no-edit origin/canary; git add -A; git commit -m x",
+      [],
+      [],
+    ],
+    [
+      "a commit after a merge",
+      "cd ROOT && git merge --no-edit origin/canary && git commit -m x",
+      [],
+      [],
+    ],
   ] as const)
     test(`a chain with ${what} still waits off the commit lane`, async () => {
       const m = repo({ idle: 30 }, ["docs/notes.md"], [...unstaged], LEFTHOOK, [...untracked])
@@ -870,6 +924,55 @@ describe("commit-lane forms that cost no build", () => {
           : chain(m, steps)
       expect(await takes(m, argv)).toBe("waited")
     })
+
+  // a merge that stops on a conflict exits non-zero, so the push after its && never runs
+  test("a chain whose merge stops on a conflict takes run-slot-commit and pushes nothing", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    writeFileSync(
+      join(m.bin, "git"),
+      readFileSync(join(m.bin, "git"), "utf8").replace(
+        "#!/bin/bash\n",
+        '#!/bin/bash\ncase " $* " in *" merge "*" conflict "*) echo CONFLICT >&2; exit 1 ;; esac\n',
+      ),
+    )
+    m.hold("run-slot", 3, "big")
+    const steps = "cd ROOT && git merge --no-edit conflict && git push origin pushed"
+    expect(await takes(m, chain(m, steps))).toBe("run-slot-commit")
+    expect(existsSync(join(m.root, "pushed"))).toBe(false)
+  })
+
+  test("while a chain whose merge ends clean takes run-slot-commit and pushes", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    const steps = "cd ROOT && git merge --no-edit clean && git push origin pushed"
+    expect(await takes(m, chain(m, steps))).toBe("run-slot-commit")
+    expect(existsSync(join(m.root, "pushed"))).toBe(true)
+  })
+
+  // dash -c and ksh -c chains read as sh -c does, so the merge form and its add-or-commit rule hold there too, and a wrapper before the shell is a step off the list
+  for (const [shell, steps, lane] of [
+    [
+      "dash",
+      "cd ROOT && git merge --no-edit origin/canary && git push origin x",
+      "run-slot-commit",
+    ],
+    ["ksh", "cd ROOT && git merge --no-edit origin/canary; git add -A; git commit -m x", "waited"],
+  ] as const)
+    test(`${shell} -c with ${steps} ${lane === "waited" ? "waits off the commit lane" : "takes run-slot-commit"}`, async () => {
+      const m = repo({ idle: 30 }, ["docs/notes.md"])
+      m.hold("run-slot", 3, "big")
+      expect(await takes(m, chain(m, steps, shell))).toBe(lane)
+    })
+
+  test("nice sh -c with a merge and its push waits off the commit lane", async () => {
+    const m = repo({ idle: 30 }, ["docs/notes.md"])
+    m.hold("run-slot", 3, "big")
+    const argv = [
+      "nice",
+      ...chain(m, "cd ROOT && git merge --no-edit origin/canary && git push origin x"),
+    ]
+    expect(await takes(m, argv)).toBe("waited")
+  })
 
   // 8: bash -c reads -e, -u, -x, -v and -o pipefail as options before its script, which zsh -c runs as sh does
   for (const argv of [

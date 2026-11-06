@@ -76,14 +76,14 @@ test("bun run ask example prints each template, and the usage for a kind it has 
     ])
     return { code, stderr, stdout }
   }
-  for (const kind of ["code", "decision", "slack", "ui"] as const) {
+  for (const kind of ["code", "decision", "delete", "slack", "ui"] as const) {
     const printed = await example(kind)
     expect(printed.code).toBe(0)
     expect(JSON.parse(printed.stdout)).toEqual(ASK_EXAMPLES[kind])
   }
   const unknown = await example("poem")
   expect(unknown.code).toBe(2)
-  expect(unknown.stderr).toContain("bun run ask example <code|decision|slack|ui>")
+  expect(unknown.stderr).toContain("bun run ask example <code|decision|delete|slack|ui>")
 })
 
 describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
@@ -739,5 +739,12 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       expect(result.code).toBe(2)
       expect(result.stderr).toContain("usage:")
     }
+  })
+
+  test("its usage names an accept decision's list form (PG-1149)", async () => {
+    const result = await cli(["delete", "x"])
+    expect(result.stderr.replace(/\s+/g, " ")).toContain(
+      "more lists up to 20 further ones, accepted after it in that order; Approve stops at the first that fails",
+    )
   })
 })

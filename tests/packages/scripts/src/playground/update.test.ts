@@ -17,6 +17,7 @@ import {
   spawnRun,
   updateSteps,
 } from "../../../../../packages/scripts/src/playground/update"
+import { watchTorn } from "../torn-reads"
 
 const scratch = realpathSync(mkdtempSync(join(tmpdir(), "playground-update-")))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -88,6 +89,7 @@ describe("runUpdate", () => {
       ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
       ["git", "-C", repo, "status", "--porcelain", "--untracked-files=all"],
       ["git", "-C", repo, "ls-tree", "-r", "--name-only", "origin/main"],
+      ["git", "-C", repo, "diff", "-z", "--name-status", "--no-renames", "HEAD", "origin/main"],
       ["git", "-C", repo, "merge", "--ff-only", "-q", "origin/main"],
       ["bash", `${repo}/scripts/link-skills.sh`],
       ["git", "-C", repo, "diff", "--name-only", "old", "HEAD"],
@@ -210,11 +212,22 @@ describe("runUpdate", () => {
     )
     expect(code).toBe(0)
     expect(rolled).toBe(false)
-    expect(calls.slice(1, 6)).toEqual([
+    expect(calls.slice(1, 7)).toEqual([
       ["git", "-C", repo, "fetch", "-q", "--tags", "origin", "main"],
       ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
       ["git", "-C", repo, "status", "--porcelain", "--untracked-files=all"],
       ["git", "-C", repo, "ls-tree", "-r", "--name-only", "refs/tags/v0.0.20"],
+      [
+        "git",
+        "-C",
+        repo,
+        "diff",
+        "-z",
+        "--name-status",
+        "--no-renames",
+        "HEAD",
+        "refs/tags/v0.0.20",
+      ],
       ["git", "-C", repo, "checkout", "-q", "-B", "main", "refs/tags/v0.0.20"],
     ])
     expect(said.at(-1)).toStartWith("playground update: at v0.0.20; the Dashboard rolls on its own")
@@ -383,6 +396,148 @@ test("runUpdate fast-forwards a real checkout onto origin/main and runs its own 
   ).toBe(0)
   expect(git(checkout, "rev-parse", "HEAD").stdout.toString().trim()).toBe(head)
   expect(readFileSync(marks, "utf8")).toBe(`linked\nrestart ${old} HEAD\n`)
+})
+
+// On 6 Nov a guard's Bash call was refused with no-raw-delete.js throwing "Unexpected end of script" in the same second the main checkout's fast-forward rewrote 22 bundles: git unlinks a changed file and writes it again, so a guard that starts in between loads a missing or half-written bundle.
+test("a real update swaps each changed hook bundle in whole, so a reader of it mid-update finds the old file or the new one, never a missing or half-written one", async () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+  const root = join(scratch, "torn")
+  const origin = join(root, "origin")
+  const write = (path: string, text: string) => {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, text)
+  }
+  const bundle = join("scripts", "hooks", "bundled", "no-raw-delete.js")
+  const before = `${"// a\n".repeat(6_000_000)}export {}\n`
+  const after = `${"// bb\n".repeat(6_000_000)}export {}\n`
+  write(join(origin, "scripts", "link-skills.sh"), "true\n")
+  write(join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"), "\n")
+  write(join(origin, bundle), before)
+  git(root, "init", "-q", "-b", "main", origin)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "one")
+  const checkout = join(root, "checkout")
+  git(root, "clone", "-q", origin, checkout)
+  write(join(origin, bundle), after)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "two")
+  const stopWatch = await watchTorn(join(checkout, bundle), [before.length, after.length], root)
+  expect(
+    await runUpdate(
+      checkout,
+      spawnRun,
+      async () => 0,
+      () => {},
+    ),
+  ).toBe(0)
+  const { reads, torn } = await stopWatch()
+  expect(reads).toBeGreaterThan(0)
+  expect({ torn }).toEqual({ torn: 0 })
+  expect(readFileSync(join(checkout, bundle), "utf8") === after).toBe(true)
+  expect(git(checkout, "status", "--porcelain").stdout.toString()).toBe("")
+})
+
+test("a real update whose move fails after its bundles swapped in puts HEAD's bundles back, a bundle HEAD lacks removed, and stops", async () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+  const root = join(scratch, "unswap")
+  const origin = join(root, "origin")
+  const write = (path: string, text: string) => {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, text)
+  }
+  const bundled = join("scripts", "hooks", "bundled")
+  write(join(origin, "scripts", "link-skills.sh"), "true\n")
+  write(join(origin, bundled, "no-raw-delete.js"), "export const old = 1\n")
+  git(root, "init", "-q", "-b", "main", origin)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "one")
+  const checkout = join(root, "checkout")
+  git(root, "clone", "-q", origin, checkout)
+  write(join(origin, bundled, "no-raw-delete.js"), "export const changed = 2\n")
+  write(join(origin, bundled, "no-new.js"), "export const added = 3\n")
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "two")
+  const head = git(checkout, "rev-parse", "HEAD").stdout.toString().trim()
+  const failMerge: Run = async (argv, show) =>
+    argv.includes("merge") && argv.includes("--ff-only")
+      ? { code: 1, out: "merge refused" }
+      : spawnRun(argv, show)
+  const lines: string[] = []
+  expect(
+    await runUpdate(
+      checkout,
+      failMerge,
+      async () => 0,
+      (line) => lines.push(line),
+    ),
+  ).toBe(1)
+  expect(git(checkout, "rev-parse", "HEAD").stdout.toString().trim()).toBe(head)
+  expect(readFileSync(join(checkout, bundled, "no-raw-delete.js"), "utf8")).toBe(
+    "export const old = 1\n",
+  )
+  expect(existsSync(join(checkout, bundled, "no-new.js"))).toBe(false)
+  expect(git(checkout, "status", "--porcelain").stdout.toString()).toBe("")
+  expect(lines.at(-1)).toContain("merge --ff-only origin/main, or move to main there failed")
+})
+
+// A swap that stopped before its git add once left a bundle the target adds untracked, which git restore refused and the next fast-forward stopped on ("would be overwritten"), so every later update stuck.
+test("a real update whose swap fails at its git add leaves the checkout at HEAD, a bundle the target adds removed, and the next update moves it", async () => {
+  const env = { GIT_CONFIG_NOSYSTEM: "1", HOME: scratch, PATH: process.env.PATH }
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, env })
+  const root = join(scratch, "swap-fails")
+  const origin = join(root, "origin")
+  const write = (path: string, text: string) => {
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, text)
+  }
+  const bundled = join("scripts", "hooks", "bundled")
+  write(join(origin, "scripts", "link-skills.sh"), "true\n")
+  write(join(origin, "packages", "scripts", "src", "ops-restart", "cli.ts"), "\n")
+  write(join(origin, bundled, "no-raw-delete.js"), "export const old = 1\n")
+  git(root, "init", "-q", "-b", "main", origin)
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "one")
+  const checkout = join(root, "checkout")
+  git(root, "clone", "-q", origin, checkout)
+  write(join(origin, bundled, "no-raw-delete.js"), "export const changed = 2\n")
+  write(join(origin, bundled, "no-new.js"), "export const added = 3\n")
+  git(origin, "add", ".")
+  git(origin, "commit", "-q", "-m", "two")
+  const head = git(checkout, "rev-parse", "HEAD").stdout.toString().trim()
+  const failAdd: Run = async (argv, show) =>
+    argv.includes("add") ? { code: 1, out: "index.lock exists" } : spawnRun(argv, show)
+  const lines: string[] = []
+  expect(
+    await runUpdate(
+      checkout,
+      failAdd,
+      async () => 0,
+      (line) => lines.push(line),
+    ),
+  ).toBe(1)
+  expect(git(checkout, "rev-parse", "HEAD").stdout.toString().trim()).toBe(head)
+  expect(readFileSync(join(checkout, bundled, "no-raw-delete.js"), "utf8")).toBe(
+    "export const old = 1\n",
+  )
+  expect(existsSync(join(checkout, bundled, "no-new.js"))).toBe(false)
+  expect(git(checkout, "status", "--porcelain").stdout.toString()).toBe("")
+  expect(lines.at(-1)).toContain("swap in the new commit's hook bundles failed")
+  expect(
+    await runUpdate(
+      checkout,
+      spawnRun,
+      async () => 0,
+      () => {},
+    ),
+  ).toBe(0)
+  expect(readFileSync(join(checkout, bundled, "no-new.js"), "utf8")).toBe(
+    "export const added = 3\n",
+  )
 })
 
 test("a real update cut short after its fast-forward is finished by the next run, which restarts from the commit the last finished update reached", async () => {

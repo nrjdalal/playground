@@ -5301,6 +5301,9 @@ var ZodEmail = /* @__PURE__ */ $constructor("ZodEmail", (inst, def) => {
   $ZodEmail.init(inst, def);
   ZodStringFormat.init(inst, def);
 });
+function email2(params) {
+  return _email(ZodEmail, params);
+}
 var ZodGUID = /* @__PURE__ */ $constructor("ZodGUID", (inst, def) => {
   $ZodGUID.init(inst, def);
   ZodStringFormat.init(inst, def);
@@ -5549,6 +5552,14 @@ var ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
     return required(ZodNonOptional, this, args[0]);
   }
 });
+function object(shape, params) {
+  const def = {
+    type: "object",
+    shape: shape ?? {},
+    ...normalizeParams(params)
+  };
+  return new ZodObject(def);
+}
 function strictObject(shape, params) {
   return new ZodObject({
     type: "object",
@@ -5934,10 +5945,10 @@ var extOrderSchema = array(extScopeSchema).refine((names) => new Set(names).size
 var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
 
 // packages/settings/src/accounts.ts
-var email2 = string2().email();
+var email3 = string2().email();
 var label = string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a label of lowercase letters, digits, dots, dashes and underscores");
 var claudeAccount = strictObject({
-  email: email2,
+  email: email3,
   ends: string2().datetime({ offset: true }).nullable().optional(),
   endsFirst: boolean2().optional(),
   label: label.optional(),
@@ -5971,7 +5982,7 @@ var accountSettings = defineSettings({
   "usage.switchAccount": {
     default: "",
     description: "The account whose full week the ops tick tells the dispatchers and leads about, so the factory moves off it; empty for none.",
-    schema: union([email2, literal("")])
+    schema: union([email3, literal("")])
   }
 });
 // packages/settings/src/channel.ts
@@ -6051,6 +6062,52 @@ var factorySettings = defineSettings({
     default: "",
     description: "The repository the factory's pull requests land in, the checkout's origin when unset: pr:merge needs GitGuardian's check there, Checks reads its PRs, and the roster links a bare PR number into it.",
     schema: repo
+  }
+});
+// packages/settings/src/firefighting.ts
+var firefightingSettings = defineSettings({
+  "firefighting.start.account": {
+    default: "",
+    description: "The Claude account a firefighting worker logs in as (spawn.sh's --account), an email whose token the Keychain keeps; empty starts it on spawn.sh's own pick.",
+    schema: union([literal(""), email2()])
+  },
+  "firefighting.start.brief": {
+    default: "brief-ff-ticket-template.md",
+    description: "The standing brief under the data folder that ops-firefighting-start fills for each ticket, its {TICKET} and {NAME} replaced by the ticket's ID and the new worker's name.",
+    schema: string2().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder")
+  },
+  "firefighting.start.consultFrom": {
+    default: "",
+    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts nothing and tells the dispatcher "consult <id>" once per ticket, so the owner decides; empty never consults.',
+    schema: union([literal(""), string2().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM in UTC")])
+  },
+  "firefighting.start.daysOff": {
+    default: [],
+    description: "The UTC dates (YYYY-MM-DD) ops-firefighting-start starts nothing on, as a day off; empty starts on every day.",
+    schema: array(string2().regex(/^\d{4}-\d{2}-\d{2}$/, "a YYYY-MM-DD date"))
+  },
+  "firefighting.start.freshMinutes": {
+    default: 10,
+    description: "How many minutes old firefighting.json's lines may be (its lastTry, else its file time) for a start; older ones are a closed window's or a stopped relay's, so the job starts nothing and tells the Builder once.",
+    schema: number2().int().min(1).max(120)
+  },
+  "firefighting.start.hours": {
+    default: "",
+    description: "The UTC window ops-firefighting-start starts in, HH:MM-HH:MM (one past midnight wraps); outside it the job starts nothing and tells the Builder once; empty starts at any time.",
+    schema: union([
+      literal(""),
+      string2().regex(/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/, "HH:MM-HH:MM in UTC")
+    ])
+  },
+  "firefighting.start.in": {
+    default: "",
+    description: "The folder a firefighting worker opens in (spawn.sh's --in), an absolute path; empty starts none, and the job tells the Builder this key is unset.",
+    schema: union([literal(""), string2().regex(/^\/.+/, "an absolute path")])
+  },
+  "firefighting.start.prefixes": {
+    default: [],
+    description: "The ticket keys the job starts for (MADE for MADE-1), each a tracker team's key; empty starts none.",
+    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "a ticket key, upper case"))
   }
 });
 // packages/settings/src/gates.ts
@@ -6159,6 +6216,10 @@ var JOBS = {
     description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
     schedule: { every: 86400 }
   }),
+  "ops-firefighting-start": terminal("ops-firefighting-start", `${bunJob("ops-firefighting-start")} --data {data}`, {
+    description: "Starts a firefighting worker for each open ticket no session holds, Urgent first, and holds focus for an Urgent one's.",
+    schedule: { every: 60 }
+  }),
   "ops-flow": launchd("ops-flow", {
     description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",
     schedule: { every: 60 }
@@ -6186,6 +6247,10 @@ var JOBS = {
   }),
   "ops-tick": launchd("ops-tick", {
     description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
+    schedule: { every: 60 }
+  }),
+  "ops-ticket-card": terminal("ops-ticket-card", bunJob("ops-ticket-card"), {
+    description: "Keeps one Inbox card of the day's watched tickets, edited in place on every change.",
     schedule: { every: 60 }
   }),
   "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
@@ -6467,6 +6532,66 @@ var slotSettings = defineSettings({
     schema: array(string2().regex(/^\/.+/, "an absolute path"))
   }
 });
+// packages/settings/src/ticket-card.ts
+var file = string2();
+var hhmm = string2().regex(/^(?:[01]\d|2[0-4]):[0-5]\d$/, "a UTC time, HH:MM");
+var ticketCardSettings = defineSettings({
+  "ticketCard.approvals": {
+    default: 2,
+    description: "The approvals a ticket's pull request waits for, which the card counts toward.",
+    schema: number2().int().positive()
+  },
+  "ticketCard.deployedStates": {
+    default: [],
+    description: "The tracker states, by name, that mark a ticket deployed, its last step; a line closed on any other state reads closed, and with none set every closed line does.",
+    schema: array(string2().min(1))
+  },
+  "ticketCard.diaryDir": {
+    default: "diary",
+    description: "The folder, absolute or in the data folder, where the card's job appends each step it first sees to that day's <YYYY-MM-DD>-steps.md.",
+    schema: string2().min(1)
+  },
+  "ticketCard.linesFile": {
+    default: "",
+    description: "The file of the day's watched tickets the card reads, a JSON object whose lines record holds each ticket's line and whose clock record names the tickets the card shows; none until set, so the job keeps no card.",
+    schema: file
+  },
+  "ticketCard.linkBase": {
+    default: "",
+    description: "The URL a ticket's id is appended to for its link on the card; none until set, so the card links pull requests alone.",
+    schema: union([literal(""), string2().url()])
+  },
+  "ticketCard.prefixes": {
+    default: [],
+    description: "The ticket id prefixes the card shows; none means every prefix.",
+    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "an uppercase ticket prefix"))
+  },
+  "ticketCard.reopenedFile": {
+    default: "",
+    description: "The file whose reopened record maps a ticket's id to when it was seen reopened, which the card marks; none until set.",
+    schema: file
+  },
+  "ticketCard.skipsFile": {
+    default: "",
+    description: "The sent record whose <kind>-skip:<ticket>:<area> keys mark a ticket skipped for an area, which the card shows so; none until set.",
+    schema: file
+  },
+  "ticketCard.title": {
+    default: "Tickets today",
+    description: "The card's title.",
+    schema: string2().min(1)
+  },
+  "ticketCard.verdictsFile": {
+    default: "",
+    description: "The file mapping a ticket's id to its triage verdict, { at, kind }, which the card shows as its cause found; none until set.",
+    schema: file
+  },
+  "ticketCard.window": {
+    default: { days: [0, 1, 2, 3, 4, 5, 6], end: "24:00", start: "00:00" },
+    description: "The UTC hours on the weekdays (0 is Sunday) the card's job writes in; outside them it writes nothing.",
+    schema: object({ days: array(number2().int().min(0).max(6)), end: hhmm, start: hhmm })
+  }
+});
 // packages/scripts/src/trace-count/kinds.ts
 var TODAY_PUBLIC = ["nrjdalal/playground", "nrjdalal/playground-yard"];
 var reposOf = (settings) => {
@@ -6739,16 +6864,81 @@ var ROOT_SHELLS = new Map([
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
 function stdinShell(cmd) {
+  cmd = spreadSplit(cmd);
   const parsed = parse3(cmd);
   const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading));
   if (parsed.capped) {
     const names = cmd.words.map((w) => program(w.value));
-    if (names.some((n) => ROOT_SHELLS.has(n)))
+    if (names.some((n) => ROOT_SHELLS.has(n) || n === "su"))
       kinds.push("root");
     else if (names.some((n) => SHELLS.has(n)))
       kinds.push("shell");
   }
   return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean);
+}
+function spreadSplit(cmd) {
+  if (!cmd.words.some((w) => program(w.value) === "env"))
+    return cmd;
+  const options = WRAPPERS.get("env");
+  const out = [];
+  const rest = [...cmd.words].reverse();
+  let inEnvOptions = false;
+  let spreadOne = false;
+  for (let w = rest.pop();w; w = rest.pop()) {
+    const v = w.value;
+    const long = inEnvOptions ? envLong(v) : undefined;
+    const split = long?.name === "split-string" ? long.value ?? "" : long || !inEnvOptions ? undefined : SPLIT.exec(v)?.[1];
+    if (split !== undefined) {
+      const text = (split || rest.pop()?.value || "").replace(/\$\{[^}]*\}/g, UNKNOWN).replace(/\\[_fnrtv]/g, " ").replace(/['"\\]/g, "");
+      const words = text.split(/\s+/).filter(Boolean);
+      for (let j = words.length - 1;j >= 0; j--)
+        rest.push({ quoted: false, value: words[j] });
+      spreadOne = true;
+      continue;
+    }
+    if (inEnvOptions && v === "-") {
+      out.push({ ...w, value: "-i" });
+      continue;
+    }
+    out.push(w);
+    if (program(v) === "env")
+      inEnvOptions = true;
+    else if (!inEnvOptions || ASSIGN.test(v))
+      continue;
+    else if (!v.startsWith("-") || v === "--")
+      inEnvOptions = false;
+    else if (long ? ENV_LONG_VALUES.has(long.name) && long.value === undefined : ENV_SHORT_VALUE.test(v) || optionValue(v, options) === "next") {
+      const value = rest.pop();
+      if (value)
+        out.push(value);
+    }
+  }
+  return spreadOne ? { ...cmd, words: out } : cmd;
+}
+var ENV_LONG = [
+  "argv0",
+  "block-signal",
+  "chdir",
+  "debug",
+  "default-signal",
+  "help",
+  "ignore-environment",
+  "ignore-signal",
+  "list-signal-handling",
+  "null",
+  "split-string",
+  "unset",
+  "version"
+];
+var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
+var ENV_SHORT_VALUE = /^-[0iv]*[aCu]$/;
+function envLong(v) {
+  const m = /^--([a-z0-9-]+)(?:=([\s\S]*))?$/.exec(v);
+  if (!m)
+    return;
+  const hits = ENV_LONG.filter((o) => o.startsWith(m[1]));
+  const name = hits.includes(m[1]) ? m[1] : hits.length === 1 ? hits[0] : undefined;
+  return name ? { name, value: m[2] } : undefined;
 }
 function stdinShellOf(cmd, { args, first, name, xargs }) {
   const fed = !!cmd.stdin || !!xargs;
@@ -6758,6 +6948,8 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
     const family = familyOf(name);
     if (family)
       return fed && interpreted(family, args, xargs) ? "code" : undefined;
+    if (name === "su")
+      return suCommand(args) ? undefined : "root";
     if (!SHELLS.has(name))
       return;
     if (fed)
@@ -6781,13 +6973,28 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   for (const w of before) {
     if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value)))
       return "root";
-    if (w === firstWrapper || ROOT_SHELLS.has(w.value))
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value.toLowerCase()))
       wrappers.push(program(w.value));
   }
   if (first && wrappers.length)
     return "root";
   return fed && first ? "shell" : undefined;
 }
+var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
+var suCommand = (args) => {
+  for (const [at, word] of args.entries()) {
+    const { value } = word;
+    if (word.unknown !== undefined || word.glob || marked(value))
+      return false;
+    if (value === "-c" || value === "--command")
+      return at + 1 < args.length;
+    if (value.startsWith("--command="))
+      return true;
+    if (value.startsWith("-") && !SU_PLAIN.has(value))
+      return false;
+  }
+  return false;
+};
 function startsRootShell(wrapper, value) {
   if (marked(value))
     return true;
@@ -6903,6 +7110,98 @@ function codeFed(commands) {
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
+var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
+var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/;
+var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
+var zshSplits = (line) => {
+  if (ZSH_SPLITS.test(line))
+    return true;
+  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
+    const at = command.search(ARRAY_MAKERS);
+    if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at)))
+      return true;
+  }
+  const joined = line.replace(/[\\'"]/g, "");
+  const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
+  const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
+  return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
+};
+var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
+var ZSH_ARRAYS = new Set([
+  "aliases",
+  "argv",
+  "builtins",
+  "cdpath",
+  "commands",
+  "comppostfuncs",
+  "compprefuncs",
+  "compstate",
+  "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
+  "fignore",
+  "fpath",
+  "funcfiletrace",
+  "funcsourcetrace",
+  "funcstack",
+  "functions",
+  "functions_source",
+  "functrace",
+  "galiases",
+  "history",
+  "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "killring",
+  "langinfo",
+  "mailpath",
+  "manpath",
+  "match",
+  "mbegin",
+  "mend",
+  "module_path",
+  "modules",
+  "nameddirs",
+  "options",
+  "parameters",
+  "patchars",
+  "path",
+  "pipestatus",
+  "psvar",
+  "region_highlight",
+  "registers",
+  "reply",
+  "reswords",
+  "saliases",
+  "signals",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
+  "watch",
+  "widgets",
+  "words",
+  "zle_bracketed_paste",
+  "zle_highlight",
+  "zsh_eval_context",
+  "zsh_scheduled_events"
+]);
+var oneWord = (written) => {
+  const plain = ONE_WORD.exec(written);
+  return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "");
+};
+var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
@@ -7005,6 +7304,8 @@ var setVar = (vars, key, value) => {
 };
 var merge2 = (out, part) => {
   out.value += part.value;
+  if (part.splits && out.splits !== "always")
+    out.splits = part.splits;
   if (part.unknown)
     out.unknown ??= part.unknown;
   if (part.variable)
@@ -7027,7 +7328,43 @@ var slice = (word, from) => {
 };
 var visible = (value) => value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ");
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
-var program = (value) => basename(value.replace(/^=/, ""));
+var SHELL_OWN = new Set([
+  ".",
+  "alias",
+  "cd",
+  "declare",
+  "eval",
+  "export",
+  "hash",
+  "let",
+  "local",
+  "popd",
+  "pushd",
+  "read",
+  "readonly",
+  "set",
+  "shift",
+  "source",
+  "trap",
+  "type",
+  "typeset",
+  "unalias",
+  "unset"
+]);
+var G_WRAPPERS = new Map([
+  ["genv", "env"],
+  ["gnice", "nice"],
+  ["gnohup", "nohup"],
+  ["gstdbuf", "stdbuf"],
+  ["gtimeout", "timeout"]
+]);
+var program = (value) => {
+  const base = basename(value.replace(/^=/, ""));
+  const lower = base.toLowerCase();
+  if (SHELL_OWN.has(lower) && value !== lower)
+    return value;
+  return G_WRAPPERS.get(lower) ?? lower;
+};
 var UV_TAKES = new Set([
   "--cache-dir",
   "--config-file",
@@ -7373,14 +7710,23 @@ function word(lx) {
     } else if (c === "$" && next === '"')
       lx.i++;
     else if (c === "$" || c === "`") {
+      const from = lx.i;
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge2(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
+      const written = src.slice(from, lx.i);
+      if (marked(text.value))
+        merge2(out, {
+          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
+          value: ""
+        });
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir2();
       lx.i++;
     } else {
+      if (c === UNKNOWN || c === READ)
+        out.splits = "always";
       out.value += c;
       bare += c;
       lx.i++;
@@ -7411,11 +7757,13 @@ function double(lx) {
 `)
         out.value += '$`"\\'.includes(next) ? next : c + next;
       lx.i += 2;
-    } else if (c === "$")
-      merge2(out, dollar(lx));
-    else if (c === "`")
-      merge2(out, backtick(lx));
-    else {
+    } else if (c === "$" || c === "`") {
+      const from = lx.i;
+      const text = c === "$" ? dollar(lx) : backtick(lx);
+      merge2(out, text);
+      if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
+        out.splits = "always";
+    } else {
       out.value += c;
       lx.i++;
     }
@@ -7456,8 +7804,10 @@ function dollar(lx) {
     lx.i = end;
     return variable(name);
   }
-  if (/[A-Za-z_]/.test(next)) {
-    const from = ++lx.i;
+  const flagged = /[=~^]/.test(next) && /[A-Za-z_]/.test(src[lx.i + 2] ?? "");
+  if (flagged || /[A-Za-z_]/.test(next)) {
+    lx.i += flagged ? 2 : 1;
+    const from = lx.i;
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
     return variable(src.slice(from, lx.i));
@@ -7626,6 +7976,8 @@ function unwrap(state, inside, budget) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+      } else if (wrapper === "env" && v === "-") {
+        take();
       } else if (v === "--") {
         take();
         while (ASSIGN.test(peek()?.value ?? ""))
@@ -7810,7 +8162,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   if (name === "") {
     for (const [key, value] of local)
       setVar(env.vars, key, value);
-    if (builtins || cmd.feedsShell)
+    if (builtins || cmd.feedsShell || rootFed(cmd))
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -7866,7 +8218,7 @@ var throughBuiltin = (cmd, { first }) => {
   if (!first)
     return false;
   const before = cmd.words.slice(0, cmd.words.indexOf(first));
-  return before.some((w) => !w.quoted && BUILTIN.has(program(w.value))) && before.every((w) => !w.quoted && (BUILTIN.has(program(w.value)) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
+  return before.some((w) => !w.quoted && BUILTIN.has(w.value)) && before.every((w) => !w.quoted && (BUILTIN.has(w.value) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
 };
 var manyTimes = (cmd, { first }) => !!cmd.repeated || cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0).some((w) => !w.quoted && COUNTED.has(program(w.value)));
 var startFolders = (env) => [
@@ -8030,16 +8382,18 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
   const { inline, operand } = shellOperand(args, name);
+  const splits = (script) => SPLITTERS.has(name) || name === "zsh" && (zshSplits(script) || args.some((a) => /^[-+]/.test(a.value) && a.value !== "-c"));
   if (operand && inline) {
     let script = operand.value;
     if (xargs?.replace && script.includes(xargs.replace)) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins);
+    return run(lexScript(script, env), { ...subshell(env), splits: splits(script) }, visit, builtins);
   }
   const script = await scriptOf(operand, cmd, env);
-  return run(lexScript(known(script), env), subshell(env), visit, builtins);
+  const text = known(script);
+  return run(lexScript(text, env), { ...subshell(env), splits: splits(text) }, visit, builtins);
 }
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
@@ -8141,8 +8495,10 @@ async function stdinOf(cmd, env) {
   tick();
   return held(await stdinText(cmd, env));
 }
+var feedsStdin = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
+var rootFed = (cmd) => cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root";
 async function stdinText(cmd, env) {
-  const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
+  const input = cmd.redirects.findLast(feedsStdin);
   if (input?.target?.procs)
     return outputs(input.target.procs, env);
   if (input?.op === "<" || input?.op === "<>")

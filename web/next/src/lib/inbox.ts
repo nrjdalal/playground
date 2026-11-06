@@ -216,8 +216,8 @@ export const canDraft = (item: InboxItem): boolean =>
 const chosen = (item: InboxItem) =>
   item.kind !== "update" && item.answer && "choice" in item.answer ? item.answer : null
 
-// What the dashboard's own run on an accept's, an apps change's, a grant's or a guard setting's Approve gave, read off any answer, none for the rest.
-type Steps = Pick<InboxAnswer, "accepted" | "listed" | "opened" | "set">
+// What the dashboard's own run on an accept's, an apps change's, a grant's, an own card's or a guard setting's Approve gave, read off any answer, none for the rest.
+type Steps = Pick<InboxAnswer, "accepted" | "listed" | "opened" | "owned" | "set">
 const stepsOf = (answer: object | null): Steps => (answer ?? {}) as Steps
 
 // Pure: whether a card a reply collapsed opens again to its full self, its answers and Schedule back: an open decision or draft whose answer is that reply, its poster not done with it, which an answer or a Schedule from the card replaces.
@@ -364,6 +364,14 @@ export const foldsByDefault = (item: InboxItem, now: number): boolean =>
 
 // The shelf a card sits on: the list, or one of the rows under it.
 export type Shelf = "archived" | "done" | "inbox" | "progress" | "snoozed"
+
+// The words each shelf's row shows; what a row does reads its place, never these, so they can change.
+export const SHELF_LABELS: Record<Exclude<Shelf, "inbox">, string> = {
+  archived: "Archive",
+  done: "Done",
+  progress: "In progress",
+  snoozed: "Later",
+}
 
 // A card's verbs, beside its own answers and Reply: Seen marks it read, Done sends it to Done, Later puts it off until a time, Archive takes it off his list unanswered and Move back returns it, and Dismiss sends it to Done marked dismissed.
 export type Verb = "archive" | "dismiss" | "done" | "later" | "moveBack" | "seen"
@@ -519,6 +527,25 @@ export const dismissable = (item: InboxItem): boolean =>
   (item.kind === "update" || item.status !== "open" || chosen(item)?.choice === "replied") &&
   !answeredDismissedAt(item)
 
+// Pure: what a shelf's row does, by its place: Archive's one click dismisses each card in turn, Done's marks what is unread on it as read and the row reads muted once none is, and In progress and Later have no one click.
+export function shelfRow(
+  place: Exclude<Shelf, "inbox">,
+  shelf: InboxItem[],
+): { bulk: { each: boolean; ids: string[] } | null; muted: boolean; unread?: number } {
+  if (place === "archived")
+    return {
+      bulk: shelf.length > 0 ? { each: true, ids: shelf.map((item) => item.id) } : null,
+      muted: false,
+    }
+  if (place !== "done") return { bulk: null, muted: false }
+  const unread = shelf.filter(dismissable)
+  return {
+    bulk: shelf.length > 0 ? { each: false, ids: unread.map((item) => item.id) } : null,
+    muted: unread.length === 0,
+    unread: unread.length,
+  }
+}
+
 // Pure: the line over the list: what needs him, the drafts, the answers that failed to send and the unread updates, each left out at none. A reply took an item off his hands, so it reads here no more.
 export function inboxSummary(items: InboxItem[]): string | null {
   const open = items.filter(
@@ -555,6 +582,7 @@ export function kindWord(item: InboxItem): string {
     delete: "Delete",
     grant: "Permission",
     guard: "Guard setting",
+    own: "Own account",
     reveal: "Show a secret",
     schema: "Schema",
     secret: "Secret",
@@ -605,9 +633,9 @@ export function itemState(item: InboxItem): ItemState {
   }
   if (sendFailed(item)) return "failed"
   if (needsYou(item)) return "open"
-  // an accept, an apps change or a guard setting the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out; a grant that opened nothing failed, and one that opened its pane waits on its poster's recheck
-  const { accepted, listed, opened, set } = stepsOf(provided)
-  const ran = accepted ?? listed ?? set
+  // an accept, an apps change, an own flag or a guard setting the dashboard ran is done or failed by its exit code alone, since nothing is left for its poster to carry out; a grant that opened nothing failed, and one that opened its pane waits on its poster's recheck
+  const { accepted, listed, opened, owned, set } = stepsOf(provided)
+  const ran = accepted ?? listed ?? owned ?? set
   if (ran) return ran.exitCode === 0 ? "done" : "failed"
   if (opened && opened.exitCode !== 0) return "failed"
   // a reply is being carried out by its poster until it is closed, then done
@@ -725,9 +753,9 @@ export function outcomeLine(item: InboxItem): string | null {
   return item.answer.noLink ? `${done} · No link: ${item.answer.noLink}` : done
 }
 
-// Pure: the result line of a step the dashboard ran on Approve that leaves its poster nothing to do: an accept's, an apps change's, a guard setting's, or a grant that opened nothing; null for any other answer.
+// Pure: the result line of a step the dashboard ran on Approve that leaves its poster nothing to do: an accept's, an apps change's, an own flag's, a guard setting's, or a grant that opened nothing; null for any other answer.
 const stepLine = (answer: Steps): string | null => {
-  const { accepted, listed, opened, set } = answer
+  const { accepted, listed, opened, owned, set } = answer
   if (accepted)
     return accepted.exitCode === 0
       ? `Accepted: ${accepted.line}`
@@ -736,6 +764,10 @@ const stepLine = (answer: Steps): string | null => {
     return listed.exitCode === 0
       ? `Your apps: ${listed.line}`
       : `Apps change failed (exit ${listed.exitCode}): ${listed.line}`
+  if (owned)
+    return owned.exitCode === 0
+      ? `Own account: ${owned.line}`
+      : `Own account change failed (exit ${owned.exitCode}): ${owned.line}`
   if (set)
     return set.exitCode === 0
       ? `Guard setting: ${set.line}`

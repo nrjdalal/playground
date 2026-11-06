@@ -1,4 +1,5 @@
 import "@packages/env/aliases"
+import { existsSync, renameSync } from "node:fs"
 import { dirname, isAbsolute, join, resolve } from "node:path"
 
 import type { GapsRead } from "@packages/env/gaps"
@@ -182,6 +183,20 @@ export const checkoutOf = (root: string): Checkout => {
     branch: git(root, ["symbolic-ref", "--quiet", "--short", "HEAD"]),
     linked: dir("--git-dir") !== dir("--git-common-dir"),
   }
+}
+
+// A worktree's stack restarted over the web's kept dev cache, web/next/.next/dev, reloaded every page every few seconds and never drew the sidebar's groups, so a linked worktree's dev start renames it to dev-aside-<time> beside it, which the worktree's removal or `bun run clean` takes; a --serve start, the main checkout and a person's own clone keep it. Returns where it went, or null when it stays.
+export const setNextDevAside = (
+  root: string,
+  { linked, serving }: { linked: boolean; serving: boolean },
+  now = new Date(),
+): string | null => {
+  if (!linked || serving) return null
+  const from = join(root, "web/next/.next/dev")
+  if (!existsSync(from)) return null
+  const to = join(root, `web/next/.next/dev-aside-${now.toISOString().replace(/[:.]/g, "-")}`)
+  renameSync(from, to)
+  return to
 }
 
 // The main checkout, whose code moves only through merged PRs, from any worktree of it; null outside git.

@@ -1,4 +1,4 @@
-import { statfsSync } from "node:fs"
+import { realpathSync, statfsSync } from "node:fs"
 import { appendFile, mkdir, stat, unlink } from "node:fs/promises"
 import { basename, dirname, join } from "node:path"
 
@@ -20,6 +20,7 @@ import {
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
+import { swapBundles, unswapBundles } from "../swap-bundles"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
 import { guardProbe } from "./guard-probe"
@@ -541,6 +542,18 @@ const canaryPull = async (ctx: Context) => {
       const [old, up] = [await sha("HEAD"), await sha("@{u}")]
       const incoming = await ctx.run(["git", "-C", tree, "diff", "--name-only", old, up])
       const install = owed.has(tree) || /(^|\/)(bun\.lock|package\.json)$/m.test(incoming.out)
+      // a main checkout that follows canary is the one the guards load their bundles from, so its changed bundles are swapped in whole before the fast-forward (swap-bundles.ts), put back if the fast-forward fails; a swap that fails puts back what it wrote, and the pull goes on as before
+      const git = (...args: string[]) => ctx.run(["git", "-C", tree, ...args])
+      let swapped: string[] = []
+      let putBack = { code: 0, out: "" }
+      if (
+        realpathSync(tree) === realpathSync(ctx.repo) &&
+        (await git("merge-base", "--is-ancestor", old, up)).code === 0
+      ) {
+        const result = await swapBundles(tree, git, up)
+        swapped = result.swapped
+        putBack = result.putBack ?? putBack
+      }
       const step = install
         ? await ctx.run(
             [
@@ -557,6 +570,8 @@ const canaryPull = async (ctx: Context) => {
             30 * 60_000,
           )
         : await ctx.run(["git", "-C", tree, "merge", "--ff-only", "-q", up], 120_000)
+      if (step.code !== 0 && swapped.length && (await sha("HEAD")) === old)
+        putBack = await unswapBundles(tree, git, swapped)
       const why = lines(step.out).at(-1) ?? `exit ${step.code}`
       if (step.code === 0) {
         if (install) owed.delete(tree)
@@ -564,6 +579,8 @@ const canaryPull = async (ctx: Context) => {
         owed.add(tree)
         text = `canary-pull: ${tree} did not install: ${why}`
       } else text = `canary-pull: ${tree} did not fast-forward: ${why}`
+      if (putBack.code)
+        text = `canary-pull: ${tree} could not put HEAD's hook bundles back: ${putBack.out}`
     }
     if (!text) delete told[tree]
     else if (told[tree] !== text && (await ctx.send("ops", text, true))) told[tree] = text

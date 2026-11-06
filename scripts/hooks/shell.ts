@@ -3,9 +3,11 @@ import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
+// `splits` marks a text holding a value the lexer cannot read that may expand to several words: `sh` when each such part is an unquoted plain `$X` or `${X}`, which zsh keeps whole unless the line may split it (`Env.splits`), and `always` when any part is in no form the lexer knows as one word (`ONE_WORD`, `QUOTED_ONE_WORD`).
 // `tilde` marks a word that opens with an unquoted ~- or ~+, which zsh expands to the folder it last left or the one it is in.
 export type Text = {
   reads?: Text[]
+  splits?: "always" | "sh"
   tilde?: boolean
   unknown?: string
   value: string
@@ -94,6 +96,8 @@ export type Env = {
   // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
   oldFrom?: string[]
   process: Record<string, string | undefined>
+  // Set where an unquoted plain parameter may split into words (`Word.splits`'s `sh`): a script bash, csh, dash, fish, ksh, sh or tcsh runs, a zsh line or run that may set an option, make an array or name a parameter it expands (`zshSplits`), and every line a runner the hook cannot name may hand to sh
+  splits?: boolean
   vars: Map<string, Text>
 }
 export type Flag = { name: string; value?: Word }
@@ -221,7 +225,8 @@ const GROUPING = new Set(["}", "done", "esac", "fi"])
 export const ASSIGN = /^[A-Za-z_]\w*=/
 // Each wrapper's options, A to Z: its flags, then the options that take a value, short and long; parse reads a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, and reads an option missing here both as a flag and as taking the next word, so a hook judges the program under each
 type Options = { flags: Set<string>; values: Set<string> }
-const WRAPPERS = new Map<string, Options>(
+// run-slot.sh's CHAIN_WRAPPER_OPTIONS mirrors these lists, which a test holds equal, so its chain reader reads past the same options
+export const WRAPPERS = new Map<string, Options>(
   Object.entries({
     builtin: ["", ""],
     busybox: ["", ""],
@@ -276,16 +281,93 @@ const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
-// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; "code" for an interpreter of another language (`python3`, `node18`) that a pipe or xargs feeds, whatever its options or inline program, unless it runs a script file or a module of its own; a reserved word, a function's name or an assignment before it skipped
+// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper or su among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell or su not handed a command (`sudo -s`, `nice doas -s`, `su root`, `busybox su`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; "code" for an interpreter of another language (`python3`, `node18`) that a pipe or xargs feeds, whatever its options or inline program, unless it runs a script file or a module of its own; a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): StdinKind | undefined {
+  cmd = spreadSplit(cmd)
   const parsed = parse(cmd)
   const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading))
   if (parsed.capped) {
     const names = cmd.words.map((w) => program(w.value))
-    if (names.some((n) => ROOT_SHELLS.has(n))) kinds.push("root")
+    if (names.some((n) => ROOT_SHELLS.has(n) || n === "su")) kinds.push("root")
     else if (names.some((n) => SHELLS.has(n))) kinds.push("shell")
   }
   return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean)
+}
+
+// The command with each env's split string (`env -S 'sudo -s'`) spread into the words env runs, every env read, quoted or behind another wrapper, in one linear pass over a stack of the words still to read; the grammar is the stdin-shell lines of scripts/hooks/README.md
+function spreadSplit(cmd: Command): Command {
+  if (!cmd.words.some((w) => program(w.value) === "env")) return cmd
+  const options = WRAPPERS.get("env") as Options
+  const out: Word[] = []
+  const rest = [...cmd.words].reverse()
+  let inEnvOptions = false
+  let spreadOne = false
+  for (let w = rest.pop(); w; w = rest.pop()) {
+    const v = w.value
+    const long = inEnvOptions ? envLong(v) : undefined
+    const split =
+      long?.name === "split-string"
+        ? (long.value ?? "")
+        : long || !inEnvOptions
+          ? undefined
+          : SPLIT.exec(v)?.[1]
+    if (split !== undefined) {
+      const text = (split || rest.pop()?.value || "")
+        .replace(/\$\{[^}]*\}/g, UNKNOWN)
+        .replace(/\\[_fnrtv]/g, " ")
+        .replace(/['"\\]/g, "")
+      const words = text.split(/\s+/).filter(Boolean)
+      for (let j = words.length - 1; j >= 0; j--) rest.push({ quoted: false, value: words[j] })
+      spreadOne = true
+      continue
+    }
+    // a lone `-` is env's `-i`, and BSD env reads its options on after it (GNU env's end there, so this reads more than GNU runs); it is written as `-i` for parse
+    if (inEnvOptions && v === "-") {
+      out.push({ ...w, value: "-i" })
+      continue
+    }
+    out.push(w)
+    if (program(v) === "env") inEnvOptions = true
+    else if (!inEnvOptions || ASSIGN.test(v)) continue
+    else if (!v.startsWith("-") || v === "--") inEnvOptions = false
+    else if (
+      long
+        ? ENV_LONG_VALUES.has(long.name) && long.value === undefined
+        : ENV_SHORT_VALUE.test(v) || optionValue(v, options) === "next"
+    ) {
+      const value = rest.pop()
+      if (value) out.push(value)
+    }
+  }
+  return spreadOne ? { ...cmd, words: out } : cmd
+}
+
+// GNU env's long options, each read by any unique prefix as its getopt_long reads it (`--split`, `--u X`), and the ones that take a value; its short ones that take a value end a cluster of its flags (`-a name`, `-iu X`)
+const ENV_LONG = [
+  "argv0",
+  "block-signal",
+  "chdir",
+  "debug",
+  "default-signal",
+  "help",
+  "ignore-environment",
+  "ignore-signal",
+  "list-signal-handling",
+  "null",
+  "split-string",
+  "unset",
+  "version",
+]
+const ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"])
+const ENV_SHORT_VALUE = /^-[0iv]*[aCu]$/
+
+// env's long option a word names, by its full name or a unique prefix, with the value attached after `=`
+function envLong(v: string): { name: string; value?: string } | undefined {
+  const m = /^--([a-z0-9-]+)(?:=([\s\S]*))?$/.exec(v)
+  if (!m) return undefined
+  const hits = ENV_LONG.filter((o) => o.startsWith(m[1]!))
+  const name = hits.includes(m[1]!) ? m[1] : hits.length === 1 ? hits[0] : undefined
+  return name ? { name, value: m[2] } : undefined
 }
 
 export type StdinKind = "code" | "root" | "shell"
@@ -300,6 +382,8 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
       return fed || (name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "")) ? "shell" : undefined
     const family = familyOf(name)
     if (family) return fed && interpreted(family, args, xargs) ? "code" : undefined
+    // su, busybox's applet included, with no command of its own starts a root shell that reads its script from stdin, as `sudo -s` does
+    if (name === "su") return suCommand(args) ? undefined : "root"
     if (!SHELLS.has(name)) return undefined
     if (fed) return "shell"
     const { inline, operand } = shellOperand(args, name)
@@ -319,7 +403,8 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
   for (const w of before) {
     if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value))) return "root"
     // a wrapper: that first one, or a word whose unquoted value is a wrapper's bare name (`'sudo'`, `\doas`, `doas sudo`)
-    if (w === firstWrapper || ROOT_SHELLS.has(w.value)) wrappers.push(program(w.value))
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value.toLowerCase()))
+      wrappers.push(program(w.value))
   }
   // a program the hook cannot read, behind a wrapper, may be a root shell
   if (first && wrappers.length) return "root"
@@ -327,6 +412,19 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
   return fed && first ? "shell" : undefined
 }
 
+// The option words su takes before -c or --command for its line to read as a command of its own, each known exactly; any other option word reads as a root shell, so an option's value never hides a -c
+const SU_PLAIN = new Set(["-", "-f", "-l", "-m"])
+// Whether su's words hand it a command: -c or --command with its command, after option words of SU_PLAIN and words the hook reads whole alone (`su root -c <cmd>`, `su - -c <cmd>`), since a value it cannot read, or a glob, may be any option
+const suCommand = (args: Word[]) => {
+  for (const [at, word] of args.entries()) {
+    const { value } = word
+    if (word.unknown !== undefined || word.glob || marked(value)) return false
+    if (value === "-c" || value === "--command") return at + 1 < args.length
+    if (value.startsWith("--command=")) return true
+    if (value.startsWith("-") && !SU_PLAIN.has(value)) return false
+  }
+  return false
+}
 // Whether a word, by its unquoted value, starts a wrapper's root shell: a listed option, alone, as a long one's unambiguous prefix (`--sh`) or in a cluster of the wrapper's flags ahead of its first value-taking letter, or a word the hook cannot read
 function startsRootShell(wrapper: string, value: string): boolean {
   if (marked(value)) return true
@@ -438,8 +536,108 @@ export function codeFed(commands: Command[]): Map<Command, Fed> {
 }
 
 // Wrappers that take one positional argument (a count or a duration) before the command.
-const COUNTED = new Set(["repeat", "timeout"])
+export const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"])
+// The shells that make an unquoted parameter several words (fish a list's elements, the rest by splitting); zsh keeps one word unless the line may change that (`ZSH_SPLITS`)
+const SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"])
+// A zsh line that may make an unquoted plain parameter several words: one that sets an option (setopt, unsetopt, emulate, the options array, set's -o, +o, -y or -A), makes an array (an `X=(` or `X+=(` assignment, mapfile, readarray, zparseopts) or sources a file (`source`, `.`), which may do either
+const ZSH_SPLITS =
+  /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/
+// The builtins whose -a or -A makes an array: read and the declaring builtins
+const ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/
+// Whether a zsh line may make an unquoted plain parameter several words: it may set an option, make an array or source a file (`ZSH_SPLITS`), give read or a declaring builtin -a or -A (`ARRAY_MAKERS`), or name a parameter it expands other than by expanding it, since a builtin neither list names may fill that name as an array; each pass is linear in the line, so a long line costs linear time
+export const zshSplits = (line: string): boolean => {
+  if (ZSH_SPLITS.test(line)) return true
+  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
+    const at = command.search(ARRAY_MAKERS)
+    if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at))) return true
+  }
+  const joined = line.replace(/[\\'"]/g, "")
+  const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g
+  const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g))
+  return [...joined.matchAll(expansion)].some(([, name]) => named.has(name))
+}
+// An unquoted expansion zsh reads as one word unless the line splits it (`Text.splits`'s `sh`): a plain parameter by name or digit, braced or not, but one of zsh's own arrays (`ZSH_ARRAYS`)
+const ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/
+// The arrays and hashes zsh sets, ties or fills itself, each several words unquoted (zsh 5.9's zshparam(1), zshzle(1)'s and zshcompwid(1)'s special parameters, zshcompsys(1)'s hook arrays, and zshmodules(1)'s zsh/datetime, zsh/langinfo, zsh/parameter, zsh/sched, zsh/system, zsh/termcap, zsh/terminfo and zsh/zleparameter)
+const ZSH_ARRAYS = new Set([
+  "aliases",
+  "argv",
+  "builtins",
+  "cdpath",
+  "commands",
+  "comppostfuncs",
+  "compprefuncs",
+  "compstate",
+  "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
+  "fignore",
+  "fpath",
+  "funcfiletrace",
+  "funcsourcetrace",
+  "funcstack",
+  "functions",
+  "functions_source",
+  "functrace",
+  "galiases",
+  "history",
+  "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "killring",
+  "langinfo",
+  "mailpath",
+  "manpath",
+  "match",
+  "mbegin",
+  "mend",
+  "module_path",
+  "modules",
+  "nameddirs",
+  "options",
+  "parameters",
+  "patchars",
+  "path",
+  "pipestatus",
+  "psvar",
+  "region_highlight",
+  "registers",
+  "reply",
+  "reswords",
+  "saliases",
+  "signals",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
+  "watch",
+  "widgets",
+  "words",
+  "zle_bracketed_paste",
+  "zle_highlight",
+  "zsh_eval_context",
+  "zsh_scheduled_events",
+])
+// Whether zsh reads an unquoted expansion as one word: a plain parameter that is none of its own arrays
+const oneWord = (written: string): boolean => {
+  const plain = ONE_WORD.exec(written)
+  return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "")
+}
+// A double-quoted expansion every shell reads as one word: a plain parameter, one with an operator after its name (a default, a pattern cut, a replacement), arithmetic, a command substitution or a backtick; a zsh flag, a subscript, `$@`, `$*` or a default's or alternate's text holding an `@` is none
+const QUOTED_ONE_WORD =
+  /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/
 // The script names a shell or a source reads stdin through
 const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
@@ -552,6 +750,7 @@ export function varsSince(vars: Map<string, Text>, cursor: number | undefined): 
 
 const merge = (out: Text, part: Text): void => {
   out.value += part.value
+  if (part.splits && out.splits !== "always") out.splits = part.splits
   if (part.unknown) out.unknown ??= part.unknown
   if (part.variable) out.variable ??= part.variable
   if (part.reads?.length) (out.reads ??= []).push(...part.reads)
@@ -576,7 +775,45 @@ export const visible = (value: string): string =>
 
 export const marked = (value: string): boolean => value.includes(UNKNOWN) || value.includes(READ)
 
-export const program = (value: string): string => basename(value.replace(/^=/, ""))
+// The shell's own builtins whose effect a hook follows (its folder, its variables, its aliases, a name's lookup): the shell matches them by their exact case, and in another case one runs no builtin (macOS's /usr/bin/cd and the like run `builtin cd` in a child), so it changes nothing of the shell's
+const SHELL_OWN = new Set([
+  ".",
+  "alias",
+  "cd",
+  "declare",
+  "eval",
+  "export",
+  "hash",
+  "let",
+  "local",
+  "popd",
+  "pushd",
+  "read",
+  "readonly",
+  "set",
+  "shift",
+  "source",
+  "trap",
+  "type",
+  "typeset",
+  "unalias",
+  "unset",
+])
+// Homebrew coreutils' second copies of the wrappers, each run with its plain name's options
+const G_WRAPPERS = new Map([
+  ["genv", "env"],
+  ["gnice", "nice"],
+  ["gnohup", "nohup"],
+  ["gstdbuf", "stdbuf"],
+  ["gtimeout", "timeout"],
+])
+// A command word's program by its basename, in lower case, since macOS's filesystem ignores case and runs a program named in any case; a builtin of SHELL_OWN keeps the word as written unless it is the bare lower-case name, since in another case or by a path it runs macOS's /usr/bin stand-in in a child, and a g-wrapper reads as its plain name
+export const program = (value: string): string => {
+  const base = basename(value.replace(/^=/, ""))
+  const lower = base.toLowerCase()
+  if (SHELL_OWN.has(lower) && value !== lower) return value
+  return G_WRAPPERS.get(lower) ?? lower
+}
 
 // uv's and uvx's options that take the next word as their value, so the word after is not the program
 export const UV_TAKES = new Set([
@@ -972,13 +1209,23 @@ function word(lx: Lexer): Word {
     } else if (c === "$" && next === '"') lx.i++
     else if (c === "$" || c === "`") {
       // an unquoted expansion's value is globbed too
+      const from = lx.i
       const text = c === "$" ? dollar(lx) : backtick(lx)
       merge(out, text)
       if (GLOB_CHARS.test(text.value)) out.glob = true
+      const written = src.slice(from, lx.i)
+      // a plain parameter or arithmetic splits only where the shell splits one
+      if (marked(text.value))
+        merge(out, {
+          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
+          value: "",
+        })
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir()
       lx.i++
     } else {
+      // a value the hook could not read, pasted into a line read again (an eval's, a script's), is unquoted text there
+      if (c === UNKNOWN || c === READ) out.splits = "always"
       out.value += c
       bare += c
       lx.i++
@@ -1011,9 +1258,12 @@ function double(lx: Lexer): Text {
     if (c === "\\") {
       if (next !== "\n") out.value += '$`"\\'.includes(next) ? next : c + next
       lx.i += 2
-    } else if (c === "$") merge(out, dollar(lx))
-    else if (c === "`") merge(out, backtick(lx))
-    else {
+    } else if (c === "$" || c === "`") {
+      const from = lx.i
+      const text = c === "$" ? dollar(lx) : backtick(lx)
+      merge(out, text)
+      if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i))) out.splits = "always"
+    } else {
       out.value += c
       lx.i++
     }
@@ -1058,8 +1308,11 @@ function dollar(lx: Lexer): Text {
     lx.i = end
     return variable(name)
   }
-  if (/[A-Za-z_]/.test(next)) {
-    const from = ++lx.i
+  // zsh's $=X, $~X and $^X read X with a flag (a split, a glob, an array join)
+  const flagged = /[=~^]/.test(next) && /[A-Za-z_]/.test(src[lx.i + 2] ?? "")
+  if (flagged || /[A-Za-z_]/.test(next)) {
+    lx.i += flagged ? 2 : 1
+    const from = lx.i
     while (/\w/.test(src[lx.i] ?? "")) lx.i++
     return variable(src.slice(from, lx.i))
   }
@@ -1269,6 +1522,9 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
         take()
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
+      } else if (wrapper === "env" && v === "-") {
+        // a lone `-` is env's -i, and BSD env reads its options on after it
+        take()
       } else if (v === "--") {
         take()
         while (ASSIGN.test(peek()?.value ?? "")) assign(local, take() as Word)
@@ -1506,7 +1762,8 @@ async function examineReading(
   }
   if (name === "") {
     for (const [key, value] of local) setVar(env.vars, key, value)
-    if (builtins || cmd.feedsShell) verdict = await visit(cmd, parsed, here)
+    // a root shell with no program of its own (`sudo -s <<< …`) is visited when a redirect feeds it, so a hook can read that script
+    if (builtins || cmd.feedsShell || rootFed(cmd)) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     // a glob in the folder is judged as any program's words are, since it may land anywhere it matches
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -1590,16 +1847,16 @@ const onceOrMore = (cmd: Command, parsed: Parsed): boolean =>
   !cmd.unsure &&
   (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
 
-// Whether `builtin` or `command` runs the command's program, with nothing but their own options, reserved words and assignments in front of it.
+// Whether `builtin` or `command` runs the command's program, with nothing but their own options, reserved words and assignments in front of it; each counts only as its bare lower-case word, since `COMMAND` runs macOS's /usr/bin/command in a child and `BUILTIN` is not found.
 const throughBuiltin = (cmd: Command, { first }: Parsed): boolean => {
   if (!first) return false
   const before = cmd.words.slice(0, cmd.words.indexOf(first))
   return (
-    before.some((w) => !w.quoted && BUILTIN.has(program(w.value))) &&
+    before.some((w) => !w.quoted && BUILTIN.has(w.value)) &&
     before.every(
       (w) =>
         !w.quoted &&
-        (BUILTIN.has(program(w.value)) ||
+        (BUILTIN.has(w.value) ||
           w.value.startsWith("-") ||
           MARKERS.has(w.value) ||
           ASSIGN.test(w.value)),
@@ -1856,20 +2113,31 @@ async function shell(
   const slot = shellSlot(args, name)
   if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
   const { inline, operand } = shellOperand(args, name)
+  // a zsh run with any option but -c may set one that splits
+  const splits = (script: string) =>
+    SPLITTERS.has(name) ||
+    (name === "zsh" &&
+      (zshSplits(script) || args.some((a) => /^[-+]/.test(a.value) && a.value !== "-c")))
   if (operand && inline) {
     let script = operand.value
     if (xargs?.replace && script.includes(xargs.replace)) {
       const fed = await stdinOf(cmd, env)
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
     }
-    return run(lexScript(script, env), subshell(env), visit, builtins)
+    return run(
+      lexScript(script, env),
+      { ...subshell(env), splits: splits(script) },
+      visit,
+      builtins,
+    )
   }
   const script = await scriptOf(operand, cmd, env)
-  return run(lexScript(known(script), env), subshell(env), visit, builtins)
+  const text = known(script)
+  return run(lexScript(text, env), { ...subshell(env), splits: splits(text) }, visit, builtins)
 }
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
-const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
+export const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
 
 // A shell's or source's script: stdin with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text> {
@@ -1981,10 +2249,16 @@ export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
   return held(await stdinText(cmd, env))
 }
 
+// A redirect that feeds stdin text, as stdinOf reads it: a file, a here-string, a heredoc or a process substitution, never a duplicated descriptor
+export const feedsStdin = ({ fd, op }: Redirect): boolean =>
+  (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&"
+
+// Whether a redirect feeds a root shell its script (`sudo -s <<< …`, `su < <(…)`), which run() hands every hook and leaves each to read
+export const rootFed = (cmd: Command): boolean =>
+  cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root"
+
 async function stdinText(cmd: Command, env: Env): Promise<Text> {
-  const input = cmd.redirects.findLast(
-    (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
-  )
+  const input = cmd.redirects.findLast(feedsStdin)
   if (input?.target?.procs) return outputs(input.target.procs, env)
   if (input?.op === "<" || input?.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect")

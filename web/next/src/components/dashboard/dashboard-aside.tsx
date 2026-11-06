@@ -458,8 +458,8 @@ export function DashboardAside({ children }: { children: ReactNode }) {
             <Tabs
               value={side}
               onValueChange={(value) => setSide(value as AsideTab)}
-              // clips the hidden bar, which slides below the edge, so it never makes the panel scroll and carry the handle up with it
-              className={`relative flex h-full min-h-0 flex-col overflow-hidden px-6 ${SIDE_TOP}`}
+              // clips the hidden bar, which slides below the edge, as clip and not hidden, since code can scroll a hidden box: a row jump to a low card or a focus below the edge scrolled it and left the bar and its handle up the aside until a remount
+              className={`relative flex h-full min-h-0 flex-col overflow-clip px-6 ${SIDE_TOP}`}
               // a portal's pointer (the viewer opened from a card) bubbles here through React, so only the aside's own DOM counts
               onPointerMove={(event) => {
                 if (!event.currentTarget.contains(event.target as Node)) return

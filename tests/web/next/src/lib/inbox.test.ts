@@ -56,6 +56,8 @@ import {
   sendFailed,
   sendUnconfirmed,
   sendWhy,
+  SHELF_LABELS,
+  shelfRow,
   STUCK_QUEUED_MS,
   updatedSince,
   upfrontLink,
@@ -255,6 +257,49 @@ describe("a guard decision (PG-1090)", () => {
       "Approve · Take slack.gatedSends back to its default · Guard setting failed (exit 1): slack.gatedSends has no value at acme-test: it is at its default",
     )
     expect(itemState(refused)).toBe("failed")
+  })
+})
+
+describe("an own decision (PG-1162)", () => {
+  const own = {
+    key: "pat@example.com",
+    own: true,
+    scope: "made-up-me",
+    type: "own",
+    why: "Spend the org's accounts first",
+  }
+  const approved = (preview: object, owned: object) =>
+    item({
+      answer: { at: "2026-11-06T03:00:00.000Z", choice: "approve", owned },
+      delivery: { at: "x", status: "delivered", via: "session" },
+      kind: "decision",
+      preview,
+      status: "approved",
+    } as never)
+
+  test("needs you while open, and reads Own account", () => {
+    const asked = item({ kind: "decision", preview: own } as never)
+    expect(kindWord(asked)).toBe("Own account")
+    expect(needsYou(asked)).toBe(true)
+  })
+
+  test("reads the line the dashboard wrote, done or failed by its exit code", () => {
+    const ran = approved(own, {
+      exitCode: 0,
+      line: "pat@example.com is now your own account at made-up-me",
+    })
+    expect(outcomeLine(ran)).toBe(
+      "Approve · Mark pat@example.com as your own account · Own account: pat@example.com is now your own account at made-up-me",
+    )
+    expect(itemState(ran)).toBe("done")
+    const gone = approved(
+      { ...own, own: false },
+      { exitCode: 1, line: "pat@example.com is no longer in usage.accounts at made-up-me" },
+    )
+    expect(outcomeLine(gone)).toBe(
+      "Approve · Unmark pat@example.com as your own account · Own account change failed (exit 1): pat@example.com is no longer in usage.accounts at made-up-me",
+    )
+    expect(itemState(gone)).toBe("failed")
   })
 })
 
@@ -664,6 +709,52 @@ describe("Dismiss", () => {
     expect(inboxView([seen]).shown).toEqual([seen])
     expect(needsYou(seen)).toBe(true)
     expect(outcomeLine(seen)).toBeNull()
+  })
+})
+
+// PG-1074: a shelf's row does what its place says, whatever words it shows.
+describe("a shelf's row, by its place", () => {
+  const read = item({ answer: { dismissedAt: "2026-10-07T11:00:00.000Z" }, kind: "update", ref: 2 })
+  const unread = item({ kind: "update", ref: 3 })
+  const waiting = item({ kind: "decision", ref: 4 })
+
+  test("Archive's one click dismisses each card in turn, a waiting ask included", () => {
+    expect(shelfRow("archived", [waiting, unread])).toEqual({
+      bulk: { each: true, ids: ["id-4", "id-3"] },
+      muted: false,
+    })
+  })
+
+  test("Done's one click marks what is unread on it as read, and the row reads muted once none is", () => {
+    expect(shelfRow("done", [read, unread])).toEqual({
+      bulk: { each: false, ids: ["id-3"] },
+      muted: false,
+      unread: 1,
+    })
+    expect(shelfRow("done", [read])).toEqual({
+      bulk: { each: false, ids: [] },
+      muted: true,
+      unread: 0,
+    })
+  })
+
+  test("In progress and Later have no one click and never read muted", () => {
+    for (const place of ["progress", "snoozed"] as const)
+      expect(shelfRow(place, [waiting, unread])).toEqual({ bulk: null, muted: false })
+  })
+
+  test("an empty shelf has no one click", () => {
+    for (const place of ["archived", "done", "progress", "snoozed"] as const)
+      expect(shelfRow(place, []).bulk).toBeNull()
+  })
+
+  test("each place keeps its words: In progress, Later, Archive and Done", () => {
+    expect(SHELF_LABELS).toEqual({
+      archived: "Archive",
+      done: "Done",
+      progress: "In progress",
+      snoozed: "Later",
+    })
   })
 })
 

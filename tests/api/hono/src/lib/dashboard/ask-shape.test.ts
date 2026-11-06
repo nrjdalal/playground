@@ -8,6 +8,10 @@ import {
   shapeHints,
 } from "../../../../../../api/hono/src/lib/dashboard/ask-shape"
 import {
+  deleteRefusal,
+  targetWords,
+} from "../../../../../../api/hono/src/lib/dashboard/delete-targets"
+import {
   attachmentSourceSchema,
   inboxInputSchema,
 } from "../../../../../../api/hono/src/lib/dashboard/inbox"
@@ -100,9 +104,9 @@ describe("shapeHints: unlinked refs (#1020)", () => {
       kind: "unlinked",
       refs: ["#1000", "PR 1001"],
     })
-    expect(unlinked("PLAT-2779 and NG-1322 are done; NG-1322 again.")).toEqual({
+    expect(unlinked("CEDAR-2779 and BRAVO-1322 are done; BRAVO-1322 again.")).toEqual({
       kind: "unlinked",
-      refs: ["PLAT-2779", "NG-1322"],
+      refs: ["CEDAR-2779", "BRAVO-1322"],
     })
     expect(unlinked("Landed at d05240d6.")).toEqual({ kind: "unlinked", refs: ["d05240d6"] })
     expect(
@@ -112,11 +116,11 @@ describe("shapeHints: unlinked refs (#1020)", () => {
 
   test("stays quiet on a ref linked in its line, inside a code block, or an Inbox ref", () => {
     expect(unlinked("Merged [#1000](https://github.com/acme/app/pull/1000).")).toBeUndefined()
-    expect(unlinked("PLAT-2779 is at https://linear.app/acme/issue/PLAT-2779")).toBeUndefined()
+    expect(unlinked("CEDAR-2779 is at https://linear.app/acme/issue/CEDAR-2779")).toBeUndefined()
     expect(
       unlinked("[`d05240d6`](https://github.com/acme/app/commit/d05240d6) landed."),
     ).toBeUndefined()
-    expect(unlinked("```\nmerged #1000 at d05240d6 for NG-1322\n```")).toBeUndefined()
+    expect(unlinked("```\nmerged #1000 at d05240d6 for BRAVO-1322\n```")).toBeUndefined()
     expect(unlinked("Answered on #i369 and #i41.")).toBeUndefined()
   })
 
@@ -166,6 +170,23 @@ describe("ASK_EXAMPLES", () => {
     ).toEqual([
       ["before", true],
       ["after", true],
+    ])
+  })
+
+  // PG-1066: playground rm --decision matches a delete's what by the worktree's full path, so the template leads with one
+  test("the delete template is a valid delete decision naming its worktree by the full path ask new and playground rm --decision read", () => {
+    const example = ASK_EXAMPLES.delete
+    expect(inboxInputSchema.safeParse(example).error?.issues ?? []).toEqual([])
+    expect(example.preview.type).toBe("delete")
+    const [path] = targetWords(example.preview.what)
+    expect(path).toMatch(/^\/.+\/\.claude\/worktrees\/[^/]+$/)
+    const worktrees = path!.slice(0, path!.lastIndexOf("/"))
+    const machine = { cwd: "/", exists: () => true, home: "/Users/you", worktrees }
+    expect(deleteRefusal(example, machine)).toBeNull()
+    // the card shows "Why: " before the first line, so a sentence leads and its bullets follow a blank line
+    expect(example.preview.why.split("\n").slice(0, 2)).toEqual([
+      expect.stringMatching(/^[^-]/),
+      "",
     ])
   })
 

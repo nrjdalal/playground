@@ -41,7 +41,31 @@ export const specOnly = (text: string, path = ""): string => {
   return `---\n${kept.join("\n")}\n---${match[2]}${text.slice(match[0].length)}`
 }
 
+const UV = ["uv", "run", "--quiet", "--python", "3.13", "--with", PIN]
+const said = (run: { stderr: Buffer; stdout: Buffer }) =>
+  `${run.stdout}${run.stderr}`.trim().split("\n").join(" ")
+
+// One fetch of the pin per run, from uv's cache when the package index is down, so every skill after it validates offline; undefined once skills-ref is in the cache.
+const resolve = (): string | undefined => {
+  const help = ["skills-ref", "validate", "--help"]
+  const online = Bun.spawnSync([...UV, ...help], { stderr: "pipe", stdout: "pipe" })
+  if (online.exitCode === 0) return
+  const cached = Bun.spawnSync([...UV, "--offline", ...help], { stderr: "pipe", stdout: "pipe" })
+  if (cached.exitCode === 0) {
+    console.error(
+      `skills-ref: the package index is out of reach, so each skill validates from uv's cache: ${said(online)}`,
+    )
+    return
+  }
+  return `skills-ref: uv found skills-ref's packages neither on the package index nor in its cache: ${said(online)}`
+}
+
 if (import.meta.main) {
+  const unresolved = resolve()
+  if (unresolved) {
+    console.log(unresolved)
+    process.exit(1)
+  }
   const root = join(import.meta.dir, "..", "..", "..", "..")
   const scratch = makeScratch("skills-ref-")
   const failed: string[] = []
@@ -54,13 +78,12 @@ if (import.meta.main) {
         join(copy, "SKILL.md"),
         specOnly(await Bun.file(join(root, file)).text(), file),
       )
-      const run = Bun.spawnSync(
-        ["uv", "run", "--quiet", "--python", "3.13", "--with", PIN, "skills-ref", "validate", copy],
-        { stderr: "pipe", stdout: "pipe" },
-      )
+      const run = Bun.spawnSync([...UV, "--offline", "skills-ref", "validate", copy], {
+        stderr: "pipe",
+        stdout: "pipe",
+      })
       if (run.exitCode === 0) continue
-      const said = `${run.stdout}${run.stderr}`.trim().split("\n").join(" ")
-      failed.push(`FAIL ${dirname(file)}: ${said}`)
+      failed.push(`FAIL ${dirname(file)}: ${said(run)}`)
     }
     for (const line of failed) console.log(line)
     console.log(

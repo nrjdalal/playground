@@ -39,6 +39,7 @@ import {
   RiSlackLine,
   RiTableLine,
   RiTicketLine,
+  RiUserStarLine,
   RiWindowLine,
   RiZzzLine,
   type RemixiconComponentType,
@@ -112,6 +113,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useYardWrites } from "@/hooks/use-yard-writes"
+import { ACCOUNTS_QUERY_KEY } from "@/lib/accounts"
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
@@ -128,7 +130,6 @@ import {
   commentRefused,
   decisionChoices,
   deliveryNote,
-  dismissable,
   dismissEach,
   dismissItems,
   filesCount,
@@ -162,6 +163,8 @@ import {
   sendUnconfirmed,
   sendWhy,
   type Shelf,
+  SHELF_LABELS,
+  shelfRow,
   takenBy,
   updatedSince,
   upfrontLink,
@@ -187,6 +190,7 @@ const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   delete: RiDeleteBinLine,
   grant: RiShieldKeyholeLine,
   guard: RiShieldCheckLine,
+  own: RiUserStarLine,
   reveal: RiKey2Line,
   schema: RiTableLine,
   secret: RiKey2Line,
@@ -659,6 +663,25 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
         </p>
       )
     case "accept":
+      if (preview.more?.length)
+        return (
+          <>
+            <p>
+              On Approve, the dashboard accepts these proposals in order, and stops at the first
+              that fails:
+            </p>
+            <ol className="list-decimal pl-5">
+              {[preview, ...preview.more].map((proposal, at) => (
+                <li key={at}>
+                  the proposed {proposal.kind} <code className="font-mono">{proposal.key}</code> in{" "}
+                  {proposal.scope}, as it reads at{" "}
+                  <code className="font-mono">{proposal.rev.slice(0, 7)}</code>
+                </li>
+              ))}
+            </ol>
+            <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+          </>
+        )
       return (
         <>
           <p>
@@ -722,6 +745,20 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
               {JSON.stringify(preview.value, null, 2)}
             </pre>
           )}
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "own":
+      // the one row and the change Approve asks for; Approve's result line says what it found there
+      return (
+        <>
+          <p>
+            On Approve, the dashboard {preview.own ? "marks" : "unmarks"}{" "}
+            <code className="font-mono">{preview.key}</code> as your own account in{" "}
+            <code className="font-mono">usage.accounts</code> at{" "}
+            <code className="font-mono">{preview.scope}</code>: Own{" "}
+            {preview.own ? "off → on" : "on → off"}. Every other account stays as it is.
+          </p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
         </>
       )
@@ -918,6 +955,9 @@ export function InboxCard({
       return false
     } finally {
       await queryClient.invalidateQueries({ queryKey: INBOX_QUERY_KEY })
+      // an own card's Approve writes usage.accounts, so Settings > Accounts reads its switch again
+      if (item.kind === "decision" && item.preview.type === "own")
+        await queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY })
       setPending(false)
     }
   }
@@ -1068,7 +1108,7 @@ export function InboxCard({
       <SoFar thread={item.preview.thread} />
       <div className="flex flex-col gap-1.5">
         {item.preview.thread && (
-          <p className="text-muted-foreground text-xs font-medium">Your reply</p>
+          <p className="text-muted-foreground text-xs font-medium">Your message</p>
         )}
         {!answers ? (
           <p className="whitespace-pre-wrap">{draft}</p>
@@ -1798,12 +1838,12 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   // Archive holds what he archived, kept out of items, and what was set aside before Archive kept items open
   const archived = [...(data?.archived ?? []), ...setAside].sort((a, b) => b.ref - a.ref)
   const snoozed = data?.snoozed ?? []
-  // the shelves under the open items, each row's label, icon, cards and place, read by the accordion and by a link to a shelved card
+  // the shelves under the open items, each row's place, icon and cards, the place its key in the accordion and for a link to a shelved card
   const shelves = [
-    ["In progress", RiProgress4Line, progress, "progress"],
-    ["Later", RiZzzLine, snoozed, "snoozed"],
-    ["Archive", RiArchive2Line, archived, "archived"],
-    ["Done", RiCheckDoubleLine, done, "done"],
+    ["progress", RiProgress4Line, progress],
+    ["snoozed", RiZzzLine, snoozed],
+    ["archived", RiArchive2Line, archived],
+    ["done", RiCheckDoubleLine, done],
   ] as const
   const { held, rows } = pinnedView(shown, order)
   const pill = usePill(held.length)
@@ -1892,7 +1932,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
     .map((item) => item.id)
   const clearing = unreadIds.length
   const shelfSizes: Record<string, number> = Object.fromEntries(
-    shelves.map(([label, , shelf]) => [label, shelf.length]),
+    shelves.map(([place, , shelf]) => [place, shelf.length]),
   )
   const actions = (pill || rows.length > 0) && (
     <div className="absolute top-1.5 right-[calc(var(--pane-x,0px)+1.75rem)] flex items-center gap-2">
@@ -2001,79 +2041,69 @@ export function Inbox({ viewing }: { viewing: boolean }) {
           </AccordionContent>
         </AccordionItem>
         <div ref={below}>
-          {shelves.map(([label, Icon, shelf, place]) => (
-            <AccordionItem
-              key={label}
-              value={label}
-              disabled={shelf.length === 0}
-              className={SHELF_ITEM}
-            >
-              <AccordionTrigger
-                // Done at 0 unread reads as muted as an empty shelf, yet still opens to its history
-                className={cn(
-                  SHELF_ROW,
-                  label === "Done" &&
-                    shelf.filter(dismissable).length === 0 &&
-                    "opacity-50 hover:opacity-100 aria-expanded:opacity-100",
-                )}
-                header={(props) => (
-                  <h3 {...props} className={cn(props.className, STICKY_HEADER)}>
-                    {props.children}
-                    {/* the Archive shelf empties in one click, each card's own Dismiss in turn; Done marks what settled on its own read, typing nothing into any session, greyed once all are */}
-                    {label !== "Later" &&
-                      label !== "In progress" &&
-                      shelf.length > 0 &&
-                      !config.hosted && (
+          {shelves.map(([place, Icon, shelf]) => {
+            const label = SHELF_LABELS[place]
+            const { bulk: sweep, muted, unread } = shelfRow(place, shelf)
+            return (
+              <AccordionItem
+                key={place}
+                value={place}
+                disabled={shelf.length === 0}
+                className={SHELF_ITEM}
+              >
+                <AccordionTrigger
+                  // Done at 0 unread reads as muted as an empty shelf, yet still opens to its history
+                  className={cn(
+                    SHELF_ROW,
+                    muted && "opacity-50 hover:opacity-100 aria-expanded:opacity-100",
+                  )}
+                  header={(props) => (
+                    <h3 {...props} className={cn(props.className, STICKY_HEADER)}>
+                      {props.children}
+                      {/* the Archive shelf empties in one click, each card's own Dismiss in turn; Done marks what settled on its own read, typing nothing into any session, greyed once all are */}
+                      {sweep && !config.hosted && (
                         <ShelfDismiss
                           disabled={bulkPending}
-                          ids={(label === "Archive" ? shelf : shelf.filter(dismissable)).map(
-                            (item) => item.id,
-                          )}
+                          ids={sweep.ids}
                           label={
-                            label === "Archive"
-                              ? "Dismiss all in Archive"
-                              : "Mark all in Done as read"
+                            sweep.each ? `Dismiss all in ${label}` : `Mark all in ${label} as read`
                           }
                           onDismiss={(ids) =>
                             void bulk(() =>
-                              label === "Archive"
+                              sweep.each
                                 ? dismissEach(shelf.filter((item) => ids.includes(item.id)))
                                 : dismissItems(ids),
                             )
                           }
                         />
                       )}
-                  </h3>
-                )}
-              >
-                {/* every shelf counts what it holds, Done its history too, its ✓ and its muting saying whether any is unread */}
-                <ShelfLabel
-                  count={shelf.length}
-                  icon={Icon}
-                  label={label}
-                  unread={label === "Done" ? shelf.filter(dismissable).length : undefined}
-                />
-                <ShelfMark empty={shelf.length === 0} />
-              </AccordionTrigger>
-              {/* kept mounted while shut, as the open row is, so a card opened on its shelf stays opened */}
-              <AccordionContent keepMounted className={SHELF_PANEL}>
-                <div role="list" className="flex flex-col gap-3 pt-8 pb-3">
-                  {shelf.map((item) => (
-                    <InboxCard
-                      key={item.id}
-                      item={item}
-                      marked={item.ref === reply?.ref}
-                      now={now}
-                      paused={paused.has(item.id)}
-                      onBack={() => setBack(item.id)}
-                      shelf={place}
-                      updated={updated(item)}
-                    />
-                  ))}
-                </div>
-              </AccordionContent>
-            </AccordionItem>
-          ))}
+                    </h3>
+                  )}
+                >
+                  {/* every shelf counts what it holds, Done its history too, its ✓ and its muting saying whether any is unread */}
+                  <ShelfLabel count={shelf.length} icon={Icon} label={label} unread={unread} />
+                  <ShelfMark empty={shelf.length === 0} />
+                </AccordionTrigger>
+                {/* kept mounted while shut, as the open row is, so a card opened on its shelf stays opened */}
+                <AccordionContent keepMounted className={SHELF_PANEL}>
+                  <div role="list" className="flex flex-col gap-3 pt-8 pb-3">
+                    {shelf.map((item) => (
+                      <InboxCard
+                        key={item.id}
+                        item={item}
+                        marked={item.ref === reply?.ref}
+                        now={now}
+                        paused={paused.has(item.id)}
+                        onBack={() => setBack(item.id)}
+                        shelf={place}
+                        updated={updated(item)}
+                      />
+                    ))}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            )
+          })}
           {/* the Preview row under Done, there whether or not the Inbox holds anything: a live page from a dev stack or Previews, the pane's room below it as a browser */}
           <AccordionItem value="Preview" className={SHELF_ITEM}>
             <AccordionTrigger

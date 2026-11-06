@@ -77,14 +77,15 @@ Another, ops-loom-relay, passes Claude Code's usage on to the org's Loom as coun
 each person's own.
 Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup reached: worktrees and branches of merged or closed PRs, exited containers of worktrees that are gone, Docker's dangling images and build cache, and turbo cache files over 2 days old.
 It keeps a worktree that another worktree or a scratch folder still links into, and names the first three links.
-It posts an Inbox update when it freed 1 GB or more, and asks the owner, in one delete decision, before it removes anything that holds work no merge landed.
+A merged or closed PR's worktree goes to the trash whatever it holds.
+It posts an Inbox update when it freed 1 GB or more, and asks the owner, in one delete decision, before it removes any other thing that holds work no merge landed.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).
 A probe lives for one test and never waits on the owner.
 The dispatcher, the Planner and the two leads never close, except to be started again with their settings after a restore or from a handoff once their guidance changes; they compact their own context in one 400k window (`autoCompactWindow` 400000) and keep their pane and name.
 
 In herdr, sessions that work together share a workspace, each in a pane of its own: a checker opens as a column beside its worker's pane (`spawn.sh column`), and every other start opens a workspace of its own.
 A session ends when the one it reports to closes its pane, never the others.
-A finished worker, reviewer or tester also ends by itself: right after its PR merges, and from a check every 5 minutes, while one with work left unsaved stays open and its lead gets a `Not ended` line saying why.
+A finished worker, reviewer or tester also ends by itself: right after its PR merges, and from a check every 5 minutes, while one with work left unsaved stays open and its lead gets a `Not ended` line saying why, unless that work sits in one of Playground's own worktrees whose PR has merged or closed, which the cleanup moves to the trash.
 Sessions already running move at their next restart, so nothing is closed just to re-arrange it.
 
 The leads keep watch with a sweep: every 15 minutes each one runs `playground sweep`, which prints only what changed since its last sweep (new alerts, the merge queue, the load, ETAs that have passed, a parked row's hold that has closed, and for Ops, once an hour, each ops switch still on with its reason) or `quiet`,
@@ -101,7 +102,7 @@ No factory session blocks on him: one that posted a decision carries on or ends 
 For a focused stretch, such as a timed test, a demo or an hour of deep work, `playground focus on --session <name> --reason "<why>"` gives one session the Mac for up to 180 minutes.
 While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep and that session's own reviewer and tester keep running.
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
-A firefighting start (spawn.sh's `--firefighting`) passes focus and the load gate while a firefighting trigger file stands, and the memory gate still applies to it.
+A firefighting start (spawn.sh's `--firefighting`) passes the load gate and a full run-slot queue at the slots gate while a firefighting trigger file stands, and the memory gate still applies to it; it passes focus too on a stop or head-start file, while the starter job's own file never does, and the job itself holds its High, Medium and Low starts while focus stands.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.

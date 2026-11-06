@@ -244,9 +244,9 @@ if [ "${1:-}" = set ]; then
   exit 0
 fi
 # every read subcommand below sets CAN_TAKE, so quick_kind never sends its bare true down the quick lane (run-slot-can-take.test.ts runs each)
-# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules and burst_held open it, and the load units (with that
-# session's reserve) fit, else 1, so a script that takes its slot itself reads them as every run here does (ops-unstick does; localci and
-# the merge train still take theirs by their own mkdir for now); it reads neither the queue nor run-slot.priority
+# run-slot.sh can-take <slot> <who>: exit 0 when that slot is free, its off-switches, load rules and burst_held open it, and unit_fits passes (the
+# session's units and reserve, or a queue ticket's own when <who> names one, as ops-unstick asks for the head), else 1, so a script that takes its
+# slot itself reads them as every run here does (localci and the merge train still take theirs by their own mkdir for now); it reads no queue order and no other waiter, only the ticket it is given, and run-slot.priority only through may_reserve's reserve
 CAN_TAKE=
 # run-slot.sh head: prints the queue's head, the ticket first_waiter names (<ns>-<pid>-<who>), or nothing, so ops-unstick watches the waiter the queue serves next rather than the oldest
 HEAD_ONLY=
@@ -262,17 +262,28 @@ if [ "${1:-}" = slots ]; then
   SLOTS_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
-# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many a medium run could take now (the open, unheld ones while its load units fit beside the held runs' and slots.peers', less the reserve), and the live tickets in the queue, which spawn.sh's slots gate reads
+# run-slot.sh room: prints "<lanes> <held> <free> <waiters>": the lanes slots counts, how many a run holds, how many the queue's next run can take now (the open, unheld ones while unit_fits passes for first_waiter's ticket, or a medium with no waiter; none while waiters wait and none can start), and the live tickets in the queue, which spawn.sh's slots gate reads
+# run-slot.sh kind -- <command>: print the lane run-slot picks for that command (refuse for a run it refuses, docker for a docker build, else quick_kind's clone, commit, quick, or nothing for the queue) and exit, with no ask line, ticket or holder and nothing run, so a lane question reads run-slot's own pick
+KIND_ONLY=
+if [ "${1:-}" = kind ]; then
+  [ $# -ge 3 ] && [ "$2" = -- ] || { echo "usage: run-slot.sh kind -- <command> [args...]" >&2; exit 2; }
+  KIND_ONLY=1
+  set -- run-slot-kind "${@:2}"
+fi
 ROOM_ONLY=
 if [ "${1:-}" = room ]; then
   [ $# -eq 1 ] || { echo "usage: run-slot.sh room" >&2; exit 2; }
   ROOM_ONLY=1 CAN_TAKE=run-slot
   set -- ops-unstick -- true
 fi
+CAN_TICKET=
 if [ "${1:-}" = can-take ]; then
   [ $# -eq 3 ] || { echo "usage: run-slot.sh can-take <slot> <who>" >&2; exit 2; }
   case "$2" in run-slot|run-slot-2|run-slot-3|run-slot-4) CAN_TAKE=$2 ;; *) echo "run-slot.sh: no slot $2" >&2; exit 2 ;; esac
-  set -- "$3" -- true
+  w=$3
+  # a ticket-shaped name whose file is gone (its waiter just started) is no one's run to answer for, so it cannot take the slot (review round 1)
+  if [[ "$3" =~ ^[0-9]+-[0-9]+-. ]]; then [ -f "$OPS/run-slot.waiters/$3" ] || exit 1; CAN_TICKET=$3; w=${3#*-*-}; fi
+  set -- "$w" -- true
 fi
 MODEL_BOUND=
 AFTER=
@@ -294,13 +305,14 @@ WHO=$1
 shift 2
 case "$WHO" in *[!A-Za-z0-9._#-]*|"") echo "run-slot.sh: <who> is a session name (letters, digits, . _ - #)" >&2; exit 2 ;; esac
 # every run drops each expired switch, so the readers that only look for the file (the merge train, Checks, the leads' sweep) find it gone too
-for s in $SWITCHES; do switch_on "$s"; done
+[ -n "$KIND_ONLY" ] || for s in $SWITCHES; do switch_on "$s"; done
 # a dev stack never ends, so it would hold a slot for hours (dispatcher, 19 Oct: a tester's `bun run dev` held run-slot.single with 7 waiters)
 for a in "$@"; do
-  case "$a" in dev|dev:*) echo "run-slot.sh: a dev stack runs as a background task under the load gate, not through run-slot" >&2; exit 2 ;; esac
+  case "$a" in dev|dev:*) [ -z "$KIND_ONLY" ] || { echo refuse; exit 0; }; echo "run-slot.sh: a dev stack runs as a background task under the load gate, not through run-slot" >&2; exit 2 ;; esac
 done
 # dispatcher, 18 Oct: a command that never exits holds its slot until it is stopped (keen-ledger's dev stack held one from 21:13Z to 21:58Z)
 if printf ' %s' "$@" | grep -qE ' (bun|npm|pnpm|yarn) run dev( |$)| next dev( |$)| ingest .*--follow| --watch(=| |$)'; then
+  [ -z "$KIND_ONLY" ] || { echo refuse; exit 0; }
   echo "run-slot.sh: $* never exits, so it would hold a slot until stopped (slots): start a fixture stack outside run-slot, only while you take shots" >&2
   exit 2
 fi
@@ -347,7 +359,7 @@ if [ -n "$AFTER" ] && [ -z "$REREAD" ]; then
   ASKED=$(date +%s)
 fi
 # bun run pr:merge or pr:train, as the whole command, runs at once outside the queue once any --after wait ends, since a merge carries its own gates and its type steps take their own slots (5 Nov: three wrapped merges in an hour each waited behind the heavy queue, and each inner type step queued again)
-if [ "${1:-}" = bun ] && [ "${2:-}" = run ] && { [ "${3:-}" = pr:merge ] || [ "${3:-}" = pr:train ]; }; then
+if [ -z "$KIND_ONLY" ] && [ "${1:-}" = bun ] && [ "${2:-}" = run ] && { [ "${3:-}" = pr:merge ] || [ "${3:-}" = pr:train ]; }; then
   echo "run-slot.sh: bun run $3 runs at once, outside the queue: a merge carries its own gates, and its type steps take their own slots (packages/scripts/src/pr-merge/README.md)" >&2
   exec "$@" 3<&-
 fi
@@ -397,7 +409,7 @@ box_fits() {
   done
 }
 # runner-host/slot-off keeps run-slot's runs here and leaves the box to Checks (ops, 20 Oct: 19 one-file runs queued ahead of 3 gate suites on its 2 slots)
-if [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" ] && ! switch_on runner-host/off && ! switch_on runner-host/slot-off && box_fits "$@"; then
+if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" ] && ! switch_on runner-host/off && ! switch_on runner-host/slot-off && box_fits "$@"; then
   BOXDIR=$(box_dir "$@")
   # the box runs BOXDIR's checkout, so a path in another one would run in the wrong tree there and go red as "Script not found" (9jhtsd, 24 Oct)
   checkout_of() {
@@ -423,9 +435,53 @@ if [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$OPS/runner-host/ci.sh" 
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# A `sh -c`, `bash -c` or `zsh -c` chain's steps, or a `bash <script file>`'s, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command (exit 0) or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB)
+# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell word), and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, a step holding a chain shell word anywhere (a nested chain, a script file or a shell fed its script on stdin), or with a command substitution beside docker, podman or a portless compose
+# the wrappers chain_steps reads past to the program they run, A to Z, each as <name>|<flags>|<options that take a value>, and the ones that take one count or duration before it: scripts/hooks/shell.ts's WRAPPERS and COUNTED, with the env and xargs options its parse reads by hand, which a test holds equal
+CHAIN_WRAPPER_OPTIONS="builtin||
+busybox||
+caffeinate|-d -i -m -s -u|-t -w
+command|-p -V -v|
+doas|-L -n -s|-a -C -u
+env|-0 -i -v --debug --ignore-environment --null|-C -P -S -u --chdir --unset
+exec|-c -l|-a
+nice||-n --adjustment
+nocorrect||
+noglob||
+nohup||
+repeat||
+stdbuf||-e -i -o --error --input --output
+sudo|-A -B -b -E -e -H -i -K -k -l -N -n -P -S -s -V -v --askpass --background --bell --edit --help --list --login --non-interactive --preserve-env --preserve-groups --remove-timestamp --reset-timestamp --set-home --shell --stdin --validate --version|-C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user
+time|-a -h -l -p -q -V -v --append --portability --quiet --verbose|-f -o --format --output
+timeout|-f -p -v --foreground --preserve-status --verbose|-k -s --kill-after --signal
+xargs|-0 -i -o -p -r -t -x --exit --interactive --no-run-if-empty --null --open-tty --replace --show-limits --verbose|-a -d -E -I -J -L -n -P -R -S -s --arg-file --delimiter --max-args --max-chars --max-lines --max-procs --process-slot-var
+"
+CHAIN_COUNTED="repeat timeout"
+CHAIN_WRAPPERS=
+while IFS='|' read -r CHAIN_NAME _; do [ -n "$CHAIN_NAME" ] && CHAIN_WRAPPERS+="$CHAIN_NAME "; done <<< "$CHAIN_WRAPPER_OPTIONS"
+CHAIN_SHELLS="sh bash zsh dash ksh"
+# where a wrapper's option word leaves its value, as shell.ts's optionValue reads it: own when it takes none or carries it, next when the next word is its value, end for --, and nothing for an option the wrapper's list lacks
+wrapper_option() {
+  local w=$2 flags values k c n
+  [ "$w" = -- ] && { echo end; return; }
+  while IFS='|' read -r n flags values; do [ "$n" = "$1" ] && break; done <<< "$CHAIN_WRAPPER_OPTIONS"
+  flags=" $flags " values=" $values "
+  if [ "${w#--}" != "$w" ]; then
+    n=${w%%=*}
+    case "$values" in *" $n "*) if [ "$n" = "$w" ]; then echo next; else echo own; fi; return ;; esac
+    case "$flags" in *" $n "*) echo own ;; esac
+    return
+  fi
+  # nice's own -<number> is its adjustment
+  if [ "$1" = nice ] && [[ "$w" =~ ^-[0-9]+$ ]]; then echo own; return; fi
+  for ((k = 1; k < ${#w}; k++)); do
+    c=-${w:k:1}
+    case "$values" in *" $c "*) if [ "$k" -eq $((${#w} - 1)) ]; then echo next; else echo own; fi; return ;; esac
+    case "$flags" in *" $c "*) ;; *) return ;; esac
+  done
+  echo own
+}
 chain_steps() {
-  local a first="" script="" next="" file="" opt="" lead="" oval=""
+  local a b first="" script="" next="" file="" opt="" lead="" oval="" wrapped="" unplaced="" value="" ended="" count=""
   for a in "$@"; do
     if [ -n "$next" ]; then
       if [ -n "$oval" ]; then [ "$a" = pipefail ] || return 1; oval=""; continue; fi
@@ -433,15 +489,46 @@ chain_steps() {
       script=$a; break
     fi
     [ -n "$file" ] && break
-    case "$a" in env|*=*) [ -z "$first" ] && { lead+=$a$'\x1f'; continue; } ;; esac
-    if [ -z "$first" ]; then first=$(basename -- "$a"); case "$first" in sh|bash|zsh) continue ;; *) return 0 ;; esac; fi
+    # an unplaced first word runs a program this cannot read, so a shell word after it runs a script this cannot read too (its -c script, a script file or stdin), whatever follows it
+    if [ -n "$unplaced" ]; then
+      case " $CHAIN_SHELLS " in *" ${a##*/} "*) return 1 ;; esac
+      continue
+    fi
+    if [ -z "$first" ]; then
+      # a wrapper's options, their values, its count and VAR=x words sit before its program, and come out as a step of their own, as env words do; a wrapper option's value is never its program
+      if [ -n "$value" ]; then value=""; lead+=$a$'\x1f'; continue; fi
+      if [ -n "$wrapped" ] && [ -z "$ended" ] && [ "${a#-}" != "$a" ] && [ "$a" != - ]; then
+        # env's split string holds its program inside one word
+        if [ "$wrapped" = env ]; then case "$a" in -S* | -[0iv]*S* | --split-string | --split-string=*) return 1 ;; esac; fi
+        case "$(wrapper_option "$wrapped" "$a")" in
+          own) ;;
+          next) value=1 ;;
+          end) ended=1 ;;
+          # an option the wrapper's list lacks may take the next word, so the program after it is one this cannot place
+          *) unplaced=1; continue ;;
+        esac
+        lead+=$a$'\x1f'; continue
+      fi
+      if [[ "$a" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then lead+=$a$'\x1f'; continue; fi
+      if [ -n "$count" ]; then count=""; lead+=$a$'\x1f'; continue; fi
+      b=$(basename -- "$a")
+      case " $CHAIN_SHELLS " in *" $b "*) first=$b; continue ;; esac
+      # docker and podman are judged by docker_reader on their own argv, so a container's shell is no chain of this machine's
+      case "$b" in docker|podman) return 0 ;; esac
+      if [[ " $CHAIN_WRAPPERS " == *" $b "* ]]; then
+        wrapped=$b ended=""
+        case " $CHAIN_COUNTED " in *" $b "*) count=1 ;; esac
+        lead+=$a$'\x1f'; continue
+      fi
+      unplaced=1; continue
+    fi
     case "$a" in -c | -[!-]*c) next=1 ;; -*) opt=1 ;; *) [ -z "$opt" ] || return 1; file=$a ;; esac
   done
   [ -n "$first" ] || return 0
   if [ -n "$file" ]; then plain "$file" && [ -f "$file" ] && [ -r "$file" ] || return 1; fi
   [ -n "$script$file" ] || return 1
-  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" <<'PY'
-import shlex, sys
+  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" "$CHAIN_WRAPPERS" "$CHAIN_SHELLS" <<'PY'
+import os, re, shlex, sys
 
 try:
     text = sys.argv[2]
@@ -501,6 +588,21 @@ for i, step in enumerate(steps):
             step += [seps[i], later[0]]
     if step:
         print("\x1f".join(step))
+# a step that eval or a $ word runs, past VAR=x or behind a wrapper word, a step holding a chain shell word (a nested chain, a script file or a script on stdin), or a command substitution in a chain whose script or lead words name docker, podman or a portless compose (shlex splits a backquote's inner script at ;, so a name split across its steps is read over the whole chain), names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
+wrappers = set(sys.argv[4].split())
+shells = set(sys.argv[5].split())
+if any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3]):
+    sys.exit(1)
+for step in steps:
+    i = 0
+    while i < len(step) and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", step[i]):
+        i += 1
+    hidden = lambda w: w == "eval" or "$" in w
+    if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
+        sys.exit(1)
+    # a chain shell word anywhere past VAR=x, whatever program leads the step, runs a script this does not read: its own -c script (a nested chain, split only one level), a script file, or one fed on stdin (a pipe, a < redirect or a heredoc), behind any option, value or fd number, so it reads as one it cannot read
+    if any(os.path.basename(w) in shells for w in step[i:]):
+        sys.exit(1)
 PY
 }
 # a git run's subcommand, past env, VAR=x and git's own options, each of -C, -c, --git-dir, --work-tree, --namespace and --config-env with its value; nothing for a step that runs no git
@@ -567,7 +669,7 @@ set_flags() { local w; for w in "$@"; do case "$w" in pipefail) ;; [-+] | [-+]*[
 bare_dir() { local d=$1; while [ ${#d} -gt 1 ] && [ "${d%/}" != "$d" ]; do d=${d%/}; done; printf '%s' "$d"; }
 # an absolute folder in a git repo, written plain
 abs_in_repo() { case "${1:-}" in /*) ;; *) return 1 ;; esac; plain "$1" && git -C "$1" rev-parse --show-toplevel >/dev/null 2>&1; }
-# Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form a reading of cd, ~ or env let through): a git add, commit or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add, commit or push after it or as `git -C <that kind of folder>`, `bun run precommit:light` in run-slot's own repo, and a script's `set` of shell options, each word plain. CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
+# Whether every step of a chain is a form the commit lane proves safe, a closed list (builder, 5 Nov: three review rounds each found one more form a reading of cd, ~ or env let through): a git add, commit, merge or push in run-slot's own folder, a `cd` to an absolute folder in a repo, a git add, commit, merge or push after it or as `git -C <that kind of folder>`, `bun run precommit:light` in run-slot's own repo, and a script's `set` of shell options, each word plain. CHAIN_SAFE then holds each git step as `git -C <folder> <verb> ...`, joined by \x1f, one a line; else CHAIN_BAD holds the first step outside the list. Any other form, an env prefix, ~, $HOME, a backquote, cd - or a relative folder, is outside it, with no attempt to resolve it.
 CHAIN_SAFE="" CHAIN_BAD=""
 chain_safe() {
   local line words cdir="" folder verb rest=()
@@ -596,6 +698,7 @@ chain_safe() {
     case "$verb" in
       add) plain ${rest[@]+"${rest[@]}"} && add_flags ${rest[@]+"${rest[@]}"} || return 1 ;;
       commit) commit_words ${rest[@]+"${rest[@]}"} || return 1 ;;
+      merge) merge_words ${rest[@]+"${rest[@]}"} || return 1 ;;
       push) plain ${rest[@]+"${rest[@]}"} || return 1 ;;
       *) return 1 ;;
     esac
@@ -603,13 +706,25 @@ chain_safe() {
   done < <(chain_steps "$@")
   CHAIN_BAD=""
 }
-# a chain's lane: `commit` when it commits or pushes and chain_safe takes every step, so it ends in seconds as a bare commit does (4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue); `general <step>` for one that commits or pushes with a step outside that list, which run-slot says, so its worker can run the commit on its own; else nothing
+# a git merge's words: --no-edit, --ff, --ff-only or --no-ff and one or more plain refs, since a merge runs commit-msg alone, never pre-commit's build, and any other option (-s, -X, -m) is off the list
+merge_words() {
+  local w refs=""
+  for w in "$@"; do
+    case "$w" in
+      --no-edit | --ff | --ff-only | --no-ff) ;;
+      -*) return 1 ;;
+      *) plain "$w" || return 1; refs=1 ;;
+    esac
+  done
+  [ -n "$refs" ]
+}
+# a chain's lane: `commit` when it commits, merges or pushes and chain_safe takes every step, so it ends in seconds as a bare commit does (4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue); `general <step>` for one that commits, merges or pushes with a step outside that list, which run-slot says, so its worker can run the commit on its own; else nothing
 chain_lane() {
   local line words commits=""
   while IFS= read -r line; do
     IFS=$'\x1f' read -ra words <<< "$line"
     [ ${#words[@]} -gt 0 ] || continue
-    case "$(git_verb "${words[@]}")" in commit|push) commits=1 ;; esac
+    case "$(git_verb "${words[@]}")" in commit|merge|push) commits=1 ;; esac
   done < <(chain_steps "$@")
   [ -n "$commits" ] || return
   if chain_safe "$@"; then echo commit; else echo "general $(shown "$CHAIN_BAD")"; fi
@@ -621,7 +736,7 @@ quick_rule() {
   case "$WHO" in commit-*) [ "${RUN_SLOT_COMMIT_STEP:-}" = 1 ] && { echo commit; return; } ;; esac
   # the command's first word past env and VAR=x, as box_fits finds it (optimizer, 19 Oct: a commit run as env NODE_ENV=... git commit waited 14 min in the queue)
   first=$(first_word "$@")
-  case "$(basename -- "$first")" in sh|bash|zsh) [ "$(chain_lane "$@")" = commit ] && echo commit; return ;; esac
+  case " $CHAIN_SHELLS " in *" $(basename -- "$first") "*) [ "$(chain_lane "$@")" = commit ] && echo commit; return ;; esac
   if [ "$(basename -- "$first")" = git ]; then
     # a merge or pull runs no pre-commit build (lefthook.yml has no merge hook), so it ends in seconds (optimizer, 20 Oct: a 1s git merge waited 26.6 min behind suites)
     # a push runs only the pre-push hook's seconds (retro 2, 31 Oct: git push queued 205 min in a day)
@@ -740,11 +855,11 @@ runs_program() {
 }
 # a commit whose pre-commit build runs next build goes through the queue as a big run (3 Nov, 04:05Z and 06:41Z: one built at 1.7 cores beside its own session's big run, and one beside a clone with load1 at 56): a git commit but -n, in a repo whose lefthook.yml pre-commit runs a build, staging a file @web/next#build builds from (unless every one is Markdown or a Python test under tests/, which lefthook's build skips), with -a or a pathspec file any it may stage, or one under a path it names, or commit-slot.ts's build (commit-<worktree>) for one; and, failing closed, a git run with a word outside these lists, or a verb that is an alias
 heavy_build() {
-  local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir=""
+  local a c f files top dir="" commit="" all="" gitc="" magic="" noverify="" unlisted="" loose="" prev="" after="" seen="" verb="" state=lead paths=() vars=() line words first adir="" merged=""
   # a chain that commits counts as a build unless chain_safe takes every step; then it builds when one of its commit steps would, read with what its git add steps stage, and when an add runs in another folder than a commit, whose paths it would misread
   first=$(first_word "$@")
-  case "$(basename -- "$first")" in
-    sh|bash|zsh)
+  case " $CHAIN_SHELLS " in
+    *" $(basename -- "$first") "*)
       while IFS= read -r line; do
         IFS=$'\x1f' read -ra words <<< "$line"
         [ ${#words[@]} -gt 0 ] || continue
@@ -758,7 +873,10 @@ heavy_build() {
         while IFS= read -r line; do
           IFS=$'\x1f' read -ra words <<< "$line"
           [ ${#words[@]} -gt 0 ] || continue
+          # an add or commit after a merge counts as a build, since a merge that stops on a conflict leaves the other side's files for them to stage
+          case "${words[3]}:$merged" in add:1 | commit:1) CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0 ;; esac
           case "${words[3]}" in
+            merge) merged=1 ;;
             add) adir=${adir:-${words[2]}}; [ "$adir" = "${words[2]}" ] && chain_add "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0; } ;;
             commit) { [ -z "$adir" ] || [ "$adir" = "${words[2]}" ]; } && ! heavy_build "${words[@]}" || { CHAIN_ADD_ALL="" CHAIN_ADD_TRACKED="" CHAIN_ADD=(); return 0; } ;;
           esac
@@ -873,23 +991,23 @@ light_run() {
 }
 # one line when a Mac run asks, takes its slot and ends, so a run's wait sits beside its run time (optimizer, 19 Oct)
 rlog() { echo "$(date -u +%FT%TZ) $1 $WHO $$ $2" >> "$OPS/run-slot.runs.log" 2>/dev/null; }
-[ -n "$CAN_TAKE" ] || [ -n "$REREAD" ] || rlog ask "$*"
+[ -n "$KIND_ONLY" ] || [ -n "$CAN_TAKE" ] || [ -n "$REREAD" ] || rlog ask "$*"
 # a named run from a worktree under .claude/worktrees/ records its session as that worktree's owner, named as commit-slot.ts names the folder
 case "$WHO:$PWD" in
   commit-*) ;;
   */.claude/worktrees/*)
-    if [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
+    if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
       OWNED=${PWD#*/.claude/worktrees/}
       OWNED=$(printf '%s' "${OWNED%%/*}" | tr -c 'A-Za-z0-9._#-' '-')
       mkdir -p "$OPS/run-slot.owner" && printf '%s\n' "$WHO" > "$OPS/run-slot.owner/$OWNED"
     fi ;;
 esac
 # a chain that commits beside a heavier step says the lane it takes and why, on stderr and as a `why` line after its ask (the ask line stays the command alone, which ran_last3 matches)
-if [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
+if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$REREAD" ]; then
   WHY=$(chain_lane "$@")
   case "$WHY" in
     "general "*)
-      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since \`${WHY#general }\` is not a form the commit lane takes (git add, commit or push in run-slot's folder, or after a cd or as git -C to an absolute folder in the repo, and bun run precommit:light); run the commit as one of those to take the commit lane" >&2
+      echo "run-slot.sh: this chain goes through the general queue, not the commit lane, since \`${WHY#general }\` is not a form the commit lane takes (git add, commit, push, or merge with --no-edit, --ff, --ff-only or --no-ff, in run-slot's folder, or after a cd or as git -C to an absolute folder in the repo, and bun run precommit:light); run the commit or merge as one of those to take the commit lane, or run an off-list merge and its push as two calls" >&2
       rlog why "general: \`${WHY#general }\` is outside the commit lane's forms" ;;
   esac
 fi
@@ -902,6 +1020,8 @@ HEAVY=
 heavy_build "$@" && HEAVY=1
 light_run "$@" && SIZE=small UNITS=1
 DOCKER=$(docker_kind "$@")
+# kind's answer: refuse for a docker run run-slot refuses, docker for one it takes to run-slot-docker, else quick_kind's lane (clone, commit, quick, or nothing for the queue)
+if [ -n "$KIND_ONLY" ]; then case "$DOCKER" in refuse\ *) echo refuse ;; ?*) echo docker ;; *) quick_kind "$@" ;; esac; exit 0; fi
 case "$DOCKER" in refuse\ *) echo "${DOCKER#refuse }" >&2; rlog refused "docker"; exit 2 ;; ?*) HEAVY=1 ;; esac
 # a model-bound run skips the queue's lanes, run-slot-docker among them, and a build fills the VM rather than waiting on a model
 [ -n "$DOCKER" ] && [ -n "$MODEL_BOUND" ] && { echo "run-slot.sh refuses --model-bound for a docker build, which fills the Docker VM rather than waiting on a model: run it without --model-bound, so it takes run-slot-docker, one docker build at a time" >&2; rlog refused "docker"; exit 2; }
@@ -954,9 +1074,15 @@ CHILD=""
 # seconds between a waiter's looks, and a held clone's (the tests shorten both)
 POLL=${RUN_SLOT_POLL:-15}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
-# the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake's line it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
+# the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake (clone_brake) it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
 CLONE_GAP=180
 CLONE_MARGIN=4
+# the clones' brake, the owner's load rule of 5 Nov (load5 under 15, the owner's Mac's core count), one per core: sysctl's hw.ncpu, the count spawn.sh's load gate starts from, else 15; never load_line, whose cap shuts run-slot-2 (6 Nov, 06:52Z to 07:03Z: a cap of 1 held every clone)
+clone_brake() {
+  local n
+  n=$(sysctl -n hw.ncpu 2>/dev/null | tr -cd 0-9)
+  if [ "${n:-0}" -gt 0 ]; then echo "$n"; else echo 15; fi
+}
 
 # Waiters take slots oldest first (builder, 12 Oct: a request queued at 13:28Z lost three slots in a row to later ones): each waiter leaves a
 # ticket, run-slot.waiters/<ns>-<pid>-<who>, and only the oldest ticket whose pid is alive may take a slot; a ticket goes once its slot is taken
@@ -1039,20 +1165,34 @@ ordered_waiters() {
   done | sort -s -k1,1n -k2,2n -k3,3n -k4,4 | cut -d' ' -f5,6
 }
 first_waiter() {
-  # the first waiter in that order whose run fits the units free now, so a run too big for them never holds back a smaller one behind it,
-  # or the first pinned one, fitting or not; with s2, only among the waiters that can take run-slot-2 (builder, 12 Oct: older copies at
+  # the first waiter in that order whose run fits the units free now (unit_fits), so a run too big for them never holds back a smaller one behind it;
+  # a pinned one that does not fit holds its place while it is a wall (no rank) or the runs that passed it are all that keep it out, and is named
+  # when no run behind it fits, so it starts once its lanes open and is never starved (issue 1216: a pinned 3-unit head kept 11 smaller waiters
+  # behind it for 25 minutes with 2 lanes free); with s2, only among the waiters that can take run-slot-2 (builder, 12 Oct: older copies at
   # the head left slot 2 idle)
-  local p t f c r m held list mode=${1:-}
-  c=$(capacity); r=$(reserve "$c"); held=$(held_units)
+  local p t f c held list pc pl mode=${1:-} blocked=""
+  c=$(capacity); held=$(held_units)
   list=$(ordered_waiters)
   while read -r p t; do
     [ -n "$t" ] || continue
     f=$(cat "$QUEUE/$t" 2>/dev/null)
     [ "$mode" = s2 ] && [ -z "$f" ] && continue
     set -- $f
-    m=$(may_reserve "${2:-22}" "${4:-medium}" "${t#*-*-}" "$r")
-    if [ "$p" = 1 ] || fits "$(held_for "$m" "$held")" "${3:-2}" $((c - m)); then echo "$t"; return; fi
+    if unit_fits "${2:-22}" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" "$held"; then echo "$t"; return; fi
+    [ "$p" = 1 ] || continue
+    [ -n "${2:-}" ] && read -r pc pl <<< "$(passer_units "$t")"
+    if [ -z "${2:-}" ] || unit_fits "$2" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" $((held - pc)) "$pl"; then echo "$t"; return; fi
+    [ -n "$blocked" ] || blocked=$t
   done <<< "$list"
+  [ -z "$blocked" ] || echo "$blocked"
+}
+# "<slots> <lanes>": the units of every holder the load units count (holders) that took its slot after ticket $1 was written, the runs that passed
+# it, in held_units' and lane_units' shares; one rule over holders, so a holder they count later passes by it too (review rounds 1 and 2: a lane and a peer)
+passer_units() {
+  local since
+  since=$(mtime "$QUEUE/$1") || { echo "0 0"; return; }
+  since=$(date -u -r "$since" +%FT%TZ 2>/dev/null || date -u -d "@$since" +%FT%TZ)
+  holders | awk -v since="$since" '$2 > since { if ($1 == "lane") l += $3; else t += $3 } END { print t + 0, l + 0 }'
 }
 # a waiter whose script was replaced while it waits (a pull, a link-skills run) runs the new copy with its own arguments, since bash keeps
 # reading the old file (dispatcher, 18 Oct: waiters started before a run-slot change kept the old clone-allow and queue rules)
@@ -1302,6 +1442,8 @@ slot_open() {
 # counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither
 lanes_open() {
   local idle swap tps mbs load need="" verdict=shut why="" seen free level
+  # a read subcommand takes the verdict a waiter wrote in the last 30 s, so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
+  if [ -n "$CAN_TAKE" ] && seen=$(fresh_lanes); then [ "$seen" = open ]; return; fi
   read -r idle swap tps mbs _ <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
   case "$idle" in
@@ -1319,12 +1461,24 @@ lanes_open() {
     verdict=open
   fi
   seen=$(cat "$OPS/run-slot.lanes" 2>/dev/null)
-  if [ -z "$CAN_TAKE" ] && [ "$seen" != "$verdict" ]; then
-    echo "$verdict" > "$OPS/run-slot.lanes"
-    free=$(memstat level); level=$(memstat vm_pressure_level)
-    rlog lanes "$verdict${why:+ why=$why} idle=$idle% load1=$load free=${free:--}${free:+%} pressure=${level:--} swapins=$swap disk0_tps=${tps:--} disk0_mbs=${mbs:--}"
+  if [ -z "$CAN_TAKE" ]; then
+    # every waiter's reading rewrites the verdict, so its age says how fresh it is (fresh_lanes)
+    echo "$verdict" > "$OPS/run-slot.lanes.$$" && mv -f "$OPS/run-slot.lanes.$$" "$OPS/run-slot.lanes"
+    if [ "$seen" != "$verdict" ]; then
+      free=$(memstat level); level=$(memstat vm_pressure_level)
+      rlog lanes "$verdict${why:+ why=$why} idle=$idle% load1=$load free=${free:--}${free:+%} pressure=${level:--} swapins=$swap disk0_tps=${tps:--} disk0_mbs=${mbs:--}"
+    fi
   fi
   [ "$verdict" = open ]
+}
+# the lanes verdict a waiter wrote in the last 30 s, two of its looks; an older one, as a copy from before every look rewrote it leaves, reads as none
+fresh_lanes() {
+  local m age v
+  m=$(mtime "$OPS/run-slot.lanes") || return 1
+  age=$(($(date +%s) - m))
+  [ "$age" -ge 0 ] && [ "$age" -lt 30 ] || return 1
+  v=$(cat "$OPS/run-slot.lanes" 2>/dev/null)
+  case "$v" in open | shut) echo "$v" ;; *) return 1 ;; esac
 }
 
 # the UTC time $1 seconds ago as run-slot.runs.log writes it, by BSD date, else GNU date
@@ -1351,47 +1505,48 @@ burst_held() {
 }
 
 # Load units: each held CPU slot's run counts the units on its holder line (2, a medium, for a line with none), and the slots the load rules open now, or a holder already has, give 2 units each. A quarter of them, at least 1, stays for small runs and the runs that gate a merge, so a big run never blocks a small one
-held_units() {
-  local s u total=0
+held_units() { holders | awk '$1 == "slot" { t += $3 } END { print t + 0 }'; }
+# a held commit or clone lane's 2 units, which count only against a run that leaves the reserve, so a medium or big run waits beside a commit's build and a clone while a small run and one that gates a merge start beside them as before (3 Nov, 06:41Z: a next build ran on the commit lane beside a clone with no units held, and load1 reached 56)
+lane_units() { holders | awk '$1 == "lane" { t += $3 } END { print t + 0 }'; }
+# every holder the load units count, one "<slot|lane> <start> <units>" line each: run-slot to run-slot-4 (its holder line's units, 2 for none), each
+# live holder of another factory's run slots (slots.peers), read only, since that folder is theirs (ops, 31 Oct: the two pools took load1 to 77),
+# and a held commit or clone lane (2); a start that cannot be read is "-", which no ticket's time sorts before
+holders() {
+  local d s line at u
   for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
     reclaim "$OPS/$s"
     [ -d "$OPS/$s" ] || continue
-    u=$(cut -d' ' -f4 "$OPS/$s.holder" 2>/dev/null)
-    case "$u" in 1|2|3) ;; *) u=2 ;; esac
-    total=$((total + u))
+    at="" u=""
+    read -r _ _ at u _ 2>/dev/null < "$OPS/$s.holder"
+    case "$u" in 1 | 2 | 3) ;; *) u=2 ;; esac
+    echo "slot ${at:--} $u"
   done
-  echo $((total + $(peer_units)))
-}
-# a held commit or clone lane's 2 units, which count only against a run that leaves the reserve, so a medium or big run waits beside a commit's build and a clone while a small run and one that gates a merge start beside them as before (3 Nov, 06:41Z: a next build ran on the commit lane beside a clone with no units held, and load1 reached 56)
-lane_units() {
-  local s total=0
   for s in run-slot-commit run-slot-clone; do
     reclaim "$OPS/$s"
-    [ -d "$OPS/$s" ] && total=$((total + 2))
+    [ -d "$OPS/$s" ] || continue
+    at=""
+    read -r _ _ at _ 2>/dev/null < "$OPS/$s.holder"
+    echo "lane ${at:--} 2"
   done
-  echo "$total"
-}
-# the units held against a run that must leave $1 free: the CPU slots' and peers' (held_units's $2 when given), plus the lanes' when $1 is over 0
-held_for() {
-  local h=${2:-$(held_units)}
-  [ "$1" -gt 0 ] && h=$((h + $(lane_units)))
-  echo "$h"
-}
-# each live holder of another factory's run slots (slots.peers) counts its units here, read only, since that folder is theirs (ops, 31 Oct: the two pools took load1 to 77)
-peer_units() {
-  local d s line u total=0
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
       [ -d "$d/$s" ] || continue
       line=$(cat "$d/$s.holder" 2>/dev/null)
       stale "$d/$s" "$line" && continue
-      u=$(printf '%s' "$line" | cut -d' ' -f4)
-      case "$u" in 1|2|3) ;; *) u=2 ;; esac
-      total=$((total + u))
+      at="" u=""
+      read -r _ _ at u _ <<< "$line"
+      case "$u" in 1 | 2 | 3) ;; *) u=2 ;; esac
+      echo "slot ${at:--} $u"
     done
   done <<< "$PEERS"
-  echo "$total"
+}
+# the units held against a run that must leave $1 free: the CPU slots' and peers' (held_units's $2 when given), plus the lanes' less $3 when $1 is over 0, never under 0
+held_for() {
+  local h=${2:-$(held_units)}
+  [ "$1" -gt 0 ] && h=$((h + $(lane_units) - ${3:-0}))
+  [ "$h" -ge 0 ] || h=0
+  echo "$h"
 }
 # lanes_open, once per capacity() count: its slot checks share the first one's verdict, since a reading per slot counted slot 2 shut on a stale reading and slots 3 and 4 open on one that landed between them; outside a count LANES is unset, so each check reads afresh and a waiter still reads the gauges on every poll
 lanes_now() {
@@ -1408,6 +1563,12 @@ capacity() {
     { [ -d "$OPS/$s" ] || slot_open "$s"; } && n=$((n + 1))
   done
   echo $((2 * n))
+}
+# the one gate: whether a run of rank $1, $2 units and size $3, for $4, fits the load units free now, beside $6 held within capacity $5 when given (with $7 of the lanes' units left out); the wait loop, first_waiter, room and can-take all read it, so a lane room counts as free is one the queue's next run can take (issue 1216)
+unit_fits() {
+  local c=${5:-$(capacity)} m
+  m=$(may_reserve "$1" "$3" "$4" "$(reserve "$c")")
+  fits "$(held_for "$m" "${6:-}" "${7:-0}")" "$2" $((c - m))
 }
 # whether a run of $2 units fits beside $1 held within a limit of $3; any run fits while no slot is held, so a big run still starts on a quiet machine
 fits() { [ "$1" -eq 0 ] || [ $(($1 + $2)) -le "$3" ]; }
@@ -1559,12 +1720,14 @@ if [ -n "$KIND" ]; then
     ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
   while clone_held; do reread; sleep "$CLONE_POLL"; done
-  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of load_line's brake line, and while a big run holds a CPU slot, whatever clone-allow names; an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
+  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of the brake, one per core, or at half the cores or more where that line sits lower (under 8 cores; on 4 or fewer the brake less the margin is 0 or less and would hold every clone), and while a big run holds a CPU slot, whatever clone-allow names; an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
   clone_spaced() {
-    local brake l s last
-    brake=$(load_line)
+    local brake line l s last
+    brake=$(clone_brake)
+    line=$((brake - CLONE_MARGIN))
+    [ "$line" -lt $(((brake + 1) / 2)) ] && line=$(((brake + 1) / 2))
     l=$(load5)
-    [ -n "$l" ] && [ "$l" -ge $((brake - CLONE_MARGIN)) ] && { echo "for load5 under $((brake - CLONE_MARGIN)), $CLONE_MARGIN under the brake's $brake"; return; }
+    [ -n "$l" ] && [ "$l" -ge "$line" ] && { echo "for load5 under $line, the brake's $brake less $CLONE_MARGIN and never under half of it"; return; }
     for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
       reclaim "$OPS/$s"
       [ -d "$OPS/$s" ] && [ "$(cut -d' ' -f5 "$OPS/$s.holder" 2>/dev/null)" = big ] && { echo "while a big run holds $s"; return; }
@@ -1618,17 +1781,29 @@ if [ -n "$ROOM_ONLY" ]; then
   done
   c=$(capacity)
   free=0
-  r=$(reserve "$c")
-  fits "$(held_for "$r")" 2 $((c - r)) && free=$((c / 2 - held))
-  echo "$((c / 2)) $held $free $(ordered_waiters | grep -c .)"
+  waiters=$(ordered_waiters | grep -c .)
+  # the free lanes are the ones the queue's next run can take: first_waiter's own units, none while no waiter can start, a medium's with no waiter
+  t=$(first_waiter)
+  if [ -n "$t" ]; then
+    set -- $(cat "$QUEUE/$t" 2>/dev/null)
+    unit_fits "${2:-22}" "${3:-2}" "${4:-medium}" "${t#*-*-}" "$c" && free=$((c / 2 - held))
+  elif [ "$waiters" = 0 ]; then
+    unit_fits 22 2 medium "" "$c" && free=$((c / 2 - held))
+  fi
+  echo "$((c / 2)) $held $free $waiters"
   exit 0
 fi
 
 if [ -n "$CAN_TAKE" ]; then
+  if [ -n "$CAN_TICKET" ]; then
+    rank="" UNITS="" SIZE=""
+    read -r _ rank UNITS SIZE _ 2>/dev/null < "$QUEUE/$CAN_TICKET"
+    case "$rank" in [0-2][1-3]) CLASS=${rank%?} ;; *) CLASS=2 ;; esac
+    case "$UNITS" in 1 | 2 | 3) ;; *) UNITS=2 SIZE=medium ;; esac
+  fi
   reclaim "$OPS/$CAN_TAKE"
   [ ! -d "$OPS/$CAN_TAKE" ] && slot_open "$CAN_TAKE" && ! burst_held > /dev/null || exit 1
-  c=$(capacity); m=$(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")")
-  fits "$(held_for "$m")" "$UNITS" $((c - m))
+  unit_fits "$CLASS$UNITS" "$UNITS" "$SIZE" "$WHO"
   exit
 fi
 
@@ -1658,8 +1833,9 @@ while :; do
     continue
   fi
   # this run's own units must fit beside what the slots hold now (the queue's order checked them for a waiter at its head)
-  c=$(capacity); m=$(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")")
-  if ! fits "$(held_for "$m")" "$UNITS" $((c - m)); then
+  c=$(capacity)
+  if ! unit_fits "$CLASS$UNITS" "$UNITS" "$SIZE" "$WHO" "$c"; then
+    m=$(may_reserve "$CLASS$UNITS" "$SIZE" "$WHO" "$(reserve "$c")")
     [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for $UNITS free load units ($SIZE; $(held_for "$m") of $c held)" >&2
     sleep "$POLL"
     waited=$((waited + 15))

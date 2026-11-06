@@ -296,8 +296,87 @@ var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
+var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
+var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
+var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
+var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
+var ZSH_ARRAYS = new Set([
+  "aliases",
+  "argv",
+  "builtins",
+  "cdpath",
+  "commands",
+  "comppostfuncs",
+  "compprefuncs",
+  "compstate",
+  "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
+  "fignore",
+  "fpath",
+  "funcfiletrace",
+  "funcsourcetrace",
+  "funcstack",
+  "functions",
+  "functions_source",
+  "functrace",
+  "galiases",
+  "history",
+  "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "killring",
+  "langinfo",
+  "mailpath",
+  "manpath",
+  "match",
+  "mbegin",
+  "mend",
+  "module_path",
+  "modules",
+  "nameddirs",
+  "options",
+  "parameters",
+  "patchars",
+  "path",
+  "pipestatus",
+  "psvar",
+  "region_highlight",
+  "registers",
+  "reply",
+  "reswords",
+  "saliases",
+  "signals",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
+  "watch",
+  "widgets",
+  "words",
+  "zle_bracketed_paste",
+  "zle_highlight",
+  "zsh_eval_context",
+  "zsh_scheduled_events"
+]);
+var oneWord = (written) => {
+  const plain = ONE_WORD.exec(written);
+  return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "");
+};
+var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
@@ -392,6 +471,8 @@ var unknown = (why) => ({ unknown: why, value: UNKNOWN });
 var setLog = new WeakMap;
 var merge = (out, part) => {
   out.value += part.value;
+  if (part.splits && out.splits !== "always")
+    out.splits = part.splits;
   if (part.unknown)
     out.unknown ??= part.unknown;
   if (part.variable)
@@ -404,7 +485,43 @@ var slice = (word, from) => {
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
-var program = (value) => basename(value.replace(/^=/, ""));
+var SHELL_OWN = new Set([
+  ".",
+  "alias",
+  "cd",
+  "declare",
+  "eval",
+  "export",
+  "hash",
+  "let",
+  "local",
+  "popd",
+  "pushd",
+  "read",
+  "readonly",
+  "set",
+  "shift",
+  "source",
+  "trap",
+  "type",
+  "typeset",
+  "unalias",
+  "unset"
+]);
+var G_WRAPPERS = new Map([
+  ["genv", "env"],
+  ["gnice", "nice"],
+  ["gnohup", "nohup"],
+  ["gstdbuf", "stdbuf"],
+  ["gtimeout", "timeout"]
+]);
+var program = (value) => {
+  const base = basename(value.replace(/^=/, ""));
+  const lower = base.toLowerCase();
+  if (SHELL_OWN.has(lower) && value !== lower)
+    return value;
+  return G_WRAPPERS.get(lower) ?? lower;
+};
 var UV_TAKES = new Set([
   "--cache-dir",
   "--config-file",
@@ -758,14 +875,23 @@ function word(lx) {
     } else if (c === "$" && next === '"')
       lx.i++;
     else if (c === "$" || c === "`") {
+      const from = lx.i;
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
+      const written = src.slice(from, lx.i);
+      if (marked(text.value))
+        merge(out, {
+          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
+          value: ""
+        });
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir3();
       lx.i++;
     } else {
+      if (c === UNKNOWN || c === READ)
+        out.splits = "always";
       out.value += c;
       bare += c;
       lx.i++;
@@ -796,11 +922,13 @@ function double(lx) {
 `)
         out.value += '$`"\\'.includes(next) ? next : c + next;
       lx.i += 2;
-    } else if (c === "$")
-      merge(out, dollar(lx));
-    else if (c === "`")
-      merge(out, backtick(lx));
-    else {
+    } else if (c === "$" || c === "`") {
+      const from = lx.i;
+      const text = c === "$" ? dollar(lx) : backtick(lx);
+      merge(out, text);
+      if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
+        out.splits = "always";
+    } else {
       out.value += c;
       lx.i++;
     }
@@ -841,8 +969,10 @@ function dollar(lx) {
     lx.i = end;
     return variable(name);
   }
-  if (/[A-Za-z_]/.test(next)) {
-    const from = ++lx.i;
+  const flagged = /[=~^]/.test(next) && /[A-Za-z_]/.test(src[lx.i + 2] ?? "");
+  if (flagged || /[A-Za-z_]/.test(next)) {
+    lx.i += flagged ? 2 : 1;
+    const from = lx.i;
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
     return variable(src.slice(from, lx.i));
@@ -1010,6 +1140,8 @@ function unwrap(state, inside, budget) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+      } else if (wrapper === "env" && v === "-") {
+        take();
       } else if (v === "--") {
         take();
         while (ASSIGN.test(peek()?.value ?? ""))

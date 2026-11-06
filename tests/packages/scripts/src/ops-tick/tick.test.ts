@@ -30,6 +30,7 @@ import {
 } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
+import { watchTorn } from "../torn-reads"
 import { type Answers, fakeRun } from "./fake-run"
 
 // A machine whose sessions.names keep the old names, which this file's fallbacks name.
@@ -891,6 +892,39 @@ describe("canary pull", () => {
     const { ctx, sent } = fake(scratch(), at(14, 10))
     await beat("canary-pull").run({ ...ctx, repo: w.repo, run: realRun })
     expect(git(w.leads, "rev-parse", "HEAD")).toBe(before)
+    expect(sent).toEqual([])
+  })
+
+  // A main checkout that follows canary is the one every guard loads its bundles from, so its pull swaps each changed bundle in whole, as playground update does.
+  test("swaps a changed hook bundle in whole when the worktree it pulls is the main checkout, so a reader never finds it missing or half-written", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "canary-pull-main-")))
+    dirs.push(root)
+    const bundle = join("scripts", "hooks", "bundled", "no-raw-delete.js")
+    const before = `${"// a\n".repeat(6_000_000)}export {}\n`
+    const after = `${"// bb\n".repeat(6_000_000)}export {}\n`
+    const seed = join(root, "seed")
+    mkdirSync(join(seed, "scripts", "hooks", "bundled"), { recursive: true })
+    writeFileSync(join(seed, bundle), before)
+    git(seed, "init", "-q", "-b", "canary")
+    git(seed, "add", ".")
+    git(seed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "one")
+    const origin = join(root, "origin.git")
+    git(root, "clone", "-q", "--bare", seed, origin)
+    const repo = join(root, "repo")
+    git(root, "clone", "-q", "-b", "canary", origin, repo)
+    writeFileSync(join(seed, bundle), after)
+    git(seed, "add", ".")
+    git(seed, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "two")
+    git(seed, "push", "-q", origin, "canary")
+    const stopWatch = await watchTorn(join(repo, bundle), [before.length, after.length], root)
+    const { ctx, sent } = fake(scratch(), at(14, 5))
+    await beat("canary-pull").run({ ...ctx, repo, run: realRun })
+    const { reads, torn } = await stopWatch()
+    expect(reads).toBeGreaterThan(0)
+    expect({ torn }).toEqual({ torn: 0 })
+    expect(git(repo, "rev-parse", "HEAD")).toBe(git(origin, "rev-parse", "canary"))
+    expect(readFileSync(join(repo, bundle), "utf8") === after).toBe(true)
+    expect(git(repo, "status", "--porcelain")).toBe("")
     expect(sent).toEqual([])
   })
 

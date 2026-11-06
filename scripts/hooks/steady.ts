@@ -86,19 +86,106 @@ function singleQuotesOut(command: string): string {
   return double || docs.length ? command : out
 }
 
+// a plain read of a variable: `$name` or `${name}`, never one zsh subscripts with a `[` after it
+const READ = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})(?!\[)/.source
+// a character double quotes hold as text
+const TEXT = /[^"$`\\]/.source
+// a part of a plain word: word characters and reads, a single quote, or a double quote holding nothing but text and reads
+const WORD = new RegExp(String.raw`^(?:(?:[\w./:=@%+,~-]|${READ})+|'[^']*'|"(?:${TEXT}|${READ})*")`)
+// a redirection whose target is the next word, or one that carries its own (`2>&1`, `>&-`)
+const REDIRECT = /^(?:[<>]&(?:\d+|-)|<<<|&>>?|>>?\|?|<>?)/
+// the reserved words and precommand modifiers after which the next word is still a program word
+const KEEPS_PROGRAM =
+  /^(?:builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/
+// the prompt parameters zsh expands (under promptsubst for the PS/RPROMPT family), so a line that sets one, by assignment or as a `read` or `print -v` target, can run a captured body's text as a prompt, as `print -P` runs its argument; the name is matched as a bare word, so a mere mention reads the line whole too
+const PROMPT_PARAM = /^(?:PS[0-4]|PROMPT[2-4]?|RPROMPT2?|RPS[12]|SPROMPT)(?!\w)/
+// a heredoc operator whose delimiter is quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`), its word ending where a word does
+const QUOTED_DOC =
+  /^<<(-?)[ \t]*((?:[\w.-]*(?:'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])[\w.-]*)+)(?=[\s;&|<>]|$)/
+
+// The line with each body of a heredoc whose delimiter is quoted put as an empty line, since the shell expands nothing in it, so its text reads as no evaluation, subscript or qualifier; only a line whose text outside the bodies is blanks, WORD's parts, `;`, `&&`, `||`, `|`, REDIRECT's and QUOTED_DOC's is scanned, so the bodies start and end where the shell's do, and any other line, one whose step's program word holds a read among them, comes back as written
+function quotedBodiesOut(command: string): string {
+  let out = ""
+  const docs: { delim: string; strip: boolean }[] = []
+  // the next word is a step's program word, unless it is an assignment or a redirection's target
+  let program = true
+  let target = false
+  let word = ""
+  const endWord = () => {
+    if (word && target) target = false
+    else if (word && !/^[A-Za-z_]\w*=/.test(word) && !KEEPS_PROGRAM.test(word)) program = false
+    word = ""
+  }
+  for (let i = 0; i < command.length;) {
+    const rest = command.slice(i)
+    let token: string | undefined
+    let doc: RegExpMatchArray | null = null
+    if (rest[0] === "\n") {
+      endWord()
+      out += "\n"
+      i++
+      for (const { delim, strip } of docs)
+        for (;;) {
+          if (i >= command.length) return command
+          const end = command.indexOf("\n", i)
+          const stop = end === -1 ? command.length : end
+          const line = command.slice(i, stop)
+          const last = (strip ? line.replace(/^\t+/, "") : line) === delim
+          out += (last ? line : "") + (end === -1 ? "" : "\n")
+          i = stop + 1
+          if (last) break
+        }
+      docs.length = 0
+      program = true
+      continue
+    } else if ((token = rest.match(/^[ \t]+/)?.[0])) endWord()
+    else if ((token = rest.match(/^(?:&&|\|\||[;|])/)?.[0])) {
+      endWord()
+      program = true
+    } else if (rest.startsWith("<<") && !rest.startsWith("<<<")) {
+      doc = rest.match(QUOTED_DOC)
+      if (!doc) return command
+      if (/^\d+$/.test(word)) word = ""
+      endWord()
+      token = doc[0]
+      docs.push({
+        delim: doc[2].replace(/\\(.)/g, "$1").replace(/["']/g, ""),
+        strip: doc[1] === "-",
+      })
+    } else if ((token = rest.match(REDIRECT)?.[0])) {
+      // a file descriptor's number belongs to the redirection it leads
+      if (/^\d+$/.test(word)) word = ""
+      endWord()
+      target = !/&(?:\d+|-)$/.test(token)
+    } else if ((token = rest.match(WORD)?.[0])) {
+      word += token
+      // a read as a step's program word runs a command the scan cannot name
+      if (program && !target && token.includes("$") && !/^[A-Za-z_]\w*=/.test(word)) return command
+      // a prompt parameter set on the line can expand a captured body's text as a prompt, running it
+      if (PROMPT_PARAM.test(word)) return command
+    }
+    // a quote that spans a newline while a body is pending moves where the shell starts reading it
+    if (!token || (docs.length && token.includes("\n"))) return command
+    out += token
+    i += token.length
+  }
+  return docs.length ? command : out
+}
+
 // How many times the line names each variable other than by reading it ($K, ${K}, ${K:-…} and the other READS_ONLY forms): every other spelling of the name counts, an assignment, an append, a bare word (read's, a for loop's, arithmetic's) and a name spelled across a quote or a backslash (`X\Y`, `X"Y"`, which the shell reads as XY) included, as does one attached after an option cluster's a or v (`printf -vK`), a lone flag (`-K`) aside; and the names an unquoted plain assignment sets (`K=`, where a quoted `"K=a"` is a command), read in one pass
 export function namings(command: string): Namings {
   const counts = new Map<string, number>()
   const plain = new Set<string>()
   const add = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
   // a name indirection sets or evaluates a variable whose name the hook cannot read: an assignment sets it, and a read evaluates any subscript the name's value holds (`N=a; N+=[V]; : ${!N}`), so zsh's P flag holds nothing, nor does a flag with a delimited argument (`${(j:…:)…}`), since its argument can hide a `)` and a P, nor do the e, % and # flags, which evaluate a value as shell text, a prompt or arithmetic
+  const text = quotedBodiesOut(command)
   let blind =
-    EVALUATES.some((evaluates) => evaluates.test(command)) ||
-    SUBSCRIPT.test(command) ||
-    SUBSCRIPT.test(unquoted(command)) ||
-    QUALIFIER.test(singleQuotesOut(command)) ||
-    INDIRECTS.test(command)
-  for (const [, flags, closed] of command.matchAll(/\$\{\(([^)]*)(\)?)/g))
+    EVALUATES.some((evaluates) => evaluates.test(text)) ||
+    SUBSCRIPT.test(text) ||
+    SUBSCRIPT.test(unquoted(text)) ||
+    QUALIFIER.test(singleQuotesOut(text)) ||
+    INDIRECTS.test(text)
+  for (const [, flags, closed] of text.matchAll(/\$\{\(([^)]*)(\)?)/g))
     if (!closed || !/^[\w@~^=!*-]*$/.test(flags) || /[eP]/.test(flags)) blind = true
   for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
     const [whole, expanded, key] = m
@@ -344,8 +431,25 @@ const PRINTS = new Set(["print", "printf"])
 const NUMERIC = new Set(["float", "integer"])
 // the builtins that give a name an attribute: n makes a bash nameref, a name whose every later write sets the variable its value names, and i (zsh's E and F too) makes every later assignment to it an arithmetic evaluation
 const TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"])
-// the builtins that run text as the line's own shell, which can set any variable
-const RUNS_TEXT = new Set([".", "eval", "source"])
+// the builtins that run text or load code as the line's own shell, which can set any variable: a trap's text runs there (a DEBUG trap's before each command), as do zsh's sched's, emulate -c's, a zstyle -e value's and a zregexparse action's, bash's mapfile -C callback, an alias on a later line, a history event fc or r runs, and the code autoload, zmodload and enable -f load
+const RUNS_TEXT = new Set([
+  ".",
+  "alias",
+  "autoload",
+  "emulate",
+  "enable",
+  "eval",
+  "fc",
+  "mapfile",
+  "r",
+  "readarray",
+  "sched",
+  "source",
+  "trap",
+  "zmodload",
+  "zregexparse",
+  "zstyle",
+])
 // the tests whose -v reads its operand as a name, evaluating any subscript it holds; test and [ take their operators after expansion, so a word that expands may be a -v or split into one and its operand, while [[ reads its operators as written
 const TESTS = new Set(["[", "[[", "test"])
 // the -v operand that names no subscript: a plain unquoted name, as written
@@ -386,14 +490,14 @@ const OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"])
 const CLOSES = new Set(["done", "esac", "fi", "}"])
 const LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"])
 
-// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs eval or source, sets a variable by a name the hook cannot read whole (a name-indirection assignment, a bash nameref, an integer attribute or text the shell evaluates among them), or names IFS, holds none, and holdable() is the rest of the allow-list
+// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs text or loads code in its own shell (a RUNS_TEXT builtin, or a command whose name the hook cannot read, which may be any of them or a builtin that sets a variable), sets a variable by a name the hook cannot read whole (a name-indirection assignment, a bash nameref, an integer attribute or text the shell evaluates among them), or names IFS, holds none, and holdable() is the rest of the allow-list
 export function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Steady {
   if (named.blind || named.counts.has("IFS")) return () => NONE
   const counts = new Map(named.counts)
   const parses = commands.map((cmd) => parse(cmd))
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at]
-    if (RUNS_TEXT.has(name)) return () => NONE
+    if (RUNS_TEXT.has(name) || marked(name)) return () => NONE
     const flagged = (letters: RegExp) =>
       cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value))
     if (NUMERIC.has(name) || (TYPESETS.has(name) && flagged(/[EFin]/))) return () => NONE
@@ -444,7 +548,9 @@ export function steadyNames(named: Namings, commands: Command[]): (cmd: Command)
     const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&"
     if (!top || cmd.detached || (!always && cmd.follows !== "&&")) continue
     const [first] = cmd.words
+    // an array assignment (`a=(…)`) makes several words of its name, never one value
     if (!first || !ASSIGN.test(first.value) || parses[at].name !== "") continue
+    if (/^[A-Za-z_]\w*\+?=\(/.test(first.value)) continue
     for (const key of parses[at].local.keys())
       if (holdable(key, named, counts)) set.set(key, always ? { at } : { at, chain })
   }

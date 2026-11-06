@@ -37,6 +37,7 @@ import {
   type Visit,
   withDeadline,
   type Word,
+  zshSplits,
 } from "./shell"
 import { held, heldWord, namings, NONE, type Steady, steadyNames, unquoted } from "./steady"
 
@@ -96,13 +97,52 @@ const GIT_READS = new Set([
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
+// The removers whose macOS build stops reading options at the first operand, as getopt does, or reads none but a leading -- (unlink), so a later dashed word is an operand
+const GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"])
+// rsync's options that write the path given as their value, read by any prefix since macOS's openrsync takes a shortened long name: its backup, partial and temp folders, its log file and its batch files
+const RSYNC_PATHS = [
+  "backup-dir",
+  "log-file",
+  "only-write-batch",
+  "partial-dir",
+  "temp-dir",
+  "write-batch",
+]
+// rsync's flags whose exact name is a prefix of a path option, which both builds read as the flag
+const RSYNC_FLAGS = new Set(["backup", "partial"])
+// rsync's -T, its temp folder, in a short cluster whose earlier letters take no value (-B, -e, -f, -M and -@ do)
+const RSYNC_TEMP = /^-[^-@BefMT]*T/
+// Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
+const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
+// Homebrew's GNU coreutils under their g prefix (gcp, grm), each read as the remover or writer it names
+const GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/
+// A writer's options that take a value rather than name a target, by short letter (`gnu` for a GNU build alone, `bsd` for macOS's alone) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner, strip program, and macOS's destdir, hash, link flags, metalog and tags, mkdir's mode, mv's suffix, touch's adjustment, date, reference file and stamp; cp's, install's, ln's and mv's -t names their target folder, and macOS install's -M its metalog, read apart
+const WRITER_TAKES: Record<
+  string,
+  { bsd?: string; flags?: string[]; gnu?: string; long: string[]; short: string }
+> = {
+  cp: { gnu: "S", long: ["no-preserve", "sparse", "suffix"], short: "" },
+  install: {
+    bsd: "BDfhlMT",
+    flags: ["strip"],
+    gnu: "S",
+    long: ["group", "mode", "owner", "strip-program", "suffix"],
+    short: "gmo",
+  },
+  ln: { gnu: "S", long: ["suffix"], short: "" },
+  mkdir: { long: ["mode"], short: "m" },
+  mv: { gnu: "S", long: ["suffix"], short: "" },
+  touch: { long: ["date", "reference", "time"], short: "Adrt" },
+}
 const DUPLICATE = /^(?:\d+|-)$/
 // Whether a redirect writes a file: >, >>, >|, <> or >& to a name, not an fd
 const writer = ({ op, target }: { op: string; target?: Word }): boolean =>
   [">", ">>", ">|", "<>"].includes(op) || (op === ">&" && !DUPLICATE.test(target?.value ?? ""))
 const GLOB = /[*?[{(]/
-// Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
-const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
+// Variables that make git or a pager run a program, or point git at a config file that can, so a reader with one set is judged as any other program.
+const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/
+// git's variables that only name an author or a committer, text git never runs
+const GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
 
 // Whether a scope's variables set one that makes git or a pager run a program, each name read once.
@@ -180,6 +220,100 @@ function gitConfigs(args: Word[]): Word[] {
   return configs
 }
 
+// A word past the literal prefix a writer reads its target after (`of=`, `-t`, `--target-directory=`), its raw text cut alike so held() reads the rest; with no raw text that opens with the prefix, an unread rest stays unheld
+const after = (word: Word, cut: number): Word => ({
+  ...word,
+  raw: word.raw?.startsWith(word.value.slice(0, cut)) ? word.raw.slice(cut) : undefined,
+  value: word.value.slice(cut),
+})
+
+// Whether the shell may split a word into several: always for a substitution or a pasted value, and for a parameter where the shell splits one (`Word.splits` in shell.ts)
+const splitIn = (word: Word, splitting = false): boolean =>
+  word.splits === "always" || (word.splits === "sh" && splitting)
+
+// The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install, ln and mv (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch; and every word the shell may split (`Word.splits`), since one of its words may land as a target
+function writeTargets(
+  name: string,
+  args: Word[],
+  gnu: boolean,
+  posix = false,
+  splitting = false,
+): Word[] {
+  const splits = args.filter((word) => splitIn(word, splitting))
+  if (name === "dd")
+    return [
+      ...new Set([
+        ...args.flatMap((word) =>
+          word.value.startsWith("of=")
+            ? [after(word, 3)]
+            : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value)
+              ? [word]
+              : [],
+        ),
+        ...splits,
+      ]),
+    ]
+  const into = name === "cp" || name === "install" || name === "ln" || name === "mv"
+  const takes = WRITER_TAKES[name]
+  const operands: Word[] = []
+  let folder: Word | undefined
+  let folders = false
+  // GNU's cp, install, ln and mv read an unread word before `--` that expands to -t<folder> as their target folder
+  const maybe: Word[] = []
+  // the file macOS's install writes its metalog to
+  const logs: Word[] = []
+  for (let k = 0, options = true; k < args.length; k++) {
+    const word = args[k]
+    const { value } = word
+    if (into && gnu && options && marked(value)) maybe.push(word)
+    if (!options || value === "-" || !value.startsWith("-")) {
+      operands.push(word)
+      // macOS's getopt stops at the first operand, as GNU's does under POSIXLY_CORRECT, so a later dashed word is an operand
+      if (!gnu || posix) options = false
+    } else if (value === "--") options = false
+    else if (value.startsWith("--")) {
+      // a long option GNU reads by any prefix, its value attached after = or as the next word
+      const [, long, attached] = /^--([^=]*)(=?)/.exec(value) ?? []
+      if (into && "target-directory".startsWith(long))
+        folder = attached ? after(word, long.length + 3) : args[++k]
+      else if (name === "install" && "directory".startsWith(long)) folders = true
+      else if (
+        !attached &&
+        !takes?.flags?.includes(long) &&
+        takes?.long.some((take) => take.startsWith(long))
+      )
+        k++
+    } else
+      // a short cluster read letter by letter up to the first that takes a value, whose value is the cluster's rest or else the next word
+      for (let i = 1; i < value.length; i++) {
+        const letter = value[i]
+        if (name === "install" && letter === "d") folders = true
+        else if (into && letter === "t") {
+          folder = i + 1 < value.length ? after(word, i + 1) : args[++k]
+          break
+        } else if (
+          takes?.short.includes(letter) ||
+          (gnu ? takes?.gnu : takes?.bsd)?.includes(letter)
+        ) {
+          const rest = i + 1 < value.length
+          if (!gnu && name === "install" && letter === "M") {
+            const log = rest ? after(word, i + 1) : args[k + 1]
+            if (log) logs.push(log)
+          }
+          if (!rest) k++
+          break
+        }
+      }
+  }
+  // ln's lone operand links into the shell's folder, unless the shell splits it into more operands
+  if (name === "ln" && !folder && operands.length === 1)
+    return [{ quoted: false, value: "." }, ...splits]
+  const targets = into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
+  // macOS's cp, ln and mv take no target option and write to their last operand, so a split word moves no target there
+  const moved = into && !gnu && name !== "install" ? [] : splits
+  return [...new Set([...targets, ...maybe, ...logs, ...moved])]
+}
+
 // The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from.
 export const GUARD_KEYS = new Set([
   "ext.links",
@@ -211,7 +345,7 @@ function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   tick()
   if (marked(word.value) || word.value.startsWith("-")) return false
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir } as Env))
-  if (program(word.value).toLowerCase() === "playground")
+  if (program(word.value) === "playground")
     return (
       !word.value.includes("/") ||
       !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory())
@@ -299,7 +433,7 @@ function awkPrograms(words: Word[]): Word[] | undefined {
 
 // The lines an awk program runs, read whatever the line: each string literal of a program that can run a command or write a file
 function programLines({ args, first }: Parsed, rooted: boolean): string[] {
-  if (!AWKS.has(program(first?.value ?? "").toLowerCase())) return []
+  if (!AWKS.has(program(first?.value ?? ""))) return []
   return (awkPrograms(args) ?? [])
     .filter(({ value }) => rooted || awkRuns(value))
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
@@ -412,7 +546,7 @@ function narrow(cmd: Command, env: Env): boolean {
     )
   }
   if (!ownProgram(cmd, parsed)) return false
-  const base = program(first.value).toLowerCase()
+  const base = program(first.value)
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))
@@ -680,6 +814,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
+  // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
+  const placed = (word: Word, env: Env, steady: Steady) =>
+    pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined
+  const afterUnreadCd = (write: string) =>
+    `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`
   const seen = new Set<string>()
   let steadyAt: (cmd: Command) => Steady = () => NONE
   let whole = false
@@ -725,6 +864,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       return refuse(
         `a write to ${blind.target.value} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`,
       )
+    // after a cd to a folder the hook cannot read (`Env.cwdUnread`), the shell may be in the root, so a writing redirect the hook can place only by the shell's own folder is refused
+    const unplaced = env.cwdUnread
+      ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd)))
+      : undefined
+    if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
@@ -760,7 +904,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
-      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
+      // a runner the hook cannot name may hand the line to sh, which splits its parameters
+      const verdict = await run(
+        lex(line, env.known),
+        { ...env, splits: true, vars: new Map() },
+        visit,
+        true,
+      )
       if (verdict) return verdict
     }
     // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
@@ -777,7 +927,12 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
     const verb = name && !marked(name) ? name : "a program it cannot read"
-    const remover = REMOVERS.has(name)
+    // a GNU build named by its g prefix or reached by its gnubin path reads as the tool it builds, with GNU's options
+    const tool = GNU_NAMED.exec(name)?.[1] ?? name
+    const gnu = tool !== name || first.value.includes("/gnubin/")
+    const remover = REMOVERS.has(tool)
+    // POSIXLY_CORRECT set in the call, by a prefix or on its line, makes a GNU build stop its options at the first operand
+    const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"))
     // a line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run inside this root, whatever folder it started in
     if (env.cwdAnywhere)
       return refuse(
@@ -791,17 +946,44 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (inRoot(here.cwd)) return refuse(`${verb} run inside ${root}`)
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`)
-      // a value the hook cannot read under a remover, or in git's -c, could name the root, so it is refused unless the call holds it
-      const unheld = remover ? args.find((word) => !held(word, here, steady)) : undefined
+      // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
+      const unheld = (
+        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, here.splits) : []
+      ).find((word) => !held(word, here, steady))
       if (unheld)
         return refuse(
-          `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
+          splitIn(unheld, here.splits)
+            ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally`
+            : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
         )
       if (name === "git") {
         const config = gitConfigs(args).find((word) => marked(word.value))
         if (config)
           return refuse(
             `git ${/^-c./.test(config.raw ?? config.value) ? "" : "-c "}${shown(config)}, a value built from a variable or a substitution; write the value literally in the call`,
+          )
+        // git takes --config-env's value from a variable, and a git variable other than an author's or a committer's, or a pager or editor variable, can make git run a program or write, so either from a value the hook does not hold is refused
+        const { rest } = gitCall(args, here)
+        const fromEnv = args
+          .slice(0, args.length - rest.length - 1)
+          .find((word) => /^--config-env(?:=|$)/.test(word.value))
+        if (fromEnv)
+          return refuse(
+            `git ${shown(fromEnv)}, which takes a config value from a variable the hook cannot read; write the value literally with git -c`,
+          )
+        const scoped = runsVariable(here.vars) ? [...here.vars] : []
+        const variable = [
+          ...parsed.local,
+          ...scoped.filter(([key]) => !parsed.local.has(key)),
+        ].find(
+          ([key, value]) =>
+            RUNS.test(key) &&
+            !GIT_TEXT.test(key) &&
+            !held({ ...value, quoted: false }, here, steady),
+        )
+        if (variable)
+          return refuse(
+            `git with ${variable[0]} set to a value the hook does not hold, which git may run or read as config; write the value literally in the call`,
           )
       }
       const scope = since(varsJudged, here.vars, `${here.cwd}\0${remover}`)
@@ -834,6 +1016,47 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         if (named) return refuse(`${verb} under xargs on ${named}`)
       }
     }
+    // after a cd the hook cannot read, a remover's operand or a writer's target the hook can place only by the shell's own folder may be in the root
+    const end = args.findIndex((word) => word.value === "--")
+    // a dash with more after it is an option, while a lone dash is an operand
+    const option = (word: Word) => /^-./.test(word.value)
+    // macOS unlink reads no option but a leading --
+    const stop =
+      !GETOPT_REMOVERS.has(tool) || (gnu && !posix)
+        ? -1
+        : tool === "unlink" && !gnu
+          ? Number(args[0]?.value === "--")
+          : args.findIndex((word) => !option(word))
+    // mv's -t folder and rsync's path values are written to, though their word opens with a dash
+    const values =
+      tool === "mv"
+        ? writeTargets(tool, args, gnu, posix, env.splits)
+        : tool === "rsync"
+          ? args.flatMap((word, k) => {
+              const long = /^--([^=]+)=?/.exec(word.value)
+              const path =
+                long &&
+                !RSYNC_FLAGS.has(long[1]) &&
+                RSYNC_PATHS.some((name) => name.startsWith(long[1]))
+              const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length
+              if (!cut) return []
+              // with no value attached, the option takes the next word, a dash-led one too
+              if (cut < word.value.length) return [after(word, cut)]
+              return args[k + 1] ? [args[k + 1]] : []
+            })
+          : []
+    const operands = remover
+      ? [
+          ...args.filter(
+            (word, k) => (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !option(word),
+          ),
+          ...values,
+        ]
+      : WRITERS.has(tool)
+        ? writeTargets(tool, args, gnu, posix, env.splits)
+        : []
+    const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
+    if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
   }
   const named = namings(command)
   const known = knownVariables(command, environment, directory)
@@ -850,6 +1073,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
     process: environment,
+    splits: zshSplits(command),
     vars: new Map(),
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
