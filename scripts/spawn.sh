@@ -797,6 +797,7 @@ TITLE_ARG=
 IN_DIR=
 CHECK=
 FIREFIGHTING=
+NAME_PROJECT=
 SIZE=
 RUNTIME=
 words=()
@@ -1209,12 +1210,8 @@ case "$MODE" in
         refuse "$DIR is the main checkout, and $NAME ran in ${ran:-another folder}: $back"
       fi
     fi
-    # With no id, Claude's resume picker looks the name up only in the transcripts of the folder it starts in (its project folder, named from the folder's real path), so in a folder the session never ran in it finds nothing and the launch waits out its timeout.
-    if [ $# -eq 2 ]; then
-      project=$(project_of "$(cd -P "$DIR" && pwd -P)")
-      grep -l -m 1 -F -e "\"customTitle\":\"$NAME\"" -e "\"agentName\":\"$NAME\"" "$project"/*.jsonl > /dev/null 2>&1 ||
-        refuse "no session named $NAME ran in $DIR, so Claude's resume picker would find nothing there: pass its session id, or resume it in the folder it ran in"
-    fi
+    # With no id, the folder's project folder, whose transcripts the name check after the capacity gate reads.
+    [ $# -ne 2 ] || NAME_PROJECT=$(project_of "$(cd -P "$DIR" && pwd -P)")
     ;;
   *) NAME=${MODE:-session}; usage ;;
 esac
@@ -1395,6 +1392,12 @@ PY
     refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
 fi
 gate_capacity
+# With no id, Claude's resume picker looks the name up only in the transcripts of the folder it starts in (its project folder, named from the folder's real path), so in a folder the session never ran in it finds nothing and the launch waits out its timeout.
+# The check reads every transcript there (4.1 GB in the main checkout's on 6 Nov), so it runs past the gate, and a refused resume retried every 30 s reads none.
+if [ -n "$NAME_PROJECT" ]; then
+  grep -l -m 1 -F -e "\"customTitle\":\"$NAME\"" -e "\"agentName\":\"$NAME\"" "$NAME_PROJECT"/*.jsonl > /dev/null 2>&1 ||
+    refuse "no session named $NAME ran in $DIR, so Claude's resume picker would find nothing there: pass its session id, or resume it in the folder it ran in"
+fi
 if [ "$RUNTIME" = herdr ]; then
   # herdr names an agent by [a-z][a-z0-9_-]{0,31}, so a longer name could never name the session's agent there.
   [ "${#NAME}" -le 32 ] || refuse "herdr names an agent with at most 32 characters, and $NAME has ${#NAME}"

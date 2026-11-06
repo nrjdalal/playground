@@ -15,6 +15,7 @@ import { dirname, join } from "node:path"
 
 import {
   bin,
+  capacityLog,
   execLine,
   herdrPin,
   launchAfterRm,
@@ -779,6 +780,63 @@ describe("a resume with no id finds its session by name in its folder (#1201)", 
       ranIn(join(home, ".claude"), root, "worker-x"),
     )
     expect(r.code).toBe(0)
+  })
+
+  // The name check reads every transcript in the folder's project (4.1 GB in the main checkout's on 6 Nov), so a resume the gate refuses must not pay for it: a lead retrying a refused resume would feed the load the gate waits on.
+  const scans = (r: { home: string }) => {
+    const log = join(r.home, "grep.calls")
+    return existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []
+  }
+  const ranHere = (home: string) => ranIn(join(home, ".claude"), root, "worker-x")
+
+  test.each([
+    ["load", { FAKE_LOAD1: "40.00", FAKE_LOAD5: "40.00" }, "max(load1, load5) is 40.00"],
+    ["memory", { FAKE_PRESSURE: "4" }, "pressure level is 4"],
+    ["usage", { USAGE_JSON: "{ nope" }, "usage.json (does not read)"],
+  ])("a resume the %s gate refuses reads no transcript of the folder", async (gate, env, said) => {
+    const r = await spawn(
+      ["resume", "worker-x", root],
+      [],
+      { ...NONE, ...env },
+      undefined,
+      claude,
+      ranHere,
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(said)
+    expect(capacityLog(r)).toEqual([expect.objectContaining({ gate, verdict: "refused" })])
+    expect(scans(r)).toEqual([])
+    expect(r.cmux).toBeUndefined()
+  })
+
+  test("a resume past the gate reads the folder's transcripts once, and --check still refuses a folder it never ran in", async () => {
+    const passed = await spawn(["resume", "worker-x", root], [], NONE, undefined, claude, ranHere)
+    expect(passed.code).toBe(0)
+    expect(scans(passed)).toEqual([expect.stringContaining(`/projects/${projectOf(root)}/`)])
+    const checked = await spawn(
+      ["resume", "worker-x", root, "--check"],
+      [],
+      NONE,
+      undefined,
+      claude,
+    )
+    expect(checked.code).toBe(1)
+    expect(checked.err).toContain(`no session named worker-x ran in ${root}`)
+    expect(checked.out).not.toContain("can start")
+    expect(scans(checked)).toHaveLength(1)
+  })
+
+  test("a live session holding the name refuses before the folder's transcripts are read, with the live session's exit 3", async () => {
+    const r = await spawn(
+      ["resume", "worker-x", root],
+      [{ name: "worker-x", pid: 5002 }],
+      NONE,
+      undefined,
+      claude,
+    )
+    expect(r.code).toBe(3)
+    expect(r.err).toContain("a live session already holds the name worker-x (pid 5002)")
+    expect(scans(r)).toEqual([])
   })
 })
 
