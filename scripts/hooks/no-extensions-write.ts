@@ -832,7 +832,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           `${name} inside env -S's string, which the hook reads as find or xargs only as a word of its own; run it without env -S`,
         )
       const { words } = cmd
-      const value = first.value.replace(/g(find|xargs)$/, "$1")
+      const value = first.value.replace(/g(find|xargs)$/i, "$1")
       cmd.words = words.map((word) => (word === first ? { ...word, value } : word))
       try {
         return await examine(cmd, env, visit, false)
