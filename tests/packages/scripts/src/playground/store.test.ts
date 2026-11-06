@@ -450,19 +450,19 @@ describe("playground ext", () => {
       JSON.parse(
         (await ext(at, ["put", "tester", "doc", "notes", "-", "--reason", "r"], body, role)).out,
       ) as { rev: string; state: string }
-    const first = await put("accepted\n")
+    const first = await put("accepted")
     const accept = await ext(at, ["accept", "tester", "doc", "notes", first.rev, "--reason", "r"])
     const accepted = { rev: accept.out.split(" ")[1]!, state: accept.out.split(" ").at(-1) }
-    const proposed = await put("proposed\n", "worker")
+    const proposed = await put("proposed", "worker")
     expect([accepted.state, proposed.state]).toEqual(["accepted", "proposed"])
     const show = async (rev: string) =>
       JSON.parse((await ext(at, ["show", "tester", "doc", "notes", "--rev", rev])).out)
     expect(await show(proposed.rev)).toMatchObject({
-      content: { body: "proposed\n" },
+      content: { body: "proposed" },
       state: "proposed",
     })
     expect(await show(accepted.rev)).toMatchObject({
-      content: { body: "accepted\n" },
+      content: { body: "accepted" },
       state: "accepted",
     })
   })
