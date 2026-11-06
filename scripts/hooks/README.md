@@ -12,8 +12,11 @@ An option missing from that list is read both as a flag and as taking the next w
 A hook that calls `parse` itself (no-desktop-owner-app's shell scan, no-false-green, no-kill-by-name's xargs read, and `shell.ts`'s read of a substitution's output) takes the first reading, the flag and the one word, as canary read them.
 A command's parse makes at most 16 other readings (`READINGS`), so a call holding many such options is read in bounded time; past them, an option is read as a flag alone, as canary read it.
 Only the first reading moves the folder, sets variables and records files for the commands after it; each other reading runs on its own copy of them, taken before the command.
-A command's stdin is the text its input redirects leave on fd 0, applied left to right, a `<&N` taking whatever last fed descriptor N (`3<<< '…' <&3`), and a brace group's, a subshell's or a loop's stdin redirect is the stdin of each command in its body that has no pipe or redirect of its own (`{ sh; } <<< '…'`).
-A here-string's `$(echo …)` of words it can read is those words, and a here-string of one variable the line set earlier (`S='…'; sh <<< "$S"`) is that variable's value; text reached any of these ways is `inferred`, which [no-extensions-write](#no-extensions-write) and [no-main-checkout](#no-main-checkout) refuse as a root shell's script they cannot read, as they refused it before.
+Every hook reads a command's stdin through `stdinOf`: the last file, here-string, heredoc or process substitution on fd 0 of its own, else its pipe, else text it cannot read, so a hook that refuses stdin it cannot read keeps that refusal.
+A script a shell reads from stdin (`scriptStdin`: a shell's or a source's, a root shell's in [no-raw-delete](#no-raw-delete), code a pipe feeds) is judged under that reading and the shell's own, joined.
+The shell's own reading applies the input redirects left to right, a duplicate onto fd 0 (`<&N`, `0>&N`, `<&N-`) taking whatever last fed descriptor N (`3<<< '…' <&3`), and a brace group's, a subshell's or a loop's input redirects before each body command's own (`{ sh; } <<< '…'`).
+It reads a here-string's `$(echo …)` of words it can read as those words, zsh's `\n` a line break and any other backslash unread, and a here-string of one variable the line set earlier (`S='…'; sh <<< "$S"`) as that variable's value.
+It follows no descriptor an `exec` feeds, which it reads as unfed, and no variable set other than by a plain assignment, which it reads as that assignment's value.
 
 ## Registered in both settings files
 
@@ -281,7 +284,7 @@ A here-string's `$(echo …)` of words it can read is those words, and a here-st
   A long option's unambiguous prefix counts as that option, as sudo's getopt_long reads it (`--sh`, `--lo`), while sudo itself refuses the ambiguous `--s` and `--l`.
   The root shell is looked for under each reading of the wrapper's options (above); once the parse runs out of readings, any sudo, doas, pkexec or su among the command's words counts as a root shell and any shell's name as a shell.
   Every spaced text of every program on such a line, each `\n`-separated part of it and an awk program's strings are read as command lines.
-  A root shell's stdin is read as its script, and one the hook cannot read (a download, a file it cannot see, a bare `sudo -s`) or reaches only as `inferred` text (this file's opening) is refused: run its commands as calls of their own.
+  A root shell's stdin is read as its script, and one the hook cannot read (a download, a file it cannot see, a bare `sudo -s`, one only the shell's own reading reaches, this file's opening) is refused: run its commands as calls of their own.
   For any program but a reader, each text that holds a space (a word, the value after its `=`, an option's attached value, a variable the call sets or exports) is judged as a command line of its own, a leading `!` dropped, since a program may run it (`watch`, `tmux`, `ssh -o ProxyCommand`, `rsync -e`, a git alias, a pager).
   A value it cannot read (a variable, a substitution) is lexed again with the steady variables the call has set by then, an assignment naming an earlier one included (`S=/tmp/a; T="$S/b"`), and judged as written;
   under a remover (`find`, `mv`, `rm`, `rmdir`, `rsync`, `unlink`) one still unread is refused, so hold it in the same call or write it literally, and git's `-c` takes a literal value alone, refusing any variable or substitution, held or not, but the `HOME`, `TMPDIR` and `PWD` the hook reads from the call's environment.
@@ -563,7 +566,7 @@ A here-string's `$(echo …)` of words it can read is those words, and a here-st
   and the refusal names the fix, naming the folder (`git -C <your worktree>`, `bun --cwd <your worktree>`) or a `cd` to a literal path that is there.
   So a line that starts in a worktree is refused too where a `cd` of its own may reach the main checkout, and one that starts in the main checkout runs where every folder its `cd` steps may reach is a worktree.
   It reads the command a pipeline feeds as code, the set [no-extensions-write](#no-extensions-write) names (`<reader> | sh`, `<reader> | eval "$(cat)"`, `<reader> | while read l; do eval $l; done`, a loop's output piped into one), as the shell's own command line:
-  a script it cannot read, or reaches only as `inferred` text (this file's opening), is refused where that shell may run in the main checkout.
+  a script it cannot read, one only the shell's own reading reaches (this file's opening) included, is refused where that shell may run in the main checkout.
   It reads the script a here-string, a heredoc, a file or a process substitution feeds a shell (`sudo -s <<< '<command>'`, `sh <<EOF`, `sudo -s < <(<reader>)`) the same way.
   A pipe into an interpreter there is refused from the main checkout whatever it carries, since the hook reads no other language, while one that runs a script file or a module of its own past options its family's table names (`| node x.js`, `| python3 -m json.tool`) runs, that file's text being outside the line.
   For bun and deno that file is a JavaScript or TypeScript name, since they run a bare name off PATH (`| bun run sh`).

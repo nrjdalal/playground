@@ -301,7 +301,6 @@ var ROOT_SHELLS = new Map([
 var BARE_ROOT = new Set(["pkexec"]);
 var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
 var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
-var BODY_FED = new WeakSet;
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
@@ -656,9 +655,10 @@ function walk(lx, scope, nested, inherit) {
         lx.i++;
       const [, fd] = redirect;
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1");
+      const outer = lx.hereString;
       lx.hereString = op === "<<<";
       const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx);
-      lx.hereString = false;
+      lx.hereString = outer;
       const entry = { fd, op, target };
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -933,9 +933,11 @@ function substituted(inner, known, here = false) {
   if (only.words.length === 0 && only.redirects.length === 1 && input.op === "<" && input.target) {
     return { reads: [input.target], value: READ };
   }
-  const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value));
+  const printed = args.map((w) => w.value.replaceAll("\\n", `
+`));
+  const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value)) && printed.every((v) => !v.includes("\\"));
   if (here && first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
-    return { inferred: "a command substitution", value: args.map((w) => w.value).join(" ") };
+    return { inferred: "a command substitution", value: printed.join(" ") };
   return unknown("a command substitution");
 }
 var MKTEMP_FLAGS = new Set(["d", "q"]);

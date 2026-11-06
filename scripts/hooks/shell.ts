@@ -4,7 +4,7 @@ import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 // `tilde` marks a word that opens with an unquoted ~- or ~+, which zsh expands to the folder it last left or the one it is in.
-// `inferred` names how the reader worked out a text canary's reader could not read (a substitution's echo, a variable the line set, a duplicated descriptor, a compound command's redirect), so a hook that refuses a root shell's unreadable script keeps that refusal.
+// `inferred` marks a here-string's echo substitution read as its words, which stdinOf, the reading every hook takes as stdin, still takes as unknown; only scriptStdin reads it.
 export type Text = {
   inferred?: string
   reads?: Text[]
@@ -23,7 +23,8 @@ export type Word = Text & {
   raw?: string
   source?: string
 }
-type Redirect = { body?: Text; fd: string; op: string; target?: Word }
+// `bodyFed` is the compound command's input redirect this one is run()'s copy of, on a command in its body, which stdinOf passes over
+type Redirect = { body?: Text; bodyFed?: Redirect; fd: string; op: string; target?: Word }
 export type Command = {
   // Set on a while's or an until's condition outside every other loop, and on the script an eval or a source there reads, which the shell runs at least once: a cd there leaves the folder before it behind, as a sure cd does, while `repeated` reads each later pass
   atLeastOnce?: boolean
@@ -539,30 +540,35 @@ export function codeFed(commands: Command[]): Map<Command, Fed> {
   return fed
 }
 
-// The stdin redirects run() copied from a compound command onto its body, which stdinText marks as text canary's reader could not reach
-const BODY_FED = new WeakSet<Redirect>()
-
-// A compound command's stdin redirect (`{ sh; } <<< x`, `( sh ) < f`, `while read l; do sh; done <<< x`) is the stdin of every command in its body that has none of its own, a pipe or a redirect, as the shell runs them; the last close is read first, so an outer one reaches an inner one's body too
+// A compound command's input redirects (`{ sh; } <<< x`, `( sh ) < f`, `while read l; do sh; done <<< x`, `{ sh <&3; } 3<<< x`) apply to every command in its body before that command's own, as the shell runs them, a pipe into one keeping its stdin; the last close is read first, so an outer one reaches an inner one's body too
 function feedBodies(commands: Command[]): void {
   for (let k = commands.length - 1; k >= 0; k--) {
     const close = commands[k]
-    const input = stdinRedirect(close)
-    if (!input) continue
+    const inputs = close.redirects.filter((r) => r.op.startsWith("<") || dupOnto0(r))
+    if (inputs.length === 0) continue
     const body = close.inner
       ? close.inner()
       : CLOSES.has(markers(close.words)[0] ?? "")
-        ? opened(commands, k)
+        ? bodyOf(commands, k)
         : []
+    const fed = inputs.map((r) => ({ ...r, bodyFed: r.bodyFed ?? r }))
+    const origins = new Set(fed.map((r) => r.bodyFed))
     for (const cmd of body) {
-      if (cmd === close || cmd.stdin || stdinRedirect(cmd)) continue
-      cmd.redirects.push(input)
-      BODY_FED.add(input)
+      if (cmd === close) continue
+      // the group's redirects apply before the command's own, so its own stdin, a pipe included, wins; an outer group's copy already there gives way to the inner group's, which carries it first
+      const own = cmd.redirects.filter((r) => !r.bodyFed || !origins.has(r.bodyFed))
+      cmd.redirects.splice(
+        0,
+        cmd.redirects.length,
+        ...(cmd.stdin ? fed.filter((r) => fdOf(r) !== "0") : fed),
+        ...own,
+      )
     }
   }
 }
 
-// The commands from the one that opens the body a closing word at k ends, up to k, by the reserved words in command position
-function opened(commands: Command[], k: number): Command[] {
+// The body a closing word at k ends: the commands from the one that opens it up to k, by the reserved words in command position
+function bodyOf(commands: Command[], k: number): Command[] {
   let depth = 0
   for (let j = k; j >= 0; j--) {
     for (const m of markers(commands[j].words)) depth += CLOSES.has(m) ? 1 : OPENS.has(m) ? -1 : 0
@@ -992,9 +998,10 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       const [, fd] = redirect
       // zsh's >!, >>! and >&! override noclobber as >| does
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1")
+      const outer = lx.hereString
       lx.hereString = op === "<<<"
       const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx)
-      lx.hereString = false
+      lx.hereString = outer
       const entry: Redirect = { fd, op, target }
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -1281,8 +1288,11 @@ function substituted(inner: Command[], known: Record<string, string>, here = fal
   if (only.words.length === 0 && only.redirects.length === 1 && input.op === "<" && input.target) {
     return { reads: [input.target], value: READ }
   }
-  // `$(echo …)` prints its words joined by spaces, when none is an option or a part it cannot read
-  const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value))
+  // `$(echo …)` prints its words joined by spaces, when none is an option or a part it cannot read; zsh's echo reads a `\n` as a line break, and any other backslash as an escape it leaves unread
+  const printed = args.map((w) => w.value.replaceAll("\\n", "\n"))
+  const words =
+    args.every((w) => !w.unknown && !w.glob && !marked(w.value)) &&
+    printed.every((v) => !v.includes("\\"))
   if (
     here &&
     first?.value === "echo" &&
@@ -1291,7 +1301,7 @@ function substituted(inner: Command[], known: Record<string, string>, here = fal
     words &&
     !args[0]?.value.startsWith("-")
   )
-    return { inferred: "a command substitution", value: args.map((w) => w.value).join(" ") }
+    return { inferred: "a command substitution", value: printed.join(" ") }
   return unknown("a command substitution")
 }
 
@@ -1548,7 +1558,7 @@ export async function examine(
   }
   // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already
   if (!cmd.runsStdin || stdinScript(primary)) return
-  const script = await stdinOf(cmd, env)
+  const script = await scriptStdin(cmd, env)
   return nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins))
 }
 
@@ -2026,7 +2036,7 @@ export const known = (script: Text): string => script.value.replaceAll(UNKNOWN, 
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text> {
   const script =
     !operand || STDIN_PATHS.has(operand.value)
-      ? await stdinOf(cmd, env)
+      ? await scriptStdin(cmd, env)
       : operand.procs
         ? await outputs(operand.procs, env)
         : unknown("a script file")
@@ -2127,51 +2137,69 @@ function printf([format = "", ...args]: string[]): string {
   }
 }
 
+// A command's stdin as every hook reads it: the last file, here-string, heredoc or process substitution on fd 0 of its own, else its pipe, else unknown; a duplicated descriptor, a compound command's redirect, a here-string's echo or one variable the line set stay unknown here, so a hook that refuses stdin it cannot read keeps that refusal
 export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
   tick()
-  return held(await stdinText(cmd, env))
+  const input = cmd.redirects.findLast((r) => !r.bodyFed && ownFeed(r))
+  if (!input)
+    return held(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see"))
+  const text = await redirectText(input, env, false)
+  return held(text.inferred ? unknown(text.inferred) : text)
 }
 
-// The redirect whose text reaches a command's stdin, its input redirects applied left to right as the shell applies them: a file, a here-string, a heredoc or a process substitution on fd 0, or through a `<&N` the one that last fed descriptor N (`3<<< x <&3`), none after a `<&-` or a descriptor it cannot read
+// A script a shell reads from stdin: stdinOf's reading and, where it differs, the one stdinRedirect applies left to right, each part it cannot read a line break, so a delete either reading finds is judged; unknown only when stdinOf's is
+export async function scriptStdin(cmd: Command, env: Env): Promise<Text> {
+  const own = await stdinOf(cmd, env)
+  tick()
+  const fed = held(await stdinText(cmd, env))
+  if (fed.unknown === LARGE) return fed
+  if (fed.value === own.value) return own
+  return { ...(own.unknown ? { unknown: own.unknown } : {}), value: `${known(own)}\n${known(fed)}` }
+}
+
+const ownFeed = ({ fd, op }: Redirect): boolean =>
+  (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&"
+
+// The redirect whose text reaches a command's stdin, its input redirects applied left to right as the shell applies them: a file, a here-string, a heredoc or a process substitution on fd 0, or through a duplicate onto fd 0 (`<&N`, `0>&N`, the move `<&N-`) the one that last fed descriptor N (`3<<< x <&3`), none after a `<&-` or a descriptor it cannot read
 function stdinRedirect(cmd: Command): Redirect | undefined {
   const fed = new Map<string, Redirect | undefined>()
   for (const r of cmd.redirects) {
-    if (!r.op.startsWith("<")) continue
-    const from = r.target?.value ?? ""
-    fed.set(
-      r.fd === "" ? "0" : r.fd,
-      r.op === "<&" ? (/^\d+$/.test(from) ? fed.get(from) : undefined) : r,
-    )
+    const dup = r.op === "<&" || dupOnto0(r)
+    if (!r.op.startsWith("<") && !dup) continue
+    const from = (r.target?.value ?? "").replace(/^(\d+)-$/, "$1")
+    fed.set(fdOf(r), dup ? (/^\d+$/.test(from) ? fed.get(from) : undefined) : r)
   }
   return fed.get("0")
 }
 
+const fdOf = (r: Redirect): string => (r.fd === "" ? (r.op.startsWith(">") ? "1" : "0") : r.fd)
+
+// `0>&N` duplicates N onto stdin, as `<&N` does
+const dupOnto0 = (r: Redirect): boolean => r.op === ">&" && r.fd === "0"
+
+// Whether a command's stdin is a redirect, by stdinOf's reading or stdinRedirect's
+export const stdinFed = (cmd: Command): boolean =>
+  stdinRedirect(cmd) !== undefined || cmd.redirects.some(ownFeed)
+
 // Whether a redirect feeds a root shell its script (`sudo -s <<< …`, `su < <(…)`), which run() hands every hook and leaves each to read
-export const rootFed = (cmd: Command): boolean =>
-  stdinRedirect(cmd) !== undefined && stdinShell(cmd) === "root"
+export const rootFed = (cmd: Command): boolean => stdinFed(cmd) && stdinShell(cmd) === "root"
 
 async function stdinText(cmd: Command, env: Env): Promise<Text> {
   const input = stdinRedirect(cmd)
   if (!input) return cmd.stdin ? outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see")
-  const text = await redirectText(input, env)
-  // text canary's reader could not reach: a redirect another descriptor or a compound command hands on
-  const how = BODY_FED.has(input)
-    ? "a compound command's redirect"
-    : input.fd !== "" && input.fd !== "0"
-      ? "a duplicated descriptor"
-      : undefined
-  return how && !text.unknown ? { ...text, inferred: text.inferred ?? how } : text
+  const text = await redirectText(input, env, true)
+  return text.inferred ? { ...text, inferred: undefined } : text
 }
 
-async function redirectText(input: Redirect, env: Env): Promise<Text> {
+async function redirectText(input: Redirect, env: Env, vars: boolean): Promise<Text> {
   if (input.target?.procs) return outputs(input.target.procs, env)
   if (input.op === "<" || input.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect")
   if (!input.body) return unknown("a heredoc the hook could not read")
   // a here-string of one variable the line set earlier (`S=x; sh <<< "$S"`) is that variable's value
-  const set = input.body.variable ? env.vars.get(input.body.variable) : undefined
+  const set = vars && input.body.variable ? env.vars.get(input.body.variable) : undefined
   if (input.body.unknown && input.body.value === `${UNKNOWN}\n` && set && !set.unknown)
-    return resolveText({ ...set, inferred: "a shell variable", value: `${set.value}\n` }, env)
+    return resolveText({ ...set, value: `${set.value}\n` }, env)
   return resolveText(input.body, env)
 }
 

@@ -20,6 +20,7 @@ import {
   readPath,
   rootFed,
   run,
+  scriptStdin,
   slotWords,
   stdinOf,
   UNKNOWN,
@@ -261,7 +262,7 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       if (verdict) return verdict
       // a root shell's here-string, heredoc, input file or process substitution is its script, which run() leaves to each hook; each part it cannot read is taken as a line break, so the rest is still judged, as the shared reader reads a plain shell's script
       if (rootFed(cmd)) {
-        const found = await line(known(await stdinOf(cmd, at)), at)
+        const found = await line(known(await scriptStdin(cmd, at)), at)
         if (found) return found
       }
       const pkg = packageOf(name, args)
