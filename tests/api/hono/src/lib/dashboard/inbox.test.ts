@@ -4920,7 +4920,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const atOrg = (data: string) =>
       readSetting(data, "slack.gatedSends")?.rows.filter((row) => row.scope === "acme-test")
     const approve = (id: string, seen: string | undefined, settings?: string) =>
-      store.answerItem(db, id, { action: "approve", seen }, { actor, settings })
+      store.answerItem(db, id, { action: "approve", seen }, { actor, settingsData: settings })
 
     test("writes the card's value at its scope as the owner's act, and records the line under set", async () => {
       const data = folder()
@@ -4936,7 +4936,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
             sent.push(delivery)
             return { at: "2026-11-06T03:00:00.000Z", ok: true, sessionId: "s1" }
           },
-          settings: data,
+          settingsData: data,
         },
       )
       expect(answered.ok && answered.item.status).toBe("approved")
@@ -5002,11 +5002,11 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { action: "deny", seen: denied.updatedAt },
         {
           actor,
-          settings: data,
+          settingsData: data,
         },
       )
       const set = await post(decision(GUARD))
-      await store.answerItem(db, set.id, { action: "clear" }, { actor, settings: data })
+      await store.answerItem(db, set.id, { action: "clear" }, { actor, settingsData: data })
       expect(atOrg(data)).toEqual([])
     })
 

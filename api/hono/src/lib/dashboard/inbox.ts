@@ -1381,7 +1381,7 @@ export async function answerItem(
     grant,
     now = new Date(),
     reveal,
-    settings,
+    settingsData,
     upload,
     wait,
   }: {
@@ -1393,7 +1393,7 @@ export async function answerItem(
     grant?: ArgvRun
     now?: Date
     reveal?: KeychainRead
-    settings?: string
+    settingsData?: string
   } & Pick<Sending, "upload" | "wait">,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
@@ -1444,7 +1444,7 @@ export async function answerItem(
           actor: "id" in actor ? actor.id : actor.label,
           apps,
           grant,
-          settings,
+          settingsData,
         })
       : undefined
   if (step && "refusal" in step)
@@ -1559,8 +1559,14 @@ function stepOf(
     actor,
     apps,
     grant,
-    settings,
-  }: { accept?: ExtRun; actor: string; apps?: OwnerApps; grant?: ArgvRun; settings?: string },
+    settingsData,
+  }: {
+    accept?: ExtRun
+    actor: string
+    apps?: OwnerApps
+    grant?: ArgvRun
+    settingsData?: string
+  },
 ):
   | { key: "accepted" | "listed" | "opened" | "set"; run: () => Promise<RunResult> }
   | { refusal: string }
@@ -1610,8 +1616,8 @@ function stepOf(
     }
   }
   if (preview.type === "guard") {
-    if (!settings) return { refusal: "This dashboard cannot write a guard setting" }
-    return { key: "set", run: async () => guardWrite(settings, preview, ref, actor) }
+    if (!settingsData) return { refusal: "This dashboard cannot write a guard setting" }
+    return { key: "set", run: async () => guardWrite(settingsData, preview, ref, actor) }
   }
   return undefined
 }

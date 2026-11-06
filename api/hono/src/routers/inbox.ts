@@ -179,7 +179,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         // a stack showing test data opens nothing on this Mac's screen
         grant: readsLive() ? runArgv : undefined,
         reveal: readFromKeychain(),
-        settings: dataDir(),
+        settingsData: dataDir(),
         upload: slackUpload(),
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
