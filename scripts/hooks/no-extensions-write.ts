@@ -306,12 +306,19 @@ function programLines({ args, first }: Parsed, rooted: boolean): string[] {
 }
 
 const SEDS = new Set(["gsed", "sed"])
+// Whether a word is read as written: no glob and no part the hook cannot read
+const literal = (w: Word) => !w.glob && !marked(w.value)
 // sed's options that write nothing and read no script from elsewhere: -n, -E, -r, -s, -u and -z, alone or clustered, and their long names
 const SED_FLAG =
   /^-[nErsuz]+$|^--(?:null-data|posix|quiet|regexp-extended|separate|silent|unbuffered)$/
-const SED_RE = String.raw`/(?:[^/\\\n]|\\.)*/`
-const SED_ADDRESS = String.raw`(?:\d+|\$|${SED_RE})`
-const SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[pdqQnNlP=]|s${SED_RE.slice(0, -1)}${SED_RE}[gpiImM0-9]*)[ \t]*`
+// a bracket expression holding no / and no [, which BSD sed reads whole and GNU sed reads to the same end, so both end its regex at one /
+const SED_BRACKET = String.raw`\[\^?\]?[^\]/[\n]*\]`
+// a regex's body up to its closing /, a / inside a bracket expression held by SED_BRACKET alone
+const SED_BODY = String.raw`(?:[^/\\\n[]|\\.|${SED_BRACKET})*/`
+// a replacement's text up to its closing /
+const SED_TEXT = String.raw`(?:[^/\\\n]|\\.)*/`
+const SED_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
+const SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[pdqQnNlP=]|s/${SED_BODY}${SED_TEXT}[gpiImM0-9]*)[ \t]*`
 // a sed script read whole by a closed grammar: addresses, then p, d, q, Q, n, N, l, P, = or s/// with flags from g, p, i, I, m, M and digits, so it holds no w or W write, no e run and no r read of another file
 const SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`)
 
@@ -334,19 +341,20 @@ function sedReads(args: Word[]): boolean {
     } else operands.push(args[k])
   }
   const read = scripts.length ? scripts : operands.slice(0, 1)
-  return (
-    read.length > 0 && read.every((w) => !w.glob && !marked(w.value) && SED_SCRIPT.test(w.value))
-  )
+  return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value))
 }
 
 // perl's options that run no other code and write nothing: n, p, l, a and w clustered, the last of them may be e or E, whose script is the next word; -i, -M, -m, -I, -x, -d, -s and the rest are off it
 const PERL_FLAG = /^-[nplaw]*[eE]?$/
 // a regex with no variable, no array and no code block (`(?{`, `(??{`, `(*{`), its $ only an anchor
-const PERL_RE = String.raw`/(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`
+const PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`
+const PERL_RE = `/${PERL_BODY}`
+// a match variable, $1 to $9 or $&, before no [, { or ->, since perl reads one there as a subscript and runs its expression as code
+const PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`
 // a value print may name: a string holding only text, \n, \t and the match variables $1 to $9 and $&, or one of those variables, or $_
-const PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|\$[1-9&])*"|\$[1-9&_])`
+const PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-9&_])`
 const PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:if|unless|while|for)[ \t]+${PERL_RE}[gimsx]*)?`
-const PERL_SUB = String.raw`s${PERL_RE.slice(0, -1)}/(?:[^/\\\n@$]|\\.|\$[1-9&])*/[gimsx]*`
+const PERL_SUB = String.raw`s/${PERL_BODY}(?:[^/\\\n@$]|\\.|${PERL_MATCH})*/[gimsx]*`
 const PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`
 // a perl one-liner read whole by a closed grammar: print statements of match variables and plain strings, each optionally under if, unless, while or for a regex, and s/// with flags from g, i, m, s and x, so no regex holds a variable, an array or a code block and no replacement interpolates code
 const PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`)
@@ -375,8 +383,8 @@ function perlReads({ args, local }: Parsed, env: Env): boolean {
   const files = args.slice(k)
   return (
     scripts.length > 0 &&
-    scripts.every((w) => !w.glob && !marked(w.value) && PERL_SCRIPT.test(w.value)) &&
-    files.every((w) => !w.glob && !marked(w.value) && PERL_FILE.test(w.value))
+    scripts.every((w) => literal(w) && PERL_SCRIPT.test(w.value)) &&
+    files.every((w) => literal(w) && PERL_FILE.test(w.value))
   )
 }
 

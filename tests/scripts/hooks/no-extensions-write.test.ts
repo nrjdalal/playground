@@ -679,6 +679,12 @@ describe("a quoted argument is read as a command line only where a program runs 
       `perl -ne 'print "$1\\n" while /#(\\d+)/g' notes.md`,
     ],
     ["perl printing every match with -l", "perl -lne 'print for /PG-\\d+/g' notes.md"],
+    ["perl replacing a match with its variable", "perl -pe 's/(a)/<$1>/' notes.md"],
+    [
+      "sed printing the issue's line ranges after a grep",
+      `grep -n -E "^ {0,2}(if |elif |else$|fi$)" scripts/spawn.sh | sed -n '/^13[2-9][0-9]:\\|^1[45][0-9][0-9]:/p'`,
+    ],
+    ["sed replacing a tag by a bracket class", "sed 's/<pasted_content[^>]*>/[P]/g' notes.md"],
     ["git -c with a literal pager", "git -c core.pager=less log"],
     ["rm of a glob in a build folder", "rm -rf build/*"],
     ["rm of a held folder's glob", "X=build; rm -rf $X/*"],

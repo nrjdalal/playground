@@ -16,6 +16,23 @@ export const groups: Group[] = [
         "sed --in-place with a suffix",
         "sed --in-place=.b 's/a/b/' ~/.playground/extensions/.no-such-folder/x.md",
       ],
+      [
+        "sed -l -i editing in place",
+        "sed -l -i 's/a/b/' ~/.playground/extensions/.no-such-folder/x.md",
+      ],
+      [
+        "sed --in-place with no suffix",
+        "sed --in-place 's/a/b/' ~/.playground/extensions/.no-such-folder/x.md",
+      ],
+      [
+        "sed's w command given by -e",
+        "sed -n -e 'p' -e 'w ~/.playground/extensions/.no-such-folder/x' notes.md",
+      ],
+      [
+        "sed's script read from a file by -f",
+        "sed -n -f x.sed ~/.playground/extensions/.no-such-folder/x.md",
+      ],
+      ["sed's s/// w flag behind a slash in a bracket", "sed -n 's/[/]/;/w ext*/p' notes.md"],
       ["sed's w command", "sed -n 'w ~/.playground/extensions/.no-such-folder/x' notes.md"],
       [
         "sed's W command after an address",
@@ -51,6 +68,30 @@ export const groups: Group[] = [
       [
         "perl's string interpolating a command",
         "perl -ne 'print \"@{[ qx(rm -rf ~/.playground/extensions/.no-such-folder) ]}\"' notes.md",
+      ],
+      [
+        "perl's string running a command in a match variable's { subscript",
+        "perl -ne 'print \"$1{`rm -rf ~/.playground/ext*/.no-such-folder`}\" if /(a)/' notes.md",
+      ],
+      [
+        "perl's string running a command in a match variable's [ subscript",
+        "perl -ne 'print \"$1[`rm -rf ~/.playground/ext*/.no-such-folder`]\" if /(a)/' notes.md",
+      ],
+      [
+        "perl's string running a command in a match variable's -> subscript",
+        "perl -ne 'print \"$1->[`rm -rf ~/.playground/ext*/.no-such-folder`]\" if /(a)/' notes.md",
+      ],
+      [
+        "perl's replacement running a command in a match variable's { subscript",
+        "perl -pe 's/(a)/$1{`rm -rf ext*`}/' notes.md",
+      ],
+      [
+        "perl's replacement running a command in a match variable's [ subscript",
+        "perl -pe 's/(a)/$1[`rm -rf ext*`]/' notes.md",
+      ],
+      [
+        "perl's replacement running a command in a match variable's -> subscript",
+        "perl -pe 's/(a)/$1->[`rm -rf ext*`]/' notes.md",
       ],
       [
         "perl with PERL5OPT set",
