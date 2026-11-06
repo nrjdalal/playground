@@ -420,35 +420,66 @@ describe("ops-firefighting-start", () => {
     expect(s.spawns()[0]!.slice(-2)).toEqual(["--account", "made-up@example.com"])
   })
 
-  test("a refused start is told once without its session name, leaves no brief, and is tried again on the next pass (#1160)", async () => {
+  test("a refused start keeps one name and one brief for its ticket across retries, told once per reason, both gone once the ticket closes (#1160)", async () => {
+    let why = "the memory gate holds it"
     const s = setup(
       line("MADE-1", "Medium", 1),
       {},
-      {
-        spawned: (argv) => ({
-          code: 1,
-          out: `spawn.sh refuses ${argv[2]}: the memory gate holds it\n`,
-        }),
-      },
+      { spawned: (argv) => ({ code: 1, out: `spawn.sh refuses ${argv[2]}: ${why}\n` }) },
     )
     await s.pass()
     await s.pass()
-    expect(s.spawns().map((argv) => argv[2])).toEqual(["worker-made-up-1", "worker-made-up-2"])
-    expect(s.sent).toEqual(["Not started for MADE-1: the memory gate holds it"])
-    expect(readdirSync(s.data).filter((file) => file.startsWith("brief-worker-"))).toEqual([])
+    why = "the load gate holds it"
+    await s.pass()
+    expect(s.spawns().map((argv) => argv[2])).toEqual([
+      "worker-made-up-1",
+      "worker-made-up-1",
+      "worker-made-up-1",
+    ])
+    expect(s.sent).toEqual([
+      "Not started for MADE-1: the memory gate holds it",
+      "Not started for MADE-1: the load gate holds it",
+    ])
+    const briefs = () => readdirSync(s.data).filter((file) => file.startsWith("brief-worker-"))
+    expect(briefs()).toEqual(["brief-worker-made-up-1.md"])
+    writeFileSync(
+      join(s.data, "firefighting.json"),
+      relayFile(line("MADE-1", "Medium", 1, { open: false }), NOW.getTime()),
+    )
+    await s.pass()
+    expect(briefs()).toEqual([])
+    expect(s.state().named).toEqual({})
   })
 
   test("a High, Medium or Low line waits while any focus stands, with no name or brief, told once, and starts once it lifts (#1160)", async () => {
+    // MADE-9, an open Urgent, holds the focus ff-first-worker works under, so the job's own focus is no all-clear's to lower
     for (const reason of [`${REASON} MADE-9 open`, "the owner's demo"]) {
-      const s = setup(line("MADE-1", "Medium", 1), {
-        "focus.json": focusFile(reason, 60, "ff-first-worker"),
-      })
+      const s = setup(
+        { ...line("MADE-1", "Medium", 2), ...line("MADE-9", "Urgent", 1) },
+        {
+          "focus.json": focusFile(reason, 30, "ff-first-worker"),
+          "ops/ops-firefighting-start.state.json": {
+            ...RUNNING,
+            started: { "MADE-9": "ff-first-worker" },
+          },
+          "roster.json": {
+            agents: [{ name: "ff-first-worker", status: "working", ticket: "MADE-9" }],
+          },
+        },
+      )
       await s.pass()
       await s.pass()
       expect(s.spawns()).toEqual([])
       expect(s.sent).toEqual(["Waiting on MADE-1 (Medium): focus stands for ff-first-worker"])
       expect(readdirSync(s.data).filter((file) => file.startsWith("brief-worker-"))).toEqual([])
-      s.later(61)
+      s.later(31)
+      writeFileSync(
+        join(s.data, "firefighting.json"),
+        relayFile(
+          { ...line("MADE-1", "Medium", 2), ...line("MADE-9", "Urgent", 1) },
+          NOW.getTime() + 31 * MINUTE,
+        ),
+      )
       await s.pass()
       expect(s.titles()).toEqual(["MADE-1 firefight"])
     }

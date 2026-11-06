@@ -7,7 +7,7 @@ import type { Beat, Context } from "../ops-tick/tick"
 import { vaultRefusal } from "../playground/installed"
 import { orgsIo, whichSkill } from "../playground/orgs"
 import { loadSessionNames } from "../playground/setting"
-import { type StartConfig, startPass } from "./start"
+import { lastLine, type StartConfig, startPass } from "./start"
 
 const data = engineData("ops-firefighting-start")
 
@@ -29,7 +29,7 @@ const config = async (): Promise<StartConfig> => {
 // A new worker's name, as bun run name gives one.
 const name = async (): Promise<string> => {
   const r = await run([process.execPath, join(import.meta.dir, "..", "name", "index.ts"), "worker"])
-  const picked = r.out.trim().split("\n").at(-1) ?? ""
+  const picked = lastLine(r.out)
   if (r.code !== 0 || !/^[a-z0-9]+-worker$/.test(picked))
     throw new Error(`bun run name worker: ${r.out.trim()}`)
   return picked
@@ -56,7 +56,7 @@ const linearStates =
       "states",
       ids.join(","),
     ])
-    if (code !== 0) throw new Error(out.trim().split("\n").at(-1) || `linear-read exited ${code}`)
+    if (code !== 0) throw new Error(lastLine(out) || `linear-read exited ${code}`)
     return JSON.parse(out.slice(out.indexOf("{"))) as Record<string, string>
   }
 

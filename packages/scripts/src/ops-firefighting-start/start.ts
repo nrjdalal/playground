@@ -5,7 +5,7 @@ import type { Context } from "../ops-tick/tick"
 import { MAX_MINUTES, standing } from "../playground/focus"
 import { writeAtomic } from "../write-atomic"
 
-// ops-firefighting-start: each beat reads the relay's firefighting.json and starts one --firefighting worker for each open ticket of firefighting.start.prefixes that no one holds, Urgent, High, Medium, Low and oldest first, at most CAP in progress but for an Urgent, which always starts; its start file keeps spawn.sh's load and slots gates open for those starts while one is open, and focus stands for an Urgent ticket's session alone.
+// ops-firefighting-start: each beat reads the relay's firefighting.json and starts one --firefighting worker for each open ticket of firefighting.start.prefixes that the tracker's digest lists and no one holds, Urgent, High, Medium, Low and oldest first, at most CAP in progress but for an Urgent, which always starts; its start file keeps spawn.sh's load and slots gates open for those starts while one is open, and focus stands for an Urgent ticket's session alone.
 
 export type StartConfig = {
   account?: string
@@ -40,10 +40,11 @@ type Line = {
 }
 type Row = { name?: string; status?: string; ticket?: string; title?: string }
 
-// What a beat keeps between passes: the session started for each ticket, the line last told for each, when each closed line was first seen closed, when Linear first read each of those open again (the ticket card reads reopened), and when Linear was last asked.
+// What a beat keeps between passes: the session started for each ticket, the name a ticket whose start was refused keeps, the line last told for each, when each closed line was first seen closed, when Linear first read each of those open again (kept for a ticket card to read), and when Linear was last asked.
 export type State = {
   closedSeen: Record<string, string>
   linearAt?: string
+  named: Record<string, string>
   reopened: Record<string, string>
   started: Record<string, string>
   told: Record<string, string>
@@ -69,7 +70,8 @@ const readJson = async <T>(path: string): Promise<T | undefined> => {
 }
 
 const rankOf = (line: Line) => (line.urgent === true ? 0 : (RANK[line.urgency ?? ""] ?? 4))
-const lastLine = (out: string) => out.trim().split("\n").at(-1) ?? ""
+const isUrgent = (line: Line) => rankOf(line) === 0
+export const lastLine = (out: string) => out.trim().split("\n").at(-1) ?? ""
 
 export const statePath = (ops: string) => join(ops, "ops-firefighting-start.state.json")
 
@@ -81,13 +83,8 @@ export async function startPass({
   name,
 }: StartDeps): Promise<void> {
   const path = statePath(ctx.ops)
-  const state: State = {
-    closedSeen: {},
-    reopened: {},
-    started: {},
-    told: {},
-    ...(await readJson<State>(path)),
-  }
+  const kept = await readJson<State>(path)
+  const state: State = { closedSeen: {}, named: {}, reopened: {}, started: {}, told: {}, ...kept }
   const save = () => writeAtomic(path, `${JSON.stringify(state, null, 2)}\n`)
   const tell = async (id: string, text: string) => {
     if (state.told[id] === text) return
@@ -99,7 +96,11 @@ export async function startPass({
     `^(?:${config.prefixes.map((p) => p.replace(/[^A-Za-z0-9]/g, "")).join("|")})-\\d+$`,
   )
   const relay = join(data, "firefighting.json")
-  const ff = await readJson<{ lastTry?: number; lines?: Record<string, Line> }>(relay)
+  const ff = await readJson<{
+    clock?: Record<string, unknown>
+    lastTry?: number
+    lines?: Record<string, Line>
+  }>(relay)
   // The relay writes lastTry on every pass inside its window, quiet ones included, and nothing outside it, so lines older than freshMinutes are a closed window's or a stopped relay's: none starts from them, and a focus already standing is left to the session working its ticket.
   const wrote =
     typeof ff?.lastTry === "number"
@@ -117,9 +118,15 @@ export async function startPass({
   }
   delete state.told[""]
   const all = Object.values(ff?.lines ?? {})
-  const lines = config.prefixes.length
+  const matched = config.prefixes.length
     ? all.filter((l): l is Line & { id: string } => typeof l?.id === "string" && ticket.test(l.id))
     : []
+  // Only a ticket the tracker's digest lists is a firefighting one: the relay keeps it in the file's clock map, while a line a mention elsewhere named (an integration or port ask) has no entry, so it never starts; a file with no clock map starts nothing.
+  const listed = new Set(Object.keys(ff?.clock ?? {}))
+  for (const line of matched)
+    if (!listed.has(line.id))
+      await tell(line.id, `Skipped ${line.id}: no digest of the tracker lists it`)
+  const lines = matched.filter((l) => listed.has(l.id))
   const rows = (await readJson<{ agents?: Row[] }>(join(data, "roster.json")))?.agents ?? []
   const live = rows.filter((r) => !ENDED.has(r.status ?? ""))
   const rowOf = (session: string) => rows.find((r) => r.name === session)
@@ -129,14 +136,20 @@ export async function startPass({
     (state.started[id] !== undefined && !ENDED.has(rowOf(state.started[id]!)?.status ?? ""))
   for (const line of lines)
     if (line.theirs === true) await tell(line.id, `Skipped ${line.id}: someone else took it`)
-  await reopen(lines, state, ctx.now, linearStates, tell)
+  await reopen(lines, state, ctx.now, linearStates, tell, kept === undefined)
   const open = lines.filter(
     (l) => (l.open === true || state.reopened[l.id] !== undefined) && l.theirs !== true,
   )
   const ids = new Set(open.map((l) => l.id))
   for (const id of Object.keys(state.started)) if (!ids.has(id)) delete state.started[id]
+  // a ticket that closed while its start was refused frees its name and its brief
+  for (const [id, session] of Object.entries(state.named))
+    if (!ids.has(id)) {
+      await rm(join(data, `brief-${session}.md`), { force: true })
+      delete state.named[id]
+    }
   for (const key of Object.keys(state.told))
-    if (key && key !== "linear" && !lines.some((l) => key === l.id || key === `${l.id} reopened`))
+    if (key && key !== "linear" && !matched.some((l) => key === l.id || key === `${l.id} reopened`))
       delete state.told[key]
   // The start file names every open ticket this job serves, so it stands while one is open and goes once none is.
   const startFile = join(data, START_FILE)
@@ -158,7 +171,7 @@ export async function startPass({
   let heldBy: string | undefined
   for (const line of queue) {
     const id = line.id
-    if (rankOf(line) !== 0 && inProgress >= CAP) {
+    if (!isUrgent(line) && inProgress >= CAP) {
       await tell(
         id,
         `Waiting on ${id} (${line.urgency ?? "no urgency"}): ${inProgress} in progress, the cap is ${CAP}`,
@@ -180,14 +193,23 @@ export async function startPass({
       )
       continue
     }
-    if (rankOf(line) === 0) {
-      const f = await standing(data, ctx.now)
-      if (f?.reason.startsWith(REASON)) {
-        heldBy ??= f.session
-        await focus(ctx, ["off"])
-      }
+    // spawn.sh lets every --firefighting start past focus while the relay's stop file stands, and cannot tell an Urgent from the rest, so the job holds its own: a High, Medium or Low waits while any focus stands.
+    const f = await standing(data, ctx.now)
+    if (f && !isUrgent(line)) {
+      await tell(
+        id,
+        `Waiting on ${id} (${line.urgency ?? "no urgency"}): focus stands for ${f.session}`,
+      )
+      continue
     }
-    const session = await name()
+    if (f?.reason.startsWith(REASON)) {
+      heldBy ??= f.session
+      await focus(ctx, ["off"])
+    }
+    // a ticket keeps the name its first try took, so a refused start retries under it, with one brief
+    const session = state.named[id] ?? (await name())
+    state.named[id] = session
+    await save()
     const brief = `brief-${session}.md`
     await Bun.write(
       join(data, brief),
@@ -208,14 +230,14 @@ export async function startPass({
       ...(config.account ? ["--account", config.account] : []),
     ]
     const spawned = await ctx.run(argv, 300_000)
+    // told once per reason: the session's name is taken out, so the same refusal reads the same on every retry
     if (spawned.code !== 0) {
-      await tell(
-        id,
-        `Not started for ${id}: ${lastLine(spawned.out) || `spawn.sh exited ${spawned.code}`}`,
-      )
+      const why = lastLine(spawned.out).replace(/^spawn\.sh refuses \S+: /, "")
+      await tell(id, `Not started for ${id}: ${why || `spawn.sh exited ${spawned.code}`}`)
       continue
     }
     state.started[id] = session
+    delete state.named[id]
     inProgress++
     await save()
     const set = await ctx.run([
@@ -235,7 +257,7 @@ export async function startPass({
     ctx,
     data,
     open
-      .filter((l) => rankOf(l) === 0)
+      .filter(isUrgent)
       .map((l) => l.id)
       .sort(),
     state,
@@ -251,9 +273,12 @@ async function reopen(
   now: Date,
   linearStates: StartDeps["linearStates"],
   tell: (id: string, text: string) => Promise<void>,
+  firstBeat: boolean,
 ): Promise<void> {
   const closed = lines.filter((l) => l.open !== true && l.theirs !== true)
-  for (const l of closed) state.closedSeen[l.id] ??= now.toISOString()
+  // On the first beat, with no state kept, a line already closed closed before the job ran, at a time no line holds, so it counts as closed long ago and is never asked.
+  const seen = firstBeat ? new Date(0).toISOString() : now.toISOString()
+  for (const l of closed) state.closedSeen[l.id] ??= seen
   for (const id of Object.keys(state.closedSeen))
     if (!closed.some((l) => l.id === id)) delete state.closedSeen[id]
   for (const id of Object.keys(state.reopened))
@@ -325,13 +350,10 @@ async function holdFocus(
       "--for",
       String(MAX_MINUTES),
     ])
+  // the same session's on extends its focus, so a re-arm needs no off and posts no focus-ended card; a new session takes an off first, since on refuses while another's focus stands
   if (!standingFocus) await on()
-  else if (
-    ours &&
-    (Date.parse(standingFocus.until) - now.getTime() < REARM_MS ||
-      standingFocus.session !== session)
-  ) {
+  else if (ours && standingFocus.session !== session) {
     await focus(ctx, ["off"])
     await on()
-  }
+  } else if (ours && Date.parse(standingFocus.until) - now.getTime() < REARM_MS) await on()
 }
