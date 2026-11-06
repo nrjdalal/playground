@@ -91,6 +91,7 @@ const setup = (
     writeFileSync(join(data, file), JSON.stringify(body))
   const runs: string[][] = []
   const sent: string[] = []
+  const sentTo: string[] = []
   const asked: string[][] = []
   let now = NOW
   // playground focus as its cli writes focus.json: on stands for --for minutes, off ends it now.
@@ -123,7 +124,7 @@ const setup = (
       if (!argv[0]!.endsWith("spawn.sh")) return { code: 0, out: "" }
       return typeof spawned === "function" ? spawned(argv) : spawned
     },
-    send: async (_, text) => (sent.push(text), true),
+    send: async (to, text) => (sent.push(text), sentTo.push(to), true),
   })
   let n = 0
   const pass = (config = CONFIG) =>
@@ -151,7 +152,7 @@ const setup = (
       ? JSON.parse(readFileSync(join(data, START_FILE), "utf8"))
       : undefined
   const state = () => JSON.parse(readFileSync(statePath(join(data, "ops")), "utf8"))
-  return { asked, data, focus, later, pass, runs, sent, spawns, startFile, state, titles }
+  return { asked, data, focus, later, pass, runs, sent, sentTo, spawns, startFile, state, titles }
 }
 
 // A running job's state, with nothing started yet, so a line seen closed now closed while it ran.
@@ -266,13 +267,116 @@ describe("ops-firefighting-start", () => {
     expect(s.spawns()).toEqual([])
   })
 
-  test("an ended row frees its ticket, and a second pass starts nothing new for a ticket the first started", async () => {
+  test("a row already ended on the first beat does not hold its ticket, and a second pass starts nothing new for a ticket the first started", async () => {
     const s = setup(line("MADE-1", "Medium", 1), {
       "roster.json": { agents: [{ name: "a", status: "ended", ticket: "MADE-1" }] },
     })
     await s.pass()
     await s.pass()
     expect(s.spawns()).toHaveLength(1)
+  })
+
+  test("a ticket whose roster row ended today never starts again today, and may the next day (#1150)", async () => {
+    const roster = (status: string) => ({ agents: [{ name: "a", status, ticket: "MADE-1" }] })
+    const s = setup(line("MADE-1", "Medium", 1), {
+      "ops/ops-firefighting-start.state.json": RUNNING,
+      "roster.json": roster("working"),
+    })
+    await s.pass()
+    writeFileSync(join(s.data, "roster.json"), JSON.stringify(roster("ended")))
+    await s.pass()
+    s.later(60)
+    writeFileSync(
+      join(s.data, "firefighting.json"),
+      relayFile(line("MADE-1", "Medium", 1), NOW.getTime() + 60 * MINUTE),
+    )
+    await s.pass()
+    expect(s.spawns()).toEqual([])
+    expect(s.sent).toEqual(["Not starting MADE-1 again today: a, its session, ended today"])
+    s.later(16 * 60)
+    writeFileSync(
+      join(s.data, "firefighting.json"),
+      relayFile(line("MADE-1", "Medium", 1), NOW.getTime() + 17 * 60 * MINUTE),
+    )
+    await s.pass()
+    expect(s.titles()).toEqual(["MADE-1 firefight"])
+  })
+
+  test("a session this job started that ends is not started again the same day (#1150)", async () => {
+    const s = setup(line("MADE-1", "Medium", 1), {
+      "ops/ops-firefighting-start.state.json": RUNNING,
+    })
+    await s.pass()
+    writeFileSync(
+      join(s.data, "roster.json"),
+      JSON.stringify({ agents: [{ name: "worker-made-up-1", status: "ended", ticket: "MADE-1" }] }),
+    )
+    await s.pass()
+    await s.pass()
+    expect(s.titles()).toEqual(["MADE-1 firefight"])
+  })
+
+  test("the start window: a line at 12:00Z or at 03:59Z starts nothing, told once, one at 11:59Z starts, and a day off starts nothing (#1150)", async () => {
+    const hours = { ...CONFIG, hours: "04:00-12:00" }
+    const at = (minutes: number) => {
+      const s = setup(
+        line("MADE-1", "Urgent", 1),
+        {},
+        { wrote: NOW.getTime() + (minutes - 1) * MINUTE },
+      )
+      s.later(minutes)
+      return s
+    }
+    const noon = at(4 * 60)
+    await noon.pass(hours)
+    await noon.pass(hours)
+    expect(noon.spawns()).toEqual([])
+    expect(noon.startFile()).toBeUndefined()
+    expect(noon.sent).toEqual([
+      "Starting nothing: 2026-11-06 12:00Z is outside the start window (04:00-12:00)",
+    ])
+    const early = at(-4 * 60 - 1)
+    await early.pass(hours)
+    expect(early.spawns()).toEqual([])
+    const last = at(4 * 60 - 1)
+    await last.pass(hours)
+    expect(last.titles()).toEqual(["MADE-1 firefight"])
+    const off = setup(line("MADE-1", "Urgent", 1))
+    await off.pass({ ...hours, daysOff: ["2026-11-06"] })
+    expect(off.spawns()).toEqual([])
+    expect(off.sent).toEqual([
+      "Starting nothing: 2026-11-06 08:00Z is outside the start window (04:00-12:00, and a day off)",
+    ])
+  })
+
+  test("the window's last stretch: a line at 10:59Z starts, one at 11:00Z starts nothing and is told to the dispatcher once as consult, and 12:00Z is outside (#1150)", async () => {
+    const config = { ...CONFIG, consultFrom: "11:00", hours: "04:00-12:00" }
+    const at = (minutes: number) => {
+      const s = setup(
+        line("MADE-1", "High", 1),
+        {},
+        { wrote: NOW.getTime() + (minutes - 1) * MINUTE },
+      )
+      s.later(minutes)
+      return s
+    }
+    const before = at(179)
+    await before.pass(config)
+    expect(before.titles()).toEqual(["MADE-1 firefight"])
+    const consult = at(180)
+    await consult.pass(config)
+    await consult.pass(config)
+    expect(consult.spawns()).toEqual([])
+    expect(consult.sent).toEqual([
+      "consult MADE-1 (High): it came in after 11:00Z, the start window's last stretch, so the owner decides whether to take it; a yes goes to the Builder, who starts it",
+    ])
+    expect(consult.sentTo).toEqual(["dispatcher"])
+    const noon = at(240)
+    await noon.pass(config)
+    expect(noon.spawns()).toEqual([])
+    expect(noon.sent[0]).toStartWith(
+      "Starting nothing: 2026-11-06 12:00Z is outside the start window",
+    )
   })
 
   test("theirs, busy, closed and other prefixes start nothing; theirs is told once as a skip", async () => {

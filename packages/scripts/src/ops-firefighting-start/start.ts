@@ -10,7 +10,10 @@ import { writeAtomic } from "../write-atomic"
 export type StartConfig = {
   account?: string
   brief: string
+  consultFrom?: string
+  daysOff?: string[]
   freshMinutes: number
+  hours?: string
   in?: string
   prefixes: string[]
 }
