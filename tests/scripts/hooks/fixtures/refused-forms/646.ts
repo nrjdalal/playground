@@ -105,7 +105,10 @@ export const groups: Group[] = [
         `cd "$D"; echo x > -a/tmp/y`,
       ],
       ["cp to a relative path holding an = after a cd to a variable", `cd "$D"; cp x a=/tmp/y`],
-      ["rm of a relative path holding an = after a cd to a variable", `cd "$D"; rm -rf x=/tmp`],
+      [
+        "rm of a relative path holding an = after a cd to a variable",
+        `cd "$D"; rm -rf x=/usr/share/x`,
+      ],
       [
         "rm of a dashed operand after the end of options after a cd to a variable",
         `cd "$D"; rm -rf -- -x`,
