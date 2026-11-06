@@ -745,4 +745,45 @@ describe("ops-firefighting-start", () => {
     await hand.pass()
     expect(hand.focus()).toEqual([])
   })
+
+  test("an Urgent session that ends while its ticket stays open has the job's focus lowered, and none raised again (#1160)", async () => {
+    const s = setup(line("MADE-1", "Urgent", 1), {
+      "ops/ops-firefighting-start.state.json": RUNNING,
+    })
+    await s.pass()
+    expect(s.focus().map((args) => args[0])).toEqual(["on"])
+    writeFileSync(
+      join(s.data, "roster.json"),
+      JSON.stringify({ agents: [{ name: "worker-made-up-1", status: "ended", ticket: "MADE-1" }] }),
+    )
+    s.later(1)
+    await s.pass()
+    s.later(1)
+    await s.pass()
+    expect(s.focus().map((args) => args[0])).toEqual(["on", "off"])
+    expect(s.titles()).toEqual(["MADE-1 firefight"])
+  })
+
+  test("a row that ends after the job's first beat, before its first pass inside the window, holds its ticket that day (#1160)", async () => {
+    const config = { ...CONFIG, hours: "09:00-12:00" }
+    const roster = (status: string) => ({ agents: [{ name: "a", status, ticket: "MADE-1" }] })
+    const s = setup(line("MADE-1", "Medium", 1), { "roster.json": roster("working") })
+    await s.pass(config)
+    writeFileSync(join(s.data, "roster.json"), JSON.stringify(roster("ended")))
+    s.later(30)
+    await s.pass(config)
+    s.later(30)
+    writeFileSync(
+      join(s.data, "firefighting.json"),
+      relayFile(line("MADE-1", "Medium", 1), NOW.getTime() + 60 * MINUTE),
+    )
+    await s.pass(config)
+    expect(s.spawns()).toEqual([])
+  })
+
+  test("a consultFrom outside the hours never applies, so a line at 08:00Z starts (#1160)", async () => {
+    const s = setup(line("MADE-1", "High", 1))
+    await s.pass({ ...CONFIG, consultFrom: "13:00", hours: "04:00-12:00" })
+    expect(s.titles()).toEqual(["MADE-1 firefight"])
+  })
 })

@@ -90,6 +90,7 @@ export async function startPass({
   name,
 }: StartDeps): Promise<void> {
   const path = statePath(ctx.ops)
+  const kept = await readJson<State>(path)
   const state: State = {
     closedSeen: {},
     ended: {},
@@ -97,7 +98,7 @@ export async function startPass({
     reopened: {},
     started: {},
     told: {},
-    ...(await readJson<State>(path)),
+    ...kept,
   }
   const save = () => writeAtomic(path, `${JSON.stringify(state, null, 2)}\n`)
   const tell = async (id: string, text: string, to = "builder") => {
@@ -109,7 +110,7 @@ export async function startPass({
   const ticket = new RegExp(
     `^(?:${config.prefixes.map((p) => p.replace(/[^A-Za-z0-9]/g, "")).join("|")})-\\d+$`,
   )
-  // The roster keeps no end time, so the job notes the day it first sees each row ended, on every beat, stale or outside the window too; a ticket whose row ended today never starts again today. A row already ended on the first beat ended before the job ran and counts on no day.
+  // The roster keeps no end time, so the job notes the day it first sees each row ended, on every beat, stale or outside the window too; a ticket whose row ended today never starts again today. A row already ended on the job's very first beat, with no state yet, ended before the job ran and counts on no day.
   const day = ctx.now.toISOString().slice(0, 10)
   const rows = (await readJson<{ agents?: Row[] }>(join(data, "roster.json")))?.agents ?? []
   const rowOf = (session: string) => rows.find((r) => r.name === session)
@@ -117,7 +118,7 @@ export async function startPass({
     rows.filter((r) => r.ticket === id || r.title === id || (r.title ?? "").startsWith(`${id} `))
   const firstBeat = state.watchingSince === undefined
   for (const r of rows)
-    if (r.name && ENDED.has(r.status ?? "")) state.ended[r.name] ??= firstBeat ? "" : day
+    if (r.name && ENDED.has(r.status ?? "")) state.ended[r.name] ??= kept ? day : ""
   for (const name of Object.keys(state.ended))
     if (!rows.some((r) => r.name === name && ENDED.has(r.status ?? ""))) delete state.ended[name]
   const relay = join(data, "firefighting.json")
@@ -314,6 +315,7 @@ export async function startPass({
       .map((l) => l.id)
       .sort(),
     state,
+    (session) => !ENDED.has(rowOf(session)?.status ?? ""),
     heldBy,
   )
   state.watchingSince ??= ctx.now.toISOString()
@@ -379,12 +381,13 @@ const inWindow = (config: StartConfig, now: Date): boolean => {
   return !from || !to || within(iso.slice(11, 16), from, to)
 }
 
-// From config.consultFrom to the window's end, read inside the window: up to midnight with no hours set.
+// From config.consultFrom to the window's end, read inside the window: up to midnight with no hours set, and never for a consultFrom outside the hours.
 const lastStretch = (config: StartConfig, now: Date): boolean => {
   if (!config.consultFrom) return false
   const at = now.toISOString().slice(11, 16)
-  const to = (config.hours ?? "").split("-")[1]
-  return to ? within(at, config.consultFrom, to) : at >= config.consultFrom
+  const [from, to] = (config.hours ?? "").split("-")
+  if (!from || !to) return at >= config.consultFrom
+  return within(config.consultFrom, from, to) && within(at, config.consultFrom, to)
 }
 
 const focus = (ctx: Context, args: string[]) =>
@@ -395,20 +398,23 @@ const focus = (ctx: Context, args: string[]) =>
     ...args,
   ])
 
-// While an open Urgent ticket has a session this job started, focus stands for one such session (the one holding it, else `prefer`, the one that held it before this pass lowered it, else the newest), re-armed under 10 minutes left; once none is open, the focus this job set is lowered and a hand-set one is left.
+// While an open Urgent ticket has a session this job started whose roster row has not ended, focus stands for one such session (the one holding it, else `prefer`, the one that held it before this pass lowered it, else the newest), re-armed under 10 minutes left; once none is open, or each such session has ended, the focus this job set is lowered and a hand-set one is left.
 async function holdFocus(
   ctx: Context,
   data: string,
   urgent: string[],
   state: State,
+  live: (session: string) => boolean,
   prefer?: string,
 ): Promise<void> {
   const now = ctx.now
   const standingFocus = await standing(data, now)
   const ours = standingFocus?.reason.startsWith(REASON) ?? false
-  const sessions = urgent.map((id) => state.started[id]).filter((s): s is string => s !== undefined)
+  const started = urgent.map((id) => state.started[id]).filter((s): s is string => s !== undefined)
+  // a session whose roster row ended holds no focus, though its ticket stays open
+  const sessions = started.filter(live)
   if (!sessions.length) {
-    if (ours && !urgent.length) await focus(ctx, ["off"])
+    if (ours && (!urgent.length || started.length)) await focus(ctx, ["off"])
     return
   }
   const session =
