@@ -361,33 +361,31 @@ const entriesOf = (dir: string): Dirent[] => {
   }
 }
 
+// The folders directly in a folder, or none when it cannot be read.
+const dirsIn = (dir: string): string[] =>
+  entriesOf(dir)
+    .filter((e) => e.isDirectory())
+    .map((e) => join(dir, e.name))
+
 // The folders worktreeRefusal reads for links beyond the other worktrees: each makeScratch folder directly in a temp folder, and each session's scratchpad (<scratchpads>/<project>/<session>/scratchpad) with each folder directly in it, where a scratch copy sits.
 export function linkPlaces(
   tmps = [tmpdir(), "/tmp"],
   scratchpads = join("/tmp", `claude-${process.getuid?.() ?? 0}`),
 ): string[] {
-  const dirs = (dir: string) =>
-    entriesOf(dir)
-      .filter((e) => e.isDirectory())
-      .map((e) => join(dir, e.name))
   const marked = [...new Set(tmps.map(real))].flatMap((tmp) =>
-    dirs(tmp).filter((dir) => lstat(join(dir, MARKER))?.isFile()),
+    dirsIn(tmp).filter((dir) => lstat(join(dir, MARKER))?.isFile()),
   )
-  const pads = dirs(scratchpads)
-    .flatMap(dirs)
+  const pads = dirsIn(scratchpads)
+    .flatMap(dirsIn)
     .map((session) => join(session, "scratchpad"))
     .filter((pad) => lstat(pad)?.isDirectory())
-  return [...marked, ...pads.flatMap((pad) => [pad, ...dirs(pad)])]
+  return [...marked, ...pads.flatMap((pad) => [pad, ...dirsIn(pad)])]
 }
 
 // The links outside a worktree that point into it, as its refusal naming the first three, or null: the entries of each other worktree and each place, and of its node_modules one level deep, as a node_modules clone makes them; a link whose target is missing or lies outside the worktree does not count.
 const linkHolder = (at: string, roots: Roots, places: string[]): string | null => {
-  const worktrees = worktreesOf(roots)
-  const siblings = entriesOf(worktrees)
-    .filter((e) => e.isDirectory())
-    .map((e) => join(worktrees, e.name))
   const links: string[] = []
-  for (const folder of new Set([...siblings, ...places].map(real))) {
+  for (const folder of new Set([...dirsIn(worktreesOf(roots)), ...places].map(real))) {
     if (inside(folder, at)) continue
     const modules = join(folder, "node_modules")
     const dirs = lstat(modules)?.isDirectory() ? [folder, modules] : [folder]

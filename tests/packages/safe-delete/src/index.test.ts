@@ -587,6 +587,7 @@ describe("worktreeRefusal", () => {
     expect(worktreeRefusal(wt, roots, holders)).toBe(
       `${wt} is linked into by ${link} -> ${join(wt, "node_modules")}: repoint or remove each link first`,
     )
+    expect(worktreeRefusal(wt, roots, { ...holders, discard: true })).toContain("is linked into by")
   })
 
   test("refuses a worktree a scratch folder's copy links into, one level down its node_modules", () => {
