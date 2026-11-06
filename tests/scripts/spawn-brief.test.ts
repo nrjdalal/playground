@@ -148,7 +148,6 @@ describe("--reports-to names the session a worker reports to (#1727)", () => {
     ["probe", ["probe", "probe-x", "ops", "b.md", "--runtime", "herdr"]],
     ["manager", ["manager", "dispatcher-2", "b.md"]],
     ["resume", ["resume", "worker-brave-otter", "/tmp"]],
-    ["move", ["move", "worker-brave-otter"]],
     ["restore", ["restore"]],
     ["close", ["close", "worker-brave-otter"]],
   ])("a %s refuses it", async (_, args) => {

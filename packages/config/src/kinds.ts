@@ -159,7 +159,7 @@ export function roleOfName(name: string): string {
   return kind ? FACTORY_ROLE_OF_KIND[kind] : ""
 }
 
-// Pure: the factory role of a session by its name, the roster's kind for that name first, as the hooks place one cmux restored without PLAYGROUND_ROLE; "" for a session of the owner's own.
+// Pure: the factory role of a session by its name, the roster's kind for that name first, as the hooks place one resumed without PLAYGROUND_ROLE; "" for a session of the owner's own.
 export const factoryRoleOf = (name: string, kind: unknown): string =>
   (isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "") || roleOfName(name)
 

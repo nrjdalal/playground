@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""scripts/ops after the 13 Oct cmux restarts (#542): the dashboard follows cmux.
+"""scripts/ops's jobs: up.py, ops-dashboard's run.sh and supervisor.sh, and the session resume they print.
 
-- up.py starts every terminal job in herdr, a job stored as cmux or auto included, and counts one whose pid runs under cmux unhealthy (fake process tables).
+- up.py starts every terminal job in herdr, a job stored as cmux or auto included, and judges each by its heartbeat alone (fake process tables).
 - ops-dashboard's run.sh and supervisor.sh stop their recorded process groups on SIGHUP and once their parent is gone, and nothing else: each
   runs on scratch state with stub git, bun, curl, docker, cmux and claude, so its stack is a few sleeps this test starts, never the dashboard.
   Started from the repo's copy, run.sh execs the checkout's own once at its first start (#1330), so the scratch checkout holds a copy of scripts/ops.
 - supervisor.sh answers a roll-now with nothing to roll to (`playground update`) with CURRENT, or SKIP for a head in bad-builds, and removes it.
 
-No real cmux restart happens here. Run: python3 tests/test_ops_cmux.py
+No real job or dashboard starts here. Run: python3 tests/test_ops_jobs.py
 """
 import contextlib
 import importlib.util
@@ -25,7 +25,6 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OPS = os.path.join(ROOT, "scripts", "ops")
-CMUX = "/Applications/cmux.app/Contents/MacOS/cmux"
 failures = []
 lock = threading.Lock()
 
@@ -91,15 +90,9 @@ def test_up(scratch):
     with open(os.path.join(state, "ops-x.json"), "w") as f:
         json.dump({"job": "ops-x", "pid": me, "startedAt": now, "lastBeatAt": now, "lastResult": "ok", "cycleSeconds": 60}, f)
     job = {"name": "ops-x", "heartbeat": "ops-x", "runtime": "cmux"}
-    under = {me: (400, "/bin/bash"), 400: (300, "/bin/zsh"), 300: (100, "/usr/bin/login"), 100: (1, CMUX), 1: (0, "/sbin/launchd")}
-    ok, why = up.healthy(job, under)
-    check(not ok and "runs under cmux" in why, "up: a job stored as cmux whose pid runs under the cmux app is unhealthy, so it moves to herdr", why)
-    check(not up.healthy({**job, "runtime": "auto"}, under)[0], "up: so is a job stored as auto")
-    orphan = {me: (1, "/bin/bash"), 200: (1, CMUX), 1: (0, "/sbin/launchd")}
-    check(up.healthy(job, orphan) == (True, "ok"), "up: a job stored as cmux whose pid runs outside cmux is healthy")
-    cli = {me: (100, "/Applications/cmux.app/Contents/Resources/bin/cmux"), 100: (1, "/bin/zsh"), 200: (1, CMUX)}
-    check(up.healthy(job, cli)[0], "up: the cmux CLI above a job does not count as the cmux app")
-    check(up.healthy({"name": "ops-x", "heartbeat": "ops-x", "launchd": "com.x.ops-x"}, under)[0], "up: a launchd job is judged by its heartbeat alone")
+    check(up.healthy(job) == (True, "ok"), "up: a job stored as cmux is judged by its fresh heartbeat alone")
+    check(up.healthy({**job, "runtime": "auto"}) == (True, "ok"), "up: so is a job stored as auto")
+    check(up.healthy({"name": "ops-x", "heartbeat": "ops-x", "launchd": "com.x.ops-x"})[0], "up: a launchd job is judged by its heartbeat alone")
 
 def test_unguarded(scratch):
     config = os.path.join(scratch, "unguarded")
@@ -345,54 +338,6 @@ def test_branch_guard(scratch):
               f"dashboard: {script} refuses a checkout off live/dashboard and resets nothing", f"{r.returncode} {r.stderr.strip()} | git ran: {ran!r}")
 
 
-def test_up_orphan(scratch):
-    config = os.path.join(scratch, "up-orphan")
-    state = os.path.join(config, "playground", "ops")
-    os.makedirs(state)
-    up = load("up_orphan", os.path.join(OPS, "up.py"), config)
-    # the orphan is no child of this test, as a real one is not of up.py, so launchd reaps it rather than leaving a zombie up.py reads as alive
-    orphan = int(subprocess.run(["bash", "-c", "sleep 1000 > /dev/null 2>&1 & echo $!"], capture_output=True, text=True).stdout)
-    kept = subprocess.Popen(["sleep", "1000"], start_new_session=True)
-    late = subprocess.Popen(["sleep", "1000"], start_new_session=True)
-    fresh = subprocess.Popen(["sleep", "1000"], start_new_session=True)
-    daemon = subprocess.Popen(["sleep", "1000"], start_new_session=True)
-    try:
-        now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        jobs = []
-        for name, pid in (("ops-orphan", orphan), ("ops-kept", kept.pid), ("ops-late", late.pid)):
-            with open(os.path.join(state, f"{name}.json"), "w") as f:
-                json.dump({"job": name, "pid": pid, "startedAt": now, "lastBeatAt": now, "lastResult": "ok", "cycleSeconds": 60}, f)
-            jobs.append({"name": name, "heartbeat": name, "runtime": "cmux", "command": f"python3 /x/{name}/run.py", "cwd": "/x"})
-        # ops-fresh was restarted during the pass: once.py has recorded its pid, but it has written no heartbeat yet
-        jobs.append({"name": "ops-fresh", "heartbeat": "ops-fresh", "runtime": "cmux", "command": "python3 /x/ops-fresh/run.py", "cwd": "/x"})
-        # ops-daemon is a launchd job with no heartbeat: launchd started its holder, so up.py only reports it
-        jobs.append({"name": "ops-daemon", "heartbeat": "ops-daemon", "launchd": "com.x.daemon", "command": "python3 /x/ops-daemon/run.py", "cwd": "/x"})
-        with open(os.path.join(state, "jobs.json"), "w") as f:
-            json.dump({"jobs": jobs}, f)
-        me = os.getpid()
-        procs = {me: (1, "/bin/bash"), 100: (1, CMUX), orphan: (100, "/bin/sleep"), kept.pid: (1, "/bin/bash"), daemon.pid: (100, "/bin/sleep"), 1: (0, "/sbin/launchd")}
-        # ops-late's holder started after the snapshot was read, so the table lacks it
-        holders = {"ops-orphan": orphan, "ops-kept": kept.pid, "ops-late": late.pid, "ops-fresh": fresh.pid, "ops-daemon": daemon.pid}
-        started = []
-        up.ptable.table = lambda: procs
-        up.once.running = lambda name, marker: holders[name]
-        up.herdr = lambda: ("/x/herdr", "")
-        up.start = lambda job: started.append(job["name"])
-        up.up(True)
-        check(not alive(orphan), "up: a holder of a job stored as cmux that runs under cmux is stopped")
-        check(started == ["ops-orphan"], "up: that job is started again, and the one outside cmux is left alone", repr(started))
-        check(kept.poll() is None, "up: the holder outside cmux still runs")
-        check(late.poll() is None, "up: a holder the process snapshot lacks is left running")
-        check(fresh.poll() is None, "up: a holder the snapshot lacks, with no heartbeat yet, is left running")
-        check(daemon.poll() is None, "up: a launchd job's holder under cmux is only reported, never stopped")
-    finally:
-        if alive(orphan):
-            os.kill(orphan, signal.SIGKILL)
-        for proc in (kept, late, fresh, daemon):
-            proc.kill()
-            proc.wait()
-
-
 HERDR_STUB = r"""#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
@@ -478,13 +423,13 @@ def test_up_herdr(scratch):
     open(sock, "w").close()
     herdr_state = os.path.join(scratch, "herdr-state.json")
     cmux_log = os.path.join(scratch, "cmux.log")
-    saved = {k: os.environ.get(k) for k in ("PATH", "PLAYGROUND_HERDR_DIR", "PLAYGROUND_HERDR_SESSION", "STUB_HERDR_STATE", "STUB_CMUX_LOG", "STUB_HERDR_DOWN", "STUB_HERDR_RUN_FAIL", "CMUX_SOCKET_PATH")}
+    saved = {k: os.environ.get(k) for k in ("PATH", "PLAYGROUND_HERDR_DIR", "PLAYGROUND_HERDR_SESSION", "STUB_HERDR_STATE", "STUB_CMUX_LOG", "STUB_HERDR_DOWN", "STUB_HERDR_RUN_FAIL")}
     os.environ.update(PATH=f"{bins}:{os.environ['PATH']}", PLAYGROUND_HERDR_DIR=pins, STUB_HERDR_STATE=herdr_state, STUB_CMUX_LOG=cmux_log)
     os.environ.pop("PLAYGROUND_HERDR_SESSION", None)
     open(cmux_log, "w").close()
     up = load("up_herdr", os.path.join(OPS, "up.py"), config)
     me = os.getpid()
-    procs = {me: (100, "/bin/bash"), 100: (1, CMUX), 1: (0, "/sbin/launchd")}
+    procs = {me: (100, "/bin/bash"), 100: (1, "/bin/zsh"), 1: (0, "/sbin/launchd")}
     up.ptable.table = lambda: procs
     herdr_st = lambda: json.load(open(herdr_state)) if os.path.exists(herdr_state) else {"workspaces": [], "panes": [], "calls": []}
     folder = os.path.join(scratch, "jobs")
@@ -533,27 +478,18 @@ def test_up_herdr(scratch):
         check(not any(p.get("label") == "ops-fail" for p in herdr_st()["panes"]) and "pane run failed" in open(up.LOG).read(),
               "up: a herdr pane whose run fails is closed, and the log names the step", json.dumps(herdr_st()["panes"]))
 
-        # 3: cmux to herdr: the copy under cmux is stopped by its recorded pid before the herdr start
-        def holder(name, parent):
+        def holder(name, parent, age=0):
             # no child of this test, so launchd reaps it once stopped rather than leaving a zombie up.py reads as alive
             pid = int(subprocess.run(["bash", "-c", f'python3 -c "import time; time.sleep(1000)" {folder}/{name}/run.py > /dev/null 2>&1 & echo $!'],
                                      capture_output=True, text=True).stdout)
             holders.append(pid)
             procs[pid] = (parent, "/usr/bin/python3")
-            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - age * 60))
             with open(os.path.join(state, f"{name}.pid"), "w") as f:
                 f.write(f"{pid}\n")
             with open(os.path.join(state, f"{name}.json"), "w") as f:
                 json.dump({"job": name, "pid": pid, "startedAt": now, "lastBeatAt": now, "lastResult": "ok", "cycleSeconds": 60}, f)
             return pid
-
-        in_cmux = holder("ops-move", 100)
-        check(not up.healthy(job("ops-move"), procs)[0], "up: a job stored as cmux, its copy under cmux is not healthy")
-        pass_with([job("ops-move")])
-        st = herdr_st()
-        moved = next((p for p in st["panes"] if p.get("label") == "ops-move"), {})
-        check(wait_for(lambda: not alive(in_cmux), 5), "up: cmux to herdr stops the copy under cmux by its recorded pid")
-        check("ops-move" in moved.get("run", ""), "up: and starts the job in herdr", json.dumps(st["panes"]))
 
         # a job stored as auto starts in herdr, and its copy under the pinned herdr's server is left there
         pass_with([job("ops-auto", runtime="auto")])
@@ -563,21 +499,6 @@ def test_up_herdr(scratch):
         calls = len(herdr_st()["calls"])
         pass_with([job("ops-auto-kept", runtime="auto")])
         check(alive(in_herdr) and len(herdr_st()["calls"]) == calls, "up: a job stored as auto, healthy in herdr, is left there")
-
-        # --once-per-cmux, an old ~/.zshrc hook's call, runs no pass and leaves no marker
-        cmux_sock = os.path.join(scratch, "cmux-launch")
-        open(cmux_sock, "w").close()
-        os.environ["CMUX_SOCKET_PATH"] = cmux_sock
-        with open(os.path.join(state, "jobs.json"), "w") as f:
-            json.dump({"jobs": [job("ops-once", runtime="herdr")]}, f)
-        calls = len(herdr_st()["calls"])
-        argv = sys.argv
-        try:
-            sys.argv = ["up.py", "--once-per-cmux"]
-            up.main()
-        finally:
-            sys.argv = argv
-        check(len(herdr_st()["calls"]) == calls and not os.path.exists(os.path.join(state, "up.cmux")), "up: --once-per-cmux runs no pass and leaves no marker")
 
         # a pass that prints: a job with a command and no runtime opens in herdr, and the jobs after it still run
         bare = {k: v for k, v in job("ops-noruntime").items() if k != "runtime"}
@@ -604,33 +525,29 @@ def test_up_herdr(scratch):
         del os.environ["STUB_HERDR_RUN_FAIL"]
         check(said[0] == said[1] and "could not start ops-stale" in said[0] and "m old" not in said[0], "up: the printed line leaves out the heartbeat's age", said)
 
-        # a pass outside cmux starts a job stored as cmux in herdr
-        outside = {k: v for k, v in procs.items()}
-        outside[me] = (1, "/bin/bash")
-        up.ptable.table = lambda: outside
+        # a job stored as cmux starts in herdr
         far = pass_with([job("ops-far")], quiet=False)
-        up.ptable.table = lambda: procs
-        check("started ops-far in herdr" in far and any(p.get("label") == "ops-far" for p in herdr_st()["panes"]), "up: a pass outside cmux starts a job stored as cmux in herdr", far)
+        check("started ops-far in herdr" in far and any(p.get("label") == "ops-far" for p in herdr_st()["panes"]), "up: a job stored as cmux starts in herdr", far)
         check(open(cmux_log).read() == "", "up: and no pass calls cmux", open(cmux_log).read())
 
-        # a missing server socket refuses a herdr start and stops nothing
+        # a missing server socket refuses a herdr start and stops nothing: a copy whose heartbeat went stale keeps running
         os.remove(sock)
-        kept = holder("ops-kept", 100)
+        kept = holder("ops-kept", 100, age=10)
         calls = len(herdr_st()["calls"])
         pass_with([job("ops-kept", runtime="herdr")])
         check(alive(kept) and len(herdr_st()["calls"]) == calls and "has no socket" in open(up.LOG).read(),
-              "up: with no herdr socket, a herdr job is logged and skipped, and its cmux copy keeps running")
+              "up: with no herdr socket, a herdr job is logged and skipped, and its running copy keeps running")
 
         # a server that crashed leaves its socket: one that does not say it runs refuses a herdr start too, and stops nothing
         open(sock, "w").close()
         os.environ["STUB_HERDR_DOWN"] = "1"
-        down = holder("ops-down", 100)
+        down = holder("ops-down", 100, age=10)
         calls = len(herdr_st()["calls"])
         said = pass_with([job("ops-down", runtime="herdr")], quiet=False)
         check("ops-down is down, and herdr cannot start it: the herdr server" in said and "is not running" in said,
               "up: and prints why herdr cannot start it", said)
         check(alive(down) and len(herdr_st()["calls"]) == calls and "is not running" in open(up.LOG).read(),
-              "up: with a herdr socket but no running server, a herdr job is logged and skipped, and its cmux copy keeps running")
+              "up: with a herdr socket but no running server, a herdr job is logged and skipped, and its running copy keeps running")
     finally:
         for pid in holders:
             if alive(pid):
@@ -733,7 +650,6 @@ def main():
     with tempfile.TemporaryDirectory() as scratch:
         test_cfg(scratch)
         test_up(scratch)
-        test_up_orphan(scratch)
         test_up_herdr_names(scratch)
         test_up_herdr(scratch)
         test_unguarded(scratch)

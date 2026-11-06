@@ -1,4 +1,4 @@
-// PreToolUse hook for the factory's sessions, loaded from the factory settings file and, for a session cmux restored, the project settings, acting only for a factory session (role.ts): refuses a write that changes an extension repository's git data or name (a git push, a gh or gh api write, a curl, a GitHub MCP write), since the sync pushes each scope's clone to that repository and renders it into every session's store; issue and pull request conversation there passes.
+// PreToolUse hook for the factory's sessions, loaded from the factory settings file and, for a session resumed without its settings, the project settings, acting only for a factory session (role.ts): refuses a write that changes an extension repository's git data or name (a git push, a gh or gh api write, a curl, a GitHub MCP write), since the sync pushes each scope's clone to that repository and renders it into every session's store; issue and pull request conversation there passes.
 import "../../packages/env/src/aliases"
 import { existsSync } from "node:fs"
 import { join } from "node:path"

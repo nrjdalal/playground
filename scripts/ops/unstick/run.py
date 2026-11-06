@@ -23,7 +23,7 @@ CODE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LW = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
 OPS = os.path.join(LW, "ops")
 HERE = os.path.join(OPS, "unstick")
-# read budget (dispatcher, 13 Oct, after cmux reached 155% CPU with ~50 sessions): a pass every 120s (ND-644, planner), under the Dashboard's 3-minute
+# read budget (dispatcher, 13 Oct, after the terminal app reached 155% CPU with ~50 sessions): a pass every 120s (ND-644, planner), under the Dashboard's 3-minute
 # freshness for state.json, reading only the screens of sessions whose transcript has been quiet over QUIET_READ; one still writing is at work
 CYCLE = 120
 QUIET_READ = 60
@@ -682,7 +682,7 @@ def resume_owned(sid, error_at):
     """True when the session's own hooks recorded this stop, so ops-session-resume sends its line: a usage limit with its reset, a
     reset after the error line, whose carry-on comes from Claude Code itself when it announced its own continue in the transcript, and from
     ops-session-resume on every other limit; or a failed turn, its record written by the StopFailure hook at or after the error
-    line. A record from an earlier stop (herdr and cmux restore a session without its --settings, so outside a playground checkout its hooks
+    line. A record from an earlier stop (a session resumed without its --settings, so outside a playground checkout its hooks
     stop) leaves the line to this job."""
     import datetime as _dt
     parse = lambda t: _dt.datetime.fromisoformat(t.replace("Z", "+00:00"))

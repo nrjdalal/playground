@@ -48,7 +48,7 @@ import {
 } from "./probe"
 import { runSpawn, startDispatcher } from "./spawn"
 import { runStore, terminalIo } from "./store"
-import { startJobs, TERMINAL } from "./terminal"
+import { startJobs } from "./terminal"
 import { askPurge, uninstall } from "./uninstall"
 import { runUpdate, spawnRun } from "./update"
 import { version } from "./version"
@@ -264,7 +264,7 @@ const status = (): Promise<number> =>
     async () => ((await opsHerdr(["status"]).exited) === 0 ? 0 : 1),
     async () => {
       const { urls } = liveDashboard()
-      for (const line of statusLines(await probe(urls), TERMINAL)) console.log(line)
+      for (const line of statusLines(await probe(urls))) console.log(line)
     },
   )
 
