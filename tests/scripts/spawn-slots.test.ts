@@ -83,7 +83,50 @@ describe("the slots gate admits a new worker only when run-slot has room for its
     expect(capacityLog(r)).toEqual([expect.objectContaining({ verdict: "pass" })])
   })
 
-  test("a worker start is refused when run-slot.sh room gives no reading", async () => {
+  // run-slot's queue full, as on 6 Nov's urgent start: the free lanes lack the load units, and 8 runs wait.
+  const fullQueue = slots(2, 8, 3)
+  const standing = (home: string) =>
+    writeFileSync(join(home, ".playground", "firefighting-stop.json"), "{}")
+  const trigger = (home: string) => {
+    fullQueue(home)
+    standing(home)
+  }
+  const urgent = (args: string[], setup: (home: string) => void) =>
+    spawn(args, [], { FAKE_CPU_IDLE: "80" }, undefined, undefined, setup)
+
+  test("a --firefighting worker start passes a full queue while its trigger file stands (#1147)", async () => {
+    const r = await urgent([...worker, "--firefighting"], trigger)
+    expect(r.code).toBe(0)
+    expect(capacityLog(r)).toEqual([
+      expect.objectContaining({
+        readings: expect.objectContaining({
+          firefighting: expect.stringMatching(/\/\.playground\/firefighting-stop\.json$/),
+          lanes_free: 0,
+          waiters: 8,
+        }),
+        verdict: "pass",
+      }),
+    ])
+  })
+
+  test("a worker start without --firefighting keeps the slots gate while a trigger file stands", async () => {
+    const r = await urgent(worker, trigger)
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain("the slots gate holds it")
+  })
+
+  test("a --firefighting worker start with no trigger file standing is refused, as before", async () => {
+    const r = await urgent([...worker, "--firefighting"], fullQueue)
+    expect(r.code).not.toBe(0)
+    expect(placing(r)).toEqual([])
+    expect(r.err).toContain("--firefighting starts only while a firefighting trigger file stands")
+  })
+
+  test.each([
+    ["a worker start", worker],
+    ["a --firefighting worker start, its trigger file standing,", [...worker, "--firefighting"]],
+  ])("%s is refused when run-slot.sh room gives no reading", async (_, args) => {
     // a scratch checkout holding spawn.sh, its data-folder resolver and a run-slot.sh that prints nothing
     const checkout = mkdtempSync(join(scratch, "no-room-"))
     mkdirSync(join(checkout, "scripts", "ops"), { recursive: true })
@@ -96,7 +139,7 @@ describe("the slots gate admits a new worker only when run-slot has room for its
         join(checkout, "packages", "env", "src", file),
         readFileSync(join(root, "packages", "env", "src", file)),
       )
-    const r = await spawn(worker, [], {}, join(checkout, "scripts", "spawn.sh"))
+    const r = await spawn(args, [], {}, join(checkout, "scripts", "spawn.sh"), undefined, standing)
     expect(r.code).not.toBe(0)
     expect(placing(r)).toEqual([])
     expect(r.err).toContain(
