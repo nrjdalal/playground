@@ -23,6 +23,8 @@ export type Word = Text & {
 }
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
+  // Set on a while's or an until's condition outside every other loop, and on the script an eval or a source there reads, which the shell runs at least once: a cd there leaves the folder before it behind, as a sure cd does, while `repeated` reads each later pass
+  atLeastOnce?: boolean
   // Set on the bare copy run() hands a hook's visit for a followed command with a redirect: the command it stands for
   bareOf?: Command
   // The token of the run of commands this one belongs to: it changes at each operator that runs a command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and carries into every group, body and pipeline the run reaches, so a cd is read as having moved the shell only for the commands whose token is its own
@@ -40,6 +42,8 @@ export type Command = {
   inner?: () => Command[]
   // Set on every command of a body the shell may keep for a later call (`held`'s, up to its close), so a word's ~- there may expand at that call, wherever the shell has moved by then
   kept?: boolean
+  // Set on a zsh head whose body is a brace group in its own words (`repeat 3 { cd ..; }`, `while true { … }`, `if true { … }`), which the reader does not read, so the shell reads as able to be in any folder after it (`Env.cwdAnywhere`)
+  opaque?: boolean
   redirects: Redirect[]
   // Set when a count or a loop may run the command more than once, so a relative cd of its own may climb or descend any number of folders
   repeated?: boolean
@@ -83,6 +87,8 @@ export type Env = {
   // Set once a cd's landing folder cannot be named at all (`cd "$X"`, a popd, zsh's two-operand cd), so each hook reads it by its own fail-closed rule, through `places`'s fallback
   cwdUnread?: boolean
   files: Map<string, Text>
+  // Set by a hook that holds the line's steady variables (`steady.ts`): a cd's folder word with those it reads put in, else undefined, so a cd through one is read by the folder it names
+  hold?: (word: Word, cmd: Command, env: Env) => Word | undefined
   known: Record<string, string>
   old?: { dir?: string }
   // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
@@ -624,7 +630,96 @@ function decode(raw: string): string {
 export function lex(src: string, known: Record<string, string> = {}): Lexed {
   const lx: Lexer = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() }
   list(lx, 0, false)
+  calledAgain(lx.commands, src)
+  braced(lx.commands)
   return { commands: lx.commands, scopes: lx.scopes }
+}
+
+// The heads after which zsh takes a brace group as the body, in the head's own words
+const BRACED = new Set([
+  "elif",
+  "else",
+  "for",
+  "foreach",
+  "if",
+  "repeat",
+  "select",
+  "until",
+  "while",
+])
+
+// Marks each zsh head that holds an unquoted `{` past its command position, closed by a later `}`, as opaque: bash reads `if grep -q { f` with no `}` after it, so that one stays read as typed
+function braced(commands: Command[]): void {
+  for (const [k, c] of commands.entries()) {
+    const head = c.words[0]
+    if (!head || head.quoted || !BRACED.has(head.value)) continue
+    const at = c.words.findIndex((w, i) => i > 0 && !w.quoted && w.value === "{")
+    if (at < 0 || markers(c.words).length > at) continue
+    if (commands.slice(k + 1).some((d) => d.words.some((w) => !w.quoted && w.value === "}")))
+      c.opaque = true
+  }
+}
+
+// A function's body runs each time the line calls it, so its commands are marked repeated unless the line names the function just twice, by its definition and by one call that runs at most once: a call in a loop, in another body, or one the line names anywhere else (an eval's text, a recursive call) may run it again; a name the reader cannot read as a plain word, a call through a word it cannot read, and any eval or source may call it again too
+function calledAgain(commands: Command[], src: string): void {
+  for (const [k, open] of commands.entries()) {
+    const [first, second] = open.words
+    if (!open.held || !first || first.quoted) continue
+    // `function f {` names it in its own words, and `f() {` (or `f() if`, any compound) in the one word before the `()` the lexer reads as an empty group
+    const before = commands[k - 1]?.words
+    const word =
+      first.value === "function"
+        ? second
+        : open.group && before?.length === 1
+          ? before[0]
+          : undefined
+    if (!word) continue
+    let end = k
+    for (let balance = 0; end < commands.length; end++) {
+      const reserved = markers(commands[end].words)
+      balance +=
+        reserved.filter((w) => OPENS.has(w)).length - reserved.filter((w) => CLOSES.has(w)).length
+      if (balance <= 0) break
+    }
+    const body = commands.slice(k, end + 1)
+    const name = word.value.replace(/\(\)$/, "")
+    if (word.quoted || !/^[\w.:-]+$/.test(name)) {
+      for (const c of body) c.repeated = true
+      continue
+    }
+    const outside = commands.filter((_, at) => at < k - 1 || at > end).map(callee)
+    const calls = outside.filter((w) => w?.value === name)
+    const others = outside.some(
+      (w) =>
+        w !== undefined &&
+        (w.unknown !== undefined ||
+          (!w.quoted && (w.value === "eval" || w.value === "source" || w.value === "."))),
+    )
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    // a redirect's target names a file, never a call, so a file of the function's name is no mention of it
+    const files = commands
+      .flatMap((c) => c.redirects)
+      .filter((r) => r.target?.value === name).length
+    const mentions =
+      (src.match(new RegExp(`(?<![\\w.:-])${escaped}(?![\\w.:-])`, "g"))?.length ?? 0) - files
+    const call = commands.find((c, at) => (at < k - 1 || at > end) && callee(c)?.value === name)
+    const once = mentions === 2 && calls.length === 1 && !others && !call?.repeated && !call?.kept
+    if (!once) for (const c of body) c.repeated = true
+  }
+}
+
+// The word a command runs as its program, past its assignments, its reserved words and `builtin` or `command` with their options, quoted or not, so `$'\x66'` reads as the `f` it calls
+function callee(cmd: Command): Word | undefined {
+  return cmd.words.find(
+    (w) =>
+      w.quoted ||
+      !(
+        ASSIGN.test(w.value) ||
+        MARKERS.has(w.value) ||
+        BUILTIN.has(w.value) ||
+        w.value.startsWith("-")
+      ),
+  )
 }
 
 // A subshell or a substitution is a scope of its own, so a cd inside it stays inside it.
@@ -654,6 +749,8 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   let after = ""
   // each body the walk is inside, true for one the shell may keep for a later call
   const bodies: boolean[] = []
+  // each loop whose `do` the walk has not reached, true for a while's or an until's, whose condition the shell runs once for each pass and once more
+  const heads: boolean[] = []
   // A pipeline's commands and a backgrounded one run in subshells: a cd there leaves the shell where it was.
   const end = (op: string) => {
     const done = cmd
@@ -679,13 +776,35 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       if (after === "||" || depth > 0 || body) done.unsure = true
       if (after === "&&") done.chained = true
       done.chain = lx.token
-      if (reserved.some((w) => HELD.has(w))) done.held = true
+      // `f() if …`, a function whose body is a compound other than a brace group, keeps that body for each call as `f() {` keeps its own
+      const last = lx.commands[lx.commands.length - 1]?.words
+      const compound =
+        !!done.group &&
+        last?.length === 1 &&
+        OPENS.has(reserved[0] ?? "") &&
+        !HELD.has(reserved[0] ?? "")
+      if (reserved.some((w) => HELD.has(w)) || compound) done.held = true
       if (done.held || bodies.includes(true)) done.kept = true
-      for (const w of reserved) {
-        if (OPENS.has(w)) bodies.push(HELD.has(w))
+      for (const [at, w] of reserved.entries()) {
+        if (OPENS.has(w)) bodies.push(HELD.has(w) || (compound && at === 0))
         else if (CLOSES.has(w)) bodies.pop()
       }
-      if (loops > 0 || loop) done.repeated = true
+      // zsh's foreach runs its body up to an `end`, with no `do`
+      const each = done.words[0]?.quoted ? undefined : done.words[0]?.value
+      const outer = heads.length === 0 && loops === 0
+      let head = heads.length > 0
+      for (const w of reserved) {
+        if (w === "while" || w === "until" || w === "for" || w === "select")
+          heads.push(w === "while" || w === "until")
+        else if (w === "do") heads.pop()
+        head ||= heads.length > 0
+      }
+      if (each === "foreach") heads.push(false)
+      else if (each === "end" && heads.length > 0 && !loop) heads.pop()
+      // every command between a loop's head and its `do` runs once for each pass: a while's or an until's condition, and the body of zsh's short loops, which have no `do`
+      if (loops > 0 || loop || head || each === "foreach") done.repeated = true
+      if (outer && !loop && reserved.some((w) => w === "while" || w === "until"))
+        done.atLeastOnce = true
       depth = Math.max(0, depth + opened - closed)
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0))
       // a run ends only at an operator that runs the next command whatever this one did, and only outside every body: a `|` keeps the pipeline in the run, and entering a group, a body or a script keeps the run it was reached through
@@ -1258,6 +1377,11 @@ export async function examine(
 ): Promise<string | undefined> {
   tick()
   unchain(cmd, env)
+  if (cmd.opaque) {
+    env.cwdAnywhere = true
+    env.cwdSure = undefined
+    env.cwdUnread = true
+  }
   const [primary, ...others] = readings(parse(cmd))
   const expanded = expandTilde(cmd, primary.name, env)
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
@@ -1405,14 +1529,32 @@ async function examineReading(
     const script = await scriptOf(args[0], cmd, here)
     verdict =
       (script.unknown ? await visit(cmd, parsed, here) : undefined) ??
-      (await nested(cmd, env, () => run(lexScript(known(script), env), here, visit, builtins)))
+      (await nested(cmd, env, () =>
+        run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins),
+      ))
   } else if (name === "eval") {
     verdict = await nested(cmd, env, () =>
-      run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins),
+      run(
+        again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed),
+        here,
+        visit,
+        builtins,
+      ),
     )
   } else verdict = await visit(cmd, parsed, here)
   await record(cmd, name, args, here)
   return verdict
+}
+
+// A script an eval or a source reads in the line's own shell runs again each time a count or a loop runs that command, so each of its commands is marked repeated, as the line's own would be
+function again(lexed: Lexed, cmd: Command, parsed: Parsed): Lexed {
+  if (!manyTimes(cmd, parsed)) return lexed
+  const more = onceOrMore(cmd, parsed)
+  for (const c of lexed.commands) {
+    if (more && !c.repeated) c.atLeastOnce = true
+    c.repeated = true
+  }
+  return lexed
 }
 
 // Runs a script a command of the line reads (a shell, an eval, a source). The line's own run does not reach into it, since every command of the script runs because that command ran, so the script reads with no chain of the line's; what the script's own trailing chain leaves joins the line's on the way out, under the reading command's own token, since a cd an `&&` made sure at the end of an eval or a source may not have run either.
@@ -1437,6 +1579,15 @@ const sureToRun = (cmd: Command, parsed: Parsed): boolean =>
   !cmd.detached &&
   !cmd.unsure &&
   !cmd.repeated &&
+  (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
+
+// Whether the shell runs a command at least once and may run it again: a while's or an until's condition, sure to run as `sureToRun` reads it but for `repeated`, so a count in front of it (`repeat 0`), a body kept for a later call, or an `&&` before the loop (`false && while …`, which may skip it) keeps it out
+const onceOrMore = (cmd: Command, parsed: Parsed): boolean =>
+  !!cmd.atLeastOnce &&
+  !cmd.chained &&
+  !cmd.detached &&
+  !cmd.kept &&
+  !cmd.unsure &&
   (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
 
 // Whether `builtin` or `command` runs the command's program, with nothing but their own options, reserved words and assignments in front of it.
@@ -1535,7 +1686,10 @@ function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: s
   const paths = new Set<string>()
   const many = manyTimes(cmd, parsed)
   let unread = dirs.length > 1
-  for (const word of dirs.length > 1 ? dirs : [dir]) {
+  for (const typed of dirs.length > 1 ? dirs : [dir]) {
+    // a steady variable's value is read in, so its target, and whether it climbs, is the folder it names; the unread reading the cd had stays beside it, so it is never read looser than before
+    const word = env.hold?.(typed, cmd, env) ?? typed
+    if (word !== typed) unread = true
     for (const base of from.length > 0 ? from : [undefined]) {
       tick()
       const path = pathOf(word, { ...env, cwd: base })
@@ -1623,8 +1777,15 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     return
   }
   env.cwdSure = undefined
+  // a while's or an until's condition runs at least once, so a cd there into folders that are there leaves the ones before it behind, and the shell is in one its passes reach
+  const behind =
+    onceOrMore(cmd, parsed) &&
+    !unread &&
+    !move.back &&
+    paths.length > 0 &&
+    (chained || (await Promise.all(paths.map(isFolder))).every(Boolean))
   // a form that returns to a folder the line named before takes every one of them, since the reader cannot tell which the shell goes back to
-  env.cwdMaybe = keep([...new Set([...(move.back ? back : from), ...paths])], env)
+  env.cwdMaybe = keep([...new Set([...(move.back ? back : behind ? [] : from), ...paths])], env)
   env.cwdUnread = env.cwdUnread || unread || (from.length === 0 && paths.length === 0)
 }
 

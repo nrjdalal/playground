@@ -625,6 +625,39 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     expect(await bash(command, WORKTREE)).toContain("no-main-checkout hook refuses")
   })
 
+  // #623: a climb the shell runs at most once reaches one folder up, the worktrees folder, so each stays running
+  test.each([
+    ["a function whose cd climbs, called once", "f() { cd ..; }; f; git commit -m x"],
+    ["an if condition that climbs", "if cd ..; then git commit -m x; fi"],
+    ["a single eval of a climb", "eval 'cd ..'; git commit -m x"],
+    ["one climb through a variable", "U=..; cd $U; git commit -m x"],
+    ["a function called once beside a file of its name", "f() { cd ..; }; f; echo x > f"],
+    ["a function called once beside a variable argument", 'f() { cd ..; }; f; git commit -m "$m"'],
+    ["an if condition with a brace argument", "if grep -q { f; then :; fi; git commit -m x"],
+    ["a for loop with no cd", "for i in 1 2 3; do echo $i; done; git commit -m x"],
+  ])("from a worktree, %s runs", async (_name, command) => {
+    expect(await bash(command, WORKTREE)).toBeUndefined()
+  })
+
+  // #623: a while's or an until's condition runs at least once, so its cd leaves the main checkout behind
+  test.each([
+    [
+      "a while condition's cd into a worktree",
+      `while cd ${WORKTREE} && false; do :; done; git commit -m x`,
+    ],
+    [
+      "an until condition's cd into a worktree",
+      `until cd ${WORKTREE}; do :; done; git commit -m x`,
+    ],
+    ["a while condition's climb out of it", "while cd .. && false; do :; done; git commit -m x"],
+    [
+      "a while condition's eval of a cd into a worktree",
+      `while eval 'cd ${WORKTREE}' && false; do :; done; git commit -m x`,
+    ],
+  ])("from the main checkout, %s runs", async (_name, command) => {
+    expect(await bash(command)).toBeUndefined()
+  })
+
   test("from a worktree, bun's --cwd into another worktree runs", async () => {
     expect(await bash(`bun run --cwd ${MAIN}/.claude/worktrees/b build`, WORKTREE)).toBeUndefined()
   })
