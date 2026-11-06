@@ -380,7 +380,36 @@ export function linkPlaces(
   return [...marked, ...pads.flatMap((pad) => [pad, ...dirs(pad)])]
 }
 
-// Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session, running clone or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary.
+// The links outside a worktree that point into it, as its refusal naming the first three, or null: the entries of each other worktree and each place, and of its node_modules one level deep, as a node_modules clone makes them; a link whose target is missing or lies outside the worktree does not count.
+const linkHolder = (at: string, roots: Roots, places: string[]): string | null => {
+  const worktrees = worktreesOf(roots)
+  const siblings = entriesOf(worktrees)
+    .filter((e) => e.isDirectory())
+    .map((e) => join(worktrees, e.name))
+  const links: string[] = []
+  for (const folder of new Set([...siblings, ...places].map(real))) {
+    if (inside(folder, at)) continue
+    const modules = join(folder, "node_modules")
+    const dirs = lstat(modules)?.isDirectory() ? [folder, modules] : [folder]
+    for (const dir of dirs)
+      for (const entry of entriesOf(dir)) {
+        if (!entry.isSymbolicLink()) continue
+        const link = join(dir, entry.name)
+        let target: string
+        try {
+          target = realpathSync(link)
+        } catch {
+          continue
+        }
+        if (inside(target, at)) links.push(`${link} -> ${target}`)
+      }
+  }
+  if (!links.length) return null
+  const more = links.length > 3 ? `, and ${links.length - 3} more` : ""
+  return `${at} is linked into by ${links.sort().slice(0, 3).join(", ")}${more}: repoint or remove each link first`
+}
+
+// Why a worktree may not be removed, or null: it sits in <main>/.claude/worktrees, the roster reads, no live session, running clone, link from outside it or process holds it, and, unless --discard, it holds no uncommitted change and its HEAD's work is on origin/canary.
 export function worktreeRefusal(path: string, roots: Roots, holders: Holders): string | null {
   const at = real(path)
   if (dirname(at) !== worktreesOf(roots)) return `${at} is not a worktree in ${worktreesOf(roots)}`
@@ -421,6 +450,8 @@ export function worktreeRefusal(path: string, roots: Roots, holders: Holders): s
   }
   const cloned = cloneHolder(at, holders.clones())
   if (cloned) return cloned
+  const linked = linkHolder(at, roots, holders.places())
+  if (linked) return linked
   if (holders.procs === null) return `the processes' folders cannot be listed, so ${at} stays`
   const held = holders.procs.filter((p) => inside(real(p.cwd), at))
   const holder = held.find((p) => isAgentBrowser(p.command)) ?? held[0]
