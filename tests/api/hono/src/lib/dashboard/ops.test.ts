@@ -210,6 +210,18 @@ describe("readOps", () => {
 
 // The sidebar's runners read when they run (every 5 min, every day at 5:00 AM) under a plain name that never repeats a word.
 describe("job names and schedules", () => {
+  test("every job Playground ships has a plain name and a hover line (#1160)", async () => {
+    // by its path at run time: the jobs registry imports @/ against the settings package, which this folder's config maps to the API's src
+    const registry = join(import.meta.dir, "../../../../../../packages/settings/src/jobs.ts")
+    const { JOBS } = (await import(registry)) as { JOBS: Record<string, unknown> }
+    for (const job of Object.keys(JOBS))
+      expect([job, RUNNER_NAMES[job], OPS_DOES[job]]).toEqual([
+        job,
+        expect.any(String),
+        expect.any(String),
+      ])
+  })
+
   test("every job the API describes has a plain name, and no shown name holds ops", () => {
     for (const job of Object.keys(OPS_DOES)) expect(RUNNER_NAMES[job]).toBeString()
     for (const name of Object.values(RUNNER_NAMES)) expect(name).not.toMatch(/ops/i)
