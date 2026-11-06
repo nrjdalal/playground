@@ -3,7 +3,7 @@ import { join } from "node:path"
 
 type Git = (...args: string[]) => Promise<{ code: number; out: string }>
 
-const BUNDLED = "scripts/hooks/bundled"
+const BUNDLED = "scripts/hooks/bundled/"
 
 // Every guard loads its bundle from the main checkout's scripts/hooks/bundled, and git rewrites a file it moves in place (unlink, then write), so a guard that starts mid-move can load a missing or half-written bundle and fail closed. So before the move, each bundle the target adds or changes is written beside its path and renamed over it, then staged, and the move finds it at the target and leaves it alone; the swapped paths come back for unswapBundles.
 export const swapBundles = async (
@@ -11,12 +11,12 @@ export const swapBundles = async (
   git: Git,
   target: string,
 ): Promise<{ code: number; out: string; swapped: string[] }> => {
-  const listed = await git("diff", "--name-status", "--no-renames", "HEAD", target, "--", BUNDLED)
+  const listed = await git("diff", "--name-status", "--no-renames", "HEAD", target)
   if (listed.code !== 0) return { ...listed, swapped: [] }
   const paths = listed.out
     .split("\n")
     .map((line) => line.split("\t"))
-    .filter(([status, path]) => path && (status === "A" || status === "M"))
+    .filter(([status, path]) => path?.startsWith(BUNDLED) && (status === "A" || status === "M"))
     .map(([, path]) => path!)
   const done: string[] = []
   for (const path of paths) {

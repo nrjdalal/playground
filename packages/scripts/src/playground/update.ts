@@ -101,11 +101,17 @@ export const runUpdate = async (
   ]
   const target = to ? `refs/tags/${to}` : "origin/main"
   // every hook that runs its source (all but the bundled PreToolUse guards) and every ops job run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its changed manifests and that install first, while the code is still the old commit's (the install step after the move then finds it linked); a target that deletes or moves a manifest, which the old code may still read, a tree with edits or untracked files of its own, or an install that fails there moves first as before
+  // a fast-forward stops on a checkout with commits of its own, so files are staged only where it will move, and a tree with edits or untracked files of its own moves as before; a checkout -B moves over them either way; read once, for prelink and swap
+  let staging: Promise<boolean> | undefined
+  const stages = () =>
+    (staging ??= (async () => {
+      const merges = !to && branch === "main"
+      if (merges && (await git("merge-base", "--is-ancestor", "HEAD", target)).code !== 0)
+        return false
+      return !(await git("status", "--porcelain", "--untracked-files=all")).out.trim()
+    })())
   const prelink = async (): ReturnType<Run> => {
-    // a fast-forward stops on a checkout with commits of its own, so its manifests are staged only where it will move; a checkout -B moves over them either way
-    const merges = !to && branch === "main"
-    if (merges && (await git("merge-base", "--is-ancestor", "HEAD", target)).code !== 0) return ok
-    if ((await git("status", "--porcelain", "--untracked-files=all")).out.trim()) return ok
+    if (!(await stages())) return ok
     const lines = async (...args: string[]) => (await git(...args)).out.split("\n").filter(Boolean)
     const manifests: Record<string, string> = {}
     for (const path of await lines("ls-tree", "-r", "--name-only", target)) {
@@ -145,12 +151,10 @@ export const runUpdate = async (
       ...manifestsChanged,
     )
   }
-  // the guards load their bundles from this checkout, so the move finds each changed one swapped in whole first (swap-bundles.ts); a checkout with commits of its own or files of its own moves as before, and a move that fails puts them back
+  // the guards load their bundles from this checkout, so the move finds each changed one swapped in whole first (swap-bundles.ts), where stages() allows, and a move that fails puts them back
   let swapped: string[] = []
   const swap = async (): ReturnType<Run> => {
-    const merges = !to && branch === "main"
-    if (merges && (await git("merge-base", "--is-ancestor", "HEAD", target)).code !== 0) return ok
-    if ((await git("status", "--porcelain", "--untracked-files=all")).out.trim()) return ok
+    if (!(await stages())) return ok
     const result = await swapBundles(repo, git, target)
     swapped = result.swapped
     if (result.code !== 0 && swapped.length) await unswapBundles(git, swapped)

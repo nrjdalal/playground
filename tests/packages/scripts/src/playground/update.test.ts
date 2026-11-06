@@ -88,6 +88,7 @@ describe("runUpdate", () => {
       ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
       ["git", "-C", repo, "status", "--porcelain", "--untracked-files=all"],
       ["git", "-C", repo, "ls-tree", "-r", "--name-only", "origin/main"],
+      ["git", "-C", repo, "diff", "--name-status", "--no-renames", "HEAD", "origin/main"],
       ["git", "-C", repo, "merge", "--ff-only", "-q", "origin/main"],
       ["bash", `${repo}/scripts/link-skills.sh`],
       ["git", "-C", repo, "diff", "--name-only", "old", "HEAD"],
@@ -210,11 +211,12 @@ describe("runUpdate", () => {
     )
     expect(code).toBe(0)
     expect(rolled).toBe(false)
-    expect(calls.slice(1, 6)).toEqual([
+    expect(calls.slice(1, 7)).toEqual([
       ["git", "-C", repo, "fetch", "-q", "--tags", "origin", "main"],
       ["git", "-C", repo, "merge-base", "--is-ancestor", "HEAD", "origin/main"],
       ["git", "-C", repo, "status", "--porcelain", "--untracked-files=all"],
       ["git", "-C", repo, "ls-tree", "-r", "--name-only", "refs/tags/v0.0.20"],
+      ["git", "-C", repo, "diff", "--name-status", "--no-renames", "HEAD", "refs/tags/v0.0.20"],
       ["git", "-C", repo, "checkout", "-q", "-B", "main", "refs/tags/v0.0.20"],
     ])
     expect(said.at(-1)).toStartWith("playground update: at v0.0.20; the Dashboard rolls on its own")
