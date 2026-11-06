@@ -33,6 +33,7 @@ import {
   type Text,
   tick,
   UNKNOWN,
+  unreadWord,
   varsSince,
   type Visit,
   withDeadline,
@@ -889,9 +890,8 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (write) return refuse(write)
     // a command with no program runs nothing that reads the environment, so only its own assignments count
     const vars = !reader && first ? since(varsRead, env.vars, "") : []
-    // an eval's words are its script, so one the hook cannot read is refused
-    const unreadEval =
-      name === "eval" && args.find((a) => a.unknown !== undefined || marked(a.value))
+    // an eval's words are its script, so one the hook cannot read, a glob's file names included, is refused
+    const unreadEval = name === "eval" && args.find(unreadWord)
     if (unreadEval)
       return refuse(
         `an eval of ${shown(unreadEval)}, a value the hook cannot read; run its commands as calls of their own, with no eval`,

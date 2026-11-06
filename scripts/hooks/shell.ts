@@ -774,6 +774,9 @@ export const visible = (value: string): string =>
   value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ")
 
 export const marked = (value: string): boolean => value.includes(UNKNOWN) || value.includes(READ)
+// Whether a word holds a part the hook cannot read: an unknown part, a value it marks, or a glob, whose file names it cannot see
+export const unreadWord = (word: Word): boolean =>
+  word.unknown !== undefined || !!word.glob || marked(word.value)
 
 // The shell's own builtins whose effect a hook follows (its folder, its variables, its aliases, a name's lookup): the shell matches them by their exact case, and in another case one runs no builtin (macOS's /usr/bin/cd and the like run `builtin cd` in a child), so it changes nothing of the shell's
 const SHELL_OWN = new Set([
@@ -1790,10 +1793,9 @@ async function examineReading(
         run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins),
       ))
   } else if (name === "eval") {
-    // an eval of a word the hook cannot read runs code the hook never sees, so a hook judges the eval itself, as it does a source of a script it cannot read
-    const unread = args.some((a) => a.unknown !== undefined || marked(a.value))
+    // an eval of a word the hook cannot read, a glob's file names included, runs code the hook never sees, so a hook judges the eval itself, as it does a source of a script it cannot read
     verdict =
-      (unread ? await visit(cmd, parsed, here) : undefined) ??
+      (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ??
       (await nested(cmd, env, () =>
         run(
           again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed),
