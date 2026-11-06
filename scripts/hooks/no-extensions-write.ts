@@ -107,8 +107,8 @@ const RSYNC_PATHS = [
   "temp-dir",
   "write-batch",
 ]
-// rsync's -T, its temp folder, with its value attached in a short cluster whose earlier letters take no value (-B, -e, -f, -M and -@ do)
-const RSYNC_TEMP = /^-[^-@BefMT]*T(?=.)/
+// rsync's -T, its temp folder, in a short cluster whose earlier letters take no value (-B, -e, -f, -M and -@ do)
+const RSYNC_TEMP = /^-[^-@BefMT]*T/
 // Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
 const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
 // Homebrew's GNU coreutils under their g prefix (gcp, grm), each read as the remover or writer it names
@@ -1001,11 +1001,14 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       tool === "mv"
         ? writeTargets(tool, args, gnu, posix)
         : tool === "rsync"
-          ? args.flatMap((word) => {
-              const long = /^--([^=]+)=/.exec(word.value)
+          ? args.flatMap((word, k) => {
+              const long = /^--([^=]+)=?/.exec(word.value)
               const path = long && RSYNC_PATHS.some((name) => name.startsWith(long[1]))
               const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length
-              return cut ? [after(word, cut)] : []
+              if (!cut) return []
+              // with no value attached, the option takes the next word, a dash-led one too
+              if (cut < word.value.length) return [after(word, cut)]
+              return args[k + 1] ? [args[k + 1]] : []
             })
           : []
     const operands = remover
