@@ -381,7 +381,7 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       expect(r.err).toContain(CANNOT)
     })
 
-    // #1159: a chain shell given no script file, or an -s cluster, reads its script on stdin, through a pipe, a < redirect or a heredoc, which run-slot cannot see
+    // #1159: a chain shell word anywhere in a step runs a script run-slot does not read, its script fed on stdin through a pipe, a < redirect or a heredoc among them
     for (const script of [
       'echo "docker build ." | sh',
       "bash < docker-build.sh",
@@ -389,6 +389,16 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       'printf "docker build .\\n" | nice dash',
       "bash -o pipefail < docker-build.sh",
       "ksh -- < docker-build.sh",
+      // review round 1 of #1159: an fd number, an option's value and a heredoc each sit after the shell word, which reads as one run-slot cannot read whatever follows it
+      'echo "docker build ." | sh 2>/dev/null',
+      'echo "docker build ." | bash 2>&1',
+      'echo "docker build ." | dash 1>&2',
+      'echo "docker build ." | bash -eo pipefail',
+      'echo "docker build ." | bash -O extglob',
+      'echo "docker build ." | bash --rcfile /dev/null',
+      "sh <<'EOF'\ndocker build .\nEOF",
+      'echo hi; sh 2>/dev/null -c "docker build ."',
+      "echo hi; bash docker-build.sh",
     ])
       test(`a shell fed its script on stdin: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
