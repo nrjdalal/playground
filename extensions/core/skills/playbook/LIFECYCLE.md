@@ -136,7 +136,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   `playground update` touches ops-dashboard's `roll-now`, and `playground status` only reads, ops-herdr's `status` lines among its own.
   `playground sweep <lead>` reads what changed since that lead's last sweep and prints it, or `quiet`, writing only its cursor, `sweep/<lead>.json` in the data folder ([SWEEP.md](SWEEP.md)).
   `playground focus on --session <name> --reason "<why>" [--for <minutes>]` gives one session the Mac for up to 180 minutes (120 by default), recorded in the data folder's `focus.json`.
-  While it stands, held-prs.json's `"*"` line holds every merge, `run-slot.focus` holds every other session's heavy run while ops-tick's, the dashboard's and the focused session's own reviewer's and tester's go on ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)), and spawn.sh refuses every new session but a move, that reviewer or tester,
+  While it stands, held-prs.json's `"*"` line holds every merge, `run-slot.focus` holds every other session's heavy run while ops-tick's, the dashboard's and the focused session's own reviewer's and tester's go on ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)), and spawn.sh refuses every new session but that reviewer or tester,
   and a `--firefighting` start while a firefighting trigger file stands ([scripts/README.md](../../../../scripts/README.md#spawnsh)).
   For an urgent ticket, Ops runs `run-slot.sh preempt` after focus is on, which stops each run another session already holds a slot with; the run says focus preempted it and to run it again once focus ends.
   What comes into the Inbox meanwhile is held quiet, out of its counts and the tab's dot, but an alert update ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)).
@@ -152,7 +152,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   A fresh the dispatcher session, after a restart, reads the previous the dispatcher transcript and re-checks its open items against the roster and the managers before it answers the owner.
   A session resumed after any restart, an account switch included, re-arms its background tasks and re-sends its unanswered messages first, by the **context** rule ([rules/context.md](../../rules/context.md)), which the `after-resume` hook puts in front of it.
   No session reports Playground as running until its own `ListAgents` lists a session named `dispatcher`; a roster entry, a resume record or a Dashboard row does not count.
-  Ops' sweep has each factory session herdr restored without the factory's hooks respawned with its settings ([SWEEP.md](SWEEP.md)).
+  Ops' sweep has each factory session resumed without the factory's hooks respawned with its settings ([SWEEP.md](SWEEP.md)).
 
 A Mac restart clears `/private/tmp`, so every scratchpad is lost.
 Anything a session needs across a restart goes under `~/.playground/scratchpad/<name>/`, which the restart leaves alone.

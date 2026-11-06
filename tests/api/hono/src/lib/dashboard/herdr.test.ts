@@ -1011,7 +1011,7 @@ describe.skipIf(!existsSync(HERDR))("herdr's schema", () => {
   })
 })
 
-// Every herdr call in the dashboard goes through herdr.ts, as every cmux call goes through cmux.ts, and only deliver.ts sends a message.
+// Every herdr call in the dashboard goes through herdr.ts, and only deliver.ts sends a message.
 const API = join(import.meta.dir, "../../../../../../api/hono/src")
 const sources = () =>
   [...new Bun.Glob("**/*.ts").scanSync({ cwd: API })].map((file) => ({

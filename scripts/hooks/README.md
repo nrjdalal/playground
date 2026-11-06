@@ -15,7 +15,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 ## Registered in both settings files
 
-- herdr's own resume restores a session after a restart without its `--settings` or `PLAYGROUND_ROLE`, so `.claude/settings.json` registers every PreToolUse hook `scripts/factory-settings.json` does, with the same matcher and the same command string,
+- A session resumed without its `--settings` or `PLAYGROUND_ROLE` (a bare `claude --resume`, or herdr's own resume, which ops-herdr's `config.toml` keeps off: playbook's SESSIONS.md) still loads the checkout's project settings, so `.claude/settings.json` registers every PreToolUse hook `scripts/factory-settings.json` does, with the same matcher and the same command string,
   since Claude Code runs a handler defined in both files once only when the two commands match byte for byte (measured on Claude Code 2.1.302: one space apart, it runs twice; `tests/scripts/hooks-abs-path.test.ts` holds every hook in both files to it).
   That one command finds the checkout with no `$HOME` in it: `$PLAYGROUND_REPO`, which spawn.sh's launch exports as its main checkout, else the main checkout git names for `$CLAUDE_PROJECT_DIR` (`--git-common-dir`, so a session in a worktree runs the main checkout's guards); when neither names a folder holding the hook's script, it runs nothing and exits 0.
 - A hook's script lands on `main` in one ship and its registration in a later one, since every wrapper runs its script from the main checkout, which follows `main`, and a factory session on `canary` loses the hook's tool the moment `canary` registers a script `main` lacks.
@@ -395,7 +395,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 - A factory session's headless `claude -p` (or `--print`) runs on the session's own account and carries its role: `scripts/hooks/no-headless-login.ts`, registered beside no-stash and acting for a factory session alone (`scripts/hooks/role.ts`), refuses one whose command sets no `CLAUDE_CODE_OAUTH_TOKEN` for it, as a prefix, through `env` or by an `export` earlier in the command,
   since spawn.sh hands the token to the session's own `claude` alone, so a child started from its Bash shell bills this machine's own login (21 eval runs billed an account paused at 98%).
-  It also requires `PLAYGROUND_ROLE` in the command when the session's role came from its name in the registry rather than its environment (a session herdr restored), since a run with no role passes every role-gated hook (a headless Slack post sent a url-only link no-bare-slack-link let through).
+  It also requires `PLAYGROUND_ROLE` in the command when the session's role came from its name in the registry rather than its environment (a session resumed without its settings), since a run with no role passes every role-gated hook (a headless Slack post sent a url-only link no-bare-slack-link let through).
   The role rides the environment rather than a match on the run's folder: a child inherits its parent's environment wherever it runs, while a folder match would also catch a session the owner opens there.
   The role reaches the factory's hooks where the run loads them, inside the factory's checkout, whose `.claude/settings.json` registers them; a run started in any other folder loads none of them.
   Its reason gives the shape, with the account read from the session's resume record (`~/.playground/resume/<name>.sh`, its `# account:` line, else its `--account`), and the Keychain service from the `usage.keychainService` setting, `playground-claude-oauth` while the policy sets none.
@@ -416,7 +416,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 - ALWAYS: Keep the factory out of every ticket, PR, commit, branch, comment, Slack message or DM, and file in a guarded org's repo: playbook's **classified** rule, since the factory is the owner's own and stays out of the org's records in any shape.
   Every factory session is spawned with `--settings ~/.playground/factory-settings.json` (playbook's SESSIONS.md), the file `scripts/link-skills.sh` links to `scripts/factory-settings.json`,
-  which registers the PreToolUse hook `scripts/hooks/no-playground-leak.ts` wherever the session works (`.claude/settings.json` registers it too, for a session herdr restores in the factory's checkout).
+  which registers the PreToolUse hook `scripts/hooks/no-playground-leak.ts` wherever the session works (`.claude/settings.json` registers it too, for a session resumed without its settings in the factory's checkout).
   It refuses a write to a guarded org's surface whose text holds a factory term (a name, an old session name, which a scope's own copy adds, a path, a `<role>-<sin>` session or a `probe-<sin>` or `probe-<role>-<sin>` probe from `extensions/core/lists/playground-terms.json`,
   its sins the seven words alone so `worker-pool` and `probe-path` pass, any skill's name in the checkout's `skills/` bucket folders,
   or any agent's name in the roster, both read on every call since skills are added and sessions renamed, leaving out one the file's `everyday` list names, such as `builder`, an org's own name, which its extension's copy adds, or `pr`, the public skill copied from upstream whose name is the word for a pull request, and adding none when the roster is missing or does not read;
@@ -482,7 +482,7 @@ Only the first reading moves the folder, sets variables and records files for th
 ## no-linear-ticket
 
 - ALWAYS: File a new Linear ticket only after the owner's yes, and keep the factory out of Linear and out of every guarded org's ticket, PR, commit, branch, comment, Slack message or DM, and file in its repo: playbook's **tickets** rule, since the factory is no project of the org's and stays out of its records in any shape.
-  A session started with `PLAYGROUND_ROLE` set (every factory spawn, playbook's SESSIONS.md), or with no role but a factory name in Claude Code's registry (`scripts/hooks/role.ts`, for a session herdr restored), runs the PreToolUse hook `scripts/hooks/no-linear-ticket.ts`, registered in both settings files and in the ticket skill's and playbook's frontmatter,
+  A session started with `PLAYGROUND_ROLE` set (every factory spawn, playbook's SESSIONS.md), or with no role but a factory name in Claude Code's registry (`scripts/hooks/role.ts`, for a session resumed without its settings), runs the PreToolUse hook `scripts/hooks/no-linear-ticket.ts`, registered in both settings files and in the ticket skill's and playbook's frontmatter,
   so it also runs in a guarded org's checkout whose session loads either; without the variable or a factory name it allows everything, so the owner's own sessions file freely.
   It refuses a call that files a new Linear ticket (`save_issue` with no `id`, a Linear server's create-issue tool, a GraphQL `issueCreate` or `issueBatchCreate` sent by curl, by `gh api` to a URL off GitHub, or by inline script code) unless `ticket-approvals/<team>-<UTC date>.json` in the data folder names its title;
   a GraphQL create is refused even then, since its `teamId` matches no approval.
@@ -624,7 +624,7 @@ Only the first reading moves the folder, sets variables and records files for th
 ## no-stash
 
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry (the pre-commit's lint-staged runs with `--no-stash`, so a commit adds none): take a before-shot from a separate worktree on `origin/canary`, or commit first.
-  The factory's `scripts/hooks/no-stash.ts` (registered in `scripts/factory-settings.json`, and in `.claude/settings.json` for a session herdr restores without it) refuses a stash that could take another worktree's work, and `agent-browser close --all`, which closes every session's browser on the machine.
+  The factory's `scripts/hooks/no-stash.ts` (registered in `scripts/factory-settings.json`, and in `.claude/settings.json` for a session resumed without its settings) refuses a stash that could take another worktree's work, and `agent-browser close --all`, which closes every session's browser on the machine.
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD stash pop` reads as a stash.
 
 ## no-unslotted-run
@@ -667,7 +667,7 @@ Only the first reading moves the folder, sets variables and records files for th
   since the turn went on (a Stop hook can continue it; any other tool end writes nothing, so the hook after every tool is one file read, about 10ms measured); a notice never replaces a stuck, failed or usage-limit record, nor the permission notice the record a tool end wrote, since it lands after the event that wrote it;
   and a StopFailure is `stuck` on a login, `failed` with reason `balance` on Z.ai's empty balance (`[1113]` in its last message, which the zai usage job reads), `usage-limit` with its reset on a usage limit (GLM's text in UTC+8, else Claude's limit line in the transcript), else `failed`.
   Inside herdr (`HERDR_ENV=1`) it also reports the state as herdr's own, `pane report-agent` under the source `custom:playground` as the agent `claude`, the kind herdr's `agent.prompt` types into, with a microsecond `seq`, from a detached child with a 2s timeout, and on SessionEnd hands the pane back (`pane release-agent`), so a pane that outlives claude goes back to herdr's own reading.
-  herdr restores a session without its `--settings` (measured on herdr 0.9.5), so a restored session outside the factory's checkout writes no state and its file goes stale; a reader takes a record as about the moment it was written, never as the session now.
+  herdr's own resume, when it is on, brings a session back without its `--settings` (measured on herdr 0.9.5), so a session resumed that way outside the factory's checkout writes no state and its file goes stale; a reader takes a record as about the moment it was written, never as the session now.
   The file also holds the shell-pane launcher's caller check (`procOf`, `sessionAbove`, `callerRefusal`): `run` and `login` refuse a call whose `PLAYGROUND_ROLE` or `CLAUDE_CODE_SESSION_ID` is not its claude process's own;
   [the shell-pane docs page](../../docs/playground/shell-pane.md#where-it-fits) says what the check reads and the gaps it leaves open.
   `playground rm --discard` reads the same lookup (`sessionAbove`) the other way (`callerOf` in `packages/scripts/src/playground/rm.ts`): a claude process above the call makes it a session's, which needs an approved delete decision, and none makes it a terminal's.

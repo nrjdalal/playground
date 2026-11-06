@@ -1,7 +1,7 @@
 ---
 name: playbook
 license: Complete terms in the repository's NOTICE
-description: "Factory rules for the Claude Code sessions Playground runs in herdr: roles, chain, lifecycle, the leads' sweep and the standing rules. Use when you are the dispatcher, the Planner, the Builder, Ops, the Optimizer, a worker, reviewer, tester, runner or probe session, or before you spawn, brief, rename or end a cmux session."
+description: "Factory rules for the Claude Code sessions Playground runs in herdr: roles, chain, lifecycle, the leads' sweep and the standing rules. Use when you are the dispatcher, the Planner, the Builder, Ops, the Optimizer, a worker, reviewer, tester, runner or probe session, or before you spawn, brief, rename or end a session."
 hooks:
   PreToolUse:
     - matcher: '^(Bash|Edit|MultiEdit|NotebookEdit|Write|mcp__.+__((\w+_)?[Cc]reate_?[Ii]ssues?|[Ii]ssues?_?[Cc]reate|save_issue))$'

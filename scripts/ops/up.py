@@ -126,13 +126,6 @@ def one_line_answer(out):
     return " ".join(line.strip() for line in out.splitlines() if line.strip()) or "no answer"
 
 
-def elsewhere(holder, procs, stale=""):
-    """Why a job's live holder must stop, else "": one on a deleted executable (stale); a pid the snapshot lacks started after it was read (a restart during this pass), so it is left to the next pass."""
-    if not holder or holder not in procs:
-        return ""
-    return stale
-
-
 def beat_pid(job):
     try:
         return int(json.load(open(os.path.join(OPS, f"{job['heartbeat']}.json"))).get("pid") or 0)
@@ -337,7 +330,8 @@ def up(quiet):
                 if not quiet:
                     print(f"{job['name']} is down, and herdr cannot start it: {refused}")
                 continue
-        moved = elsewhere(holder, procs, stale)
+        # a holder on a deleted executable stops; a pid the snapshot lacks started after it was read (a restart during this pass), so it is left to the next pass
+        moved = stale if holder and holder in procs else ""
         if moved:
             # on a deleted executable: ops-up started it through once.py, so its recorded pid is ours to signal; its trap stops its children
             os.kill(holder, 15)

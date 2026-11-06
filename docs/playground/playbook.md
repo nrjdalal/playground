@@ -110,7 +110,7 @@ Once focus ends, either way, one Inbox card says the same, and the quiet items c
 
 A new Linear ticket waits for the owner's yes, and Playground's own work stays out of Linear, tracked in the roster (the Dashboard's status table and Next up), the login's `doc plan-<slug>` items and GitHub.
 A session that needs a ticket asks up the chain; the dispatcher puts it to the owner as an Inbox decision, and on his yes writes that day's approval naming the team and title, which lets the ticket be filed.
-Every spawn sets `PLAYGROUND_ROLE` (a session herdr restores without it is known by its name), and in a session that has it the `no-linear-ticket` hook refuses any call that would file a ticket with no approval, through the Linear MCP or a GraphQL `issueCreate` alike.
+Every spawn sets `PLAYGROUND_ROLE` (a session resumed without it is known by its name), and in a session that has it the `no-linear-ticket` hook refuses any call that would file a ticket with no approval, through the Linear MCP or a GraphQL `issueCreate` alike.
 His own sessions have no role, so they file freely.
 The hook is a guard that fails closed: when it cannot start (Bun missing, its bundle damaged, the checkout gone) it refuses the call, naming the fix, and only a timeout lets the call through, where the rule still binds the session.
 Only the dispatcher writes an approval, and the hook refuses any other session a write into the approvals folder.
@@ -121,7 +121,7 @@ Playground is classified: nothing about it appears in any guarded org's ticket, 
 Playground is classified.
 Nothing about it, the factory or its sessions goes into any guarded org's ticket, PR, commit, branch, comment, Slack message or DM, and file in its repos.
 Every session is spawned with the factory's own settings file, which `scripts/link-skills.sh` installs at `~/.playground/factory-settings.json` without touching your own settings, so its `no-playground-leak` hook runs wherever the session works, in a guarded org's checkout too.
-herdr drops that file when it restores a session after a restart, so Playground's own project settings carry the hook as well, and a session restored where its folder's settings lack the hook is started again with the file.
+A session resumed without its settings (a bare `claude --resume`; herdr's own resume is off) drops that file, so Playground's own project settings carry the hook as well, and a session resumed where its folder's settings lack the hook is started again with the file.
 The hook refuses a Linear or Slack write, a write to a guarded org's repository through gh, git, curl or the GitHub MCP, and a commit or push in its checkout, when its text names Playground, one of its skills, a session by the name the roster gives it or an older one such as `worker-envy`, the roster, the live dashboard or `~/.playground`.
 The fixed names are one list, the leak hook's terms file in `scripts/hooks/`, and every skill folder under `skills/` and every agent's name in the roster join them, so a new skill or a renamed session is covered at once.
 The guarded org's own name always passes.
