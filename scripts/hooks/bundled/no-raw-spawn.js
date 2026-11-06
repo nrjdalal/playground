@@ -27,12 +27,7 @@ var DESK_ENV = new Set([
   "SDK_PERMISSION_MODE",
   "SDK_PROBE_DIR"
 ]);
-var RENAMED_ENV = {
-  PLAYGROUND_CMUX_SESSIONS: "PLAYGROUND_ALL_SESSIONS"
-};
 var renamedEnv = (name) => {
-  if (Object.hasOwn(RENAMED_ENV, name))
-    return RENAMED_ENV[name];
   if (!name.startsWith("DESK_"))
     return;
   const rest = name.slice("DESK_".length);
@@ -1882,12 +1877,10 @@ var HEADS = new Set([
   "tmux",
   "vault"
 ]);
-var OTHER_AGENTS = new Set(["codex", "opencode", "pi"]);
 var GLOBAL_TAKES = new Set(["--id-format", "--password", "--socket", "--window"]);
-var AGENT_TALK = new Set(["hibernate", "inbox", "message", "messages"]);
-var RESPAWN_TAKES = new Set(["--command", "--surface", "--window", "--workspace"]);
 var REOPENS = new Set(["-c", "-r", "--continue", "--resume"]);
-var TERMINAL = /^cmux$/;
+var TERMINAL = /^cmux$/i;
+var CMUX_READS = new Set(["--help", "-h", "--version", "version"]);
 var HERDR_HEADS = new Set([
   "agent",
   "api",
@@ -1954,36 +1947,6 @@ var beforeDashes = (args) => {
   return dashes === -1 ? args : args.slice(0, dashes);
 };
 var reopens = (args) => beforeDashes(args).some((a) => REOPENS.has(a.value) || /^--(?:resume|continue)=/.test(a.value));
-var findsClaude = async (_cmd, { first, name }) => name === "claude" || first && (first.unknown || marked(first.value)) ? "claude" : undefined;
-function flagValues(args, flag) {
-  const found = [];
-  args.forEach((a, k) => {
-    if (a.value === flag && args[k + 1])
-      found.push(args[k + 1]);
-    else if (a.value.startsWith(`${flag}=`))
-      found.push(slice(a, flag.length + 1));
-  });
-  return found;
-}
-function joined(words) {
-  if (words.length === 0)
-    return [];
-  const unknown = words.find((w) => unreadable(w)) ? "a word it cannot read" : undefined;
-  return [{ quoted: true, unknown, value: words.map((w) => w.value).join(" ") }];
-}
-function trailing(args, from) {
-  const words = [];
-  for (let k = from;k < args.length; k++) {
-    const v = args[k].value;
-    if (RESPAWN_TAKES.has(v))
-      k++;
-    else if (!v.startsWith("--"))
-      words.push(args[k]);
-  }
-  return joined(words);
-}
-var namesClaude = (w) => w.value === "claude" || /^--(?:agent|provider)=claude$/.test(w.value);
-var mayOpenClaude = (words) => words.some((w) => namesClaude(w) || unreadable(w)) || !words.some((w) => OTHER_AGENTS.has(w.value) || /^--agent=(?!claude$)/.test(w.value));
 function positionals(words) {
   const found = [];
   for (let k = 0;k < words.length; k++) {
@@ -1995,58 +1958,11 @@ function positionals(words) {
   }
   return found;
 }
-function judgeOpener(head, second, words) {
-  const what = `a cmux ${head}`;
-  if (head === "claude-teams" || head === "omc" || head === "restore-session")
-    return refuse(`${what}, which starts or restores Claude sessions`);
-  if (head === "recover" && flagValues(words, "--session").length > 0)
-    return refuse("a cmux recover --session, which opens a saved session");
-  if (head === "session" && second === "restore")
-    return refuse("a cmux session restore, which restores saved sessions");
-  if ((head === "restore" || head === "fork") && mayOpenClaude(words))
-    return refuse(`${what} that may open a Claude session`);
-  if (head === "vault" && second === "fork" && mayOpenClaude(words))
-    return refuse("a cmux vault fork that may open a Claude session");
-  if ((head === "agent" || head === "agent-hibernation") && second === "wake")
-    return refuse(`${what} wake, which resumes a session`);
-  if (head === "agent" && !AGENT_TALK.has(second ?? "") && mayOpenClaude(words))
-    return refuse("a cmux agent that may open a Claude session");
-  if (head === "new-surface") {
-    const provider = flagValues(words, "--provider");
-    if (provider.some((p) => unreadable(p) || p.value === "claude"))
-      return refuse("a cmux new-surface that opens a Claude agent session");
-  }
-}
-async function judgeCmux(args, env) {
-  const words = beforeDashes(args);
-  if (words.some((w) => w.value === "--help" || w.value === "-h"))
+function judgeCmux(args) {
+  if (args.length === 1 && CMUX_READS.has(args[0].value))
     return;
-  const [head, second] = positionals(words);
-  if (!head)
-    return;
-  const opened = judgeOpener(head, second, words);
-  if (opened)
-    return opened;
-  const what = `a cmux ${head}`;
-  for (const layout of flagValues(words, "--layout")) {
-    if (unreadable(layout))
-      return refuse(`${what} whose layout it cannot read`);
-    if (/\bclaude\b/i.test(layout.value))
-      return refuse(`${what} whose layout starts claude`);
-  }
-  const commands = [
-    ...flagValues(words, "--command"),
-    ...flagValues(words, "--shell"),
-    ...head === "surface" ? joined(args.slice(words.length + 1)) : [],
-    ...head === "respawn-pane" ? trailing(words, words.findIndex((w) => w.value === head) + 1) : []
-  ];
-  for (const command of commands) {
-    if (unreadable(command))
-      return refuse(`${what} whose command it cannot read`);
-    const inner = { ...env, files: new Map, vars: new Map };
-    if (await run(lex(command.value, env.known), inner, findsClaude))
-      return refuse(`${what} that starts claude`);
-  }
+  const [head] = positionals(beforeDashes(args));
+  return refuse(`a cmux ${head ?? "call"}, since every session runs in herdr and no factory session calls cmux (only \`cmux --help\`, \`-h\`, \`--version\` and \`version\` run)`);
 }
 function herdrArgs(args) {
   const found = [];
@@ -2146,14 +2062,14 @@ var visit = async (cmd, { args, first, local, name }, env) => {
   if (args.some((a) => a.value === "herdrdev/herdr"))
     return refuseHerdr("herdr's agent skill, which teaches typing into other panes");
   if (TERMINAL.test(name))
-    return judgeCmux(args, env);
+    return judgeCmux(args);
   if (name === "herdr" || first?.variable === "HERDR_BIN_PATH")
     return judgeHerdr(args, local, env);
   if (first && (first.unknown || marked(first.value))) {
     if (HERDR_HEADS.has(herdrWords(args)[0] ?? ""))
       return judgeHerdr(args, local, env, first);
     const [head] = positionals(beforeDashes(args));
-    return head && HEADS.has(head) ? judgeCmux(args, env) : undefined;
+    return head && HEADS.has(head) ? judgeCmux(args) : undefined;
   }
   if (name === "claude" && reopens(args))
     return refuse("a claude --resume or --continue");
@@ -2161,8 +2077,8 @@ var visit = async (cmd, { args, first, local, name }, env) => {
 var BARE = (command) => command.replace(/[\\'"]/g, "");
 var OPENS2 = new RegExp(`\\b(?:cmux|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS].join("|")})\\b`);
 var REOPEN = /\bclaude\b[\s\S]*(?:\s-[cr]\b|--resume|--continue)/;
-var candidate = (command) => command.includes("$'") || OPENS2.test(BARE(command)) || REOPEN.test(BARE(command)) || UNIX.test(BARE(command));
-var spawnCall = (command) => /\b(?:herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/.test(BARE(command)) || /\bcmux\b/.test(BARE(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE(command)) || REOPEN.test(BARE(command));
+var candidate = (command) => command.includes("$'") || OPENS2.test(BARE(command)) || /\bcmux\b/i.test(BARE(command)) || REOPEN.test(BARE(command)) || UNIX.test(BARE(command));
+var spawnCall = (command) => /\b(?:herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/.test(BARE(command)) || /\bcmux\b/i.test(BARE(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE(command)) || REOPEN.test(BARE(command));
 function commandOf(raw) {
   try {
     const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);
