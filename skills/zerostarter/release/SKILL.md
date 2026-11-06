@@ -96,7 +96,7 @@ Done when the PR reads `MERGED` and `MERGE` holds its merge commit. A refusal fo
 
 The tag is the last tag's patch plus one (`v0.0.98` is followed by `v0.0.99`); the root `package.json` version is not moved and does not decide it.
 
-The notes take ZeroStarter's shape: the compare link, one emoji section per commit type, then each contributor as `- <name> @<login>`, the name read from the commit's author, and `@<login>` alone when the commit has none. A line keeps its first word's case when that word is a command, a flag, a file or a code-like name (`bun run ask`, `--all`, `spawn.sh`, `ops-firefighting-start`), and a plain first word takes its capital; a footer line that begins with `BREAKING CHANGE:` or `BREAKING-CHANGE:` marks its commit breaking, as Conventional Commits writes the token. `bun run release:notes <last tag> vX.Y.Z` renders them from GitHub's compare of the two tags (`packages/scripts/src/release-notes/`) and prints them. Write them to a file outside the checkout, and name it by its literal absolute path in `--notes-file`, since the leak guards read a notes file only through a literal path:
+The notes take ZeroStarter's shape: the compare link, one emoji section per commit type, then each contributor as `- <name> @<login>`, the name read from the commit's author, and `@<login>` alone when the commit has none. `bun run release:notes <last tag> vX.Y.Z` renders them from GitHub's compare of the two tags (`packages/scripts/src/release-notes/`) and prints them. Write them to a file outside the checkout, and name it by its literal absolute path in `--notes-file`, since the leak guards read a notes file only through a literal path:
 
 ```bash
 gh api -X POST repos/{owner}/{repo}/git/refs -f ref=refs/tags/vX.Y.Z -f sha="$MERGE"
