@@ -132,7 +132,8 @@ export const ASK_EXAMPLES = {
       type: "delete",
       what: "/Users/you/playground/.claude/worktrees/PG-12-old-export",
       why: [
-        "- 🧹 Its PR is open, and its branch holds 2 commits no merge landed.",
+        "Its PR is open, and its branch holds 2 commits no merge landed.",
+        "",
         "- 🗑️ Approve moves it to the trash, kept 7 days; playground rm --restore brings it back.",
         "- ✋ Deny leaves it in place.",
       ].join("\n"),
