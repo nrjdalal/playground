@@ -398,14 +398,12 @@ const prePushConfig = async () =>
     }
   )["pre-push"]
 
-// a pre-push job's shell text as this checkout runs it, from its script or its command, its paths pointed at this checkout so it runs from a scratch repo
-const pushJob = async (name: string) => {
-  const script = Bun.file(join(ROOT, ".lefthook/pre-push", `${name}.sh`))
-  const text = (await script.exists())
-    ? await script.text()
-    : String((await prePushConfig()).commands?.[name]?.run)
-  return text.replaceAll(" packages/", ` ${ROOT}/packages/`)
-}
+// a pre-push script's text, its paths pointed at this checkout so it runs from a scratch repo
+const pushScript = async (name: string) =>
+  (await Bun.file(join(ROOT, ".lefthook/pre-push", name)).text()).replaceAll(
+    " packages/",
+    ` ${ROOT}/packages/`,
+  )
 
 // a ZeroStarter sync overlays lefthook.yml with the starter's, which holds neither script, so this row goes red until each is restored
 test("pre-push runs its stdin jobs as scripts, each execing its check", async () => {
@@ -416,12 +414,17 @@ test("pre-push runs its stdin jobs as scripts, each execing its check", async ()
     const script = Bun.file(join(ROOT, ".lefthook/pre-push", name))
     expect(await script.exists()).toBe(true)
     expect(await script.text()).toContain(`\nexec ${command}\n`)
+    // lefthook makes a script executable as it runs it, so a script committed without the bit leaves every checkout's tree changed after its first push
+    const index = Bun.spawnSync(["git", "ls-files", "-s", `.lefthook/pre-push/${name}`], {
+      cwd: ROOT,
+    })
+    expect(index.stdout.toString()).toStartWith("100755 ")
   }
 })
 
 // this repo's pre-push marker job, its script run from this checkout, in a scratch repo whose commits go in with hooks off, fed git's pre-push lines: each pushed ref is read from its remote sha when this clone has it, else from its merge-base with origin/canary, and a delete reads nothing
 test("the pre-push marker check refuses a pushed conflict marker a hooks-off commit let through", async () => {
-  const markers = await pushJob("conflict-markers")
+  const markers = await pushScript("conflict-markers.sh")
   const dir = mkdtempSync(join(tmpdir(), "lefthook-push-markers-"))
   const run = (argv: string[], stdin?: string) => {
     const result = Bun.spawnSync(argv, {
@@ -484,7 +487,7 @@ test("the pre-push marker check refuses a pushed conflict marker a hooks-off com
   }
 }, 60_000)
 
-// the real lefthook on this repo's pre-push stdin jobs, as commands or scripts, their paths pointed at this checkout, in a scratch clone whose commits go in with hooks off: with main level with origin/main, a push of another branch is still read, and keeps-canary refuses a normal push as before
+// the real lefthook on this repo's pre-push stdin scripts, their paths pointed at this checkout, in a scratch clone whose commits go in with hooks off: with main level with origin/main, a push of another branch is still read, and keeps-canary refuses a normal push as before
 test("pre-push reads a pushed branch while the checked-out one has nothing new", async () => {
   const prePush = await prePushConfig()
   const dir = mkdtempSync(join(tmpdir(), "lefthook-push-other-"))
@@ -541,22 +544,15 @@ test("pre-push reads a pushed branch while the checked-out one has nothing new",
       expect(run(seed, argv)).toMatchObject({ code: 0 })
     expect(run(dir, ["git", "clone", "-q", "--bare", seed, remote])).toMatchObject({ code: 0 })
     expect(run(dir, ["git", "clone", "-q", remote, work])).toMatchObject({ code: 0 })
-    // this checkout's stdin jobs alone, where lefthook.yml holds them: audit reaches the network, and ensure-branches reads no pushed ref
-    const commands: Record<string, Record<string, unknown>> = {}
-    const scripts: Record<string, Record<string, unknown>> = {}
+    // this checkout's stdin scripts alone: audit reaches the network, and ensure-branches reads no pushed ref
+    const scripts: Record<string, unknown> = {}
     mkdirSync(join(work, ".lefthook/pre-push"), { recursive: true })
-    for (const name of ["conflict-markers", "keeps-canary"]) {
-      const script = prePush.scripts?.[`${name}.sh`]
-      if (script) {
-        scripts[`${name}.sh`] = script
-        await Bun.write(join(work, ".lefthook/pre-push", `${name}.sh`), await pushJob(name))
-      } else commands[name] = { ...prePush.commands?.[name], run: await pushJob(name) }
+    for (const name of Object.keys(PUSH_SCRIPTS)) {
+      scripts[name] = prePush.scripts?.[name]
+      await Bun.write(join(work, ".lefthook/pre-push", name), await pushScript(name))
     }
     // JSON is YAML, so the jobs go in as lefthook read them
-    await Bun.write(
-      join(work, "lefthook.yml"),
-      JSON.stringify({ "pre-push": { commands, scripts } }),
-    )
+    await Bun.write(join(work, "lefthook.yml"), JSON.stringify({ "pre-push": { scripts } }))
 
     git("checkout", "-q", "--no-track", "-b", "marked", "origin/canary")
     await commit(
@@ -589,7 +585,7 @@ test("pre-push reads a pushed branch while the checked-out one has nothing new",
     expect(dropped.out).toContain("a.ts (dropped in")
     expect(push("tidy")).toMatchObject({ code: 0 })
     expect(push("")).toMatchObject({ code: 0 })
-    // a normal push, from the branch itself, which lefthook reads as commands or scripts alike
+    // a normal push, from the branch itself, which keeps-canary refused as a command too
     git("checkout", "-q", "dropped")
     const normal = push("dropped")
     expect(normal.code).not.toBe(0)
