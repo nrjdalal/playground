@@ -217,6 +217,34 @@ describe("a node_modules clone waits for its spacing", () => {
 })
 
 // A fake git and bun on PATH touch their last argument, so a run through run-slot shows whether it ran while a big run holds the queue's units.
+// a lane question read from run-slot's own pick, with nothing run: a replay of the runs log's commands must never execute them
+test("run-slot.sh kind prints the lane a command takes and runs nothing", async () => {
+  const m = machine()
+  const kind = async (words: string[]) => {
+    const p = Bun.spawn(["bash", SCRIPT, "kind", "--", ...words], {
+      cwd: m.root,
+      env: m.env(),
+      stdout: "pipe",
+    })
+    expect(await p.exited).toBe(0)
+    return (await new Response(p.stdout).text()).trim()
+  }
+  expect(await kind(["cp", "-R", "node_modules", join(m.root, "made")])).toBe("clone")
+  expect(await kind(["touch", join(m.root, "made")])).toBe("")
+  // review round 1: a run run-slot refuses reads as refuse, a dev stack's among them
+  expect(await kind(["bun", "run", "dev"])).toBe("refuse")
+  // a chain's git steps take the commit lane only in a repo, so these name this checkout, which kind never runs them in
+  const repo = join(import.meta.dir, "../../..")
+  for (const shell of ["sh", "dash", "ksh"])
+    expect([
+      shell,
+      await kind([shell, "-c", `git -C ${repo} commit -m x; git -C ${repo} push origin`]),
+    ]).toEqual([shell, "commit"])
+  expect(existsSync(join(m.root, "made"))).toBe(false)
+  expect(existsSync(join(m.ops, "run-slot.runs.log"))).toBe(false)
+  expect(existsSync(join(m.ops, "run-slot.waiters"))).toBe(false)
+})
+
 describe("a quick run takes its own slot past a full queue", () => {
   // Runs argv through run-slot past a full queue and says whether it ran: once it ends, or once it prints the queue's waiting line, when it is stopped (an event, never a clock, so a loaded runner only makes it slower)
   // ran: the seconds each earlier run of the same command took, oldest first, as run-slot.runs.log records them

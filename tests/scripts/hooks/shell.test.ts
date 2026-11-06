@@ -10,6 +10,7 @@ import {
   places,
   run,
   stdinShell,
+  type StdinKind,
   withDeadline,
 } from "../../../scripts/hooks/shell"
 import { type Paths, REFUSED_FORMS } from "./fixtures/refused-forms"
@@ -210,6 +211,23 @@ describe("stdinShell reads a privilege wrapper's root shell", () => {
     ["a second wrapper's shell option behind a plain first wrapper", "doas sudo -i", "root"],
     ["a quoted shell option", "sudo '-s'", "root"],
     ["the shell long option given its command", "sudo --shell ls", undefined],
+  ])("%s", (_, line, kind) => {
+    expect(stdinShell(lex(line).commands[0])).toBe(kind)
+  })
+})
+
+describe("stdinShell reads env's split string as the words it runs", () => {
+  test.each<[string, string, StdinKind | undefined]>([
+    ["sudo's shell in a split string", "env -S 'sudo -s'", "root"],
+    ["sudo's shell in a long split-string option", "env --split-string='sudo -s'", "root"],
+    ["a shell given no script in a split string", "env -S 'sh'", "shell"],
+    ["a harmless command in a split string", "env -S 'sudo ls'", undefined],
+    ["a quoted env's split string", "'env' -S 'sudo -s'", "root"],
+    ["a second env's split string behind nice", "env nice env -S 'sudo -s'", "root"],
+    ["an abbreviated split-string option", "env --split='sudo -s'", "root"],
+    ["a split string after an abbreviated unset", "env nice env --u X -S 'sudo -s'", "root"],
+    ["a split string after argv0's value", "env -a name -S 'sudo -s'", "root"],
+    ["a split string after a lone dash, env's -i", "'env' - -S 'sudo -s'", "root"],
   ])("%s", (_, line, kind) => {
     expect(stdinShell(lex(line).commands[0])).toBe(kind)
   })
