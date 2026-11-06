@@ -1100,6 +1100,12 @@ describe("the pre-commit hooks-bundle job", () => {
       const refused = hook()
       expect(refused.code).not.toBe(0)
       expect(refused.out).toContain("run git add scripts/hooks/bundled, then commit again")
+      // an untracked file there refuses too, as a new guard's first bundle would be
+      git("checkout", "--", "scripts/hooks/bundled/role.js")
+      writeFileSync(join(dir, "scripts", "hooks", "bundled", "extra.js"), "new\n")
+      const untracked = hook()
+      expect(untracked.code).not.toBe(0)
+      expect(untracked.out).toContain("run git add scripts/hooks/bundled, then commit again")
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
