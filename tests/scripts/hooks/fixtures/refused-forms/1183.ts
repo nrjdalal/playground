@@ -12,6 +12,30 @@ export const groups: Group[] = [
     ],
   },
   {
+    folders: ["process home", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "tee through a variable that an export behind the dash names",
+        "- export D=~/.playground/extensions; tee $D/x < /dev/null",
+      ],
+      [
+        "a redirect through a variable that an export behind the dash names",
+        "- export D=~/.playground/extensions; echo x > $D/x",
+      ],
+    ],
+  },
+  {
+    folders: ["process home", "process worktree"],
+    guards: ["no-extensions-write", "no-raw-delete"],
+    rows: () => [
+      [
+        "a delete through a variable that an export behind the dash names",
+        `- export D=${NEVER_MADE}; rm -rf $D`,
+      ],
+    ],
+  },
+  {
     folders: ["home", "checkout"],
     guards: ["no-extensions-write"],
     rows: ({ LIST, ROOT }) => [
@@ -24,4 +48,9 @@ export const groups: Group[] = [
     guards: ["no-main-checkout"],
     rows: () => [["a commit behind the dash", "- git commit --allow-empty -m x"]],
   },
+]
+
+// #1215 holds the one form no-extensions-write lets run: a redirect whose target goes through a variable, behind the dash or not; once #1215 refuses it, this entry fails and comes out
+export const allowed: string[] = [
+  "a redirect through a variable that an export behind the dash names",
 ]
