@@ -2,6 +2,10 @@
 const workstream = (sessionId: string) =>
   `cmux-feed-v1:${Buffer.from("claude").toString("base64")}:${Buffer.from(sessionId).toString("base64")}`
 
+// The session a fixture's item was built for, read back from its workstream id.
+export const sessionOf = (item: { workstream_id?: unknown }): string =>
+  Buffer.from(String(item.workstream_id).split(":").at(-1) ?? "", "base64").toString("utf8")
+
 export const QUESTION_ID = "54FB3383-A4B7-47D1-A6F8-225DF4F9E6A8"
 export const PERMISSION_ID = "A70A45B3-D38A-48D9-8D56-CE30BEED2681"
 export const PLAN_ID = "836EA043-F9D4-48F7-9917-14B4F76A2B0A"

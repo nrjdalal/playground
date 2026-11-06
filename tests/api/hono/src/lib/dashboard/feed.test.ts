@@ -9,7 +9,11 @@ import {
   type FeedAnswer,
 } from "../../../../../../api/hono/src/lib/dashboard/feed"
 import type { KeyStep } from "../../../../../../api/hono/src/lib/dashboard/herdr"
-import { feedBySession, type Live } from "../../../../../../api/hono/src/lib/dashboard/workers"
+import {
+  feedItemOf,
+  type FeedItem,
+  type Live,
+} from "../../../../../../api/hono/src/lib/dashboard/workers"
 import {
   PERMISSION_ID,
   permissionItem,
@@ -17,6 +21,7 @@ import {
   planItem,
   QUESTION_ID,
   questionItem,
+  sessionOf,
   TWO_QUESTION_ID,
   twoQuestionItem,
 } from "./feed-fixtures"
@@ -46,7 +51,11 @@ function fakes(
   screens: string[] = [PICKER, DONE],
   approvals = false,
 ) {
-  const feed = feedBySession({ items })
+  const cards = (sessionId: string) =>
+    items
+      .filter((item) => sessionOf(item) === sessionId)
+      .map(feedItemOf)
+      .filter((card): card is FeedItem => card !== null)
   const recorded: string[] = []
   const typed: KeyStep[][] = []
   const reads: string[] = []
@@ -70,14 +79,14 @@ function fakes(
       transcripts: new Map(),
       workers: [
         {
-          feed: feed.get("s-1") ?? [],
+          feed: cards("s-1"),
           herdr: true,
           name: "dispatcher",
           sessionId: "s-1",
           surface: "herdr:probes:w1:p1",
         },
         {
-          feed: feed.get("s-2") ?? [],
+          feed: cards("s-2"),
           herdr: true,
           name: "builder",
           sessionId: "s-2",
@@ -189,15 +198,11 @@ describe("answerFeed", () => {
 })
 
 describe("replyFor", () => {
-  const item = feedBySession({ items: [questionItem("s-1")] }).get("s-1")![0]!
-  const multi = feedBySession({
-    items: [
-      {
-        ...questionItem("s-1"),
-        questions: [{ ...questionItem("s-1").questions[0], multi_select: true }],
-      },
-    ],
-  }).get("s-1")![0]!
+  const item = feedItemOf(questionItem("s-1"))!
+  const multi = feedItemOf({
+    ...questionItem("s-1"),
+    questions: [{ ...questionItem("s-1").questions[0], multi_select: true }],
+  })!
   const answers = (choices: string[], text: string | null): FeedAnswer => ({
     answers: [{ choices, text }],
     kind: "question",
@@ -223,19 +228,13 @@ describe("replyFor", () => {
 
   // A permission is allowed only when the card could show all of what the tool would do; it can always be denied.
   test("a permission cut short, or with nothing to show, cannot be allowed from here", () => {
-    const long = feedBySession({
-      items: [
-        {
-          ...permissionItem("s-1"),
-          tool_input: JSON.stringify({ content: "y".repeat(7000), file_path: "/x" }),
-        },
-      ],
-    }).get("s-1")![0]!
+    const long = feedItemOf({
+      ...permissionItem("s-1"),
+      tool_input: JSON.stringify({ content: "y".repeat(7000), file_path: "/x" }),
+    })!
     expect(replyFor(long, once)).toMatchObject({ code: "INVALID" })
     expect(replyFor(long, deny)).toMatchObject({ kind: "permission", mode: "deny" })
-    const blank = feedBySession({
-      items: [{ ...permissionItem("s-1"), tool_input: undefined }],
-    }).get("s-1")![0]!
+    const blank = feedItemOf({ ...permissionItem("s-1"), tool_input: undefined })!
     expect(replyFor(blank, once)).toMatchObject({ code: "INVALID" })
     expect(replyFor(blank, deny)).toMatchObject({ mode: "deny" })
   })
@@ -243,11 +242,12 @@ describe("replyFor", () => {
   // A plan is approved only when the card could show all of it.
   test("a plan cut short, or empty, cannot be started from here", () => {
     const start: FeedAnswer = { feedback: null, kind: "plan", mode: "manual" }
-    const clipped = feedBySession({
-      items: [{ ...planItem("s-1"), plan: JSON.stringify({ plan: "z".repeat(9000) }) }],
-    }).get("s-1")![0]!
+    const clipped = feedItemOf({
+      ...planItem("s-1"),
+      plan: JSON.stringify({ plan: "z".repeat(9000) }),
+    })!
     expect(replyFor(clipped, start)).toMatchObject({ code: "INVALID" })
-    const empty = feedBySession({ items: [{ ...planItem("s-1"), plan: "" }] }).get("s-1")![0]!
+    const empty = feedItemOf({ ...planItem("s-1"), plan: "" })!
     expect(replyFor(empty, start)).toMatchObject({ code: "INVALID" })
     expect(replyFor(clipped, { feedback: null, kind: "plan", mode: "deny" })).toMatchObject({
       kind: "plan",
@@ -257,8 +257,8 @@ describe("replyFor", () => {
 })
 
 describe("the activity row", () => {
-  const plan = feedBySession({ items: [planItem("s-1")] }).get("s-1")![0]!
-  const permission = feedBySession({ items: [permissionItem("s-1")] }).get("s-1")![0]!
+  const plan = feedItemOf(planItem("s-1"))!
+  const permission = feedItemOf(permissionItem("s-1"))!
 
   test("names what was answered, never with what words or command", () => {
     const note = answerSummary("dispatcher", plan, {
