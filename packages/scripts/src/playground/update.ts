@@ -1,6 +1,7 @@
 // playground update: the release skill's step 5 as one script, then the Dashboard's roll.
 import { basename, join } from "node:path"
 
+import { swapBundles, unswapBundles } from "../swap-bundles"
 import { BUNDLED_ROOT, CORE_SKILLS } from "./orgs"
 import { unlinked } from "./unlinked"
 
@@ -100,11 +101,17 @@ export const runUpdate = async (
   ]
   const target = to ? `refs/tags/${to}` : "origin/main"
   // every hook that runs its source (all but the bundled PreToolUse guards) and every ops job run this checkout's code the moment it moves, so a target that declares a dependency the checkout has not linked gets its changed manifests and that install first, while the code is still the old commit's (the install step after the move then finds it linked); a target that deletes or moves a manifest, which the old code may still read, a tree with edits or untracked files of its own, or an install that fails there moves first as before
+  // a fast-forward stops on a checkout with commits of its own, so files are staged only where it will move, and a tree with edits or untracked files of its own moves as before; a checkout -B moves over them either way; read once, for prelink and swap
+  let staging: Promise<boolean> | undefined
+  const stages = () =>
+    (staging ??= (async () => {
+      const merges = !to && branch === "main"
+      if (merges && (await git("merge-base", "--is-ancestor", "HEAD", target)).code !== 0)
+        return false
+      return !(await git("status", "--porcelain", "--untracked-files=all")).out.trim()
+    })())
   const prelink = async (): ReturnType<Run> => {
-    // a fast-forward stops on a checkout with commits of its own, so its manifests are staged only where it will move; a checkout -B moves over them either way
-    const merges = !to && branch === "main"
-    if (merges && (await git("merge-base", "--is-ancestor", "HEAD", target)).code !== 0) return ok
-    if ((await git("status", "--porcelain", "--untracked-files=all")).out.trim()) return ok
+    if (!(await stages())) return ok
     const lines = async (...args: string[]) => (await git(...args)).out.split("\n").filter(Boolean)
     const manifests: Record<string, string> = {}
     for (const path of await lines("ls-tree", "-r", "--name-only", target)) {
@@ -144,6 +151,23 @@ export const runUpdate = async (
       ...manifestsChanged,
     )
   }
+  // the guards load their bundles from this checkout, so the move finds each changed one swapped in whole first (swap-bundles.ts), where stages() allows; a swap that fails puts back what it wrote, and a move that fails puts the swap back
+  let swapped: string[] = []
+  let unswapped = ""
+  const swap = async (): ReturnType<Run> => {
+    if (!(await stages())) return ok
+    const result = await swapBundles(repo, git, target)
+    swapped = result.swapped
+    if (result.putBack?.code) unswapped = result.putBack.out
+    return result
+  }
+  const swappedMove = (step: () => ReturnType<Run>) => async (): ReturnType<Run> => {
+    const moved = await step()
+    if (moved.code === 0 || !swapped.length) return moved
+    const putBack = await unswapBundles(repo, git, swapped)
+    if (putBack.code) unswapped = putBack.out
+    return moved
+  }
   const prelinked =
     "the checkout's files are as they were; fix the failure above and run playground update again"
   const steps: [string, () => ReturnType<Run>, string?][] = to
@@ -154,17 +178,24 @@ export const runUpdate = async (
           () => git("merge-base", "--is-ancestor", "HEAD", "origin/main"),
         ],
         ["link the new commit's dependencies", prelink, prelinked],
-        [`check out ${to}`, () => git("checkout", "-q", "-B", "main", `refs/tags/${to}`)],
+        ["swap in the new commit's hook bundles", swap, prelinked],
+        [
+          `check out ${to}`,
+          swappedMove(() => git("checkout", "-q", "-B", "main", `refs/tags/${to}`)),
+        ],
       ]
     : [
         ["fetch origin main", () => git("fetch", "-q", "origin", "main")],
         ["a tree with no uncommitted changes, off main", cleanTree],
         ["link the new commit's dependencies", prelink, prelinked],
-        ["merge --ff-only origin/main, or move to main there", move],
+        ["swap in the new commit's hook bundles", swap, prelinked],
+        ["merge --ff-only origin/main, or move to main there", swappedMove(move)],
       ]
   for (const [name, step, state = "the checkout is as it was"] of steps)
     if ((await step()).code !== 0) {
-      log(`playground update: ${name} failed; ${state}`)
+      log(
+        `playground update: ${name} failed; ${unswapped ? `HEAD's hook bundles could not be put back (${unswapped}), so git status names what is left` : state}`,
+      )
       return 1
     }
   // link-skills.sh first, as the release skill's step 5 runs it: every later step and every ops job reads the data folder it links
