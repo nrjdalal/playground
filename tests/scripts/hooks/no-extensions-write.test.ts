@@ -1583,6 +1583,44 @@ describe("a read of the root, and writes elsewhere, run", () => {
   })
 })
 
+describe("a write the hook can place outside the root runs, after a cd it cannot read too (PG-646)", () => {
+  test.each([
+    ["rm of a relative path after a cd to a literal path", "cd /tmp/x && rm -rf build"],
+    ["a reader after a cd to a variable", `cd "$X"; ls`],
+    [
+      "a program after a cd to the checkout's top",
+      `cd "$(git rev-parse --show-toplevel)" && bun test`,
+    ],
+    ["git status after a cd to a variable", `cd "$X" && git status`],
+    ["a redirect to an absolute path after a cd to a variable", `cd "$X"; echo x > /tmp/y`],
+    ["rm of an absolute path after a cd to a variable", `cd "$X"; rm -rf /tmp/scratch-dir`],
+    ["cp of a relative file to an absolute path after a cd to a variable", `cd "$X"; cp a /tmp/b`],
+    [
+      "a redirect to a file the line holds after a cd to a variable",
+      `F=/tmp/y; cd "$X"; echo x > "$F"`,
+    ],
+    ["a plain git log", "git log"],
+    ["a plain git status", "git status"],
+    ["git -c of a pager", "git -c core.pager=less log"],
+    ["a git author name from a variable", `GIT_AUTHOR_NAME="$N" git commit -m x`],
+    ["cp to a literal path elsewhere", "cp x /tmp/y"],
+    ["cp to a path the line holds", `D=/tmp/d; cp x "$D/y"`],
+    ["cp of a variable to a literal path", `cp "$S" /tmp/y`],
+    ["touch with a reference file from a variable", `touch -r "$R" /tmp/y`],
+    ["dd reading a variable to a literal path", `dd if="$S" of=/tmp/y`],
+    ["tee to a literal path", "echo x | tee /tmp/y"],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+
+  test.each([
+    ["a write after a sure cd out of the root", "cd /tmp && echo x > y"],
+    ["a reader after a cd to a variable", `cd "$X"; cat policy.json`],
+  ])("%s, from the root", async (_, command) => {
+    expect(await bash(command, ROOT)).toBeUndefined()
+  })
+})
+
 describe("a playground CLI call that changes what a guard reads is refused, naming the owner's route", () => {
   test.each([
     [
