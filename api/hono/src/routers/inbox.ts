@@ -8,6 +8,7 @@ import { z } from "zod"
 import { readAttachment } from "@/lib/dashboard/attachments"
 import { deliver } from "@/lib/dashboard/deliver"
 import { readsLive } from "@/lib/dashboard/fixture"
+import { standingFocus } from "@/lib/dashboard/focus"
 import {
   answerInputSchema,
   answerItem,
@@ -16,26 +17,32 @@ import {
   listItems,
   markRead,
   provideSecret,
+  replyInputSchema,
+  replyItem,
   retryDelivery,
+  revealSecret,
   scheduleItem,
   secretInputSchema,
 } from "@/lib/dashboard/inbox"
 import { runArgv } from "@/lib/dashboard/run-argv"
-import { runSink, saveToKeychain } from "@/lib/dashboard/secret-sink"
+import { readFromKeychain, runSink, saveToKeychain } from "@/lib/dashboard/secret-sink"
 import { slackUpload } from "@/lib/dashboard/slack-upload"
 import { DISPATCHER } from "@/lib/dashboard/workers"
 import {
   ApiError,
   authErrorResponses,
   conflictErrorResponses,
+  errorResponse,
   forbiddenErrorResponses,
   notFoundErrorResponses,
   validationErrorResponses,
 } from "@/lib/error"
+import { dataDir } from "@/lib/sessions/paths"
 import { ownerApps, runCli } from "@/lib/store/extensions"
 import {
   authMiddleware,
   guardWrites,
+  refuseAgent,
   requireConsoleRole,
   requireLoopback,
   requireTrustedOrigin,
@@ -75,10 +82,13 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Playground's Inbox in priority order: open decisions and drafts, then unread updates, then the rest of the last week, each newest first, with the count of what needs the owner",
+        "Playground's Inbox in priority order: open decisions and drafts, then unread updates, then the rest of the last week, each newest first, with the count of what needs the owner; while `playground focus` stands, `quiet` names each item that came in since it began, an alert update aside, and the count leaves those out until it ends",
       responses: { 200: { description: "OK" }, ...authErrorResponses, ...forbiddenErrorResponses },
     }),
-    async (c) => c.json({ data: await listItems(db) }),
+    async (c) => {
+      const now = new Date()
+      return c.json({ data: await listItems(db, now, await standingFocus(dataDir(), now)) })
+    },
   )
   .get(
     "/attachments/:id",
@@ -147,7 +157,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Inbox"],
       description:
-        "Answer an open decision (approve, deny, clear to set it aside, or edit with words) or draft (send, or for a Slack draft save it as a draft in Slack, each as written or changed, discard, or clear to set it aside), with his optional note; archive what waits, or an update, out of the list unanswered, or move it back (unarchive), a set-aside one included, each telling its poster nothing; or dismiss it to Done, which sets aside what still waits as clear does, telling its poster set-aside, and marks anything else dismissed, telling its poster dismiss: drop it, with how to close it. With seen, the updatedAt of the card he answered, it is refused when the item has changed since. The answer is kept, then typed into the posting session through the delivery adapter, and that session carries it out; the Dashboard itself sends no message, and only shares a Slack send's files into its channel and thread first (dm upload), a failed share failing the send before anything is typed. An accept, an apps change and a grant are the decisions whose Approve the Dashboard carries out itself. An accept's Approve: once the answer is kept, it runs the extensions store's accept of <scope> <kind> <key> <rev> from the preview's words, with no role, records its exit code and line under accepted, and tells the poster. An apps change's Approve writes the owner's own desktop-owner-apps list, the login scope's, with the app added or removed, through the store's put with no role, and records its line under listed. A grant's Approve opens System Settings at the pane for its permission (Accessibility or Screen Recording) on this Mac, a stack reading the live machine alone, records its line under opened, and tells the poster to recheck the grant",
+        "Answer an open decision (approve, deny, clear to set it aside, or edit with words) or draft (send, or for a Slack draft save it as a draft in Slack, each as written or changed, discard, or clear to set it aside), with his optional note; archive what waits, or an update, out of the list unanswered, or move it back (unarchive), a set-aside one included, each telling its poster nothing; or dismiss it to Done, which sets aside what still waits as clear does, telling its poster set-aside, and marks anything else dismissed, telling its poster dismiss: drop it, with how to close it. With seen, the updatedAt of the card he answered, it is refused when the item has changed since. The answer is kept, then typed into the posting session through the delivery adapter, and that session carries it out; the Dashboard itself sends no message, and only shares a Slack send's files into its channel and thread first (dm upload), a failed share failing the send before anything is typed. An accept, an apps change, a grant and a guard setting are the decisions whose Approve the Dashboard carries out itself. An accept's Approve: once the answer is kept, it runs the extensions store's accept of <scope> <kind> <key> <rev> from the preview's words, with no role, records its exit code and line under accepted, and tells the poster. An apps change's Approve writes the owner's own desktop-owner-apps list, the login scope's, with the app added or removed, through the store's put with no role, and records its line under listed. A grant's Approve opens System Settings at the pane for its permission (Accessibility or Screen Recording) on this Mac, a stack reading the live machine alone, records its line under opened, and tells the poster to recheck the grant. A guard setting's Approve takes seen, and writes the setting at the card's scope in this machine's extensions, its value or none, which takes it back to its default, and records its line under set",
       responses: {
         200: { description: "OK" },
         ...validationErrorResponses,
@@ -168,9 +178,45 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         dispatcher: DISPATCHER,
         // a stack showing test data opens nothing on this Mac's screen
         grant: readsLive() ? runArgv : undefined,
+        reveal: readFromKeychain(),
+        settingsData: dataDir(),
         upload: slackUpload(),
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
+      return c.json({ data: result.item })
+    },
+  )
+  .post(
+    "/:id/reply",
+    describeRoute({
+      tags: ["Inbox"],
+      description:
+        "Reply on a card: his comment alone, typed into the posting session as re #iN: <words> through the delivery adapter, or into the dispatcher once the poster has ended; an open decision or draft with no answer yet records it as his reply and waits on its poster's edit, which returns it to him, or its close, while any other card keeps its answer as it was. A comment that reached no session is refused with why, recording nothing",
+      responses: {
+        200: { description: "OK" },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+        502: errorResponse(
+          "CMUX_FAILED",
+          "The comment reached no session: neither its poster nor, once the poster has ended, the dispatcher took it, with why; nothing is recorded",
+        ),
+      },
+    }),
+    sValidator("json", replyInputSchema, invalid),
+    async (c) => {
+      const user = c.get("user")
+      const result = await replyItem(db, c.req.param("id"), c.req.valid("json"), {
+        actor: { email: user.email, id: user.id },
+        deliver,
+        dispatcher: DISPATCHER,
+        reveal: readFromKeychain(),
+      })
+      if (!result.ok) {
+        if (result.code === "UNDELIVERED") throw new ApiError(502, "CMUX_FAILED", result.message)
+        throw new ApiError(STATUS[result.code], result.code, result.message)
+      }
       return c.json({ data: result.item })
     },
   )
@@ -237,6 +283,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         ...conflictErrorResponses,
       },
     }),
+    refuseAgent,
     sValidator("json", secretInputSchema, invalidSecret),
     async (c) => {
       const user = c.get("user")
@@ -249,5 +296,29 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
       return c.json({ data: result.item })
+    },
+  )
+  // a POST, so the relay, which carries GETs on RELAY_GETS alone, never carries it
+  .post(
+    "/:id/reveal",
+    describeRoute({
+      tags: ["Inbox"],
+      description:
+        "Show an open reveal card's Keychain item on the owner's click: its value comes back in this one response, never stored, cached or logged, and the agent sign-in is refused",
+      responses: {
+        200: { description: "OK" },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+        ...conflictErrorResponses,
+      },
+    }),
+    refuseAgent,
+    async (c) => {
+      const result = await revealSecret(db, c.req.param("id"), readFromKeychain())
+      if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
+      c.header("Cache-Control", "no-store")
+      return c.json({ data: { value: result.value } })
     },
   )

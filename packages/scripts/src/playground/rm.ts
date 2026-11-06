@@ -6,6 +6,7 @@ import { dataDir } from "@packages/env/data-dir"
 import {
   type Clone,
   isAgentBrowser,
+  linkPlaces,
   listTrash,
   type Proc,
   quarantine,
@@ -79,7 +80,7 @@ export type Decision = {
   status?: string
 }
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the session the caller is (callerOf), and the session's name.
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, the session the caller is (callerOf), and the session's name.
 export type RmDeps = {
   caller: () => Promise<string | undefined>
   clones: () => Clone[]
@@ -89,6 +90,7 @@ export type RmDeps = {
   main: string
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
+  places: () => string[]
   procs: () => Proc[] | null
   session: () => Promise<string>
 }
@@ -217,7 +219,7 @@ const decisionOf =
     }
   }
 
-// This machine's: the caller above this process, run-slot's running clone, HOME, the data folder, the Inbox through the Dashboard's checkout, the main checkout, gh for a merged PR, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
+// This machine's: the caller above this process, run-slot's running clone, HOME, the data folder, the Inbox through the Dashboard's checkout, the main checkout, gh for a merged PR, notify.sh to the dispatcher, linkPlaces' temp and scratchpad folders, lsof and ps, and the Claude Code registry's name for this session, else "shell".
 export const rmDeps = (repo: string): RmDeps => ({
   caller: () => callerOf(process.env, process.ppid),
   clones: clones(dataDir()),
@@ -232,6 +234,7 @@ export const rmDeps = (repo: string): RmDeps => ({
       stderr: "ignore",
       stdout: "ignore",
     }),
+  places: linkPlaces,
   procs: processes,
   session: sessionName,
 })
@@ -295,10 +298,11 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
             session,
             worktree: args.worktree
               ? {
-                  clones: deps.clones(),
+                  clones: deps.clones,
                   discard: args.discard,
                   live: STATUSES.live,
                   merged: deps.merged,
+                  places: deps.places,
                   ...(args.pr ? { pr: args.pr } : {}),
                   procs: deps.procs(),
                   roster: join(deps.data, "roster.json"),

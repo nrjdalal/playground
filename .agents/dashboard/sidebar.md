@@ -7,7 +7,7 @@
   The primary's opens `/dashboard`, your chat, and the second's `/dashboard?worker=<sessionId>`, its own chat.
   The live Alpha row holds a plus in its effort's place, shown as a row's toggle is (`TOGGLE_SHOWN`, the effort hiding by `EFFORT_HIDDEN`, and while its picker is open), its words `Add a dispatcher or orchestrator` in its `aria-label` and the shared Tooltip (`TemplatePicker` in `web/next/src/components/dashboard/template-picker.tsx`).
   It opens shadcn's Popover over a Command list of `sessions.templates`, a row each: its label, then its backend or model and effort, muted (`templateRowView` in `web/next/src/lib/templates.ts`).
-  A row a gate would refuse shows disabled with its reason in that place (the API's `refusal`, or `The second dispatcher is running` for a dispatcher template while Bravo is live), and the foot links Edit templates to `/dashboard/settings`.
+  A row a gate would refuse shows disabled with its reason in that place (the API's `refusal`, or `The second dispatcher is running` for a dispatcher template while Bravo is live), and the foot links Edit templates to `/dashboard/settings#templates`, Settings' Templates section (dashboard.md).
   A pick starts the template's session (`POST /api/v1/sessions/templates/:id/start`, writes.md), a spinner on its row until the API answers, and a refusal shows the API's words whole in a toast.
   The stored sidebar draws the slots `/api/health` counts in `dispatcherSlots` (`readDispatcherSlots` in `api/hono/src/lib/dashboard/workers.ts`: the primary's, plus the second's while Claude's registry names it or the roster lists it neither done nor ended), which the layout reads on the server and hands `DashboardDispatchers` (`dispatcherSlotsShown`),
   filling with empty busy rows (`PendingRow`, no skeleton, the row's own box, `ROW_BOX`, with nothing in it) the rows it lacks, so the second's row arriving moves nothing below it (`verify cls`), since it stores live sessions alone and a rostered second that is down would otherwise lose its row (`verify cls`'s second dispatcher down case);
@@ -129,7 +129,7 @@
   A stuck reviewer or tester leaves its worker collapsed (#i547: "a worker row stays collapsed while its nested reviewer or tester is stuck; the worker row already draws the red alarm itself, so nothing hides"): while the row hides it, collapsed or on the collapsed rail, the worker's row draws the red alarm and names it in its tooltip, so it never hides.
   The pull request read is one `gh api graphql` call per branch, cached as `.agents/dashboard/dashboard.md` says (5 minutes, a merged PR read once), now also reading `reviewDecision`, `latestOpinionatedReviews`, the base's required approvals, `mergeQueueEntry` and `autoMergeRequest`, and from the same comments the newest ReviewBot round and the newest Tester verdict at the head.
 - The tab's favicon wears a red dot as Slack's does, only when something new waits for the owner:
-  a Changelog entry the owner has not read (the Changelog square's unread count, `useAppUnread`), or an inbox item that needs the owner and came after their last look at the inbox (`newInInbox` in `web/next/src/lib/tab-dot.ts`).
+  a Changelog entry the owner has not read (the Changelog square's unread count, `useAppUnread`), or an inbox item that needs the owner and came after their last look at the inbox (`newInInbox` in `web/next/src/lib/tab-dot.ts`), one held quiet while focus stands left out until it ends (`loudItems`, `.agents/dashboard/asks.md`).
   Each source is also marked where it lives, the dot alone once too easy to miss, from the same reads, by the one corner mark every square wears, a red dot (`bg-destructive`) at its top right (`CountBadge` in `web/next/src/components/dashboard/count-badge.tsx`):
   a square with a count holds it inside the dot in white, new or not, the Inbox tab beside every dashboard page (`useDotSources`) and the Changelog's square in the aside's tab bar (its unread count, `useAppUnread`, `.agents/dashboard/apps.md`);
   the bar hides until the pointer nears it while Auto-hide tab bar is ticked, its drawer handle wearing the plain dot meanwhile (`.agents/dashboard/asks.md`); and a square with no count
@@ -211,9 +211,9 @@
   `orderByStatus` applies this once in the dashboard, after the agents board is read, so the System page's table follows the same order.
   A light moves its row only once it has held for `LIGHT_HOLD_MS` (a wait at once, into it and out of it, since leaving it means it was answered), so a session pausing between steps stays put.
   A session's record can read `needsInput` after its picker is answered, until the session's turn ends, so the transcript clears it first, the transcript's word counting over the record's:
-  `factsIn` in `api/hono/src/lib/dashboard/transcript.ts` keeps each session's open AskUserQuestion calls and when the newest was answered, and `unansweredFeed` and `answeredSince` in `workers.ts` drop a Feed picker raised before that answer (cmux's Feed, which no board reads now),
-  keeping a session's newest pickers as many as it still holds open, and read a `needsInput` the record set before the answer, once none is open, as running,
-  or as idle when an interrupt followed the answer (Esc on a picker runs no Stop hook); a permission or a plan stays, since it may be a subagent's. The hub re-reads the board the moment a session waiting on them writes a line.
+  `factsIn` in `api/hono/src/lib/dashboard/transcript.ts` keeps each session's open AskUserQuestion calls and when the newest was answered, and `answeredSince` in `workers.ts` reads a `needsInput` the record set before that answer, once none is open, as running,
+  or as idle when an interrupt followed the answer (Esc on a picker runs no Stop hook).
+  The hub re-reads the board the moment a session waiting on them writes a line.
   AI Runners holds the runner sessions alone.
   Scripts, after it, lists the ops jobs Ops runs as scripts with no Claude session, A to Z, collapsed until its label is clicked, so the jobs never read as a crowd of runners, a Failing or Down script still showing, in red,
   under the collapsed label (`scriptsShown` in `web/next/src/lib/ops.ts`; its open state lives in `DashboardProvider`, as Other's does, kept across reloads as every group's is).
@@ -256,3 +256,4 @@
   The menu then lists Settings (`/dashboard/settings`), in the Dashboard and the Console alike; the menu has no Home, since `/` opens the dashboard.
   The Dashboard's menu has no Log out (`logOut={false}` in `owner-menu.tsx`), since `/dashboard`'s first-run pane signs this Mac's owner straight back in; the Console's keeps it.
   The Console's user menu reads the account by the same rules: `SidebarUserMenu` reads it only when its caller passes `account`, which both layouts do on the owner rung alone.
+- On the hosted build the sidebar draws none of its writes (the template plus, a thread's menu, the Orchestrators order, Update now), and the read-only line stands for them, by stack.md's relay rule.

@@ -97,7 +97,7 @@ describe("a node_modules clone waits while clone-off stands", () => {
   })
 
   test("but goes on normal pressure and load1 and load5 under 30", async () => {
-    expect(await machine({ load1: 29, off }).clones("node_modules")).toBe(true)
+    expect(await machine({ load1: 29, load5: 2, off }).clones("node_modules")).toBe(true)
   })
 
   test("and on warn pressure with 8% free", async () => {
@@ -138,12 +138,91 @@ describe("a node_modules clone waits while clone-off stands", () => {
   })
 })
 
+// 6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the load brake
+describe("a node_modules clone waits for its spacing", () => {
+  const SPACED = /^run-slot\.sh: this clone waits /gm
+  // whether the clone waited (printed its spacing line and had not run when stopped) or ran
+  const clone = async (m: ReturnType<typeof machine>, who = "worker-c") => {
+    mkdirSync(join(m.root, "node_modules"), { recursive: true })
+    const run = m.start(who, {}, SCRIPT, ["cp", "-R", "node_modules"])
+    if (await run.saw(SPACED)) {
+      await stop(run.p)
+      return existsSync(run.marker) ? "ran" : "waited"
+    }
+    return (await run.ran()) ? "ran" : "ended"
+  }
+  const iso = (ago: number) => new Date(Date.now() - ago * 1000).toISOString().slice(0, 19) + "Z"
+  // a runs log whose last clone ended `ago` seconds back, or whose run on `slot` did
+  const ended = (m: ReturnType<typeof machine>, ago: number, slot = "run-slot-clone") =>
+    writeFileSync(
+      join(m.ops, "run-slot.runs.log"),
+      `${iso(ago + 30)} start worker-a 111 ${slot} waited=0s\n${iso(ago)} end worker-a 111 rc=0 ran=30s\n`,
+    )
+
+  test("within the gap of the last clone's end", async () => {
+    const m = machine()
+    ended(m, 60)
+    expect(await clone(m)).toBe("waited")
+  })
+
+  test("but starts once the gap has passed", async () => {
+    const m = machine()
+    ended(m, 400)
+    expect(await clone(m)).toBe("ran")
+  })
+
+  test("and a run on another slot that ended within the gap holds no clone", async () => {
+    const m = machine()
+    ended(m, 60, "run-slot")
+    expect(await clone(m)).toBe("ran")
+  })
+
+  test("while load5 is within 4 of the brake's line, 22 with no cap", async () => {
+    expect(await clone(machine({ load1: 2, load5: 18 }))).toBe("waited")
+  })
+
+  test("and within 4 of run-slot.load5-cap's line", async () => {
+    const m = machine({ load1: 2, load5: 11 })
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "15\n")
+    expect(await clone(m)).toBe("waited")
+  })
+
+  test("but starts under that line", async () => {
+    const m = machine({ load1: 2, load5: 10 })
+    writeFileSync(join(m.ops, "run-slot.load5-cap"), "15\n")
+    expect(await clone(m)).toBe("ran")
+  })
+
+  test("while a big run holds a lane", async () => {
+    const m = machine()
+    m.hold("run-slot-3", 3, "big")
+    expect(await clone(m)).toBe("waited")
+  })
+
+  test("but starts beside a medium run", async () => {
+    const m = machine()
+    m.hold("run-slot-3", 2, "medium")
+    expect(await clone(m)).toBe("ran")
+  })
+
+  test("and starts at once with neither hold standing", async () => {
+    expect(await clone(machine())).toBe("ran")
+  })
+
+  test("and a session clone-allow names keeps its pass past clone-off", async () => {
+    const m = machine({ off: ["run-slot.clone-off"], pressure: 4 })
+    writeFileSync(join(m.ops, "run-slot.clone-allow"), "tester-.*\n")
+    expect(await clone(m, "tester-sloth")).toBe("ran")
+  })
+})
+
 // A fake git and bun on PATH touch their last argument, so a run through run-slot shows whether it ran while a big run holds the queue's units.
 describe("a quick run takes its own slot past a full queue", () => {
   // Runs argv through run-slot past a full queue and says whether it ran: once it ends, or once it prints the queue's waiting line, when it is stopped (an event, never a clock, so a loaded runner only makes it slower)
   // ran: the seconds each earlier run of the same command took, oldest first, as run-slot.runs.log records them
-  // the slot the last quick() run took, from its runs log's start line
+  // the slot the last quick() run took, from its runs log's start line, and what it printed on stderr
   let took = ""
+  let said = ""
   // as: the run's session name and env words, and whether a CPU-queue waiter's ticket stands ahead of it
   const quick = async (
     argv: string[],
@@ -154,10 +233,16 @@ describe("a quick run takes its own slot past a full queue", () => {
     const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
     m.hold("run-slot", 3, "big")
     if (as.waiter) m.ticket(1, "worker-w", "s2 23 3 big")
+    // each fake touches its last word; git answers rev-parse, as a repo's folder does
     for (const bin of ["bun", "git"]) {
-      writeFileSync(join(m.bin, bin), '#!/bin/bash\ntouch "${@: -1}"\n')
+      writeFileSync(
+        join(m.bin, bin),
+        '#!/bin/bash\ncase " $* " in *" rev-parse "*) exit 0 ;; esac\ntouch "${@: -1}"\n',
+      )
       chmodSync(join(m.bin, bin), 0o755)
     }
+    // ROOT in a word stands for the machine's folder
+    argv = argv.map((a) => a.replaceAll("ROOT", m.root))
     // the marker is the line's last word, a test file under the repo's tests/ folder, since only such a word counts toward the quick rule's files
     mkdirSync(join(m.root, "tests"))
     const marker = "tests/a.test.ts"
@@ -184,6 +269,7 @@ describe("a quick run takes its own slot past a full queue", () => {
     })()
     while (!ended && !err.match(WAITING)) await Bun.sleep(20)
     if (!ended) await stop(p)
+    said = err
     took =
       readFileSync(join(m.ops, "run-slot.runs.log"), "utf8")
         .split("\n")
@@ -301,6 +387,36 @@ describe("a quick run takes its own slot past a full queue", () => {
 
   test("nor does the mark under a session's own name", async () => {
     expect(await quick(["bun", "run", "build"], [], { ...STEP, who: "worker-q" })).toBe(false)
+  })
+
+  // 4 Nov: a docs-only commit and push inside sh -c waited about 45 minutes in the general queue, while a bare git commit takes the commit lane within a minute; these read the slot each took, since a chain's own steps never touch the marker
+  test("a sh -c chain of a cd to the repo, then git add, commit and push, takes run-slot-commit", async () => {
+    await quick(
+      ["sh", "-c", `cd ROOT && git add . && git commit -m "a b" && git push origin`],
+      [],
+      {
+        waiter: true,
+      },
+    )
+    expect(took).toBe("run-slot-commit")
+  })
+
+  // a login shell's profile puts the system's git ahead of the fake one, which the slot it took does not depend on
+  test("and so does a bash -lc chain of git -C steps", async () => {
+    await quick(["bash", "-lc", `git -C ROOT commit -m x; git -C ROOT push origin`])
+    expect(took).toBe("run-slot-commit")
+  })
+
+  test("but a chain that commits beside a test goes through the queue and says why", async () => {
+    expect(await quick(["bash", "-c", `cd ROOT && bun run test && git commit -m x`])).toBe(false)
+    expect(said).toContain(
+      "run-slot.sh: this chain goes through the general queue, not the commit lane, since `bun run test` is not a form the commit lane takes",
+    )
+  })
+
+  test("while a chain with no git commit or push says nothing of the commit lane", async () => {
+    expect(await quick(["bash", "-c", 'bun run test && git add "$0"'])).toBe(false)
+    expect(said).not.toContain("commit lane")
   })
 
   // ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites
@@ -462,8 +578,8 @@ describe("the quick slot runs whatever load5 reads", () => {
     expect(await run.ran()).toBe(true)
   })
 
-  test("and so does a node_modules clone, with clone-off unset", async () => {
-    expect(await machine({ load1: 30 }).clones("node_modules")).toBe(true)
+  test("and so does a node_modules clone at load1 30, with clone-off unset and load5 under its margin", async () => {
+    expect(await machine({ load1: 30, load5: 2 }).clones("node_modules")).toBe(true)
   })
 })
 

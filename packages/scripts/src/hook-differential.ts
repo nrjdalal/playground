@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 
 import { dataDirOf } from "@packages/env/data-dir"
 
@@ -19,6 +19,7 @@ import { dataDirOf } from "@packages/env/data-dir"
 export type Check = (
   raw: string,
   env: Record<string, string | undefined>,
+  main?: string,
 ) => Promise<string | undefined> | string | undefined
 type Form = { command: string; inClass?: boolean }
 type Call = { command: string; cwd: string }
@@ -28,6 +29,34 @@ const USAGE =
   "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>]> --canary <sha> --hook <name> [--hook <name> ...] [--fresh]"
 
 const DAY = 24 * 3600 * 1000
+
+// The hooks whose check() takes the main checkout third: canary's tree is unpacked by git archive and is no git checkout, so on its own default each would read that folder as main, and both sides get the head's main checkout
+export const TAKES_MAIN = ["no-main-checkout", "no-unslotted-run"]
+
+// Every file in the hooks' import graph that finds a path from its own copy's folder (import.meta's dir, path or url), and why each reads the same on both sides: canary's copy sits in an unpacked tree that is no git checkout
+export const ROOT_READS: Record<string, string> = {
+  "packages/scripts/src/main-checkout.ts":
+    "pinned: mainCheckout() reads PLAYGROUND_REPO first, which both sides get as the head's main checkout",
+  "packages/scripts/src/playground/setting.ts":
+    "unreached: only stuck-alert's import.meta.main block imports it, and role.ts and no-chat-question run it for sessions.names and live.branch, data-folder reads that never take its checkout's origin",
+  "packages/settings/src/rendered.ts":
+    "its own tree: coreDir() is extensions/core, whose lists ship with each version",
+  "scripts/hooks/no-chat-question.ts":
+    "unreached: a Stop hook reads last_assistant_message, which no Bash call the differential passes carries",
+  "scripts/hooks/no-extensions-write.ts":
+    "its own tree: the worker module it loads is its own code",
+  "scripts/hooks/no-main-checkout.ts":
+    "pinned: on TAKES_MAIN, so check() takes the head's main checkout",
+  "scripts/hooks/no-playground-leak.ts":
+    "its own tree: skillNames() lists the tracked skills/playground, which ships with each version",
+  "scripts/hooks/no-raw-spawn.ts": "verdict-free: spawn.sh's path is only in the refusal text",
+  "scripts/hooks/no-unslotted-run.ts":
+    "pinned: on TAKES_MAIN, so check() takes the head's main checkout",
+  "scripts/hooks/role.ts":
+    "its own tree: setting.ts reads the data folder both sides share, and roster-statuses.json ships with each version",
+  "scripts/hooks/session-state.ts":
+    "unreached: it exports no check() for the differential to load; its own path only spawns its report",
+}
 
 // The run-slot call a bare start becomes, or the argv itself inside a ticket (whose child carries the RUN_SLOT_NICE run-slot exports) or with no executable run-slot.sh
 export const routed = ({
@@ -56,16 +85,40 @@ export const cwdsOf = (home: string) => [
   join(home, "x", ".claude", "worktrees", "y"),
 ]
 
-const allows = async (check: Check, call: Call, home: string) =>
-  (await check(
-    JSON.stringify({ cwd: call.cwd, tool_input: { command: call.command }, tool_name: "Bash" }),
-    {
-      HOME: home,
-    },
-  )) === undefined
+// PLAYGROUND_REPO set to the head's main checkout while both sides run, so mainCheckout() on canary's side reads it rather than its own unpacked folder; the caller's value is put back after
+async function pinned<T>(repo: string | undefined, run: () => Promise<T>): Promise<T> {
+  if (repo === undefined) return run()
+  const was = process.env.PLAYGROUND_REPO
+  process.env.PLAYGROUND_REPO = repo
+  try {
+    return await run()
+  } finally {
+    if (was === undefined) delete process.env.PLAYGROUND_REPO
+    else process.env.PLAYGROUND_REPO = was
+  }
+}
+
+// main undefined leaves a hook's own default in place, as a call with no third argument does
+const allows = (check: Check, call: Call, home: string, main?: string, repo?: string) =>
+  pinned(
+    repo,
+    async () =>
+      (await check(
+        JSON.stringify({ cwd: call.cwd, tool_input: { command: call.command }, tool_name: "Bash" }),
+        { HOME: home },
+        main,
+      )) === undefined,
+  )
 
 // Each form from each folder through both hooks: the same, newly allowed and newly refused, each split by the form's class (a form with no class is outside it)
-export async function sweep(canary: Check, head: Check, forms: Form[], home: string) {
+export async function sweep(
+  canary: Check,
+  head: Check,
+  forms: Form[],
+  home: string,
+  main?: string,
+  repo?: string,
+) {
   const counts = {
     cases: 0,
     forms: forms.length,
@@ -78,8 +131,8 @@ export async function sweep(canary: Check, head: Check, forms: Form[], home: str
     for (const cwd of cwdsOf(home)) {
       counts.cases++
       const [was, now] = [
-        await allows(canary, { command, cwd }, home),
-        await allows(head, { command, cwd }, home),
+        await allows(canary, { command, cwd }, home, main, repo),
+        await allows(head, { command, cwd }, home, main, repo),
       ]
       if (was === now) {
         counts.same++
@@ -128,11 +181,21 @@ export async function calls(projects: string, since: number): Promise<Call[]> {
 }
 
 // Each call from its own folder through both hooks: the same, newly allowed and newly refused
-export async function replay(canary: Check, head: Check, list: Call[], home: string) {
+export async function replay(
+  canary: Check,
+  head: Check,
+  list: Call[],
+  home: string,
+  main?: string,
+  repo?: string,
+) {
   const counts = { calls: list.length, "newly allowed": 0, "newly refused": 0, same: 0 }
   const changed: string[] = []
   for (const call of list) {
-    const [was, now] = [await allows(canary, call, home), await allows(head, call, home)]
+    const [was, now] = [
+      await allows(canary, call, home, main, repo),
+      await allows(head, call, home, main, repo),
+    ]
     if (was === now) counts.same++
     else {
       counts[now ? "newly allowed" : "newly refused"]++
@@ -356,14 +419,16 @@ async function main(args: string[]): Promise<number> {
     return 2
   }
   const list = mode === "replay" ? await calls(projects, Date.now() - hours * 3600 * 1000) : []
+  const headMain = dirname(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]))
   const result = { changed: [] as string[], counts: [] as string[] }
   for (const hook of hooks) {
     const canary: Check = (await import(join(before, "scripts/hooks", `${hook}.ts`))).check
     const head: Check = (await import(join(root, "scripts/hooks", `${hook}.ts`))).check
+    const main = TAKES_MAIN.includes(hook) ? headMain : undefined
     const { changed, counts } =
       mode === "sweep"
-        ? await sweep(canary, head, forms, home)
-        : await replay(canary, head, list, home)
+        ? await sweep(canary, head, forms, home, main, headMain)
+        : await replay(canary, head, list, home, main, headMain)
     result.counts.push(JSON.stringify({ hook, ...counts }))
     console.log(result.counts.at(-1))
     for (const line of changed.slice(0, 20)) {

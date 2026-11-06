@@ -30,6 +30,9 @@ export const stop = async (p: Subprocess) => {
   await p.exited
 }
 
+// Ubuntu 26.04's default mkdir, uutils 0.10.0, reports success when another process made the folder between its own check and its mkdir (fixed in uutils 0.11.0), so two looks could each take one of run-slot.sh's mkdir locks; the image keeps GNU's as gnumkdir, which fails there as the Mac's mkdir does, so a machine's fake bin runs that one where it exists
+const GNU_MKDIR = Bun.which("gnumkdir")
+
 export const dirs: string[] = []
 afterAll(() => {
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })
@@ -43,6 +46,8 @@ export type Setup = {
   load1?: number
   load5?: number
   mergeQueue?: unknown
+  // the epoch second every `date` that names no time of its own reads, so a log line written seconds back keeps its age through every look; an age run-slot.sh reads from a file's real mtime (the queue's AGED pin, the switch expiry, a stale holder, the gauges cache) then reads below zero and never trips, so a test of one of those leaves it unset
+  now?: number
   off?: string[]
   peers?: string[]
   plan?: unknown
@@ -61,6 +66,7 @@ export const machine = ({
   load1 = 2,
   load5 = load1,
   mergeQueue,
+  now,
   off = [],
   peers = [],
   plan,
@@ -131,8 +137,19 @@ esac
     `#!/bin/bash\n[ "$2" = factory.repo ] && { echo '"acme/app"'; exit 0; }\n[ "$2" = --guarded-orgs ] && { echo '["acme-co"]'; exit 0; }\n[ "$2" = slots.peers ] && { echo '${JSON.stringify(peers)}'; exit 0; }\nexec ${process.execPath} "$@"\n`,
   )
   chmodSync(join(bin, "bun"), 0o755)
+  if (now !== undefined) {
+    writeFileSync(
+      join(bin, "date"),
+      `#!/bin/bash\nfor a in "$@"; do case "$a" in -r*|-d*) exec ${Bun.which("date")} "$@" ;; esac; done\nexec ${Bun.which("date")} ${process.platform === "darwin" ? `-r ${now}` : `-d @${now}`} "$@"\n`,
+    )
+    chmodSync(join(bin, "date"), 0o755)
+  }
   // SLOW_CHILD puts a slowed python3 in the fake bin folder, which PATH reads first
   slowChild("python3", bin)
+  if (GNU_MKDIR) {
+    writeFileSync(join(bin, "mkdir"), `#!/bin/bash\nexec ${GNU_MKDIR} "$@"\n`)
+    chmodSync(join(bin, "mkdir"), 0o755)
+  }
   const env = (extra: Record<string, string> = {}) => ({
     CLAUDE_CONFIG_DIR: config,
     PLAYGROUND_DATA_DIR: join(config, "playground"),
@@ -165,16 +182,17 @@ esac
   const tickets = () =>
     existsSync(join(ops, "run-slot.waiters")) ? readdirSync(join(ops, "run-slot.waiters")) : []
   // Starts `touch <marker>` through run-slot (or the copy at `script`) in the background, reading its stderr as it comes. Each check waits on an event (the run's exit, a line it prints), never a wall-clock budget, so a loaded runner only makes it slower.
-  // command: the words before the marker, which a fake bin in the machine's bin folder touches; touch by default
+  // command: the words before the marker, which a fake bin in the machine's bin folder touches; touch by default; cwd: the folder it runs from, the scratch root by default
   const start = (
     who: string,
     extra: Record<string, string> = {},
     script = SCRIPT,
     command = ["touch"],
+    cwd = root,
   ) => {
     const marker = join(root, `ran-${who}-${Math.random()}`)
     const p = Bun.spawn(["bash", script, who, "--", ...command, marker], {
-      cwd: root,
+      cwd,
       env: env(extra),
       stderr: "pipe",
     })

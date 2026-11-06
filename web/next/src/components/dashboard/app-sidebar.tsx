@@ -124,6 +124,7 @@ import {
   rowText,
   statusParts,
 } from "@/lib/agents"
+import { config } from "@/lib/config"
 import {
   checkerOf,
   dispatcherOf,
@@ -571,7 +572,7 @@ export function useDashboardUpdate(): MenuUpdate | null {
   const close = useCloseSheet()
   const hover = updateHover(data?.update, new Date(now))
   const message = updateMessage(data?.update, new Date(now))
-  if (!allowed || !hover || !message) return null
+  if (!allowed || !hover || !message || config.hosted) return null
   const live = dispatcherOf(workers, dispatcher)
   const to = live?.name ?? null
   const label = live ? chatLabel(live, dispatcher) : dispatcherLabel(null, true)
@@ -639,7 +640,7 @@ export function DashboardDispatchers({ rows = 1 }: { rows?: number }) {
           ) : undefined
         // Alpha's plus, in its effort's place, starts a session from a template
         const action =
-          i === 0 && !muted ? (
+          i === 0 && !muted && !config.hosted ? (
             <TemplatePicker
               className={cn("right-1.5", TOGGLE_SHOWN)}
               secondRunning={shown.slots.slice(1).some((slot) => slot.worker)}
@@ -1407,35 +1408,47 @@ function ManagersGroup({
   )
   const names = sessions.map((worker) => worker.name)
   const moveTo = (from: number, to: number) => managers.move(arrayMove(names, from, to))
+  const label = (
+    <>
+      Orchestrators
+      <LabelChevron open={open} />
+      <GroupCount count={count} />
+    </>
+  )
   return (
     <SidebarGroup>
-      <ContextMenu>
-        <ContextMenuTrigger
-          render={
-            <SidebarGroupLabel
-              className="w-full pl-2.5"
-              render={labelToggle(open, setOpen)}
-              aria-description={MENU_HINT}
-              onKeyDown={openMenuByKey}
-            />
-          }
-        >
-          Orchestrators
-          <LabelChevron open={open} />
-          <GroupCount count={count} />
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuGroup>
-            <ContextMenuItem
-              className="text-xs"
-              disabled={managers.order.length === 0}
-              onClick={managers.reset}
-            >
-              Reset order to A to Z
-            </ContextMenuItem>
-          </ContextMenuGroup>
-        </ContextMenuContent>
-      </ContextMenu>
+      {/* the order is a write, so the hosted build keeps A to Z with no Reset, no menu and no drag */}
+      {config.hosted ? (
+        <SidebarGroupLabel className="w-full pl-2.5" render={labelToggle(open, setOpen)}>
+          {label}
+        </SidebarGroupLabel>
+      ) : (
+        <ContextMenu>
+          <ContextMenuTrigger
+            render={
+              <SidebarGroupLabel
+                className="w-full pl-2.5"
+                render={labelToggle(open, setOpen)}
+                aria-description={MENU_HINT}
+                onKeyDown={openMenuByKey}
+              />
+            }
+          >
+            {label}
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuGroup>
+              <ContextMenuItem
+                className="text-xs"
+                disabled={managers.order.length === 0}
+                onClick={managers.reset}
+              >
+                Reset order to A to Z
+              </ContextMenuItem>
+            </ContextMenuGroup>
+          </ContextMenuContent>
+        </ContextMenu>
+      )}
       <SidebarMenu
         aria-busy={muted || undefined}
         className={cn("space-y-0.5", muted && "opacity-60")}
@@ -1452,7 +1465,7 @@ function ManagersGroup({
               <span>None running</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
-        ) : muted ? (
+        ) : muted || config.hosted ? (
           sessions.map((worker) => row(worker, membersOf(worker)))
         ) : (
           <DndContext
@@ -2066,35 +2079,42 @@ export function ThreadsGroup({
                   {countLabel(thread.unread)}
                 </SidebarMenuBadge>
               )}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <SidebarMenuAction
-                      showOnHover
-                      aria-label={`More for ${thread.title}`}
-                      className={cn(
-                        "right-1.5",
-                        thread.unread > 0 && "max-md:right-7",
-                        capped && "max-md:right-10",
-                      )}
-                    />
-                  }
-                >
-                  <RiMoreLine />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="right">
-                  {threadActions(thread).map(({ label, patch }) => (
-                    <DropdownMenuItem
-                      key={label}
-                      onClick={() =>
-                        runAction(thread, { label, patch }, { patch: onPatch, rename: setRenaming })
-                      }
-                    >
-                      {label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {/* each of its actions is a write, so the hosted build draws no menu */}
+              {!config.hosted && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <SidebarMenuAction
+                        showOnHover
+                        aria-label={`More for ${thread.title}`}
+                        className={cn(
+                          "right-1.5",
+                          thread.unread > 0 && "max-md:right-7",
+                          capped && "max-md:right-10",
+                        )}
+                      />
+                    }
+                  >
+                    <RiMoreLine />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" side="right">
+                    {threadActions(thread).map(({ label, patch }) => (
+                      <DropdownMenuItem
+                        key={label}
+                        onClick={() =>
+                          runAction(
+                            thread,
+                            { label, patch },
+                            { patch: onPatch, rename: setRenaming },
+                          )
+                        }
+                      >
+                        {label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </SidebarMenuItem>
           )
         })}

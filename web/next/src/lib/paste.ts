@@ -5,8 +5,6 @@ export const MESSAGE_MAX_CHARS = 8000
 export const MESSAGE_MAX_LINES = 100
 // A paste longer than this goes as a file even when the message would fit.
 export const PASTE_MAX_CHARS = 2000
-// Room for what is added to the box's words at send: a picked inbox reply's "re #iN: " tag.
-const REPLY_ROOM = 16
 
 // The control characters a text file holds (tab, line feed, form feed, carriage return and escape), the ones the API's isText() keeps; asText drops every other control character, DEL and C1 included, which deliver() would drop as well.
 export const TEXT_CONTROLS = "\t\n\f\r\u001b"
@@ -28,7 +26,7 @@ export function pastedFile(pasted: string, before: string, after = ""): File | n
     .replace(/(?!\n)\p{Cc}/gu, "")
   if (
     pasted.length <= PASTE_MAX_CHARS &&
-    whole.length + REPLY_ROOM <= MESSAGE_MAX_CHARS &&
+    whole.length <= MESSAGE_MAX_CHARS &&
     whole.split("\n").length <= MESSAGE_MAX_LINES
   ) {
     return null
@@ -40,6 +38,7 @@ export function pastedFile(pasted: string, before: string, after = ""): File | n
 
 type PasteBox = {
   dispatchEvent: (event: Event) => boolean
+  readOnly: boolean
   selectionEnd: number
   selectionStart: number
   setRangeText: (text: string, start: number, end: number, mode: "end") => void
@@ -48,7 +47,7 @@ type PasteBox = {
 
 export type PasteInsert = "landed" | "left" | "missed"
 
-// A plain-text paste the box takes as words lands as the text its paste event carried, inserted here rather than by the browser, whose own insert reads the clipboard again and lands nothing when it has changed since (a dictation's 84 characters read at the paste and none at the insert, most likely the dictation app putting the old clipboard back between the two, estimated). It replaces the selection, through the browser's insertText so undo keeps it, else at the selection by hand with the input event React's onChange reads. Call it after the composer's own paste handling, which takes files and long text; returns left when it leaves the paste to the browser, else whether the box then holds it, read from the box itself (its value or its caret moved), so an insert that reports done and changes nothing falls back to the hand insert and, missing that too, reads missed.
+// A plain-text paste the box takes as words lands as the text its paste event carried, inserted here rather than by the browser, whose own insert reads the clipboard again and lands nothing when it has changed since (a dictation's 84 characters read at the paste and none at the insert, most likely the dictation app putting the old clipboard back between the two, estimated). It replaces the selection, through the browser's insertText so undo keeps it, else at the selection by hand with the input event React's onChange reads. Call it after the composer's own paste handling, which takes files and long text; returns left when it leaves the paste to the browser, a read-only box's included, since the hand insert would write into a box the browser keeps as it is, else whether the box then holds it, read from the box itself (its value or its caret moved), so an insert that reports done and changes nothing falls back to the hand insert and, missing that too, reads missed.
 export function insertPaste(
   event: {
     clipboardData: { getData: (type: string) => string }
@@ -58,7 +57,7 @@ export function insertPaste(
   },
   insertText: (text: string) => boolean = (text) => document.execCommand("insertText", false, text),
 ): PasteInsert {
-  if (event.defaultPrevented) return "left"
+  if (event.defaultPrevented || event.currentTarget.readOnly) return "left"
   // line ends as the box takes them from a paste
   const text = event.clipboardData.getData("text/plain").replace(/\r\n?/g, "\n")
   if (!text) return "left"

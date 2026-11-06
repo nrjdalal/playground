@@ -1,7 +1,7 @@
 "use client"
 
 import type { Worker } from "@api/hono"
-import { RiAddLine, RiArrowUpLine, RiCloseLine, RiReplyLine } from "@remixicon/react"
+import { RiAddLine, RiArrowUpLine, RiReplyLine } from "@remixicon/react"
 import { useForm, useStore } from "@tanstack/react-form"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
@@ -10,6 +10,7 @@ import type { CSSProperties, KeyboardEvent } from "react"
 import { AttachmentChips, useAttachments } from "@/components/dashboard/attachments"
 import { useDashboard } from "@/components/dashboard/dashboard"
 import { ModePicker } from "@/components/dashboard/mode-picker"
+import { ReadOnlyLine } from "@/components/dashboard/read-only-line"
 import { SettingPicker } from "@/components/dashboard/setting-picker"
 import { Hint } from "@/components/hint"
 import { Badge } from "@/components/ui/badge"
@@ -22,9 +23,11 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { toast } from "@/components/ui/toast"
+import { useYardWrites } from "@/hooks/use-yard-writes"
 import { chatLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { caretPoint } from "@/lib/caret"
+import { config } from "@/lib/config"
 import { isPrimary } from "@/lib/dashboard"
 import { draftSaver, readDrafts, takeHanded } from "@/lib/drafts"
 import { itemTag, useInbox } from "@/lib/inbox"
@@ -32,7 +35,7 @@ import { isLoginCommand, LOGIN_HINT } from "@/lib/login-expired"
 import { comparable, submittable } from "@/lib/outbox"
 import { insertPaste } from "@/lib/paste"
 import { markInserted, watchPastes } from "@/lib/paste-log"
-import { setReply, setTypedReply, typedReply, useReply, withReply } from "@/lib/reply"
+import { setTypedReply, typedReply } from "@/lib/reply"
 import { matchSkills, offersSkills, pickSkill, slashToken } from "@/lib/skill-menu"
 
 const COARSE = "(pointer: coarse)"
@@ -53,7 +56,7 @@ export function sendsOnEnter(event: EnterKey, enterAddsLine = false) {
   return !enterAddsLine || event.metaKey || event.ctrlKey
 }
 
-// The box's id, so a pending bubble's Unsend, Dismiss or Retry can hand focus back to it once the button is gone. Playground's own box keeps the bare id, which an Inbox card's Reply focuses; any other box takes its session's name and thread after it, so two boxes on one page never share an id.
+// The box's id, so a pending bubble's Unsend, Dismiss or Retry can hand focus back to it once the button is gone. Playground's own box keeps the bare id; any other box takes its session's name and thread after it, so two boxes on one page never share an id.
 export const COMPOSER_ID = "composer"
 export const composerId = (
   worker: Pick<Worker, "name" | "role">,
@@ -92,7 +95,13 @@ const useSkills = (sessionId: string | null) =>
 const MENU_GAP = 4
 
 // Says something to a session as the owner: typed into its own terminal as if the owner typed it there, or for the session the dashboard hosts, put on its input; its reply arrives in the steps above, from the transcript. Phase 2a: either dispatcher, the assistant, and the session the dashboard hosts on the Agent SDK. Files come with a message by the attach button, a paste or a drop: each uploads at once and shows as a chip above the box, and the message carries their paths for the session to Read. What is typed and attached stays as the session's draft until it is sent. Sending hands the message to the dashboard's outbox and clears the box and the draft at once, so nothing waits on the request: the message shows in the stream as a pending bubble, and while more than one is on its way the chat's Checkpoint bar above the box counts them. It is AI Elements' Prompt Input, an InputGroup in a form: the reply chip and files above the box, which grows with what is typed up to 40% of the view and scrolls past that, then attach, the mode menu and send, whose tooltip holds the key hint.
-export function Composer({ threadId, worker }: { threadId?: string; worker: Worker }) {
+// The hosted build's chat has a composer only in a browser that keeps a paired key, whose send the relay carries; elsewhere there it shows the one read-only line in the box's place.
+export function Composer(props: { threadId?: string; worker: Worker }) {
+  const writes = useYardWrites()
+  return writes.send ? <WritableComposer {...props} /> : <ReadOnlyLine className="mb-2 py-2" />
+}
+
+function WritableComposer({ threadId, worker }: { threadId?: string; worker: Worker }) {
   const onPicker = worker.light === "needs-you"
   const { allowed, approvals, dispatcher, outbox } = useDashboard()
   // The session is shown by its label as its chat names it (chatLabel: Message Alpha); the message still goes to its raw name.
@@ -110,11 +119,9 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
   const hint = touch
     ? "Enter adds a line, the button sends"
     : "Enter sends, Shift+Enter adds a line"
-  // An inbox item this message answers: picked by its Reply button, or named in the words as re #iN; Playground's own box alone answers one, as the Inbox is his.
+  // An inbox item this message answers, named in the words as re #iN; Playground's own box alone answers one, as the Inbox is his.
   const id = composerId(worker, dispatcher, threadId)
   const main = id === COMPOSER_ID
-  const chosen = useReply()
-  const picked = main ? chosen : null
   const items = useInbox(allowed).data?.items
   const box = useRef<HTMLTextAreaElement>(null)
   // What was typed here and not sent, kept per session in this browser, so leaving the chat or reloading the tab loses nothing.
@@ -126,7 +133,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
   // held still, since the form resets its words to new defaults on any render while untouched
   const [defaultValues] = useState(() => ({ text: saved?.text ?? "" }))
 
-  // the session's skills, for the / menu below and to keep a skill first when a reply is sent
+  // the session's skills, for the / menu below
   const skills = useSkills(offersSkills(worker) ? worker.sessionId : null).data ?? []
 
   const form = useForm({
@@ -163,13 +170,12 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
       outbox.send(worker.name, {
         attachments: attachments.refs,
         ...(startsThread ? { newThread: true } : {}),
-        text: withReply(words, picked, skills),
+        text: words,
         threadId,
       })
       formApi.reset({ text: "" }, { keepDefaultValues: true })
       setNewThread(false)
       attachments.clear()
-      if (main) setReply(null)
     },
   })
 
@@ -247,11 +253,10 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
     event.preventDefault()
     event.currentTarget.form?.requestSubmit()
   }
-  const typed = main ? typedReply(text, items ?? []) : null
-  const reply = picked ?? typed
-  // the list marks the item the words name, as it marks a picked one
-  const typedRef = typed?.ref
-  const typedTitle = typed?.title
+  const reply = main ? typedReply(text, items ?? []) : null
+  // the list marks the item the words name
+  const typedRef = reply?.ref
+  const typedTitle = reply?.title
   useEffect(() => {
     if (!main) return
     setTypedReply(
@@ -266,7 +271,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
   // every Cmd+V and paste on the page, and each insert into the box but plain typing, goes to the browser's paste log (lib/paste-log.ts), lengths only, and a miss to this machine's API
   useEffect(() => watchPastes(() => box.current), [])
 
-  // A failed message's Edit puts its text and files back here to fix and send again, after anything already there, taken once so coming back to the page does not put it back again; a thread's box beside the session's own leaves it to that one.
+  // A failed message's Edit puts its text and files back here to fix and send again, after anything already there, and an Inbox card's Reply puts re #iN: before it, each taken once so coming back to the page does not put it back again, with focus in the box and the caret at the end; a thread's box beside the session's own leaves it to that one.
   const { clearDraft, draft } = outbox
   const { restore } = attachments
   const taken = useRef<typeof draft>(null)
@@ -279,6 +284,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
     restore(draft.attachments)
     clearDraft()
     box.current?.focus()
+    requestAnimationFrame(() => box.current?.setSelectionRange(text.length, text.length))
   }, [clearDraft, draft, form, restore, threadId, worker.name])
 
   return (
@@ -326,7 +332,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                 event.preventDefault()
                 void form.handleSubmit()
               }}
-              {...attachments.dropProps}
+              {...(config.hosted ? {} : attachments.dropProps)}
               data-dragging={attachments.dragging || undefined}
               className="data-dragging:ring-ring/50 rounded-lg data-dragging:ring-2"
             >
@@ -341,19 +347,6 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                           Replying to <span className="font-mono">{itemTag(reply)}</span> ·{" "}
                           {reply.title}
                         </span>
-                        {picked && (
-                          <Hint content={`Stop replying to ${itemTag(reply)}`} description={null}>
-                            <InputGroupButton
-                              aria-label={`Stop replying to ${itemTag(reply)}`}
-                              size="icon-xs"
-                              variant="ghost"
-                              className="hover:bg-foreground/10 dark:hover:bg-foreground/10 -mr-1 size-4 rounded-full"
-                              onClick={() => setReply(null)}
-                            >
-                              <RiCloseLine className="size-3" aria-hidden />
-                            </InputGroupButton>
-                          </Hint>
-                        )}
                       </Badge>
                     )}
                     {attachments.chips.length ? (
@@ -384,7 +377,7 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                   aria-controls={menuOpen ? menuIds.list : undefined}
                   aria-activedescendant={menuOpen ? menuIds.item : undefined}
                   onPaste={(event) => {
-                    attachments.onPaste(event)
+                    if (!config.hosted) attachments.onPaste(event)
                     const inserted = insertPaste(event)
                     if (inserted !== "left") markInserted(event.nativeEvent, inserted === "landed")
                   }}
@@ -405,22 +398,27 @@ export function Composer({ threadId, worker }: { threadId?: string; worker: Work
                   align="block-end"
                   className="px-2 pt-1 pb-2 [&_button[data-size=icon-sm]]:size-7 [&_svg]:size-3.5!"
                 >
-                  <input {...attachments.pickerProps} />
-                  <Hint content="Attach images, PDFs or text files, or paste or drop them">
-                    <InputGroupButton
-                      aria-label="Attach files"
-                      className="rounded-full"
-                      onClick={attachments.pick}
-                      size="icon-sm"
-                      variant="outline"
-                    >
-                      <RiAddLine />
-                    </InputGroupButton>
-                  </Hint>
-                  <ModePicker approvals={approvals} worker={worker} />
+                  {/* an upload, a mode and a setting are writes the relay does not carry, so the hosted build's box sends words alone */}
+                  {!config.hosted && (
+                    <>
+                      <input {...attachments.pickerProps} />
+                      <Hint content="Attach images, PDFs or text files, or paste or drop them">
+                        <InputGroupButton
+                          aria-label="Attach files"
+                          className="rounded-full"
+                          onClick={attachments.pick}
+                          size="icon-sm"
+                          variant="outline"
+                        >
+                          <RiAddLine />
+                        </InputGroupButton>
+                      </Hint>
+                      <ModePicker approvals={approvals} worker={worker} />
+                    </>
+                  )}
                   <div className="ml-auto flex items-center gap-2">
                     {/* New thread is off for now, so this row renders no toggle and a send starts no thread */}
-                    <SettingPicker label={label} worker={worker} />
+                    {!config.hosted && <SettingPicker label={label} worker={worker} />}
                     {/* the box's own aria-description already speaks the key hint */}
                     <Hint content={hint} description={null}>
                       <InputGroupButton

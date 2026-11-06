@@ -39,7 +39,7 @@ export const resumeLine = (resetsAt: string): string =>
 
 const keyOf = (record: SessionState): string => `${record.sessionId} ${record.resetsAt}`
 
-// A restart (herdr's, cmux's or the machine's) loses the turn in flight, and cmux's own restore resumes a session with no first prompt, so it sits idle. `spawn.sh resume` gives every resume a first prompt, whose turn writes a newer record, so the wait lets that land first.
+// A restart (herdr's or the machine's) loses the turn in flight, and a restore that resumes a session with no first prompt leaves it idle. `spawn.sh resume` gives every resume a first prompt, whose turn writes a newer record, so the wait lets that land first.
 export const RESTART_GRACE_MS = 120_000
 
 export const restartLine = (startedAt: number): string =>

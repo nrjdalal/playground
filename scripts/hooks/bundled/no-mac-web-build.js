@@ -30,12 +30,7 @@ var DESK_ENV = new Set([
   "SDK_PERMISSION_MODE",
   "SDK_PROBE_DIR"
 ]);
-var RENAMED_ENV = {
-  PLAYGROUND_CMUX_SESSIONS: "PLAYGROUND_ALL_SESSIONS"
-};
 var renamedEnv = (name) => {
-  if (Object.hasOwn(RENAMED_ENV, name))
-    return RENAMED_ENV[name];
   if (!name.startsWith("DESK_"))
     return;
   const rest = name.slice("DESK_".length);
@@ -56,142 +51,8 @@ import { homedir } from "os";
 import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
 
-// scripts/hooks/role.ts
-import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
-
-// packages/config/src/kinds.ts
-var ROSTER_KINDS = [
-  "assistant",
-  "builder",
-  "dispatcher",
-  "ops",
-  "optimizer",
-  "orchestrator",
-  "planner",
-  "probe",
-  "researcher",
-  "reviewer",
-  "runner",
-  "tester",
-  "worker"
-];
-var isRosterKind = (value) => ROSTER_KINDS.includes(value);
-var FACTORY_ROLE_OF_KIND = {
-  assistant: "lead",
-  builder: "lead",
-  dispatcher: "dispatcher",
-  ops: "lead",
-  optimizer: "lead",
-  orchestrator: "lead",
-  planner: "lead",
-  probe: "probe",
-  researcher: "worker",
-  reviewer: "reviewer",
-  runner: "runner",
-  tester: "tester",
-  worker: "worker"
-};
-var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
-var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
-var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
-var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
-var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
-var DEFAULT_SESSION_NAMES = {
-  aliases: {},
-  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
-};
-var NAMES = Symbol.for("playground.sessionNames");
-var held = globalThis;
-var setSessionNames = (next) => {
-  held[NAMES] = next;
-};
-var getSessionNames = () => held[NAMES] ?? DEFAULT_SESSION_NAMES;
-var namedKinds = () => {
-  const { aliases, names } = getSessionNames();
-  return new Map([
-    ...Object.entries(names).map(([kind, name]) => [name, kind]),
-    [`${names.dispatcher}-2`, "dispatcher"],
-    ...Object.entries(aliases),
-    ["optimizer", "optimizer"]
-  ]);
-};
-var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
-function roleOfName(name) {
-  const kind = placedKindOfName(name);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-var SEATLESS = new Set(["ended", "parked"]);
-
-// scripts/hooks/role.ts
-var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
-var names;
-function loadNames(environment = process.env) {
-  names ??= (async () => {
-    try {
-      const setting = join2(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
-      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
-        env: { ...process.env, ...environment },
-        stderr: "ignore",
-        stdout: "pipe"
-      });
-      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
-`);
-      if (await read.exited === 0)
-        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
-    } catch {}
-  })();
-  return names;
-}
-async function registryName(sessionId, environment = process.env) {
-  const dir = join2(environment.CLAUDE_CONFIG_DIR || join2(homedir2(), ".claude"), "sessions");
-  for await (const file of new Bun.Glob("*.json").scan(dir)) {
-    try {
-      const entry = await Bun.file(join2(dir, file)).json();
-      if (entry.sessionId === sessionId && typeof entry.name === "string")
-        return entry.name;
-    } catch {}
-  }
-}
-async function rosterRole(name, environment = process.env) {
-  const path = join2(dataDirOf(environment), "roster.json");
-  try {
-    const roster = await Bun.file(path).json();
-    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
-  } catch {
-    return "";
-  }
-}
-async function sessionRole(environment, sessionId) {
-  if (environment.PLAYGROUND_ROLE)
-    return environment.PLAYGROUND_ROLE;
-  if (typeof sessionId !== "string")
-    return "";
-  try {
-    const name = await registryName(sessionId, environment) ?? "";
-    const role = name && await rosterRole(name, environment);
-    if (role)
-      return role;
-    await loadNames(environment);
-    return roleOfName(name);
-  } catch {
-    return "";
-  }
-}
-async function fromFactory(raw, environment = process.env) {
-  return await sessionRole(environment, sessionOf(raw)) !== "";
-}
-function sessionOf(raw) {
-  try {
-    return JSON.parse(raw).session_id;
-  } catch {
-    return;
-  }
-}
-
 // scripts/hooks/shell.ts
-import { homedir as homedir3 } from "os";
+import { homedir as homedir2 } from "os";
 import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
@@ -217,7 +78,7 @@ function filled(script, mark, value) {
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
-var held2 = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
+var held = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
 var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
@@ -270,6 +131,7 @@ var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
   builtin: ["", ""],
+  busybox: ["", ""],
   caffeinate: ["-d -i -m -s -u", "-t -w"],
   command: ["-p -V -v", ""],
   doas: ["-L -n -s", "-a -C -u"],
@@ -329,20 +191,22 @@ function stdinShell(cmd) {
     else if (names.some((n) => SHELLS.has(n)))
       kinds.push("shell");
   }
-  return kinds.includes("root") ? "root" : kinds.find(Boolean);
+  return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean);
 }
 function stdinShellOf(cmd, { args, first, name, xargs }) {
+  const fed = !!cmd.stdin || !!xargs;
   if (first && !marked(first.value)) {
-    if (name === "." || name === "source")
-      return args[0]?.value === "/dev/stdin" ? "shell" : undefined;
+    if (name === "." || name === "source" || name === "eval")
+      return fed || name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "") ? "shell" : undefined;
+    const family = familyOf(name);
+    if (family)
+      return fed && interpreted(family, args, xargs) ? "code" : undefined;
     if (!SHELLS.has(name))
       return;
+    if (fed)
+      return "shell";
     const { inline, operand } = shellOperand(args, name);
-    if (xargs && (!operand || xargs.replace !== undefined && operand.value.includes(xargs.replace)))
-      return "shell";
-    if (inline && operand && cmd.stdin && marked(operand.value))
-      return "shell";
-    return inline || operand ? undefined : "shell";
+    return inline || operand && !STDIN_PATHS.has(operand.value) ? undefined : "shell";
   }
   let at = 0;
   for (let w = cmd.words[at];w && !w.quoted; w = cmd.words[at]) {
@@ -363,7 +227,9 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
     if (w === firstWrapper || ROOT_SHELLS.has(w.value))
       wrappers.push(program(w.value));
   }
-  return first && wrappers.length ? "root" : undefined;
+  if (first && wrappers.length)
+    return "root";
+  return fed && first ? "shell" : undefined;
 }
 function startsRootShell(wrapper, value) {
   if (marked(value))
@@ -386,8 +252,101 @@ function startsRootShell(wrapper, value) {
   }
   return shell;
 }
+var FAMILIES = {
+  bun: { takes: ["--cwd", "--env-file", "--preload", "--tsconfig-override"], values: "r" },
+  deno: { takes: ["--config", "--import-map"], values: "c" },
+  lua: { takes: [], values: "l" },
+  node: {
+    takes: [
+      "--conditions",
+      "--env-file",
+      "--experimental-loader",
+      "--import",
+      "--input-type",
+      "--inspect-port",
+      "--loader",
+      "--max-old-space-size",
+      "--require",
+      "--stack-size",
+      "--title"
+    ],
+    values: "Cr"
+  },
+  osascript: { takes: [], values: "ls" },
+  perl: { takes: [], values: "I" },
+  php: { own: "f", takes: [], values: "cdf" },
+  python: { own: "m", takes: ["--check-hash-based-pycs"], values: "WXm" },
+  ruby: { takes: [], values: "CEIr" }
+};
+var FAMILY = /^(bun|deno|lua|luajit|node|nodejs|osascript|perl|php|python|ruby)[\d.]*$/;
+var familyOf = (name) => {
+  const base = FAMILY.exec(name)?.[1];
+  return base ? FAMILIES[base === "nodejs" ? "node" : base === "luajit" ? "lua" : base] : undefined;
+};
+function interpreted(family, args, xargs) {
+  const filled = (word) => marked(word.value) || !!xargs?.replace && word.value.includes(xargs.replace);
+  const own = (word) => !!word && !filled(word) && !STDIN_PATHS.has(word.value);
+  const runner = family === FAMILIES.bun || family === FAMILIES.deno;
+  const script = (word) => own(word) && (!runner || /\.[cm]?[jt]sx?$/.test(word?.value ?? ""));
+  let sub = false;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "--")
+      return !script(args[k + 1]);
+    if (value.startsWith("--")) {
+      if (!family.takes.includes(value.split("=")[0]))
+        return true;
+      if (!value.includes("="))
+        k++;
+      continue;
+    }
+    if (value.startsWith("-") && value !== "-") {
+      const [letter, attached] = [value[1], value.slice(2)];
+      if (!family.values.includes(letter))
+        return true;
+      if (letter === family.own)
+        return !own(attached ? { ...args[k], value: attached } : args[k + 1]);
+      if (!attached)
+        k++;
+      continue;
+    }
+    if (runner && !sub && value === "run") {
+      sub = true;
+      continue;
+    }
+    return !script(args[k]);
+  }
+  return true;
+}
+function codeFed(commands) {
+  const fed = new Map;
+  const add = (cmd, kind) => {
+    if (!kind || !cmd.stdin)
+      return;
+    const known = fed.get(cmd.stdin);
+    if (known?.kind !== "code")
+      fed.set(cmd.stdin, { consumer: cmd, kind });
+  };
+  for (const [k, cmd] of commands.entries()) {
+    if (!cmd.stdin)
+      continue;
+    add(cmd, stdinShell(cmd));
+    let depth = 0;
+    for (let j = k;j < commands.length; j++) {
+      const body = commands[j];
+      for (const m of markers(body.words))
+        depth += OPENS.has(m) ? 1 : CLOSES.has(m) ? -1 : 0;
+      if (j > k)
+        add(cmd, stdinShell({ ...body, stdin: cmd.stdin }));
+      if (depth <= 0)
+        break;
+    }
+  }
+  return fed;
+}
 var COUNTED = new Set(["repeat", "timeout"]);
-var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
+var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
+var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
 var GIT_TAKES = new Set([
@@ -496,7 +455,7 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join3 = (parts, separator = "") => {
+var join2 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -542,7 +501,71 @@ function decode(raw) {
 function lex(src, known = {}) {
   const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
+  calledAgain(lx.commands, src);
+  braced(lx.commands);
   return { commands: lx.commands, scopes: lx.scopes };
+}
+var BRACED = new Set([
+  "elif",
+  "else",
+  "for",
+  "foreach",
+  "if",
+  "repeat",
+  "select",
+  "until",
+  "while"
+]);
+function braced(commands) {
+  for (const [k, c] of commands.entries()) {
+    const head = c.words[0];
+    if (!head || head.quoted || !BRACED.has(head.value))
+      continue;
+    const at = c.words.findIndex((w, i) => i > 0 && !w.quoted && w.value === "{");
+    if (at < 0 || markers(c.words).length > at)
+      continue;
+    if (commands.slice(k + 1).some((d) => d.words.some((w) => !w.quoted && w.value === "}")))
+      c.opaque = true;
+  }
+}
+function calledAgain(commands, src) {
+  for (const [k, open] of commands.entries()) {
+    const [first, second] = open.words;
+    if (!open.held || !first || first.quoted)
+      continue;
+    const before = commands[k - 1]?.words;
+    const word = first.value === "function" ? second : open.group && before?.length === 1 ? before[0] : undefined;
+    if (!word)
+      continue;
+    let end = k;
+    for (let balance = 0;end < commands.length; end++) {
+      const reserved = markers(commands[end].words);
+      balance += reserved.filter((w) => OPENS.has(w)).length - reserved.filter((w) => CLOSES.has(w)).length;
+      if (balance <= 0)
+        break;
+    }
+    const body = commands.slice(k, end + 1);
+    const name = word.value.replace(/\(\)$/, "");
+    if (word.quoted || !/^[\w.:-]+$/.test(name)) {
+      for (const c of body)
+        c.repeated = true;
+      continue;
+    }
+    const outside = commands.filter((_, at) => at < k - 1 || at > end).map(callee);
+    const calls = outside.filter((w) => w?.value === name);
+    const others = outside.some((w) => w !== undefined && (w.unknown !== undefined || !w.quoted && (w.value === "eval" || w.value === "source" || w.value === ".")));
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const files = commands.flatMap((c) => c.redirects).filter((r) => r.target?.value === name).length;
+    const mentions = (src.match(new RegExp(`(?<![\\w.:-])${escaped}(?![\\w.:-])`, "g"))?.length ?? 0) - files;
+    const call = commands.find((c, at) => (at < k - 1 || at > end) && callee(c)?.value === name);
+    const once = mentions === 2 && calls.length === 1 && !others && !call?.repeated && !call?.kept;
+    if (!once)
+      for (const c of body)
+        c.repeated = true;
+  }
+}
+function callee(cmd) {
+  return cmd.words.find((w) => w.quoted || !(ASSIGN.test(w.value) || MARKERS.has(w.value) || BUILTIN.has(w.value) || w.value.startsWith("-")));
 }
 function nest(lx, inherit) {
   list(lx, lx.scopes.push(lx.scope) - 1, true, inherit);
@@ -566,6 +589,7 @@ function walk(lx, scope, nested, inherit) {
   let loops = 0;
   let after = "";
   const bodies = [];
+  const heads = [];
   const end = (op) => {
     const done = cmd;
     const pipe = op === "|" || op === "|&";
@@ -591,18 +615,36 @@ function walk(lx, scope, nested, inherit) {
       if (after === "&&")
         done.chained = true;
       done.chain = lx.token;
-      if (reserved.some((w) => HELD.has(w)))
+      const last = lx.commands[lx.commands.length - 1]?.words;
+      const compound = !!done.group && last?.length === 1 && OPENS.has(reserved[0] ?? "") && !HELD.has(reserved[0] ?? "");
+      if (reserved.some((w) => HELD.has(w)) || compound)
         done.held = true;
       if (done.held || bodies.includes(true))
         done.kept = true;
-      for (const w of reserved) {
+      for (const [at, w] of reserved.entries()) {
         if (OPENS.has(w))
-          bodies.push(HELD.has(w));
+          bodies.push(HELD.has(w) || compound && at === 0);
         else if (CLOSES.has(w))
           bodies.pop();
       }
-      if (loops > 0 || loop)
+      const each = done.words[0]?.quoted ? undefined : done.words[0]?.value;
+      const outer = heads.length === 0 && loops === 0;
+      let head = heads.length > 0;
+      for (const w of reserved) {
+        if (w === "while" || w === "until" || w === "for" || w === "select")
+          heads.push(w === "while" || w === "until");
+        else if (w === "do")
+          heads.pop();
+        head ||= heads.length > 0;
+      }
+      if (each === "foreach")
+        heads.push(false);
+      else if (each === "end" && heads.length > 0 && !loop)
+        heads.pop();
+      if (loops > 0 || loop || head || each === "foreach")
         done.repeated = true;
+      if (outer && !loop && reserved.some((w) => w === "while" || w === "until"))
+        done.atLeastOnce = true;
       depth = Math.max(0, depth + opened - closed);
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
       if (depth === 0 && FREES.has(op))
@@ -778,7 +820,7 @@ function word(lx) {
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
-      out.value += homedir3();
+      out.value += homedir2();
       lx.i++;
     } else {
       out.value += c;
@@ -1086,9 +1128,10 @@ async function runAll(lexed, env, visit, builtins) {
     envs.set(scope, child);
     return child;
   };
-  for (const cmd of lexed.commands)
-    if (cmd.stdin && stdinShell(cmd))
-      cmd.stdin.feedsShell = true;
+  for (const [producer, { consumer, kind }] of codeFed(lexed.commands)) {
+    producer.feedsShell = true;
+    consumer.runsStdin = kind !== "code";
+  }
   for (const cmd of lexed.commands) {
     const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins);
     if (verdict)
@@ -1099,6 +1142,11 @@ var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
   unchain(cmd, env);
+  if (cmd.opaque) {
+    env.cwdAnywhere = true;
+    env.cwdSure = undefined;
+    env.cwdUnread = true;
+  }
   const [primary, ...others] = readings(parse(cmd));
   const expanded = expandTilde(cmd, primary.name, env);
   const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
@@ -1115,6 +1163,18 @@ async function examine(cmd, env, visit, builtins) {
     if (verdict)
       return verdict;
   }
+  if (!cmd.runsStdin || stdinScript(primary))
+    return;
+  const script = await stdinOf(cmd, env);
+  return nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins));
+}
+function stdinScript({ args, name }) {
+  if (name === "." || name === "source")
+    return STDIN_PATHS.has(args[0]?.value ?? "");
+  if (!SHELLS.has(name))
+    return false;
+  const { inline, operand } = shellOperand(args, name);
+  return !operand || !inline && STDIN_PATHS.has(operand.value);
 }
 var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
 function expandTilde(cmd, name, env) {
@@ -1207,15 +1267,26 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
     verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
-  else if ((name === "source" || name === ".") && (args[0]?.procs || args[0]?.value === "/dev/stdin")) {
+  else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
     const script = await scriptOf(args[0], cmd, here);
-    verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(lexScript(known(script), env), here, visit, builtins));
+    verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
   } else if (name === "eval") {
-    verdict = await nested(cmd, env, () => run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins));
+    verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record(cmd, name, args, here);
   return verdict;
+}
+function again(lexed, cmd, parsed) {
+  if (!manyTimes(cmd, parsed))
+    return lexed;
+  const more = onceOrMore(cmd, parsed);
+  for (const c of lexed.commands) {
+    if (more && !c.repeated)
+      c.atLeastOnce = true;
+    c.repeated = true;
+  }
+  return lexed;
 }
 async function nested(cmd, env, body) {
   const chain = env.cwdChain;
@@ -1232,6 +1303,7 @@ async function nested(cmd, env, body) {
 }
 var BUILTIN = new Set(["builtin", "command"]);
 var sureToRun = (cmd, parsed) => !cmd.detached && !cmd.unsure && !cmd.repeated && (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed));
+var onceOrMore = (cmd, parsed) => !!cmd.atLeastOnce && !cmd.chained && !cmd.detached && !cmd.kept && !cmd.unsure && (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed));
 var throughBuiltin = (cmd, { first }) => {
   if (!first)
     return false;
@@ -1256,7 +1328,7 @@ var tildeSign = (name, dir, env) => (name === "cd" || name === "pushd") && env.o
 async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
-    return homedir3();
+    return homedir2();
   const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
   const sign = typed ? undefined : tildeSign(name, dir, env);
   const base = sign && (sign === "-" ? env.old?.dir : env.cwd);
@@ -1271,14 +1343,17 @@ function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
   const [dir] = dirs;
   if (!dir) {
-    return name === "cd" ? { paths: [homedir3()], unread: false } : { back: true, paths: [homedir3()], unread: true };
+    return name === "cd" ? { paths: [homedir2()], unread: false } : { back: true, paths: [homedir2()], unread: true };
   }
   if (dir.value === "-")
     return { back: true, paths: [], unread: true };
   const paths = new Set;
   const many = manyTimes(cmd, parsed);
   let unread = dirs.length > 1;
-  for (const word of dirs.length > 1 ? dirs : [dir]) {
+  for (const typed of dirs.length > 1 ? dirs : [dir]) {
+    const word = env.hold?.(typed, cmd, env) ?? typed;
+    if (word !== typed)
+      unread = true;
     for (const base of from.length > 0 ? from : [undefined]) {
       tick();
       const path = pathOf(word, { ...env, cwd: base });
@@ -1345,7 +1420,8 @@ async function chdirTo(name, cmd, parsed, env) {
     return;
   }
   env.cwdSure = undefined;
-  env.cwdMaybe = keep([...new Set([...move.back ? back : from, ...paths])], env);
+  const behind = onceOrMore(cmd, parsed) && !unread && !move.back && paths.length > 0 && (chained || (await Promise.all(paths.map(isFolder))).every(Boolean));
+  env.cwdMaybe = keep([...new Set([...move.back ? back : behind ? [] : from, ...paths])], env);
   env.cwdUnread = env.cwdUnread || unread || from.length === 0 && paths.length === 0;
 }
 var negated = (cmd) => markers(cmd.words).filter((word) => word === "!").length % 2 === 1;
@@ -1402,10 +1478,7 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    const verdict = await run(lexScript(script, env), subshell(env), visit, builtins);
-    if (verdict || !cmd.stdin || !marked(operand.value))
-      return verdict;
-    return run(lexScript(known(await stdinOf(cmd, env)), env), subshell(env), visit, builtins);
+    return run(lexScript(script, env), subshell(env), visit, builtins);
   }
   const script = await scriptOf(operand, cmd, env);
   return run(lexScript(known(script), env), subshell(env), visit, builtins);
@@ -1413,13 +1486,13 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const script = !operand || operand.value === "/dev/stdin" ? await stdinOf(cmd, env) : operand.procs ? await outputs(operand.procs, env) : unknown("a script file");
+  const script = !operand || STDIN_PATHS.has(operand.value) ? await stdinOf(cmd, env) : operand.procs ? await outputs(operand.procs, env) : unknown("a script file");
   if (deadline !== undefined && script.unknown === LARGE)
     throw new RangeError(LARGE);
   return script;
 }
 async function outputs(cmds, env) {
-  return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join2(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -1430,7 +1503,7 @@ async function record(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join3([await existing(path, env), out]) : out));
+    env.files.set(path, held(r.op === ">>" ? join2([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -1439,7 +1512,7 @@ async function record(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join3([await existing(path, env), input]) : input));
+      env.files.set(path, held(append ? join2([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -1468,7 +1541,7 @@ async function outputOf(cmd, env) {
         return unknown(LARGE);
       parts.push(part);
     }
-    return join3(parts);
+    return join2(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -1508,7 +1581,7 @@ function printf([format = "", ...args]) {
 }
 async function stdinOf(cmd, env) {
   tick();
-  return held2(await stdinText(cmd, env));
+  return held(await stdinText(cmd, env));
 }
 async function stdinText(cmd, env) {
   const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
@@ -1585,7 +1658,7 @@ function knownVariables(command, environment, cwd) {
   return known;
 }
 
-// scripts/hooks/no-mac-web-build.ts
+// scripts/hooks/docker-build.ts
 var DOCKERS = new Set(["docker", "docker-compose"]);
 var DOCKER_TAKES = new Set([
   "--config",
@@ -1644,15 +1717,18 @@ var SERVICE_TAKES = new Set([
   "-v",
   "-w"
 ]);
-var INSPECT_TIMEOUT_MS = 8000;
-var WEB_DOCKERFILE = "web/next/Dockerfile";
-var API_HERE = "The api image still builds here (docker compose build api).";
-var BOX_ROUTE = `Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. ${API_HERE}`;
-var NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or build the web image on a machine with no live dashboard running. ${API_HERE}`;
-async function hasRunnerHost(environment) {
-  const ip = environment.RUNNER_HOST || (await Bun.file(join4(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
-  return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip);
-}
+var BUILD_TAKES = new Set([
+  "--build-arg",
+  "--builder",
+  "--memory",
+  "--provenance",
+  "--sbom",
+  "--ssh",
+  "-m"
+]);
+var union = (...sets) => new Set(sets.flatMap((set) => [...set]));
+var COMPOSE_SERVICE_TAKES = union(SERVICE_TAKES, COMPOSE_TAKES);
+var COMPOSE_BUILD_TAKES = union(BUILD_TAKES, COMPOSE_TAKES);
 function positionals(args, takes) {
   const out = [];
   for (let k = 0;k < args.length; k++) {
@@ -1671,18 +1747,223 @@ function subcommand(args, takes) {
   return { rest: args.slice(k + 1), sub: args[k] };
 }
 var help = (args) => args.some((a) => a.value === "-h" || a.value === "--help");
+var COMPOSE_ROOT_TAKES = new Set([...COMPOSE_TAKES, ...DOCKER_TAKES]);
 function composeBuild(args) {
-  const { rest, sub } = subcommand(args, COMPOSE_TAKES);
-  if (!sub || help(rest))
+  const found = subcommand(args, COMPOSE_ROOT_TAKES);
+  const { rest, sub } = found.sub?.value === "alpha" ? subcommand(found.rest, new Set) : found;
+  if (!sub)
     return;
+  const own = sub.value === "run" ? beforeService(rest) : rest;
+  if (help(own))
+    return;
+  if (sub.value === "watch")
+    return { kind: "compose", rest, sub: "watch" };
   if (!["build", "create", "run", "up"].includes(sub.value))
     return;
-  if (rest.some((a) => a.value === "--no-build"))
+  if (own.some((a) => a.value === "--no-build"))
     return;
-  const words = positionals(rest, SERVICE_TAKES);
-  const services = sub.value === "run" ? words.slice(0, 1) : words;
+  return { kind: "compose", rest, sub: sub.value };
+}
+function beforeService(rest) {
+  for (let k = 0;k < rest.length; k++) {
+    const v = rest[k].value;
+    if (COMPOSE_SERVICE_TAKES.has(v))
+      k++;
+    else if (!v.startsWith("-") || v === "-")
+      return rest.slice(0, k);
+  }
+  return rest;
+}
+function dockerBuild(args, compose) {
+  if (compose)
+    return composeBuild(args);
+  const { rest, sub } = subcommand(args, DOCKER_TAKES);
+  if (!sub)
+    return;
+  if (sub.value === "compose")
+    return composeBuild(rest);
+  const image = (words) => help(words) ? undefined : { kind: "image", rest: words, sub: "build" };
+  if (sub.value === "build")
+    return image(rest);
+  if (sub.value === "bake")
+    return help(rest) ? undefined : { kind: "bake", rest, sub: "bake" };
+  if (["builder", "buildx", "image"].includes(sub.value)) {
+    const inner = subcommand(rest, new Set(["--builder"]));
+    if (inner.sub?.value === "build" || inner.sub?.value === "b")
+      return image(inner.rest);
+    if (sub.value !== "image" && ["bake", "f"].includes(inner.sub?.value ?? "") && !help(inner.rest))
+      return { kind: "bake", rest: inner.rest, sub: "bake" };
+  }
+}
+function portlessCompose(name, args) {
+  let words = args;
+  if (name === "bun") {
+    if (args[0]?.value !== "x")
+      return;
+    words = args.slice(1);
+  }
+  if (name !== "portless") {
+    if (!["bun", "bunx", "npx"].includes(name))
+      return;
+    let k = 0;
+    while (k < words.length && words[k].value.startsWith("-"))
+      k += ["--package", "-p"].includes(words[k].value) ? 2 : 1;
+    if (program(words[k]?.value ?? "").replace(/@.*$/, "") !== "portless")
+      return;
+    words = words.slice(k + 1);
+  }
+  return words[0]?.value === "compose" ? words.slice(1) : undefined;
+}
+
+// scripts/hooks/role.ts
+import { homedir as homedir3 } from "os";
+import { join as join3 } from "path";
+
+// packages/config/src/kinds.ts
+var ROSTER_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "orchestrator",
+  "planner",
+  "probe",
+  "researcher",
+  "reviewer",
+  "runner",
+  "tester",
+  "worker"
+];
+var isRosterKind = (value) => ROSTER_KINDS.includes(value);
+var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
+  builder: "lead",
+  dispatcher: "dispatcher",
+  ops: "lead",
+  optimizer: "lead",
+  orchestrator: "lead",
+  planner: "lead",
+  probe: "probe",
+  researcher: "worker",
+  reviewer: "reviewer",
+  runner: "runner",
+  tester: "tester",
+  worker: "worker"
+};
+var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
+var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
+var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
+var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
+var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
+var DEFAULT_SESSION_NAMES = {
+  aliases: {},
+  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
+};
+var NAMES = Symbol.for("playground.sessionNames");
+var held2 = globalThis;
+var setSessionNames = (next) => {
+  held2[NAMES] = next;
+};
+var getSessionNames = () => held2[NAMES] ?? DEFAULT_SESSION_NAMES;
+var namedKinds = () => {
+  const { aliases, names } = getSessionNames();
+  return new Map([
+    ...Object.entries(names).map(([kind, name]) => [name, kind]),
+    [`${names.dispatcher}-2`, "dispatcher"],
+    ...Object.entries(aliases),
+    ["optimizer", "optimizer"]
+  ]);
+};
+var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
+function roleOfName(name) {
+  const kind = placedKindOfName(name);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+var SEATLESS = new Set(["ended", "parked"]);
+
+// scripts/hooks/role.ts
+var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
+var names;
+function loadNames(environment = process.env) {
+  names ??= (async () => {
+    try {
+      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
+        env: { ...process.env, ...environment },
+        stderr: "ignore",
+        stdout: "pipe"
+      });
+      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
+`);
+      if (await read.exited === 0)
+        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
+    } catch {}
+  })();
+  return names;
+}
+async function registryName(sessionId, environment = process.env) {
+  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir3(), ".claude"), "sessions");
+  for await (const file of new Bun.Glob("*.json").scan(dir)) {
+    try {
+      const entry = await Bun.file(join3(dir, file)).json();
+      if (entry.sessionId === sessionId && typeof entry.name === "string")
+        return entry.name;
+    } catch {}
+  }
+}
+async function rosterRole(name, environment = process.env) {
+  const path = join3(dataDirOf(environment), "roster.json");
+  try {
+    const roster = await Bun.file(path).json();
+    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
+    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
+  } catch {
+    return "";
+  }
+}
+async function sessionRole(environment, sessionId) {
+  if (environment.PLAYGROUND_ROLE)
+    return environment.PLAYGROUND_ROLE;
+  if (typeof sessionId !== "string")
+    return "";
+  try {
+    const name = await registryName(sessionId, environment) ?? "";
+    const role = name && await rosterRole(name, environment);
+    if (role)
+      return role;
+    await loadNames(environment);
+    return roleOfName(name);
+  } catch {
+    return "";
+  }
+}
+async function fromFactory(raw, environment = process.env) {
+  return await sessionRole(environment, sessionOf(raw)) !== "";
+}
+function sessionOf(raw) {
+  try {
+    return JSON.parse(raw).session_id;
+  } catch {
+    return;
+  }
+}
+
+// scripts/hooks/no-mac-web-build.ts
+var INSPECT_TIMEOUT_MS = 8000;
+var WEB_DOCKERFILE = "web/next/Dockerfile";
+var API_HERE = "The api image still builds here (docker compose build api).";
+var BOX_ROUTE = `Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. ${API_HERE}`;
+var NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or build the web image on a machine with no live dashboard running. ${API_HERE}`;
+async function hasRunnerHost(environment) {
+  const ip = environment.RUNNER_HOST || (await Bun.file(join4(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
+  return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip);
+}
+function composeBuild2({ rest, sub }) {
+  const words = positionals(rest, COMPOSE_SERVICE_TAKES);
+  const services = sub === "run" ? words.slice(0, 1) : words;
   if (services.length === 0 || services.some((s) => s.value === "web" || marked(s.value)))
-    return `docker compose ${sub.value} of the web image`;
+    return `docker compose ${sub} of the web image`;
 }
 function dockerfile(args) {
   for (let k = 0;k < args.length; k++) {
@@ -1695,8 +1976,6 @@ function dockerfile(args) {
   }
 }
 function imageBuild(args) {
-  if (help(args))
-    return;
   const file = dockerfile(args);
   if (!file)
     return;
@@ -1705,20 +1984,11 @@ function imageBuild(args) {
     return `docker build -f ${WEB_DOCKERFILE}`;
 }
 function webBuild(args, compose) {
-  if (compose)
-    return composeBuild(args);
-  const { rest, sub } = subcommand(args, DOCKER_TAKES);
-  if (!sub)
-    return;
-  if (sub.value === "compose")
-    return composeBuild(rest);
-  if (sub.value === "build")
-    return imageBuild(rest);
-  if (["builder", "buildx", "image"].includes(sub.value)) {
-    const inner = subcommand(rest, new Set(["--builder"]));
-    if (inner.sub?.value === "build" || inner.sub?.value === "b")
-      return imageBuild(inner.rest);
-  }
+  const build = dockerBuild(args, compose);
+  if (build?.kind === "compose")
+    return composeBuild2(build);
+  if (build?.kind === "image")
+    return imageBuild(build.rest);
 }
 async function dashboardRuns(what, environment) {
   const route = async () => await hasRunnerHost(environment) ? BOX_ROUTE : NO_HOST_ROUTE;
@@ -1764,6 +2034,9 @@ var visit = async (_cmd, { args, first, name }, env) => {
   };
   if (DOCKERS.has(name))
     return judge(args, name === "docker-compose");
+  const compose = portlessCompose(name, args);
+  if (compose)
+    return judge(compose, true);
   if (first && (first.unknown || marked(first.value)) && webBuild(args, false))
     return judge(args, false);
   if (PRINTERS.has(name) || name === "ssh")

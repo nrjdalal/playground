@@ -420,7 +420,7 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
   return records
 }
 
-// Pure: every server's workspaces as cmux's list-workspaces gives them, each id its ref too.
+// Pure: every server's workspaces in the board's workspace list, each id its ref too.
 export const herdrWorkspaces = (reads: ServerRead[]): Json[] =>
   reads.flatMap((read) =>
     read.workspaces.map((w) => {
@@ -432,7 +432,7 @@ export const herdrWorkspaces = (reads: ServerRead[]): Json[] =>
 // What a herdr session's prompt is, as its own hooks' stuck record names it: the subagent that asked (agentId), the kind (reason: permission, question, plan, elicitation, login) and the tool a permission is for. herdrFeed() in workers.ts builds its card from it.
 export type HerdrWait = { agentId: string | null; reason: string | null; tool: string | null }
 
-// Pure: a herdr session's lifecycle, its usage limit and, while it waits on a prompt its hooks named, that prompt (wait). herdr's own state comes first, since C5's hooks report every state to it (a probe); the hooks' own file (C5) speaks where herdr has none (unknown), and for what herdr's state cannot say: a usage limit and its reset. A stuck record the transcript has moved past (an Escape on a prompt fires no hook, measured) also ends the blocked state the same hook reported to herdr, which herdr keeps until the next prompt or stop, but only while it is the prompt herdr shows: written no earlier than the blocked state this process saw begin (`seenAt`), less the time a board takes to see it, since a session herdr restored runs without its hooks and its file keeps an older record; with no start seen (the dashboard started, or its reads paused, after the prompt), any stuck record is taken as that prompt, so a stale one can read a restored session's new prompt as idle until its next.
+// Pure: a herdr session's lifecycle, its usage limit and, while it waits on a prompt its hooks named, that prompt (wait). herdr's own state comes first, since C5's hooks report every state to it (a probe); the hooks' own file (C5) speaks where herdr has none (unknown), and for what herdr's state cannot say: a usage limit and its reset. A stuck record the transcript has moved past (an Escape on a prompt fires no hook, measured) also ends the blocked state the same hook reported to herdr, which herdr keeps until the next prompt or stop, but only while it is the prompt herdr shows: written no earlier than the blocked state this process saw begin (`seenAt`), less the time a board takes to see it, since a session resumed without its settings runs without its hooks and its file keeps an older record; with no start seen (the dashboard started, or its reads paused, after the prompt), any stuck record is taken as that prompt, so a stale one can read a restored session's new prompt as idle until its next.
 export function herdrState(
   status: string,
   file: SessionState | null,
@@ -644,7 +644,7 @@ export function answerKeys(screen: ScreenPrompt, ask: Ask): Keys {
 // The gap between two keys, so Claude Code reads each as its own press rather than one chunk of input.
 const KEY_GAP_MS = 40
 
-// Answers a prompt with the keys answerKeys() gave, one request each (`pane.send_keys`, words by `pane.send_text`), in order. It types only for answerHerdr() in feed.ts, the owner's own Submit on the prompt's card (cmux.test.ts's "herdr's pane writes").
+// Answers a prompt with the keys answerKeys() gave, one request each (`pane.send_keys`, words by `pane.send_text`), in order. It types only for answerHerdr() in feed.ts, the owner's own Submit on the prompt's card (herdr.test.ts's "herdr's pane writes").
 export async function typeKeys(surface: string, steps: KeyStep[]): Promise<void> {
   const { pane, server } = paneAt(surface)
   for (const [i, step] of steps.entries()) {

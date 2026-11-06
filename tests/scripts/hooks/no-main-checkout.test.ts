@@ -291,10 +291,100 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
     },
   )
 
+  const interpreters: [string, string][] = [
+    ["node", "| node"],
+    ["python3", "| python3"],
+    ["perl", "| perl"],
+    ["ruby", "| ruby"],
+    ["osascript", "| osascript"],
+    ["bun -", "| bun -"],
+    ["python3 -", "| python3 -"],
+    ["node /dev/stdin", "| node /dev/stdin"],
+    ["deno run -", "| deno run -"],
+    ["nice python3 -", "| nice python3 -"],
+    ["xargs node", "| xargs node"],
+    ["xargs python3", "| xargs python3"],
+    ["xargs perl", "| xargs perl"],
+    ["xargs ruby", "| xargs ruby"],
+    ["xargs osascript", "| xargs osascript"],
+    ["xargs bun -", "| xargs bun -"],
+    ["xargs running node -e on each line", "| xargs -I{} node -e {}"],
+    ["xargs perl -e", "| xargs perl -e"],
+    ["a while loop handing each line to python3", "| while read l; do python3; done"],
+  ]
+
+  test.each([
+    [". /dev/fd/0", "| . /dev/fd/0"],
+    ["source /dev/fd/0", "| source /dev/fd/0"],
+    [". /proc/self/fd/0", "| . /proc/self/fd/0"],
+    [". -", "| . -"],
+    ["eval of a substitution reading stdin", '| eval "$(cat)"'],
+    ["sh -c of a quoted substitution", "| sh -c '$(cat)'"],
+    ["sh -", "| sh -"],
+    ["sh /dev/stdin", "| sh /dev/stdin"],
+    ["bash of a process substitution", "| bash <(cat)"],
+    ["a while loop that evals each line", "| while read l; do eval $l; done"],
+    ["sh -c sourcing stdin", "| sh -c '. /dev/stdin'"],
+    ["sh -c piping stdin into a shell", "| sh -c 'cat | sh'"],
+    ["xargs running $SHELL", "| xargs -I{} $SHELL -c {}"],
+    ["$SHELL -", "| $SHELL -"],
+    ["env -i bash -s", "| env -i bash -s"],
+    ["command eval", '| command eval "$(cat)"'],
+    ["nice sh /dev/fd/0", "| nice sh /dev/fd/0"],
+    ["a brace group that evals a line", '| { read a; eval "$a"; }'],
+    ["an until loop handing each line to sh -c", '| until ! read l; do sh -c "$l"; done'],
+    ...interpreters,
+  ])(
+    "a script's output piped into %s, a command that can run its input as code, is judged as a pipe into a shell",
+    async (_name, tail) => {
+      expect(await bash(`bun run ask list ${tail}`)).toContain("no-main-checkout hook refuses")
+      expect(await bash(`echo 'git commit -m x' ${tail}`)).toContain(
+        "no-main-checkout hook refuses",
+      )
+    },
+  )
+
+  // the hook reads no other language, so even a harmless input it reads is refused when it feeds an interpreter, while a shell fed the same text runs
+  test.each(interpreters)(
+    "a harmless input the hook reads, piped into %s, is refused from the main checkout",
+    async (_name, tail) => {
+      expect(await bash(`echo x ${tail}`)).toContain("no-main-checkout hook refuses")
+    },
+  )
+
+  test("a harmless input the hook reads, piped into sh, runs from the main checkout", async () => {
+    expect(await bash("echo x | sh")).toBeUndefined()
+  })
+
   test.each([
     ["xargs sh -c of a script that only reads", "echo 'git status' | xargs sh -c"],
     ["xargs handing words to a script it names", "echo x | xargs sh -c 'echo $0'"],
     ["a while loop piped into a reader", "echo x | while read l; do echo $l; done | cat"],
+    ["a script's output piped into a reader", "bun run ask list | cat"],
+    ["a script's output handed to grep by xargs", "bun run ask list | xargs grep x"],
+    [
+      "a script's output read by a loop that runs no code",
+      "bun run ask list | while read l; do echo $l; done",
+    ],
+    ["an eval of a script that only reads, fed by a pipe", "echo x | eval 'git status'"],
+    ["a pipe into sh of a script that only reads", "echo 'git status' | sh -"],
+    ["a script's output piped into a node script", "bun run ask list | node x.js"],
+    ["a script's output piped into a python3 module", "bun run ask list | python3 -m json.tool"],
+    ["a script's output piped into an attached python3 module", "echo '{}' | python3 -mjson.tool"],
+    [
+      "a script's output piped into a node script past a preload",
+      "bun run ask list | node -r fs x.js",
+    ],
+    ["a script's output piped into a script bun runs", "bun run ask list | bun run x.ts"],
+    [
+      "a script's output piped into a versioned python3's script",
+      "bun run ask list | python3.12 x.py",
+    ],
+    [
+      "a script's output handed by xargs to a python3 script",
+      "bun run ask list | xargs python3 x.py",
+    ],
+    ["a script's output piped into jq", "bun run ask list | jq ."],
   ])("from the main checkout, %s runs", async (_name, command) => {
     expect(await bash(command)).toBeUndefined()
   })
@@ -533,6 +623,39 @@ describe("what keeps the main checkout up to date, or only reads it, runs", () =
     ["a cd command runs", `command cd ${MAIN}; git commit -m x`],
   ])("from a worktree, %s is refused", async (_name, command) => {
     expect(await bash(command, WORKTREE)).toContain("no-main-checkout hook refuses")
+  })
+
+  // #623: a climb the shell runs at most once reaches one folder up, the worktrees folder, so each stays running
+  test.each([
+    ["a function whose cd climbs, called once", "f() { cd ..; }; f; git commit -m x"],
+    ["an if condition that climbs", "if cd ..; then git commit -m x; fi"],
+    ["a single eval of a climb", "eval 'cd ..'; git commit -m x"],
+    ["one climb through a variable", "U=..; cd $U; git commit -m x"],
+    ["a function called once beside a file of its name", "f() { cd ..; }; f; echo x > f"],
+    ["a function called once beside a variable argument", 'f() { cd ..; }; f; git commit -m "$m"'],
+    ["an if condition with a brace argument", "if grep -q { f; then :; fi; git commit -m x"],
+    ["a for loop with no cd", "for i in 1 2 3; do echo $i; done; git commit -m x"],
+  ])("from a worktree, %s runs", async (_name, command) => {
+    expect(await bash(command, WORKTREE)).toBeUndefined()
+  })
+
+  // #623: a while's or an until's condition runs at least once, so its cd leaves the main checkout behind
+  test.each([
+    [
+      "a while condition's cd into a worktree",
+      `while cd ${WORKTREE} && false; do :; done; git commit -m x`,
+    ],
+    [
+      "an until condition's cd into a worktree",
+      `until cd ${WORKTREE}; do :; done; git commit -m x`,
+    ],
+    ["a while condition's climb out of it", "while cd .. && false; do :; done; git commit -m x"],
+    [
+      "a while condition's eval of a cd into a worktree",
+      `while eval 'cd ${WORKTREE}' && false; do :; done; git commit -m x`,
+    ],
+  ])("from the main checkout, %s runs", async (_name, command) => {
+    expect(await bash(command)).toBeUndefined()
   })
 
   test("from a worktree, bun's --cwd into another worktree runs", async () => {

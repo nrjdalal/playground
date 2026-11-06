@@ -26,7 +26,7 @@ const steps: [string, string[]][] = [
   ["container volumes", py("test_docker_rm_volumes.py")],
   ["kill by name", py("test_kill_by_name.py")],
   ["hooks on main", ["bun", "packages/scripts/src/hooks-on-main.ts"]],
-  ["ops cmux", py("test_ops_cmux.py")],
+  ["ops jobs", py("test_ops_jobs.py")],
   ["ops merge train", py("test_ops_merge_train.py")],
   ["em-dash check", ["bash", "scripts/check-em-dashes.sh"]],
   ["one sentence per line", ["bun", "packages/scripts/src/docs-wrap/cli.ts", "--check"]],

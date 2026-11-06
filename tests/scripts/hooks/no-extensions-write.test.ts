@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSyn
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { GUARD_SETTING_KEYS } from "../../../packages/settings/src/guard-keys"
 import { check, GUARD_KEYS, guarded } from "../../../scripts/hooks/no-extensions-write"
 import { overBaseline, stepsOf } from "./pace"
 
@@ -523,6 +524,65 @@ describe("a write by ~ is judged against the home the shell expands it to", () =
     })
     expect(await check(raw, real)).toBeUndefined()
   })
+
+  // A folder below the home that is neither the root nor above it, so canary's whole-program-glob fallback resolves there and runs, which is what makes the extraction the only thing that can refuse these rows.
+  const worktree = join(homedir(), "worktree")
+
+  // PG-840: the command string a shell-running call is given runs through a shell, which expands its leading ~ to the home, so a data-folder glob in it is judged against the home from any folder, a worktree included; canary read only the program's own call parens as a glob in the worktree, so it ran this from a worktree.
+  test.each([
+    [
+      "a data-folder glob removed through execSync",
+      `node -e 'require("child_process").execSync("rmdir ~/.play*")'`,
+    ],
+    [
+      "a data-folder glob removed through execSync joined from two strings",
+      `node -e 'require("child_process").execSync("rmdir " + "~/.play*")'`,
+    ],
+    [
+      "a data-folder glob removed through spawnSync with shell true",
+      `node -e 'require("child_process").spawnSync("rmdir ~/.play*", { shell: true })'`,
+    ],
+    [
+      "a data-folder glob removed through execSync beside an unrelated shell variable",
+      `node -e 'require("child_process").execSync("rmdir ~/.play* $1")'`,
+    ],
+    [
+      "a data-folder glob removed through execSync before an echo of a variable",
+      `node -e 'require("child_process").execSync("rmdir ~/.play*; echo $HOME")'`,
+    ],
+  ])("%s is refused from a worktree", async (_, command) => {
+    const reason = await check(
+      JSON.stringify({ cwd: worktree, tool_input: { command }, tool_name: "Bash" }),
+      real,
+    )
+    expect(reason).toContain("no-extensions-write hook refuses")
+  })
+
+  // PG-840 residual, named in the hook's README as the guard's known limit: a command string the hook cannot read as literals (a variable, a template with a substitution), an argument list no shell runs its ~, and a regex's .exec whose string no shell runs, each stays as canary judged them, so none is newly refused from a worktree. The README names the rest of the residual, whose working forms are kept out of this file.
+  test.each([
+    [
+      "a removal built from a variable through execSync",
+      `node -e 'const d=process.argv[1]; require("child_process").execSync("rmdir " + d)' ~/.play`,
+    ],
+    [
+      "an argument list no shell runs, its ~ left literal",
+      `bun -e 'Bun.spawnSync(["rmdir", "~/.play*"])'`,
+    ],
+    [
+      "a benign home path removed through execSync",
+      `node -e 'require("child_process").execSync("rmdir ~/.no-such-benign-dir")'`,
+    ],
+    [
+      "a regex exec whose string no shell runs",
+      `node -e 'const re = /a b/; re.exec("rmdir ~/.play*")'`,
+    ],
+  ])("%s runs from a worktree", async (_, command) => {
+    const reason = await check(
+      JSON.stringify({ cwd: worktree, tool_input: { command }, tool_name: "Bash" }),
+      real,
+    )
+    expect(reason).toBeUndefined()
+  })
 })
 
 // A quoted argument with a space is read as a command line unless every command on the line is on a closed list of readers (awk with a program that runs nothing, cat, grep, head, tail, wc, sort, uniq, cut), with no redirect that writes a file; an awk program that runs a command has its literals read wherever it stands, and sed keeps canary's reading.
@@ -587,6 +647,45 @@ describe("a quoted argument is read as a command line only where a program runs 
     ["cut at a quoted brace", "cut -d'{' -f1 /dev/null"],
     ["sort keyed at a quoted bracket", "sort -t'[' -k2 /dev/null"],
     ["awk matching a regex that starts at / and holds a glob", "awk '/^a*b/' /dev/null"],
+    ["sed printing a bold list item's lines", "sed -n '/^- \\*\\*/p' ~/.playground/x.md"],
+    [
+      "sed printing a bold list item's text",
+      "sed -n 's/^- \\*\\*\\([^*]*\\)\\*\\*.*/\\1/p' ~/.playground/x.md",
+    ],
+    [
+      "sed printing a range between two regex addresses",
+      "sed -n '/## latest (proposal, round 2/,/^## Notes/p' notes.md",
+    ],
+    [
+      "awk printing a range between two regexes by a flag",
+      "awk '/^## latest \\(proposal, round 2/{f=1} /^## Notes/{f=0} f' notes.md",
+    ],
+    ["sed printing from a regex to the last line", "sed -n '/[Nn]it/,$p' notes.md"],
+    ["sed printing a regex and the six lines after it", "sed -n '/[Rr]eviewer/,+6p' notes.md"],
+    ["sed printing a function's lines", "sed -n '/^f() {/,/^}/p' notes.md"],
+    [
+      "awk printing a function's range from git show's output",
+      "git show c668f859:scripts/ops/run-slot.sh | awk '/^memstat\\(\\)/,/^}/' | head -30",
+    ],
+    [
+      "sed printing a function's range from git show's output",
+      "git show c668f859:scripts/ops/run-slot.sh | sed -n '/^memstat()/,/^}/p'",
+    ],
+    [
+      "awk after a sed that prints a line naming a shell",
+      "sed -n '/sh -c/p' /dev/null; awk '$3 ~ /runner/' /dev/null",
+    ],
+    [
+      "perl printing each match of a /g regex",
+      `perl -ne 'print "$1\\n" while /#(\\d+)/g' notes.md`,
+    ],
+    ["perl printing every match with -l", "perl -lne 'print for /PG-\\d+/g' notes.md"],
+    ["perl replacing a match with its variable", "perl -pe 's/(a)/<$1>/' notes.md"],
+    [
+      "sed printing the issue's line ranges after a grep",
+      `grep -n -E "^ {0,2}(if |elif |else$|fi$)" scripts/spawn.sh | sed -n '/^13[2-9][0-9]:\\|^1[45][0-9][0-9]:/p'`,
+    ],
+    ["sed replacing a tag by a bracket class", "sed 's/<pasted_content[^>]*>/[P]/g' notes.md"],
     ["git -c with a literal pager", "git -c core.pager=less log"],
     ["rm of a glob in a build folder", "rm -rf build/*"],
     ["rm of a held folder's glob", "X=build; rm -rf $X/*"],
@@ -891,8 +990,8 @@ describe("a quoted argument is read as a command line only where a program runs 
       "exec uniq watch 'rm -rf ~/.playground/extensions/.no-such-folder'",
     ],
     [
-      "awk after a sed, which keeps canary's reading",
-      "sed -n '/sh -c/p' /dev/null; awk '$3 ~ /runner/' /dev/null",
+      "awk after a printf, which keeps canary's reading",
+      "printf '%s\\n' '/sh -c/p'; awk '$3 ~ /runner/' /dev/null",
     ],
     [
       "sed -i '' inserting a removal into a git hook",
@@ -1534,14 +1633,6 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
       "ext put past a word it cannot read",
       'playground ext put "$(printf -- --dry-run)" login list x /tmp/x.json --reason r',
     ],
-    [
-      "settings set past --yes, which settings takes as an option",
-      `playground settings set --yes ui.theme owner.names '["x"]' --reason r`,
-    ],
-    [
-      "settings reset past --yes",
-      "playground settings reset --yes ui.theme owner.names --reason r",
-    ],
     ["settings set of live.branch", "playground settings set live.branch x --reason r"],
     ["settings set of paths.codeRoot", "playground settings set paths.codeRoot / --reason r"],
     ["settings set of sessions.names", "playground settings set sessions.names '{}' --reason r"],
@@ -1561,11 +1652,6 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
     ["ext order", "playground ext order acme login"],
     ["ext remove with a --dry-run it ignores", "playground ext remove acme --dry-run"],
     ["settings set of ext.links", "playground settings set ext.links '{}' --reason x"],
-    ["settings set of owner.names", "playground settings set owner.names '[]' --reason x"],
-    [
-      "settings set of factory.archiveRepo",
-      "playground settings set factory.archiveRepo a/b --reason x",
-    ],
     [
       "settings set of factory.publicRepo",
       "playground settings set factory.publicRepo a/b --reason x",
@@ -1593,6 +1679,37 @@ describe("a playground CLI call that changes what a guard reads is refused, nami
     const reason = await bash(command)
     expect(reason).toContain("no-extensions-write hook refuses")
     expect(reason).toContain("!")
+  })
+
+  test.each([
+    ["settings set of owner.names", "playground settings set owner.names '[]' --reason x"],
+    [
+      "settings set of factory.archiveRepo",
+      "playground settings set factory.archiveRepo a/b --reason x",
+    ],
+    [
+      "settings set past --yes, which settings takes as an option",
+      `playground settings set --yes ui.theme owner.names '["x"]' --reason r`,
+    ],
+    [
+      "settings reset past --yes",
+      "playground settings reset --yes ui.theme owner.names --reason r",
+    ],
+  ])(
+    "%s at your login's scope routes the owner to Privacy on the Settings page",
+    async (_, command) => {
+      const reason = await bash(command)
+      expect(reason).toContain("no-extensions-write hook refuses")
+      expect(reason).toContain(
+        "tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page.",
+      )
+      expect(reason).not.toContain("terminal window")
+    },
+  )
+
+  test("a Privacy key at an org's scope, which Privacy does not save, keeps the ! route", async () => {
+    const reason = await bash("playground settings set --scope acme owner.names '[]' --reason x")
+    expect(reason).toContain("in the dispatcher's terminal window")
   })
 
   test.each([
@@ -1790,6 +1907,25 @@ describe("the gated keys are every key the guards read", () => {
     expect(await read("scripts/spawn.sh")).toContain("setting_text paths.codeRoot")
     expect(GUARD_KEYS.has("paths.codeRoot")).toBe(true)
   })
+})
+
+// PG-1090: the Inbox's guard decision takes the keys GUARD_SETTING_KEYS names, so the two lists are one, and a session's own write of each stays refused.
+describe("a guard decision's keys are the keys the hook gates (PG-1090)", () => {
+  test("GUARD_KEYS holds GUARD_SETTING_KEYS, no more and no fewer", () => {
+    expect([...GUARD_KEYS].sort()).toEqual([...GUARD_SETTING_KEYS].sort())
+  })
+
+  test.each([...GUARD_SETTING_KEYS])(
+    "a session's own settings set and reset of %s are refused",
+    async (key) => {
+      expect(
+        await bash(`playground settings set ${key} '{}' --scope acme-test --reason r`),
+      ).toContain("no-extensions-write hook refuses")
+      expect(await bash(`playground settings reset ${key} --scope acme-test --reason r`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+    },
+  )
 })
 
 describe("a refusal for a value the hook does not hold names it in readable text", () => {

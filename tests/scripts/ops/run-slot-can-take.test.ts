@@ -144,3 +144,25 @@ describe("every read subcommand answers as before when the runs log holds three 
       expect(short[2]).toBe(true)
     })
 })
+
+// LANES carries one slot count's lanes verdict inside capacity(), so a value the caller's env holds must steer no check outside a count
+describe("a LANES value in the caller's env", () => {
+  test("LANES=open leaves slot 2 shut on a machine whose gauges shut the lanes", async () => {
+    expect(
+      await machine({ idle: 30 }).canTake("run-slot-2", "worker-probe", { LANES: "open" }),
+    ).toBe(false)
+  })
+
+  test("LANES=shut leaves slot 2 open on a machine whose gauges open the lanes", async () => {
+    expect(await machine().canTake("run-slot-2", "worker-probe", { LANES: "shut" })).toBe(true)
+  })
+
+  test("slots counts one lane under LANES=open on a machine whose gauges shut the lanes", () => {
+    const m = machine({ idle: 30 })
+    const run = Bun.spawnSync(["bash", SCRIPT, "slots"], {
+      cwd: m.root,
+      env: m.env({ LANES: "open" }),
+    })
+    expect([run.exitCode, run.stdout.toString()]).toEqual([0, "1\n"])
+  })
+})

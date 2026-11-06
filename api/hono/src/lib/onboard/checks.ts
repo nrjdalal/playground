@@ -22,17 +22,7 @@ export type Check = {
   status: "MISSING" | "ok" | "optional" | "waiting"
 }
 
-type Tool =
-  | "bun"
-  | "claude"
-  | "cmux"
-  | "docker"
-  | "gh"
-  | "git"
-  | "herdr"
-  | "node"
-  | "python3"
-  | "uv"
+type Tool = "bun" | "claude" | "docker" | "gh" | "git" | "herdr" | "node" | "python3" | "uv"
 
 type Action = NonNullable<Check["action"]>
 
@@ -45,13 +35,6 @@ const TOOLS: [Tool, boolean, string, Action | null, string][] = [
     "every session",
     { id: "claude", label: "Install Claude Code" },
     "Claude Code is not installed.",
-  ],
-  [
-    "cmux",
-    false,
-    "the terminal sessions run in",
-    null,
-    "cmux is not installed. Sessions still run without it.",
   ],
   [
     "docker",
@@ -148,8 +131,6 @@ const toolCheck = async (
   const bin = tool === "herdr" && reader.exists(pinnedHerdr(env)) ? pinnedHerdr(env) : tool
   if (bin === tool && !reader.has(tool)) return missing("not found", install, note)
   const ok = (detail: string) => okRow(tool, need, detail)
-  // cmux runs only through the dashboard's cmux.ts, so its row reads PATH alone.
-  if (tool === "cmux") return ok("installed")
   if (tool === "docker") {
     const info = await reader.run([...COMMANDS.dockerInfo()])
     if (info.code !== 0) {

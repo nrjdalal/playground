@@ -212,7 +212,7 @@ if current in ACCOUNTS:
 if due:
     why = f"{current} 5-hour {c.get('five')}%, week {c.get('week')}%"
     if target and not open_ask and state.get("due") != target:
-        # dispatcher, 14 Oct (#i338): the switch runs through cmux, the factory's and never an ask to the owner; this only says it is due
+        # dispatcher, 14 Oct (#i338): the switch runs through the factory's terminal and never an ask to the owner; this only says it is due
         state["due"] = target
         kind = "ending" if target in ENDS else "renewing"
         print(f"login flip: switch due to {target} ({kind}, week {(seen.get(target) or {}).get('week')}%): {why}; the factory switches (no ask to the owner); " + ("spawn.sh --account is live on main" if account_live() else "spawn.sh --account is NOT on main yet, so the switch cannot start"))

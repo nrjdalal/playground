@@ -127,9 +127,13 @@ describe("set", () => {
       expect(r.err).toContain(fix)
       expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
     }
-    const kept = await run(config, ["set", "worker-greed", "status=parked"])
+    const kept = await run(config, ["set", "worker-greed", "status=parked", "hold=#12"])
     expect(kept.code).toBe(0)
-    expect(agentOf(kept.roster, "worker-greed")).toEqual({ ...WITH_PR, status: "parked" })
+    expect(agentOf(kept.roster, "worker-greed")).toEqual({
+      ...WITH_PR,
+      hold: "#12",
+      status: "parked",
+    })
   })
 
   test("a kind outside the list is refused, and the roster is left as it was", async () => {
@@ -424,7 +428,9 @@ describe("status", () => {
     const { finished, live } = (await Bun.file(statuses).json()) as Record<string, string[]>
     const config = configWith([WITH_PR])
     for (const word of [...live!, ...finished!]) {
-      const r = await run(config, ["set", "worker-greed", `status=${word}`])
+      // a park names what it waits on
+      const hold = word === "parked" ? ["hold=#12"] : []
+      const r = await run(config, ["set", "worker-greed", `status=${word}`, ...hold])
       expect([r.code, agentOf(r.roster, "worker-greed")?.status]).toEqual([0, word])
     }
   })
@@ -500,6 +506,151 @@ describe("eta", () => {
     const cleared = await run(config, ["report", "worker-greed", "merged abc1234", "eta="])
     expect(cleared.code).toBe(0)
     expect(agentOf(cleared.roster, "worker-greed")).not.toHaveProperty("eta")
+  })
+})
+
+// owner= marks the owner's own ask a session works on, which run-slot.sh ranks after the merge gates; it names the ask, never a person
+describe("owner", () => {
+  test.each([
+    ["a word", "me"],
+    ["a session name", "dispatcher"],
+    ["a bare number", "12"],
+    ["a Linear URL", "https://linear.app/x/issue/AB-1"],
+  ])(
+    "%s is refused by set, report and assign, naming the forms, and writes nothing",
+    async (_case, value) => {
+      for (const args of [
+        ["set", "worker-greed", `owner=${value}`],
+        ["report", "worker-greed", "PR opened", `owner=${value}`],
+        ["assign", "worker-greed", "Export fix", "Fix the export", `owner=${value}`],
+      ]) {
+        const r = await run(configWith([WITH_PR]), args)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain("owner takes the owner's ask it serves")
+        expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
+      }
+    },
+  )
+
+  test("an Inbox item, an issue or PR, or a decision is stored, and an empty owner= clears it", async () => {
+    const config = configWith([WITH_PR])
+    for (const value of [
+      "#i949",
+      "PG-1057",
+      "#1057",
+      "https://github.com/acme/app/issues/3",
+      "https://github.com/acme/app/pull/4",
+      "d-0935",
+    ]) {
+      const r = await run(config, ["set", "worker-greed", `owner=${value}`])
+      expect(r.code).toBe(0)
+      expect(agentOf(r.roster, "worker-greed")?.owner).toBe(value)
+    }
+    const cleared = await run(config, ["set", "worker-greed", "owner="])
+    expect(cleared.code).toBe(0)
+    expect(agentOf(cleared.roster, "worker-greed")).not.toHaveProperty("owner")
+  })
+
+  test("assign clears it with the old task's pr", async () => {
+    const r = await run(configWith([{ ...WITH_PR, owner: "#i949" }]), [
+      "assign",
+      "worker-greed",
+      "New chore",
+      "Do the new chore",
+    ])
+    expect(r.code).toBe(0)
+    expect(agentOf(r.roster, "worker-greed")).not.toHaveProperty("owner")
+  })
+})
+
+// a parked row names what it waits on, so the sweep tells its lead once that closes
+describe("hold", () => {
+  test("a park with no hold is refused by set, report and assign, naming the forms, and writes nothing", async () => {
+    for (const args of [
+      ["set", "worker-greed", "status=parked"],
+      ["report", "worker-greed", "Parked on the load hold", "status=parked"],
+      ["assign", "worker-greed", "Export fix", "Fix the export", "status=parked"],
+    ]) {
+      const r = await run(configWith([WITH_PR]), args)
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("add hold=#<n>, hold=#i<n> or hold=d-<n>")
+      expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
+    }
+  })
+
+  test("a park on an issue or PR, an Inbox item or a decision is stored", async () => {
+    for (const hold of ["#12", "#i5", "d-215"]) {
+      const r = await run(configWith([WITH_PR]), [
+        "set",
+        "worker-greed",
+        "status=parked",
+        `hold=${hold}`,
+      ])
+      expect(r.code).toBe(0)
+      expect(agentOf(r.roster, "worker-greed")).toMatchObject({ hold, status: "parked" })
+    }
+  })
+
+  test("any other hold is refused, naming the forms, and writes nothing", async () => {
+    const r = await run(configWith([WITH_PR]), ["set", "worker-greed", "status=parked", "hold=abc"])
+    expect(r.code).toBe(2)
+    expect(r.err).toContain(
+      "hold takes #<n> (an issue or PR), #i<n> (an Inbox item) or d-<n> (a decision), not abc",
+    )
+    expect(r.roster).toMatchObject({ agents: [WITH_PR], updatedAt: "2026-10-01T00:00:00Z" })
+  })
+
+  test("an empty hold= on a parked row is refused, and on any other row clears it", async () => {
+    const parked = { ...WITH_PR, hold: "#12", status: "parked" }
+    const refused = await run(configWith([parked]), ["set", "worker-greed", "hold="])
+    expect(refused.code).toBe(2)
+    expect(refused.err).toContain("add hold=#<n>, hold=#i<n> or hold=d-<n>")
+    const cleared = await run(configWith([{ ...WITH_PR, hold: "#12" }]), [
+      "set",
+      "worker-greed",
+      "hold=",
+    ])
+    expect(cleared.code).toBe(0)
+    expect(agentOf(cleared.roster, "worker-greed")).not.toHaveProperty("hold")
+  })
+
+  test("a row parked with no hold before this check still takes a write that leaves its park alone", async () => {
+    const r = await run(configWith([{ ...WITH_PR, status: "parked" }]), [
+      "set",
+      "worker-greed",
+      "eta=",
+    ])
+    expect(r.code).toBe(0)
+  })
+
+  test("leaving the park drops its hold, so a later park names a fresh one", async () => {
+    const r = await run(configWith([{ ...WITH_PR, hold: "#12", status: "parked" }]), [
+      "set",
+      "worker-greed",
+      "status=working",
+    ])
+    expect(r.code).toBe(0)
+    expect(agentOf(r.roster, "worker-greed")).not.toHaveProperty("hold")
+    const again = await run(configWith([{ ...WITH_PR, hold: "#12", status: "parked" }]), [
+      "assign",
+      "worker-greed",
+      "Next chore",
+      "Do the next chore",
+    ])
+    expect(again.code).toBe(0)
+    expect(agentOf(again.roster, "worker-greed")).not.toHaveProperty("hold")
+  })
+
+  test("a hold on a row the call leaves not parked is refused naming status=parked, and stores nothing (#1102)", async () => {
+    const working = await run(configWith([WITH_PR]), ["set", "worker-greed", "hold=#5"])
+    expect(working.code).toBe(2)
+    expect(working.err).toContain("add status=parked to the same call")
+    expect(agentOf(working.roster, "worker-greed")).toEqual(WITH_PR)
+    const config = configWith([{ ...WITH_PR, hold: "#12", status: "parked" }])
+    const left = await run(config, ["set", "worker-greed", "status=working", "hold=#5"])
+    expect(left.code).toBe(2)
+    expect(left.err).toContain("add status=parked to the same call")
+    expect(agentOf(left.roster, "worker-greed")).toMatchObject({ hold: "#12", status: "parked" })
   })
 })
 

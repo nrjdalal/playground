@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Spawns a factory session in herdr, the one way a factory session starts one
 # (the no-raw-spawn hook refuses the rest). A capacity gate refuses, failing
-# closed, unless four gates pass in order (a move runs the usage gate alone),
+# closed, unless four gates pass in order,
 # the first failure naming its gate and its reading, every pass and refusal
 # logged as one JSON line in ~/.playground/ops/capacity.jsonl, where the
 # load gate reads the starts of the last 5 minutes back, with each slots.peers folder's own log's. No count of live sessions holds a spawn, so
@@ -13,15 +13,15 @@ set -euo pipefail
 #      half its item's load units (small 1, medium 2, big 3: --size, else small
 #      for a reviewer or tester, else what `ops/run-slot.sh size <name>` reads),
 #      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
-#      a small worker keeping an eighth in its place for the reviewers and testers; a load over that
-#      line reads the CPU's busy cores (top -l 2 -n 0) too, and refuses only when they and the starts
-#      are over it as well, or when top cannot be read
+#      a small worker keeping an eighth in its place for the reviewers and testers; a load at or over
+#      that line refuses whatever the CPU's idle share, so the load stays under the cores, but for a
+#      --firefighting start while its trigger file stands (FF_TRIGGER), logged as readings.firefighting
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
 #   load5 under 30, pressure level 1 and swap-ins under 100/s (vm_stat -c 2 1)
 #   Under Claude Code's sandbox the load comes from uptime, and a refused pressure level leaves the swap-ins to decide (scripts/README.md)
-#   3. slots, for a fresh worker start alone (a reviewer, tester, resume or move skips it, so work
+#   3. slots, for a fresh worker start alone (a reviewer, tester or resume skips it, so work
 #      already admitted finishes): `ops/run-slot.sh room`, refusing while runs wait in its queue and no
 #      lane is free with the load units for a run, or when room gives no reading
 #   4. usage, the launching backend's own window: Claude reads usage.json
@@ -51,9 +51,9 @@ set -euo pipefail
 #   spawn.sh resume    <name> <dir> [session-id]        reopens a closed session: in herdr in the pane herdr kept under its label while that pane holds no agent, else in a workspace of its own; with no session id, only in a folder it ran in; a <dir> in the Desktop folder resumes in the same tree under the code root, its transcript copied there when a session id is given; with no code root it resumes in the Desktop folder itself
 #   spawn.sh restore                                    resumes every herdr session whose resume record (~/.playground/resume) names it on the server PLAYGROUND_HERDR_SESSION names (playground by default) and whose roster row is not done, ended, parked or paused, each through `spawn.sh resume` and its gate with the --account its start was given, the --model it started with and an --effort other than high; a live one is skipped, each record it passes over and each resume that fails is named with its reason, and one restore runs at a time
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
-#   spawn.sh move      <name>                           takes the live cmux session holding <name> to herdr: every check and the usage gate run but the load and memory gates, since the copy it closes frees what the new one takes; only then it closes the session's cmux surface (its workspace when that was the last surface), waits up to 30s (PLAYGROUND_MOVE_WAIT seconds) for its process to exit, and resumes it in herdr by its session id. It takes --model, --effort, --account and --brief as a resume does, --backend for a session with no pin, and --runtime herdr alone; a session cmux holds no record of at its pid is left alone, and a session cannot move itself: its lead moves it
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
-#   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" ("can move" for a move) and start or close nothing
+#   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
+#   --firefighting     with any mode but restore or close, anywhere among its words: the start passes focus's refusal and the load gate (the memory gate still reads it) while a firefighting trigger file stands in the data folder (firefighting-stop.json or firefighting-headstart.json), and is refused while none does
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
@@ -94,6 +94,14 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 # The roster's manager kinds (kinds.ts' ROSTER_ROLE_OF_KIND), so a kind role_of_kind does not list runs as a lead: an orchestrator. A read that fails leaves the named kinds alone, so an orchestrator is refused rather than guessed.
 MANAGER_KINDS=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { ROSTER_ROLE_OF_KIND as r } from '$REPO/packages/config/src/kinds.ts'; console.log(Object.keys(r).filter((k) => r[k] === 'manager').join(' '))" 2>/dev/null) || MANAGER_KINDS=
+# The firefighting trigger file standing in the data folder, the first of the two that exists; exit 1 when neither does. Its content is not read.
+firefighting_trigger() {
+  local f
+  for f in "$DATA/firefighting-stop.json" "$DATA/firefighting-headstart.json"; do
+    [ -e "$f" ] && { echo "$f"; return 0; }
+  done
+  return 1
+}
 [[ $DATA == "$HOME"/* ]] && SHOWN="~${DATA#"$HOME"}" || SHOWN=$DATA
 SETTINGS="$DATA/factory-settings.json"
 HERDR_DIR=${PLAYGROUND_HERDR_DIR:-${DESK_HERDR_DIR:-$DATA/herdr}}
@@ -250,7 +258,7 @@ for pid, data in sorted(entries.items()):
         print(pid, field(data.get("sessionId")), field(data.get("cwd")), starts[pid], sep="\t")
 PY
 }
-# The capacity gate: four gates in order (load, memory, slots for a fresh worker start, usage; a move skips load and memory, since the copy it closes frees what the new one takes), the first failure naming its gate and its reading (a first dispatcher's failures each kept as a skip, the gates after it still read), every pass and refusal, and a first dispatcher's skipped start, one JSON line in ~/.playground/ops/capacity.jsonl (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing a past line for each skip and then ok, or the refusal for refuse() to print.
+# The capacity gate: four gates in order (load, memory, slots for a fresh worker start, usage), the first failure naming its gate and its reading (a first dispatcher's failures each kept as a skip, the gates after it still read), every pass and refusal, and a first dispatcher's skipped start, one JSON line in ~/.playground/ops/capacity.jsonl (the load gate reads the last 5 minutes of starts back; a refusal's carries its printed words as detail); python exits 0 printing a past line for each skip and then ok, or the refusal for refuse() to print.
 # The login a launch runs on with no --account, from Claude Code's config, which the launch reads from ~ when it drops inscope's folder.
 own_config() { if [ -n "$UNSET" ]; then echo "$HOME/.claude.json"; else echo "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"; fi; }
 gate_capacity() {
@@ -261,7 +269,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$MOVE_PID" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${FF_TRIGGER:-}" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -271,14 +279,12 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, move, gates, size, units, role, room, first = sys.argv[1:14]
+data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, firefighting = sys.argv[1:14]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
 now = dt.datetime.now(dt.timezone.utc)
 readings = {}
-if move:
-    readings["move"] = f"pid {move}"
 
 # The first dispatcher starts past a failing gate, so the owner always has one: the skip is kept and the gates after it still read, its login pick included.
 skips = []
@@ -361,11 +367,7 @@ def pct(part, whole):
 def fmt(x):
     return f"{x:g}"
 
-# A move swaps one copy of a session for another, adding no memory or load, so it skips the load and memory gates and the usage gate alone judges it.
-if move:
-    readings["load"] = f"skipped (move of pid {move})"
-    readings["memory"] = f"skipped (move of pid {move})"
-elif backend == "glm":
+if backend == "glm":
     try:
         # a GLM session draws no Claude usage, so it has its own gate: load5 under gates.glmLoad5Max, memory pressure 1 and swap-ins under gates.glmSwapinsMax a second
         loads = loadavg()
@@ -439,32 +441,17 @@ else:
         share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
         keep = cap * share
         readings["reserve"] = keep
-        # the load average counts the sessions' many short-lived processes (load 24 on 15 cores at 55% idle, 22 Oct), so a load over the line reads the CPU's busy cores too, against the same line held at the cores' count, and refuses only when both are over
-        if readings["load5"] + starts >= cap - keep:
-            idle = None
-            try:
-                out = subprocess.run(["top", "-l", "2", "-n", "0"], capture_output=True, text=True, timeout=10).stdout
-                idle = float([line for line in out.splitlines() if line.startswith("CPU usage:")][-1].split(",")[-1].split("%")[0])
-            except (IndexError, OSError, subprocess.TimeoutExpired, ValueError):
-                pass
-            readings["cpu_idle"] = idle
-            cpu_cap = min(cap, cores)
-            cpu_line = cpu_cap - cpu_cap * share
-            if idle is not None:
-                readings["cpu_busy"] = round(cores * (100 - idle) / 100, 2)
-            if idle is None or readings["cpu_busy"] + starts >= cpu_line:
-                at = (
-                    f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
-                    if mult != 1
-                    else f"the {cores} cores"
-                )
-                at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
-                cpu = (
-                    "it cannot read the CPU use (top), so the load alone decides"
-                    if idle is None
-                    else f"the CPU is {100 - idle:g}% busy (top), {readings['cpu_busy']:g} of the {cores} cores, which with the starts is at or over {cpu_line:g} too"
-                )
-                refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}; {cpu}. Wait for it to fall, or close a session that is done, and run it again.")
+        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --firefighting start passes while its trigger file stands (FF_TRIGGER), since firefighting comes first, and the memory gate still reads it
+        if firefighting:
+            readings["firefighting"] = firefighting
+        elif readings["load5"] + starts >= cap - keep:
+            at = (
+                f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
+                if mult != 1
+                else f"the {cores} cores"
+            )
+            at = f"at or over {at}" if not keep else f"at or over {cap - keep:g}: {at}, less the {keep:g} kept for {'checkers (gates.reviewReserve; this start is a small worker)' if size == 'small' else f'small items (this start is {size})'}"
+            refuse("load", f"max(load1, load5) is {readings['load5']:.2f} and {starts:g} started in the last {fmt(gates['startsWindow'] / 60)} minutes, {at}. Wait for it to fall, or close a session that is done, and run it again.")
     except Skip:
         pass
 
@@ -782,7 +769,7 @@ PY
   esac
 }
 
-# --account, --backend, --model, --effort, --brief, --reports-to, --title, --in and --check may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --model, --effort, --brief, --reports-to, --title, --in, --check and --firefighting may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -809,9 +796,10 @@ REPORTS_TO=
 TITLE_ARG=
 IN_DIR=
 CHECK=
+FIREFIGHTING=
+NAME_PROJECT=
 SIZE=
 RUNTIME=
-MOVE_PID=
 words=()
 while [ $# -gt 0 ]; do
   if [ "$1" = --account ]; then
@@ -865,6 +853,9 @@ while [ $# -gt 0 ]; do
     shift 2
   elif [ "$1" = --check ]; then
     CHECK=1
+    shift
+  elif [ "$1" = --firefighting ]; then
+    FIREFIGHTING=1
     shift
   elif [ "$1" = --brief ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RESUME_BRIEF" ] || usage
@@ -1061,42 +1052,6 @@ except (ValueError, KeyError, TypeError):
   fi
   exit 0
 fi
-# A move takes the live cmux session holding the name to herdr, where the capacity gate would refuse the resume that follows a close on a loaded machine: the copy it closes frees what the new one takes. It reads the session from Claude's registry and its surface from cmux, then runs as a resume in herdr with the live-name check and the load and memory gates set aside for that one pid; the close itself comes after every check, below.
-if [ "$MODE" = move ]; then
-  NAME=${1:-move}
-  [ $# -eq 1 ] || usage
-  word "$NAME" || refuse "a name is lowercase words joined by hyphens"
-  [ -z "$RUNTIME" ] || [ "$RUNTIME" = herdr ] || refuse "a move goes to herdr; --runtime takes herdr or nothing, not $RUNTIME"
-  RUNTIME=herdr
-  MOVE_WAIT=${PLAYGROUND_MOVE_WAIT:-30}
-  [[ $MOVE_WAIT =~ ^[0-9]+$ ]] || refuse "PLAYGROUND_MOVE_WAIT is $MOVE_WAIT; set whole seconds, or unset it for the default 30"
-  MOVE_WAIT=$((10#$MOVE_WAIT))
-  holders=$(live_holders "$NAME") || refuse "it cannot read the live sessions in $REGISTRY"
-  [ -n "$holders" ] || refuse "no live session holds the name $NAME, so there is nothing to move"
-  [ "$(grep -c . <<<"$holders")" -eq 1 ] || refuse "$(grep -c . <<<"$holders") live sessions hold the name $NAME, so it cannot tell which one to move"
-  IFS=$'\t' read -r MOVE_PID MOVE_ID MOVE_CWD MOVE_START <<<"$holders"
-  [[ $MOVE_ID =~ ^[0-9a-f-]{36}$ ]] || refuse "the registry gives pid $MOVE_PID no session id, so it cannot resume it"
-  [ -d "$MOVE_CWD" ] || refuse "the folder $MOVE_CWD the registry gives pid $MOVE_PID is not a folder"
-  # Only a session cmux holds a record for, at the pid the registry names, is moved: one in herdr, outside both, or a stale record of an earlier process is never closed from here.
-  records=$(CMUX_QUIET=1 cmux sessions list --session "$MOVE_ID" --json) || refuse "it cannot read cmux's record of $NAME (cmux sessions list)"
-  ids=$(printf '%s' "$records" | python3 -I -c 'import json, re, sys
-try:
-    for record in json.load(sys.stdin)["sessions"]:
-        surface, workspace = record.get("surface_id"), record.get("workspace_id")
-        if str(record.get("session_id")).lower() == sys.argv[1] and record.get("pid") == int(sys.argv[2]) and all(isinstance(v, str) and re.fullmatch(r"[0-9A-Fa-f-]+", v) for v in (surface, workspace)):
-            print(surface, workspace)
-            break
-except (ValueError, KeyError, TypeError, AttributeError):
-    pass' "$MOVE_ID" "$MOVE_PID")
-  [ -n "$ids" ] || refuse "cmux holds no surface for $NAME (session $MOVE_ID, pid $MOVE_PID), so it is not running in cmux and a move leaves it alone"
-  MOVE_SURFACE=${ids% *} MOVE_WORKSPACE=${ids#* }
-  # cmux sets CMUX_SURFACE_ID in every terminal: closing your own surface ends this script before the herdr copy starts.
-  mine=${CMUX_SURFACE_ID:-}
-  [ "$(tr a-f A-F <<<"$MOVE_SURFACE")" != "$(tr a-f A-F <<<"$mine")" ] ||
-    refuse "surface $MOVE_SURFACE is your own, and closing it would end this move before the herdr copy starts; ask your lead to move you"
-  MODE=resume
-  set -- "$NAME" "$MOVE_CWD" "$MOVE_ID"
-fi
 # A manager's column names it once, read as the long form: a lead reports to the first dispatcher, and the first dispatcher is briefed by the session running spawn.sh, its name read from Claude's registry entry for CLAUDE_PID.
 if [ "$MODE" = column ] && [ $# -eq 3 ]; then
   NAME=$1
@@ -1255,12 +1210,8 @@ case "$MODE" in
         refuse "$DIR is the main checkout, and $NAME ran in ${ran:-another folder}: $back"
       fi
     fi
-    # With no id, Claude's resume picker looks the name up only in the transcripts of the folder it starts in (its project folder, named from the folder's real path), so in a folder the session never ran in it finds nothing and the launch waits out its timeout.
-    if [ $# -eq 2 ]; then
-      project=$(project_of "$(cd -P "$DIR" && pwd -P)")
-      grep -l -m 1 -F -e "\"customTitle\":\"$NAME\"" -e "\"agentName\":\"$NAME\"" "$project"/*.jsonl > /dev/null 2>&1 ||
-        refuse "no session named $NAME ran in $DIR, so Claude's resume picker would find nothing there: pass its session id, or resume it in the folder it ran in"
-    fi
+    # With no id, the folder's project folder, whose transcripts the name check reads once the capacity gate has read as --check does (below).
+    [ $# -ne 2 ] || NAME_PROJECT=$(project_of "$(cd -P "$DIR" && pwd -P)")
     ;;
   *) NAME=${MODE:-session}; usage ;;
 esac
@@ -1410,7 +1361,7 @@ holders=$(live_holders "$NAME") || refuse "it cannot read the live sessions in $
 taken=$(tail -n 1 <<<"$holders" | cut -f 1)
 # Claude Code gives a session whose name is taken a generated one, while the roster would still point at the old session.
 # It exits 3, so restore tells a live session, which it leaves as it is, from a resume that failed.
-[ -z "$taken" ] || [ -n "$CHECK" ] || [ "$taken" = "$MOVE_PID" ] ||
+[ -z "$taken" ] || [ -n "$CHECK" ] ||
   REFUSE_CODE=3 refuse "a live session already holds the name $NAME (pid $taken), so the new one would start under a generated name. A respawned session takes the name only once the old session is gone: close it first (its handoff written, SESSIONS.md End), then run this again."
 # The item's size and its load units: --size, else small for a checker, a short read run-slot.sh knows no name for, else the roster and plan.json through run-slot.sh's own reader
 [ -n "$SIZE" ] || case "$ROLE" in reviewer | tester) SIZE=small ;; esac
@@ -1419,8 +1370,12 @@ case "$SIZE" in
   *) ITEM=$(bash "$REPO/scripts/ops/run-slot.sh" size "$NAME" 2>/dev/null) || ITEM= ;;
 esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
-# While focus stands (playground focus), one session has the Mac, so a start waits for its end; a move closes the copy it replaces, so it goes on.
-if [ -z "$MOVE_PID" ] && FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
+FF_TRIGGER=
+if [ -n "$FIREFIGHTING" ]; then
+  FF_TRIGGER=$(firefighting_trigger) || refuse "--firefighting starts only while a firefighting trigger file stands in $DATA (firefighting-stop.json or firefighting-headstart.json), and none does"
+fi
+# While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --firefighting start (below).
+if FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
 import datetime, json, sys
 try:
     f = json.load(open(sys.argv[1]))
@@ -1432,7 +1387,15 @@ if until <= datetime.datetime.now(datetime.timezone.utc):
 print(f"{f.get('session')} until {f['until']}")
 PY
 ); then
-  refuse "focus stands for $FOCUS, so no new session starts until it ends (playground focus off ends it)"
+  # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --firefighting start goes on while its trigger file stands
+  [ -n "$FF_TRIGGER" ] || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
+    refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
+fi
+# With no id, Claude's resume picker looks the name up only in the transcripts of the folder it starts in (its project folder, named from the folder's real path), so in a folder the session never ran in it finds nothing and the launch waits out its timeout; that check reads every transcript there, so the gate reads first as --check does, logging no start, and the gate proper runs after it.
+if [ -n "$NAME_PROJECT" ]; then
+  (CHECK=1 && gate_capacity) > /dev/null || exit $?
+  grep -l -m 1 -F -e "\"customTitle\":\"$NAME\"" -e "\"agentName\":\"$NAME\"" "$NAME_PROJECT"/*.jsonl > /dev/null 2>&1 ||
+    refuse "no session named $NAME ran in $DIR, so Claude's resume picker would find nothing there: pass its session id, or resume it in the folder it ran in"
 fi
 gate_capacity
 if [ "$RUNTIME" = herdr ]; then
@@ -1441,7 +1404,7 @@ if [ "$RUNTIME" = herdr ]; then
   herdr_ready "${PLAYGROUND_HERDR_SESSION:-${DESK_HERDR_SESSION:-playground}}"
 fi
 if [ -n "$CHECK" ]; then
-  if [ -n "$MOVE_PID" ]; then echo "ok: $NAME can move"; else echo "ok: $NAME can start"; fi
+  echo "ok: $NAME can start"
   exit 0
 fi
 # A session moved off the Desktop folder keeps its transcript in that folder's project, so it is copied to the new folder's, where --resume looks.
@@ -1623,42 +1586,11 @@ herdr_answer() {
   done
 }
 
-# A move closes the cmux copy only now, with every check and gate passed and the launch file written; cmux's close is how the old process ends (nothing here signals it), and the new one starts only once that process has gone, since two copies of a session would share one transcript.
-if [ -n "$MOVE_PID" ]; then
-  # Once the cmux copy is closed, every refusal names the resume that brings the session back by hand, with each option the move was given.
-  by_hand="$(printf %q "$MAIN/scripts/spawn.sh") resume $(printf '%q ' "$NAME" "$DIR" "$SESSION")--runtime herdr"
-  [ -z "$ACCOUNT$GLM_GIVEN" ] || by_hand+=" --account $(printf %q "$ACCOUNT$GLM_GIVEN")"
-  [ -z "$CLAUDE_MODEL" ] || by_hand+=" --model $(printf %q "$CLAUDE_MODEL")"
-  [ -z "$EFFORT" ] || by_hand+=" --effort $(printf %q "$EFFORT")"
-  [ -z "$PIN_GIVEN" ] || by_hand+=" --backend $(printf %q "$BACKEND")"
-  [ -z "$BRIEF" ] || by_hand+=" --brief $(printf %q "$BRIEF")"
-  if ! closed=$(CMUX_QUIET=1 cmux close-surface --workspace "$MOVE_WORKSPACE" --surface "$MOVE_SURFACE" --force 2>&1); then
-    # cmux keeps a workspace's last surface open, so the workspace closes instead.
-    if grep -qi 'cannot close the last surface' <<<"$closed"; then
-      closed=$(CMUX_QUIET=1 cmux workspace close "$MOVE_WORKSPACE" --force 2>&1) && closed=ok || closed="${closed:-no answer from cmux}"
-    fi
-    if [ "$closed" != ok ]; then
-      closed=$(tr -s '\n' ' ' <<<"$closed")
-      rm -f -- "$LAUNCH_FILE"
-      refuse "cmux would not close the surface of $NAME (${closed% }), so nothing was moved"
-    fi
-  fi
-  tries=0
-  while [ "$(started "$MOVE_PID")" = "$MOVE_PID $MOVE_START" ]; do
-    if [ "$tries" -ge $((MOVE_WAIT * 2)) ]; then
-      rm -f -- "$LAUNCH_FILE"
-      refuse "pid $MOVE_PID still runs ${MOVE_WAIT}s after cmux closed its surface, so the herdr copy was not started: resume it by hand once it exits: $by_hand"
-    fi
-    sleep 0.5
-    tries=$((tries + 1))
-  done
-fi
-
 if [ "$RUNTIME" = herdr ]; then
   # A restarted server brings each pane back as a shell under its label, so a resume reopens the session in the pane that held it, while it holds no agent; the live-name check above has already refused a live session.
   placed=
   if [ "$MODE" = resume ]; then
-    # A list herdr will not give leaves placed empty, so the session opens in a workspace of its own rather than ending the script under set -e (after a move's close, with the session down).
+    # A list herdr will not give leaves placed empty, so the session opens in a workspace of its own rather than ending the script under set -e.
     placed=$(hr pane list 2>/dev/null | python3 -I -c 'import json, sys
 try:
     for pane in json.load(sys.stdin)["result"]["panes"]:
@@ -1673,7 +1605,6 @@ except (ValueError, KeyError, TypeError):
   said_file="$LAUNCH_DIR/$NAME.herdr"
   if ! { : > "$said_file"; } 2>/dev/null; then
     rm -f -- "$LAUNCH_FILE"
-    [ -z "$MOVE_PID" ] || refuse "it cannot write $said_file after cmux closed its copy, so $NAME is down and no pin was written: resume it by hand: $by_hand"
     refuse "it cannot write $said_file, so nothing was started and no pin was written"
   fi
   if [ -z "$placed" ]; then
@@ -1699,7 +1630,6 @@ except (ValueError, KeyError, TypeError):
     [ -z "$placed" ] || [ "$out" = reused ] || hr pane close "$PANE" >/dev/null 2>&1 || true
     # A placed or reused pane's answer is JSON or `reused`, never why, so with herdr silent it names the pane herdr would not use.
     [ -z "$placed" ] || out="herdr would not label pane $PANE or run the launch in it"
-    [ -z "$MOVE_PID" ] || refuse "herdr opened no session for $NAME (${herdr_said:-${out:-no answer from herdr}}) after cmux closed its copy, so $NAME is down and no pin was written: resume it by hand: $by_hand"
     refuse "herdr opened no session for $NAME (${herdr_said:-${out:-no answer from herdr}}), so nothing was started and no pin was written"
   fi
   rm -f -- "$said_file"
@@ -1734,8 +1664,6 @@ fi
 set -- set "$NAME" "kind=$KIND"
 # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
 [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
-# A moved session no longer has the cmux workspace its entry names; an empty value removes the key.
-[ -n "$MOVE_PID" ] && set -- "$@" "workspace="
 # A second dispatcher started under an <id>-dispatcher name records its slot, which roster.ts who dispatcher 2 reads; a dispatcher's name with -2 holds slot 2 by its name.
 [ "$MODE" = manager ] && [ "$KIND" = dispatcher ] && [ -z "$FIRST" ] && ! second_dispatcher "$NAME" && set -- "$@" "slot=2"
 if [ "$MODE" = column ]; then

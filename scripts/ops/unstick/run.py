@@ -23,7 +23,7 @@ CODE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LW = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
 OPS = os.path.join(LW, "ops")
 HERE = os.path.join(OPS, "unstick")
-# read budget (dispatcher, 13 Oct, after cmux reached 155% CPU with ~50 sessions): a pass every 120s (ND-644, planner), under the Dashboard's 3-minute
+# read budget (dispatcher, 13 Oct, after the terminal app reached 155% CPU with ~50 sessions): a pass every 120s (ND-644, planner), under the Dashboard's 3-minute
 # freshness for state.json, reading only the screens of sessions whose transcript has been quiet over QUIET_READ; one still writing is at work
 CYCLE = 120
 QUIET_READ = 60
@@ -428,6 +428,8 @@ def stall(live, state):
 # dispatcher, 8 Oct (load 80 on 15 cores, the dashboard 5.7s): at most 2 heavy jobs at once (3 while slot 3 is open). A heavy job is a full suite, a
 # build or type check, or a dev stack other than the live dashboard's. slot_alerts says which of them raise the outside-slot alert.
 HEAVY = re.compile(r"(NODE_ENV=test bun test|(^|/)bun test tests|bun run test(:skills)?\b|turbo run (build|check-types)|api/hono/src/bin/dev\.ts)")
+# precommit:light runs outside the slots by rule (scripts/ops/README.md) and its checks (trace-count's test, env-keys' one-package build) take seconds, so nothing under it is a job or counts toward the cap
+PRECOMMIT_LIGHT = re.compile(r"^(\S*/)?bun\s+(\S*/)?packages/scripts/src/precommit-light\.ts(\s|$)")
 
 
 ORGS = None
@@ -484,6 +486,8 @@ def heavy_jobs(rows=None):
             p = parent.get(p)
         # one job per tree: skip a heavy process whose ancestor is itself a heavy process already counted
         if any(a in cmds and HEAVY.search(cmds[a]) for a in chain):
+            continue
+        if any(PRECOMMIT_LIGHT.match(cmds.get(a, "")) for a in chain):
             continue
         cwd = subprocess.run(["lsof", "-a", "-p", pid, "-d", "cwd", "-Fn"], capture_output=True, text=True, timeout=10).stdout
         # a self-hosted runner's CI job runs the workflow's own steps, so it takes no run slot; it still counts toward the cap
@@ -678,7 +682,7 @@ def resume_owned(sid, error_at):
     """True when the session's own hooks recorded this stop, so ops-session-resume sends its line: a usage limit with its reset, a
     reset after the error line, whose carry-on comes from Claude Code itself when it announced its own continue in the transcript, and from
     ops-session-resume on every other limit; or a failed turn, its record written by the StopFailure hook at or after the error
-    line. A record from an earlier stop (herdr and cmux restore a session without its --settings, so outside a playground checkout its hooks
+    line. A record from an earlier stop (a session resumed without its --settings, so outside a playground checkout its hooks
     stop) leaves the line to this job."""
     import datetime as _dt
     parse = lambda t: _dt.datetime.fromisoformat(t.replace("Z", "+00:00"))
@@ -833,13 +837,16 @@ def slot_idle_alerts(state, now_t):
             c = todo.pop()
             tree.append(c)
             todo += kids.get(c, [])
-        total = sum(cpu.get(c, 0.0) for c in tree)
+        # ps reads CPU time in hundredths, so the sum is rounded to them and the same times never read as a drop
+        total = round(sum(cpu.get(c, 0.0) for c in tree), 2)
         key = f"{slot}:{pid}"
         e = prev.get(key)
         # a total below the saved one means a step exited and took its CPU time with it, so the next step is measured from the new total
-        if not e or total - e["cpu"] >= SLOT_IDLE_CPU or total < e["cpu"]:
-            cur[key] = {"cpu": total, "since": now_t, "told": False}
+        # a pid the last check did not see started since, so its run is younger than the wait; an entry with no pids reads as this tree
+        if not e or total - e["cpu"] >= SLOT_IDLE_CPU or total < e["cpu"] or set(tree) - set(e.get("pids", tree)):
+            cur[key] = {"cpu": total, "pids": sorted(tree), "since": now_t, "told": False}
             continue
+        e["pids"] = sorted(tree)
         cur[key] = e
         idle = SLOT_IDLE_INSTALL if any(INSTALL.search(cmd.get(c, "")) for c in tree) else SLOT_IDLE
         if now_t - e["since"] >= idle:

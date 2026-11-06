@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import type { InboxItem } from "../../../../../../api/hono/src/lib/dashboard/inbox"
+import { type Choices, choicesOf } from "../../../../../../packages/config/src/inbox"
 import { DashboardContext } from "../../../../../../web/next/src/components/dashboard/dashboard"
 import {
   AskChoices,
@@ -95,8 +96,8 @@ const named = (html: string, label: string): string =>
     })
     ?.split(">")[0] ?? ""
 
-// The delivery line names its poster by its label, and the label keeps the raw session name on hover, as the sender label does. The dashboard here holds no live session, so the poster reads as plain text with its hover.
-describe("a delivered answer's poster", () => {
+// A result line that names its poster (Queued for, Send unconfirmed) names it by its label, and the label keeps the raw session name on hover, as the sender label does. The dashboard here holds no live session, so the poster reads as plain text with its hover.
+describe("a queued answer's poster", () => {
   const answered = {
     ...decision,
     answer: {
@@ -113,24 +114,29 @@ describe("a delivered answer's poster", () => {
   } as InboxItem
 
   test("is shown by its label with the raw name on hover", () => {
-    const html = render(false, answered)
-    expect(html).toContain("Delivered to")
+    const html = render(false, {
+      ...answered,
+      delivery: { at: "2026-10-12T10:05:01.000Z", status: "queued" },
+    } as InboxItem)
+    expect(html).toContain("Queued for")
     expect(html).toContain('aria-description="ops"')
   })
 
   test("is the session that took the answer when the poster had ended, with its raw name on hover", () => {
     const html = render(false, {
       ...answered,
-      delivery: { ...answered.delivery, to: "dispatcher" },
+      delivery: { at: "2026-10-12T10:05:01.000Z", status: "queued", to: "dispatcher" },
     } as InboxItem)
+    expect(html).toContain("Queued for")
     expect(html).toContain('aria-description="dispatcher"')
   })
 })
 
 describe("a card that just moved under him", () => {
-  test("pauses Approve, Deny and Archive, still focusable and saying why", () => {
+  test("pauses Send and Archive, still focusable and saying why, and dims its options", () => {
     const html = render(true)
-    for (const label of ["Approve", "Deny", "Archive"]) {
+    expect(html).toContain('aria-busy="true"')
+    for (const label of ["Send", "Archive"]) {
       const tag = named(html, label)
       expect(tag).toContain('aria-disabled="true"')
       expect(tag).not.toContain("title=")
@@ -144,9 +150,8 @@ describe("a card that just moved under him", () => {
 
   test("offers them as usual when it has not moved", () => {
     const html = render(false)
-    for (const label of ["Approve", "Deny", "Archive"]) {
-      expect(named(html, label)).not.toContain("aria-disabled")
-    }
+    expect(html).not.toContain('aria-busy="true"')
+    expect(named(html, "Archive")).not.toContain("aria-disabled")
   })
 })
 
@@ -238,14 +243,14 @@ describe("a card's change and colour: its updated time, and colour for its kind 
   // #882: a folded row keeps its choices
   test("an answered card folds to its result, keeping Done, Dismiss and its chevron, and opened, they sit in the footer row left of Reply, its result above the row", () => {
     const folded = render(false, sending)
-    expect(folded).toContain("Being carried out")
+    expect(folded).toContain("Approve · Ship 3f9a2c1 to main")
     for (const label of ["Done", "Dismiss", "Expand"]) expect(named(folded, label)).not.toBe("")
     const html = opened(sending)
     const dismiss = named(html, "Dismiss")
     expect(dismiss).not.toBe("")
     const reply = html.indexOf('aria-label="Reply to #i41"')
     expect(reply).toBeGreaterThan(-1)
-    expect(html.indexOf("Being carried out")).toBeLessThan(html.indexOf(dismiss))
+    expect(html.indexOf("Approve · Ship 3f9a2c1 to main")).toBeLessThan(html.indexOf(dismiss))
     expect(html.indexOf(dismiss)).toBeLessThan(reply)
   })
 })
@@ -267,8 +272,8 @@ describe("one action where two overlapped, and Draft where the app has a draft A
   test("a card's answer names the updatedAt it showed, so the API refuses one to words its poster edited since", () => {
     const card = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
     const client = readFileSync(join(web, "src/lib/inbox.ts"), "utf8")
-    expect(card).toContain("answerItem(item, action, text, note.trim() || undefined)")
-    expect(client).toContain("json: { action, note, seen: updatedAt, text }")
+    expect(card).toContain("answerItem(item, action, text, note.trim() || undefined, option)")
+    expect(client).toContain("json: { action, note, option, seen: updatedAt, text }")
   })
 
   test("an unread update's line ends in a single tick, Mark as read; once read, a muted double tick named Read, folded, its row keeping Dismiss (#882)", () => {
@@ -355,9 +360,10 @@ describe("a card a chat reply collapsed", () => {
       .find((button) => /aria-label="(Expand|Collapse)"/.test(button))
       ?.split(">")[0] ?? ""
 
-  test("reads as being worked on, folded: no Send, Draft, Discard or Later, and Expand to open it, on E too", () => {
+  test("reads as being worked on, folded: its blue light, no Send, Draft, Discard or Later, and Expand to open it, on E too", () => {
     const html = render(false, replied())
-    expect(html).toContain("is on it…")
+    expect(html).toContain("You replied")
+    expect(html).toContain("animate-spin")
     for (const label of ["Send", "Draft", "Discard", "Later"]) expect(named(html, label)).toBe("")
     expect(toggle(html)).toContain('aria-expanded="false"')
     expect(toggle(html)).toContain('aria-keyshortcuts="E"')
@@ -401,7 +407,7 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
   test("an open decision shows whole, its chevron reading Collapse", () => {
     const html = render(false)
     expect(named(html, "Collapse")).toContain('aria-expanded="true"')
-    expect(named(html, "Approve")).not.toBe("")
+    expect(html).toContain(">Approve</span>")
   })
 
   test("a read update folds to its title, keeping Done, Later, Archive and Dismiss, and Expand opens it to its words", () => {
@@ -418,11 +424,11 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
     expect(named(open, "Dismiss")).not.toBe("")
   })
 
-  test("an ask put away with Later folds until its time, its row keeping Approve, Deny, Later, Archive and Dismiss", () => {
+  test("an ask put away with Later folds until its time, its row keeping Later, Archive and Dismiss, its options in its body", () => {
     const folded = render(false, snoozed, false, { shelf: "snoozed" })
     expect(named(folded, "Expand")).not.toBe("")
-    for (const label of ["Approve", "Deny", "Later", "Archive", "Dismiss"])
-      expect(named(folded, label)).not.toBe("")
+    for (const label of ["Later", "Archive", "Dismiss"]) expect(named(folded, label)).not.toBe("")
+    expect(folded).not.toContain(">Approve</span>")
   })
 
   test("an open draft offers Archive, Later and Dismiss beside Send, and its folded row leaves Send to its words", () => {
@@ -529,11 +535,40 @@ describe("a decision's labelled Approve and Deny options", () => {
     )
   })
 
-  test("an ask with no labels renders as it does today", () => {
+  test("an ask with no labels keeps its On Approve line, above a bare Approve and Deny", () => {
     const html = render(false, unlabelled)
     expect(html).toContain("On Approve,")
     expect(html).toContain("does this:")
-    expect(html).not.toContain('data-slot="questionnaire-choice"')
+    expect(html).toContain('data-slot="questionnaire-choice"')
+    expect(html).toContain(">Approve</span>")
+    expect(html).toContain(">Deny</span>")
+  })
+
+  test("a lettered ask shows A to E with their descriptions and number badges, then None of these (#873)", () => {
+    const html = render(false, {
+      ...unlabelled,
+      preview: {
+        options: [
+          { description: "Staging first, a day of soak", label: "Port to staging, then main" },
+          { label: "Hotfix main" },
+        ],
+        text: "Which way does the fix go?",
+        type: "ask",
+      },
+    } as InboxItem)
+    for (const word of ["A. Port to staging, then main", "B. Hotfix main", "C. None of these"])
+      expect(html).toContain(`>${word}</span>`)
+    expect(html).toContain("Staging first, a day of soak")
+    expect(html).not.toContain(">Approve</span>")
+    expect(html).not.toContain("On Approve,")
+    expect(html.match(/data-slot="questionnaire-choice"/g)).toHaveLength(3)
+  })
+
+  test("every decision but a secret shows its rows, a typed one by its default labels (#873)", () => {
+    const html = render(false)
+    expect(html).toContain("Ship 3f9a2c1 to main")
+    expect(html).toContain("Hold the ship")
+    expect(html.match(/data-slot="questionnaire-choice"/g)).toHaveLength(2)
   })
 
   test("its Archive button says why on hover while the card is paused, as its siblings do", () => {
@@ -546,8 +581,8 @@ describe("a decision's labelled Approve and Deny options", () => {
 })
 
 // Questionnaire counts a disabled choice as no answer, so disabling the picked side on a busy card (its answer on its way, or just moved under him) read as unanswered after Send's own check, and both choices drew red with aria-invalid until the card settled.
-describe("a labelled ask's choices while the card is busy", () => {
-  const labels = { approve: "Ship it", deny: "Hold it" }
+describe("a decision's choices while the card is busy", () => {
+  const labeled: Choices = choicesOf({ approve: "Ship it", deny: "Hold it", type: "ask" })!
   const choices = (state: { busy: boolean; paused: boolean }) =>
     renderToStaticMarkup(
       createElement(
@@ -558,8 +593,8 @@ describe("a labelled ask's choices while the card is busy", () => {
           { name: "question" },
           createElement(AskChoices, {
             ...state,
-            labels,
-            pick: "approve",
+            choices: labeled,
+            pick: 0,
             setPick: () => undefined,
           }),
         ),
@@ -571,13 +606,13 @@ describe("a labelled ask's choices while the card is busy", () => {
   // AskChoices holds no hooks, so it is called as a function and each choice's change fired as a click or a key would fire it
   type Choice = { props: { children: { props: { onChange: () => void } } } }
   const picked = (busy: boolean) => {
-    const picks: string[] = []
+    const picks: number[] = []
     const element = AskChoices({
       busy,
-      labels,
+      choices: labeled,
       paused: false,
-      pick: "approve",
-      setPick: (side) => picks.push(side),
+      pick: 0,
+      setPick: (row) => picks.push(row),
     })
     for (const choice of element.props.children as Choice[]) choice.props.children.props.onChange()
     return picks
@@ -598,7 +633,7 @@ describe("a labelled ask's choices while the card is busy", () => {
 
   test("a click or a key on a busy card leaves the pick as it was, and takes either side on an idle one", () => {
     expect(picked(true)).toEqual([])
-    expect(picked(false)).toEqual(["approve", "deny"])
+    expect(picked(false)).toEqual([0, 1])
   })
 
   test("an idle card's group reads neither busy nor dimmed", () => {
@@ -650,16 +685,16 @@ describe("Schedule's row", () => {
     const click = source.slice(at, source.indexOf("</button>", at))
     expect(click).toContain("onClick={onRead}")
     expect(source).toContain("onRead={() => read()}")
-    expect(source).toContain(
-      "const read = () => (unread && !paused ? void settle(() => markRead([item.id])) : undefined)",
+    expect(source).toMatch(
+      /const read = \(\) =>\s+unread && !paused && !config\.hosted \? void settle\(\(\) => markRead\(\[item\.id\]\)\) : undefined/,
     )
     expect(source).not.toContain('answerItem(item.id, "read"')
     expect(source).not.toContain('answerItem(item, "read"')
     const seen = render(false, { ...decision, readAt: "2026-10-12T10:05:00.000Z" } as InboxItem)
     expect(named(seen, "Mark as read")).toBe("")
     expect(seen).toContain('aria-label="Read"')
-    for (const label of ["Approve", "Deny", "Archive", "Later"])
-      expect(named(seen, label)).not.toBe("")
+    for (const label of ["Send", "Archive", "Later"]) expect(named(seen, label)).not.toBe("")
+    for (const side of ["Approve", "Deny"]) expect(seen).toContain(`>${side}</span>`)
   })
 
   test("the comment box reads Add an optional comment, named Comment, the same gap-2 below the choices as between them", () => {
@@ -670,6 +705,27 @@ describe("Schedule's row", () => {
     const html = render(false)
     expect(html).toContain('placeholder="Add an optional comment"')
     expect(html).toContain('aria-label="Comment"')
+  })
+
+  // a focused box that turns disabled drops focus to the page, so words dictated or typed while a card above it leaves land nowhere
+  test("the comment box stays enabled on a card that just moved under him, and only reads read-only while its answer is on its way", () => {
+    const box = (html: string) => html.match(/<textarea[^>]*aria-label="Comment"[^>]*>/)?.[0] ?? ""
+    expect(box(render(true))).not.toBe("")
+    expect(box(render(true))).not.toMatch(/\sdisabled=""/)
+    expect(box(render(false))).not.toMatch(/\sdisabled=""|\sreadonly=""/i)
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    expect(source).toMatch(/<NoteBox[^>]*readOnly=\{pending\}/)
+    expect(source).toMatch(/placeholder="Paste the value"\s+readOnly=\{pending\}/)
+  })
+
+  // the browser's own paste reads the clipboard again at the insert, which a dictation app may have put back by then, so the box inserts the text its paste event carried, as the composer does
+  test("the comment box lands a paste as the text its event carried, through insertPaste", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const box = source.slice(
+      source.indexOf("function NoteBox("),
+      source.indexOf("// Taking what waits behind the pill"),
+    )
+    expect(box).toContain("onPaste={(event) => void insertPaste(event)}")
   })
 
   test("an unread ask keeps its light and draws no unread dot, which stays an update's", () => {
@@ -725,10 +781,10 @@ describe("a settled card's footer", () => {
 
   test("the result sits above the footer row and Dismiss stands in the row, left of Reply", () => {
     const html = opened(settled)
-    const resultAt = html.indexOf("Answered by")
+    const resultAt = html.indexOf("Decided by")
     const footerAt = html.indexOf('data-slot="card-footer"')
     const dismissAt = html.indexOf(named(html, "Dismiss"))
-    const replyAt = html.indexOf('aria-description="Reply"')
+    const replyAt = html.indexOf('aria-label="Reply to #i41"')
     expect(resultAt).toBeGreaterThan(-1)
     expect(footerAt).toBeGreaterThan(-1)
     expect(dismissAt).toBeGreaterThan(-1)
@@ -742,15 +798,15 @@ describe("a settled card's footer", () => {
     ).toBe(-1)
   })
 
-  test("the poster's settle reason reads once, in the result, never as Your note, since he never wrote it", () => {
+  test("the poster's settle reason reads once, in the result, never as his comment, since he never wrote it", () => {
     const html = render(false, settled)
-    expect(html).not.toContain("Your note")
+    expect(html).not.toContain("You: ")
     const approved = {
       ...decision,
       answer: { at: "2026-10-12T10:05:00.000Z", choice: "approve", note: "Ship it after lunch." },
       status: "done",
     } as InboxItem
-    expect(render(false, approved)).toContain("Your note: Ship it after lunch.")
+    expect(render(false, approved)).toContain("You: Ship it after lunch.")
   })
 })
 
@@ -780,6 +836,91 @@ describe("a settled card's right-hand group", () => {
     const between = html.slice(dismissAt, replyAt)
     expect(between.split("<button").length - 1, "Collapse, then Reply's own").toBe(2)
     expect(between).toContain('aria-label="Collapse"')
+  })
+})
+
+// ib-7: one comment box on every open card, and Reply on every card, folded rows included, in place of Chat about it.
+describe("the comment box and Reply on every card", () => {
+  const answered = {
+    ...decision,
+    answer: { at: "2026-10-12T10:05:00.000Z", choice: "approve" },
+    delivery: { at: "2026-10-12T10:05:01.000Z", status: "delivered", to: "ops", via: "session" },
+    status: "approved",
+  } as InboxItem
+  const update = {
+    ...decision,
+    kind: "update",
+    preview: { outcome: "merged" },
+    readAt: "2026-10-12T10:01:00.000Z",
+    title: "Merged #270",
+  } as InboxItem
+  const secret = {
+    ...decision,
+    preview: { key: "API_KEY", sink: { item: "slack", type: "keychain" }, type: "secret" },
+    title: "Paste the Slack token",
+  } as InboxItem
+  const cards = { answered, open: decision, secret, update }
+
+  test("every open card shows the box: an open ask, an answered one, an update and a secret ask", () => {
+    for (const [name, item] of Object.entries(cards)) {
+      expect(opened(item), name).toContain('aria-label="Comment"')
+    }
+  })
+
+  test("a secret ask's value field stays enabled on a card that just moved under him, so a paste in that second lands", () => {
+    const field = (html: string) =>
+      html.match(/<input[^>]*placeholder="Paste the value"[^>]*>/)?.[0] ?? ""
+    const paused = render(true, secret, false, { defaultOpen: true })
+    expect(field(paused)).not.toBe("")
+    expect(field(paused)).not.toMatch(/\sdisabled=""|\sreadonly=""/i)
+    expect(field(paused)).toContain('type="password"')
+  })
+
+  test("the box reads optional where it rides an answer as its note, and plain where Reply alone sends it", () => {
+    expect(opened(decision)).toContain('placeholder="Add an optional comment"')
+    for (const item of [answered, update, secret]) {
+      expect(opened(item)).toContain('placeholder="Add a comment"')
+    }
+  })
+
+  test("every card offers Reply, folded or open, and none offers Chat about it", () => {
+    for (const [name, item] of Object.entries(cards)) {
+      for (const html of [render(false, item), opened(item)]) {
+        expect(named(html, "Reply to #i41"), name).not.toBe("")
+        expect(html).not.toContain("Chat about")
+      }
+    }
+    expect(render(false, update)).not.toContain('aria-label="Comment"')
+  })
+
+  test("Reply with an empty box hands the card's ref to Playground's composer, which the aside brings forward, focused in the click's frame (#1045)", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const reply = source.slice(source.indexOf("const onReply = () => {"))
+    // the hand goes only while Playground's session is live, the one whose composer the dashboard mounts, else the card's own box opens as before
+    expect(source).toContain("const chat = allowed ? dispatcherOf(workers, dispatcher) : null")
+    expect(reply).toContain("replyRoute({ chat: chat !== null, folded, secret: keepsReply, text })")
+    expect(reply).toContain('if (route === "composer" && chat) {')
+    expect(reply).toContain("flushSync(() => outbox.reply(chat.name, item.ref))")
+    expect(reply).toContain("document.getElementById(COMPOSER_ID)?.focus()")
+    // the hand goes to the primary dispatcher's box alone, the page's own chat or the aside's, and the aside shows that chat on every hand, so it never lands in a box out of sight
+    const aside = readFileSync(join(web, "src/components/dashboard/dashboard-aside.tsx"), "utf8")
+    expect(aside).toContain("const handed = outbox.draft")
+    expect(aside).toContain("else showChat()")
+    const composer = readFileSync(join(web, "src/components/dashboard/composer.tsx"), "utf8")
+    expect(composer).toContain(
+      'const text = takeHanded(form.getFieldValue("text"), draft, worker.name, taken.current)',
+    )
+    expect(composer).toContain("if (threadId) return")
+  })
+
+  test("Reply opens a folded card to its box, focused in the click's frame, and sends the words alone, a secret's guarded by its value", () => {
+    const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
+    const reply = source.slice(source.indexOf("const onReply = () => {"))
+    expect(reply).toContain("flushSync(() => setToggled(true))")
+    expect(reply).toContain("document.getElementById(commentId)?.focus()")
+    expect(reply).toContain("secretAsk ? commentRefused(note, secret) : null")
+    expect(reply).toContain("replyItem(item.id, text)")
+    expect(source).not.toContain("setReply")
   })
 })
 
@@ -875,8 +1016,8 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
   })
 
   test("Done's ✓✓ marks every item in it read, and is gone once all are", () => {
-    expect(source).toContain(
-      '{label !== "Later" && label !== "In progress" && shelf.length > 0 && (',
+    expect(source).toMatch(
+      /\{label !== "Later" &&\s+label !== "In progress" &&\s+shelf\.length > 0 &&\s+!config\.hosted && \(/,
     )
     const button = (ids: string[]) =>
       /<button[^>]*>/.exec(
@@ -916,8 +1057,8 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
   test("each row ends in its ShelfMark, the open row and every shelf, and In progress offers no ✓ since its poster closes it", () => {
     expect(source).toContain("<ShelfMark empty={shown.length === 0} />")
     expect(source).toContain("<ShelfMark empty={shelf.length === 0} />")
-    expect(source).toContain(
-      '{label !== "Later" && label !== "In progress" && shelf.length > 0 && (',
+    expect(source).toMatch(
+      /\{label !== "Later" &&\s+label !== "In progress" &&\s+shelf\.length > 0 &&\s+!config\.hosted && \(/,
     )
   })
 
@@ -945,7 +1086,7 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
     const actions = source.slice(source.indexOf("const actions ="), source.indexOf("const bulk ="))
     expect(actions).toContain("const actions = (pill || rows.length > 0) && (")
     expect(actions).toMatch(
-      /\{clearing === 0 \? \(\n\s+<span[^>]*>\n\s+<RiCheckDoubleLine className="size-3" aria-label="All read" \/>/,
+      /\{config\.hosted \? null : clearing === 0 \? \(\n\s+<span[^>]*>\n\s+<RiCheckDoubleLine className="size-3" aria-label="All read" \/>/,
     )
     expect(actions).toContain("<RiCheckLine />")
     const shelf = source.slice(
@@ -1203,8 +1344,8 @@ describe("every kind of card on the Questionnaire", () => {
     const send = named(html, "Send")
     expect(send).toContain('aria-disabled="true"')
     expect(send).not.toMatch(/\sdisabled=""/)
-    expect(send).toContain('aria-description="Pick Approve or Deny first"')
-    expect(tipsOf(html.split(send)[1] ?? "")[0]).toBe("Pick Approve or Deny first")
+    expect(send).toContain('aria-description="Pick an option first"')
+    expect(tipsOf(html.split(send)[1] ?? "")[0]).toBe("Pick an option first")
     expect(html).not.toContain('data-slot="questionnaire-error"')
     for (const [choice] of html.matchAll(/<input [^>]*type="radio"[^>]*>/g)) {
       expect(choice).not.toMatch(/\srequired=""/)
@@ -1240,8 +1381,8 @@ describe("every kind of card on the Questionnaire", () => {
     )
   })
 
-  test("the footer sits outside the form, so a key pressed on its buttons or its time field never submits the question", () => {
-    for (const html of [render(false), render(false, draft), render(false, failed)]) {
+  test("a card but an open decision keeps its footer outside the form, so a key pressed on its buttons or its time field never submits the question", () => {
+    for (const html of [render(false, draft), render(false, failed)]) {
       const [inside, outside] = html.split("</form>")
       expect(inside).not.toContain('data-slot="card-footer"')
       expect(outside).toContain('data-slot="card-footer"')
@@ -1421,6 +1562,72 @@ describe("an ask's files in its card", () => {
   })
 })
 
+describe("a ship decision's PRs", () => {
+  test("each opens its page from the card when the item names it, and an older item's reads as before", () => {
+    const html = render(false, {
+      ...decision,
+      preview: {
+        prs: [{ number: 270, title: "x", url: "https://github.com/acme/app/pull/270" }],
+        sha: "3f9a2c1",
+        type: "ship",
+      },
+    } as InboxItem)
+    expect(html).toMatch(
+      /<a [^>]*href="https:\/\/github.com\/acme\/app\/pull\/270"[^>]*target="_blank"[^>]*>#270<\/a> x/,
+    )
+    expect(render(false)).toContain("#270 x")
+  })
+})
+
+describe("a delete decision's why", () => {
+  test("renders as markdown, so each target's PR opens from the card, while what stays the plain text Approve deletes", () => {
+    const html = render(false, {
+      ...decision,
+      preview: {
+        type: "delete",
+        what: "- worktree `/m/.claude/worktrees/pg-2`",
+        why: "Left over.\n\n- worktree `pg-2`: [#12](https://github.com/acme/app/pull/12)",
+      },
+      title: "Delete 1 leftover the nightly cleanup found",
+    } as InboxItem)
+    expect(html).toMatch(/<a [^>]*href="https:\/\/github.com\/acme\/app\/pull\/12"[^>]*>#12<\/a>/)
+    expect(html).toContain("- worktree `/m/.claude/worktrees/pg-2`")
+  })
+})
+
+describe("a guard decision's card (PG-1090)", () => {
+  const value = { path: "/made/up/send", selfDm: "D0MADEUP1", servers: ["made-up-slack"] }
+  const guard = (preview: object) =>
+    render(false, {
+      ...decision,
+      preview: {
+        key: "slack.gatedSends",
+        scope: "acme-test",
+        type: "guard",
+        why: "A made-up gate",
+        ...preview,
+      },
+      title: "Gate acme-test's Slack sends?",
+    } as InboxItem)
+  // the markup as React writes text: quotes and ampersands as their entities
+  const escaped = (text: string) => text.replaceAll("&", "&amp;").replaceAll('"', "&quot;")
+
+  test("shows the key, the scope and the value as the JSON Approve writes", () => {
+    const html = guard({ value })
+    expect(html).toContain("sets the guard setting")
+    expect(html).toContain(">slack.gatedSends</code>")
+    expect(html).toContain(">acme-test</code>")
+    expect(html).toContain(escaped(JSON.stringify(value, null, 2)))
+  })
+
+  test("with no value, reads that Approve takes the setting back to its default, and draws no value", () => {
+    const html = guard({})
+    expect(html).toContain("takes the guard setting")
+    expect(html).toContain(" back to its default.")
+    expect(html).not.toContain("<pre")
+  })
+})
+
 describe("a held Yard post's card", () => {
   test("its Approve is a link that opens Yard's approve page in a new tab, never an answer", () => {
     const html = render(false, {
@@ -1482,7 +1689,7 @@ describe("one word a meaning: Later, Archive, Reply and Replying (PG-900)", () =
     expect(tipsOf(html)).toContain("Later: put it away until a time, then it asks again")
   })
 
-  test("the chat button is Reply, and the card it is replying to reads Replying in its band, with no fill", () => {
+  test("the card's button is Reply, and the card the chat's words name as re #iN reads Replying in its band, with no fill", () => {
     const html = opened(answered)
     expect(html).toContain('aria-label="Reply to #i41"')
     expect(html).not.toContain("Chat about")

@@ -213,7 +213,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - ALWAYS: Send every link in a Slack post as a link chip in its full shape; `no-bare-slack-link` refuses a factory session's post holding a URL no chip carries, and its reason gives the chip ([scripts/hooks/README.md](./scripts/hooks/README.md)).
 - ALWAYS: Feed a row of `tests/scripts/hooks/fixtures/refused-forms/` to a guard only as `check()` input, whatever HOME or folder is set, since each row is a command that does what it says and can name a path outside HOME; `tests/scripts/hooks/fixtures-are-data.test.ts` holds the fixture's importers to it.
 - A factory session starts another only through `scripts/spawn.sh`, whose capacity gate, backends, models, runtimes, resume and restore are in [scripts/README.md](./scripts/README.md#spawnsh): read it before you change spawn.sh or when it refuses a start you did not expect;
-  `no-raw-spawn` refuses a cmux call that opens a claude session, and every herdr call but a read or one to a scratch world of the session's own.
+  `no-raw-spawn` refuses every cmux call but its help or version, and every herdr call but a read or one to a scratch world of the session's own.
 - The herdr servers belong to one ops job, `bun run ops:herdr`, on the binary and config its `pin.json` names ([scripts/README.md](./scripts/README.md#the-herdr-servers)), read before you change that job or herdr's pinned binary or config.
 - The factory's hooks: read a hook's section of [scripts/hooks/README.md](./scripts/hooks/README.md) before you change it, its tests or its registration, and when it refuses a call you did not expect, since the README holds each one in full and its reason names the fix.
   Five have their own lines above (`no-bare-slack-link`, `no-linear-ticket`, `no-playground-leak`, `no-raw-spawn`, `no-release-comment`);
@@ -224,7 +224,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 
 Playground's sessions run as a factory: the dispatcher manages, the Builder leads the workers (`<id>-worker`), Ops leads the runners (`<id>-runner`) and the ops jobs, and a probe (`<id>-probe`) lives for one test.
 
-- ALWAYS: Load [playbook](./extensions/core/skills/playbook/SKILL.md) when you are one of those sessions, or before you spawn, brief, rename or end a cmux session.
+- ALWAYS: Load [playbook](./extensions/core/skills/playbook/SKILL.md) when you are one of those sessions, or before you spawn, brief, rename or end a session.
   Its roles, chain, lifecycle, sweep and standing rules bind every session in the factory.
 - ALWAYS: Signal only processes you started; never select pids by name or pattern.
   A pattern matches the live dashboard and every worker's stack.
@@ -247,21 +247,19 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
   - ALWAYS: Keep it on loopback: the API, `next dev` and the live dashboard's built next server bind 127.0.0.1, and the dashboard is never deployed.
     The hosted build is the one exception (stack.md's hosted rule): it deploys, mounting only sign-in, health and Yard's routes.
   - ALWAYS: Keep the hosted build to its allowlist: `api/hono/src/index.ts` imports `hosted.ts` under `PLAYGROUND_HOSTED=1` and `local.ts` otherwise, and fails closed: `hosted.ts` without the flag, and a local build on Vercel, refuse to start.
-  - ALWAYS: Carry only the GETs on `RELAY_GETS` (`api/hono/src/lib/relay/protocol.ts`) through the relay; a write waits for a paired key that signs it.
+  - ALWAYS: Carry only the GETs on `RELAY_GETS` and the POSTs on `RELAY_WRITES` that the paired key signs (`api/hono/src/lib/relay/protocol.ts`) through the relay.
   - ALWAYS: Stop `bun run dev` before running `bun run build`, `bun run check-types` or `bun run test`, or committing, in the same worktree.
   - ALWAYS: Keep the dashboard on the owner rung: every route and the WebSocket pass `requireConsoleRole("owner")`, but first run's setup routes, which serve before any user exists.
     Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung or the one their route names (stack.md's hosted rule).
   - ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: each stored session's transcript, line by line, Playground's own alone unless the stack opts in) in the dashboard's local Postgres on 127.0.0.1, never a shared database.
   - ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, and every file the dashboard keeps outside the database from its data folder, `dataDir()`.
-- Cmux: read `.agents/dashboard/cmux.md` before you change a cmux or herdr call, how a session counts as live, how often the board refreshes or the System panel's commands.
-  cmux is deprecated: it takes no new work, only a fix for a break, and herdr is the terminal.
-  - ALWAYS: Keep every cmux call inside `api/hono/src/lib/dashboard/cmux.ts`, whose code no route calls now, since the dashboard reads, sends and answers through herdr.
+- Herdr: read `.agents/dashboard/herdr.md` before you change a herdr call, how a session counts as live, how often the board refreshes or the System panel's commands.
   - ALWAYS: Route every herdr call through `api/hono/src/lib/dashboard/herdr.ts`, the terminal the dashboard reads every session from.
   - ALWAYS: Count a session record as live only through `liveRecords()`, which `listLive` applies to herdr's records before any read.
   - ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, whose `COMMANDS` holds each one's fixed argv.
 - Messages: read `.agents/dashboard/messages.md` before you change how a message, a file or an answer reaches a session, the composer, the session the dashboard hosts on the Agent SDK, how a transcript renders, or the outbox and the stream's scroll.
   - ALWAYS: Send anything to a session through `deliver()` in `api/hono/src/lib/dashboard/deliver.ts`, and only for the owner's own clicks, since its text reads as the owner's.
-  - ALWAYS: Send a herdr session (cmux.md) the message as one `agent.prompt` through `prompt()` in herdr.ts, from `deliver()` alone.
+  - ALWAYS: Send a herdr session (herdr.md) the message as one `agent.prompt` through `prompt()` in herdr.ts, from `deliver()` alone.
   - ALWAYS: Reach the session the dashboard hosts on the Claude Agent SDK only through `api/hono/src/lib/dashboard/sdk.ts`.
   - ALWAYS: Keep a message's files in the owner-only attachments folder, never in a database.
   - ALWAYS: Render text from a session's transcript through `TranscriptMarkdown`, or give your own Streamdown its `TRANSCRIPT_COMPONENTS` and `transcriptUrlTransform`.

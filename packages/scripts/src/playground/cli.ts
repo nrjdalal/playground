@@ -48,7 +48,7 @@ import {
 } from "./probe"
 import { runSpawn, startDispatcher } from "./spawn"
 import { runStore, terminalIo } from "./store"
-import { startJobs, TERMINAL } from "./terminal"
+import { startJobs } from "./terminal"
 import { askPurge, uninstall } from "./uninstall"
 import { runUpdate, spawnRun } from "./update"
 import { version } from "./version"
@@ -145,11 +145,16 @@ const managerAlone = async (kind: ManagerVerb): Promise<number> => {
   return 1
 }
 
-// Loaded only for sweep, since sweep.ts reaches past this folder into ops-tick.
+// Loaded only for sweep, since sweep.ts reaches past this folder into ops-tick; its holds read through gh and the Dashboard's checkout.
 const sweep = async (lead: string): Promise<number> => {
-  const { runSweep } = await import("./sweep")
+  const { readHold, runSweep } = await import("./sweep")
+  const { factoryRepoOf } = await import("./setting")
   try {
-    console.log((await runSweep(lead, dataDir())).join("\n"))
+    // with no factory.repo to read, each issue or PR hold reads as unreadable rather than stopping the sweep
+    const factory = await factoryRepoOf().catch(() => "")
+    console.log(
+      (await runSweep(lead, dataDir(), undefined, undefined, readHold(REPO, factory))).join("\n"),
+    )
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error))
   }
@@ -259,7 +264,7 @@ const status = (): Promise<number> =>
     async () => ((await opsHerdr(["status"]).exited) === 0 ? 0 : 1),
     async () => {
       const { urls } = liveDashboard()
-      for (const line of statusLines(await probe(urls), TERMINAL)) console.log(line)
+      for (const line of statusLines(await probe(urls))) console.log(line)
     },
   )
 

@@ -5,12 +5,14 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 
 import {
   calls,
@@ -20,10 +22,12 @@ import {
   parse,
   replay,
   resultPath,
+  ROOT_READS,
   routed,
   store,
   stored,
   sweep,
+  TAKES_MAIN,
   type Check,
 } from "../../../../packages/scripts/src/hook-differential"
 
@@ -231,6 +235,147 @@ describe("sweep and replay", () => {
     ])
     const { counts } = await replay(() => "refused", recorder([]), list, "/h")
     expect(counts).toEqual({ calls: 2, "newly allowed": 2, "newly refused": 0, same: 0 })
+  })
+})
+
+// A hook whose check() takes the main checkout reads it from its own folder when none is given, and canary's unpacked tree is no git checkout, so the differential hands both sides the head's (PG-996)
+describe("a hook that takes the main checkout", () => {
+  // refuses a command that names its main checkout; with none given, main is the folder it would read from its own tree
+  const guard =
+    (fallback: string): Check =>
+    (raw, _env, main = fallback) =>
+      JSON.parse(raw).tool_input.command.includes(`${main}/`) ? "refused" : undefined
+  const canary = guard("/tmp/hook-differential/abc")
+  const head = guard("/main")
+  const forms = [{ command: "echo x > /main/f", inClass: false }]
+
+  test("reads the head's main checkout on both sides, so a sweep and a replay count the same verdict as the same", async () => {
+    const { changed, counts } = await sweep(canary, head, forms, "/h", "/main")
+    expect(counts).toMatchObject({
+      cases: 3,
+      "newly allowed": { inClass: 0, outClass: 0 },
+      "newly refused": { inClass: 0, outClass: 0 },
+      same: 3,
+    })
+    expect(changed).toEqual([])
+    const call = { command: "echo x > /main/f", cwd: "/h" }
+    expect((await replay(canary, head, [call], "/h", "/main")).counts).toMatchObject({
+      "newly refused": 0,
+      same: 1,
+    })
+  })
+
+  test("TAKES_MAIN names every hook whose check() takes the main checkout, and only those", async () => {
+    const hooks = join(import.meta.dir, "../../../../scripts/hooks")
+    const taking: string[] = []
+    for await (const file of new Bun.Glob("*.ts").scan(hooks)) {
+      const signature =
+        /export (?:async )?function check\(([\s\S]*?)\)\s*:\s*(?:Promise|string)/.exec(
+          await Bun.file(join(hooks, file)).text(),
+        )?.[1]
+      if (signature?.includes("main: string = mainCheckout("))
+        taking.push(file.replace(/\.ts$/, ""))
+    }
+    expect(taking.length).toBeGreaterThan(0)
+    expect([...TAKES_MAIN].sort()).toEqual(taking.sort())
+  })
+})
+
+describe("a hook that reads beside its own copy", () => {
+  // finds its checkout as packages/scripts/src/main-checkout.ts does: PLAYGROUND_REPO, else the folder above its own folder's git common dir, else its own folder
+  const STUB = `import { dirname } from "node:path"
+export const check = (raw) => {
+  const git = Bun.spawnSync(["git", "-C", import.meta.dir, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+  const root = process.env.PLAYGROUND_REPO || (git.exitCode === 0 ? dirname(git.stdout.toString().trim()) : import.meta.dir)
+  return JSON.parse(raw).tool_input.command.includes(root + "/") ? "refused" : undefined
+}
+`
+  const copy = async (at: string) => {
+    mkdirSync(join(at, "scripts", "hooks"), { recursive: true })
+    writeFileSync(join(at, "scripts", "hooks", "stub.ts"), STUB)
+    return (await import(join(at, "scripts", "hooks", "stub.ts"))).check as Check
+  }
+
+  test("reads the head's main checkout through PLAYGROUND_REPO on both sides, and the caller's value comes back after", async () => {
+    const headRoot = realpathSync(mkdtempSync(join(DIR, "own-head-")))
+    expect(Bun.spawnSync(["git", "init", "-q", headRoot]).exitCode).toBe(0)
+    const head = await copy(headRoot)
+    const canary = await copy(realpathSync(mkdtempSync(join(DIR, "own-canary-"))))
+    const command = `echo x > ${headRoot}/f`
+    const was = process.env.PLAYGROUND_REPO
+    try {
+      delete process.env.PLAYGROUND_REPO
+      const swept = await sweep(
+        canary,
+        head,
+        [{ command, inClass: false }],
+        "/h",
+        undefined,
+        headRoot,
+      )
+      expect(swept.counts).toMatchObject({ "newly refused": { inClass: 0, outClass: 0 }, same: 3 })
+      expect(swept.changed).toEqual([])
+      expect(process.env.PLAYGROUND_REPO).toBeUndefined()
+      process.env.PLAYGROUND_REPO = "/elsewhere"
+      const replayed = await replay(
+        canary,
+        head,
+        [{ command, cwd: "/h" }],
+        "/h",
+        undefined,
+        headRoot,
+      )
+      expect(replayed.counts).toMatchObject({ "newly refused": 0, same: 1 })
+      expect(process.env.PLAYGROUND_REPO).toBe("/elsewhere")
+    } finally {
+      if (was === undefined) delete process.env.PLAYGROUND_REPO
+      else process.env.PLAYGROUND_REPO = was
+    }
+  })
+
+  test("ROOT_READS names every file in the hooks' import graph that reads a path from its own folder, and only those", () => {
+    const repo = join(import.meta.dir, "../../../..")
+    const SPEC =
+      /(?:^|\n)\s*(?:import|export)\b[^"'`]*?from\s*["']([^"']+)["']|(?:^|\n)\s*import\s*["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g
+    const OWN = /import\.meta\.(?:dir|dirname|filename|path|url)\b/
+    const file = (base: string) =>
+      [base, `${base}.ts`, join(base, "index.ts")].find(
+        (c) => existsSync(c) && statSync(c).isFile(),
+      )
+    // a relative path from the importer, `@packages/<name>[/<sub>]` by its package's bun export else `src/<sub>`, and a package's own `@/<path>` under its `src`
+    const target = (importer: string, spec: string): string | undefined => {
+      if (spec.startsWith(".")) return file(resolve(dirname(importer), spec))
+      const pkg = /^@packages\/([^/]+)(?:\/(.+))?$/.exec(spec)
+      if (pkg) {
+        const at = join(repo, "packages", pkg[1]!)
+        const json = JSON.parse(readFileSync(join(at, "package.json"), "utf8")) as {
+          exports?: Record<string, { bun?: string } | string>
+        }
+        const entry = json.exports?.[pkg[2] ? `./${pkg[2]}` : "."]
+        const bun = typeof entry === "object" ? entry.bun : undefined
+        return (bun && file(join(at, bun))) || file(join(at, "src", pkg[2] ?? "index"))
+      }
+      const own = /^@\/(.+)$/.exec(spec)
+      const home = /^(.*\/packages\/[^/]+)\//.exec(importer)?.[1]
+      return own && home ? file(join(home, "src", own[1]!)) : undefined
+    }
+    const seen = new Set<string>()
+    const visit = (path: string) => {
+      if (seen.has(path)) return
+      seen.add(path)
+      for (const m of readFileSync(path, "utf8").matchAll(SPEC)) {
+        const found = target(path, (m[1] ?? m[2] ?? m[3])!)
+        if (found) visit(found)
+      }
+    }
+    const hooks = join(repo, "scripts", "hooks")
+    for (const file of new Bun.Glob("*.ts").scanSync(hooks)) visit(join(hooks, file))
+    const reading = [...seen]
+      .filter((p) => OWN.test(readFileSync(p, "utf8")))
+      .map((p) => relative(repo, p))
+    expect(reading.length).toBeGreaterThan(0)
+    expect(Object.keys(ROOT_READS).sort()).toEqual(reading.sort())
+    for (const why of Object.values(ROOT_READS)) expect(why.length).toBeGreaterThan(0)
   })
 })
 
