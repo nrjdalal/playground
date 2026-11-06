@@ -385,10 +385,40 @@ describe("the types gate", () => {
     expect(existsSync(join(worktree, "node_modules", "kept"))).toBe(true)
   })
 
+  // pr:merge's types step runs CI's own type filters, @packages/scripts among them for the reason turbo.json's @packages/scripts#check-types gives
+  test("ciSteps' check-types takes CI's filters, @packages/scripts among them, with canary for CI's base", async () => {
+    const canary = "c".repeat(40)
+    const workflow = Bun.YAML.parse(
+      await Bun.file(
+        join(import.meta.dir, "../../../../../.github/workflows/auto-check-build.yml"),
+      ).text(),
+    ) as { jobs: Record<string, { steps: { run?: string }[] }> }
+    const line = Object.values(workflow.jobs)
+      .flatMap((job) => job.steps.flatMap((step) => (step.run ?? "").split("\n")))
+      .find((each) => each.includes("turbo run check-types"))
+    const ci = [...(line ?? "").matchAll(/--filter=(?:'([^']*)'|(\S+))/g)].map(
+      ([, quoted, bare]) =>
+        `--filter=${(quoted ?? bare)!.replace("origin/${{ github.base_ref }}", canary)}`,
+    )
+    const step = ciSteps({
+      canary,
+      checkout: "/co",
+      hooks: false,
+      prepare: "none",
+      worktree: "/wt",
+    }).find((each) => each.name === "check-types")
+    expect(ci).toContain("--filter=@packages/scripts")
+    expect(step?.argv.filter((arg) => arg.startsWith("--filter="))).toEqual(ci)
+  })
+
   test("ciSteps runs CI's type steps after what node_modules needs, each through run-slot as the merge train, or bare under a held slot", () => {
     const at = { canary: "c".repeat(40), checkout: "/co", worktree: "/wt" }
     const checks = [
-      ["check-types", `bunx turbo run check-types --filter=...[${"c".repeat(40)}]`, true],
+      [
+        "check-types",
+        `bunx turbo run check-types --filter=...[${"c".repeat(40)}] --filter=@packages/scripts`,
+        true,
+      ],
       ["build", "bunx turbo run build --filter=./packages/* --filter=@api/hono", true],
       ["metrics", "bun packages/scripts/src/data-table-metrics.ts", false],
       ["check-types:tests", "bun run check-types:tests", true],
