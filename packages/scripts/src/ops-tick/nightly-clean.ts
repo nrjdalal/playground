@@ -354,6 +354,7 @@ export const nightlyClean =
       const out: string[] = []
       for (const w of staleWorktrees(worktrees, prs)) {
         const line = await cleanWorktree(w.path, "nightly-clean", cleanup, {
+          pr: w.pr.url,
           pushed: w.pr.headRefOid,
         })
         out.push(line)
