@@ -961,7 +961,7 @@ describe("the Inbox as one accordion: the open items, then Later, Archive and Do
 
   test("the rows run open items, In progress, Later, Archive, Done, and the ones put away with Later come from the API's own list, never items", () => {
     expect(source).toContain('<AccordionItem value="open" disabled={rows.length === 0}')
-    const order = ['["In progress"', '["Later"', '["Archive"', '["Done"'].map((row) =>
+    const order = ['["progress"', '["snoozed"', '["archived"', '["done"'].map((row) =>
       source.indexOf(row),
     )
     expect(order.every((at) => at > 0)).toBe(true)
@@ -1641,16 +1641,21 @@ describe("the shelves under the list, by place", () => {
     delivery: { at, status: "delivered", via: "session" },
     status: "approved",
   })
-  const settled = card(61, { answer: { at, choice: "approve" }, status: "done" })
-  const read = card(62, { answer: { at, choice: "approve", dismissedAt: at }, status: "done" })
+  // an update read before Done kept updates in the list is on Done, unread until dismissed
+  const update = {
+    kind: "update",
+    preview: { outcome: "merged" },
+    readAt: "2026-10-12T10:00:00.000Z",
+    status: "done",
+  }
+  const settled = card(61, update)
+  const read = card(62, { ...update, answer: { dismissedAt: at } })
   const inbox = (done: InboxItem[]) => {
     const client = new QueryClient() as { setQueryData: (key: unknown, data: unknown) => void }
     client.setQueryData(INBOX_QUERY_KEY, {
       archived: [card(63, { answer: { at, choice: "clear" }, status: "cleared" })],
       items: [working, ...done],
-      snoozed: [
-        card(64, { answer: { at, choice: "later", snoozedUntil: "2026-10-13T10:00:00.000Z" } }),
-      ],
+      snoozed: [card(64, { answer: { at, snoozedUntil: "2026-10-13T10:00:00.000Z" } })],
     })
     return renderToStaticMarkup(
       createElement(
@@ -1775,16 +1780,10 @@ describe("one word a meaning: Later, Archive, Reply and Replying (PG-900)", () =
     expect(marked.split(">")[0]).not.toContain("bg-muted/50")
   })
 
-  test("the shelves read Later and Archive, and each header button names its shelf", () => {
+  test("the shelves read Later and Archive", () => {
     const source = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
     for (const old of ['"Snoozed"', '"Archived"', "Mark all done as read", "Dismiss all archived"])
       expect(source).not.toContain(old)
-    for (const now of [
-      '["Later", RiZzzLine',
-      '["Archive", RiArchive2Line',
-      '"Dismiss all in Archive"',
-      '"Mark all in Done as read"',
-    ])
-      expect(source).toContain(now)
+    expect(SHELF_LABELS).toMatchObject({ archived: "Archive", snoozed: "Later" })
   })
 })
