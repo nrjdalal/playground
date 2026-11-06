@@ -150,14 +150,14 @@ const BARE = (command: string) => command.replace(/[\\'"]/g, "")
 
 // agent-browser named beside a close or its aliases.
 const teardown = (command: string): boolean =>
-  /agent-browser/.test(BARE(command)) && /\b(?:close|exit|quit)\b/.test(BARE(command))
+  /agent-browser/i.test(BARE(command)) && /\b(?:close|exit|quit)\b/.test(BARE(command))
 
 // The cheap first look, with quotes and backslashes gone so `st''ash` still counts: a stash, an --all or an agent-browser close; git and agent-browser need not be named (`$GIT stash`), and $'...' can spell any word, so it always counts.
 const candidate = (command: string): boolean =>
   command.includes("$'") || /stash|--all\b/.test(BARE(command)) || teardown(command)
 
 const stashCall = (command: string): boolean =>
-  (/\bgit\b/.test(BARE(command)) && /\bstash\b/.test(BARE(command))) || teardown(command)
+  (/\bgit\b/i.test(BARE(command)) && /\bstash\b/.test(BARE(command))) || teardown(command)
 
 function commandOf(raw: string): string | undefined {
   try {
