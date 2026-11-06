@@ -15,6 +15,7 @@ An `ask` decision renders its text as markdown, with its attachments under it: e
 - A `delete` decision's `what` names each target by its full path (`<main checkout>/.claude/worktrees/<name>`), since `playground rm --decision` matches that path and `ask new` refuses a short name.
 - A draft, a `slack` decision or a `ticket` decision is the message or ticket itself, so it keeps that text's own shape and takes steps 5, 8 and 9. A draft or a `slack` decision may carry `attachments`, such as an issue's before and after shots, which its card shows under the words and Send leaves out of Slack.
 - A `secret` ask carries only its key and sink, which the card words itself: its title takes step 5, then step 9; the value itself is the owner's to type into the card, so it appears nowhere in the item.
+- A `reveal` card carries only the item's full `service` and a `why`, a plain line: its title takes step 5, then step 9; the card fetches the value on the owner's own click, so it appears nowhere in the item either.
 
 Every decision and draft then takes step 10 once the owner answers; an update gets no answer, so it ends at step 9.
 

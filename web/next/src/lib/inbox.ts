@@ -76,6 +76,13 @@ export async function provideSecret(
   return data
 }
 
+// A reveal card's Keychain value, fetched on the owner's Show or Copy alone and held by the caller only as long as it shows.
+export async function revealSecret(id: string): Promise<string> {
+  const { data, error } = await unwrap(apiClient.v1.inbox[":id"].reveal.$post({ param: { id } }))
+  if (error) throw new Error(error.message)
+  return data.value
+}
+
 // The update named: one he clicked.
 export async function markRead(ids: string[]) {
   const { data, error } = await unwrap(apiClient.v1.inbox.read.$post({ json: { ids } }))
@@ -336,7 +343,7 @@ export function pickedAt(day: Date | undefined, time: string, now: Date): Date |
 }
 
 // Pure: whether he archived an item and has not dismissed it since.
-const isArchived = (item: InboxItem): boolean =>
+export const isArchived = (item: InboxItem): boolean =>
   item.answer !== null && "archivedAt" in item.answer && !("dismissedAt" in item.answer)
 
 // Pure: whether an item asks something of the owner now: an open decision or draft, an answer that failed to send, or an update not read yet. A reply took an item off his hands, so it waits on its poster alone, and one he archived waits on him moving it back.
@@ -547,6 +554,7 @@ export function kindWord(item: InboxItem): string {
     budget: "Budget",
     delete: "Delete",
     grant: "Permission",
+    reveal: "Show a secret",
     schema: "Schema",
     secret: "Secret",
     ship: "Ship",
@@ -659,7 +667,7 @@ export const takenBy = (item: InboxItem): string =>
     ? item.delivery.to
     : item.from
 
-// Pure: what became of an answer, in the words the list shows once an item is answered.
+// Pure: what became of an answer, the card's result line: what was picked, in the card's own words, then a state only where the answer did not simply go through, since the card's light says the rest; his comment shows on the line under it, never in this one, and no word here is one typed for the session that asked.
 export function outcomeLine(item: InboxItem): string | null {
   // an item still sleeping holds no choice, and asks him nothing until its time
   if (item.kind === "update" || !item.answer || !("choice" in item.answer)) return null
@@ -667,67 +675,53 @@ export function outcomeLine(item: InboxItem): string | null {
     return `Draft not saved: ${item.answer.noLink}`
   // closed by its poster, decided another way: the owner gave no answer, so nothing was delivered
   if (item.answer.choice === "settled") {
-    const by = `Answered by ${agentLabel(item.answer.by)}`
+    const by = `Decided by ${agentLabel(item.answer.by)}`
     return item.answer.note ? `${by} · ${item.answer.note}` : by
   }
-  // when, and each environment's exit status: all a secret's card ever shows of it
+  // each environment's mark, and why one refused it: all a secret's card ever shows of it
   if (item.answer.choice === "provided") {
-    const results = (item.answer.results ?? []).map(
-      (result) =>
-        `${result.environment}: ${result.line ?? (result.exitCode === null ? "stopped by a signal" : `exit ${result.exitCode}`)}`,
+    const results = (item.answer.results ?? []).map((result) =>
+      result.exitCode === 0
+        ? `${result.environment} ✓`
+        : `${result.environment} ✗ ${result.line ?? (result.exitCode === null ? "stopped by a signal" : `exit ${result.exitCode}`)}`,
     )
-    return [`Provided at ${fullTime(item.answer.at)}`, ...results].join(" · ")
+    return ["Provided", ...results].join(" · ")
   }
+  // his words, being carried out by its poster until it is closed, which the light says
+  if (item.answer.choice === "replied")
+    return item.answer.said ? `You: "${item.answer.said}"` : "You replied"
   const who = agentLabel(takenBy(item))
-  // being carried out by its poster until it is closed, where the close's link shows in the footer
-  // his words lead, so the card says what is being done
-  if (item.answer.choice === "replied") {
-    const said = item.answer.said ? `You replied "${item.answer.said}"` : "You replied"
-    return carriedOut(item) ? said : `${said} · ${who} is on it…`
-  }
   let done = {
-    approve: pickedLine(item, "You approved"),
+    approve: pickedLine(item, item.answer),
     clear: `Archived ${fullTime(item.answer.at)}`,
-    deny: pickedLine(item, "You denied"),
-    discard: "You discarded it",
+    deny: pickedLine(item, item.answer),
+    discard: "Discarded",
     draft: item.answer.editedText
-      ? "You saved it as a draft with changes"
-      : "You saved it as a draft",
-    edit: "You approved it with changes",
-    send: item.answer.editedText ? "You sent it with changes" : "You sent it",
+      ? "Saved as a Slack draft with your changes"
+      : "Saved as a Slack draft",
+    edit: `${pickedLine(item, item.answer)} · With your changes`,
+    send: item.answer.editedText ? "Sent with your changes" : "Sent",
   }[item.answer.choice]
   const uploaded = item.answer.uploaded
   if (uploaded) done += ` · ${filesCount(uploaded)} shared`
   const delivery = item.delivery
-  const reached =
-    delivery?.status === "delivered"
-      ? delivery.via === "cli"
-        ? `Read by ${who}`
-        : `Delivered to ${who}`
-      : delivery?.status === "failed"
-        ? delivery.code === "LOST"
-          ? `Lost: ${delivery.reason}`
-          : sendUnconfirmed(item)
-            ? `Send unconfirmed: whether ${who} has it is not known`
-            : `Send failed: ${delivery.reason}`
-        : "Delivery pending"
+  const failed =
+    delivery?.status !== "failed"
+      ? null
+      : delivery.code === "LOST"
+        ? `Lost: ${delivery.reason}`
+        : sendUnconfirmed(item)
+          ? `Send unconfirmed: whether ${who} has it is not known`
+          : `Send failed: ${delivery.reason}`
   // a step the dashboard ran says what it gave, the card's whole result, and why its poster was not told when that failed; a grant that opened its pane says so, then waits on its poster's recheck
   const step = stepLine(stepsOf(item.answer))
-  if (step)
-    return delivery?.status === "failed" ? `${done} · ${step} · ${reached}` : `${done} · ${step}`
+  if (step) return failed ? `${done} · ${step} · ${failed}` : `${done} · ${step}`
   const { opened } = stepsOf(item.answer)
   if (opened) done += ` · ${opened.line.charAt(0).toUpperCase()}${opened.line.slice(1)}`
   // Claude Code holds it until the session is free, whatever the answer
-  if (delivery?.status === "queued") return `${done} · Queued: ${who} holds it, to take once free`
-  if (isGo(item.answer.choice) && delivery?.status !== "failed" && !carriedOut(item)) {
-    if (item.answer.choice === "draft") return `${done} · Saving a Slack draft…`
-    const slack = item.kind === "decision" && item.preview.type === "slack"
-    if (item.answer.choice !== "send" && !slack) return `${done} · Being carried out by ${who}…`
-    return `${done} · ${kindWord(item) === "Linear comment" ? "Sending to Linear…" : "Sending in Slack…"}`
-  }
-  return item.answer.noLink
-    ? `${done} · ${reached} · No link: ${item.answer.noLink}`
-    : `${done} · ${reached}`
+  if (delivery?.status === "queued") return `${done} · Queued for ${who}`
+  if (failed) return `${done} · ${failed}`
+  return item.answer.noLink ? `${done} · No link: ${item.answer.noLink}` : done
 }
 
 // Pure: the result line of a step the dashboard ran on Approve that leaves its poster nothing to do: an accept's, an apps change's, or a grant that opened nothing; null for any other answer.
@@ -837,21 +831,11 @@ export const inboxTarget = (anchor: string, items: readonly InboxItem[]): boolea
 export const decisionChoices = (item: InboxItem): Choices | null =>
   item.kind === "decision" ? choicesOf(item.preview) : null
 
-// Pure: the row an approved or denied decision's answer picked: the go row its option names, the first when it names none, or the no-go row; null for any other answer.
-export function pickedRow(item: InboxItem): ChoiceRow | null {
-  if (item.kind !== "decision" || !item.answer || !("choice" in item.answer)) return null
-  const { choice } = item.answer
-  if (choice !== "approve" && choice !== "deny") return null
-  return rowOfAnswer(item.preview, item.answer)
-}
-
-// Pure: the result line's lead for a decision's pick, naming the option as the card showed it: a lettered row by its letter and label, a yes or no by its side and its own label, and an unlabelled Approve or Deny by its side alone.
-function pickedLine(item: InboxItem, side: "You approved" | "You denied"): string {
-  const picked = pickedRow(item)
-  if (!picked) return `${side} it`
-  if (decisionChoices(item)?.shape === "letters")
-    return `You picked ${picked.letter}: ${picked.label}`
-  return picked.label === "Approve" || picked.label === "Deny"
-    ? `${side} it`
-    : `${side}: ${picked.label}`
+// Pure: the result line's lead for a pick, the option as the card showed it: a lettered row by its letter and label, a yes or no by its side and its own label, and a bare Approve or Deny where the row says no more.
+function pickedLine(item: InboxItem, answer: { choice: string; option?: number }): string {
+  const side = answer.choice === "deny" ? "Deny" : "Approve"
+  const row = item.kind === "decision" ? rowOfAnswer(item.preview, answer) : null
+  if (!row) return side
+  if (decisionChoices(item)?.shape === "letters") return `${row.letter} · ${row.label}`
+  return row.label === side ? side : `${side} · ${row.label}`
 }

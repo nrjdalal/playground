@@ -84,6 +84,7 @@ describe("defineSettings", () => {
       "sessions.templates",
       "slack.dmChannel",
       "slack.dmOwner",
+      "slack.gatedSends",
       "slack.linkConverter",
       "slack.mode",
       "slack.sendServer",

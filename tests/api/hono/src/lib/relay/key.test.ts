@@ -121,14 +121,16 @@ describe("the paired key, on this Mac", () => {
     const browser = await browserKey()
     await keys.offer(browser.frame)
     const paired = await keys.approve(browser.frame.id)
+    const before = await takes(keys, browser.privateKey, paired!.id)
     const waiting = await browserKey()
     await keys.offer(waiting.frame)
     await keys.revoke()
     expect([
+      before,
       await takes(keys, browser.privateKey, paired!.id),
       await keys.paired(),
       keys.pending(),
-    ]).toEqual([false, null, null])
+    ]).toEqual([true, false, null, null])
   })
 
   test("an Approve whose write fails leaves no half-written key file behind", async () => {

@@ -18,7 +18,7 @@ import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-
 import { z } from "zod"
 
 import { fileNameOf } from "../download"
-import { KEYCHAIN_ITEM_NAMES, KEYCHAIN_ITEMS, type KeychainItemName } from "../keychain-items"
+import { KEYCHAIN_ITEM_NAMES, keychainSpec, PLAYGROUND_SERVICE } from "../keychain-items"
 import { ID_PATTERN } from "./attachments"
 
 // Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, an apps change's or a grant's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
@@ -156,10 +156,14 @@ const vercelSinkSchema = z.strictObject({
   type: z.literal("vercel"),
 })
 
-// Where a secret ask's value goes, the allowlist in code: Vercel, `vercel env add` once an environment for one project, or keychain, one of this Mac's Keychain items keychain-items.ts allows.
+// A Keychain item a card names: a typed one by name (slack, yard), or any of Playground's own by its full service (keychainSpec), always as this Mac's signed-in user.
+const playgroundService = z.string().regex(PLAYGROUND_SERVICE, "Must be a playground- service")
+const keychainItemField = z.union([z.enum(KEYCHAIN_ITEM_NAMES), playgroundService])
+
+// Where a secret ask's value goes, the allowlist in code: Vercel, `vercel env add` once an environment for one project, or keychain, one of this Mac's Keychain items keychainItemField allows.
 export const secretSinkSchema = z.discriminatedUnion("type", [
   vercelSinkSchema,
-  z.strictObject({ item: z.enum(KEYCHAIN_ITEM_NAMES), type: z.literal("keychain") }),
+  z.strictObject({ item: keychainItemField, type: z.literal("keychain") }),
 ])
 
 export type SecretSink = z.infer<typeof secretSinkSchema>
@@ -297,11 +301,14 @@ export type OwnerApps = { login: string; read: () => string[] | null; run: ExtRu
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 
 // Saves the value as one allowlisted Keychain item, throwing on a refusal; secret-sink.ts holds the real one, and a test passes its own.
-export type KeychainSave = (item: KeychainItemName, value: string) => Promise<void>
+export type KeychainSave = (item: string, value: string) => Promise<void>
+
+// Reads one allowlisted Keychain item's value, null when it holds none of its shape; secret-sink.ts holds the real one, and a test passes its own.
+export type KeychainRead = (item: string) => Promise<string | null>
 
 const OPTIONS_MESSAGE = `An ask offers 1 to ${MAX_OPTIONS} options, each with a label: one for a yes or no, two or more for lettered choices`
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change or a grant's System Settings pane, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in ELI5 / ASD-STE100, one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change or a grant's System Settings pane, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in ELI5 / ASD-STE100, one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere. A reveal shows the owner a Keychain item's value on the owner's click instead, kept nowhere either.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
@@ -365,6 +372,8 @@ export const previewSchema = z.discriminatedUnion("type", [
     sink: secretSinkSchema,
     type: z.literal("secret"),
   }),
+  // shows a Keychain item's value on the owner's click, in that one response alone (revealSecret); it names the item by its full service, so the card shows which one
+  z.strictObject({ service: playgroundService, type: z.literal("reveal"), why: words }),
   acceptSchema,
   appsSchema,
   grantSchema,
@@ -756,7 +765,12 @@ function answerOf(
     if (item.preview.type === "accept" && action === "edit") {
       return { message: "An accept is approved or denied as its proposal reads" }
     }
-    if ((item.preview.type === "apps" || item.preview.type === "grant") && action === "edit") {
+    if (
+      (item.preview.type === "apps" ||
+        item.preview.type === "grant" ||
+        item.preview.type === "reveal") &&
+      action === "edit"
+    ) {
       return { message: "This decision is approved or denied as it reads" }
     }
     // Clear: neither a yes nor a no; he has set the talk aside and will pick it up later, while whatever is already moving keeps moving
@@ -1332,6 +1346,7 @@ export async function answerItem(
     dispatcher,
     grant,
     now = new Date(),
+    reveal,
     upload,
     wait,
   }: {
@@ -1342,6 +1357,7 @@ export async function answerItem(
     dispatcher?: string
     grant?: ArgvRun
     now?: Date
+    reveal?: KeychainRead
   } & Pick<Sending, "upload" | "wait">,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
@@ -1353,6 +1369,7 @@ export async function answerItem(
       ok: false,
     }
   }
+  if (await holdsRevealed(current, [input.note, input.text], reveal)) return REVEALED
   if (input.action === "archive") return archive(db, current, now)
   if (input.action === "unarchive") return unarchive(db, current, now)
   if (input.action === "dismiss" && !waits(current)) {
@@ -1815,8 +1832,9 @@ export async function provideSecret(
   }
   const { key, sink } = current.preview
   // a paste off the item's shape is refused before the claim, so the card stays open for the right one
-  if (sink.type === "keychain" && !KEYCHAIN_ITEMS[sink.item].valid.test(value))
-    return { code: "VALIDATION_ERROR", message: KEYCHAIN_ITEMS[sink.item].invalid, ok: false }
+  const spec = sink.type === "keychain" ? keychainSpec(sink.item) : null
+  if (spec && !spec.valid.test(value))
+    return { code: "VALIDATION_ERROR", message: spec.invalid, ok: false }
   if (seen !== undefined && seen !== current.updatedAt) {
     return {
       code: "CONFLICT",
@@ -1870,7 +1888,7 @@ export async function provideSecret(
 
 // A keychain sink's one result: saved, or the writer's first line, which names the refusal and never the value.
 async function saveKeychain(
-  item: KeychainItemName,
+  item: string,
   value: string,
   keychain: KeychainSave | undefined,
 ): Promise<SinkResult> {
@@ -1883,6 +1901,46 @@ async function saveKeychain(
     const line = (error instanceof Error ? error.message : "the save failed").split("\n")[0] ?? ""
     return { environment: "Keychain", exitCode: 1, line: line.split(value).join("…") }
   }
+}
+
+// Reads a reveal card's Keychain item for the owner's Show or Copy, and only while the card is open and not archived, so an old card is no standing read handle. It writes nothing: the value is in no row, delivery, log or refusal, only in what it returns.
+export async function revealSecret(
+  db: Database,
+  id: string,
+  read: KeychainRead,
+): Promise<{ ok: true; value: string } | Refused> {
+  const item = await getItem(db, id)
+  if (!item || item.id !== id) return NOT_FOUND
+  if (item.kind !== "decision" || item.preview.type !== "reveal") {
+    return { code: "VALIDATION_ERROR", message: "Only a reveal card shows a value", ok: false }
+  }
+  if (item.status !== "open" || archivedAt(item) !== null) {
+    return { code: "CONFLICT", message: "This card is closed, so it shows nothing", ok: false }
+  }
+  const value = await read(item.preview.service)
+  if (value === null) {
+    return { code: "NOT_FOUND", message: "That Keychain item holds no value", ok: false }
+  }
+  return { ok: true, value }
+}
+
+const REVEALED: Refused = {
+  code: "VALIDATION_ERROR",
+  message: "That is the card's value: it stays out of a comment",
+  ok: false,
+}
+
+// Whether his words hold a reveal card's value, read again from the Keychain, so a Copy pasted into the card's own comment never reaches its poster; false on any other card, with no words or with no reader.
+async function holdsRevealed(
+  item: InboxItem,
+  words: (string | undefined)[],
+  read: KeychainRead | undefined,
+): Promise<boolean> {
+  if (!read || item.kind !== "decision" || item.preview.type !== "reveal") return false
+  const said = words.filter((word): word is string => Boolean(word?.trim()))
+  if (said.length === 0) return false
+  const value = await read(item.preview.service)
+  return value !== null && said.some((word) => word.includes(value))
 }
 
 // Keeps how many files a send shared in its answer, 0 on a stack that shares none, so a Retry after the words failed to type shares none twice.
@@ -1992,7 +2050,13 @@ export async function replyItem(
   db: Database,
   id: string,
   input: ReplyInput,
-  { actor, deliver, dispatcher, now = new Date() }: Omit<Telling, "now" | "wait"> & { now?: Date },
+  {
+    actor,
+    deliver,
+    dispatcher,
+    now = new Date(),
+    reveal,
+  }: Omit<Telling, "now" | "wait"> & { now?: Date; reveal?: KeychainRead },
 ): Promise<
   { item: InboxItem; ok: true } | Refused | { code: "UNDELIVERED"; message: string; ok: false }
 > {
@@ -2002,6 +2066,7 @@ export async function replyItem(
   }
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
+  if (await holdsRevealed(current, [parsed.data.text], reveal)) return REVEALED
   const text = `re ${itemTag(current.ref)}: ${parsed.data.text}`
   const one = (to: string) => ({ actor, id: crypto.randomUUID(), text, to })
   let delivery = await attempt(deliver, one(current.from), now)
@@ -2264,7 +2329,7 @@ async function recordLink(
   return row ? toItem(row) : null
 }
 
-// The poster closes its own open decision or draft (`bun run ask settle`), when it was decided another way: it reads Answered by the poster, with the note, and goes to Done at once, as a closed answer does. One the owner has answered is refused, as is a reply its poster has acked (a settle would replace its answer) and an update, which asks nothing.
+// The poster closes its own open decision or draft (`bun run ask settle`), when it was decided another way: it reads Decided by the poster, with the note, and goes to Done at once, as a closed answer does. One the owner has answered is refused, as is a reply its poster has acked (a settle would replace its answer) and an update, which asks nothing.
 export async function settleItem(
   db: Database,
   key: string,

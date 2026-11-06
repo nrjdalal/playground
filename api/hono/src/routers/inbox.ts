@@ -20,11 +20,12 @@ import {
   replyInputSchema,
   replyItem,
   retryDelivery,
+  revealSecret,
   scheduleItem,
   secretInputSchema,
 } from "@/lib/dashboard/inbox"
 import { runArgv } from "@/lib/dashboard/run-argv"
-import { runSink, saveToKeychain } from "@/lib/dashboard/secret-sink"
+import { readFromKeychain, runSink, saveToKeychain } from "@/lib/dashboard/secret-sink"
 import { slackUpload } from "@/lib/dashboard/slack-upload"
 import { DISPATCHER } from "@/lib/dashboard/workers"
 import {
@@ -41,6 +42,7 @@ import { ownerApps, runCli } from "@/lib/store/extensions"
 import {
   authMiddleware,
   guardWrites,
+  refuseAgent,
   requireConsoleRole,
   requireLoopback,
   requireTrustedOrigin,
@@ -176,6 +178,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         dispatcher: DISPATCHER,
         // a stack showing test data opens nothing on this Mac's screen
         grant: readsLive() ? runArgv : undefined,
+        reveal: readFromKeychain(),
         upload: slackUpload(),
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
@@ -207,6 +210,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         actor: { email: user.email, id: user.id },
         deliver,
         dispatcher: DISPATCHER,
+        reveal: readFromKeychain(),
       })
       if (!result.ok) {
         if (result.code === "UNDELIVERED") throw new ApiError(502, "CMUX_FAILED", result.message)
@@ -278,6 +282,7 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
         ...conflictErrorResponses,
       },
     }),
+    refuseAgent,
     sValidator("json", secretInputSchema, invalidSecret),
     async (c) => {
       const user = c.get("user")
@@ -290,5 +295,29 @@ export const inboxRouter = new Hono<{ Variables: Session }>()
       })
       if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
       return c.json({ data: result.item })
+    },
+  )
+  // a POST, so the relay, which carries GETs on RELAY_GETS alone, never carries it
+  .post(
+    "/:id/reveal",
+    describeRoute({
+      tags: ["Inbox"],
+      description:
+        "Show an open reveal card's Keychain item on the owner's click: its value comes back in this one response, never stored, cached or logged, and the agent sign-in is refused",
+      responses: {
+        200: { description: "OK" },
+        ...validationErrorResponses,
+        ...authErrorResponses,
+        ...forbiddenErrorResponses,
+        ...notFoundErrorResponses,
+        ...conflictErrorResponses,
+      },
+    }),
+    refuseAgent,
+    async (c) => {
+      const result = await revealSecret(db, c.req.param("id"), readFromKeychain())
+      if (!result.ok) throw new ApiError(STATUS[result.code], result.code, result.message)
+      c.header("Cache-Control", "no-store")
+      return c.json({ data: { value: result.value } })
     },
   )

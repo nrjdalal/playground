@@ -17,6 +17,9 @@ import {
   RiDeleteBinLine,
   RiDraftLine,
   RiExternalLinkLine,
+  RiEyeLine,
+  RiEyeOffLine,
+  RiFileCopyLine,
   RiGitMergeLine,
   RiInboxLine,
   RiInboxUnarchiveLine,
@@ -107,9 +110,11 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useYardWrites } from "@/hooks/use-yard-writes"
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
+import { copyToClipboard } from "@/lib/clipboard"
 import { config } from "@/lib/config"
 import { dispatcherOf, useNow } from "@/lib/dashboard"
 import {
@@ -129,6 +134,7 @@ import {
   focusAfterTake,
   foldsByDefault,
   INBOX_QUERY_KEY,
+  isArchived,
   inboxLight,
   inboxSummary,
   inboxView,
@@ -148,6 +154,7 @@ import {
   resultLink,
   retryable,
   retryItem,
+  revealSecret,
   scheduleChoices,
   scheduleItem,
   sendFailed,
@@ -165,6 +172,7 @@ import {
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
 import { insertPaste } from "@/lib/paste"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
+import { ON_THE_MAC_LINE } from "@/lib/relay"
 import { replyRoute, useTypedReply } from "@/lib/reply"
 import { iconTone, type ShownState, statusIcon } from "@/lib/status-icons"
 import { inboxMark, readMark } from "@/lib/tab-dot"
@@ -177,6 +185,7 @@ const DECISION_ICONS: Record<InboxPreview["type"], RemixiconComponentType> = {
   budget: RiMoneyDollarCircleLine,
   delete: RiDeleteBinLine,
   grant: RiShieldKeyholeLine,
+  reveal: RiKey2Line,
   schema: RiTableLine,
   secret: RiKey2Line,
   ship: RiShipLine,
@@ -483,6 +492,63 @@ function Shown({ preview }: { preview: Pick<InboxUpdate, "attachments" | "text">
   )
 }
 
+// How long a shown value stays on screen before it hides itself.
+const REVEAL_SHOWN_MS = 30_000
+
+// A reveal card's value: masked until Show, which fetches it and hides it again after REVEAL_SHOWN_MS, on Hide or when the card folds; Copy fetches it straight to the clipboard and never draws it. It lives in this state alone.
+function RevealField({ id }: { id: string }) {
+  const [value, setValue] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (value === null) return
+    const hide = setTimeout(() => setValue(null), REVEAL_SHOWN_MS)
+    return () => clearTimeout(hide)
+  }, [value])
+  const reveal = async (use: (value: string) => unknown) => {
+    setError(null)
+    try {
+      await use(await revealSecret(id))
+    } catch (failure) {
+      setError((failure as Error).message)
+    }
+  }
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center gap-2">
+        <code
+          aria-label="Value"
+          className="border-input min-w-0 flex-1 truncate rounded-md border px-2.5 py-1.5 font-mono text-xs"
+        >
+          {value ?? "\u25CF".repeat(12)}
+        </code>
+        <Button
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={() => (value === null ? void reveal(setValue) : setValue(null))}
+        >
+          {value === null ? (
+            <RiEyeLine data-icon="inline-start" />
+          ) : (
+            <RiEyeOffLine data-icon="inline-start" />
+          )}
+          {value === null ? "Show" : "Hide"}
+        </Button>
+        <Button
+          size="sm"
+          type="button"
+          variant="outline"
+          onClick={() => void reveal((got) => copyToClipboard(got, "Copied"))}
+        >
+          <RiFileCopyLine data-icon="inline-start" />
+          Copy
+        </Button>
+      </div>
+      {error ? <p className="text-destructive text-xs">{error}</p> : null}
+    </div>
+  )
+}
+
 // Exactly what Approve does, the card's description: our own words around the session's, a Slack message's plain text that hides nothing and an ask's rendered as its chat would show them.
 function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
   const preview = item.preview
@@ -610,6 +676,20 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
             {preview.change === "add" ? "to" : "from"} your apps, which no session may drive.
           </p>
           <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+        </>
+      )
+    case "reveal":
+      return (
+        <>
+          <p>
+            Shows this Mac&apos;s Keychain item{" "}
+            <code className="font-mono break-all">{preview.service}</code> here when you click Show
+            or Copy. It is kept nowhere else.
+          </p>
+          <p className="break-words whitespace-pre-wrap">Why: {preview.why}</p>
+          {item.status === "open" && !isArchived(item) && !config.hosted && (
+            <RevealField id={item.id} />
+          )}
         </>
       )
     case "grant":
@@ -778,6 +858,9 @@ export function InboxCard({
 }) {
   const queryClient = useQueryClient()
   const { allowed, dispatcher, outbox, workers } = useDashboard()
+  // what the card answers: everything on a local stack, and on the hosted build its answer, Later and Done where the relay carries them
+  const writes = useYardWrites()
+  const answers = writes.answers(item)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Check it for me sends its note once
@@ -798,10 +881,12 @@ export function InboxCard({
   const secretKey =
     item.kind === "decision" && item.preview.type === "secret" ? item.preview.key : null
   const secretAsk = secretKey !== null
+  // a secret ask's or a reveal card's Reply stays in its own box, never the chat's composer, so its value reaches no chat (the API refuses a reveal card's comment that holds its value)
+  const keepsReply = secretAsk || (item.kind === "decision" && item.preview.type === "reveal")
   const titleId = useId()
-  // every write the card makes goes through here, and the hosted build's relay carries none, so there it sends nothing
+  // every write the card makes goes through here, and a card whose answer the relay does not carry sends nothing; a refusal shows in the Mac's own words
   const settle = async (write: () => Promise<unknown>) => {
-    if (config.hosted) return false
+    if (!answers) return false
     setPending(true)
     setError(null)
     try {
@@ -849,7 +934,7 @@ export function InboxCard({
   // a folded row keeps its verbs, and the answers that need nothing its body holds; Seen is the band's tick, on a card in his list he has not marked read, and reading answers nothing
   const buttons = verbs(item, shelf)
   const unread = buttons.includes("seen")
-  // the hosted build's relay carries no write, so a click there leaves the read mark to this Mac
+  // the hosted build's relay carries no read mark, so a click there leaves it to this Mac
   const read = () =>
     unread && !paused && !config.hosted ? void settle(() => markRead([item.id])) : undefined
   const busy = pending || paused
@@ -872,7 +957,7 @@ export function InboxCard({
   // Reply with an empty box hands the card's ref to Playground's composer (a secret ask's, or any while that session is down, opens its own box), and with words opens a folded card to them or sends them alone; either box takes focus in the click's own frame, so a paste sent at once lands there
   const onReply = () => {
     const text = note.trim()
-    const route = replyRoute({ chat: chat !== null, folded, secret: secretAsk, text })
+    const route = replyRoute({ chat: chat !== null, folded, secret: keepsReply, text })
     if (route === "composer" && chat) {
       flushSync(() => outbox.reply(chat.name, item.ref))
       document.getElementById(COMPOSER_ID)?.focus()
@@ -964,7 +1049,7 @@ export function InboxCard({
         {item.preview.thread && (
           <p className="text-muted-foreground text-xs font-medium">Your reply</p>
         )}
-        {config.hosted ? (
+        {!answers ? (
           <p className="whitespace-pre-wrap">{draft}</p>
         ) : (
           <Textarea
@@ -1001,7 +1086,7 @@ export function InboxCard({
           item.answer.choice !== "settled" &&
           item.answer.note && (
             <span className="text-muted-foreground mt-1 block whitespace-pre-wrap">
-              Your note: {item.answer.note}
+              You: {item.answer.note}
             </span>
           )}
         {untold && <span className="text-muted-foreground mt-1 block">{untold}</span>}
@@ -1046,7 +1131,8 @@ export function InboxCard({
           </Button>
         </Hint>
       ) : (
-        retryable(item, now) && (
+        retryable(item, now) &&
+        !config.hosted && (
           <Hint content={held}>
             <Button
               size="sm"
@@ -1192,31 +1278,38 @@ export function InboxCard({
           () => void onAnswer("dismiss"),
         )}
       <Reopen open={open} setOpen={setToggled} />
-      <Hint
-        content={
-          held ??
-          (secretAsk || !chat
-            ? "Reply: your comment alone, to its poster"
-            : "Reply: your comment alone, to its poster, or with the box empty, in your chat")
-        }
-      >
-        <Button
-          size="icon-sm"
-          variant="outline"
-          aria-label={`Reply to ${itemTag(item)}`}
-          className="shrink-0"
-          disabled={busy}
-          {...hold}
-          onClick={onReply}
+      {/* a Reply is a write the relay does not carry, so the hosted build's comment rides the answer alone */}
+      {!config.hosted && (
+        <Hint
+          content={
+            held ??
+            (secretAsk || !chat
+              ? "Reply: your comment alone, to its poster"
+              : "Reply: your comment alone, to its poster, or with the box empty, in your chat")
+          }
         >
-          <RiReplyLine />
-        </Button>
-      </Hint>
+          <Button
+            size="icon-sm"
+            variant="outline"
+            aria-label={`Reply to ${itemTag(item)}`}
+            className="shrink-0"
+            disabled={busy}
+            {...hold}
+            onClick={onReply}
+          >
+            <RiReplyLine />
+          </Button>
+        </Hint>
+      )}
     </div>
   )
 
-  // the hosted build's relay carries reads alone, so its cards hold no buttons and the Inbox's one read-only line stands for them
-  const footer = config.hosted ? null : (
+  // a card whose answer the relay does not carry holds no buttons: a paired hosted page says to answer it on the Mac, and one with no key leaves it to the Inbox's one read-only line
+  const footer = !answers ? (
+    writes.send ? (
+      <CardFooter className="text-muted-foreground text-xs">{ON_THE_MAC_LINE}</CardFooter>
+    ) : null
+  ) : (
     <CardFooter className="flex-wrap gap-2">
       {footerInForm ? (
         // shadcn's questionnaire actions in a row that wraps on a narrow card: Submit first, off until an option is picked and saying why on hover and focus, then the card's own buttons
@@ -1419,8 +1512,8 @@ export function InboxCard({
             {result}
           </CardHeader>
           {body && <CardContent>{body}</CardContent>}
-          {/* the card's last block before its buttons: his comment, the note with whatever he answers, or alone through Reply */}
-          {!folded && !config.hosted && (
+          {/* the card's last block before its buttons: his comment, the note with whatever he answers, or alone through Reply, which stays on the Mac, so the hosted build draws it only where it rides an answer */}
+          {!folded && answers && (noted || !config.hosted) && (
             // the same gap-2 above it as between the choices
             <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
               {/* a box turned disabled drops focus to the page, so words dictated or typed as a card above leaves land nowhere: it stays enabled while the card is paused and turns read-only while its answer is on its way */}
@@ -1673,6 +1766,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   const { data, error, isPending } = useInbox(allowed)
   const queryClient = useQueryClient()
   const now = useNow()
+  const writes = useYardWrites()
   const [bulkPending, setBulkPending] = useState(false)
   const [bulkError, setBulkError] = useState<string | null>(null)
   // the ids in the order he sees them, set on the first read and when he takes what waits behind the pill
@@ -1817,7 +1911,7 @@ export function Inbox({ viewing }: { viewing: boolean }) {
   }
   return (
     <section aria-label="Inbox" className="@container flex flex-col gap-3">
-      {config.hosted && <ReadOnlyLine />}
+      {!writes.send && <ReadOnlyLine />}
       {/* one accordion, each row an icon, its words and a count: the open items first, then the shelves, an empty row grayed and shut */}
       <Accordion
         multiple

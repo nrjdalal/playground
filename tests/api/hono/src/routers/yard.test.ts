@@ -153,7 +153,7 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
     ])
   })
 
-  test("the relay carries the owner's reads and pair request to a Mac on its socket and back, and refuses a member, a wrong Origin, a write and the first-run routes", async () => {
+  test("the relay carries the owner's reads, pair request and signed writes to a Mac on its socket and back, and refuses a member, a wrong Origin, an unsigned write and the first-run routes", async () => {
     await sql`insert into "user" (id, name, email, login, role) values ('ow', 'ow', ${["ow", "example.com"].join("@")}, 'ow', 'owner')`
     await sql`insert into yard_token (id, hash, name, user_id) values (${crypto.randomUUID()}, ${createHash("sha256").update("yard_ow").digest("hex")}, ${"mac"}, 'ow')`
     const run = child(await Bun.file(RELAY).text(), {
@@ -192,9 +192,20 @@ describe.skipIf(!dockerUp())("Yard's routes on the hosted build", () => {
       requests: [{ login: "ow", method: "GET", path: "/api/v1/workers?x=1" }],
       status: { online: true, since: null },
       statusAfter: { online: false, since: "string" },
+      signedWrite: [201, { sent: true }],
       write: 404,
+      writeMember: 403,
+      writeNoOrigin: 403,
+      writeNotAFrame: 400,
+      writeOffList: 403,
+      writeOtherLogin: 403,
+      writeWrongOrigin: 403,
+      writes: [{ login: "ow", path: "/api/v1/messages", type: "write" }],
       wrongOrigin: 403,
     })
+    // the hub forwards a write's body from memory alone: no log line of the hosted side holds it
+    expect(`${run.out}${run.err}`).not.toContain("body-kept-nowhere")
+    expect(run.out).toMatch(/\[relay\] write [0-9a-f-]{36} \/api\/v1\/messages 201 \d{4}-/)
   })
 
   // A member of its own with a token, so a test's posts meet no other test's one-a-second limit.
