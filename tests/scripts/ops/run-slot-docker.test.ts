@@ -368,7 +368,7 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
         expect(r.err).toContain(CANNOT)
       })
 
-    // #1158's review: ksh reads a cluster with a dash inside it as two options (ksh -x-c runs its -c script), and a ksh word reads as a chain run-slot cannot read whatever follows it
+    // #1158's review: ksh reads a cluster with a dash inside it as two options (ksh -x-c runs its -c script), and after an unplaced first word a ksh word reads as a chain run-slot cannot read whatever follows it
     test("an unplaced first word before ksh -x-c", async () => {
       const r = await run(["launcher", "ksh", "-x-c", "docker build ."])
       expect(r.code).toBe(2)
@@ -411,7 +411,7 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       'echo hi; sh 2>/dev/null -c "docker build ."',
       "echo hi; bash docker-build.sh",
     ])
-      test(`a shell fed its script on stdin: ${script}`, async () => {
+      test(`a shell word in a step: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
         expect(r.code).toBe(2)
         expect(r.err).toContain(CANNOT)
