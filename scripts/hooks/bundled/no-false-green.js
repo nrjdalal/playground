@@ -256,7 +256,6 @@ var WRAPPERS = new Map(Object.entries({
   nocorrect: ["", ""],
   noglob: ["", ""],
   nohup: ["", ""],
-  pkexec: ["--disable-internal-agent --help --keep-cwd --version", "--user"],
   repeat: ["", ""],
   stdbuf: ["", "-e -i -o --error --input --output"],
   sudo: [
@@ -295,10 +294,8 @@ function optionValue(word, { flags, values }) {
 }
 var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
-  ["pkexec", new Set],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
-var BARE_ROOT = new Set(["pkexec"]);
 var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
 var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var COUNTED = new Set(["repeat", "timeout"]);
@@ -311,6 +308,9 @@ var ZSH_ARRAYS = new Set([
   "builtins",
   "cdpath",
   "commands",
+  "comppostfuncs",
+  "compprefuncs",
+  "compstate",
   "dirstack",
   "dis_aliases",
   "dis_builtins",
@@ -337,6 +337,7 @@ var ZSH_ARRAYS = new Set([
   "jobstates",
   "jobtexts",
   "keymaps",
+  "killring",
   "langinfo",
   "mailpath",
   "manpath",
@@ -352,6 +353,8 @@ var ZSH_ARRAYS = new Set([
   "path",
   "pipestatus",
   "psvar",
+  "region_highlight",
+  "registers",
   "reply",
   "reswords",
   "saliases",
@@ -363,6 +366,9 @@ var ZSH_ARRAYS = new Set([
   "usergroups",
   "watch",
   "widgets",
+  "words",
+  "zle_bracketed_paste",
+  "zle_highlight",
   "zsh_eval_context",
   "zsh_scheduled_events"
 ]);
@@ -1027,7 +1033,6 @@ function backtick(lx) {
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
   return unknown("a command substitution");
 }
-var echoes = false;
 function substituted(inner, known) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
@@ -1047,11 +1052,6 @@ function substituted(inner, known) {
   if (only.words.length === 0 && only.redirects.length === 1 && input.op === "<" && input.target) {
     return { reads: [input.target], value: READ };
   }
-  const printed = args.map((w) => w.value.replaceAll("\\n", `
-`));
-  const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value)) && printed.every((v) => !v.includes("\\"));
-  if (echoes && first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
-    return { value: printed.join(" ") };
   return unknown("a command substitution");
 }
 var MKTEMP_FLAGS = new Set(["d", "q"]);
