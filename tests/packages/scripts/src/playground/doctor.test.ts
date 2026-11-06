@@ -18,7 +18,10 @@ import {
   versionCheck,
 } from "../../../../../packages/scripts/src/playground/doctor"
 import { writeRoot } from "../../../../../packages/settings/src/folder"
+// registers the jobs.<name> settings policyJson resolves, as the store's writer has them
+import "../../../../../packages/settings/src/jobs"
 import { extensionsDir } from "../../../../../packages/settings/src/rendered"
+import { policyJson } from "../../../../../packages/settings/src/settings-folder"
 
 const DOCTOR = join(import.meta.dir, "../../../../../packages/scripts/src/playground/doctor.ts")
 const scratch = mkdtempSync(join(tmpdir(), "playground-doctor-"))
@@ -217,6 +220,13 @@ describe("the jobs check on a machine with a store", () => {
     ])
     expect(jobChecks(registryJobsText("{}"), () => true)).toEqual([
       { detail: "every ops job is off", name: "jobs", status: "ok" },
+    ])
+  })
+
+  test("a launchd job its row turns on by enabled alone reads its label from the registry (PG-1196)", () => {
+    const rows = [{ key: "jobs.opsTick", scope: "made-up-me", value: { enabled: true } }]
+    expect(jobChecks(registryJobsText(policyJson(rows, "made-up-me")), () => true)).toEqual([
+      { detail: "com.playground.ops-tick loaded", name: "job ops-tick", status: "ok" },
     ])
   })
 

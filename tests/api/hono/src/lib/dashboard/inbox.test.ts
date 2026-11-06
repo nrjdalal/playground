@@ -49,6 +49,7 @@ import { RELAY_ANSWER_KINDS } from "../../../../../../packages/message/src/index
 import { GUARD_SETTING_KEYS } from "../../../../../../packages/settings/src/guard-keys"
 import { judgeItem, putItem } from "../../../../../../packages/settings/src/items"
 import { loginPath } from "../../../../../../packages/settings/src/rendered"
+import { settingFields } from "../../../../../../packages/settings/src/settings"
 import {
   readSetting,
   setSetting,
@@ -1416,6 +1417,43 @@ describe("a guard decision (PG-1090)", () => {
     expect(checkAnswer(open, { action: "deny" })).toMatchObject({ status: "denied" })
     expect(checkAnswer(open, { action: "edit", text: "another value" })).toHaveProperty("message")
     expect(RELAY_ANSWER_KINDS as readonly string[]).not.toContain("guard")
+  })
+})
+
+// PG-1196: the guard decision also sets a job's enabled field and the ticket card's settings, which no session may write either.
+describe("a guard decision for a job or the ticket card (PG-1196)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
+
+  test("takes a registry job's enabled field alone, or no value, and each ticketCard key with a value its schema takes", () => {
+    expect(takes({ key: "jobs.opsTicketCard", value: { enabled: true } })).toBe(true)
+    expect(takes({ key: "jobs.opsSweep", value: { enabled: false } })).toBe(true)
+    expect(takes({ key: "jobs.opsTicketCard", value: undefined })).toBe(true)
+    expect(takes({ key: "ticketCard.deployedStates", value: ["Made-up Deployed"] })).toBe(true)
+    expect(takes({ key: "ticketCard.linesFile", value: "/made/up/lines.json" })).toBe(true)
+  })
+
+  test("GUARD_SETTING_KEYS holds every ticketCard key the settings define", () => {
+    const ticketCard = settingFields()
+      .map(({ key }) => key)
+      .filter((key) => key.startsWith("ticketCard."))
+    expect(ticketCard.length).toBeGreaterThan(0)
+    const guarded: string[] = GUARD_SETTING_KEYS.filter((key) => key.startsWith("ticketCard."))
+    expect(guarded).toEqual(ticketCard)
+  })
+
+  test("refuses a job decision carrying any field but enabled, a job the registry does not name, and a ticketCard value its key refuses", () => {
+    for (const change of [
+      { key: "jobs.opsTicketCard", value: { command: "made-up", enabled: true } },
+      { key: "jobs.opsTicketCard", value: { enabled: true, schedule: { every: 5 } } },
+      { key: "jobs.opsTicketCard", value: {} },
+      { key: "jobs.opsTicketCard", value: true },
+      { key: "jobs.opsMadeUp", value: { enabled: true } },
+      { key: "ticketCard.approvals", value: -1 },
+      { key: "ticketCard.madeUp", value: "x" },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
   })
 })
 
@@ -5205,6 +5243,52 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const set = await post(decision(GUARD))
       await store.answerItem(db, set.id, { action: "clear" }, { actor, settingsData: data })
       expect(atOrg(data)).toEqual([])
+    })
+
+    test("a job's Approve stores its enabled field alone at its scope, so every other field still reads the registry's (PG-1196)", async () => {
+      const data = folder()
+      const key = "jobs.opsTicketCard"
+      const card = { ...GUARD, key, scope: "made-up-me", value: { enabled: true } }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      const read = readSetting(data, key)!
+      expect(read.rows).toEqual([{ key, scope: "made-up-me", value: { enabled: true } }])
+      expect(read.value).toEqual({ ...(read.default as object), enabled: true })
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        set: { exitCode: 0, line: `set ${key} at made-up-me to {"enabled":true}` },
+      })
+      const again = await post(decision(card))
+      expect((await approve(again.id, again.updatedAt, data)).ok).toBe(true)
+      expect((await store.getItem(db, again.id))?.answer).toMatchObject({
+        set: {
+          exitCode: 0,
+          line: `${key} at made-up-me is already {"enabled":true}, so nothing changed`,
+        },
+      })
+    })
+
+    test("a job's Approve keeps the other fields its scope's row holds, and stores no registry field (PG-1196)", async () => {
+      const data = folder()
+      const key = "jobs.opsTicketCard"
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+      const row = { enabled: false, schedule: { every: 7 } }
+      expect(setSetting(data, { key, scope: "made-up-me", value: row }, who).ok).toBe(true)
+      const card = { ...GUARD, key, scope: "made-up-me", value: { enabled: true } }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(readSetting(data, key)!.rows).toEqual([
+        { key, scope: "made-up-me", value: { enabled: true, schedule: { every: 7 } } },
+      ])
+    })
+
+    test("a ticketCard Approve writes its key at the named scope (PG-1196)", async () => {
+      const data = folder()
+      const key = "ticketCard.deployedStates"
+      const posted = await post(decision({ ...GUARD, key, value: ["Made-up Deployed"] }))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(readSetting(data, key)!.rows).toEqual([
+        { key, scope: "acme-test", value: ["Made-up Deployed"] },
+      ])
     })
 
     test("with no data folder its Approve is refused and the item stays open", async () => {

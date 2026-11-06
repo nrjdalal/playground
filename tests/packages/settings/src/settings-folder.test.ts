@@ -235,3 +235,25 @@ describe("settings over the extensions folder", () => {
     }
   })
 })
+
+// PG-1196: a job turned on by its enabled field alone is stored as that field alone, and every reader (policy.json, readSetting, which merge-train's own schedule read goes through, and the Settings list the job toggles read) sees the registry's job under it.
+describe("a job set by its enabled field alone (PG-1196)", () => {
+  test("its row holds enabled alone, while policy.json and readSetting read the whole job, merge-train's schedule included", () => {
+    const data = fresh()
+    const key = "jobs.opsMergeTrain"
+    expect(set(data, key, ME, { enabled: true }, who("turn the train on")).ok).toBe(true)
+    expect(file(data, `${ME}/settings.json`)).toEqual({ [key]: { enabled: true } })
+    const read = readSetting(data, key)!
+    expect(read.rows).toEqual([{ key, scope: ME, value: { enabled: true } }])
+    expect(read.value).toEqual({ ...(read.default as object), enabled: true })
+    expect((read.value as { schedule: { every: number } }).schedule.every).toBeGreaterThan(0)
+    expect(file(data, "policy.json").values[key]).toEqual(read.value)
+    expect(listSettings(data).values[key]).toEqual(read.value)
+  })
+
+  test("a job the registry does not name is refused at write, and nothing is stored", () => {
+    const data = fresh()
+    expect(set(data, "jobs.opsMadeUp", ME, { enabled: true }, who("no such job")).ok).toBe(false)
+    expect(existsSync(join(extensionsDir(data), ME, "settings.json"))).toBe(false)
+  })
+})
