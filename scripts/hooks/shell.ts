@@ -540,28 +540,35 @@ export const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"])
 // The shells that make an unquoted parameter several words (fish a list's elements, the rest by splitting); zsh keeps one word unless the line may change that (`ZSH_SPLITS`)
 const SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"])
-// A zsh line that may make an unquoted plain parameter several words: one that sets an option (setopt, unsetopt, emulate, the options array, set's -o, +o, -y or -A) or makes an array (an `X=(` or `X+=(` assignment, read's or a declaring builtin's -a or -A, mapfile, readarray, zparseopts)
+// A zsh line that may make an unquoted plain parameter several words: one that sets an option (setopt, unsetopt, emulate, the options array, set's -o, +o, -y or -A), makes an array (an `X=(` or `X+=(` assignment, mapfile, readarray, zparseopts) or sources a file (`source`, `.`), which may do either
 const ZSH_SPLITS =
-  /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|\bread\b[^;&|\n]*\s-[A-Za-z]*[aA]|\b(?:declare|export|float|integer|local|readonly|typeset)\b[^;&|\n]*\s[-+][A-Za-z]*[aA]/
-// Whether a zsh line may make an unquoted plain parameter several words: it may set an option or make an array (`ZSH_SPLITS`), or it names a parameter it expands other than by expanding it, since a builtin `ZSH_SPLITS` does not list may fill that name as an array
+  /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)\s*(?:(?:builtin|command)\s+)?(?:source|\.)\s/
+// The builtins whose -a or -A makes an array: read and the declaring builtins
+const ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/
+// Whether a zsh line may make an unquoted plain parameter several words: it may set an option, make an array or source a file (`ZSH_SPLITS`), give read or a declaring builtin -a or -A (`ARRAY_MAKERS`), or name a parameter it expands other than by expanding it, since a builtin neither list names may fill that name as an array; each scan reads the line once, so a long line costs linear time
 export const zshSplits = (line: string): boolean => {
   if (ZSH_SPLITS.test(line)) return true
+  for (const command of line.split(/[;&|\n]/)) {
+    const at = command.search(ARRAY_MAKERS)
+    if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at))) return true
+  }
   const joined = line.replace(/[\\'"]/g, "")
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g
-  const rest = joined.replace(expansion, " ")
-  return [...joined.matchAll(expansion)].some(([, name]) =>
-    new RegExp(`(?<![\\w$])${name}(?!\\w)`).test(rest),
-  )
+  const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g))
+  return [...joined.matchAll(expansion)].some(([, name]) => named.has(name))
 }
 // An unquoted expansion zsh reads as one word unless the line splits it (`Text.splits`'s `sh`): a plain parameter by name or digit, braced or not, but one of zsh's own arrays (`ZSH_ARRAYS`)
 const ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/
-// The arrays and hashes zsh sets, ties or fills itself, each several words unquoted (zsh 5.9's zshparam(1), and zshmodules(1)'s zsh/datetime, zsh/langinfo, zsh/parameter, zsh/sched, zsh/system, zsh/termcap, zsh/terminfo and zsh/zleparameter)
+// The arrays and hashes zsh sets, ties or fills itself, each several words unquoted (zsh 5.9's zshparam(1), zshzle(1)'s and zshcompwid(1)'s special parameters, zshcompsys(1)'s hook arrays, and zshmodules(1)'s zsh/datetime, zsh/langinfo, zsh/parameter, zsh/sched, zsh/system, zsh/termcap, zsh/terminfo and zsh/zleparameter)
 const ZSH_ARRAYS = new Set([
   "aliases",
   "argv",
   "builtins",
   "cdpath",
   "commands",
+  "comppostfuncs",
+  "compprefuncs",
+  "compstate",
   "dirstack",
   "dis_aliases",
   "dis_builtins",
@@ -588,6 +595,7 @@ const ZSH_ARRAYS = new Set([
   "jobstates",
   "jobtexts",
   "keymaps",
+  "killring",
   "langinfo",
   "mailpath",
   "manpath",
@@ -603,6 +611,7 @@ const ZSH_ARRAYS = new Set([
   "path",
   "pipestatus",
   "psvar",
+  "region_highlight",
   "reply",
   "reswords",
   "saliases",
@@ -614,6 +623,9 @@ const ZSH_ARRAYS = new Set([
   "usergroups",
   "watch",
   "widgets",
+  "words",
+  "zle_bracketed_paste",
+  "zle_highlight",
   "zsh_eval_context",
   "zsh_scheduled_events",
 ])
