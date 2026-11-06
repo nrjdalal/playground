@@ -98,15 +98,19 @@ const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 // Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
 const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
-// A writer's options whose next word is a value rather than a target: mkdir's mode, touch's date, reference file and stamp
-const WRITER_TAKES: Record<string, string[]> = { mkdir: ["-m"], touch: ["-d", "-r", "-t"] }
+// A writer's options whose next word is a value rather than a target: install's group, mode and owner, mkdir's mode, touch's date, reference file and stamp
+const WRITER_TAKES: Record<string, string[]> = {
+  install: ["-g", "-m", "-o"],
+  mkdir: ["-m"],
+  touch: ["-d", "-r", "-t"],
+}
 const DUPLICATE = /^(?:\d+|-)$/
 // Whether a redirect writes a file: >, >>, >|, <> or >& to a name, not an fd
 const writer = ({ op, target }: { op: string; target?: Word }): boolean =>
   [">", ">>", ">|", "<>"].includes(op) || (op === ">&" && !DUPLICATE.test(target?.value ?? ""))
 const GLOB = /[*?[{(]/
-// Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
-const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|LESSOPEN|PAGER|VISUAL)$/
+// Variables that make git or a pager run a program, or point git at a config file that can, so a reader with one set is judged as any other program.
+const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/
 // git's variables that only name an author or a committer, text git never runs
 const GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
@@ -186,21 +190,43 @@ function gitConfigs(args: Word[]): Word[] {
   return configs
 }
 
-// The words a writer writes to: dd's of= operand, the -t folder of cp, install and ln or else their last operand, and every operand of mkdir, tee and touch
+// A word past the literal prefix a writer reads its target after (`of=`, `-t`, `--target-directory=`), its raw text cut alike so held() reads the rest; with no raw text that opens with the prefix, an unread rest stays unheld
+const after = (word: Word, cut: number): Word => ({
+  ...word,
+  raw: word.raw?.startsWith(word.value.slice(0, cut)) ? word.raw.slice(cut) : undefined,
+  value: word.value.slice(cut),
+})
+
+// The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install and ln (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch
 function writeTargets(name: string, args: Word[]): Word[] {
-  if (name === "dd") return args.filter((word) => word.value.startsWith("of="))
+  if (name === "dd")
+    return args.flatMap((word) =>
+      word.value.startsWith("of=")
+        ? [after(word, 3)]
+        : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value)
+          ? [word]
+          : [],
+    )
   const into = name === "cp" || name === "install" || name === "ln"
   const operands: Word[] = []
   let folder: Word | undefined
+  let folders = false
   for (let k = 0, options = true; k < args.length; k++) {
-    const { value } = args[k]
-    if (!options || value === "-" || !value.startsWith("-")) operands.push(args[k])
+    const word = args[k]
+    const { value } = word
+    const long = /^--([a-z-]+)(=?)/.exec(value)
+    if (!options || value === "-" || !value.startsWith("-")) operands.push(word)
     else if (value === "--") options = false
     else if (WRITER_TAKES[name]?.includes(value)) k++
-    else if (into && /^(?:-[A-Za-z]*t|--target-directory)$/.test(value)) folder = args[++k]
-    else if (into && /^(?:-t.|--target-directory=)/.test(value)) folder = args[k]
+    else if (name === "install" && (value === "--directory" || /^-[A-Za-z]*d/.test(value)))
+      folders = true
+    else if (into && long && "target-directory".startsWith(long[1]))
+      folder = long[2] ? after(word, long[0].length) : args[++k]
+    else if (into && /^-[A-Za-z]*t/.test(value))
+      folder = value.endsWith("t") ? args[++k] : after(word, value.indexOf("t") + 1)
   }
-  return into ? (folder ? [folder] : operands.slice(-1)) : operands
+  if (name === "ln" && !folder && operands.length === 1) return [{ quoted: false, value: "." }]
+  return into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
 }
 
 // The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from.
@@ -703,12 +729,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
-  // whether the hook places a write's path with no folder of the shell's: absolute, under ~, or through a variable the call holds; dd's of= and a -t folder by their value
+  // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
   const placed = (word: Word, env: Env, steady: Steady) =>
-    pathOf(texts(heldWord(word, env, steady) ?? word).at(-1) as Text, {
-      ...env,
-      cwd: undefined,
-    }) !== undefined
+    pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined
   const afterUnreadCd = (write: string) =>
     `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`
   const seen = new Set<string>()
@@ -896,8 +919,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
     // after a cd the hook cannot read, a remover's operand or a writer's target the hook can place only by the shell's own folder may be in the root
+    const end = args.findIndex((word) => word.value === "--")
     const operands = remover
-      ? args.filter((word) => !word.value.startsWith("-"))
+      ? args.filter((word, k) => (end !== -1 && k > end) || !word.value.startsWith("-"))
       : WRITERS.has(name)
         ? writeTargets(name, args)
         : []
