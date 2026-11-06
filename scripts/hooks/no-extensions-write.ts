@@ -823,18 +823,18 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, first, name, xargs } = parsed
-    // findutils' g names are read again as find and xargs, so every check those two take reads them
+    // findutils' g names are read again as find and xargs, so every check those two take reads them; the words swap in place, keeping the Command steadyAt knows and the program's path
     const findutils = GNU_NAMED.exec(name)?.[1]
-    if (first && (findutils === "find" || findutils === "xargs"))
-      return examine(
-        {
-          ...cmd,
-          words: cmd.words.map((word) => (word === first ? { ...word, value: findutils } : word)),
-        },
-        env,
-        visit,
-        false,
-      )
+    if (first && (findutils === "find" || findutils === "xargs")) {
+      const { words } = cmd
+      const value = first.value.replace(/g(find|xargs)$/, "$1")
+      cmd.words = words.map((word) => (word === first ? { ...word, value } : word))
+      try {
+        return await examine(cmd, env, visit, false)
+      } finally {
+        cmd.words = words
+      }
+    }
     // every folder the shell may be in, so a write a cd the reader cannot be sure of would land in the root is judged there too
     for (const here of places(env)) {
       const into = cmd.redirects.find(

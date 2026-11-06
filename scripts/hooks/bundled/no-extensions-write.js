@@ -3157,11 +3157,16 @@ async function inspect(raw, environment, unknown = false) {
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false);
     const { args, first, name, xargs } = parsed;
     const findutils = GNU_NAMED.exec(name)?.[1];
-    if (first && (findutils === "find" || findutils === "xargs"))
-      return examine({
-        ...cmd,
-        words: cmd.words.map((word) => word === first ? { ...word, value: findutils } : word)
-      }, env, visit, false);
+    if (first && (findutils === "find" || findutils === "xargs")) {
+      const { words } = cmd;
+      const value = first.value.replace(/g(find|xargs)$/, "$1");
+      cmd.words = words.map((word) => word === first ? { ...word, value } : word);
+      try {
+        return await examine(cmd, env, visit, false);
+      } finally {
+        cmd.words = words;
+      }
+    }
     for (const here of places(env)) {
       const into = cmd.redirects.find((r) => r.target && writer(r) && (inRoot(pathOf(r.target, here)) || GLOB.test(r.target.value) && !!names(r.target, here, true)));
       if (into?.target)
