@@ -30,7 +30,7 @@ import {
 } from "../../../../../packages/scripts/src/ops-tick/tick"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
-import { fakeRun } from "./fake-run"
+import { type Answers, fakeRun } from "./fake-run"
 
 // A machine whose sessions.names keep the old names, which this file's fallbacks name.
 beforeAll(() => setSessionNames(OLD_AS_NAMES))
@@ -53,12 +53,7 @@ const scratch = (): string => {
 const at = (hour: number, minute: number) => new Date(2026, 9, 19, hour, minute, 10)
 
 // A fake context: each script's answer by a word of its argv (fakeRun), every run and every line sent recorded; a line holding a word of fails throws, as notify.sh failing does.
-const fake = (
-  ops: string,
-  now: Date,
-  answers: Parameters<typeof fakeRun>[0] = {},
-  fails: string[] = [],
-) => {
+const fake = (ops: string, now: Date, answers: Answers = {}, fails: string[] = []) => {
   const { inputs, run, runs } = fakeRun(answers)
   const sent: { text: string; to: string }[] = []
   const ctx: Context = {

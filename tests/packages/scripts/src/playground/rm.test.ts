@@ -1,5 +1,6 @@
 import { afterAll, expect, test } from "bun:test"
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -116,6 +117,7 @@ const machine = () => {
     main,
     merged: () => false,
     notify: (text) => void told.push(text),
+    places: () => [],
     session: async () => "j6rjgy-worker",
   }
   return { deps, home, main, root, told }
@@ -414,6 +416,162 @@ test("runRm --worktree refuses a worktree a running clone reads from, naming the
   expect(existsSync(wt)).toBe(true)
   expect(await runRm(["--worktree", wt], deps)).toBe(0)
   expect(existsSync(wt)).toBe(false)
+})
+
+// A main checkout with a remote and a worktree on PG-1-thing holding one commit of its own, which the deps call merged, so rm --worktree moves it, after a step of the caller's own and with its extra words; and the trash id of the move.
+const trashedWorktree = async (
+  before = (_wt: string, _main: string) => {},
+  words: string[] = [],
+) => {
+  const { deps, main, root } = machine()
+  git(root, "init", "--bare", "-q", join(root, "remote.git"))
+  git(main, "init", "-q", "-b", "canary")
+  writeFileSync(join(main, "README.md"), "x")
+  git(main, "add", ".")
+  git(main, "commit", "-qm", "init")
+  git(main, "remote", "add", "origin", join(root, "remote.git"))
+  git(main, "push", "-q", "origin", "canary")
+  const wt = join(main, ".claude", "worktrees", "pg-1")
+  git(main, "worktree", "add", "-q", "-b", "PG-1-thing", wt)
+  writeFileSync(join(wt, "work.txt"), "work")
+  git(wt, "add", ".")
+  git(wt, "commit", "-qm", "work")
+  const sha = git(wt, "rev-parse", "HEAD")
+  const merged = { ...deps, merged: () => true }
+  before(wt, main)
+  expect(await runRm(["--worktree", wt, ...words], merged)).toBe(0)
+  expect(existsSync(wt)).toBe(false)
+  const [batch] = readdirSync(join(deps.data, "trash"))
+  return { deps: merged, id: `${batch}/1`, main, sha, wt }
+}
+
+// What git reads in a restored worktree: its status, its branch, its HEAD, and whether the main checkout lists it.
+const gitSees = (main: string, wt: string) => ({
+  branch: git(wt, "symbolic-ref", "--short", "HEAD"),
+  head: git(wt, "log", "-1", "--format=%H"),
+  listed: git(main, "worktree", "list", "--porcelain").includes(`worktree ${wt}\n`),
+  status: git(wt, "status", "--porcelain"),
+})
+
+test("runRm --restore brings a worktree back as git reads it: on its branch, at the commit it held, listed", async () => {
+  const { deps, id, main, sha, wt } = await trashedWorktree()
+  expect(await runRm(["--restore", id], deps)).toBe(0)
+  expect(gitSees(main, wt)).toEqual({ branch: "PG-1-thing", head: sha, listed: true, status: "" })
+})
+
+test("runRm --restore recreates the worktree's branch at the commit it held when the branch has gone", async () => {
+  const { deps, id, main, sha, wt } = await trashedWorktree()
+  git(main, "branch", "-D", "PG-1-thing")
+  expect(await runRm(["--restore", id], deps)).toBe(0)
+  expect(gitSees(main, wt)).toEqual({ branch: "PG-1-thing", head: sha, listed: true, status: "" })
+  expect(git(main, "rev-parse", "PG-1-thing")).toBe(sha)
+})
+
+test("runRm --restore refuses a worktree whose branch and commit have both gone, naming the commit, and moves nothing", async () => {
+  const { deps, id, main, sha, wt } = await trashedWorktree()
+  git(main, "branch", "-D", "PG-1-thing")
+  git(main, "reflog", "expire", "--expire=now", "--all")
+  git(main, "gc", "-q", "--prune=now")
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--restore", id], deps)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toHaveLength(1)
+  expect(said[0]).toContain(sha)
+  expect(said[0]).toContain(`git -C ${main} branch PG-1-thing ${sha}`)
+  expect(existsSync(wt)).toBe(false)
+  expect(readdirSync(join(deps.data, "trash", id))).toEqual(["pg-1"])
+})
+
+test("runRm --restore leaves a worktree's git record as it is when it is still there, so a staged change stays staged", async () => {
+  let saved = ""
+  const { deps, id, main, wt } = await trashedWorktree(
+    (wt, main) => {
+      writeFileSync(join(wt, "staged.txt"), "s")
+      git(wt, "add", "staged.txt")
+      saved = join(main, "..", "pg-1-record")
+      cpSync(join(main, ".git", "worktrees", "pg-1"), saved, { recursive: true })
+    },
+    ["--discard"],
+  )
+  cpSync(saved, join(main, ".git", "worktrees", "pg-1"), { recursive: true })
+  expect(await runRm(["--restore", id], deps)).toBe(0)
+  expect(git(wt, "diff", "--cached", "--name-only")).toBe("staged.txt")
+})
+
+test("runRm --restore refuses a worktree whose branch now points at another commit, naming both, and moves nothing", async () => {
+  const { deps, id, main, sha, wt } = await trashedWorktree()
+  git(main, "branch", "-f", "PG-1-thing", "canary")
+  const moved = git(main, "rev-parse", "canary")
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--restore", id], deps)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toHaveLength(1)
+  expect(said[0]).toContain(sha)
+  expect(said[0]).toContain(moved)
+  expect(said[0]).not.toContain("branch -f")
+  expect(existsSync(wt)).toBe(false)
+  expect(git(main, "rev-parse", "PG-1-thing")).toBe(moved)
+})
+
+test("runRm --restore brings a detached worktree back detached, at the commit it held", async () => {
+  const { deps, id, main, sha, wt } = await trashedWorktree((wt) =>
+    git(wt, "checkout", "-q", "--detach"),
+  )
+  expect(await runRm(["--restore", id], deps)).toBe(0)
+  expect(readFileSync(join(main, ".git", "worktrees", "pg-1", "HEAD"), "utf8")).toBe(`${sha}\n`)
+  expect(git(wt, "rev-parse", "HEAD")).toBe(sha)
+  expect(git(wt, "status", "--porcelain")).toBe("")
+  expect(git(main, "worktree", "list", "--porcelain")).toContain(`worktree ${wt}\n`)
+})
+
+test("runRm --restore refuses a detached worktree whose commit has gone, naming the commit and no branch", async () => {
+  const { deps, id, main, sha, wt } = await trashedWorktree((wt) =>
+    git(wt, "checkout", "-q", "--detach"),
+  )
+  git(main, "branch", "-D", "PG-1-thing")
+  git(main, "reflog", "expire", "--expire=now", "--all")
+  git(main, "gc", "-q", "--prune=now")
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--restore", id], deps)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toHaveLength(1)
+  expect(said[0]).toContain(sha)
+  expect(said[0]).not.toContain("git -C")
+  expect(existsSync(wt)).toBe(false)
+})
+
+test("runRm --restore exits 1 naming the step when git cannot recreate the branch after the move", async () => {
+  const { deps, id, main, wt } = await trashedWorktree()
+  git(main, "branch", "-D", "PG-1-thing")
+  writeFileSync(join(main, ".git", "refs", "heads", "PG-1-thing.lock"), "")
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--restore", id], deps)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toHaveLength(1)
+  expect(said[0]).toStartWith(
+    `playground: restored ${wt}, but git cannot read it yet: git branch PG-1-thing `,
+  )
+  expect(existsSync(wt)).toBe(true)
 })
 
 test("clonesOf reads run-slot's clone holder line while its pid lives, and a line with no source as none", () => {

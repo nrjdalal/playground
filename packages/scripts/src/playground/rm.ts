@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join, resolve } from "node:path"
 
@@ -6,11 +6,13 @@ import { dataDir } from "@packages/env/data-dir"
 import {
   type Clone,
   isAgentBrowser,
+  linkPlaces,
   listTrash,
   type Proc,
   quarantine,
   restore,
   type Roots,
+  type WorktreeGit,
 } from "@packages/safe-delete"
 
 import { targetWords } from "../../../../api/hono/src/lib/dashboard/delete-targets"
@@ -79,7 +81,7 @@ export type Decision = {
   status?: string
 }
 
-// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the session the caller is (callerOf), and the session's name.
+// What playground rm reads and calls beyond its words, so a test hands it a mkdtemp machine: the running clones, the folders it starts from, an Inbox item by its id, whether a merged PR holds a commit, every process with a working folder, the ops notify line to the dispatcher, the folders read for links into a worktree, the session the caller is (callerOf), and the session's name.
 export type RmDeps = {
   caller: () => Promise<string | undefined>
   clones: () => Clone[]
@@ -89,6 +91,7 @@ export type RmDeps = {
   main: string
   merged: (sha: string, at: string) => boolean | null
   notify: (text: string) => void
+  places: () => string[]
   procs: () => Proc[] | null
   session: () => Promise<string>
 }
@@ -217,7 +220,7 @@ const decisionOf =
     }
   }
 
-// This machine's: the caller above this process, run-slot's running clone, HOME, the data folder, the Inbox through the Dashboard's checkout, the main checkout, gh for a merged PR, notify.sh to the dispatcher, lsof and ps, and the Claude Code registry's name for this session, else "shell".
+// This machine's: the caller above this process, run-slot's running clone, HOME, the data folder, the Inbox through the Dashboard's checkout, the main checkout, gh for a merged PR, notify.sh to the dispatcher, linkPlaces' temp and scratchpad folders, lsof and ps, and the Claude Code registry's name for this session, else "shell".
 export const rmDeps = (repo: string): RmDeps => ({
   caller: () => callerOf(process.env, process.ppid),
   clones: clones(dataDir()),
@@ -232,6 +235,7 @@ export const rmDeps = (repo: string): RmDeps => ({
       stderr: "ignore",
       stdout: "ignore",
     }),
+  places: linkPlaces,
   procs: processes,
   session: sessionName,
 })
@@ -261,6 +265,57 @@ export const discardRefusal = async (
   return null
 }
 
+const gitIn = (cwd: string, ...args: string[]) => {
+  const run = Bun.spawnSync(["git", "-C", cwd, ...args], { stderr: "pipe", stdout: "pipe" })
+  return {
+    err: run.stderr.toString().trim(),
+    ok: run.exitCode === 0,
+    out: run.stdout.toString().trim(),
+  }
+}
+
+// A worktree's git record, read before its move, or undefined when git cannot read it.
+export const worktreeGit = (path: string): WorktreeGit | undefined => {
+  const sha = gitIn(path, "rev-parse", "HEAD")
+  const gitdir = gitIn(path, "rev-parse", "--absolute-git-dir")
+  if (!sha.ok || !gitdir.ok) return undefined
+  const branch = gitIn(path, "symbolic-ref", "--quiet", "--short", "HEAD")
+  return { branch: branch.ok ? branch.out : null, gitdir: gitdir.out, sha: sha.out }
+}
+
+// Why a worktree's restore would leave it on another commit or unreadable, or null; a record folder still there is kept as it is.
+const relinkRefusal = (main: string, git: WorktreeGit): string | null => {
+  if (existsSync(git.gitdir)) return null
+  const at = git.branch
+    ? gitIn(main, "rev-parse", "--verify", "--quiet", `refs/heads/${git.branch}`)
+    : null
+  if (at?.ok && at.out !== git.sha)
+    return `the branch ${git.branch} now points at ${at.out}, not ${git.sha}, the commit the worktree held, so the restore leaves both as they are`
+  if (at?.ok || gitIn(main, "cat-file", "-e", `${git.sha}^{commit}`).ok) return null
+  return `the commit ${git.sha} the worktree held is gone from ${main}, so its restore would leave a folder git cannot read: ${git.branch ? `fetch that commit, run git -C ${main} branch ${git.branch} ${git.sha}, then restore it again` : "fetch that commit, then restore it again"}`
+}
+
+// Writes a gone git record back, recreates a gone branch at its commit and rebuilds the index from HEAD, keeping the files: null when done, else the step that failed.
+const relink = (path: string, main: string, git: WorktreeGit): string | null => {
+  if (existsSync(git.gitdir)) return null
+  mkdirSync(git.gitdir, { recursive: true })
+  writeFileSync(
+    join(git.gitdir, "HEAD"),
+    git.branch ? `ref: refs/heads/${git.branch}\n` : `${git.sha}\n`,
+  )
+  writeFileSync(join(git.gitdir, "commondir"), "../..\n")
+  writeFileSync(join(git.gitdir, "gitdir"), `${join(path, ".git")}\n`)
+  if (
+    git.branch &&
+    !gitIn(main, "show-ref", "--verify", "--quiet", `refs/heads/${git.branch}`).ok
+  ) {
+    const made = gitIn(main, "branch", git.branch, git.sha)
+    if (!made.ok) return `git branch ${git.branch} ${git.sha} failed: ${made.err}`
+  }
+  const reset = gitIn(path, "reset", "-q")
+  return reset.ok ? null : `git reset -q failed: ${reset.err}`
+}
+
 // playground rm: one quarantine, list or restore against the deps' HOME, main checkout and trash; a protected or tripwire refusal goes to the dispatcher; exit 0 done, 1 refused, 2 a usage error.
 export async function runRm(words: string[], deps: RmDeps): Promise<number> {
   const args = rmArgs(words)
@@ -284,13 +339,24 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
       )
     return 0
   }
+  const keptGit =
+    "restore" in args
+      ? listTrash(roots.trash).find((entry) => entry.id === args.restore)?.git
+      : undefined
+  const relinkRefused = keptGit && relinkRefusal(roots.main, keptGit)
+  if (relinkRefused) {
+    console.error(`playground: ${relinkRefused}`)
+    return 1
+  }
   const session = "restore" in args ? "" : await deps.session()
+  const git = "worktree" in args && args.worktree ? worktreeGit(args.path) : undefined
   const done =
     "restore" in args
       ? restore(args.restore, roots)
       : quarantine(
           args.path,
           {
+            ...(git ? { git } : {}),
             reason: args.reason,
             session,
             worktree: args.worktree
@@ -299,6 +365,7 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
                   discard: args.discard,
                   live: STATUSES.live,
                   merged: deps.merged,
+                  places: deps.places,
                   ...(args.pr ? { pr: args.pr } : {}),
                   procs: deps.procs(),
                   roster: join(deps.data, "roster.json"),
@@ -313,6 +380,11 @@ export async function runRm(words: string[], deps: RmDeps): Promise<number> {
     return 1
   }
   if ("path" in done) {
+    const relinked = keptGit ? relink(done.path, roots.main, keptGit) : null
+    if (relinked) {
+      console.error(`playground: restored ${done.path}, but git cannot read it yet: ${relinked}`)
+      return 1
+    }
     console.log(`Restored ${done.path}`)
     return 0
   }

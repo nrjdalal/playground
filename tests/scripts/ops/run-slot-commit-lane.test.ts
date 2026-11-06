@@ -1047,6 +1047,23 @@ describe("commit-lane forms that cost no build", () => {
     expect(await takes(m, chain(m, steps), outside(m), medium)).toBe("waited")
   })
 
+  // a chain of git's plumbing reads commits nothing, so it starts as its own size
+  for (const steps of [
+    "git merge-base HEAD origin/canary && git cat-file -t HEAD",
+    "git for-each-ref refs/heads && git merge-base HEAD x",
+  ])
+    test(`a chain with ${steps} runs as a medium run`, async () => {
+      const m = lanes()
+      expect(await takes(m, chain(m, steps), outside(m), medium)).toMatch(/^run-slot/)
+    })
+
+  // while a plumbing write stays off git_known, so a chain counts it as a commit
+  for (const steps of ["git update-ref refs/heads/x HEAD", "git hash-object -w notes.md"])
+    test(`a chain with ${steps} counts as a build`, async () => {
+      const m = lanes()
+      expect(await takes(m, chain(m, steps), outside(m), medium)).toBe("waited")
+    })
+
   test("while git frob, which no alias names, runs as a medium run", async () => {
     const m = lanes("alias.ci\n")
     expect(await takes(m, ["git", "-C", m.root, "frob"], m.root, medium)).toMatch(/^run-slot/)
