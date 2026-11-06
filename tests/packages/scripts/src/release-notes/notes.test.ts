@@ -215,29 +215,30 @@ describe("renderNotes (PG-1213)", () => {
       .find((l) => l.startsWith("- **PG-30:**"))
 
   test.each([
-    [
-      "ops-made-up-start starts a worker for each open ticket",
-      "ops-made-up-start starts a worker for each open ticket",
-    ],
-    [
-      "no-made-up-delete reads a heredoc as its script",
-      "no-made-up-delete reads a heredoc as its script",
-    ],
-    [
-      "bun run ask builds a stale dist before it runs",
-      "bun run ask builds a stale dist before it runs",
-    ],
-    ["gh pr view reads the head once", "gh pr view reads the head once"],
-    ["rm --restore brings a worktree back", "rm --restore brings a worktree back"],
-    ["--all prints every changed line", "--all prints every changed line"],
-    ["spawn.sh refuses a second start", "spawn.sh refuses a second start"],
-    ["hooks:differential says when it cuts lines", "hooks:differential says when it cuts lines"],
-    ["madeUpReader keeps its cache", "madeUpReader keeps its cache"],
-    ["`made-up` keeps its quotes", "`made-up` keeps its quotes"],
+    "ops-made-up-start starts a worker for each open ticket",
+    "no-made-up-delete reads a heredoc as its script",
+    "bun run ask builds a stale dist before it runs",
+    "gh pr view reads the head once",
+    "rm --restore brings a worktree back",
+    "--all prints every changed line",
+    "spawn.sh refuses a second start",
+    "hooks:differential says when it cuts lines",
+    "madeUpReader keeps its cache",
+    "`made-up` keeps its quotes",
+  ])(
+    "a first word that is a command, a flag, a file or a code-like name keeps its case: %p",
+    (subject) => {
+      expect(fixLine(subject)).toBe(`- **PG-30:** ${subject} ([#30](${URL}/pull/30))`)
+    },
+  )
+
+  test.each([
     ["the board keeps its order", "The board keeps its order"],
     ["a received row reads as a sent one does", "A received row reads as a sent one does"],
+    ["the --made-up refusal names its route", "The --made-up refusal names its route"],
+    ["an --all run prints every line", "An --all run prints every line"],
   ])(
-    "a line's first word keeps its case when it is a command, a flag, a file or a code-like name, and a plain word gets its capital: %p",
+    "a plain first word gets its capital, an article before a flag included: %p",
     (subject, shown) => {
       expect(fixLine(subject)).toBe(`- **PG-30:** ${shown} ([#30](${URL}/pull/30))`)
     },
