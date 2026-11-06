@@ -132,6 +132,15 @@ jobs:
       - name: Install dependencies
         run: bun install --ignore-scripts
 
+      # a test starts its container in a 60s beforeAll, and a fresh runner's pull inside it timed out (PG-1058); image-pull.test.ts holds this list to the images the tests start
+      - name: Pull the test images
+        run: |
+          for image in postgres:18-alpine redis:alpine; do
+            start=$(date +%s)
+            docker pull -q "$image"
+            echo "$image pulled in $(( $(date +%s) - start ))s"
+          done
+
       - name: Take the split's timings
         uses: actions/download-artifact@v8
         with:
