@@ -295,18 +295,18 @@ describe("another session's message", () => {
       }),
     )
 
-  test("draws closed as a tool row: Received from its sender, then its first line", () => {
+  test("draws closed as a tool row as a sent message reads: Received alone bright, then from its sender and its first line", () => {
     const html = row()
     expect(html).toContain('data-slot="trace-collapsible-trigger"')
     expect(html).toMatch(/data-slot="trace-line"[^>]*class="[^"]*\btext-xs\b/)
-    expect(html).toContain("Received from Builder</span> PR #12 merged.")
+    expect(html).toContain("Received</span> from Builder: PR #12 merged.")
     expect(html).not.toContain("The sha is abc123")
     expect(html).not.toContain('data-slot="message"')
   })
 
   test("a sender's own name line stays out of its row", () => {
     expect(row("builder: PR #12 merged.\nmore")).toContain(
-      "Received from Builder</span> PR #12 merged.",
+      "Received</span> from Builder: PR #12 merged.",
     )
   })
 
