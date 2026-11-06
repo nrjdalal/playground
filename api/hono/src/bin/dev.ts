@@ -189,7 +189,7 @@ if (!dry) {
     const scratch = fixtureDir({ PLAYGROUND_FIXTURE_DIR: settings.PLAYGROUND_FIXTURE_DIR })
     try {
       writeFixture(checked.dashboard.fixture, scratch, trashRoots(ROOT))
-      markLaunched(scratch)
+      markLaunched(scratch, process.pid, started)
       wrote = scratch
     } catch (error) {
       console.error(`dev: refusing to start: ${error instanceof Error ? error.message : error}`)
