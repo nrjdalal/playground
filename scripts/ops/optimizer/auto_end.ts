@@ -4,8 +4,10 @@
 // After a close, each worktree the session used is cleaned (cleanWorktree): its dev stack stopped, the worktree moved to the trash, its containers and branch removed, or kept with the reason.
 // Every end and every refusal is one line for its lead; it signals nothing itself but through bun run dev:stop, which signals only the process groups that worktree's stack recorded.
 
+import { existsSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
 
+import { recordPath } from "../../../api/hono/src/lib/dev/stop"
 import { kindOf, managerKindOfName } from "../../../packages/config/src/kinds"
 import {
   type CollectInput,
@@ -285,7 +287,8 @@ export async function cleanWorktree(
       return `kept ${path}: not a worktree in ${join(deps.main, ".claude", "worktrees")}`
     const holder = await deps.held(path, pr)
     if (holder) return `kept ${path}: ${holder}`
-    const stopped = await deps.devStop(path)
+    // a clone with no stack record has no stack to stop, and a reviewer's clone with no node_modules cannot load dev:stop at all
+    const stopped = existsSync(recordPath(path)) ? await deps.devStop(path) : { ok: true, out: "" }
     if (!stopped.ok && !stopped.out.includes("no stack is recorded"))
       return `kept ${path}: ${stopped.out}`
     const moved = await deps.rm(path, reason, pr)
