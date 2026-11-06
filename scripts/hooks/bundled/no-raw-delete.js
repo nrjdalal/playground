@@ -1960,8 +1960,7 @@ async function inspect(raw, environment) {
     if (verdict)
       return verdict;
     if (rootFed(cmd)) {
-      const found = await line((await stdinOf(cmd, at)).value.replaceAll(UNKNOWN, `
-`), at);
+      const found = await line(known(await stdinOf(cmd, at)), at);
       if (found)
         return found;
     }

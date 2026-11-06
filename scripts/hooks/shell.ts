@@ -1963,7 +1963,7 @@ async function shell(
 }
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
-const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
+export const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
 
 // A shell's or source's script: stdin with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text> {
