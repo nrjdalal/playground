@@ -336,19 +336,35 @@ export const check = (raw) => {
   test("ROOT_READS names every file in the hooks' import graph that reads a path from its own folder, and only those", () => {
     const repo = join(import.meta.dir, "../../../..")
     const SPEC =
-      /(?:^|\n)\s*(?:import|export)\b[^"'`]*?from\s*["']([^"']+)["']|(?:^|\n)\s*import\s*["']([^"']+)["']/g
+      /(?:^|\n)\s*(?:import|export)\b[^"'`]*?from\s*["']([^"']+)["']|(?:^|\n)\s*import\s*["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g
     const OWN = /import\.meta\.(?:dir|dirname|filename|path|url)\b/
+    const file = (base: string) =>
+      [base, `${base}.ts`, join(base, "index.ts")].find(
+        (c) => existsSync(c) && statSync(c).isFile(),
+      )
+    // a relative path from the importer, `@packages/<name>[/<sub>]` by its package's bun export else `src/<sub>`, and a package's own `@/<path>` under its `src`
+    const target = (importer: string, spec: string): string | undefined => {
+      if (spec.startsWith(".")) return file(resolve(dirname(importer), spec))
+      const pkg = /^@packages\/([^/]+)(?:\/(.+))?$/.exec(spec)
+      if (pkg) {
+        const at = join(repo, "packages", pkg[1]!)
+        const json = JSON.parse(readFileSync(join(at, "package.json"), "utf8")) as {
+          exports?: Record<string, { bun?: string } | string>
+        }
+        const entry = json.exports?.[pkg[2] ? `./${pkg[2]}` : "."]
+        const bun = typeof entry === "object" ? entry.bun : undefined
+        return (bun && file(join(at, bun))) || file(join(at, "src", pkg[2] ?? "index"))
+      }
+      const own = /^@\/(.+)$/.exec(spec)
+      const home = /^(.*\/packages\/[^/]+)\//.exec(importer)?.[1]
+      return own && home ? file(join(home, "src", own[1]!)) : undefined
+    }
     const seen = new Set<string>()
     const visit = (path: string) => {
       if (seen.has(path)) return
       seen.add(path)
       for (const m of readFileSync(path, "utf8").matchAll(SPEC)) {
-        const spec = m[1] ?? m[2]!
-        if (!spec.startsWith(".")) continue
-        const base = resolve(dirname(path), spec)
-        const found = [base, `${base}.ts`, join(base, "index.ts")].find(
-          (c) => existsSync(c) && statSync(c).isFile(),
-        )
+        const found = target(path, (m[1] ?? m[2] ?? m[3])!)
         if (found) visit(found)
       }
     }
