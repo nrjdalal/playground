@@ -539,6 +539,25 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
         "-c",
         'case x in $(case y in a) ;; esac; /bin/s? -c "/usr/local/bin/doc?er build .")) ;; esac',
       ],
+      // review round 5 of #1219: a heredoc body's, a quoted or a comment's ) does not end a substitution
+      ["sh", "-c", "case x in $(cat <<E\n)\nE\n/usr/local/bin/doc?er build .)) ;; esac"],
+      ["sh", "-c", "case $(cat <<E\n)\nE\n/usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["sh", "-c", "case $(cat <<-E\n\t)\n\tE\n/usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["sh", "-c", 'echo "$(cat <<E\n)\nE\n/usr/local/bin/doc?er build .)"'],
+      [
+        "sh",
+        "-c",
+        'case $(cat <<E\n)\nE\n/bin/s? -c "/usr/local/bin/doc?er build .") in *) ;; esac',
+      ],
+      ["sh", "-c", "case $(echo ')'; /usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["sh", "-c", "case $(: # )\n/usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["bash", "-c", 'echo "$(echo ${x%)}; /usr/local/bin/doc?er build .)"'],
+      ["bash", "-c", 'echo "$(echo ${x:-)}; /usr/local/bin/doc?er build .)"'],
+      ["sh", "-c", "case x in $(f()case y in a) ;; esac; /usr/local/bin/doc?er build .)) ;; esac"],
+      ["bash", "-c", "case $(echo $'\\')'\n/usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["bash", "-c", "echo $'\\''; case x in $(/usr/local/bin/doc?er build .)) ;; esac"],
+      ["bash", "-c", "case x in $(cat <<'E'\n)\nE\n/usr/local/bin/doc?er build .)) ;; esac"],
+      ["bash", "-c", "case x in $(cat <<<')'; /usr/local/bin/doc?er build .)) ;; esac"],
     ])
       test(`a docker glob in a script run-slot does not open: ${argv.join(" ")}`, async () => {
         const r = await run(argv)
