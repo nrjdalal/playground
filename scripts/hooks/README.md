@@ -368,6 +368,7 @@ Only the first reading moves the folder, sets variables and records files for th
   An `ext score` after an `unset` or an `export -n` of one of those variables earlier on the line gets past, since the hook tracks a variable set, not one unset or un-exported.
   A path through a link into the root with `..` after the link (`echo x > <link>/../f`) is judged as typed, so a write by one passes.
   A `cd` or `pushd` whose landing folder nothing on the line names (`cd "$X"`, `cd -`, `popd`'s stack, a `CDPATH` lookup) leaves the command's folder unread, so after one a relative write (a writing redirect, a remover's operand, one after `--` included, or a writer's target) is refused, since the shell may be in this root.
+  macOS's `mv`, `rm`, `rmdir` and `unlink`, named bare, read options only up to their first operand, as its getopt does, so every later word, a dashed one too, is an operand, while a GNU build reads them anywhere before `--` unless the call sets `POSIXLY_CORRECT`.
   Each such word is read whole, so one holding an `=` or opening with a dash is relative unless it opens with `/` or `~`.
   A reader, any other program and a write by an absolute path still run after one, so a program that writes where it runs (a build, a script) passes.
   A `cd` whose target the reader names is judged in every folder it may reach, this root included ([The folder a hook reads](#the-folder-a-hook-reads)).
