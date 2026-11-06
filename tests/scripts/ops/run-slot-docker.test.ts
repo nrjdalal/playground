@@ -209,6 +209,30 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       expect(r.err).toContain(CANNOT)
     })
 
+    // a script file read through `bash <file>`, named so the command's words name docker
+    const file = async (args: string[], script: string) => {
+      const m = dockerMachine()
+      writeFileSync(join(m.root, "docker-steps.sh"), script)
+      const p = Bun.spawn(["bash", SCRIPT, "worker-d", "--", "bash", ...args, "docker-steps.sh"], {
+        cwd: m.root,
+        env: m.env(),
+        stderr: "pipe",
+      })
+      return { code: await p.exited, err: await new Response(p.stderr).text() }
+    }
+
+    test("an option word before a script file", async () => {
+      const r = await file(["-x"], "docker build .\n")
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CANNOT)
+    })
+
+    test("while a script file it reads keeps the chain's refusal", async () => {
+      const r = await file([], "echo hi\ndocker build .\n")
+      expect(r.code).toBe(2)
+      expect(r.err).toContain("refuses a chain that builds a docker image")
+    })
+
     test("while a chain it reads keeps its own refusal", async () => {
       const r = await run("sh", "echo hi; docker build .")
       expect(r.code).toBe(2)

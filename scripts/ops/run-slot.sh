@@ -839,21 +839,21 @@ heavy_build() {
 }
 # packages/scripts/src/docker-build.ts, the docker build reader run-slot shares with the hooks
 docker_reader() { "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" "$@" </dev/null; }
-# A docker build, as docker_reader reads it past the hooks' wrappers: run (one image), each (a compose build of no service or several, built one at a time), refuse <why>, or nothing; a chain with a docker build in any step is refused, so each build is a run of its own
+# A docker build, as docker_reader reads it past the hooks' wrappers: run (one image), each (a compose build of no service or several, built one at a time), refuse <why>, or nothing; a chain with a docker build in any step is refused, so each build is a run of its own, and so is a chain whose words name docker or portless and whose steps chain_steps cannot read
 docker_kind() {
-  local found line words steps
+  local found line words steps fix="run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"
   # the reader starts only for a command that names docker or portless, so every other run skips its bun start
   case " $* " in *docker*|*portless*) ;; *) return ;; esac
   found=$(docker_reader kind -- "$@")
   [ "$found" != none ] && { echo "$found"; return; }
   # a chain whose steps chain_steps cannot read may hold a docker build, so it is refused rather than read as no steps
-  steps=$(chain_steps "$@") || { echo "refuse run-slot.sh cannot read this chain's steps, so it refuses one that names docker or portless: run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"; return; }
+  steps=$(chain_steps "$@") || { echo "refuse run-slot.sh cannot read this chain's steps, so it refuses one that names docker or portless: $fix"; return; }
   while IFS= read -r line; do
     IFS=$'\x1f' read -ra words <<< "$line"
     [ ${#words[@]} -gt 0 ] || continue
     case "$(docker_reader kind -- "${words[@]}")" in
       none) ;;
-      *) echo "refuse run-slot.sh refuses a chain that builds a docker image (${words[*]}): run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"; return ;;
+      *) echo "refuse run-slot.sh refuses a chain that builds a docker image (${words[*]}): $fix"; return ;;
     esac
   done < <(printf '%s\n' "$steps" | grep -E "docker|portless")
 }
