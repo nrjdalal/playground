@@ -456,6 +456,8 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       'ls doc{k,}er > /dev/null 2>&1; touch "$MARKER"',
       'echo docker; ls /bin/s[h] > /dev/null; touch "$MARKER"',
       '"/usr/local/bin/doc?er" build . 2> /dev/null; touch "$MARKER"',
+      // round 2 of #1209: a case pattern names no program, so `*)` reads as no glob of one
+      'case "$1" in a|doc?er) exit 1 ;; *) touch "$MARKER" ;; esac',
     ])
       test(`while a glob that is no program word runs as before: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
@@ -479,6 +481,7 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       "nice --frobnicate /usr/local/bin/doc?er build .",
       "/usr/local/bin/doc[^x]er build .",
       "/usr/local/bin/doc{j..l}er build .",
+      "case $1 in a) (/usr/local/bin/doc?er build .) ;; esac",
     ])
       test(`a docker program word in a step: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
