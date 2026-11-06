@@ -219,24 +219,101 @@ describe("under the gates it spawns", () => {
     expect(r.roster).toContain("surface=")
   })
 
-  test.each([
-    ["resume", "ended", ["status=starting"]],
-    ["resume", "working", []],
-    ["column", "ended", ["status=starting"]],
-    ["column", "working", []],
-  ])(
-    "a %s of a %s row writes %p, so only a row close ended runs again",
-    async (mode, status, want) => {
-      const name = "reviewer-brave-otter"
-      const r = await spawn(
-        mode === "resume"
+  // A checker's start, as a resume or a column, on the roster row given; the row's status= and prs writes are what auto-end and the sweep read.
+  const PR_A = "https://github.com/acme/factory/pull/1"
+  const PR_B = "https://github.com/acme/factory/pull/2"
+  const checkerStart = (mode: string, row: object | null, extra: string[] = []) => {
+    const name = "reviewer-brave-otter"
+    return spawn(
+      [
+        ...(mode === "resume"
           ? ["resume", name, root]
-          : ["column", "reviewer", name, "worker-x", "w1:p2", "r.md"],
-        [],
-        { ROSTER_JSON: JSON.stringify({ agents: [{ name, status }] }) },
-        undefined,
-        mode === "resume" ? { name, backend: "claude" } : undefined,
-      )
+          : ["column", "reviewer", name, "worker-x", "w1:p2", "r.md"]),
+        ...extra,
+      ],
+      [],
+      row ? { ROSTER_JSON: JSON.stringify({ agents: [{ name, ...row }] }) } : {},
+      undefined,
+      mode === "resume" ? { name, backend: "claude" } : undefined,
+    )
+  }
+  const statusAndPrs = (r: { roster?: string[] }) =>
+    r.roster?.filter((arg) => /^(status|prs\+?)=/.test(arg))
+
+  test.each(["resume", "column"])(
+    "a checker's %s on an ended row listing PR A, naming PR B, sets it live with prs of PR B alone (#1135)",
+    async (mode) => {
+      const r = await checkerStart(mode, { pr: PR_A, prs: [PR_A], status: "ended" }, ["--pr", PR_B])
+      expect(r.code).toBe(0)
+      expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${PR_B}`])
+    },
+  )
+
+  test.each(["resume", "column"])(
+    "a checker's %s on an ended row naming no PR is refused before any pane opens, naming --pr (#1135)",
+    async (mode) => {
+      const r = await checkerStart(mode, { pr: PR_A, prs: [PR_A], status: "ended" })
+      expect(r.code).not.toBe(0)
+      expect(r.err).toContain("--pr <url>")
+      expect(r.roster).toBeUndefined()
+      expect(placing(r)).toEqual([])
+    },
+  )
+
+  test.each([
+    ["resume", { status: "working" }],
+    ["column", { status: "working" }],
+    ["column", null],
+  ] as [string, object | null][])(
+    "a checker's %s on a live row, or no row, naming no PR, starts as before: %p",
+    async (mode, row) => {
+      const r = await checkerStart(mode, row)
+      expect(r.code).toBe(0)
+      expect(statusAndPrs(r)).toEqual([])
+    },
+  )
+
+  test("a checker's start on a live row naming a PR adds it to prs, as assign does", async () => {
+    const r = await checkerStart("column", { prs: [PR_A], status: "working" }, ["--pr", PR_B])
+    expect(r.code).toBe(0)
+    expect(statusAndPrs(r)).toEqual([`prs+=${PR_B}`])
+  })
+
+  test("--pr takes the PRs a restart passes, a comma list, whole", async () => {
+    const r = await checkerStart("resume", { prs: [PR_A, PR_B], status: "ended" }, [
+      "--pr",
+      `${PR_A},${PR_B}`,
+    ])
+    expect(r.code).toBe(0)
+    expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${PR_A},${PR_B}`])
+  })
+
+  test.each([
+    ["a PR's form", ["resume", "reviewer-brave-otter", root, "--pr", "pull/2"], "--pr takes"],
+    [
+      "a worker's start",
+      ["worker", "worker-brave-otter", "b.md", "--title", "T", "--pr", "2"],
+      "--pr is for",
+    ],
+  ])("--pr is refused before any pane opens: %s", async (_, args, said) => {
+    const r = await spawn(args, [], {}, undefined, {
+      name: "reviewer-brave-otter",
+      backend: "claude",
+    })
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain(said)
+    expect(placing(r)).toEqual([])
+  })
+
+  test.each([
+    ["ended", ["status=starting"]],
+    ["working", []],
+  ] as [string, string[]][])(
+    "a resume of a non-checker's %s row writes %p, so only a row close ended runs again",
+    async (status, want) => {
+      const r = await spawn(["resume", OLD.planner, root, "--backend", "claude"], [], {
+        ROSTER_JSON: JSON.stringify({ agents: [{ name: OLD.planner, status }] }),
+      })
       expect(r.code).toBe(0)
       expect(r.roster?.filter((arg) => arg.startsWith("status="))).toEqual(want)
     },

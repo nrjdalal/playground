@@ -58,6 +58,27 @@ describe("a restart after a login expires", () => {
     ])
   })
 
+  test("a checker's restart names the PRs its row lists, so its resume on the row close ended starts again (#1135)", async () => {
+    const { calls, run } = spawn({ code: 0 }, { code: 0 })
+    const prs = [
+      "https://github.com/acme/factory/pull/1",
+      "https://github.com/acme/factory/issues/2",
+    ]
+    const checker = { ...SESSION, name: "reviewer-brave-otter", prs }
+    expect(await restartSession(checker, { live: true, root: "/p", run })).toEqual({
+      status: "restarted",
+    })
+    expect(calls[1]).toEqual([
+      "/p/scripts/spawn.sh",
+      "resume",
+      "reviewer-brave-otter",
+      SESSION.cwd,
+      SESSION.sessionId,
+      "--pr",
+      prs.join(","),
+    ])
+  })
+
   test("a refused close stops it there, with spawn.sh's own words", async () => {
     const { calls, run } = spawn({ code: 1, stderr: "spawn.sh: no pane is labelled dispatcher\n" })
     expect(await restartSession(SESSION, { live: true, root: "/p", run })).toEqual({

@@ -25,7 +25,7 @@ const said = (text: string) => text.trim().split("\n").at(-1) ?? ""
 // Pure: spawn.sh's two steps, a close by the pane's label and a resume of the same session id in its folder, with --account only when one is named.
 export const restartArgv = (
   root: string,
-  session: { account?: string; cwd: string; name: string; sessionId: string },
+  session: { account?: string; cwd: string; name: string; prs?: string[]; sessionId: string },
 ): string[][] => {
   const spawn = join(root, "scripts", "spawn.sh")
   return [
@@ -52,7 +52,7 @@ export function fixtureRestart(name: string, path = unstickPath()): void {
 }
 
 export async function restartSession(
-  session: { account?: string; cwd: string; name: string; sessionId: string },
+  session: { account?: string; cwd: string; name: string; prs?: string[]; sessionId: string },
   {
     live = readsLive(),
     root = checkoutRoot(),
