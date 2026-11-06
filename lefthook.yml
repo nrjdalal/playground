@@ -146,6 +146,10 @@ pre-push:
       run: bun audit --audit-level high --ignore GHSA-vfj7-8cjw-p6xm
       only:
         - ref: canary
+    conflict-markers:
+      # what each pushed ref sends, so a commit made with hooks off is refused before it reaches the remote
+      run: bun --no-env-file packages/scripts/src/conflict-markers.ts --push
+      use_stdin: true
     ensure-branches:
       run: bun packages/scripts/src/ensure-remote-branches.ts {1}
     keeps-canary:

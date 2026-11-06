@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -21,19 +21,21 @@ const runner = (failing: string[]) => {
   return { ran, run }
 }
 
+const NAMES = ["conflict-markers", "docs-wrap", "em-dashes", "env-keys", "trace-count"]
+
 describe("precommit:light", () => {
   test("the root script runs precommit-light.ts", async () => {
     const pkg = await Bun.file(join(ROOT, "package.json")).json()
     expect(pkg.scripts["precommit:light"]).toBe("bun packages/scripts/src/precommit-light.ts")
   })
 
-  test("it holds docs-wrap, em-dashes, env-keys and trace-count", () => {
-    expect(CHECKS.map((c) => c.name)).toEqual(["docs-wrap", "em-dashes", "env-keys", "trace-count"])
+  test("it holds conflict-markers, docs-wrap, em-dashes, env-keys and trace-count", () => {
+    expect(CHECKS.map((c) => c.name)).toEqual(NAMES)
   })
 
-  test("docs-wrap, env-keys and trace-count run as lefthook's pre-commit runs them", async () => {
+  test("conflict-markers, docs-wrap, env-keys and trace-count run as lefthook's pre-commit runs them", async () => {
     const hooks = await Bun.file(join(ROOT, "lefthook.yml")).text()
-    for (const name of ["docs-wrap", "trace-count"]) {
+    for (const name of ["conflict-markers", "docs-wrap", "trace-count"]) {
       const check = CHECKS.find((c) => c.name === name)!
       expect(hooks).toContain(`run: ${check.argv.join(" ")}\n`)
     }
@@ -49,24 +51,21 @@ describe("precommit:light", () => {
     ])
   })
 
-  test("all four pass: exit 0", async () => {
+  test("all five pass: exit 0", async () => {
     const { ran, run } = runner([])
     const lines: string[] = []
     expect(await precommitLight(run, (l) => lines.push(l))).toBe(0)
-    expect(ran).toEqual(["docs-wrap", "em-dashes", "env-keys", "trace-count"])
+    expect(ran).toEqual(NAMES)
     expect(lines).toEqual(["precommit:light: all passed"])
   })
 
-  test.each(["docs-wrap", "em-dashes", "env-keys", "trace-count"])(
-    "%s fails: exit 1, and every check still runs",
-    async (name) => {
-      const { ran, run } = runner([name])
-      const lines: string[] = []
-      expect(await precommitLight(run, (l) => lines.push(l))).toBe(1)
-      expect(ran).toEqual(["docs-wrap", "em-dashes", "env-keys", "trace-count"])
-      expect(lines).toEqual([`precommit:light: failed: ${name}`])
-    },
-  )
+  test.each(NAMES)("%s fails: exit 1, and every check still runs", async (name) => {
+    const { ran, run } = runner([name])
+    const lines: string[] = []
+    expect(await precommitLight(run, (l) => lines.push(l))).toBe(1)
+    expect(ran).toEqual(NAMES)
+    expect(lines).toEqual([`precommit:light: failed: ${name}`])
+  })
 
   test("a message file adds commitlint, as lefthook's commit-msg step runs it", async () => {
     const hooks = await Bun.file(join(ROOT, "lefthook.yml")).text()
@@ -78,11 +77,11 @@ describe("precommit:light", () => {
     expect(checksFor()).toEqual(CHECKS)
   })
 
-  test("commitlint fails: exit 1, and the other four still run", async () => {
+  test("commitlint fails: exit 1, and the other five still run", async () => {
     const { ran, run } = runner(["commitlint"])
     const lines: string[] = []
     expect(await precommitLight(run, (l) => lines.push(l), "msg.txt")).toBe(1)
-    expect(ran).toEqual(["docs-wrap", "em-dashes", "env-keys", "trace-count", "commitlint"])
+    expect(ran).toEqual([...NAMES, "commitlint"])
     expect(lines).toEqual(["precommit:light: failed: commitlint"])
   })
 
@@ -96,6 +95,38 @@ describe("precommit:light", () => {
     const argv = checksFor(file).at(-1)!.argv
     const exit = await Bun.spawn(argv, { cwd: ROOT, stdio: ["ignore", "ignore", "ignore"] }).exited
     expect(exit === 0 ? 0 : 1).toBe(code)
+  })
+
+  // the shape a commit made with hooks off once carried: git's own conflict block, staged in a generated hook bundle
+  test("the conflict-markers argv run for real refuses a staged conflict block in a hook bundle", async () => {
+    const argv = CHECKS.find((c) => c.name === "conflict-markers")!.argv
+    const repo = join(DIR, "markers")
+    mkdirSync(join(repo, "scripts/hooks/bundled"), { recursive: true })
+    const env = {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          (entry): entry is [string, string] =>
+            entry[1] !== undefined && !entry[0].startsWith("GIT_"),
+        ),
+      ),
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+    }
+    const run = (args: string[]) =>
+      Bun.spawnSync(args, { cwd: repo, env, stdio: ["ignore", "pipe", "pipe"] })
+    expect(run(["git", "init", "-q"]).exitCode).toBe(0)
+    const stageAndCheck = async (text: string) => {
+      await Bun.write(join(repo, "scripts/hooks/bundled/guard.js"), text)
+      expect(run(["git", "add", "-A"]).exitCode).toBe(0)
+      const check = run(argv.map((arg) => (arg.startsWith("packages/") ? join(ROOT, arg) : arg)))
+      return { code: check.exitCode, out: check.stderr.toString() }
+    }
+    const refused = await stageAndCheck("a\n<<<<<<< HEAD\nb\n=======\nc\n>>>>>>> origin/canary\n")
+    expect(refused.code).toBe(1)
+    expect(refused.out).toContain(
+      "scripts/hooks/bundled/guard.js:2, scripts/hooks/bundled/guard.js:6",
+    )
+    expect(await stageAndCheck("a\nb\nc\n")).toEqual({ code: 0, out: "" })
   })
 
   test("two fail: both are named", async () => {
