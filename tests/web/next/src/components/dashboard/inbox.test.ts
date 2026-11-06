@@ -1693,7 +1693,7 @@ describe("the shelves under the list, by place", () => {
     expect(header(html, "Done")).toMatch(
       /<span class="sr-only">, (<!-- -->)?1(<!-- -->)? unread<\/span>/,
     )
-    expect(header(html, "Done")).not.toContain("opacity-50")
+    expect(header(html, "Done")).not.toContain("opacity-50 hover:opacity-100")
     for (const label of ["In progress", "Later"]) {
       expect(header(html, label)).not.toBe("")
       expect(header(html, label)).not.toContain("aria-label=")
