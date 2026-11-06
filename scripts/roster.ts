@@ -21,7 +21,7 @@ import { writeAtomic } from "../packages/scripts/src/write-atomic"
 import STATUSES from "./roster-statuses.json"
 
 export const USAGE = `Usage:
-  roster.ts set <name> key=value [key=value ...]    (creates the agent if missing, its role from kind= or its name; a new one needs task=; status=parked needs hold=)
+  roster.ts set <name> key=value [key=value ...]    (creates the agent if missing, its role from kind= or its name; a new one needs task=; status=parked needs hold=, and a hold=<ref> needs the row parked)
   roster.ts report <name> <text> [key=value ...]    (sets lastReport, stamps lastReportAt; a new one needs task=)
   roster.ts assign <name> <title> <task> [k=v ...]  (new task, or a checker's next PR with worker= pr=, which joins its prs list; clears pr/branch/repo/owner/lastReport)
   roster.ts backlog <text>
@@ -224,10 +224,15 @@ function checkPairs(name: string, pairs: [string, string][]): void {
   checkHold(pairs)
 }
 
-// a call that parks a row, or clears a parked row's hold, leaves it holding one, so the sweep can tell its lead once the wait ends; a call that moves it off parked drops its hold, one it names included, so a later park names a fresh one. A row parked before this check keeps taking writes that leave its park alone.
+// a call that parks a row, or clears a parked row's hold, leaves it holding one, so the sweep can tell its lead once the wait ends; a call that moves it off parked drops its hold, so a later park names a fresh one, and a hold named on a row the call leaves not parked is refused, so the caller sees why it would not stay. A row parked before this check keeps taking writes that leave its park alone.
 function parkHold(entry: Agent, pairs: [string, string][], moved: boolean): void {
   const touched = moved || pairs.some(([k]) => k === "status" || k === "hold")
   if (entry.status !== "parked") {
+    if (pairs.some(([k, v]) => k === "hold" && v !== ""))
+      throw new Refusal(
+        `roster.ts: hold names what a parked row waits on, and ${entry.name} is ${entry.status}, so add status=parked to the same call`,
+        2,
+      )
     if (touched) delete entry.hold
     return
   }
