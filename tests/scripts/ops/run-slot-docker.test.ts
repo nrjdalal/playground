@@ -458,6 +458,7 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       '"/usr/local/bin/doc?er" build . 2> /dev/null; touch "$MARKER"',
       // round 2 of #1209: a case pattern names no program, so `*)` reads as no glob of one
       'case "$1" in a|doc?er) exit 1 ;; *) touch "$MARKER" ;; esac',
+      'case x in a) case y in *) :;; esac;; *) touch "$MARKER";; esac',
     ])
       test(`while a glob that is no program word runs as before: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
@@ -486,6 +487,10 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       "case x in a|b) /usr/local/bin/d?cker build . ;; esac",
       "function f { /usr/local/bin/doc?er build .; }; f",
       "coproc /usr/local/bin/doc?er build .",
+      // review round 2 of #1219: an arm's command that | ends is no pattern
+      "case x in x) true; /usr/local/bin/doc?er build . | cat;; esac",
+      "case x in x) cat /dev/null | /usr/local/bin/doc?er build . | cat;; esac",
+      "case x in a) echo ;& *) /usr/local/bin/doc?er build . ;; esac",
     ])
       test(`a docker program word in a step: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
@@ -496,8 +501,11 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     for (const script of [
       "echo docker | ! /bin/s?",
       "echo docker | case x in a|*) /bin/s? ;; esac",
+      "case x in x) true; echo docker | /bin/s? | cat;; esac",
+      'case x in x) true; sh -c "docker build ." | cat;; esac',
+      "case x in x) true; echo docker | sh | cat;; esac",
     ])
-      test(`a globbed shell after a reserved word or a case pattern: ${script}`, async () => {
+      test(`a shell after a reserved word, a case pattern or in a case arm: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
         expect(r.code).toBe(2)
         expect(r.err).toContain(CANNOT)
