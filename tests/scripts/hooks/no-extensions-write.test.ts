@@ -1852,6 +1852,10 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ],
     ["GNU xargs by its g name running echo", "echo a | gxargs echo"],
     [
+      "GNU xargs by its g name running echo after a cd to a variable",
+      `cd "$X"; echo a | gxargs echo`,
+    ],
+    [
       "GNU find by its g name printing to a held absolute file after a cd to a variable",
       `O=/tmp/out; cd "$X"; gfind /tmp/x -fprint "$O"`,
     ],
