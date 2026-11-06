@@ -96,13 +96,26 @@ const GIT_READS = new Set([
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
-// The removers whose macOS build reads options as getopt does, stopping at the first operand, so every later word, a dashed one too, is an operand
+// The removers whose macOS build stops reading options at the first operand, as getopt does, or reads none but a leading -- (unlink), so a later dashed word is an operand
 const GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"])
+// rsync's options that write the path given as their value, read by any prefix since macOS's openrsync takes a shortened long name: its backup, partial and temp folders, its log file and its batch files
+const RSYNC_PATHS = [
+  "backup-dir",
+  "log-file",
+  "only-write-batch",
+  "partial-dir",
+  "temp-dir",
+  "write-batch",
+]
+// rsync's flags whose exact name is a prefix of a path option, which both builds read as the flag
+const RSYNC_FLAGS = new Set(["backup", "partial"])
+// rsync's -T, its temp folder, in a short cluster whose earlier letters take no value (-B, -e, -f, -M and -@ do)
+const RSYNC_TEMP = /^-[^-@BefMT]*T/
 // Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
 const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
 // Homebrew's GNU coreutils under their g prefix (gcp, grm), each read as the remover or writer it names
 const GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/
-// A writer's options that take a value rather than name a target, by short letter (`gnu` for a GNU build alone, `bsd` for macOS's alone) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner, strip program, and macOS's destdir, hash, link flags, metalog and tags, mkdir's mode, touch's adjustment, date, reference file and stamp; cp's, install's and ln's -t names their target folder, and macOS install's -M its metalog, read apart
+// A writer's options that take a value rather than name a target, by short letter (`gnu` for a GNU build alone, `bsd` for macOS's alone) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner, strip program, and macOS's destdir, hash, link flags, metalog and tags, mkdir's mode, mv's suffix, touch's adjustment, date, reference file and stamp; cp's, install's, ln's and mv's -t names their target folder, and macOS install's -M its metalog, read apart
 const WRITER_TAKES: Record<
   string,
   { bsd?: string; flags?: string[]; gnu?: string; long: string[]; short: string }
@@ -117,6 +130,7 @@ const WRITER_TAKES: Record<
   },
   ln: { gnu: "S", long: ["suffix"], short: "" },
   mkdir: { long: ["mode"], short: "m" },
+  mv: { gnu: "S", long: ["suffix"], short: "" },
   touch: { long: ["date", "reference", "time"], short: "Adrt" },
 }
 const DUPLICATE = /^(?:\d+|-)$/
@@ -212,7 +226,7 @@ const after = (word: Word, cut: number): Word => ({
   value: word.value.slice(cut),
 })
 
-// The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install and ln (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch
+// The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install, ln and mv (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch
 function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): Word[] {
   if (name === "dd")
     return args.flatMap((word) =>
@@ -222,12 +236,12 @@ function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): 
           ? [word]
           : [],
     )
-  const into = name === "cp" || name === "install" || name === "ln"
+  const into = name === "cp" || name === "install" || name === "ln" || name === "mv"
   const takes = WRITER_TAKES[name]
   const operands: Word[] = []
   let folder: Word | undefined
   let folders = false
-  // GNU's cp, install and ln read an unread word before `--` that expands to -t<folder> as their target folder
+  // GNU's cp, install, ln and mv read an unread word before `--` that expands to -t<folder> as their target folder
   const maybe: Word[] = []
   // the file macOS's install writes its metalog to
   const logs: Word[] = []
@@ -310,7 +324,7 @@ function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   tick()
   if (marked(word.value) || word.value.startsWith("-")) return false
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir } as Env))
-  if (program(word.value).toLowerCase() === "playground")
+  if (program(word.value) === "playground")
     return (
       !word.value.includes("/") ||
       !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory())
@@ -398,7 +412,7 @@ function awkPrograms(words: Word[]): Word[] | undefined {
 
 // The lines an awk program runs, read whatever the line: each string literal of a program that can run a command or write a file
 function programLines({ args, first }: Parsed, rooted: boolean): string[] {
-  if (!AWKS.has(program(first?.value ?? "").toLowerCase())) return []
+  if (!AWKS.has(program(first?.value ?? ""))) return []
   return (awkPrograms(args) ?? [])
     .filter(({ value }) => rooted || awkRuns(value))
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
@@ -511,7 +525,7 @@ function narrow(cmd: Command, env: Env): boolean {
     )
   }
   if (!ownProgram(cmd, parsed)) return false
-  const base = program(first.value).toLowerCase()
+  const base = program(first.value)
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))
@@ -984,10 +998,31 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         : tool === "unlink" && !gnu
           ? Number(args[0]?.value === "--")
           : args.findIndex((word) => !option(word))
+    // mv's -t folder and rsync's path values are written to, though their word opens with a dash
+    const values =
+      tool === "mv"
+        ? writeTargets(tool, args, gnu, posix)
+        : tool === "rsync"
+          ? args.flatMap((word, k) => {
+              const long = /^--([^=]+)=?/.exec(word.value)
+              const path =
+                long &&
+                !RSYNC_FLAGS.has(long[1]) &&
+                RSYNC_PATHS.some((name) => name.startsWith(long[1]))
+              const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length
+              if (!cut) return []
+              // with no value attached, the option takes the next word, a dash-led one too
+              if (cut < word.value.length) return [after(word, cut)]
+              return args[k + 1] ? [args[k + 1]] : []
+            })
+          : []
     const operands = remover
-      ? args.filter(
-          (word, k) => (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !option(word),
-        )
+      ? [
+          ...args.filter(
+            (word, k) => (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !option(word),
+          ),
+          ...values,
+        ]
       : WRITERS.has(tool)
         ? writeTargets(tool, args, gnu, posix)
         : []

@@ -380,6 +380,74 @@ test("the pre-commit marker check refuses a staged conflict marker before lint-s
   }
 }, 60_000)
 
+// this repo's pre-push marker job, its script run from this checkout, in a scratch repo whose commits go in with hooks off, fed git's pre-push lines: each pushed ref is read from its remote sha, or from its merge-base with origin/canary for a new branch, and a delete reads nothing
+test("the pre-push marker check refuses a pushed conflict marker a hooks-off commit let through", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-push": { commands: Record<string, Record<string, unknown>> }
+  }
+  const markers = config["pre-push"].commands["conflict-markers"]
+  expect(markers).toMatchObject({ use_stdin: true })
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-push-markers-"))
+  const run = (argv: string[], stdin?: string) => {
+    const result = Bun.spawnSync(argv, {
+      cwd: dir,
+      env: SCRATCH_ENV,
+      stdin: stdin === undefined ? "ignore" : Buffer.from(stdin),
+    })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const git = (...args: string[]) =>
+    run([
+      "git",
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "core.hooksPath=/dev/null",
+      ...args,
+    ])
+  const commit = async (path: string, text: string) => {
+    mkdirSync(join(dir, path, ".."), { recursive: true })
+    await Bun.write(join(dir, path), text)
+    expect(git("add", path)).toMatchObject({ code: 0 })
+    expect(git("commit", "-q", "-m", path)).toMatchObject({ code: 0 })
+    return git("rev-parse", "HEAD").out.trim()
+  }
+  const ZERO = "0".repeat(40)
+  const push = (local: string, remote: string) =>
+    run(
+      ["bash", "-c", String(markers!.run).replace("packages/", `${ROOT}/packages/`)],
+      `refs/heads/b ${local} refs/heads/b ${remote}\n`,
+    )
+  try {
+    expect(git("init", "-q")).toMatchObject({ code: 0 })
+    const base = await commit("notes.md", "one\n")
+    expect(git("update-ref", "refs/remotes/origin/canary", base)).toMatchObject({ code: 0 })
+    const clean = await commit("notes.md", "one\ntwo\n")
+    expect(push(clean, base)).toMatchObject({ code: 0 })
+    // trailing whitespace, and a setext heading underlined with exactly seven `=`, which git's --check would flag
+    const spaced = await commit("notes.md", "one  \ntwo\n\nTitle\n=======\n")
+    expect(push(spaced, clean)).toMatchObject({ code: 0 })
+    const block = "a\n<<<<<<< HEAD\nb\n=======\nc\n>>>>>>> origin/canary\n"
+    const marked = await commit("scripts/hooks/bundled/guard.js", block)
+    const refused = push(marked, spaced)
+    expect(refused.code).not.toBe(0)
+    expect(refused.out).toContain(
+      "scripts/hooks/bundled/guard.js:2, scripts/hooks/bundled/guard.js:6",
+    )
+    // a remote branch that already holds the marker, pushed again with a clean commit on top: read from the remote sha, the push adds no marker
+    const after = await commit("notes.md", "one\ntwo\nthree\n")
+    expect(push(after, marked)).toMatchObject({ code: 0 })
+    const branch = push(marked, ZERO)
+    expect(branch.code).not.toBe(0)
+    expect(branch.out).toContain("scripts/hooks/bundled/guard.js:2")
+    expect(push(ZERO, marked)).toEqual({ code: 0, out: "" })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
 // every worktree of a checkout shares one stash list, so the pre-commit's lint-staged keeps no backup there (PG-715)
 test("the pre-commit's lint-staged runs with --no-stash", async () => {
   const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {

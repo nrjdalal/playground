@@ -446,7 +446,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   for (const w of before) {
     if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value)))
       return "root";
-    if (w === firstWrapper || ROOT_SHELLS.has(w.value))
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value.toLowerCase()))
       wrappers.push(program(w.value));
   }
   if (first && wrappers.length)
@@ -710,7 +710,43 @@ var slice = (word, from) => {
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
-var program = (value) => basename(value.replace(/^=/, ""));
+var SHELL_OWN = new Set([
+  ".",
+  "alias",
+  "cd",
+  "declare",
+  "eval",
+  "export",
+  "hash",
+  "let",
+  "local",
+  "popd",
+  "pushd",
+  "read",
+  "readonly",
+  "set",
+  "shift",
+  "source",
+  "trap",
+  "type",
+  "typeset",
+  "unalias",
+  "unset"
+]);
+var G_WRAPPERS = new Map([
+  ["genv", "env"],
+  ["gnice", "nice"],
+  ["gnohup", "nohup"],
+  ["gstdbuf", "stdbuf"],
+  ["gtimeout", "timeout"]
+]);
+var program = (value) => {
+  const base = basename(value.replace(/^=/, ""));
+  const lower = base.toLowerCase();
+  if (SHELL_OWN.has(lower) && value !== lower)
+    return value;
+  return G_WRAPPERS.get(lower) ?? lower;
+};
 var UV_TAKES = new Set([
   "--cache-dir",
   "--config-file",
@@ -1309,6 +1345,8 @@ function unwrap(state, inside, budget) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+      } else if (wrapper === "env" && v === "-") {
+        take();
       } else if (v === "--") {
         take();
         while (ASSIGN.test(peek()?.value ?? ""))
@@ -1555,7 +1593,7 @@ var throughBuiltin = (cmd, { first }) => {
   if (!first)
     return false;
   const before = cmd.words.slice(0, cmd.words.indexOf(first));
-  return before.some((w) => !w.quoted && BUILTIN.has(program(w.value))) && before.every((w) => !w.quoted && (BUILTIN.has(program(w.value)) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
+  return before.some((w) => !w.quoted && BUILTIN.has(w.value)) && before.every((w) => !w.quoted && (BUILTIN.has(w.value) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
 };
 var manyTimes = (cmd, { first }) => !!cmd.repeated || cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0).some((w) => !w.quoted && COUNTED.has(program(w.value)));
 var startFolders = (env) => [
@@ -2240,7 +2278,24 @@ var NAME_SETTERS = new Set([
 var PRINTS = new Set(["print", "printf"]);
 var NUMERIC = new Set(["float", "integer"]);
 var TYPESETS = new Set(["declare", "export", "local", "readonly", "typeset"]);
-var RUNS_TEXT = new Set([".", "eval", "source"]);
+var RUNS_TEXT = new Set([
+  ".",
+  "alias",
+  "autoload",
+  "emulate",
+  "enable",
+  "eval",
+  "fc",
+  "mapfile",
+  "r",
+  "readarray",
+  "sched",
+  "source",
+  "trap",
+  "zmodload",
+  "zregexparse",
+  "zstyle"
+]);
 var TESTS = new Set(["[", "[[", "test"]);
 var PLAIN_NAME = /^[A-Za-z_]\w*$/;
 var EXPANDS = /\$(?![A-Za-z_]\w*|\{[A-Za-z_]\w*\})|`|[<>]\(/;
@@ -2285,7 +2340,7 @@ function steadyNames(named, commands) {
   const parses = commands.map((cmd) => parse(cmd));
   for (const [at, cmd] of commands.entries()) {
     const { name } = parses[at];
-    if (RUNS_TEXT.has(name))
+    if (RUNS_TEXT.has(name) || marked(name))
       return () => NONE;
     const flagged = (letters) => cmd.words.some((w, k) => k > 0 && /^-[^-\s]/.test(w.value) && letters.test(w.value));
     if (NUMERIC.has(name) || TYPESETS.has(name) && flagged(/[EFin]/))
@@ -2538,6 +2593,16 @@ var GIT_READS = new Set([
 var EXPORTS3 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"]);
+var RSYNC_PATHS = [
+  "backup-dir",
+  "log-file",
+  "only-write-batch",
+  "partial-dir",
+  "temp-dir",
+  "write-batch"
+];
+var RSYNC_FLAGS = new Set(["backup", "partial"]);
+var RSYNC_TEMP = /^-[^-@BefMT]*T/;
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
 var GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/;
 var WRITER_TAKES = {
@@ -2551,6 +2616,7 @@ var WRITER_TAKES = {
   },
   ln: { gnu: "S", long: ["suffix"], short: "" },
   mkdir: { long: ["mode"], short: "m" },
+  mv: { gnu: "S", long: ["suffix"], short: "" },
   touch: { long: ["date", "reference", "time"], short: "Adrt" }
 };
 var DUPLICATE = /^(?:\d+|-)$/;
@@ -2640,7 +2706,7 @@ var after = (word, cut) => ({
 function writeTargets(name, args, gnu, posix = false) {
   if (name === "dd")
     return args.flatMap((word) => word.value.startsWith("of=") ? [after(word, 3)] : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value) ? [word] : []);
-  const into = name === "cp" || name === "install" || name === "ln";
+  const into = name === "cp" || name === "install" || name === "ln" || name === "mv";
   const takes = WRITER_TAKES[name];
   const operands = [];
   let folder;
@@ -2718,7 +2784,7 @@ function isCli(word, dirs) {
   if (marked(word.value) || word.value.startsWith("-"))
     return false;
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir }));
-  if (program(word.value).toLowerCase() === "playground")
+  if (program(word.value) === "playground")
     return !word.value.includes("/") || !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory());
   const cli = (sep2 + CLI).toLowerCase();
   return paths.some((path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
@@ -2781,7 +2847,7 @@ function awkPrograms(words) {
   return programs.length ? programs : undefined;
 }
 function programLines({ args, first }, rooted) {
-  if (!AWKS.has(program(first?.value ?? "").toLowerCase()))
+  if (!AWKS.has(program(first?.value ?? "")))
     return [];
   return (awkPrograms(args) ?? []).filter(({ value }) => rooted || awkRuns(value)).flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]));
 }
@@ -2862,7 +2928,7 @@ function narrow(cmd, env) {
   }
   if (!ownProgram(cmd, parsed))
     return false;
-  const base = program(first.value).toLowerCase();
+  const base = program(first.value);
   if (AWKS.has(base)) {
     const programs = awkPrograms(args);
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value));
@@ -3233,7 +3299,20 @@ async function inspect(raw, environment, unknown = false) {
     const end = args.findIndex((word) => word.value === "--");
     const option = (word) => /^-./.test(word.value);
     const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(args[0]?.value === "--") : args.findIndex((word) => !option(word));
-    const operands = remover ? args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)) : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : [];
+    const values = tool === "mv" ? writeTargets(tool, args, gnu, posix) : tool === "rsync" ? args.flatMap((word, k) => {
+      const long = /^--([^=]+)=?/.exec(word.value);
+      const path = long && !RSYNC_FLAGS.has(long[1]) && RSYNC_PATHS.some((name) => name.startsWith(long[1]));
+      const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length;
+      if (!cut)
+        return [];
+      if (cut < word.value.length)
+        return [after(word, cut)];
+      return args[k + 1] ? [args[k + 1]] : [];
+    }) : [];
+    const operands = remover ? [
+      ...args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)),
+      ...values
+    ] : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : [];
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined;
     if (loose)
       return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`));
