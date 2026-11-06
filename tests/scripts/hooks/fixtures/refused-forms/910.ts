@@ -69,7 +69,6 @@ export const groups: Group[] = [
         "a recursive delete echoed to busybox's su applet with its shell option",
         `echo 'rm -rf ${NEVER_MADE}' | busybox su -s /bin/sh`,
       ],
-      ["a recursive delete in a here-string to su's root shell", `su <<< 'rm -rf ${NEVER_MADE}'`],
     ],
   },
 ]

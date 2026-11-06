@@ -276,14 +276,14 @@ const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
-// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; "code" for an interpreter of another language (`python3`, `node18`) that a pipe or xargs feeds, whatever its options or inline program, unless it runs a script file or a module of its own; a reserved word, a function's name or an assignment before it skipped
+// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper or su among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell or su not handed a command (`sudo -s`, `nice doas -s`, `su root`, `busybox su`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; "code" for an interpreter of another language (`python3`, `node18`) that a pipe or xargs feeds, whatever its options or inline program, unless it runs a script file or a module of its own; a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): StdinKind | undefined {
   cmd = spreadSplit(cmd)
   const parsed = parse(cmd)
   const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading))
   if (parsed.capped) {
     const names = cmd.words.map((w) => program(w.value))
-    if (names.some((n) => ROOT_SHELLS.has(n))) kinds.push("root")
+    if (names.some((n) => ROOT_SHELLS.has(n) || n === "su")) kinds.push("root")
     else if (names.some((n) => SHELLS.has(n))) kinds.push("shell")
   }
   return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean)
@@ -377,6 +377,8 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
       return fed || (name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "")) ? "shell" : undefined
     const family = familyOf(name)
     if (family) return fed && interpreted(family, args, xargs) ? "code" : undefined
+    // su, busybox's applet included, with no command of its own starts a root shell that reads its script from stdin, as `sudo -s` does
+    if (name === "su") return suCommand(args) ? undefined : "root"
     if (!SHELLS.has(name)) return undefined
     if (fed) return "shell"
     const { inline, operand } = shellOperand(args, name)
@@ -404,6 +406,19 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
   return fed && first ? "shell" : undefined
 }
 
+// The option words su takes before -c or --command for its line to read as a command of its own, each known exactly; any other option word reads as a root shell, so an option's value never hides a -c
+const SU_PLAIN = new Set(["-", "-f", "-l", "-m"])
+// Whether su's words hand it a command: -c or --command with its command, after option words of SU_PLAIN and words the hook reads whole alone (`su root -c <cmd>`, `su - -c <cmd>`), since a value it cannot read, or a glob, may be any option
+const suCommand = (args: Word[]) => {
+  for (const [at, word] of args.entries()) {
+    const { value } = word
+    if (word.unknown !== undefined || word.glob || marked(value)) return false
+    if (value === "-c" || value === "--command") return at + 1 < args.length
+    if (value.startsWith("--command=")) return true
+    if (value.startsWith("-") && !SU_PLAIN.has(value)) return false
+  }
+  return false
+}
 // Whether a word, by its unquoted value, starts a wrapper's root shell: a listed option, alone, as a long one's unambiguous prefix (`--sh`) or in a cluster of the wrapper's flags ahead of its first value-taking letter, or a word the hook cannot read
 function startsRootShell(wrapper: string, value: string): boolean {
   if (marked(value)) return true
