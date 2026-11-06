@@ -23,6 +23,12 @@ export const groups: Group[] = [
       ["an eval of a variable in zsh -c", `zsh -c 'eval "$X"'`],
       ["an eval of a variable in bash -c", `bash -c 'eval "$X"'`],
       ["an eval of a variable in sh -c", `sh -c 'eval "$X"'`],
+      // a file's name is the eval's text, and a name may hold a cd into the root (`cd;cd .playground;…`)
+      ["an eval of a glob", "cd /tmp/g && eval *"],
+      ["an eval of a glob under the folder", "cd /tmp/g && eval ./*"],
+      ["an eval of a ? glob", "cd /tmp/g && eval ?*"],
+      ["an eval of a bracket glob", "cd /tmp/g && eval [c]*"],
+      ["an eval of a glob by its path", "eval /tmp/g/*"],
     ],
   },
 ]
