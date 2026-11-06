@@ -38,7 +38,16 @@ import {
   withDeadline,
   type Word,
 } from "./shell"
-import { held, heldWord, namings, NONE, type Steady, steadyNames, unquoted } from "./steady"
+import {
+  held,
+  heldReadings,
+  heldWord,
+  namings,
+  NONE,
+  type Steady,
+  steadyNames,
+  unquoted,
+} from "./steady"
 
 type Environment = Record<string, string | undefined>
 
@@ -831,15 +840,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
             (GLOB.test(r.target.value) && !!names(r.target, here, true))),
       )
       if (into?.target) return refuse(`a write to ${pathOf(into.target, here)}`)
-      // a writing redirect's target through a variable is judged as a writer's target is: refused when the hook holds no value for it, else by the path it holds
+      // a writing redirect's target through a variable is judged by the path the hook holds for it, a for loop's literal words each in turn; one it holds no value for runs, as it did before
       for (const r of cmd.redirects) {
         if (!r.target || !writer(r) || !marked(r.target.value)) continue
-        const word = heldWord(r.target, here, steadyAt(cmd))
-        if (!word)
-          return refuse(
-            `a write to ${shown(r.target)}, a value the hook does not hold; hold it in the same call (X=<path>; echo x > "$X") or write the path literally`,
-          )
-        const named = names(word, here, false)
+        const words = heldReadings(r.target, here, steadyAt(cmd)) ?? []
+        const named = words.map((word) => names(word, here, false)).find(Boolean)
         if (named) return refuse(`a write to ${named}`)
       }
     }

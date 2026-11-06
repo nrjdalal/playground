@@ -914,6 +914,7 @@ describe("a quoted argument is read as a command line only where a program runs 
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - ls",
     ],
     ["a redirect through a variable set to a scratch path", "D=/tmp/scratch-dir; echo x > $D/x"],
+    ["a redirect through a for loop's literal words", "for id in 1 2; do echo x > $id.log; done"],
     [
       "env's lone dash and an unset ahead of a harmless program",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - -u X ls",
@@ -1643,6 +1644,14 @@ describe("a read of the root, and writes elsewhere, run", () => {
     [
       "an append through a variable exported to a scratch path",
       'export D=/tmp/scratch-dir; echo x >> "$D/x"',
+    ],
+    [
+      "a redirect through a for loop's literal words",
+      "for id in 1 2; do gh run view $id > /tmp/run-$id.log; done",
+    ],
+    [
+      "a redirect through two nested for loops' literal words",
+      "for id in 1 2; do for j in a b; do echo x > /tmp/$id-$j.log; done; done",
     ],
     ["a glob elsewhere", "rm -rf /tmp/scratch-dir/*"],
     ["a printer naming the root", `echo ${ROOT}`],
