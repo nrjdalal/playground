@@ -431,7 +431,7 @@ if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell's -c cluster), and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, a step holding a chain shell word anywhere (a nested chain, a script file or a shell fed its script on stdin), or with a command substitution beside docker, podman or a portless compose
+# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell word), and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, a step holding a chain shell word anywhere (a nested chain, a script file or a shell fed its script on stdin), or with a command substitution beside docker, podman or a portless compose
 # the wrappers chain_steps reads past to the program they run, A to Z, each as <name>|<flags>|<options that take a value>, and the ones that take one count or duration before it: scripts/hooks/shell.ts's WRAPPERS and COUNTED, with the env and xargs options its parse reads by hand, which a test holds equal
 CHAIN_WRAPPER_OPTIONS="builtin||
 busybox||
@@ -477,7 +477,7 @@ wrapper_option() {
   echo own
 }
 chain_steps() {
-  local a b first="" script="" next="" file="" opt="" lead="" oval="" wrapped="" unplaced="" shell="" value="" ended="" count=""
+  local a b first="" script="" next="" file="" opt="" lead="" oval="" wrapped="" unplaced="" value="" ended="" count=""
   for a in "$@"; do
     if [ -n "$next" ]; then
       if [ -n "$oval" ]; then [ "$a" = pipefail ] || return 1; oval=""; continue; fi
@@ -485,10 +485,9 @@ chain_steps() {
       script=$a; break
     fi
     [ -n "$file" ] && break
-    # an unplaced first word runs a program this cannot read, so a shell word with a -c after it, any single-dash cluster holding c, is a chain it cannot read
+    # an unplaced first word runs a program this cannot read, so a shell word after it runs a script this cannot read too (its -c script, a script file or stdin), whatever follows it
     if [ -n "$unplaced" ]; then
-      case " $CHAIN_SHELLS " in *" ${a##*/} "*) shell=1 ;; esac
-      [ -n "$shell" ] && case "$a" in -c* | -[!-]*c*) return 1 ;; esac
+      case " $CHAIN_SHELLS " in *" ${a##*/} "*) return 1 ;; esac
       continue
     fi
     if [ -z "$first" ]; then
