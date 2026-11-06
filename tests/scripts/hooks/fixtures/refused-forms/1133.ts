@@ -73,6 +73,12 @@ export const groups: Group[] = [
       ["ln of a default holding a substitution", "ln -s ${Y:-$(cat /tmp/f)}"],
       ["ln of a variable under zsh's ~ flag", "ln -s $~X"],
       ["ln of a variable under zsh's braced ~ flag", "ln -s ${~X}"],
+      [
+        "dd with an unquoted arithmetic size bash splits",
+        `bash -c 'dd if=/dev/zero of=/tmp/y bs=$((N))'`,
+      ],
+      ["ln of an array zstyle fills by name", "zstyle -a :c s X; ln -s $X"],
+      ["ln of an array zstyle fills by name in zsh -c", `zsh -c 'zstyle -a :c s X; ln -s $X'`],
     ],
   },
 ]
