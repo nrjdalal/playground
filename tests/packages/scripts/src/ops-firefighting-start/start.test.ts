@@ -1251,6 +1251,28 @@ describe("ops-firefighting-start's date and window flows", () => {
     expect(s.sent).toEqual(["Starting nothing: firefighting.json does not parse"])
   })
 
+  test("U11: the job's own Urgent closes while an Urgent it did not start stays open, so one beat lowers its focus and the next starts the lower line", async () => {
+    const lines = {
+      ...line("MADE-1", "Urgent", 1, { open: false }),
+      ...line("MADE-2", "Urgent", 2, { busy: true }),
+      ...line("MADE-3", "Medium", 3),
+    }
+    const s = setup(lines, {
+      "focus.json": focusFile(`${REASON} MADE-1 open`, 60, "ff-first-worker"),
+      "ops/ops-firefighting-start.state.json": FIRST,
+      "roster.json": {
+        agents: [{ name: "ff-first-worker", status: "working", ticket: "MADE-1" }],
+      },
+    })
+    await s.pass()
+    expect(s.spawns()).toEqual([])
+    expect(s.focus()).toEqual([["off"]])
+    s.later(1)
+    writeFileSync(join(s.data, "firefighting.json"), relayFile(lines, NOW.getTime() + MINUTE))
+    await s.pass()
+    expect(s.titles()).toEqual(["MADE-3 firefight"])
+  })
+
   test("R2: Linear is asked at most every 5 minutes", async () => {
     const s = setup(
       line("MADE-1", "High", 1, { open: false }),

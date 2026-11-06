@@ -95,8 +95,7 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 # The roster's manager kinds (kinds.ts' ROSTER_ROLE_OF_KIND), so a kind role_of_kind does not list runs as a lead: an orchestrator. A read that fails leaves the named kinds alone, so an orchestrator is refused rather than guessed.
 MANAGER_KINDS=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { ROSTER_ROLE_OF_KIND as r } from '$REPO/packages/config/src/kinds.ts'; console.log(Object.keys(r).filter((k) => r[k] === 'manager').join(' '))" 2>/dev/null) || MANAGER_KINDS=
-# The firefighting trigger file standing in the data folder, the first of the three that exists; exit 1 when none does. Its content is not read.
-# ops-firefighting-start writes the third, firefighting-start.json, for its own starts, and it passes the load and slots gates but never focus.
+# The firefighting trigger file standing in the data folder, the first of the three that exists, exit 1 when none does, its content unread; ops-firefighting-start writes the third, firefighting-start.json, for its own starts, which passes the load and slots gates but never focus.
 firefighting_trigger() {
   local f
   for f in "$DATA/firefighting-stop.json" "$DATA/firefighting-headstart.json" "$DATA/firefighting-start.json"; do

@@ -130,8 +130,7 @@ export async function startPass({
     lastTry?: number
     lines?: Record<string, Line>
   }>(relay)
-  // The relay writes lastTry on every pass inside its window, quiet ones included, and nothing outside it, so lines older than freshMinutes are a closed window's or a stopped relay's: none starts from them, and a focus already standing is left to the session working its ticket.
-  // a file that does not parse holds no lines to trust, so it reads as stale, not by its mtime
+  // The relay writes lastTry on every pass inside its window, quiet ones included, and nothing outside it, so lines older than freshMinutes are a closed window's or a stopped relay's, and a file that does not parse holds no lines to trust: none starts from them, and a focus already standing is left to the session working its ticket.
   const exists = await Bun.file(relay).exists()
   const wrote =
     typeof ff?.lastTry === "number"
@@ -151,8 +150,7 @@ export async function startPass({
     return
   }
   delete state.told[""]
-  // The owner takes tickets only inside the start window: outside it, or on a day off, nothing starts and the start file goes, while a focus already standing is left to its session.
-  // the line names the window, never the beat's time or day, so a closed stretch is told once, and the next close once more
+  // The owner takes tickets only inside the start window: outside it, or on a day off, nothing starts and the start file goes, while a focus already standing is left to its session; the line names the window, never the beat's time or day, so a closed stretch is told once, and the next close once more.
   if (!inWindow(config, ctx.now)) {
     await tell(
       "window",
@@ -172,7 +170,7 @@ export async function startPass({
   // Only a ticket the tracker's digest lists is a firefighting one: the relay keeps it in the file's clock map, while a line a mention elsewhere named (an integration or port ask) has no entry, so it never starts; a file with no clock map starts nothing.
   const listed = new Set(Object.keys(ff?.clock ?? {}))
   for (const line of matched)
-    if (!listed.has(line.id))
+    if (!listed.has(line.id) && line.open === true)
       await tell(line.id, `Skipped ${line.id}: no digest of the tracker lists it`)
   const lines = matched.filter((l) => listed.has(l.id))
   const endedToday = (id: string) => rowsFor(id).find((r) => r.name && state.ended[r.name] === day)
@@ -181,7 +179,8 @@ export async function startPass({
     rowsFor(id).some((r) => !ENDED.has(r.status ?? "")) ||
     (state.started[id] !== undefined && !ENDED.has(rowOf(state.started[id]!)?.status ?? ""))
   for (const line of lines)
-    if (line.theirs === true) await tell(line.id, `Skipped ${line.id}: someone else took it`)
+    if (line.theirs === true && line.open === true)
+      await tell(line.id, `Skipped ${line.id}: someone else took it`)
   await reopen(lines, state, ctx.now, linearStates, tell, firstBeat)
   const open = lines.filter(
     (l) => (l.open === true || state.reopened[l.id] !== undefined) && l.theirs !== true,
@@ -424,7 +423,7 @@ const focus = (ctx: Context, args: string[]) =>
     ...args,
   ])
 
-// While an open Urgent ticket has a session this job started whose roster row has not ended, focus stands for one such session (the one holding it, else `prefer`, the one that held it before this pass lowered it, else the newest), re-armed under 10 minutes left; once none is open, or each such session has ended, the focus this job set is lowered and a hand-set one is left.
+// While an open Urgent ticket has a session this job started whose roster row has not ended, focus stands for one such session (the one holding it, else `prefer`, the one that held it before this pass lowered it, else the newest), re-armed under 10 minutes left; once no such live session is left, whether no Urgent is open, each such session has ended, or every open Urgent is one another session holds, the focus this job set is lowered and a hand-set one is left.
 async function holdFocus(
   ctx: Context,
   data: string,
@@ -440,7 +439,7 @@ async function holdFocus(
   // a session whose roster row ended holds no focus, though its ticket stays open
   const sessions = started.filter(live)
   if (!sessions.length) {
-    if (ours && (!urgent.length || started.length)) await focus(ctx, ["off"])
+    if (ours) await focus(ctx, ["off"])
     return
   }
   const session =
