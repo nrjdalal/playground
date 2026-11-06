@@ -201,6 +201,8 @@ describe("a build, a test run, lefthook, turbo or a file write in the main check
   // #573: the folder a sure cd lands in is the one the commands after it run from, and a reserved word an argument spells opens and closes no body
   test.each([
     ["a readable cd into a worktree", `cd ${WORKTREE} && bun run build`],
+    ["a cd into a worktree by builtin", `builtin cd ${WORKTREE} && git commit -m x`],
+    ["a cd into a worktree by command", `command cd ${WORKTREE} && git commit -m x`],
     ["a second cd into a subfolder of it", `cd ${WORKTREE} && cd packages && git commit -m x`],
     ["an argument that spells an opener before it", `echo if; cd ${WORKTREE} && bun run build`],
     [
