@@ -611,7 +611,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 ## no-raw-delete
 
-- A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>`, so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
+- A delete goes to the 7-day trash through `playground rm <path>`, a worktree through `playground rm --worktree <path>` (with `--discard` once its PR has merged or closed, whatever it holds), so a delete aimed wrong comes back (2 Nov: two code-review sub-agents each deleted recursively in their own scratch folders, though their prompts said to run none).
   The trash takes up to 5,000 files or 2 GB, so the refusal also names the lead's cleanup for a bigger tree and `bun install` for a `node_modules`.
   `scripts/hooks/no-raw-delete.ts`, registered after no-kill-by-name, acts for every session and every sub-agent, whose hook input carries its own `agent_id` beside its parent's `session_id`, and refuses with a reason that names `playground rm`:
   an `rm` or GNU rm's `grm` with `-r`, `-R` or `--recursive` (any prefix GNU rm takes, anywhere among its words), `find -delete`, `rm` under xargs, `gxargs` or `parallel`,
@@ -707,8 +707,8 @@ Only the first reading moves the folder, sets variables and records files for th
   herdr's own resume, when it is on, brings a session back without its `--settings` (measured on herdr 0.9.5), so a session resumed that way outside the factory's checkout writes no state and its file goes stale; a reader takes a record as about the moment it was written, never as the session now.
   The file also holds the shell-pane launcher's caller check (`procOf`, `sessionAbove`, `callerRefusal`): `run` and `login` refuse a call whose `PLAYGROUND_ROLE` or `CLAUDE_CODE_SESSION_ID` is not its claude process's own;
   [the shell-pane docs page](../../docs/playground/shell-pane.md#where-it-fits) says what the check reads and the gaps it leaves open.
-  `playground rm --discard` reads the same lookup (`sessionAbove`) the other way (`callerOf` in `packages/scripts/src/playground/rm.ts`): a claude process above the call makes it a session's, which needs an approved delete decision, and none makes it a terminal's.
-  Before the lookup, rm refuses a call whose parent is pid 1 or one the system cannot read without that decision, since a detached call's climb would find no claude process.
+  `playground rm --discard` reads the same lookup (`sessionAbove`) the other way (`callerOf` in `packages/scripts/src/playground/rm.ts`): a claude process above the call makes it a session's, which needs an approved delete decision unless the worktree's PR has merged or closed, and none makes it a terminal's.
+  Before the lookup, rm refuses a call whose parent is pid 1 or one the system cannot read without that decision or that PR state, since a detached call's climb would find no claude process.
   When it writes `stuck` or `failed` for a factory session, it also queues one line in the ops outbox (`ops-stuck-alert.jsonl`, which the relay sends by SendMessage) for the session's manager alone, by `managerFor()` in `packages/scripts/src/stuck-alert.ts`: the session, its roster task, the reason, the command or question, and its last message (playbook's **unstick**);
   An orchestrator's manager, the Assistant's for one, is the session its roster row reports to.
   The dispatcher's own and a session outside the factory queue nothing.
