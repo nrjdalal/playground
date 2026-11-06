@@ -425,7 +425,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   for (const w of before) {
     if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value)))
       return "root";
-    if (w === firstWrapper || ROOT_SHELLS.has(w.value.toLowerCase()))
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value))
       wrappers.push(program(w.value));
   }
   if (first && wrappers.length)
@@ -685,43 +685,7 @@ var slice = (word, from) => {
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
-var SHELL_OWN = new Set([
-  ".",
-  "alias",
-  "cd",
-  "declare",
-  "eval",
-  "export",
-  "hash",
-  "let",
-  "local",
-  "popd",
-  "pushd",
-  "read",
-  "readonly",
-  "set",
-  "shift",
-  "source",
-  "trap",
-  "type",
-  "typeset",
-  "unalias",
-  "unset"
-]);
-var G_WRAPPERS = new Map([
-  ["genv", "env"],
-  ["gnice", "nice"],
-  ["gnohup", "nohup"],
-  ["gstdbuf", "stdbuf"],
-  ["gtimeout", "timeout"]
-]);
-var program = (value) => {
-  const base = basename(value.replace(/^=/, ""));
-  const lower = base.toLowerCase();
-  if (SHELL_OWN.has(lower) && value !== lower)
-    return value;
-  return G_WRAPPERS.get(lower) ?? lower;
-};
+var program = (value) => basename(value.replace(/^=/, ""));
 var UV_TAKES = new Set([
   "--cache-dir",
   "--config-file",
@@ -1320,8 +1284,6 @@ function unwrap(state, inside, budget) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
-      } else if (wrapper === "env" && v === "-") {
-        take();
       } else if (v === "--") {
         take();
         while (ASSIGN.test(peek()?.value ?? ""))
@@ -1506,7 +1468,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   if (name === "") {
     for (const [key, value] of local)
       setVar(env.vars, key, value);
-    if (builtins || cmd.feedsShell)
+    if (builtins || cmd.feedsShell || rootFed(cmd))
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -1562,7 +1524,7 @@ var throughBuiltin = (cmd, { first }) => {
   if (!first)
     return false;
   const before = cmd.words.slice(0, cmd.words.indexOf(first));
-  return before.some((w) => !w.quoted && BUILTIN.has(w.value)) && before.every((w) => !w.quoted && (BUILTIN.has(w.value) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
+  return before.some((w) => !w.quoted && BUILTIN.has(program(w.value))) && before.every((w) => !w.quoted && (BUILTIN.has(program(w.value)) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
 };
 var manyTimes = (cmd, { first }) => !!cmd.repeated || cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0).some((w) => !w.quoted && COUNTED.has(program(w.value)));
 var startFolders = (env) => [
@@ -1837,8 +1799,10 @@ async function stdinOf(cmd, env) {
   tick();
   return held2(await stdinText(cmd, env));
 }
+var feedsStdin = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
+var rootFed = (cmd) => cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root";
 async function stdinText(cmd, env) {
-  const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
+  const input = cmd.redirects.findLast(feedsStdin);
   if (input?.target?.procs)
     return outputs(input.target.procs, env);
   if (input?.op === "<" || input?.op === "<>")
@@ -1985,7 +1949,7 @@ var HERDR_READS = new Set([
 ]);
 var HERDR_SOCKET = /herdr[^\s'"]*\.sock\b/;
 var CONNECTS = /^(?:bun|curl|deno|nc|ncat|netcat|node|perl|php|python[\d.]*|ruby|socat)$/;
-var UNIX = /\b(?:curl|nc|ncat|netcat|socat)\b/i;
+var UNIX = /\b(?:curl|nc|ncat|netcat|socat)\b/;
 function unixTarget(name, args) {
   const positional = args.filter((a) => !a.value.startsWith("-") || a.value === "-");
   const unix = (v) => /^-[A-Za-z0-9]*U/.test(v) || v === "--unixsock";
@@ -2134,10 +2098,10 @@ var visit = async (cmd, { args, first, local, name }, env) => {
     return refuse("a claude --resume or --continue");
 };
 var BARE = (command) => command.replace(/[\\'"]/g, "");
-var OPENS2 = new RegExp(`\\b(?:cmux|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS].join("|")})\\b`, "i");
-var REOPEN = /\bclaude\b[\s\S]*(?:\s-[cr]\b|--resume|--continue)/i;
+var OPENS2 = new RegExp(`\\b(?:cmux|herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH|${[...HEADS, ...HERDR_HEADS].join("|")})\\b`);
+var REOPEN = /\bclaude\b[\s\S]*(?:\s-[cr]\b|--resume|--continue)/;
 var candidate = (command) => command.includes("$'") || OPENS2.test(BARE(command)) || /\bcmux\b/i.test(BARE(command)) || REOPEN.test(BARE(command)) || UNIX.test(BARE(command));
-var spawnCall = (command) => /\b(?:herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/i.test(BARE(command)) || /\bcmux\b/i.test(BARE(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE(command)) || REOPEN.test(BARE(command));
+var spawnCall = (command) => /\b(?:herdr|HERDR_BIN_PATH|HERDR_SESSION|HERDR_SOCKET_PATH)/.test(BARE(command)) || /\bcmux\b/i.test(BARE(command)) && /\b(?:claude|claude-teams|omc|recover|wake|restore|restore-session|fork)\b/.test(BARE(command)) || REOPEN.test(BARE(command));
 function commandOf(raw) {
   try {
     const { tool_input: toolInput, tool_name: tool } = JSON.parse(raw);

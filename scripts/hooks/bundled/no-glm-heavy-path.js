@@ -5451,7 +5451,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   for (const w of before) {
     if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value)))
       return "root";
-    if (w === firstWrapper || ROOT_SHELLS.has(w.value.toLowerCase()))
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value))
       wrappers.push(program(w.value));
   }
   if (first && wrappers.length)
@@ -5711,43 +5711,7 @@ var slice = (word, from) => {
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
-var SHELL_OWN = new Set([
-  ".",
-  "alias",
-  "cd",
-  "declare",
-  "eval",
-  "export",
-  "hash",
-  "let",
-  "local",
-  "popd",
-  "pushd",
-  "read",
-  "readonly",
-  "set",
-  "shift",
-  "source",
-  "trap",
-  "type",
-  "typeset",
-  "unalias",
-  "unset"
-]);
-var G_WRAPPERS = new Map([
-  ["genv", "env"],
-  ["gnice", "nice"],
-  ["gnohup", "nohup"],
-  ["gstdbuf", "stdbuf"],
-  ["gtimeout", "timeout"]
-]);
-var program = (value) => {
-  const base = basename(value.replace(/^=/, ""));
-  const lower = base.toLowerCase();
-  if (SHELL_OWN.has(lower) && value !== lower)
-    return value;
-  return G_WRAPPERS.get(lower) ?? lower;
-};
+var program = (value) => basename(value.replace(/^=/, ""));
 var UV_TAKES = new Set([
   "--cache-dir",
   "--config-file",
@@ -6354,8 +6318,6 @@ function unwrap(state, inside, budget) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
-      } else if (wrapper === "env" && v === "-") {
-        take();
       } else if (v === "--") {
         take();
         while (ASSIGN.test(peek()?.value ?? ""))
@@ -6546,7 +6508,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   if (name === "") {
     for (const [key, value] of local)
       setVar(env.vars, key, value);
-    if (builtins || cmd.feedsShell)
+    if (builtins || cmd.feedsShell || rootFed(cmd))
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -6602,7 +6564,7 @@ var throughBuiltin = (cmd, { first }) => {
   if (!first)
     return false;
   const before = cmd.words.slice(0, cmd.words.indexOf(first));
-  return before.some((w) => !w.quoted && BUILTIN.has(w.value)) && before.every((w) => !w.quoted && (BUILTIN.has(w.value) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
+  return before.some((w) => !w.quoted && BUILTIN.has(program(w.value))) && before.every((w) => !w.quoted && (BUILTIN.has(program(w.value)) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
 };
 var manyTimes = (cmd, { first }) => !!cmd.repeated || cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0).some((w) => !w.quoted && COUNTED.has(program(w.value)));
 var startFolders = (env) => [
@@ -6877,8 +6839,10 @@ async function stdinOf(cmd, env) {
   tick();
   return held2(await stdinText(cmd, env));
 }
+var feedsStdin = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
+var rootFed = (cmd) => cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root";
 async function stdinText(cmd, env) {
-  const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
+  const input = cmd.redirects.findLast(feedsStdin);
   if (input?.target?.procs)
     return outputs(input.target.procs, env);
   if (input?.op === "<" || input?.op === "<>")
@@ -7279,7 +7243,7 @@ var visitor = (load5, limit) => {
     if (PURE.has(name) && !writes(cmd))
       return;
     const before = earlier;
-    const isGit = name === "git";
+    const isGit = name.toLowerCase() === "git";
     let dir = env.cwd;
     let k = 0;
     for (;isGit && k < args.length; k++) {
