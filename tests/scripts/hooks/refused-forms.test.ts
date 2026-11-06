@@ -119,6 +119,10 @@ mkdirSync(join(SYNCED, "extensions", "acme"), { recursive: true })
 git(join(SYNCED, "extensions", "acme"), "init", "-q")
 // A fabricated main checkout (holds scripts/spawn.sh and maps ask/thread to their Playground entries) and a linked worktree of it whose package.json and entry files match byte for byte, since no-desktop-owner-app's prose allowance holds from the main checkout alone. PLAYGROUND_REPO pins mainCheckout() to NDMAIN, restored after.
 const NDMAIN = join(SCRATCH, "nd-main")
+const { ask, thread } = JSON.parse(
+  readFileSync(join(import.meta.dir, "../../../package.json"), "utf8"),
+).scripts
+const SCRIPT_LINES = { ask, thread }
 const NDWORK = join(SCRATCH, "nd-work")
 git(SCRATCH, "init", "-q", "-b", "canary", NDMAIN)
 mkdirSync(join(NDMAIN, "scripts"), { recursive: true })
@@ -126,15 +130,7 @@ writeFileSync(join(NDMAIN, "scripts", "spawn.sh"), "#!/bin/sh\n")
 mkdirSync(join(NDMAIN, "api", "hono", "src", "bin"), { recursive: true })
 writeFileSync(join(NDMAIN, "api", "hono", "src", "bin", "dashboard-ask.ts"), "")
 writeFileSync(join(NDMAIN, "api", "hono", "src", "bin", "dashboard-thread.ts"), "")
-writeFileSync(
-  join(NDMAIN, "package.json"),
-  `${JSON.stringify({
-    scripts: {
-      ask: "bun api/hono/src/bin/dashboard-ask.ts",
-      thread: "bun api/hono/src/bin/dashboard-thread.ts",
-    },
-  })}\n`,
-)
+writeFileSync(join(NDMAIN, "package.json"), `${JSON.stringify({ scripts: SCRIPT_LINES })}\n`)
 git(NDMAIN, "add", ".")
 git(NDMAIN, "commit", "-q", "-m", "base")
 git(NDMAIN, "worktree", "add", "-q", "--detach", NDWORK)
