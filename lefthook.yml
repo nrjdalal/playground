@@ -83,7 +83,7 @@ pre-commit:
         if ! git diff --quiet -- scripts/hooks/bundled || [ -n "$(git ls-files --others --exclude-standard -- scripts/hooks/bundled)" ]; then echo "hooks-bundle: scripts/hooks/bundled holds changes this commit leaves unstaged, so the check would read bundles the commit does not carry; run git add scripts/hooks/bundled, then commit again" >&2; exit 1; fi;
         bun --no-env-file packages/scripts/src/hooks-bundle.ts --check
     trace-count:
-      # the trace ratchet's test, as CI runs it: it counts every file git's index holds, as it stands on disk, and a commit of images and fonts alone skips it
+      # the trace ratchet's test, as CI runs it: it counts every file git's index holds, as it stands on disk, and a commit of images and fonts alone skips it; then the list kinds from this machine's list, which the test's sandbox hides
       priority: 4
       exclude:
         - "*.gif"
@@ -93,7 +93,7 @@ pre-commit:
         - "*.png"
         - "*.webp"
         - "*.woff2"
-      run: bun run test:file tests/packages/scripts/src/trace-count/count.test.ts
+      run: bun run test:file tests/packages/scripts/src/trace-count/count.test.ts && bun --no-env-file packages/scripts/src/trace-count/cli.ts --lists
     dev-stack:
       # the build below rebuilds packages/* under this checkout's running `bun run dev` and hangs it, so the commit waits for the stack to stop
       priority: 4
