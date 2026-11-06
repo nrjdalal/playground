@@ -1088,6 +1088,23 @@ describe("the pre-commit hooks-bundle job", () => {
     }
   }, 60_000)
 
+  test("leaves a commit that stages no input alone while a bundle change sits unstaged, and refuses one that stages a guard", async () => {
+    const { dir, git, hook } = await checkout()
+    try {
+      writeFileSync(join(dir, "scripts", "hooks", "bundled", "role.js"), "edited\n")
+      writeFileSync(join(dir, "README.md"), "docs\n")
+      git("add", "README.md")
+      expect(hook()).toMatchObject({ code: 0 })
+      writeFileSync(join(dir, "scripts", "hooks", "role.ts"), 'console.log("b")\n')
+      git("add", "scripts/hooks/role.ts")
+      const refused = hook()
+      expect(refused.code).not.toBe(0)
+      expect(refused.out).toContain("run git add scripts/hooks/bundled, then commit again")
+    } finally {
+      rmSync(dir, { force: true, recursive: true })
+    }
+  }, 60_000)
+
   test("passes a merge commit with a stale bundle, which hooks-merge-canary rebuilds in a commit of its own", async () => {
     const { dir, edit, git, hook } = await checkout()
     try {
