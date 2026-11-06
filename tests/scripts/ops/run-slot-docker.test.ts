@@ -463,6 +463,58 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
         expect(r.ran).toBe(true)
       })
 
+    // review round 1 of #1209: every step is read for a docker-able program word before an unreadable one ends the read, past a reserved word that leads it, with a bracket class fnmatch does not read failing closed, behind a wrapper's options as wrapper_option reads them, and with [^x] and a letter range expanded
+    for (const script of [
+      "$X; /usr/local/bin/doc?er build .",
+      "echo hi | sh; /usr/local/bin/doc?er build .",
+      "/usr/local/bin/doc?er compose run web sh",
+      "if true; then /usr/local/bin/doc?er build .; fi",
+      "for f in a b; do /usr/local/bin/doc?er build .; done",
+      "{ /usr/local/bin/doc?er build .; }",
+      "! /usr/local/bin/doc?er build .",
+      "/usr/local/bin/[[:lower:]]ocker build .",
+      "timeout -s KILL 60 /usr/local/bin/doc?er build .",
+      "sudo -u me nice -n 5 /usr/local/bin/doc?er build .",
+      "env A=1 /usr/local/bin/doc?er build .",
+      "nice --frobnicate /usr/local/bin/doc?er build .",
+      "/usr/local/bin/doc[^x]er build .",
+      "/usr/local/bin/doc{j..l}er build .",
+    ])
+      test(`a docker program word in a step: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(GLOB)
+      })
+
+    test("a globbed shell after a reserved word", async () => {
+      const r = await run(["sh", "-c", "echo docker | ! /bin/s?"])
+      expect(r.code).toBe(2)
+      expect(r.err).toContain(CANNOT)
+    })
+
+    // review round 1 of #1209, the lead's ruling: a glob in a script run-slot does not open (a nested -c, one fed on stdin, eval's words, a chain behind an unplaced first word) is read piece by piece as a program word
+    for (const argv of [
+      ["sh", "-c", 'sh -c "/usr/local/bin/doc?er build ."'],
+      ["sh", "-c", 'echo "/usr/local/bin/doc?er build ." | sh'],
+      ["sh", "-c", "eval /usr/local/bin/doc?er build ."],
+      ["launcher", "sh", "-c", "/usr/local/bin/doc?er build ."],
+    ])
+      test(`a docker glob in a script run-slot does not open: ${argv.join(" ")}`, async () => {
+        const r = await run(argv)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(GLOB)
+      })
+
+    test("while a glob argument behind a wrapper runs as before", async () => {
+      const r = await run([
+        "sh",
+        "-c",
+        'nice ls /usr/local/bin/doc?er > /dev/null 2>&1; touch "$MARKER"',
+      ])
+      expect(r.code).toBe(0)
+      expect(r.ran).toBe(true)
+    })
+
     test("while a nested chain that names no docker runs as before", async () => {
       const r = await run(["sh", "-c", `echo hi; sh -c 'touch "$MARKER"'`])
       expect(r.code).toBe(0)
