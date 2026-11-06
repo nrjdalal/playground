@@ -12,6 +12,12 @@ export const ticketCardSettings = defineSettings({
     description: "The approvals a ticket's pull request waits for, which the card counts toward.",
     schema: z.number().int().positive(),
   },
+  "ticketCard.deployedStates": {
+    default: [] as string[],
+    description:
+      "The tracker states, by name, that mark a ticket deployed, its last step; a line closed on any other state reads closed, and with none set every closed line does.",
+    schema: z.array(z.string().min(1)),
+  },
   "ticketCard.diaryDir": {
     default: "diary",
     description:

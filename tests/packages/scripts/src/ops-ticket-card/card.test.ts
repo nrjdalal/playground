@@ -26,6 +26,7 @@ const line = (id: string, over: Partial<Line> = {}): Line => ({
 })
 const inputs = (over: Partial<Inputs> = {}): Inputs => ({
   approvals: 2,
+  deployedStates: ["Done (Prod)"],
   lines: [line("ABC-1")],
   linkBase: "",
   prs: {},
@@ -60,7 +61,7 @@ describe("a ticket's block", () => {
       "⬜ CI green",
       "⬜ approvals",
       "⬜ merged",
-      "⬜ done",
+      "⬜ deployed",
     ])
   })
 
@@ -138,21 +139,51 @@ describe("a ticket's block", () => {
     expect(red[4]).toBe("⏳ CI green    red")
   })
 
-  test("a merged PR and a closed line read merged and done", () => {
+  test("a merged PR whose ticket's state is one of deployedStates reads merged and deployed", () => {
     const pr = { ...PR, approvals: 2, checks: "green" as const, draft: false, merged: true }
-    const done = block(
-      cardOf(
-        inputs({ lines: [line("ABC-1", { mine: true, open: false })], prs: { "ABC-1": pr } }),
-        {},
-        NOW,
-      ).text,
-      "ABC-1",
+    const { seen, text } = cardOf(
+      inputs({
+        lines: [line("ABC-1", { mine: true, open: false, state: "Done (Prod)" })],
+        prs: { "ABC-1": pr },
+      }),
+      {},
+      NOW,
     )
-    expect(done.slice(5)).toEqual([
+    expect(block(text, "ABC-1").slice(5)).toEqual([
       "✅ approvals   2/2, 10:00 am",
       "✅ merged      10:00 am",
-      "✅ done        10:00 am",
+      "✅ deployed    10:00 am",
     ])
+    expect(stepLinesOf({}, seen, "UTC").at(-1)).toBe("- 10:00 am ABC-1 deployed")
+  })
+
+  test("a line closed on a state deployedStates does not name reads closed, never deployed, with nothing in flight", () => {
+    for (const [state, deployedStates] of [
+      ["Canceled", ["Done (Prod)"]],
+      ["Duplicate", ["Done (Prod)"]],
+      [undefined, ["Done (Prod)"]],
+      ["Done (Prod)", []],
+    ] as const) {
+      const { seen, text } = cardOf(
+        inputs({
+          deployedStates: [...deployedStates],
+          lines: [line("ABC-1", { mine: true, open: false, state })],
+        }),
+        {},
+        NOW,
+      )
+      expect(block(text, "ABC-1").slice(1)).toEqual([
+        "✅ taken       10:00 am",
+        "⬜ cause found",
+        "⬜ PR open",
+        "⬜ CI green",
+        "⬜ approvals",
+        "⬜ merged",
+        "✅ closed      10:00 am",
+      ])
+      expect(seen["ABC-1"]).not.toHaveProperty("deployed")
+      expect(stepLinesOf({}, seen, "UTC").at(-1)).toBe("- 10:00 am ABC-1 closed")
+    }
   })
 
   test("a skipped ticket names its area, and a colleague's names no one", () => {

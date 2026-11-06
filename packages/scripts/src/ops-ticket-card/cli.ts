@@ -15,9 +15,10 @@ import { cardOf, dayOf, inWindow, type Line, type Pr, type Seen, stepLinesOf } f
 
 const GITHUB_MS = 5 * 60_000
 
-// The job's own memory: the day's card (its id and poster, and the text last written), each step's first-seen time, and each ticket's last GitHub read.
+// The job's own memory: the day's card (its id and poster, and the text last written), the day its seen record is for with each step's first-seen time, and each ticket's last GitHub read.
 export type State = {
   card?: { day: string; from: string; id: string; text: string }
+  day?: string
   prs: Record<string, { at: number; pr?: Pr }>
   seen: Seen
 }
@@ -47,6 +48,7 @@ export const linesIn = (file: any, prefixes: string[]): Line[] =>
       mine: l.mine === true,
       open: l.open !== false,
       shownAt: Number(l.shownAt) || 0,
+      ...(typeof l.state === "string" ? { state: l.state } : {}),
       ...(l.theirs ? { theirs: true } : {}),
       ...(typeof l.urgency === "string" ? { urgency: l.urgency } : {}),
     }))
@@ -155,7 +157,7 @@ const ask = async (
 
 export type Io = { data: string; org?: string; settings: Settings }
 
-// One beat: nothing outside the window or with no lines file; else the card's text from the files and GitHub, written only when it changed, a closed card or a new day getting a new card, and each new step appended to the day's steps file.
+// One beat: nothing outside the window or with no lines file; else the card's text from the files and GitHub, written only when it changed, a closed card or a new day getting a new card, and each new step appended to the day's steps file; each ticket's read counts toward its 5 minutes even when it fails, keeping its last PR, and the reads and steps are saved before the card is written, so a failing read or ask repeats neither; a failed read throws once the beat has saved.
 export const beat = async (
   ctx: Pick<Context, "now" | "ops" | "repo" | "run">,
   io: Io,
@@ -171,16 +173,23 @@ export const beat = async (
   const state: State = (await read(path)) ?? { prs: {}, seen: {} }
   const lines = linesIn(await read(linesFile), get("ticketCard.prefixes"))
   const skips = skipsIn(await read(pathIn(io.data, get("ticketCard.skipsFile"))))
+  const failed: string[] = []
   for (const line of lines) {
     const had = state.prs[line.id]
     const settled = had?.pr?.merged && !line.open
     if (!io.org || line.theirs || skips[line.id] || settled || (had && now - had.at < GITHUB_MS))
       continue
-    state.prs[line.id] = { at: now, pr: await prOf(ctx, io.org, line.id) }
+    const pr = await prOf(ctx, io.org, line.id).catch((e: Error) => {
+      failed.push(`${line.id}: ${e.message}`)
+      return had?.pr
+    })
+    state.prs[line.id] = { at: now, pr }
   }
+  const before = state.day === day ? state.seen : {}
   const { seen, text } = cardOf(
     {
       approvals: get("ticketCard.approvals"),
+      deployedStates: get("ticketCard.deployedStates"),
       lines,
       linkBase: get("ticketCard.linkBase"),
       prs: Object.fromEntries(Object.entries(state.prs).map(([id, p]) => [id, p.pr])),
@@ -190,10 +199,13 @@ export const beat = async (
       window: get("ticketCard.window"),
       zone,
     },
-    state.card?.day === day ? state.seen : {},
+    before,
     now,
   )
-  const steps = stepLinesOf(state.card?.day === day ? state.seen : {}, seen, zone)
+  const save = (card: State["card"]) =>
+    writeAtomic(path, JSON.stringify({ card, day, prs: state.prs, seen } satisfies State))
+  await save(state.card)
+  const steps = stepLinesOf(before, seen, zone)
   if (steps.length) {
     const dir = pathIn(io.data, get("ticketCard.diaryDir"))
     await mkdir(dir, { recursive: true })
@@ -223,7 +235,8 @@ export const beat = async (
       card = { day, from, id, text }
     } else card = { ...card!, text }
   }
-  await writeAtomic(path, JSON.stringify({ card, prs: state.prs, seen } satisfies State))
+  await save(card)
+  if (failed.length) throw new Error(`gh read failed for ${failed.join("; ")}`)
 }
 
 export const BEATS: Beat[] = [

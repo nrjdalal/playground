@@ -45,7 +45,7 @@ const world = (name: string) => {
   const ops = join(data, "ops")
   mkdirSync(ops, { recursive: true })
   const ran: { argv: string[]; stdin?: string }[] = []
-  const answers = { closed: false, id: 0 }
+  const answers = { askFails: false, closed: false, id: 0, searchFails: "" }
   const lines = (l: Record<string, unknown>) =>
     writeFileSync(
       join(data, "lines.json"),
@@ -63,7 +63,15 @@ const world = (name: string) => {
   })
   const run = async (argv: string[], _t?: number, stdin?: string) => {
     ran.push({ argv, stdin })
+    if (
+      argv[0] === "gh" &&
+      argv[1] === "search" &&
+      answers.searchFails &&
+      argv.includes(`"${answers.searchFails}"`)
+    )
+      return { code: 1, out: "gh: made-up search failure" }
     if (argv[0] === "gh") return { code: 0, out: argv[1] === "search" ? SEARCH : VIEW }
+    if (answers.askFails) return { code: 1, out: "ask: made-up failure" }
     if (argv.includes("edit") && answers.closed)
       return {
         code: 1,
@@ -80,7 +88,10 @@ const world = (name: string) => {
       { data, org: org ?? undefined, settings: settings(values) },
     )
   const asks = () => ran.filter((r) => r.argv[0] === "bun").map((r) => r.argv.slice(6).join(" "))
-  const gh = () => ran.filter((r) => r.argv[0] === "gh" && r.argv[1] === "search").length
+  const gh = (id?: string) =>
+    ran.filter(
+      (r) => r.argv[0] === "gh" && r.argv[1] === "search" && (!id || r.argv.includes(`"${id}"`)),
+    ).length
   return { answers, asks, data, gh, go, lines, ops, ran }
 }
 
@@ -151,6 +162,32 @@ describe("the beat", () => {
     expect(none.gh()).toBe(0)
   })
 
+  test("one ticket's failing read throws once the beat has saved, and every ticket is still read once every 5 minutes", async () => {
+    const w = world("search-fails")
+    w.lines({
+      "ABC-1": { id: "ABC-1", mine: false, open: true, shownAt: NOW - 30 * MIN },
+      "ABC-2": { id: "ABC-2", mine: false, open: true, shownAt: NOW - 20 * MIN },
+    })
+    w.answers.searchFails = "ABC-2"
+    await expect(w.go(0)).rejects.toThrow("ABC-2")
+    for (const minute of [1, 2, 3]) await w.go(minute)
+    expect([w.gh("ABC-1"), w.gh("ABC-2")]).toEqual([1, 1])
+    expect(w.asks()).toEqual(["new"])
+  })
+
+  test("a failing ask repeats no GitHub read and no step line, and the next beat that can post does", async () => {
+    const w = world("ask-fails")
+    w.answers.askFails = true
+    for (const minute of [0, 1, 2]) await expect(w.go(minute)).rejects.toThrow("bun run ask new")
+    expect(w.gh()).toBe(1)
+    expect(readFileSync(join(w.data, "diary", "2026-11-05-steps.md"), "utf8")).toBe(
+      "- 10:00 am ABC-1 PR open\n",
+    )
+    w.answers.askFails = false
+    await w.go(3)
+    expect(w.asks().filter((a) => a === "new")).toHaveLength(4)
+  })
+
   test("each step first seen goes once into the day's steps file under diaryDir", async () => {
     const w = world("steps")
     await w.go(0)
@@ -166,17 +203,17 @@ describe("the beat", () => {
 })
 
 describe("its readers", () => {
-  test("the lines file's lines, kept to the prefixes named, none meaning every prefix", () => {
+  test("the lines file's lines with their Linear state, kept to the prefixes named, none meaning every prefix", () => {
     const file = {
       clock: { "ABC-1": {}, "XYZ-2": {} },
       lines: {
-        "ABC-1": { id: "ABC-1", open: true, shownAt: 1 },
+        "ABC-1": { id: "ABC-1", open: true, shownAt: 1, state: "In Progress" },
         "XYZ-2": { id: "XYZ-2", open: false, shownAt: 2, theirs: true },
       },
     }
     expect(linesIn(file, ["ABC"]).map((l) => l.id)).toEqual(["ABC-1"])
     expect(linesIn(file, [])).toEqual([
-      { id: "ABC-1", mine: false, open: true, shownAt: 1 },
+      { id: "ABC-1", mine: false, open: true, shownAt: 1, state: "In Progress" },
       { id: "XYZ-2", mine: false, open: false, shownAt: 2, theirs: true },
     ])
   })

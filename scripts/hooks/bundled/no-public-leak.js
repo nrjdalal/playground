@@ -6488,6 +6488,11 @@ var ticketCardSettings = defineSettings({
     description: "The approvals a ticket's pull request waits for, which the card counts toward.",
     schema: number2().int().positive()
   },
+  "ticketCard.deployedStates": {
+    default: [],
+    description: "The tracker states, by name, that mark a ticket deployed, its last step; a line closed on any other state reads closed, and with none set every closed line does.",
+    schema: array(string2().min(1))
+  },
   "ticketCard.diaryDir": {
     default: "diary",
     description: "The folder, absolute or in the data folder, where the card's job appends each step it first sees to that day's <YYYY-MM-DD>-steps.md.",

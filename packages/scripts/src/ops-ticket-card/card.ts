@@ -1,6 +1,6 @@
 // The ticket progress card, pure: the day's watched tickets in, the card's text and each step's first-seen time out, with nothing read or written here (cli.ts does the reading and writing).
 
-// A ticket's line as the lines file holds it: whose it is, whether it is still open, when it first showed, and its urgency.
+// A ticket's line as the lines file holds it: whose it is, whether it is still open, when it first showed, its tracker state by name, and its urgency.
 export type Line = {
   id: string
   // the owner's ticket: assigned to the owner
@@ -8,6 +8,7 @@ export type Line = {
   open: boolean
   // when the line first showed, epoch ms
   shownAt: number
+  state?: string
   // someone else's ticket, which the card names as a colleague's and follows no further
   theirs?: boolean
   urgency?: string
@@ -24,6 +25,8 @@ export type Pr = {
 
 export type Inputs = {
   approvals: number
+  // the tracker states, by name, that read deployed
+  deployedStates: string[]
   lines: Line[]
   // the base a ticket's id is appended to for its link, "" for none
   linkBase: string
@@ -49,9 +52,10 @@ export const STEPS = [
   "CI green",
   "approvals",
   "merged",
-  "done",
+  "deployed",
 ] as const
-export type Step = (typeof STEPS)[number]
+// A line closed on a state that is not one of deployedStates (canceled, a duplicate) ends on "closed" in place of "deployed".
+export type Step = (typeof STEPS)[number] | "closed"
 
 // The queue's order: Urgent first, then High, Medium and Low, then a ticket with no urgency, each oldest first.
 const RANK: Record<string, number> = { High: 1, Low: 3, Medium: 2, Urgent: 0 }
@@ -120,36 +124,39 @@ export const stepsOf = (
     if (pr.approvals >= inputs.approvals) done.add("approvals")
     if (pr.merged) done.add("merged")
   }
-  if (!line.open) done.add("done")
+  if (line.state && inputs.deployedStates.includes(line.state)) done.add("deployed")
+  else if (!line.open) done.add("closed")
   return { detail, done }
 }
 
 const row = (mark: string, step: string, right: string) =>
   `${mark} ${step.padEnd(12)}${right}`.trimEnd()
 
-// One ticket's block: its head, then each step's mark with its detail and the time it was first seen done; the step after the last one done is in flight.
+// One ticket's block: its head, then each step's mark with its detail and the time it was first seen done; the step after the last one done is in flight, and none once the ticket is deployed or closed.
 const blockOf = (line: Line, inputs: Inputs, seen: Seen): string[] => {
   if (line.theirs) return [`${line.id} · a colleague's`]
   const skip = inputs.skips[line.id]
   if (skip) return [`${line.id} · skipped, ${skip}`]
   const { detail, done } = stepsOf(line, inputs)
   const last = STEPS.findLastIndex((step) => done.has(step))
-  const flight = last >= 0 ? STEPS[last + 1] : undefined
+  const flight = last >= 0 && !done.has("closed") ? STEPS[last + 1] : undefined
   const reopened = inputs.reopened[line.id]
   return [
     `${line.id} · ${line.urgency ?? "no urgency"} · ${line.mine ? "yours" : "not taken"}`,
     ...(reopened ? [`↩️ reopened    ${clockOf(reopened, inputs.zone)}`] : []),
-    ...STEPS.map((step) => {
-      const time =
-        done.has(step) && seen[line.id]?.[step]
-          ? clockOf(seen[line.id]![step]!, inputs.zone)
-          : undefined
-      return row(
-        done.has(step) ? "✅" : step === flight ? "⏳" : "⬜",
-        step,
-        [detail[step], time].filter(Boolean).join(", "),
-      )
-    }),
+    ...STEPS.map((step) => (step === "deployed" && done.has("closed") ? "closed" : step)).map(
+      (step) => {
+        const time =
+          done.has(step) && seen[line.id]?.[step]
+            ? clockOf(seen[line.id]![step]!, inputs.zone)
+            : undefined
+        return row(
+          done.has(step) ? "✅" : step === flight ? "⏳" : "⬜",
+          step,
+          [detail[step], time].filter(Boolean).join(", "),
+        )
+      },
+    ),
   ]
 }
 
@@ -190,7 +197,7 @@ export const cardOf = (inputs: Inputs, seen: Seen, now: number): { seen: Seen; t
 // The steps a beat saw done for the first time, one steps-file line each, in the owner's zone: "- 1:09 pm NG-1 taken".
 export const stepLinesOf = (before: Seen, after: Seen, zone: string): string[] =>
   Object.entries(after).flatMap(([id, steps]) =>
-    STEPS.filter((step) => steps[step] && !before[id]?.[step]).map(
-      (step) => `- ${clockOf(steps[step]!, zone)} ${id} ${step}`,
-    ),
+    [...STEPS, "closed" as const]
+      .filter((step) => steps[step] && !before[id]?.[step])
+      .map((step) => `- ${clockOf(steps[step]!, zone)} ${id} ${step}`),
   )

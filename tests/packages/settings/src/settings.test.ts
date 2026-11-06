@@ -91,6 +91,7 @@ describe("defineSettings", () => {
       "slots.modelBound",
       "slots.peers",
       "ticketCard.approvals",
+      "ticketCard.deployedStates",
       "ticketCard.diaryDir",
       "ticketCard.linesFile",
       "ticketCard.linkBase",
