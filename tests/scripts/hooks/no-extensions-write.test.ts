@@ -1729,6 +1729,30 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "GNU rm by its gnubin path past an option after its first operand after a cd to a variable",
       `cd "$X"; /opt/homebrew/opt/coreutils/libexec/gnubin/rm /tmp/x -f`,
     ],
+    [
+      "GNU mv to an absolute target folder after a cd to a variable",
+      `cd "$X"; gmv -t /tmp/d /tmp/f`,
+    ],
+    [
+      "GNU mv to an absolute target folder attached after a cd to a variable",
+      `cd "$X"; gmv -t/tmp/d /tmp/f`,
+    ],
+    [
+      "GNU mv to an absolute target folder by its long option after a cd to a variable",
+      `cd "$X"; gmv --target-directory=/tmp/d /tmp/f`,
+    ],
+    [
+      "rsync with an absolute log file attached after a cd to a variable",
+      `cd "$X"; rsync -a --log-file=/tmp/l /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute temp folder attached to its short option after a cd to a variable",
+      `cd "$X"; rsync -a -T/tmp/t /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a filter rule holding a T after a cd to a variable",
+      `cd "$X"; rsync -a -f'+ Tx' /tmp/a /tmp/b`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
