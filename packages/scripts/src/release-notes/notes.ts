@@ -29,13 +29,15 @@ const OTHER = "📌 Other changes"
 const CONVENTIONAL = /^(?:\p{Extended_Pictographic}\s*)?([a-z]+)(?:\((.+)\))?(!)?: (.+)/iu
 const PULL = /\([ a-z]*#(\d+)\s*\)/gi
 
-// a first word that reads as code (a flag, a quote, a file, a script, a kebab-case or camelCase name), or a command before its arguments, keeps its case
+// a first word that reads as code (a flag, a quote, a file, a script, a kebab-case or camelCase name), or a command before its arguments, keeps its case; an article before a flag is a plain word
 const CODE_LIKE = /^[-`]|[\p{L}\d][-./:@_][\p{L}\d]|\p{Ll}\p{Lu}/u
+const ARTICLES = new Set(["a", "an", "the"])
 const COMMANDS = new Set(["bun", "bunx", "gh", "git", "npx", "playground"])
 
 function capital(text: string): string {
   const [word = "", next = ""] = text.split(/\s+/)
-  if (CODE_LIKE.test(word) || COMMANDS.has(word) || next.startsWith("-")) return text
+  if (CODE_LIKE.test(word) || COMMANDS.has(word) || (next.startsWith("-") && !ARTICLES.has(word)))
+    return text
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
