@@ -2244,3 +2244,15 @@ describe("a refusal for a value the hook does not hold names it in readable text
     expect(reason).not.toContain("\u0000")
   })
 })
+
+// An eval of literal text is followed as the line its words make, so it runs where those commands would; refused-forms/1198.ts holds the forms it refuses
+describe("an eval of literal text runs", () => {
+  test.each([
+    ["an eval of one quoted line", "eval 'echo hi'"],
+    ["an eval of literal words", "eval echo hi"],
+    ["an eval of a chain", "eval 'cd /tmp && ls'"],
+    ["an eval of a heredoc read by a substitution", "eval \"$(cat <<'EOF'\necho hi\nEOF\n)\""],
+  ])("%s runs from the checkout and the home", async (_, command) => {
+    for (const cwd of [CHECKOUT, HOME]) expect(await bash(command, cwd)).toBeUndefined()
+  })
+})
