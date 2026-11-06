@@ -316,10 +316,15 @@ function spreadSplit(cmd: Command): Command {
       spreadOne = true
       continue
     }
+    // a lone `-` is env's `-i`, as BSD and GNU env read it, so env's options go on after it; it is written as `-i` for parse
+    if (inEnvOptions && v === "-") {
+      out.push({ ...w, value: "-i" })
+      continue
+    }
     out.push(w)
     if (program(v) === "env") inEnvOptions = true
     else if (!inEnvOptions || ASSIGN.test(v)) continue
-    else if (!v.startsWith("-") || v === "-" || v === "--") inEnvOptions = false
+    else if (!v.startsWith("-") || v === "--") inEnvOptions = false
     else if (
       long
         ? ENV_LONG_VALUES.has(long.name) && long.value === undefined

@@ -392,12 +392,16 @@ function spreadSplit(cmd) {
       spreadOne = true;
       continue;
     }
+    if (inEnvOptions && v === "-") {
+      out.push({ ...w, value: "-i" });
+      continue;
+    }
     out.push(w);
     if (program(v) === "env")
       inEnvOptions = true;
     else if (!inEnvOptions || ASSIGN.test(v))
       continue;
-    else if (!v.startsWith("-") || v === "-" || v === "--")
+    else if (!v.startsWith("-") || v === "--")
       inEnvOptions = false;
     else if (long ? ENV_LONG_VALUES.has(long.name) && long.value === undefined : ENV_SHORT_VALUE.test(v) || optionValue(v, options) === "next") {
       const value = rest.pop();
