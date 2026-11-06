@@ -523,6 +523,38 @@ test("runRm --restore refuses a worktree whose branch now points at another comm
   expect(git(main, "rev-parse", "PG-1-thing")).toBe(moved)
 })
 
+test("runRm --restore brings a detached worktree back detached, at the commit it held", async () => {
+  const { deps, id, main, sha, wt } = await trashedWorktree((wt) =>
+    git(wt, "checkout", "-q", "--detach"),
+  )
+  expect(await runRm(["--restore", id], deps)).toBe(0)
+  expect(readFileSync(join(main, ".git", "worktrees", "pg-1", "HEAD"), "utf8")).toBe(`${sha}\n`)
+  expect(git(wt, "rev-parse", "HEAD")).toBe(sha)
+  expect(git(wt, "status", "--porcelain")).toBe("")
+  expect(git(main, "worktree", "list", "--porcelain")).toContain(`worktree ${wt}\n`)
+})
+
+test("runRm --restore refuses a detached worktree whose commit has gone, naming the commit and no branch", async () => {
+  const { deps, id, main, sha, wt } = await trashedWorktree((wt) =>
+    git(wt, "checkout", "-q", "--detach"),
+  )
+  git(main, "branch", "-D", "PG-1-thing")
+  git(main, "reflog", "expire", "--expire=now", "--all")
+  git(main, "gc", "-q", "--prune=now")
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--restore", id], deps)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toHaveLength(1)
+  expect(said[0]).toContain(sha)
+  expect(said[0]).not.toContain("branch")
+  expect(existsSync(wt)).toBe(false)
+})
+
 test("clonesOf reads run-slot's clone holder line while its pid lives, and a line with no source as none", () => {
   const line = "k3m9px-worker 4242 2026-11-03T05:21:53Z\t/a/src\t/a/dst\n"
   expect(clonesOf(line, () => true)).toEqual([
