@@ -356,6 +356,9 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       'echo hi; D=docker; bash -c "$D build ."',
       'echo hi; nice sh -c "docker build ."',
       'echo hi; sh -ce "docker build ."',
+      // review round 1: a chain shell anywhere in the step, behind any program, and one given a $ word, fail closed
+      'echo hi; flock /tmp/run.lock sh -c "docker build ."',
+      'echo hi; O=-c; sh $O "docker build ."',
     ])
       test(`a nested chain: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
