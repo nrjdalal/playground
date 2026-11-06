@@ -303,6 +303,7 @@ var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
 var LEADS = new Set([
   "!",
+  "-",
   "builtin",
   "command",
   "do",

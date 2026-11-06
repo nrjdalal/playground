@@ -565,6 +565,7 @@ var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
 var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]/;
 var LEADS = new Set([
   "!",
+  "-",
   "builtin",
   "command",
   "do",
@@ -579,16 +580,17 @@ var LEADS = new Set([
   "until",
   "while"
 ]);
-function sources(joined) {
+function sources(line) {
   let command = true;
-  for (const [word] of joined.matchAll(/[;&|(){}\n]|[^\s;&|(){}]+/g)) {
-    if (/^[;&|(){}\n]$/.test(word) || word === "]]")
+  for (const [raw] of line.replace(/\\\n/g, "").matchAll(/[;&|(){}\n]|(?:\$'(?:[^'\\]|\\[\s\S])*'?|'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]|[^\s;&|(){}'"\\])+/g)) {
+    const word = raw.replace(/\$'/g, "'").replace(/['"\\]/g, "");
+    if (/^[;&|(){}\n]$/.test(raw) || word === "]]")
       command = true;
     else if (!command)
       continue;
     else if (word === "source" || word === "." || word === "eval")
       return true;
-    else if (!LEADS.has(word) && !/^\w+=/.test(word))
+    else if (!LEADS.has(word) && !/^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(word))
       command = false;
   }
   return false;
@@ -602,9 +604,9 @@ var zshSplits = (line) => {
     if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at)))
       return true;
   }
-  const joined = line.replace(/[\\'"]/g, "");
-  if (sources(joined))
+  if (sources(line))
     return true;
+  const joined = line.replace(/[\\'"]/g, "");
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
   const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
   return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));

@@ -96,7 +96,7 @@ export type Env = {
   // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
   oldFrom?: string[]
   process: Record<string, string | undefined>
-  // Set where an unquoted plain parameter may split into words (`Word.splits`'s `sh`): a script bash, csh, dash, fish, ksh, sh or tcsh runs, a zsh line or run that may set an option, make an array or name a parameter it expands (`zshSplits`), and every line a runner the hook cannot name may hand to sh
+  // Set where an unquoted plain parameter may split into words (`Word.splits`'s `sh`): a script bash, csh, dash, fish, ksh, sh or tcsh runs, a zsh line or run that may set an option, make an array, run another file or string as code or name a parameter it expands (`zshSplits`), and every line a runner the hook cannot name may hand to sh
   splits?: boolean
   vars: Map<string, Text>
 }
@@ -543,9 +543,10 @@ const SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"])
 // A zsh line that may make an unquoted plain parameter several words: one that sets an option (setopt, unsetopt, emulate, the options array, set's -o, +o, -y or -A) or makes an array (an `X=(` or `X+=(` assignment, mapfile, readarray, zparseopts)
 const ZSH_SPLITS =
   /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]/
-// The words after which zsh reads the next word as a command: a reserved word that opens a condition or a body, `!`, and a precommand modifier
+// The words after which zsh reads the next word as a command: a reserved word that opens a condition or a body, `!`, and a precommand modifier (`-` among them)
 const LEADS = new Set([
   "!",
+  "-",
   "builtin",
   "command",
   "do",
@@ -560,14 +561,19 @@ const LEADS = new Set([
   "until",
   "while",
 ])
-// Whether a line runs another file or string as zsh code, which may set an option or make an array: source, `.` or eval as a command, after a separator, a parenthesis or brace (a case pattern's `)` included), a `]]` (zsh reads then, do or a short body right after one), a `LEADS` word or an assignment prefix; one pass over the line's words, read with quotes and backslashes removed, since zsh runs `'source'` and `\source` as source
-function sources(joined: string): boolean {
+// Whether a line runs another file or string as zsh code, which may set an option or make an array: source, `.` or eval as a command, after a separator, a parenthesis or brace (a case pattern's `)` included), a `]]` (zsh reads then, do or a short body right after one), a `LEADS` word or an assignment prefix (`X=`, `X+=`, `X[…]=`); one pass over the line's words, each kept whole across its quotes and escapes, then read with them removed, since zsh runs `'source'`, `$'source'` and `\source` as source
+function sources(line: string): boolean {
   let command = true
-  for (const [word] of joined.matchAll(/[;&|(){}\n]|[^\s;&|(){}]+/g)) {
-    if (/^[;&|(){}\n]$/.test(word) || word === "]]") command = true
+  for (const [raw] of line
+    .replace(/\\\n/g, "")
+    .matchAll(
+      /[;&|(){}\n]|(?:\$'(?:[^'\\]|\\[\s\S])*'?|'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]|[^\s;&|(){}'"\\])+/g,
+    )) {
+    const word = raw.replace(/\$'/g, "'").replace(/['"\\]/g, "")
+    if (/^[;&|(){}\n]$/.test(raw) || word === "]]") command = true
     else if (!command) continue
     else if (word === "source" || word === "." || word === "eval") return true
-    else if (!LEADS.has(word) && !/^\w+=/.test(word)) command = false
+    else if (!LEADS.has(word) && !/^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(word)) command = false
   }
   return false
 }
@@ -580,8 +586,8 @@ export const zshSplits = (line: string): boolean => {
     const at = command.search(ARRAY_MAKERS)
     if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at))) return true
   }
+  if (sources(line)) return true
   const joined = line.replace(/[\\'"]/g, "")
-  if (sources(joined)) return true
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g
   const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g))
   return [...joined.matchAll(expansion)].some(([, name]) => named.has(name))
