@@ -446,7 +446,7 @@ def org_owners():
     return ORGS
 
 
-# every slot run-slot.sh takes, in its clear-stale list's order, the CPU slots first as its held_units lists them, which tests hold these to; each model slot is found by its name
+# every slot run-slot.sh takes, in its clear-stale list's order, the CPU slots first as its holders lists them, which tests hold these to; each model slot is found by its name
 CPU_SLOTS = ("run-slot", "run-slot-2", "run-slot-3", "run-slot-4")
 SLOTS = (*CPU_SLOTS, "run-slot-commit", "run-slot-clone", "run-slot-quick")
 

@@ -1256,7 +1256,7 @@ describe("ops-unstick's slot alerts", () => {
       join(import.meta.dir, "../../../../scripts/ops/run-slot.sh"),
       "utf8",
     )
-    const cpu = script.match(/^held_units\(\) \{\n[^\n]*\n\s*for s in ([^;]+);/m)?.[1]?.split(" ")
+    const cpu = script.match(/^holders\(\) \{\n[^\n]*\n\s*for s in ([^;]+);/m)?.[1]?.split(" ")
     expect(cpu?.length).toBeGreaterThan(0)
     const config = scratch()
     const ops = join(config, "playground", "ops")

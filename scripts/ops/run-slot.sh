@@ -1513,14 +1513,20 @@ lane_units() { holders | awk '$1 == "lane" { t += $3 } END { print t + 0 }'; }
 # and a held commit or clone lane (2); a start that cannot be read is "-", which no ticket's time sorts before
 holders() {
   local d s line at u
-  for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone; do
+  for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
     reclaim "$OPS/$s"
     [ -d "$OPS/$s" ] || continue
     at="" u=""
     read -r _ _ at u _ 2>/dev/null < "$OPS/$s.holder"
-    case "$s" in run-slot-commit | run-slot-clone) echo "lane ${at:--} 2"; continue ;; esac
     case "$u" in 1 | 2 | 3) ;; *) u=2 ;; esac
     echo "slot ${at:--} $u"
+  done
+  for s in run-slot-commit run-slot-clone; do
+    reclaim "$OPS/$s"
+    [ -d "$OPS/$s" ] || continue
+    at=""
+    read -r _ _ at _ 2>/dev/null < "$OPS/$s.holder"
+    echo "lane ${at:--} 2"
   done
   while IFS= read -r d; do
     [ -n "$d" ] || continue
