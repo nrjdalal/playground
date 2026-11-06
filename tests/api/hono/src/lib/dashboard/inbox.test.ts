@@ -1458,6 +1458,64 @@ describe("a guard decision for a job or the ticket card (PG-1196)", () => {
   })
 })
 
+// PG-1196: the guard decision also sets ops-firefighting-start's settings, each checked as it is posted, with made-up values alone.
+describe("a guard decision for a firefighting setting (PG-1196)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
+  const at = (key: string) => `firefighting.start.${key}`
+
+  test("GUARD_SETTING_KEYS holds every firefighting.start key the settings define, and the job turns on by its enabled field alone", () => {
+    const firefighting = settingFields()
+      .map(({ key }) => key)
+      .filter((key) => key.startsWith("firefighting.start."))
+    expect(firefighting).toHaveLength(8)
+    const guarded: string[] = GUARD_SETTING_KEYS.filter((key) =>
+      key.startsWith("firefighting.start."),
+    )
+    expect(guarded).toEqual(firefighting)
+    expect(takes({ key: "jobs.opsFirefightingStart", value: { enabled: true } })).toBe(true)
+    expect(
+      takes({ key: "jobs.opsFirefightingStart", value: { enabled: true, schedule: {} } }),
+    ).toBe(false)
+  })
+
+  test("takes each key's value in its own shape, or no value", () => {
+    for (const [key, value] of [
+      ["account", "made-up@example.com"],
+      ["brief", "brief-made-up.md"],
+      ["consultFrom", "16:00"],
+      ["daysOff", ["2026-12-25", "2026-12-26"]],
+      ["freshMinutes", 15],
+      ["hours", "09:00-17:00"],
+      ["in", "/made/up/folder"],
+      ["prefixes", ["MADE", "MADEUP2"]],
+    ] as const) {
+      expect(takes({ key: at(key), value }), key).toBe(true)
+      expect(takes({ key: at(key), value: undefined }), key).toBe(true)
+    }
+  })
+
+  test("refuses a value off each key's shape, and an empty prefixes list, which a card with no value says instead", () => {
+    for (const [key, value] of [
+      ["account", "made-up"],
+      ["brief", "../made-up.md"],
+      ["consultFrom", "4pm"],
+      ["consultFrom", "09:00-17:00"],
+      ["daysOff", ["25 Dec"]],
+      ["daysOff", "2026-12-25"],
+      ["freshMinutes", 0],
+      ["freshMinutes", 1.5],
+      ["hours", "9-17"],
+      ["hours", "09:00"],
+      ["in", "made/up/folder"],
+      ["prefixes", []],
+      ["prefixes", ["made"]],
+    ] as const) {
+      expect(takes({ key: at(key), value }), `${key} ${JSON.stringify(value)}`).toBe(false)
+    }
+  })
+})
+
 // Made-up accounts: two Claude rows, one of them own, and a GLM row whose label is no Claude email.
 const ACCOUNTS = [
   { email: "pat@example.com", label: "work", renews: 17 },
@@ -5336,6 +5394,78 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(readSetting(data, key)!.rows).toEqual([
         { key, scope: "acme-test", value: ["Made-up Deployed"] },
       ])
+    })
+
+    describe("a firefighting setting's Approve (PG-1196)", () => {
+      const key = (name: string) => `firefighting.start.${name}`
+      const rows = (data: string, name: string) => readSetting(data, key(name))!.rows
+      const card = (name: string, value: unknown) => ({
+        ...GUARD,
+        key: key(name),
+        scope: "made-up-me",
+        value,
+      })
+      const approved = async (data: string, name: string, value: unknown) => {
+        const posted = await post(decision(card(name, value)))
+        expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+        return (await store.getItem(db, posted.id))?.answer as {
+          set?: { exitCode: number; line: string }
+        }
+      }
+
+      test("writes hours, consultFrom, daysOff, freshMinutes and prefixes at the named scope", async () => {
+        const data = folder()
+        for (const [name, value] of [
+          ["consultFrom", "16:00"],
+          ["daysOff", ["2026-12-25"]],
+          ["freshMinutes", 15],
+          ["hours", "09:00-17:00"],
+          ["prefixes", ["MADE"]],
+        ] as const) {
+          expect((await approved(data, name, value)).set?.exitCode, name).toBe(0)
+          expect(rows(data, name), name).toEqual([{ key: key(name), scope: "made-up-me", value }])
+        }
+      })
+
+      test("writes in only for a folder on this Mac, and refuses a missing one, writing nothing", async () => {
+        const data = folder()
+        const there = mkdtempSync(join(scratch, "made-up-folder-"))
+        expect((await approved(data, "in", join(there, "missing"))).set).toMatchObject({
+          exitCode: 1,
+          line: expect.stringContaining("no folder"),
+        })
+        expect(rows(data, "in")).toEqual([])
+        expect((await approved(data, "in", there)).set?.exitCode).toBe(0)
+        expect(rows(data, "in")).toEqual([{ key: key("in"), scope: "made-up-me", value: there }])
+      })
+
+      test("writes brief only for a file in the data folder, and refuses a missing one, writing nothing", async () => {
+        const data = folder()
+        expect((await approved(data, "brief", "brief-made-up.md")).set).toMatchObject({
+          exitCode: 1,
+          line: expect.stringContaining("no brief"),
+        })
+        expect(rows(data, "brief")).toEqual([])
+        writeFileSync(join(data, "brief-made-up.md"), "a made-up brief\n")
+        expect((await approved(data, "brief", "brief-made-up.md")).set?.exitCode).toBe(0)
+        expect(rows(data, "brief")).toHaveLength(1)
+      })
+
+      test("writes account only for an account usage.accounts lists, and refuses another, writing nothing", async () => {
+        const data = folder()
+        const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+        const accounts = [{ email: "made-up@example.com", label: "made-up" }]
+        expect(
+          setSetting(data, { key: "usage.accounts", scope: "made-up-me", value: accounts }, who).ok,
+        ).toBe(true)
+        expect((await approved(data, "account", "other@example.com")).set).toMatchObject({
+          exitCode: 1,
+          line: expect.stringContaining("usage.accounts"),
+        })
+        expect(rows(data, "account")).toEqual([])
+        expect((await approved(data, "account", "made-up@example.com")).set?.exitCode).toBe(0)
+        expect(rows(data, "account")).toHaveLength(1)
+      })
     })
 
     test("with no data folder its Approve is refused and the item stays open", async () => {

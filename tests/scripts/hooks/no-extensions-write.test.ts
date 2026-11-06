@@ -2223,8 +2223,11 @@ describe("a job's and the ticket card's settings are the owner's alone (PG-1196)
   test.each([
     "jobs.opsTicketCard",
     "jobs.opsSweep",
+    "jobs.opsFirefightingStart",
     "ticketCard.deployedStates",
     "ticketCard.linesFile",
+    "firefighting.start.hours",
+    "firefighting.start.in",
   ])("a session's own settings set and reset of %s are refused", async (key) => {
     expect(await bash(`playground settings set ${key} '{"enabled":true}' --reason r`)).toContain(
       "no-extensions-write hook refuses",
