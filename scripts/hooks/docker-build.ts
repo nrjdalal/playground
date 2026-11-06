@@ -116,10 +116,15 @@ export function dockerBuild(args: Word[], compose: boolean): DockerBuild | undef
   if (sub.value === "build") return image(rest)
   // docker bake, the docker CLI's own alias for buildx bake
   if (sub.value === "bake") return help(rest) ? undefined : { kind: "bake", rest, sub: "bake" }
+  // the docker CLI forwards builder whole to buildx, so builder reads as buildx: build or b one image, bake or its alias f a bake
   if (["builder", "buildx", "image"].includes(sub.value)) {
     const inner = subcommand(rest, new Set(["--builder"]))
     if (inner.sub?.value === "build" || inner.sub?.value === "b") return image(inner.rest)
-    if (sub.value === "buildx" && inner.sub?.value === "bake" && !help(inner.rest))
+    if (
+      sub.value !== "image" &&
+      ["bake", "f"].includes(inner.sub?.value ?? "") &&
+      !help(inner.rest)
+    )
       return { kind: "bake", rest: inner.rest, sub: "bake" }
   }
 }
