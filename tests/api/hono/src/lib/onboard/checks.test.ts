@@ -12,7 +12,6 @@ type Check = import("../../../../../../api/hono/src/lib/onboard/checks").Check
 const ORDER = [
   "bun",
   "claude",
-  "cmux",
   "docker",
   "Database",
   "gh",
@@ -49,19 +48,7 @@ const machine = (
   return { ran, reader }
 }
 
-const TOOLS = [
-  "brew",
-  "bun",
-  "claude",
-  "cmux",
-  "docker",
-  "gh",
-  "git",
-  "herdr",
-  "node",
-  "python3",
-  "uv",
-]
+const TOOLS = ["brew", "bun", "claude", "docker", "gh", "git", "herdr", "node", "python3", "uv"]
 
 const ANSWERS = {
   "bun --version": { stdout: "1.3.2\n" },
@@ -104,9 +91,7 @@ describe("onboardChecks on a machine it reads", () => {
       COMMANDS.caTrusted(CA),
       COMMANDS.dockerInfo(),
       COMMANDS.ghLogin(),
-      ...TOOLS.filter((t) => t !== "brew" && t !== "cmux").map((tool) =>
-        COMMANDS.version(tool as never),
-      ),
+      ...TOOLS.filter((t) => t !== "brew").map((tool) => COMMANDS.version(tool as never)),
     ].map((argv) => argv.join(" "))
     for (const argv of ran) expect(allowed).toContain(argv.join(" "))
   })
@@ -128,10 +113,10 @@ describe("onboardChecks on a machine it reads", () => {
     expect(onPath.herdr).toMatchObject({ detail: "0.4.2", status: "ok" })
   })
 
-  test("reads cmux from PATH alone and never runs it, since cmux runs only through cmux.ts", async () => {
-    const { ran, reader } = everything()
+  test("shows no cmux row and never runs cmux, even with cmux on PATH, since sessions run in herdr", async () => {
+    const { ran, reader } = machine([...TOOLS, "cmux"], ANSWERS, [CA])
     const checks = await onboardChecks({ ...signedUp, database: "ok", reader })
-    expect(byName(checks).cmux).toMatchObject({ detail: "installed", status: "ok" })
+    expect(byName(checks).cmux).toBeUndefined()
     expect(ran.some((argv) => argv[0] === "cmux")).toBe(false)
   })
 
@@ -144,7 +129,6 @@ describe("onboardChecks on a machine it reads", () => {
     expect(actions).toEqual({
       bun: null,
       claude: "claude",
-      cmux: null,
       Database: null,
       docker: "docker",
       gh: "gh-login",

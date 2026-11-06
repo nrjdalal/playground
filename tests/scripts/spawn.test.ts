@@ -393,7 +393,6 @@ describe("under the gates it spawns", () => {
 
   test.each([
     ["close", ["close", "worker-brave-otter"]],
-    ["move", ["move", "worker-brave-otter"]],
     ["restore", ["restore"]],
     ["runner", ["runner", "runner-calm-heron", "b.md"]],
   ])("a %s refuses --title", async (_, args) => {

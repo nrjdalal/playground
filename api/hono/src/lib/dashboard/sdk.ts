@@ -64,7 +64,7 @@ type Pending = {
   settle: (result: PermissionResult) => void
 }
 
-// What the hosted session takes from the API's environment: the user's shell basics and Claude Code's config folder, nothing else, plus PLAYGROUND_ROLE=probe, which makes it a factory probe for the factory's hooks. The API's environment holds its .env (the database URL, auth secrets, PLAYGROUND_SDK_PROBE_DIR) and the Claude Code session or cmux terminal it runs under; none of it reaches the session, and with no API key it runs on the login alone.
+// What the hosted session takes from the API's environment: the user's shell basics and Claude Code's config folder, nothing else, plus PLAYGROUND_ROLE=probe, which makes it a factory probe for the factory's hooks. The API's environment holds its .env (the database URL, auth secrets, PLAYGROUND_SDK_PROBE_DIR) and the Claude Code session or terminal it runs under; none of it reaches the session, and with no API key it runs on the login alone.
 const HOSTED_ENV = [
   "CLAUDE_CONFIG_DIR",
   "HOME",

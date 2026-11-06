@@ -9,6 +9,7 @@ import {
   DASHBOARD_DEADLINE_MS,
   DRAFT_REASON,
   readStatus,
+  LEAD_REASON,
   REASON,
   STEPS_REASON,
 } from "../../../scripts/hooks/no-chat-question"
@@ -220,23 +221,33 @@ describe("a manager's reply that asks Quilla a decision is refused until it is i
     expect(REASON.indexOf("bun run ask open")).toBeLessThan(REASON.indexOf("bun run ask new"))
   })
 
-  test("every manager: the leads by role, a manager by role, and each by its session name", async () => {
-    expect(await stop("Merge them now?", { role: "lead" })).toBe(REASON)
+  // cmux restores a session without PLAYGROUND_ROLE, so a manager is also known by its session name or roster kind, as role.ts reads them.
+  test("the dispatcher keeps its line by role, by its session name and as the second dispatcher, and so does a manager by role", async () => {
+    expect(await stop("Merge them now?", { role: "dispatcher" })).toBe(REASON)
     expect(await stop("Merge them now?", { role: "manager" })).toBe(REASON)
-    for (const name of [OLD.dispatcher, OLD.builder, OLD.ops, OLD.planner])
+    for (const name of [OLD.dispatcher, `${OLD.dispatcher}-2`])
       expect(await stop("Merge them now?", { name, role: "" })).toBe(REASON)
   })
 
-  // cmux restores a session without PLAYGROUND_ROLE, so the second dispatcher and the optimizer are known by name, as role.ts reads them.
-  test.each([
-    { label: `${OLD.dispatcher}-2, the second dispatcher`, name: `${OLD.dispatcher}-2` },
-    { label: "the optimizer", name: "optimizer" },
-  ])("$label, restored with no role, is a manager by its session name", async ({ name }) => {
-    expect(await stop("Merge them now?", { name, role: "" })).toBe(REASON)
+  test("a lead is sent to the dispatcher by role, by its session name and by its roster kind", async () => {
+    expect(await stop("Merge them now?", { role: "lead" })).toBe(LEAD_REASON)
+    for (const name of [OLD.builder, OLD.ops, OLD.planner, "optimizer", "x7mh4d-builder"])
+      expect(await stop("Merge them now?", { name, role: "" })).toBe(LEAD_REASON)
   })
 
-  test("a manager of a new name, restored with no role, is a manager by its roster kind", async () => {
-    expect(await stop("Merge them now?", { name: "x7mh4d-builder", role: "" })).toBe(REASON)
+  test("the lead's reason sends the decision to the dispatcher by SendMessage and keeps it out of chat", () => {
+    expect(LEAD_REASON).toBe(
+      "send the decision to the dispatcher with SendMessage, which posts it to the Inbox, and keep the question out of chat; once the dispatcher names its #iN, say in chat that it's in the inbox as #iN",
+    )
+  })
+
+  test("a lead naming a closed item is refused with the lead's line, saying the item is not open", async () => {
+    const reason = await stop("It's in the inbox as #i40. Ship now?", {
+      role: "lead",
+      statuses: { "#i40": "approved" },
+    })
+    expect(reason).toStartWith(LEAD_REASON)
+    expect(reason).toContain("#i40 is approved")
   })
 
   test("a second stop in the same turn is refused too, so the ask cannot stand", async () => {
@@ -402,13 +413,16 @@ describe("what passes", () => {
 
 describe("a manager's reply that keeps steps or a table for Quilla goes in one Inbox card", () => {
   const STEPS = "Next:\n1. Rotate the key.\n2. Restart the API.\n3. Check /api/health."
-  const TABLE = "| PR | State |\n|---|---|\n| #500 | merged |"
+  const TABLE = "| Step | State |\n|---|---|\n| Rotate the key | done |"
 
   test.each([
     ["3 numbered steps", STEPS],
     ["3 steps numbered with a paren", "1) Pull canary\n2) Build it\n3) Restart it"],
     ["a table", TABLE],
-    ["a table with aligned columns", "| PR | State |\n| :--- | ---: |\n| #500 | merged |"],
+    [
+      "a table with aligned columns",
+      "| Step | State |\n| :--- | ---: |\n| Rotate the key | done |",
+    ],
   ])("refused with no #iN: %s", async (_name, last) => {
     expect(await stop(last)).toBe(STEPS_REASON)
   })
@@ -505,7 +519,46 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
       await stop(`${STEPS}\nSent these steps to the dispatcher as a draft. Should I start?`, {
         role: "lead",
       }),
-    ).toBe(REASON)
+    ).toBe(LEAD_REASON)
+  })
+
+  // progress on work tracked elsewhere stays in chat, since the Inbox holds decisions and alerts: every numbered line or table body row names an issue or PR
+  test.each([
+    [
+      "3 numbered lines that each name a #<n>",
+      "Merge order:\n1. #1089 merged at c88ae1b8\n2. #1094 in review\n3. #1095 next",
+    ],
+    [
+      "3 numbered lines that each link an issue or PR",
+      "1. https://github.com/acme/app/pull/12 merged\n2. https://github.com/acme/app/issues/13 open\n3. https://github.com/acme/app/pull/14 in review",
+    ],
+    [
+      "a table whose every body row names a #<n>",
+      "| PR | ETA |\n|---|---|\n| #1089 | merged |\n| #1094 | 03:40Z |",
+    ],
+  ])("passed: progress on tracked work, %s", async (_name, last) => {
+    expect(await stop(last)).toBeUndefined()
+    expect(await stop(last, { role: "lead" })).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "3 numbered lines, one naming no #<n>",
+      "1. #1089 merged\n2. #1094 in review\n3. Restart the API.",
+    ],
+    [
+      "3 numbered lines naming only Inbox items",
+      "1. #i40 drafted\n2. #i41 drafted\n3. #i42 drafted",
+    ],
+    [
+      "a table with one body row naming no #<n>",
+      "| PR | ETA |\n|---|---|\n| #1089 | merged |\n| Restart the API | next |",
+    ],
+    ["a table with no body rows", "| PR | ETA |\n|---|---|"],
+  ])("refused: steps that are not all tracked work, %s", async (_name, last) => {
+    const statuses = { "#i40": "approved", "#i41": "approved", "#i42": "approved" }
+    expect(await stop(last, { statuses })).toStartWith(STEPS_REASON)
+    expect(await stop(last, { role: "lead", statuses })).toStartWith(DRAFT_REASON)
   })
 
   test("passed: a worker's steps, which go to its lead", async () => {
@@ -522,7 +575,7 @@ test("run as Claude Code runs it, a decision ask continues the turn with the rea
   expect(await run.exited).toBe(0)
   const output = JSON.parse(await new Response(run.stdout).text())
   expect(output.hookSpecificOutput.hookEventName).toBe("Stop")
-  expect(output.hookSpecificOutput.additionalContext).toBe(REASON)
+  expect(output.hookSpecificOutput.additionalContext).toBe(LEAD_REASON)
 })
 
 test("run as Claude Code runs it, a report stops with no output", async () => {

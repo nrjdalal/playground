@@ -24,6 +24,7 @@ import {
   store,
   stored,
   sweep,
+  TAKES_MAIN,
   type Check,
 } from "../../../../packages/scripts/src/hook-differential"
 
@@ -231,6 +232,49 @@ describe("sweep and replay", () => {
     ])
     const { counts } = await replay(() => "refused", recorder([]), list, "/h")
     expect(counts).toEqual({ calls: 2, "newly allowed": 2, "newly refused": 0, same: 0 })
+  })
+})
+
+// A hook whose check() takes the main checkout reads it from its own folder when none is given, and canary's unpacked tree is no git checkout, so the differential hands both sides the head's (PG-996)
+describe("a hook that takes the main checkout", () => {
+  // refuses a command that names its main checkout; with none given, main is the folder it would read from its own tree
+  const guard =
+    (fallback: string): Check =>
+    (raw, _env, main = fallback) =>
+      JSON.parse(raw).tool_input.command.includes(`${main}/`) ? "refused" : undefined
+  const canary = guard("/tmp/hook-differential/abc")
+  const head = guard("/main")
+  const forms = [{ command: "echo x > /main/f", inClass: false }]
+
+  test("reads the head's main checkout on both sides, so a sweep and a replay count the same verdict as the same", async () => {
+    const { changed, counts } = await sweep(canary, head, forms, "/h", "/main")
+    expect(counts).toMatchObject({
+      cases: 3,
+      "newly allowed": { inClass: 0, outClass: 0 },
+      "newly refused": { inClass: 0, outClass: 0 },
+      same: 3,
+    })
+    expect(changed).toEqual([])
+    const call = { command: "echo x > /main/f", cwd: "/h" }
+    expect((await replay(canary, head, [call], "/h", "/main")).counts).toMatchObject({
+      "newly refused": 0,
+      same: 1,
+    })
+  })
+
+  test("TAKES_MAIN names every hook whose check() takes the main checkout, and only those", async () => {
+    const hooks = join(import.meta.dir, "../../../../scripts/hooks")
+    const taking: string[] = []
+    for await (const file of new Bun.Glob("*.ts").scan(hooks)) {
+      const signature =
+        /export (?:async )?function check\(([\s\S]*?)\)\s*:\s*(?:Promise|string)/.exec(
+          await Bun.file(join(hooks, file)).text(),
+        )?.[1]
+      if (signature?.includes("main: string = mainCheckout("))
+        taking.push(file.replace(/\.ts$/, ""))
+    }
+    expect(taking.length).toBeGreaterThan(0)
+    expect([...TAKES_MAIN].sort()).toEqual(taking.sort())
   })
 })
 

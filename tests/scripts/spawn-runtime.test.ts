@@ -183,7 +183,6 @@ describe("with no --runtime, a start opens in herdr whatever its spawner's termi
     ["a probe", ["probe", "probe-x", OLD.ops, "p.md"]],
     ["a manager", ["manager", "optimizer", "b.md"]],
     ["a resume", ["resume", "worker-x", root, "0b6e3c1a-4d2f-4e8a-9c7b-1f2e3d4c5b6a"]],
-    ["a move", ["move", "worker-x"]],
     ["a --check", ["worker", "worker-brave-otter", "b.md", "--check"]],
   ])("--runtime cmux on %s is refused, naming #2076", async (_, args) => {
     const r = await spawn(
@@ -201,16 +200,12 @@ describe("with no --runtime, a start opens in herdr whatever its spawner's termi
     expect(r.roster).toBeUndefined()
   })
 
-  test("spawn.sh's only cmux calls are a move's read and close of the copy it takes to herdr", () => {
+  test("spawn.sh runs cmux nowhere: no line calls it, bare or behind an env assignment", () => {
     const text = readFileSync(join(import.meta.dir, "../../scripts/spawn.sh"), "utf8")
-    const calls = [...text.matchAll(/CMUX_QUIET=1 cmux ([a-z-]+(?: [a-z][a-z-]*)?)/g)].map(
-      (m) => m[1],
-    )
-    expect([...new Set(calls)].sort()).toEqual([
-      "close-surface",
-      "sessions list",
-      "workspace close",
-    ])
+    const calls = [
+      ...text.matchAll(/(?:^\s*|[;&|(]\s*|\$\(\s*)(?:[A-Z_]+=\S*\s+)*cmux\s+[a-z-]/gm),
+    ].map((m) => m[0].trim())
+    expect(calls).toEqual([])
   })
 
   test.each([
