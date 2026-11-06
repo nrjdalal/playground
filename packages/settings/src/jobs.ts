@@ -149,6 +149,11 @@ export const JOBS: Record<string, Job> = {
       "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
     schedule: { every: 60 },
   }),
+  "ops-ticket-card": terminal("ops-ticket-card", bunJob("ops-ticket-card"), {
+    description:
+      "Keeps one Inbox card of the day's watched tickets, edited in place on every change.",
+    schedule: { every: 60 },
+  }),
   "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
     description:
       "Reads every live session's screen and clears a factory session stuck on a prompt.",
