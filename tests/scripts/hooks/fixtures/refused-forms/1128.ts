@@ -51,6 +51,50 @@ export const groups: Group[] = [
         "cp of a held variable past a tab-stripped quoted heredoc that ends at a tab-indented delimiter",
         `${HELD}; cat <<-'EOF'\n\tEOF\n${SETS}\ncp g "$X"`,
       ],
+      [
+        "cp of a held variable past a quoted delimiter inside a parameter default",
+        `${HELD}; : \${V:- <<'1' }\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted delimiter inside a parameter default in double quotes",
+        `${HELD}; : "\${V:-" <<'1' "}"\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted delimiter inside a parameter strip",
+        `${HELD}; : \${V#<<'1' }\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted delimiter inside $[ ] arithmetic",
+        `${HELD}; false && echo $[ 1 <<'1' ]\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted delimiter after a comment that follows a subshell's closing parenthesis",
+        `${HELD}; (true)#<<'1'\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a quoted delimiter after a comment that follows arithmetic's closing parentheses",
+        `${HELD}; ((1))#<<'1'\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable set inside a substitution opened on a quoted heredoc's line",
+        `${HELD}; cat <<'E' $(\n${SETS}; cp g "$X" >&2\nE\n)\nbody\nE`,
+      ],
+      [
+        "cp of a held variable set inside a process substitution opened on a quoted heredoc's line",
+        `${HELD}; cat <<'E' <(\n${SETS}; cp g "$X" >&2\nE\n)\nbody\nE`,
+      ],
+      [
+        "cp of a held variable past a quoted heredoc after an unquoted one whose line a backslash joins to the next",
+        `${HELD}; cat <<E <<'F'\nE\\\n\nF\nE\n${SETS}\nF\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a fake quoted heredoc inside a real one a parameter's comment-like word hides",
+        `${HELD}; : \${V:- # } <<'Q'\n: <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
+      [
+        "cp of a held variable past a fake quoted heredoc inside a real one whose operator a backslash-newline splits",
+        `${HELD}; cat <\\\n<'Q'\n: <<'1'\nQ\n${SETS}\n1\ncp g "$X"`,
+      ],
     ],
   },
 ]
