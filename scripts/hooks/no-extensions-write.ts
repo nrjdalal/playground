@@ -107,6 +107,8 @@ const RSYNC_PATHS = [
   "temp-dir",
   "write-batch",
 ]
+// rsync's flags whose exact name is a prefix of a path option, which both builds read as the flag
+const RSYNC_FLAGS = new Set(["backup", "partial"])
 // rsync's -T, its temp folder, in a short cluster whose earlier letters take no value (-B, -e, -f, -M and -@ do)
 const RSYNC_TEMP = /^-[^-@BefMT]*T/
 // Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
@@ -1003,7 +1005,10 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         : tool === "rsync"
           ? args.flatMap((word, k) => {
               const long = /^--([^=]+)=?/.exec(word.value)
-              const path = long && RSYNC_PATHS.some((name) => name.startsWith(long[1]))
+              const path =
+                long &&
+                !RSYNC_FLAGS.has(long[1]) &&
+                RSYNC_PATHS.some((name) => name.startsWith(long[1]))
               const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length
               if (!cut) return []
               // with no value attached, the option takes the next word, a dash-led one too
