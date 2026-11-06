@@ -1609,6 +1609,28 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["touch with a reference file from a variable", `touch -r "$R" /tmp/y`],
     ["dd reading a variable to a literal path", `dd if="$S" of=/tmp/y`],
     ["tee to a literal path", "echo x | tee /tmp/y"],
+    ["tee to its own output", "echo x | tee -"],
+    ["a reading redirect after a cd to a variable", `cd "$X"; wc -l < notes.txt`],
+    ["cp to an absolute path holding an = after a cd to a variable", `cd "$X"; cp x /tmp/a=b`],
+    ["dd to an absolute path after a cd to a variable", `cd "$X"; dd if=x of=/tmp/y`],
+    ["cp into an absolute target folder after a cd to a variable", `cd "$X"; cp -t /tmp/d x`],
+    ["ln between absolute paths after a cd to a variable", `cd "$X"; ln -s /tmp/x /tmp/y`],
+    ["cp to a path the line holds after a cd to a variable", `D=/tmp/d; cd "$X"; cp x "$D/y"`],
+    ["mkdir with a mode from a variable", `mkdir -m "$M" /tmp/x`],
+    ["cp of a variable into a literal target folder", `cp -t /tmp/d "$S"`],
+    ["ln of a variable to a literal path", `ln -s "$S" /tmp/l`],
+    ["install of a variable past its mode", `install -m 644 "$S" /tmp/i`],
+    ["install of literal folders", "install -d /tmp/a /tmp/b"],
+    ["touch with a date from a variable", `touch -d "$W" /tmp/y`],
+    ["touch with a stamp from a variable", `touch -t "$W" /tmp/y`],
+    [
+      "git with a pager the call sets over an exported one",
+      `export GIT_PAGER="$P"; GIT_PAGER=less git log`,
+    ],
+    ["git with a variable git does not read from a variable", `FOO="$F" git log`],
+    ["git with a pager the line holds", `P=less; GIT_PAGER="$P" git log`],
+    ["git with a literal config home", "XDG_CONFIG_HOME=/tmp/c git log"],
+    ["git with a literal home", "HOME=/tmp/h git log"],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
