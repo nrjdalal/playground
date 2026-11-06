@@ -1729,6 +1729,23 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "GNU rm by its gnubin path past an option after its first operand after a cd to a variable",
       `cd "$X"; /opt/homebrew/opt/coreutils/libexec/gnubin/rm /tmp/x -f`,
     ],
+    [
+      "find printing to an absolute file after a cd to a variable",
+      `cd "$X"; find /tmp -fprint /tmp/out`,
+    ],
+    [
+      "GNU find by its g name printing to an absolute file after a cd to a variable",
+      `cd "$X"; gfind /tmp -fprint /tmp/out`,
+    ],
+    [
+      "GNU find by its g name deleting an absolute path after a cd to a variable",
+      `cd "$X"; gfind /tmp/x -delete`,
+    ],
+    [
+      "GNU find by its g name printing names after a cd to a variable",
+      `cd "$X"; gfind /tmp -name x -print`,
+    ],
+    ["GNU xargs by its g name running echo", "echo a | gxargs echo"],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
