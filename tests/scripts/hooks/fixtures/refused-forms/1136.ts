@@ -36,6 +36,22 @@ export const groups: Group[] = [
         "GNU rm of a dashed relative file after its first operand under an exported POSIXLY_CORRECT after a cd to a variable",
         `export POSIXLY_CORRECT=1; cd "$D"; grm /tmp/x -f`,
       ],
+      ["rm of a lone dash and a dashed relative file after a cd to a variable", `cd "$D"; rm - -f`],
+      [
+        "rm past an option of a lone dash and a dashed relative file after a cd to a variable",
+        `cd "$D"; rm -f - -i`,
+      ],
+      [
+        "rmdir of a lone dash and a dashed relative folder after a cd to a variable",
+        `cd "$D"; rmdir - -p`,
+      ],
+      ["mv of a lone dash to a dashed relative path after a cd to a variable", `cd "$D"; mv - -f`],
+      [
+        "GNU rm of a lone dash and a dashed relative file under POSIXLY_CORRECT after a cd to a variable",
+        `cd "$D"; POSIXLY_CORRECT=1 grm - -f`,
+      ],
+      ["rm of a lone dash alone after a cd to a variable", `cd "$D"; rm -`],
+      ["unlink of a lone dash after a cd to a variable", `cd "$D"; unlink -`],
       [
         "rm of a dashed relative file after an end of options after its first operand after a cd to a variable",
         `cd "$D"; rm /tmp/x -- -f`,
