@@ -139,9 +139,14 @@ if (!dry) {
     console.error(`dev: refusing to start: ${checked.refusal}`)
     leave(1)
   }
-  const aside = setNextDevAside(ROOT, { ...checkout, serving })
-  if (aside)
-    console.log(`dev: the web's dev cache moved aside to ${aside}, so next dev starts fresh`)
+  try {
+    const aside = setNextDevAside(ROOT, { ...checkout, serving })
+    if (aside)
+      console.error(`dev: the web's dev cache moved aside to ${aside}, so next dev starts fresh`)
+  } catch (error) {
+    console.error(`dev: refusing to start: ${error instanceof Error ? error.message : error}`)
+    leave(1)
+  }
   const portlessOwn = serviceDir(env.PORTLESS_STATE_DIR || portlessDir())
   const down = await proxyDown(env, portlessOwn)
   if (down !== null) {
