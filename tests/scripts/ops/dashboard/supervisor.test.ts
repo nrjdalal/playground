@@ -1193,6 +1193,7 @@ bun() {
     "run build") echo "build $(git rev-parse --short HEAD)" >> ${keptCalls}
       echo "envs \${HONO_APP_URL:-} \${HONO_TRUSTED_ORIGINS:-} \${NEXT_PUBLIC_API_URL:-} \${NEXT_PUBLIC_APP_URL:-} \${NODE_ENV:-} \${SKIP_ENV_VALIDATION_SERVER:-}" >> ${keptCalls}
       listed build-fails && { echo "Error: next build failed"; return 1; }
+      listed build-exits-2 && { echo "Error: next build failed"; return 2; }
       mkdir -p web/next/.next/standalone/web/next web/next/.next/static
       git rev-parse HEAD > web/next/.next/standalone/web/next/server.js ;;
     "install --frozen-lockfile") echo "NODE_ENV=\${NODE_ENV:-} SKIP_ENV_VALIDATION=\${SKIP_ENV_VALIDATION:-}" >> ${kept}/installs
@@ -1411,6 +1412,19 @@ roll_to ${c2} canary; echo "$running"`,
     fresh()
     await slotted()
     await Bun.write(join(kept, "build-fails"), `${c2}\n`)
+    const rolled = await slotRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
+    expect(rolled).toEqual({ code: 0, out: c1 })
+    expect(await keptLines(/^result /)).toEqual([
+      `result ROLL canary ${short(c2)} FAIL build before the stop: Error: next build failed; still serving ${short(c1)}`,
+    ])
+    expect(await Bun.file(join(kept, "bad-builds")).text()).toBe(`${c2}\n`)
+    expect(await keptLines(/^say roll to/)).toEqual([])
+  })
+
+  test("a build that exits 2 after run-slot starts it is the head's own failure, not a skip, since its start line is there", async () => {
+    fresh()
+    await slotted()
+    await Bun.write(join(kept, "build-exits-2"), `${c2}\n`)
     const rolled = await slotRun(`running=${c1}; roll_to ${c2} canary; echo "$running"`, c1)
     expect(rolled).toEqual({ code: 0, out: c1 })
     expect(await keptLines(/^result /)).toEqual([
