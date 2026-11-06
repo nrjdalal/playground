@@ -854,13 +854,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (write) return refuse(write)
     // a command with no program runs nothing that reads the environment, so only its own assignments count
     const vars = !reader && first ? since(varsRead, env.vars, "") : []
-    // a root shell's stdin is its script, so one the hook cannot read is refused
+    // a root shell's stdin is its script, so one the hook cannot read is refused, as is one the reader only works out (`inferred`), which this hook refused before the reader could
     const script: string[] = []
     if (stdinShell(cmd) === "root") {
       const text = await stdinOf(cmd, env)
-      if (text.unknown || marked(text.value))
+      if (text.unknown || text.inferred || marked(text.value))
         return refuse(
-          `a root shell whose script (${text.unknown ?? "a value it cannot read"}) the hook cannot read; run its commands as calls of their own, with no root shell`,
+          `a root shell whose script (${text.unknown ?? text.inferred ?? "a value it cannot read"}) the hook cannot read; run its commands as calls of their own, with no root shell`,
         )
       script.push(text.value)
     }

@@ -444,6 +444,7 @@ nice||-n --adjustment
 nocorrect||
 noglob||
 nohup||
+pkexec|--disable-internal-agent --help --keep-cwd --version|--user
 repeat||
 stdbuf||-e -i -o --error --input --output
 sudo|-A -B -b -E -e -H -i -K -k -l -N -n -P -S -s -V -v --askpass --background --bell --edit --help --list --login --non-interactive --preserve-env --preserve-groups --remove-timestamp --reset-timestamp --set-home --shell --stdin --validate --version|-C -D -g -h -p -R -r -T -t -U -u --chdir --chroot --close-from --command-timeout --group --host --other-user --prompt --role --type --user

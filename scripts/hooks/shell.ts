@@ -4,7 +4,9 @@ import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
 // `tilde` marks a word that opens with an unquoted ~- or ~+, which zsh expands to the folder it last left or the one it is in.
+// `inferred` names how the reader worked out a text canary's reader could not read (a substitution's echo, a variable the line set, a duplicated descriptor, a compound command's redirect), so a hook that refuses a root shell's unreadable script keeps that refusal.
 export type Text = {
+  inferred?: string
   reads?: Text[]
   tilde?: boolean
   unknown?: string
@@ -235,6 +237,7 @@ export const WRAPPERS = new Map<string, Options>(
     nocorrect: ["", ""],
     noglob: ["", ""],
     nohup: ["", ""],
+    pkexec: ["--disable-internal-agent --help --keep-cwd --version", "--user"],
     repeat: ["", ""],
     stdbuf: ["", "-e -i -o --error --input --output"],
     sudo: [
@@ -272,11 +275,14 @@ function optionValue(word: string, { flags, values }: Options): "next" | "own" |
   return "own"
 }
 
-// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, which startsRootShell reads
+// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, which startsRootShell reads; pkexec takes none, since one with no program starts the root shell itself (BARE_ROOT)
 const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
+  ["pkexec", new Set<string>()],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
+// The privilege wrappers that start a root shell when no program follows them (pkexec(1): "If no program is specified, the default shell will be run")
+const BARE_ROOT = new Set(["pkexec"])
 // Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper or su among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell or su not handed a command (`sudo -s`, `nice doas -s`, `su root`, `busybox su`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; "code" for an interpreter of another language (`python3`, `node18`) that a pipe or xargs feeds, whatever its options or inline program, unless it runs a script file or a module of its own; a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): StdinKind | undefined {
   cmd = spreadSplit(cmd)
@@ -403,6 +409,7 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
   }
   // a program the hook cannot read, behind a wrapper, may be a root shell
   if (first && wrappers.length) return "root"
+  if (!first && wrappers.some((wrapper) => BARE_ROOT.has(wrapper))) return "root"
   // a program the hook cannot read (`$SHELL`, `"$X"`) may be a shell
   return fed && first ? "shell" : undefined
 }
@@ -530,6 +537,38 @@ export function codeFed(commands: Command[]): Map<Command, Fed> {
   return fed
 }
 
+// The stdin redirects run() copied from a compound command onto its body, which stdinText marks as text canary's reader could not reach
+const BODY_FED = new WeakSet<Redirect>()
+
+// A compound command's stdin redirect (`{ sh; } <<< x`, `( sh ) < f`, `while read l; do sh; done <<< x`) is the stdin of every command in its body that has none of its own, a pipe or a redirect, as the shell runs them; the last close is read first, so an outer one reaches an inner one's body too
+function feedBodies(commands: Command[]): void {
+  for (let k = commands.length - 1; k >= 0; k--) {
+    const close = commands[k]
+    const input = stdinRedirect(close)
+    if (!input) continue
+    const body = close.inner
+      ? close.inner()
+      : CLOSES.has(markers(close.words)[0] ?? "")
+        ? opened(commands, k)
+        : []
+    for (const cmd of body) {
+      if (cmd === close || cmd.stdin || stdinRedirect(cmd)) continue
+      cmd.redirects.push(input)
+      BODY_FED.add(input)
+    }
+  }
+}
+
+// The commands from the one that opens the body a closing word at k ends, up to k, by the reserved words in command position
+function opened(commands: Command[], k: number): Command[] {
+  let depth = 0
+  for (let j = k; j >= 0; j--) {
+    for (const m of markers(commands[j].words)) depth += CLOSES.has(m) ? 1 : OPENS.has(m) ? -1 : 0
+    if (depth <= 0) return commands.slice(j, k + 1)
+  }
+  return []
+}
+
 // Wrappers that take one positional argument (a count or a duration) before the command.
 export const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"])
@@ -646,6 +685,7 @@ export function varsSince(vars: Map<string, Text>, cursor: number | undefined): 
 const merge = (out: Text, part: Text): void => {
   out.value += part.value
   if (part.unknown) out.unknown ??= part.unknown
+  if (part.inferred) out.inferred ??= part.inferred
   if (part.variable) out.variable ??= part.variable
   if (part.reads?.length) (out.reads ??= []).push(...part.reads)
 }
@@ -1236,6 +1276,16 @@ function substituted(inner: Command[], known: Record<string, string>): Text {
   if (only.words.length === 0 && only.redirects.length === 1 && input.op === "<" && input.target) {
     return { reads: [input.target], value: READ }
   }
+  // `$(echo …)` prints its words joined by spaces, when none is an option or a part it cannot read
+  const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value))
+  if (
+    first?.value === "echo" &&
+    !first.quoted &&
+    only.redirects.length === 0 &&
+    words &&
+    !args[0]?.value.startsWith("-")
+  )
+    return { inferred: "a command substitution", value: args.map((w) => w.value).join(" ") }
   return unknown("a command substitution")
 }
 
@@ -1448,6 +1498,7 @@ async function runAll(
     envs.set(scope, child)
     return child
   }
+  feedBodies(lexed.commands)
   for (const [producer, { consumer, kind }] of codeFed(lexed.commands)) {
     producer.feedsShell = true
     // a script in another language is not read as shell
@@ -2075,23 +2126,47 @@ export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
   return held(await stdinText(cmd, env))
 }
 
-// A redirect that feeds stdin text, as stdinOf reads it: a file, a here-string, a heredoc or a process substitution, never a duplicated descriptor
-export const feedsStdin = ({ fd, op }: Redirect): boolean =>
-  (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&"
+// The redirect whose text reaches a command's stdin, its input redirects applied left to right as the shell applies them: a file, a here-string, a heredoc or a process substitution on fd 0, or through a `<&N` the one that last fed descriptor N (`3<<< x <&3`), none after a `<&-` or a descriptor it cannot read
+function stdinRedirect(cmd: Command): Redirect | undefined {
+  const fed = new Map<string, Redirect | undefined>()
+  for (const r of cmd.redirects) {
+    if (!r.op.startsWith("<")) continue
+    const from = r.target?.value ?? ""
+    fed.set(
+      r.fd === "" ? "0" : r.fd,
+      r.op === "<&" ? (/^\d+$/.test(from) ? fed.get(from) : undefined) : r,
+    )
+  }
+  return fed.get("0")
+}
 
 // Whether a redirect feeds a root shell its script (`sudo -s <<< …`, `su < <(…)`), which run() hands every hook and leaves each to read
 export const rootFed = (cmd: Command): boolean =>
-  cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root"
+  stdinRedirect(cmd) !== undefined && stdinShell(cmd) === "root"
 
 async function stdinText(cmd: Command, env: Env): Promise<Text> {
-  const input = cmd.redirects.findLast(feedsStdin)
-  if (input?.target?.procs) return outputs(input.target.procs, env)
-  if (input?.op === "<" || input?.op === "<>")
+  const input = stdinRedirect(cmd)
+  if (!input) return cmd.stdin ? outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see")
+  const text = await redirectText(input, env)
+  // text canary's reader could not reach: a redirect another descriptor or a compound command hands on
+  const how = BODY_FED.has(input)
+    ? "a compound command's redirect"
+    : input.fd !== "" && input.fd !== "0"
+      ? "a duplicated descriptor"
+      : undefined
+  return how && !text.unknown ? { ...text, inferred: text.inferred ?? how } : text
+}
+
+async function redirectText(input: Redirect, env: Env): Promise<Text> {
+  if (input.target?.procs) return outputs(input.target.procs, env)
+  if (input.op === "<" || input.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect")
-  if (input)
-    return input.body ? resolveText(input.body, env) : unknown("a heredoc the hook could not read")
-  if (cmd.stdin) return outputOf(cmd.stdin, env)
-  return unknown("stdin the hook cannot see")
+  if (!input.body) return unknown("a heredoc the hook could not read")
+  // a here-string of one variable the line set earlier (`S=x; sh <<< "$S"`) is that variable's value
+  const set = input.body.variable ? env.vars.get(input.body.variable) : undefined
+  if (input.body.unknown && input.body.value === `${UNKNOWN}\n` && set && !set.unknown)
+    return resolveText({ ...set, inferred: "a shell variable", value: `${set.value}\n` }, env)
+  return resolveText(input.body, env)
 }
 
 export async function resolveText(text: Text, env: Env): Promise<Text> {

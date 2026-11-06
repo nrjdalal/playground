@@ -69,4 +69,23 @@ export const groups: Group[] = [
       ["a removal piped into pkexec's own root shell", `echo '${D}' | pkexec`],
     ],
   },
+  {
+    folders: ["process data folder", "process home", "process worktree"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "a harmless here-string on a brace group around sudo's root shell",
+        "{ sudo -s; } <<< 'ls -la'",
+      ],
+      ["a harmless here-string on descriptor 3 duplicated onto su's stdin", "su 3<<< 'ls' <&3"],
+      [
+        "a harmless echo's command substitution in a here-string to sudo's root shell",
+        `sudo -s <<< "$(echo ls)"`,
+      ],
+      [
+        "a harmless variable the line sets, in a here-string to sudo's root shell",
+        `S=ls; sudo -s <<< "$S"`,
+      ],
+    ],
+  },
 ]

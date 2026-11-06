@@ -448,7 +448,10 @@ async function fedScript(
   const kind = stdinShell(shell)
   if (!kind || kind === "code") return
   const script = await stdinOf(shell, here)
-  const unread = script.unknown ?? (marked(script.value) ? "a value it cannot read" : undefined)
+  const unread =
+    script.unknown ??
+    script.inferred ??
+    (marked(script.value) ? "a value it cannot read" : undefined)
   if (unread) {
     if (!inMain(here.cwd)) return
     return refuse(`a shell whose script (${unread}) the hook cannot read`, fixFor(sure))

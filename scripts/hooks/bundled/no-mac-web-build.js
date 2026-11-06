@@ -141,6 +141,7 @@ var WRAPPERS = new Map(Object.entries({
   nocorrect: ["", ""],
   noglob: ["", ""],
   nohup: ["", ""],
+  pkexec: ["--disable-internal-agent --help --keep-cwd --version", "--user"],
   repeat: ["", ""],
   stdbuf: ["", "-e -i -o --error --input --output"],
   sudo: [
@@ -179,8 +180,10 @@ function optionValue(word, { flags, values }) {
 }
 var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
+  ["pkexec", new Set],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
+var BARE_ROOT = new Set(["pkexec"]);
 function stdinShell(cmd) {
   cmd = spreadSplit(cmd);
   const parsed = parse(cmd);
@@ -295,6 +298,8 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
       wrappers.push(program(w.value));
   }
   if (first && wrappers.length)
+    return "root";
+  if (!first && wrappers.some((wrapper) => BARE_ROOT.has(wrapper)))
     return "root";
   return fed && first ? "shell" : undefined;
 }
@@ -426,6 +431,32 @@ function codeFed(commands) {
   }
   return fed;
 }
+var BODY_FED = new WeakSet;
+function feedBodies(commands) {
+  for (let k = commands.length - 1;k >= 0; k--) {
+    const close = commands[k];
+    const input = stdinRedirect(close);
+    if (!input)
+      continue;
+    const body = close.inner ? close.inner() : CLOSES.has(markers(close.words)[0] ?? "") ? opened(commands, k) : [];
+    for (const cmd of body) {
+      if (cmd === close || cmd.stdin || stdinRedirect(cmd))
+        continue;
+      cmd.redirects.push(input);
+      BODY_FED.add(input);
+    }
+  }
+}
+function opened(commands, k) {
+  let depth = 0;
+  for (let j = k;j >= 0; j--) {
+    for (const m of markers(commands[j].words))
+      depth += CLOSES.has(m) ? 1 : OPENS.has(m) ? -1 : 0;
+    if (depth <= 0)
+      return commands.slice(j, k + 1);
+  }
+  return [];
+}
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
@@ -532,6 +563,8 @@ var merge = (out, part) => {
   out.value += part.value;
   if (part.unknown)
     out.unknown ??= part.unknown;
+  if (part.inferred)
+    out.inferred ??= part.inferred;
   if (part.variable)
     out.variable ??= part.variable;
   if (part.reads?.length)
@@ -1061,6 +1094,9 @@ function substituted(inner, known) {
   if (only.words.length === 0 && only.redirects.length === 1 && input.op === "<" && input.target) {
     return { reads: [input.target], value: READ };
   }
+  const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value));
+  if (first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
+    return { inferred: "a command substitution", value: args.map((w) => w.value).join(" ") };
   return unknown("a command substitution");
 }
 var MKTEMP_FLAGS = new Set(["d", "q"]);
@@ -1210,6 +1246,7 @@ async function runAll(lexed, env, visit, builtins) {
     envs.set(scope, child);
     return child;
   };
+  feedBodies(lexed.commands);
   for (const [producer, { consumer, kind }] of codeFed(lexed.commands)) {
     producer.feedsShell = true;
     consumer.runsStdin = kind !== "code";
@@ -1665,19 +1702,38 @@ async function stdinOf(cmd, env) {
   tick();
   return held(await stdinText(cmd, env));
 }
-var feedsStdin = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
-var rootFed = (cmd) => cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root";
+function stdinRedirect(cmd) {
+  const fed = new Map;
+  for (const r of cmd.redirects) {
+    if (!r.op.startsWith("<"))
+      continue;
+    const from = r.target?.value ?? "";
+    fed.set(r.fd === "" ? "0" : r.fd, r.op === "<&" ? /^\d+$/.test(from) ? fed.get(from) : undefined : r);
+  }
+  return fed.get("0");
+}
+var rootFed = (cmd) => stdinRedirect(cmd) !== undefined && stdinShell(cmd) === "root";
 async function stdinText(cmd, env) {
-  const input = cmd.redirects.findLast(feedsStdin);
-  if (input?.target?.procs)
+  const input = stdinRedirect(cmd);
+  if (!input)
+    return cmd.stdin ? outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see");
+  const text = await redirectText(input, env);
+  const how = BODY_FED.has(input) ? "a compound command's redirect" : input.fd !== "" && input.fd !== "0" ? "a duplicated descriptor" : undefined;
+  return how && !text.unknown ? { ...text, inferred: text.inferred ?? how } : text;
+}
+async function redirectText(input, env) {
+  if (input.target?.procs)
     return outputs(input.target.procs, env);
-  if (input?.op === "<" || input?.op === "<>")
+  if (input.op === "<" || input.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect");
-  if (input)
-    return input.body ? resolveText(input.body, env) : unknown("a heredoc the hook could not read");
-  if (cmd.stdin)
-    return outputOf(cmd.stdin, env);
-  return unknown("stdin the hook cannot see");
+  if (!input.body)
+    return unknown("a heredoc the hook could not read");
+  const set = input.body.variable ? env.vars.get(input.body.variable) : undefined;
+  if (input.body.unknown && input.body.value === `${UNKNOWN}
+` && set && !set.unknown)
+    return resolveText({ ...set, inferred: "a shell variable", value: `${set.value}
+` }, env);
+  return resolveText(input.body, env);
 }
 async function resolveText(text, env) {
   if (text.unknown || !text.reads?.length)
