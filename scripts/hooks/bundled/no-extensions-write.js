@@ -2535,6 +2535,7 @@ var GIT_READS = new Set([
 ]);
 var EXPORTS3 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
+var GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"]);
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
 var GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/;
 var WRITER_TAKES = {
@@ -3228,7 +3229,9 @@ async function inspect(raw, environment, unknown = false) {
       }
     }
     const end = args.findIndex((word) => word.value === "--");
-    const operands = remover ? args.filter((word, k) => end !== -1 && k > end || !word.value.startsWith("-")) : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : [];
+    const option = (word) => /^-./.test(word.value);
+    const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(args[0]?.value === "--") : args.findIndex((word) => !option(word));
+    const operands = remover ? args.filter((word, k) => end !== -1 && k > end || stop !== -1 && k >= stop || !option(word)) : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : [];
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined;
     if (loose)
       return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`));
