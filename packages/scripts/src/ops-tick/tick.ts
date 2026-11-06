@@ -130,7 +130,7 @@ const loadReport = async (ctx: Context): Promise<string[]> =>
     .slice(0, 4)
     .map(({ command, cpu, pid }) => `${command} pid ${pid}: ${Math.round(cpu)}% CPU`)
 
-// Posts one Inbox alert update under the ops manager's name with bun run ask, its text the line that links where the owner looks next, and answers its item's id.
+// Posts one Inbox alert update under the ops manager's name with bun run ask, its text the line that links where the owner looks next, and answers its item's id; --silent, so a failure's last line is ask's own, not bun's "error: script ... exited" after it.
 const postAlert = async (
   ctx: Context,
   title: string,
@@ -141,7 +141,7 @@ const postAlert = async (
   } | null
   const by = managerOf(roster?.agents, "ops")
   const posted = await ctx.run(
-    ["bun", "run", "--cwd", ctx.repo, "ask", "new"],
+    ["bun", "run", "--silent", "--cwd", ctx.repo, "ask", "new"],
     120_000,
     JSON.stringify({ from: by, kind: "update", preview: { outcome: "alert", text }, title }),
   )
@@ -159,7 +159,7 @@ const focusCardBeat = async (ctx: Context) => {
       agents?: unknown
     } | null
     const posted = await ctx.run(
-      ["bun", "run", "--cwd", ctx.repo, "ask", "new"],
+      ["bun", "run", "--silent", "--cwd", ctx.repo, "ask", "new"],
       120_000,
       JSON.stringify({ from: managerOf(roster?.agents, "ops"), ...card }),
     )
@@ -649,6 +649,7 @@ const relayWatch = async (ctx: Context) => {
     const done = await ctx.run([
       "bun",
       "run",
+      "--silent",
       "--cwd",
       ctx.repo,
       "ask",

@@ -8,6 +8,7 @@ import {
   dashboardWatch,
 } from "../../../../../packages/scripts/src/ops-tick/dashboard-watch"
 import { BEATS, type Context } from "../../../../../packages/scripts/src/ops-tick/tick"
+import { fakeRun } from "./fake-run"
 
 const dirs: string[] = []
 afterAll(() => {
@@ -25,18 +26,18 @@ const NOTIFY = "/repo/scripts/ops/notify.sh"
 
 // A fresh context each minute, as a restarted ops-tick would have: what it keeps between minutes is on disk alone; notify.sh is never run, only recorded.
 const minute = async (ops: string, m: number, up: boolean, banners: string[]) => {
+  const { run, runs } = fakeRun()
   const ctx: Context = {
     now: new Date(Date.UTC(2026, 9, 20, 10, 48 + m, 10)),
     ops,
     repo: "/repo",
-    run: async (argv) => {
-      const at = argv.indexOf(NOTIFY)
-      if (argv[0] === "env" && argv[1] === "NOTIFY_MAC=1" && at > 0) banners.push(argv.at(-1)!)
-      return { code: 0, out: "" }
-    },
+    run,
     send: async () => true,
   }
   await dashboardWatch(ctx, async () => up)
+  for (const argv of runs)
+    if (argv[0] === "env" && argv[1] === "NOTIFY_MAC=1" && argv.indexOf(NOTIFY) > 0)
+      banners.push(argv.at(-1)!)
 }
 
 test(`one banner once the Dashboard has failed ${DASHBOARD_DOWN_MINUTES} minutes in a row, one when it answers again, and none in between (#1361)`, async () => {
@@ -80,7 +81,7 @@ test("a line notify.sh fails to queue is sent again the next minute", async () =
     now: new Date(Date.UTC(2026, 9, 20, 10, 48 + DASHBOARD_DOWN_MINUTES, 10)),
     ops,
     repo: "/repo",
-    run: async () => ({ code: 1, out: "notify.sh: no outbox" }),
+    run: fakeRun({ "notify.sh": { code: 1, err: "notify.sh: no outbox\n" } }).run,
     send: async () => true,
   }
   await expect(dashboardWatch(failing, async () => false)).rejects.toThrow("notify.sh")

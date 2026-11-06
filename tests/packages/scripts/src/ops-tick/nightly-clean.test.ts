@@ -32,6 +32,7 @@ import {
 } from "../../../../../packages/scripts/src/ops-tick/nightly-clean"
 import { BEATS, type Context } from "../../../../../packages/scripts/src/ops-tick/tick"
 import type { CleanupDeps } from "../../../../../scripts/ops/optimizer/auto_end"
+import { fakeRun, ghErrors } from "./fake-run"
 
 const dirs: string[] = []
 afterAll(() => {
@@ -188,26 +189,21 @@ test("volumes no container uses that hold over 1 GB are asked, and an unreadable
   expect(staleVolumes("not json")).toEqual([])
 })
 
-test("gh's PR answer reads from its stdout line alone, a number that is no PR skipped and its errors and stderr line no bar", () => {
+test("gh's PR answer reads from its stdout alone, a number that is no PR skipped and its errors and stderr line no bar", async () => {
   const prs = prsOf({})
-  const out = [
-    JSON.stringify({
-      data: {
-        repository: {
-          b0: {
-            nodes: [
-              { headRefOid: "h1", state: "MERGED", url: "https://github.com/acme/app/pull/7" },
-            ],
-          },
-          b1: { nodes: [] },
-          n0: null,
-          n1: { headRefOid: "h2", state: "CLOSED", url: "https://github.com/acme/app/pull/12" },
+  const { out } = await fakeRun({
+    graphql: ghErrors(
+      {
+        b0: {
+          nodes: [{ headRefOid: "h1", state: "MERGED", url: "https://github.com/acme/app/pull/7" }],
         },
+        b1: { nodes: [] },
+        n0: null,
+        n1: { headRefOid: "h2", state: "CLOSED", url: "https://github.com/acme/app/pull/12" },
       },
-      errors: [{ message: "Could not resolve to a PullRequest with the number of 939." }],
-    }),
-    "gh: Could not resolve to a PullRequest with the number of 939.",
-  ].join("\n")
+      ["Could not resolve to a PullRequest with the number of 939."],
+    ),
+  }).run(["gh", "api", "graphql", "-f", "query=..."])
   expect(readPrs(out, ["PG-1-a", "no-pr"], [939, 12], prs)).toBe(true)
   expect([...prs.byBranch]).toEqual([
     ["PG-1-a", { headRefOid: "h1", state: "MERGED", url: "https://github.com/acme/app/pull/7" }],
@@ -342,9 +338,7 @@ describe("one night's run against a fixture data folder", () => {
       `worktree ${wt("pg-2")}\nHEAD c\nbranch refs/heads/PG-2-b`,
       `worktree ${wt("pg-3")}\nHEAD d\nbranch refs/heads/PG-3-c`,
     ].join("\n\n")
-    const runs: string[][] = []
-    const inputs: string[] = []
-    const all: Record<string, string> = {
+    const all: Parameters<typeof fakeRun>[0] = {
       "docker ps": "playground-gone-db\texited\t10B\nplayground-dashboard-db\trunning\t10B",
       "docker system df": JSON.stringify({ Volumes: [] }),
       "ask new": ID,
@@ -354,19 +348,12 @@ describe("one night's run against a fixture data folder", () => {
       "worktree list": porcelain,
       ...outputs,
     }
+    const { inputs, run, runs } = fakeRun(all)
     const ctx: Context = {
       now: new Date("2026-11-05T03:00:00Z"),
       ops,
       repo: main,
-      run: async (argv, _timeout, stdin) => {
-        runs.push(argv)
-        if (stdin) inputs.push(stdin)
-        const key = Object.keys(all).find((k) => argv.join(" ").includes(k))
-        // bun run's "$ bun ..." line on stderr, which a real run joins after stdout, unless --silent
-        const echo =
-          argv[0] === "bun" && argv[1] === "run" && !argv.includes("--silent") ? "\n$ bun ask" : ""
-        return { code: 0, out: `${key ? all[key]! : ""}${echo}` }
-      },
+      run,
       send: async () => true,
     }
     const cleanup: CleanupDeps = {

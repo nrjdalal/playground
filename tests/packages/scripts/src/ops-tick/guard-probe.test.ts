@@ -8,6 +8,7 @@ import {
   preToolUseGuards,
 } from "../../../../../packages/scripts/src/ops-tick/guard-probe"
 import { BEATS, type Context } from "../../../../../packages/scripts/src/ops-tick/tick"
+import { fakeRun } from "./fake-run"
 
 const root = join(import.meta.dir, "..", "..", "..", "..", "..")
 // The scratch folder stays for the system to clear, since a test removes no tree.
@@ -33,23 +34,25 @@ writeFileSync(
 )
 const ops = join(scratch, "ops")
 
+// Bun's own crash output on stderr: the error, a note, then its version banner last.
+const CRASH = "error: Cannot find package 'x'\nnote: GET x\n\nBun v1.4.4 (macOS arm64)\n"
+
 // One beat run whose guards exit as codes says (0 when unnamed), recording each run and each send; no guard is ever started.
 const probe = async (codes: Record<string, number>, sendOk = true) => {
   const runs: { argv: string[]; stdin?: string }[] = []
   const sent: { text: string; to: string }[] = []
+  const { run } = fakeRun(
+    Object.fromEntries(
+      Object.entries(codes).map(([guard, code]) => [guard, { code, err: code === 1 ? CRASH : "" }]),
+    ),
+  )
   const ctx: Context = {
     now: new Date(Date.UTC(2026, 10, 2, 12, 0)),
     ops,
     repo,
-    run: async (argv, _timeout, stdin) => {
+    run: async (argv, timeout, stdin) => {
       runs.push({ argv, stdin })
-      const code = codes[argv.at(-1)!] ?? 0
-      // Bun's own crash output: the error, a note, then its version banner last.
-      const out =
-        code === 1
-          ? "error: Cannot find package 'x'\nnote: GET x\n\nBun v1.4.4 (macOS arm64)\n"
-          : ""
-      return { code, out }
+      return run(argv, timeout, stdin)
     },
     send: async (to, text) => {
       sent.push({ text, to })
@@ -107,10 +110,7 @@ test("with every real guard broken, the fix sits inside the 400 characters notif
     now: new Date(),
     ops: join(scratch, "ops-all"),
     repo: root,
-    run: async () => ({
-      code: 1,
-      out: "error: Cannot find package 'x'\nBun v1.4.4 (macOS arm64)\n",
-    }),
+    run: fakeRun({ "guard-probe": { code: 1, err: CRASH } }).run,
     send: async (_to, text) => {
       sent.push(text)
       return true
