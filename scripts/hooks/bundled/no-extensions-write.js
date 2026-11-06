@@ -2460,11 +2460,16 @@ var GIT_READS = new Set([
 var EXPORTS3 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
-var WRITER_TAKES = { mkdir: ["-m"], touch: ["-d", "-r", "-t"] };
+var GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/;
+var WRITER_TAKES = {
+  install: ["-g", "-m", "-o"],
+  mkdir: ["-m"],
+  touch: ["-d", "-r", "-t"]
+};
 var DUPLICATE = /^(?:\d+|-)$/;
 var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === ">&" && !DUPLICATE.test(target?.value ?? "");
 var GLOB = /[*?[{(]/;
-var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|LESSOPEN|PAGER|VISUAL)$/;
+var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/;
 var GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/;
 var CLI = join6("packages", "scripts", "src", "playground", "cli.ts");
 var varsRun = new WeakMap;
@@ -2540,26 +2545,42 @@ function gitConfigs(args) {
   }
   return configs;
 }
-function writeTargets(name, args) {
+var after = (word, cut) => ({
+  ...word,
+  raw: word.raw?.startsWith(word.value.slice(0, cut)) ? word.raw.slice(cut) : undefined,
+  value: word.value.slice(cut)
+});
+function writeTargets(name, args, gnu) {
   if (name === "dd")
-    return args.filter((word) => word.value.startsWith("of="));
+    return args.flatMap((word) => word.value.startsWith("of=") ? [after(word, 3)] : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value) ? [word] : []);
   const into = name === "cp" || name === "install" || name === "ln";
   const operands = [];
   let folder;
+  let folders = false;
+  const maybe = [];
   for (let k = 0, options = true;k < args.length; k++) {
-    const { value } = args[k];
+    const word = args[k];
+    const { value } = word;
+    const long = /^--([a-z-]+)(=?)/.exec(value);
+    if (into && gnu && options && marked(value))
+      maybe.push(word);
     if (!options || value === "-" || !value.startsWith("-"))
-      operands.push(args[k]);
+      operands.push(word);
     else if (value === "--")
       options = false;
     else if (WRITER_TAKES[name]?.includes(value))
       k++;
-    else if (into && /^(?:-[A-Za-z]*t|--target-directory)$/.test(value))
-      folder = args[++k];
-    else if (into && /^(?:-t.|--target-directory=)/.test(value))
-      folder = args[k];
+    else if (name === "install" && (value === "--directory" || /^-[A-Za-z]*d/.test(value)))
+      folders = true;
+    else if (into && long && "target-directory".startsWith(long[1]))
+      folder = long[2] ? after(word, long[0].length) : args[++k];
+    else if (into && /^-[A-Za-z]*t/.test(value))
+      folder = value.endsWith("t") ? args[++k] : after(word, value.indexOf("t") + 1);
   }
-  return into ? folder ? [folder] : operands.slice(-1) : operands;
+  if (name === "ln" && !folder && operands.length === 1)
+    return [{ quoted: false, value: "." }];
+  const targets = into && !folders ? folder ? [folder] : operands.slice(-1) : operands;
+  return [...new Set([...targets, ...maybe])];
 }
 var GUARD_KEYS = new Set([
   "ext.links",
@@ -2973,10 +2994,7 @@ async function inspect(raw, environment, unknown = false) {
       }
     }
   };
-  const placed = (word, env, steady) => pathOf(texts(heldWord(word, env, steady) ?? word).at(-1), {
-    ...env,
-    cwd: undefined
-  }) !== undefined;
+  const placed = (word, env, steady) => pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined;
   const afterUnreadCd = (write) => `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`;
   const seen = new Set;
   let steadyAt = () => NONE;
@@ -3045,7 +3063,9 @@ async function inspect(raw, environment, unknown = false) {
     if (!first || EXPORTS3.has(name) || reader)
       return;
     const verb = name && !marked(name) ? name : "a program it cannot read";
-    const remover = REMOVERS.has(name);
+    const tool = GNU_NAMED.exec(name)?.[1] ?? name;
+    const gnu = tool !== name || first.value.includes("/gnubin/");
+    const remover = REMOVERS.has(tool);
     if (env.cwdAnywhere)
       return refuse(`${verb} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`);
     const steady = steadyAt(cmd);
@@ -3055,7 +3075,7 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`${verb} run inside ${root}`);
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`);
-      const unheld = (remover ? args : WRITERS.has(name) ? writeTargets(name, args) : []).find((word) => !held3(word, here, steady));
+      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu) : []).find((word) => !held3(word, here, steady));
       if (unheld)
         return refuse(`${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`);
       if (name === "git") {
@@ -3099,7 +3119,8 @@ async function inspect(raw, environment, unknown = false) {
           return refuse(`${verb} under xargs on ${named}`);
       }
     }
-    const operands = remover ? args.filter((word) => !word.value.startsWith("-")) : WRITERS.has(name) ? writeTargets(name, args) : [];
+    const end = args.findIndex((word) => word.value === "--");
+    const operands = remover ? args.filter((word, k) => end !== -1 && k > end || !word.value.startsWith("-")) : WRITERS.has(tool) ? writeTargets(tool, args, gnu) : [];
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined;
     if (loose)
       return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`));
