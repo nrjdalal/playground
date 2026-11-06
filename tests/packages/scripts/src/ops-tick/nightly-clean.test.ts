@@ -32,7 +32,7 @@ import {
 } from "../../../../../packages/scripts/src/ops-tick/nightly-clean"
 import { BEATS, type Context } from "../../../../../packages/scripts/src/ops-tick/tick"
 import type { CleanupDeps } from "../../../../../scripts/ops/optimizer/auto_end"
-import { fakeRun, ghErrors } from "./fake-run"
+import { type Answers, fakeRun, ghErrors } from "./fake-run"
 
 const dirs: string[] = []
 afterAll(() => {
@@ -338,7 +338,7 @@ describe("one night's run against a fixture data folder", () => {
       `worktree ${wt("pg-2")}\nHEAD c\nbranch refs/heads/PG-2-b`,
       `worktree ${wt("pg-3")}\nHEAD d\nbranch refs/heads/PG-3-c`,
     ].join("\n\n")
-    const all: Parameters<typeof fakeRun>[0] = {
+    const all: Answers = {
       "docker ps": "playground-gone-db\texited\t10B\nplayground-dashboard-db\trunning\t10B",
       "docker system df": JSON.stringify({ Volumes: [] }),
       "ask new": ID,

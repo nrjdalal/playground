@@ -2022,7 +2022,10 @@ const REVEALED: Refused = {
   ok: false,
 }
 
-// Whether his words hold a reveal card's value, read again from the Keychain, so a Copy pasted into the card's own comment never reaches its poster; false on any other card, with no words or with no reader.
+// A playground- item may hold a value as short as 1 character (keychainSpec), which a substring match would find in most comments, so a shorter value is no match.
+const REVEAL_MATCH_MIN = 8
+
+// Whether his words hold a reveal card's value, read again from the Keychain, so a Copy pasted into the card's own comment never reaches its poster; false on any other card, with no words, with no reader or for a value shorter than REVEAL_MATCH_MIN.
 async function holdsRevealed(
   item: InboxItem,
   words: (string | undefined)[],
@@ -2032,7 +2035,9 @@ async function holdsRevealed(
   const said = words.filter((word): word is string => Boolean(word?.trim()))
   if (said.length === 0) return false
   const value = await read(item.preview.service)
-  return value !== null && said.some((word) => word.includes(value))
+  return (
+    value !== null && value.length >= REVEAL_MATCH_MIN && said.some((word) => word.includes(value))
+  )
 }
 
 // Keeps how many files a send shared in its answer, 0 on a stack that shares none, so a Retry after the words failed to type shares none twice.

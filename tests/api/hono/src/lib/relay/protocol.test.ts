@@ -123,8 +123,8 @@ describe("the Inbox cards a relayed answer may reach", () => {
     ])
   })
 
-  test("leave every Approve the Mac carries out itself, a delete and a secret ask on the Mac", () => {
-    for (const kind of ["accept", "apps", "delete", "grant", "secret"])
+  test("leave every Approve the Mac carries out itself, a delete, a secret ask and a reveal card on the Mac", () => {
+    for (const kind of ["accept", "apps", "delete", "grant", "reveal", "secret"])
       expect((RELAY_ANSWER_KINDS as readonly string[]).includes(kind)).toBe(false)
   })
 

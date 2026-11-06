@@ -73,7 +73,7 @@ export const checkBattery = async (ctx: {
     .then((text) => JSON.parse(text) as BatteryState)
     .catch(() => ({}))
   const ask = (args: string[], stdin?: string) =>
-    ctx.run(["bun", "run", "--cwd", ctx.repo, "ask", ...args], 120_000, stdin)
+    ctx.run(["bun", "run", "--silent", "--cwd", ctx.repo, "ask", ...args], 120_000, stdin)
   const failures: string[] = []
   if (discharging && pct !== null) {
     const roster = await readFile(join(ctx.ops, "..", "roster.json"), "utf8")
@@ -97,7 +97,7 @@ export const checkBattery = async (ctx: {
     for (const key of ["ask", "alert"] as const) {
       const id = state[key]
       if (!id) continue
-      // the read marks any answer read, which closes a clear, a deny or a discard; the JSON runs to its last brace, since run() appends bun's `$ bun ...` echo from stderr
+      // the read marks any answer read, which closes a clear, a deny or a discard; the JSON runs from its first brace to its last, so a line ask writes to stderr around it reads past
       const got = await ask(["get", id, "--ack"])
       let item: Item = {}
       try {
