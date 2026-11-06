@@ -1138,7 +1138,7 @@ reclaim() {
   [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rmdir "$1" 2>/dev/null
 }
 
-# the 5-minute load run-slot-2 in single-slot mode starts under: 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's cmux reads time out), 22 at most
+# the 5-minute load run-slot-2 in single-slot mode starts under: 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's terminal reads time out), 22 at most
 # its cap is the file's last line, the one a set writes below its reason or an old-shape file's only one
 load_line() {
   local cap

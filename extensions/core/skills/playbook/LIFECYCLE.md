@@ -122,21 +122,21 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   `attach <session>` opens a client on a running server with its environment alone (prefix `ctrl+alt+b`), refusing a binary off the pin or a server that is down, `status` prints one line a server (down, or up with the sessions its panes hold), and `env-check`, run inside a pane, prints its environment as names and lengths only.
 - **The `playground` command** (`dispatcher` is its name from before the rename) is the owner's way in from his own terminal, linked into `~/.bun/bin` by `scripts/link-skills.sh`; `playground --help` and the docs site's `/docs/cli` give its words.
   Bare `dispatcher` first runs ops-herdr's `start`, so it brings back every herdr server that is down and names each it started; then, from any terminal while the Dashboard's API does not answer 200 on `/api/health` (portless's 404 for a stack that is down is no answer), it runs ops-up (`scripts/ops/up.py`), which starts each ops job that is not healthy,
-  ops-dashboard's stack and follower among them,
-  and stops a job's holder still running under cmux by its recorded pid; it starts no Claude session, and names a missing dispatcher for you to start.
+  ops-dashboard's stack and follower among them;
+  it starts no Claude session, and names a missing dispatcher for you to start.
   Before ops-up it sets the Dashboard's database container (the `live.container` setting's) to restart with Docker and starts it when stopped, saying so in one line each (`ensureDatabase` in `packages/scripts/src/playground/database.ts`).
   Then it waits for the Dashboard's API, printing a progress line every 10s, and stops with an error once ops-dashboard's supervisor is gone or its heartbeat is past three cycles, else at 15 minutes (`waitOutcome` in `packages/scripts/src/playground/plan.ts`).
   It also stops on a START or RESTART roll begun after the database step that failed on the stack, in the supervisor's own words (`startFailure`); each early stop waits out a 30s grace for the start.
   Every job ops starts in a terminal (`runtime: "herdr"` in `~/.playground/ops/jobs.json`) runs as a pane labelled with its name in the Ops workspace on the factory herdr server, by the binary herdr's `pin.json` names,
   skipped while herdr fails spawn.sh's checks (its pin's sha256, its version, its server's socket and that server running).
-  A job row stored with the old `cmux` or `auto` runtime, or with no runtime and the retired flag that marked a terminal job, reads as `herdr` (`jobSchema` in `packages/settings/src/jobs.ts`), so its copy still under cmux is stopped by its recorded pid and started in herdr on the next pass, from any terminal.
+  A job row stored with the old `cmux` or `auto` runtime, or with no runtime and the retired flag that marked a terminal job, reads as `herdr` (`jobSchema` in `packages/settings/src/jobs.ts`), so it starts in herdr on the next pass, from any terminal.
   A start that fails is logged whole in `up.log` and tried again on the next pass, with no GRACE wait.
   `playground add` starts one session through `spawn.sh` under all its gates, one start at a time (`~/.playground/spawn.lock`), under a name from `bun run name <kind>` or a given name that gives its kind, as spawn.sh asks.
   `playground view` runs ops-herdr's `attach factory`, opening the server the sessions run on, and takes no other word; probes stay on their own server.
   `playground update` touches ops-dashboard's `roll-now`, and `playground status` only reads, ops-herdr's `status` lines among its own.
   `playground sweep <lead>` reads what changed since that lead's last sweep and prints it, or `quiet`, writing only its cursor, `sweep/<lead>.json` in the data folder ([SWEEP.md](SWEEP.md)).
   `playground focus on --session <name> --reason "<why>" [--for <minutes>]` gives one session the Mac for up to 180 minutes (120 by default), recorded in the data folder's `focus.json`.
-  While it stands, held-prs.json's `"*"` line holds every merge, `run-slot.focus` holds every other session's heavy run while ops-tick's, the dashboard's and the focused session's own reviewer's and tester's go on ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)), and spawn.sh refuses every new session but a move, that reviewer or tester,
+  While it stands, held-prs.json's `"*"` line holds every merge, `run-slot.focus` holds every other session's heavy run while ops-tick's, the dashboard's and the focused session's own reviewer's and tester's go on ([scripts/ops/README.md](../../../../scripts/ops/README.md#ops-switches)), and spawn.sh refuses every new session but that reviewer or tester,
   and a `--firefighting` start while a firefighting trigger file stands ([scripts/README.md](../../../../scripts/README.md#spawnsh)).
   For an urgent ticket, Ops runs `run-slot.sh preempt` after focus is on, which stops each run another session already holds a slot with; the run says focus preempted it and to run it again once focus ends.
   What comes into the Inbox meanwhile is held quiet, out of its counts and the tab's dot, but an alert update ([.agents/dashboard/asks.md](../../../../.agents/dashboard/asks.md)).
@@ -145,14 +145,14 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
 - **The Optimizer** is started by the dispatcher at its own start, with `playground optimizer`, and runs a retro after each ship to `main` and once a day, by the steps in its brief, `scripts/briefs/optimizer.md`.
   On ops-tick's `optimizer tick` (every 2 hours) it runs one once a ship has landed since the last, and on `optimizer daily` once no retro has run for 20 hours, so no day passes without one.
   It stays open between retros, so each beat finds it, and Ops resumes it after a Claude Code update ([Updating Claude Code](#updating-claude-code)).
-- **the dispatcher, the Planner, the Builder and Ops** stay open: they never close, except to be respawned with their settings after a cmux restore (below), to be resumed onto a new binary when Claude Code updates ([Updating Claude Code](#updating-claude-code)),
+- **the dispatcher, the Planner, the Builder and Ops** stay open: they never close, except to be respawned with their settings after a restore (below), to be resumed onto a new binary when Claude Code updates ([Updating Claude Code](#updating-claude-code)),
   or from a handoff ([SESSIONS.md](SESSIONS.md#write-a-handoff)) when their guidance changes (a rewritten brief or standing rule their running context contradicts, which the dispatcher names when it sends the change, or Ops when the change is to the dispatcher's own guidance):
   Ops respawns the dispatcher, the Planner and the Builder, the dispatcher respawns Ops, and no two managers restart at once, Ops first and alone when a change reaches it and another, and never as an Inbox item.
   The dispatcher spawns a manager under its fixed name when `ListAgents` lists none.
-  A fresh the dispatcher session, after a cmux restart, reads the previous the dispatcher transcript and re-checks its open items against the roster and the managers before it answers the owner.
+  A fresh the dispatcher session, after a restart, reads the previous the dispatcher transcript and re-checks its open items against the roster and the managers before it answers the owner.
   A session resumed after any restart, an account switch included, re-arms its background tasks and re-sends its unanswered messages first, by the **context** rule ([rules/context.md](../../rules/context.md)), which the `after-resume` hook puts in front of it.
-  No session reports Playground as running until its own `ListAgents` lists a session named `dispatcher`; a roster entry, a cmux record or a Dashboard row does not count.
-  Ops' sweep has each factory session cmux restored without the factory's hooks respawned with its settings ([SWEEP.md](SWEEP.md)).
+  No session reports Playground as running until its own `ListAgents` lists a session named `dispatcher`; a roster entry, a resume record or a Dashboard row does not count.
+  Ops' sweep has each factory session resumed without the factory's hooks respawned with its settings ([SWEEP.md](SWEEP.md)).
 
 A Mac restart clears `/private/tmp`, so every scratchpad is lost.
 Anything a session needs across a restart goes under `~/.playground/scratchpad/<name>/`, which the restart leaves alone.

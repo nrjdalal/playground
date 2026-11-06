@@ -24,14 +24,6 @@
       },
       {
         "action": null,
-        "detail": "0.61.0",
-        "name": "cmux",
-        "need": "the terminal sessions run in",
-        "note": null,
-        "status": "ok"
-      },
-      {
-        "action": null,
         "detail": "28.3.1",
         "name": "docker",
         "need": "the database",
@@ -125,14 +117,6 @@
         "detail": "2.1.4",
         "name": "claude",
         "need": "every session",
-        "note": null,
-        "status": "ok"
-      },
-      {
-        "action": null,
-        "detail": "0.61.0",
-        "name": "cmux",
-        "need": "the terminal sessions run in",
         "note": null,
         "status": "ok"
       },

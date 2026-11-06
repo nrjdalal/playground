@@ -1034,7 +1034,7 @@ describe("who calls deliver()", () => {
   })
 })
 
-// The one route beside deliver()'s that types into a pane: a herdr prompt's answer, the owner's own Submit on its card, which answerFeed() hands to answerHerdr() past its guards: the same contract as deliver() for the composer. cmux.test.ts holds typeKeys() to feed.ts.
+// The one route beside deliver()'s that types into a pane: a herdr prompt's answer, the owner's own Submit on its card, which answerFeed() hands to answerHerdr() past its guards: the same contract as deliver() for the composer. herdr.test.ts holds typeKeys() to feed.ts.
 const HERDR_ANSWER_ROUTE = {
   file: "api/hono/src/routers/dashboard.ts",
   path: "/workers/:sessionId/feed/:requestId",

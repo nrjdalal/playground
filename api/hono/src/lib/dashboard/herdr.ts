@@ -420,7 +420,7 @@ export function herdrRecords(reads: ServerRead[], registry: Registry, now: strin
   return records
 }
 
-// Pure: every server's workspaces as cmux's list-workspaces gives them, each id its ref too.
+// Pure: every server's workspaces in the board's workspace list, each id its ref too.
 export const herdrWorkspaces = (reads: ServerRead[]): Json[] =>
   reads.flatMap((read) =>
     read.workspaces.map((w) => {
@@ -644,7 +644,7 @@ export function answerKeys(screen: ScreenPrompt, ask: Ask): Keys {
 // The gap between two keys, so Claude Code reads each as its own press rather than one chunk of input.
 const KEY_GAP_MS = 40
 
-// Answers a prompt with the keys answerKeys() gave, one request each (`pane.send_keys`, words by `pane.send_text`), in order. It types only for answerHerdr() in feed.ts, the owner's own Submit on the prompt's card (cmux.test.ts's "herdr's pane writes").
+// Answers a prompt with the keys answerKeys() gave, one request each (`pane.send_keys`, words by `pane.send_text`), in order. It types only for answerHerdr() in feed.ts, the owner's own Submit on the prompt's card (herdr.test.ts's "herdr's pane writes").
 export async function typeKeys(surface: string, steps: KeyStep[]): Promise<void> {
   const { pane, server } = paneAt(surface)
   for (const [i, step] of steps.entries()) {

@@ -4,7 +4,7 @@
   Before Claude Code's first session makes the projects folder, a pass reads no transcript and `--follow` logs `no <folder> yet; waiting for Claude Code's first session`, checks for the folder each second, and watches and reads it once it appears, so a fresh Mac's follower stays up; `status` blames the database only for a database error.
   Before its first write it proves the target is a Postgres container on this machine and prints that proof, or refuses: the URL's host is loopback, one running Docker container publishes the URL's port on loopback only, and the server the URL reaches has that container's system identifier, so a tunnel or proxy to a remote database fails.
   A pg advisory lock allows one importer per database, so a second copy prints `another importer holds the lock; nothing to do` and exits 0.
-  It reads only files, so it needs no cmux socket.
+  It reads only files, so it needs no herdr socket.
   On a fixture stack, once the backfill is in, it writes the fixture's made-up threads and tags their lines (`seedFixtureThreads`, `.agents/dashboard/asks.md`); on any other source it writes none.
   A transcript replaced under its path (a new inode) or cut shorter is read again from 0 and its rows replaced (`ingestFile` in `api/hono/src/lib/sessions/ingest.ts`).
   A thread-tagged row stays through that wipe at a negative seq until a re-read line with its uuid takes it, keeping its tag, and the read that reaches the file's end deletes the tagged rows the new file dropped, so a reader stopped part way keeps every tag and its next pass carries on.
