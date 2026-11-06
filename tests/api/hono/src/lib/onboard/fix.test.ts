@@ -104,10 +104,10 @@ const begin = (
 const read = async (app: App, url: string): Promise<Read> =>
   (await (await app.request(`http://127.0.0.1${url}`, {}, peer("127.0.0.1"))).json()).data
 
-// The read once its state leaves running, or the last one when it never does.
+// The read once its state leaves running: it waits on that event alone, so a loaded machine only makes it slower, and a fix that never settles fails by the test's timeout, never as a pass.
 const settled = async (app: App, url: string, done = (r: Read) => r.state !== "running") => {
   let last = await read(app, url)
-  for (let tries = 0; tries < 250 && !done(last); tries++) {
+  while (!done(last)) {
     await Bun.sleep(20)
     last = await read(app, url)
   }

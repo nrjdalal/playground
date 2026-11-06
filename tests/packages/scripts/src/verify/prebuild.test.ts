@@ -16,8 +16,15 @@ import { join, relative } from "node:path"
 
 import * as prebuild from "../../../../../packages/scripts/src/verify/prebuild"
 
-const { isMainCheckout, prebuildStep, sourcesIn, staleInstall, unbuilt, workspaceImports } =
-  prebuild
+const {
+  importedNames,
+  isMainCheckout,
+  prebuildStep,
+  sourcesIn,
+  staleInstall,
+  unbuilt,
+  workspaceImports,
+} = prebuild
 
 const ROOT = join(import.meta.dir, "../../../../..")
 
@@ -92,20 +99,17 @@ test("isMainCheckout is the factory's main checkout alone, by real path, so a pe
   }
 })
 
-test("in the factory's main checkout prebuild stops before any build and says where to run it", () => {
+// in process, as prebuild.ts's own entry reads a target, since a spawned bun's start alone outran bun's 30 s timeout on a loaded machine
+test("in the factory's main checkout prebuild stops before any build and says where to run it", async () => {
   const dir = mkdtempSync(join(tmpdir(), "prebuild-stop-"))
   try {
     writeFileSync(join(dir, "cli.ts"), 'import "@packages/config/nope"\n')
-    const run = Bun.spawnSync(
-      [
-        "bun",
-        join(ROOT, "packages/scripts/src/verify/prebuild.ts"),
-        relative(join(ROOT, "packages/scripts/src"), dir),
-      ],
-      { cwd: ROOT, env: { ...process.env, PLAYGROUND_REPO: ROOT } },
-    )
-    expect(run.exitCode).toBe(1)
-    expect(run.stderr.toString()).toContain("run it from your own worktree")
+    const sources = await sourcesIn(relative(join(ROOT, "packages/scripts/src"), dir))
+    const missing = unbuilt(workspaceImports(sources), dir, importedNames(sources))
+    expect(missing).toEqual(["@packages/config/nope"])
+    const step = prebuildStep("verify", missing, ROOT, ROOT)
+    expect(step).not.toHaveProperty("build")
+    expect("refused" in step && step.refused).toContain("run it from your own worktree")
   } finally {
     rmSync(dir, { force: true, recursive: true })
   }
