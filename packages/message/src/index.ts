@@ -36,6 +36,26 @@ export const invitePath = (inviteId: string) => `/yard/invites/${encodeURICompon
 // Where the hosted API's relay to the owner's own Mac sits: the hosted web's dashboard reads go to this prefix plus their own path.
 export const RELAY_PREFIX = "/api/v1/yard/relay"
 
+// The Inbox cards a relayed answer may reach, by their kind (answerKind), A to Z: each one whose poster carries out the answer. Every other kind stays on the Mac, one added later included: an Approve the Mac carries out itself on its own settings and permissions (an extension accept, an apps change, a grant), a delete, and a secret ask, whose value goes to its sink through its own Submit alone.
+export const RELAY_ANSWER_KINDS = [
+  "ask",
+  "budget",
+  "draft",
+  "schema",
+  "ship",
+  "slack",
+  "ticket",
+  "update",
+] as const
+
+export type AnswerCard =
+  | { kind: "decision"; preview: { type: string } }
+  | { kind: "draft" | "update" }
+
+// Pure: an Inbox card's kind as the relay reads it, the same on the Mac and in the hosted web: a decision's preview type, else draft or update.
+export const answerKind = (card: AnswerCard): string =>
+  card.kind === "decision" ? card.preview.type : card.kind
+
 // The public half of the browser's paired key, an ECDSA P-256 key as WebCrypto exports it to JWK, kept to the four members that name it.
 export const pairKeySchema = z
   .object({

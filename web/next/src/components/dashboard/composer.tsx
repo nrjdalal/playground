@@ -23,6 +23,7 @@ import {
   InputGroupTextarea,
 } from "@/components/ui/input-group"
 import { toast } from "@/components/ui/toast"
+import { useYardWrites } from "@/hooks/use-yard-writes"
 import { chatLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { caretPoint } from "@/lib/caret"
@@ -94,9 +95,10 @@ const useSkills = (sessionId: string | null) =>
 const MENU_GAP = 4
 
 // Says something to a session as the owner: typed into its own terminal as if the owner typed it there, or for the session the dashboard hosts, put on its input; its reply arrives in the steps above, from the transcript. Phase 2a: either dispatcher, the assistant, and the session the dashboard hosts on the Agent SDK. Files come with a message by the attach button, a paste or a drop: each uploads at once and shows as a chip above the box, and the message carries their paths for the session to Read. What is typed and attached stays as the session's draft until it is sent. Sending hands the message to the dashboard's outbox and clears the box and the draft at once, so nothing waits on the request: the message shows in the stream as a pending bubble, and while more than one is on its way the chat's Checkpoint bar above the box counts them. It is AI Elements' Prompt Input, an InputGroup in a form: the reply chip and files above the box, which grows with what is typed up to 40% of the view and scrolls past that, then attach, the mode menu and send, whose tooltip holds the key hint.
-// The hosted build's chat has no composer, since its relay carries reads alone, only the one read-only line in the box's place.
+// The hosted build's chat has a composer only in a browser that keeps a paired key, whose send the relay carries; elsewhere there it shows the one read-only line in the box's place.
 export function Composer(props: { threadId?: string; worker: Worker }) {
-  return config.hosted ? <ReadOnlyLine className="mb-2 py-2" /> : <WritableComposer {...props} />
+  const writes = useYardWrites()
+  return writes.send ? <WritableComposer {...props} /> : <ReadOnlyLine className="mb-2 py-2" />
 }
 
 function WritableComposer({ threadId, worker }: { threadId?: string; worker: Worker }) {
@@ -330,7 +332,7 @@ function WritableComposer({ threadId, worker }: { threadId?: string; worker: Wor
                 event.preventDefault()
                 void form.handleSubmit()
               }}
-              {...attachments.dropProps}
+              {...(config.hosted ? {} : attachments.dropProps)}
               data-dragging={attachments.dragging || undefined}
               className="data-dragging:ring-ring/50 rounded-lg data-dragging:ring-2"
             >
@@ -375,7 +377,7 @@ function WritableComposer({ threadId, worker }: { threadId?: string; worker: Wor
                   aria-controls={menuOpen ? menuIds.list : undefined}
                   aria-activedescendant={menuOpen ? menuIds.item : undefined}
                   onPaste={(event) => {
-                    attachments.onPaste(event)
+                    if (!config.hosted) attachments.onPaste(event)
                     const inserted = insertPaste(event)
                     if (inserted !== "left") markInserted(event.nativeEvent, inserted === "landed")
                   }}
@@ -396,22 +398,27 @@ function WritableComposer({ threadId, worker }: { threadId?: string; worker: Wor
                   align="block-end"
                   className="px-2 pt-1 pb-2 [&_button[data-size=icon-sm]]:size-7 [&_svg]:size-3.5!"
                 >
-                  <input {...attachments.pickerProps} />
-                  <Hint content="Attach images, PDFs or text files, or paste or drop them">
-                    <InputGroupButton
-                      aria-label="Attach files"
-                      className="rounded-full"
-                      onClick={attachments.pick}
-                      size="icon-sm"
-                      variant="outline"
-                    >
-                      <RiAddLine />
-                    </InputGroupButton>
-                  </Hint>
-                  <ModePicker approvals={approvals} worker={worker} />
+                  {/* an upload, a mode and a setting are writes the relay does not carry, so the hosted build's box sends words alone */}
+                  {!config.hosted && (
+                    <>
+                      <input {...attachments.pickerProps} />
+                      <Hint content="Attach images, PDFs or text files, or paste or drop them">
+                        <InputGroupButton
+                          aria-label="Attach files"
+                          className="rounded-full"
+                          onClick={attachments.pick}
+                          size="icon-sm"
+                          variant="outline"
+                        >
+                          <RiAddLine />
+                        </InputGroupButton>
+                      </Hint>
+                      <ModePicker approvals={approvals} worker={worker} />
+                    </>
+                  )}
                   <div className="ml-auto flex items-center gap-2">
                     {/* New thread is off for now, so this row renders no toggle and a send starts no thread */}
-                    <SettingPicker label={label} worker={worker} />
+                    {!config.hosted && <SettingPicker label={label} worker={worker} />}
                     {/* the box's own aria-description already speaks the key hint */}
                     <Hint content={hint} description={null}>
                       <InputGroupButton

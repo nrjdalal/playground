@@ -34,10 +34,19 @@ const named = async (stored: Stored): Promise<BrowserKey> => ({
   publicKey: stored.publicKey,
 })
 
+// The query that reads this browser's key, shared by Settings' Remote and the writes a hosted page offers, so a Pair shows the composer at once.
+export const BROWSER_KEY = ["remote", "browser"] as const
+
 // The key this browser keeps, or null before one is made.
 export async function readBrowserKey(): Promise<BrowserKey | null> {
   const stored = await request<Stored | undefined>((store) => store.get(SLOT), "readonly")
   return stored ? named(stored) : null
+}
+
+// What signs this browser's writes from Yard: the kept key's id and its private half, which signs here alone, or null before one is made.
+export async function readBrowserSigner(): Promise<{ id: string; privateKey: CryptoKey } | null> {
+  const stored = await request<Stored | undefined>((store) => store.get(SLOT), "readonly")
+  return stored ? { id: (await keyIdOf(stored.publicKey)).id, privateKey: stored.privateKey } : null
 }
 
 // Sends this browser's key to the Mac as a pair request, making one only while it keeps none, so a request sent again carries the same key. The fingerprint it gives is this browser's own, never the one the hosted hub passed back, and a Mac that received another key is refused, so a key the hosted side swapped in never reads as this one.

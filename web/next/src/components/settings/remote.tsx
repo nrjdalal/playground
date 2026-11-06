@@ -21,7 +21,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { config } from "@/lib/config"
-import { type BrowserKey, pairBrowser, readBrowserKey } from "@/lib/remote-key"
+import { BROWSER_KEY, type BrowserKey, pairBrowser, readBrowserKey } from "@/lib/remote-key"
 import { relativeTime } from "@/lib/time"
 
 const REMOTE_KEY = ["remote"] as const
@@ -89,7 +89,7 @@ function MacRemote() {
         </EmptyHeader>
       </Empty>
     )
-  const { key, pending } = data
+  const { audit, key, pending } = data
   return (
     <>
       {key || pending ? (
@@ -154,6 +154,20 @@ function MacRemote() {
           </EmptyHeader>
         </Empty>
       )}
+      {audit.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <h3 className="text-muted-foreground text-xs font-medium">Last writes from Yard</h3>
+          <ul aria-label="Last writes from Yard" className="text-muted-foreground text-xs">
+            {audit.map((line, index) => (
+              <li key={`${line.at}-${index}`} className="truncate">
+                {relativeTime(line.at, now)} · {line.status} ·{" "}
+                <span className="font-mono">{line.fingerprint}</span> ·{" "}
+                <span className="font-mono">{line.path}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <ConfirmDialog
         open={revoking}
         onOpenChange={setRevoking}
@@ -183,8 +197,6 @@ async function sendPair(publicKey: BrowserKey["publicKey"]): Promise<string> {
   if (!response.ok || !body?.data) throw new Error(body?.error?.message ?? "The Mac did not answer")
   return body.data.fingerprint
 }
-
-const BROWSER_KEY = ["remote", "browser"] as const
 
 function PairThisBrowser() {
   const queryClient = useQueryClient()

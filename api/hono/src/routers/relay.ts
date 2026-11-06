@@ -13,10 +13,16 @@ import {
   validationErrorResponses,
 } from "@/lib/error"
 import type { Forwarded, Hub } from "@/lib/relay/hub"
-import { RELAY_PREFIX, relayAllowed } from "@/lib/relay/protocol"
+import {
+  pathOn,
+  RELAY_PREFIX,
+  RELAY_WRITES,
+  relayAllowed,
+  relayWriteSchema,
+} from "@/lib/relay/protocol"
 import type { YardVariables } from "@/lib/yard/caller"
 
-// The relay's hosted routes, inside Yard's router: the socket the owner's Mac holds with its own token, the Mac's status, the owner's browser's pair request, and its reads, each forwarded to the Mac with a fresh id and time, its answer passed back and kept nowhere. Every route takes the owner rung; a read also takes the hosted web's Origin when it names one, and its answer comes sandboxed and unsniffed, as the Mac's own files are.
+// The relay's hosted routes, inside Yard's router: the socket the owner's Mac holds with its own token, the Mac's status, the owner's browser's pair request, its reads, each forwarded to the Mac with a fresh id and time, and its signed writes, each forwarded as signed; every answer is passed back and kept nowhere. Every route takes the owner rung; a read also takes the hosted web's Origin when it names one, a write takes it always, and an answer comes sandboxed and unsniffed, as the Mac's own files are.
 export function relayRouter({
   hub,
   mac,
@@ -116,6 +122,52 @@ export function relayRouter({
         const answer = online(await hub.pair(caller.id, caller.login, c.req.valid("json").key))
         return new Response(Buffer.from(answer.body, "base64"), {
           headers: { "cache-control": "no-store", "content-type": "application/json" },
+          status: answer.status,
+        })
+      },
+    )
+    .post(
+      "/write",
+      describeRoute({
+        description:
+          "A write of the owner's own dashboard, signed in the owner's browser by its paired key: carried to the owner's Mac as signed, which checks the signature and runs it only for a route on its write list; the hub keeps no body and logs the write's id, path, status and time alone",
+        responses: {
+          200: { description: "The Mac's answer" },
+          ...authErrorResponses,
+          ...forbiddenErrorResponses,
+          ...validationErrorResponses,
+          503: errorResponse("MAC_OFFLINE", "Your Mac is offline"),
+        },
+        tags: ["Yard"],
+      }),
+      owner,
+      async (c, next) => {
+        if (webOrigin === null || c.req.header("origin") !== webOrigin)
+          throw new ApiError(403, "FORBIDDEN", "The relay takes a write from the hosted web alone")
+        return next()
+      },
+      sValidator("json", relayWriteSchema, (result) => {
+        if (!result.success)
+          throw new ApiError(400, "VALIDATION_ERROR", "Invalid input", { issues: result.error })
+      }),
+      async (c) => {
+        const caller = c.get("caller")
+        const write = c.req.valid("json")
+        if (write.login.toLowerCase() !== caller.login.toLowerCase())
+          throw new ApiError(403, "FORBIDDEN", "A write carries your own login alone")
+        if (!pathOn(RELAY_WRITES, write.path))
+          throw new ApiError(403, "FORBIDDEN", "The relay does not carry this write")
+        const answer = online(await hub.write(caller.id, write))
+        console.log(
+          `[relay] write ${write.id} ${write.path.split("?")[0]} ${answer.status} ${new Date().toISOString()}`,
+        )
+        return new Response(Buffer.from(answer.body, "base64"), {
+          headers: {
+            ...answer.headers,
+            "cache-control": "no-store",
+            "content-security-policy": "default-src 'none'; sandbox",
+            "x-content-type-options": "nosniff",
+          },
           status: answer.status,
         })
       },

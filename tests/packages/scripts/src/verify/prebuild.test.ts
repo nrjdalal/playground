@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -184,6 +185,45 @@ test("unbuilt names a package whose dist lacks a name the sources import, and pa
   }
 })
 
+// check-types:tests once failed after a canary merge on types a dist built before it lacked, every name the sources import still there; a rebuild under a running stack hangs it, so a stack up keeps the dist.
+test("unbuilt names a package whose src holds a file newer than its dist while no stack runs, by a dist folder's newest file, and passes a file outside its dist", () => {
+  const dir = mkdtempSync(join(tmpdir(), "prebuild-mtime-"))
+  try {
+    const at = (path: string, seconds: number) => utimesSync(path, seconds, seconds)
+    const files: Record<string, string> = {}
+    for (const [name, srcAt, distAt, served, folderAt = 500] of [
+      ["stale", 2000, 1000, "dist/index.mjs"],
+      ["fresh", 1000, 2000, "dist/index.mjs"],
+      ["folder", 1500, 2000, "dist"],
+      ["stale-folder", 2000, 1500, "dist", 3000],
+      ["source", 2000, 1000, "src/index.ts"],
+      ["root", 2000, 1000, "tsconfig.json"],
+    ] as const) {
+      const pkg = join(dir, name)
+      mkdirSync(join(pkg, "dist"), { recursive: true })
+      mkdirSync(join(pkg, "src"))
+      writeFileSync(join(pkg, "package.json"), JSON.stringify({ name: `@packages/${name}` }))
+      writeFileSync(join(pkg, "src/index.ts"), "export const a = 1\n")
+      writeFileSync(join(pkg, "src/other.ts"), "export const b = 2\n")
+      writeFileSync(join(pkg, "dist/index.mjs"), "export const a = 1\n")
+      writeFileSync(join(pkg, "tsconfig.json"), "{}\n")
+      at(join(pkg, "tsconfig.json"), 1000)
+      at(join(pkg, "src/index.ts"), 1000)
+      at(join(pkg, "src/other.ts"), srcAt)
+      at(join(pkg, "dist/index.mjs"), distAt)
+      at(join(pkg, "dist"), folderAt)
+      files[`@packages/${name}`] = join(pkg, served)
+    }
+    const resolve = (specifier: string) => files[specifier]
+    expect({
+      stackDown: unbuilt(Object.keys(files), dir, {}, resolve, false),
+      stackUp: unbuilt(Object.keys(files), dir, {}, resolve, true),
+    }).toEqual({ stackDown: ["@packages/stale", "@packages/stale-folder"], stackUp: [] })
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
 // the whole suite's prebuild once rebuilt @packages/db for "row" and "type Row", which only a test's string spells
 test("importedNames leaves a name only a string spells, as an import a line of a test's fixture holds", () => {
   expect(
@@ -240,6 +280,26 @@ const worktree = (): string => {
   mkdirSync(join(dir, "packages/fresh/node_modules/tsdown"), { recursive: true })
   mkdirSync(join(dir, "node_modules/typescript"), { recursive: true })
   return dir
+}
+
+// prebuild.ts and what it imports, into a made-up checkout: its verify folder, which this returns.
+const copyPrebuild = (dir: string): string => {
+  const verify = join(dir, "packages/scripts/src/verify")
+  mkdirSync(verify, { recursive: true })
+  cpSync(join(ROOT, "packages/scripts/src/verify/prebuild.ts"), join(verify, "prebuild.ts"))
+  cpSync(
+    join(ROOT, "packages/scripts/src/shebang.ts"),
+    join(dir, "packages/scripts/src/shebang.ts"),
+  )
+  symlinkSync(
+    join(ROOT, "packages/scripts/node_modules"),
+    join(dir, "packages/scripts/node_modules"),
+  )
+  mkdirSync(join(dir, "api/hono/src/lib/dev"), { recursive: true })
+  cpSync(join(ROOT, "api/hono/src/lib/dev/stop.ts"), join(dir, "api/hono/src/lib/dev/stop.ts"))
+  mkdirSync(join(dir, "node_modules/@packages"), { recursive: true })
+  symlinkSync(join(ROOT, "packages/safe-delete"), join(dir, "node_modules/@packages/safe-delete"))
+  return verify
 }
 
 // On 2 Nov pr:merge, run from a worktree installed before canary added @packages/safe-delete, stopped on "tsdown: command not found" partway through its build.
@@ -306,19 +366,9 @@ test("prebuildStep adds no install and no refusal on an install that matches, bu
 test("bun run pr:merge's prebuild stops on a stale install even with every dist built, and passes once it is installed", () => {
   const dir = worktree()
   try {
-    const verify = join(dir, "packages/scripts/src/verify")
-    mkdirSync(verify, { recursive: true })
+    const verify = copyPrebuild(dir)
     mkdirSync(join(dir, "packages/scripts/src/pr-merge"))
-    cpSync(join(ROOT, "packages/scripts/src/verify/prebuild.ts"), join(verify, "prebuild.ts"))
-    cpSync(
-      join(ROOT, "packages/scripts/src/shebang.ts"),
-      join(dir, "packages/scripts/src/shebang.ts"),
-    )
     writeFileSync(join(dir, "packages/scripts/src/pr-merge/cli.ts"), "export const x = 1\n")
-    symlinkSync(
-      join(ROOT, "packages/scripts/node_modules"),
-      join(dir, "packages/scripts/node_modules"),
-    )
     const { PLAYGROUND_REPO: _, ...env } = process.env
     const run = () =>
       Bun.spawnSync(["bun", join(verify, "prebuild.ts"), "pr-merge"], { cwd: dir, env })
@@ -367,17 +417,7 @@ const clone = (): {
     join(dir, "packages/plain/package.json"),
     JSON.stringify({ name: "@packages/plain" }),
   )
-  const verify = join(dir, "packages/scripts/src/verify")
-  mkdirSync(verify, { recursive: true })
-  cpSync(join(ROOT, "packages/scripts/src/verify/prebuild.ts"), join(verify, "prebuild.ts"))
-  cpSync(
-    join(ROOT, "packages/scripts/src/shebang.ts"),
-    join(dir, "packages/scripts/src/shebang.ts"),
-  )
-  symlinkSync(
-    join(ROOT, "packages/scripts/node_modules"),
-    join(dir, "packages/scripts/node_modules"),
-  )
+  const verify = copyPrebuild(dir)
   writeFileSync(
     join(dir, "packages/scripts/src/data-table-metrics.ts"),
     `import { appendFileSync, mkdirSync, writeFileSync } from "node:fs"\nmkdirSync(${JSON.stringify(join(dir, ".generated"))}, { recursive: true })\nwriteFileSync(${JSON.stringify(join(dir, ".generated/data-table-metrics.json"))}, "{}")\nappendFileSync(${JSON.stringify(log)}, "metrics\\n")\n`,
@@ -435,6 +475,35 @@ const clone = (): {
     },
   }
 }
+
+// A turbo cache hit restores a dist as it was, older than the src that sent the build, so a prebuild that left it there would build it again on every run; a src saved while the build runs still needs the next one.
+test("test:file builds a package whose src is newer than its dist, when turbo's cache hit leaves the dist as it was, again only for a src saved during that build, and then nothing", () => {
+  const { dir, log, run } = clone()
+  try {
+    const pkg = join(dir, "packages/one")
+    mkdirSync(join(pkg, "dist"))
+    mkdirSync(join(pkg, "src"))
+    writeFileSync(join(pkg, "src/index.ts"), "export const one = 1\n")
+    writeFileSync(join(pkg, "dist/index.mjs"), "export const one = 1\n")
+    utimesSync(join(pkg, "dist/index.mjs"), 1000, 1000)
+    const saved = join(dir, "saved")
+    writeFileSync(
+      join(dir, "node_modules/.bin/turbo"),
+      `#!/bin/bash\necho "$*" >> ${JSON.stringify(join(dir, "build.log"))}\n[ -e ${JSON.stringify(saved)} ] || { sleep 0.05; touch packages/one/src/index.ts ${JSON.stringify(saved)}; }\n`,
+    )
+    for (let i = 0; i < 3; i++) expect(run(["tests/one.test.ts"]).exitCode).toBe(0)
+    expect(
+      log()
+        .split("\n")
+        .filter((line) => line.startsWith("run build")),
+    ).toEqual([
+      "run build --filter=@packages/one --output-logs=errors-only",
+      "run build --filter=@packages/one --output-logs=errors-only",
+    ])
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
 
 test("test:file in a cloned worktree builds only the packages its files import, under the flags a worktree with no .env needs, and then nothing", () => {
   const { dir, log, run } = clone()

@@ -21,6 +21,7 @@ import { z } from "zod"
 // Relative, not @/: paths.ts imports this file, and the web's tests type-check it under web/next's own @/ paths.
 import shipped from "../../fixtures/dashboard.json" with { type: "json" }
 import { livePair } from "../dev/live-dashboard"
+import { startOf } from "../dev/stop"
 import { FIX_IDS } from "../onboard/fix-ids"
 import { discard, trashRoots } from "../trash"
 
@@ -45,6 +46,9 @@ export const DASHBOARD_RULES: Record<DashboardRule, string> = {
 
 // PLAYGROUND_FIXTURE=shipped names the fixture that ships in api/hono/src/fixtures/dashboard.json.
 export const SHIPPED_FIXTURE = "shipped"
+
+// The shipped fixture's own file, whose mtime tells a copy written from it that it changed.
+const SHIPPED_PATH = join(import.meta.dir, "../../fixtures/dashboard.json")
 
 const yes = (value: string | undefined): boolean => /^(1|true)$/i.test(value?.trim() ?? "")
 
@@ -354,6 +358,9 @@ export function settle(value: unknown, shiftMs: number, config: string, key = ""
 
 const STAMP = "stamp.json"
 
+// The launcher's pid and start in the copy it wrote, so a CLI in the same checkout leaves a running stack's copy alone.
+const LAUNCHER = "launcher.json"
+
 const writeEntry = (path: string, content: unknown): void => {
   mkdirSync(dirname(path), { mode: 0o700, recursive: true })
   if (path.endsWith(".jsonl") && Array.isArray(content)) {
@@ -372,6 +379,20 @@ const writeEntry = (path: string, content: unknown): void => {
     writeFileSync(path, typeof content === "string" ? content : JSON.stringify(content, null, 2), {
       mode: 0o600,
     })
+  }
+}
+
+// Marks dir's copy as the running launcher's own, by its pid and start, which a reused pid never matches.
+export function markLaunched(dir: string, pid = process.pid): void {
+  writeEntry(join(dir, LAUNCHER), { pid, started: startOf(pid) })
+}
+
+const launcherRuns = (dir: string): boolean => {
+  try {
+    const { pid, started } = JSON.parse(readFileSync(join(dir, LAUNCHER), "utf8"))
+    return Number.isInteger(pid) && typeof started === "string" && startOf(pid) === started
+  } catch {
+    return false
   }
 }
 
@@ -472,14 +493,19 @@ export function ensureFixture(source: DashboardSource = currentSource()): string
     )
   }
   const dir = fixtureDir()
-  if (existsSync(join(dir, STAMP))) return dir
+  const stamp = join(dir, STAMP)
+  const launched = yes(process.env.PLAYGROUND_FIXTURE_LAUNCHED)
+  // A copy is written again only when its source file changed after the copy was stamped, read from disk so the edit reaches it; a stack's copy is its launcher's, kept with its own writes while that launcher runs, read from inside the stack or beside it.
+  const from = source.file ?? SHIPPED_PATH
+  const newer = (): boolean => existsSync(from) && statSync(from).mtimeMs > statSync(stamp).mtimeMs
+  if (existsSync(stamp) && (launched || !newer() || launcherRuns(dir))) return dir
   // The launcher wrote this stack's fixture and drops it as the stack stops, so a process that outlives the stop (the API until its group is killed) finds it gone and writes nothing back.
-  if (yes(process.env.PLAYGROUND_FIXTURE_LAUNCHED)) {
+  if (launched) {
     throw new Error(
       `the stack's fixture at ${dir} went when it stopped; start it again with bun run dev`,
     )
   }
-  const loaded = loadFixture(source.file)
+  const loaded = loadFixture(existsSync(stamp) ? from : source.file)
   if (!loaded.ok) throw new Error(loaded.error)
   writeFixture(loaded.fixture, dir, trashRoots())
   return dir
