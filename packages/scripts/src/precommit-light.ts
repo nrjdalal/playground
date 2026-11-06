@@ -20,7 +20,11 @@ export const CHECKS = [
     name: "env-keys",
   },
   {
-    argv: ["bun", "run", "test:file", "tests/packages/scripts/src/trace-count/count.test.ts"],
+    argv: [
+      "bash",
+      "-c",
+      "bun run test:file tests/packages/scripts/src/trace-count/count.test.ts && bun --no-env-file packages/scripts/src/trace-count/cli.ts --lists",
+    ],
     name: "trace-count",
   },
 ]
