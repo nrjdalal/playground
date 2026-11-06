@@ -551,8 +551,27 @@ test("runRm --restore refuses a detached worktree whose commit has gone, naming 
   }
   expect(said).toHaveLength(1)
   expect(said[0]).toContain(sha)
-  expect(said[0]).not.toContain("branch")
+  expect(said[0]).not.toContain("git -C")
   expect(existsSync(wt)).toBe(false)
+})
+
+test("runRm --restore exits 1 naming the step when git cannot recreate the branch after the move", async () => {
+  const { deps, id, main, wt } = await trashedWorktree()
+  git(main, "branch", "-D", "PG-1-thing")
+  writeFileSync(join(main, ".git", "refs", "heads", "PG-1-thing.lock"), "")
+  const said: string[] = []
+  const error = console.error
+  console.error = (line: string) => void said.push(line)
+  try {
+    expect(await runRm(["--restore", id], deps)).toBe(1)
+  } finally {
+    console.error = error
+  }
+  expect(said).toHaveLength(1)
+  expect(said[0]).toStartWith(
+    `playground: restored ${wt}, but git cannot read it yet: git branch PG-1-thing `,
+  )
+  expect(existsSync(wt)).toBe(true)
 })
 
 test("clonesOf reads run-slot's clone holder line while its pid lives, and a line with no source as none", () => {
