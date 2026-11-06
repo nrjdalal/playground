@@ -88,7 +88,7 @@ Only the first reading moves the folder, sets variables and records files for th
   A name past a plain word (`f+`, `a/b`), a call through a word the reader cannot read (`$n`, `${b:1}`), a call it reads only once decoded (`$'\x66'`), and any `eval` or `source` on the line each read the body as one that may run again.
   A zsh head whose body is a brace group in its own words (`repeat 3 { cd ..; }`, `while true { … }`, `if true { … }`: `Command.opaque`) sets `Env.cwdAnywhere`, since the reader does not read that body.
   A `while`'s or `until`'s condition outside every other loop, with no `&&` before the loop, runs at least once (`Command.atLeastOnce`, the script an `eval` or a `source` there reads included), so its `cd` into folders that are there drops the folder before it, as a sure `cd` does, and keeps each folder its passes reach.
-  An `&&` before the loop (`false && while cd /tmp; do …`) may skip it, so its `cd` keeps the folder before it, as `false && cd /tmp` does.
+  An `&&` before the loop (`false && while cd /tmp; do …`) may skip it, so its `cd` keeps the folder before it for every command after the loop, the ones the same chain joins included, though those run only once the loop has run.
   A `cd` through a steady variable reads the folder the variable names, in a hook that holds them (`Env.hold`, which no-main-checkout sets from `steady.ts`), so its climb is read from that folder; the start-folder reading the `cd` had stays beside it.
   A `cd` that opens a function's, a brace group's or a coprocess's body adds its folder to `Env.cwdHeld`, which no later `cd` clears, since the line may call that body at any point, and a relative `cd` after it resolves from those folders too, since the body may already have run.
   A `cd` later in the body is read where it stands, as one the shell may not run, so a sure `cd` after the body clears it, as `Env.cwd`'s own reading does too.
@@ -111,9 +111,11 @@ Only the first reading moves the folder, sets variables and records files for th
   Its tests are in `bun run test:file tests/scripts/hooks`.
 - Text the shell stores and runs later is the open class, which canary shares: the reader reads neither a `trap`'s text nor an `alias`'s value, so a `cd` there (`trap 'cd ..' DEBUG`) moves the shell where the reader keeps its folder.
   The follow-up is filed as the shell reader reading the text a trap or an alias stores as a script the shell may run again at any point, which is the wording to search the tracker for.
+  Name the folder in the command itself (`git -C <path>`, `bun --cwd <path>`) on a line that sets a trap or an alias holding a `cd`.
 - A compound piped or sent to the background after its closing word (`while cd /tmp; do …; done | cat`, `if cd /tmp; then :; fi &`) runs in a subshell, which canary also reads as the line's own shell, so its `cd` moves the reader's folder where the shell's stays; zsh's function definitions that name several functions with one body (`function f g h {`) count only the first name.
   The follow-up is filed as the shell reader reading a compound piped or sent to the background as run in a subshell, which is the wording to search the tracker for.
-  Name the folder in the command itself (`git -C <path>`, `bun --cwd <path>`) on a line that sets a trap or an alias holding a `cd`.
+- A script an `eval` or a `source` reads where the shell may skip that command (`false && eval 'cd /tmp'`, `true || eval …`, an `if` body that does not run) reads as sure to run, which canary shares, so its `cd` moves the reader's folder where the shell's stays.
+  The follow-up is filed as the shell reader reading the script an eval or a source runs as unsure wherever that eval may not run, which is the wording to search the tracker for.
 
 ## after-compact
 
