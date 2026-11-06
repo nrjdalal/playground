@@ -35,13 +35,16 @@ describe("precommit:light", () => {
 
   test("conflict-markers, docs-wrap, env-keys and trace-count run as lefthook's pre-commit runs them", async () => {
     const hooks = await Bun.file(join(ROOT, "lefthook.yml")).text()
-    for (const name of ["conflict-markers", "docs-wrap", "trace-count"]) {
+    for (const name of ["conflict-markers", "docs-wrap"]) {
       const check = CHECKS.find((c) => c.name === name)!
       expect(hooks).toContain(`run: ${check.argv.join(" ")}\n`)
     }
-    const envKeys = CHECKS.find((c) => c.name === "env-keys")!.argv
-    expect(envKeys.slice(0, 2)).toEqual(["bash", "-c"])
-    expect(hooks).toContain(`run: ${envKeys[2]}\n`)
+    // a step that chains two commands runs through bash, as lefthook's shell runs its line
+    for (const name of ["env-keys", "trace-count"]) {
+      const argv = CHECKS.find((c) => c.name === name)!.argv
+      expect(argv.slice(0, 2)).toEqual(["bash", "-c"])
+      expect(hooks).toContain(`run: ${argv[2]}\n`)
+    }
   })
 
   test("em-dashes runs the repo's em-dash check", () => {

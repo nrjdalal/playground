@@ -203,7 +203,7 @@ export const cardOf = (inputs: Inputs, seen: Seen, now: number): { seen: Seen; t
   return { seen: next, text: [...blocks, fence(watch), bullets.join("\n")].join("\n\n") }
 }
 
-// The steps a beat saw done for the first time, one steps-file line each, in the owner's zone: "- 1:09 pm NG-1 taken".
+// The steps a beat saw done for the first time, one steps-file line each, in the owner's zone: "- 1:09 pm MADE-1 taken".
 export const stepLinesOf = (before: Seen, after: Seen, zone: string): string[] =>
   Object.entries(after).flatMap(([id, steps]) =>
     [...STEPS, "closed" as const]

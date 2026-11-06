@@ -26,7 +26,7 @@ type Call = { command: string; cwd: string }
 type Tally = { inClass: number; outClass: number }
 
 const USAGE =
-  "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>]> --canary <sha> --hook <name> [--hook <name> ...] [--fresh]"
+  "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>]> --canary <sha> --hook <name> [--hook <name> ...] [--all] [--fresh]"
 
 const DAY = 24 * 3600 * 1000
 
@@ -250,6 +250,7 @@ const option = (args: string[], name: string) => {
 }
 
 type Options = {
+  all: boolean
   formsAt?: string
   fresh: boolean
   hooks: string[]
@@ -257,6 +258,16 @@ type Options = {
   mode: "replay" | "sweep"
   ref: string
 }
+
+const SHOWN = 20
+
+// The changed lines a hook prints and stores, each led by the hook's name: the first 20, then one line naming how many more it cut, or every one with --all
+export const linesOf = (hook: string, changed: string[], all: boolean): string[] => [
+  ...(all ? changed : changed.slice(0, SHOWN)).map((line) => `${hook}: ${line}`),
+  ...(!all && changed.length > SHOWN
+    ? [`${hook}: ${changed.length - SHOWN} more changed lines not shown (--all prints them)`]
+    : []),
+]
 
 export function parse(args: string[]): Options | undefined {
   const [mode] = args
@@ -272,7 +283,15 @@ export function parse(args: string[]): Options | undefined {
     !(hours > 0)
   )
     return undefined
-  return { formsAt, fresh: args.includes("--fresh"), hooks, hours, mode, ref }
+  return {
+    all: args.includes("--all"),
+    formsAt,
+    fresh: args.includes("--fresh"),
+    hooks,
+    hours,
+    mode,
+    ref,
+  }
 }
 
 // The newest mtime of the transcripts under `projects`, so a replay's key moves with each new call
@@ -298,7 +317,7 @@ const cleanTree = (root: string) =>
 const formsBlob = (root: string, options: Options) =>
   git(root, ["hash-object", resolve(options.formsAt!)])
 
-// A run's key: the head's tree at a clean worktree, the canary sha, the mode with its inputs (the forms module's blob, or the hours and the newest transcript) and the sorted hooks; a worktree with any modified or untracked file has none
+// A run's key: the head's tree at a clean worktree, the canary sha, the mode with its inputs (the forms module's blob, or the hours and the newest transcript), the sorted hooks and --all; a worktree with any modified or untracked file has none
 export function keyOf({
   canary,
   options,
@@ -315,7 +334,9 @@ export function keyOf({
   const input =
     options.mode === "sweep" ? formsBlob(root, options) : `${options.hours}:${newest(projects)}`
   const key = new Bun.CryptoHasher("sha256")
-    .update(JSON.stringify([head, canary, options.mode, input, options.hooks.toSorted()]))
+    .update(
+      JSON.stringify([head, canary, options.mode, input, options.hooks.toSorted(), options.all]),
+    )
     .digest("hex")
     .slice(0, 16)
   return { canary, head, input, key }
@@ -431,9 +452,9 @@ async function main(args: string[]): Promise<number> {
         : await replay(canary, head, list, home, main, headMain)
     result.counts.push(JSON.stringify({ hook, ...counts }))
     console.log(result.counts.at(-1))
-    for (const line of changed.slice(0, 20)) {
-      result.changed.push(`${hook}: ${line}`)
-      console.error(result.changed.at(-1))
+    for (const line of linesOf(hook, changed, options.all)) {
+      result.changed.push(line)
+      console.error(line)
     }
   }
   if (found && unmoved(root, found, options))
