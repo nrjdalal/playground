@@ -97,6 +97,8 @@ const REDIRECT = /^(?:[<>]&(?:\d+|-)|<<<|&>>?|>>?\|?|<>?)/
 // the reserved words and precommand modifiers after which the next word is still a program word
 const KEEPS_PROGRAM =
   /^(?:builtin|command|do|elif|else|exec|if|nocorrect|noglob|then|time|until|while)$/
+// the prompt parameters zsh expands (under promptsubst for the PS/RPROMPT family), so an assignment to one can run a captured body's text as a prompt, as `print -P` runs its argument
+const PROMPT_PARAM = /^(?:PS[0-4]|PROMPT[2-4]?|RPROMPT2?|RPS[12]|SPROMPT)=/
 // a heredoc operator whose delimiter is quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`), its word ending where a word does
 const QUOTED_DOC =
   /^<<(-?)[ \t]*((?:[\w.-]*(?:'[^'\n]*'|"[^"\n$`\\]*"|\\[\w.-])[\w.-]*)+)(?=[\s;&|<>]|$)/
@@ -159,6 +161,8 @@ function quotedBodiesOut(command: string): string {
       word += token
       // a read as a step's program word runs a command the scan cannot name
       if (program && !target && token.includes("$") && !/^[A-Za-z_]\w*=/.test(word)) return command
+      // an assignment to a prompt parameter can expand a captured body's text as a prompt, running it
+      if (PROMPT_PARAM.test(word)) return command
     }
     // a quote that spans a newline while a body is pending moves where the shell starts reading it
     if (!token || (docs.length && token.includes("\n"))) return command
