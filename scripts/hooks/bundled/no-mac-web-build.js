@@ -1731,6 +1731,9 @@ var BUILD_TAKES = new Set([
   "--ssh",
   "-m"
 ]);
+var union = (...sets) => new Set(sets.flatMap((set) => [...set]));
+var COMPOSE_SERVICE_TAKES = union(SERVICE_TAKES, COMPOSE_TAKES);
+var COMPOSE_BUILD_TAKES = union(BUILD_TAKES, COMPOSE_TAKES);
 function positionals(args, takes) {
   const out = [];
   for (let k = 0;k < args.length; k++) {
@@ -1768,7 +1771,7 @@ function composeBuild(args) {
 function beforeService(rest) {
   for (let k = 0;k < rest.length; k++) {
     const v = rest[k].value;
-    if (SERVICE_TAKES.has(v))
+    if (COMPOSE_SERVICE_TAKES.has(v))
       k++;
     else if (!v.startsWith("-") || v === "-")
       return rest.slice(0, k);
@@ -1961,7 +1964,7 @@ async function hasRunnerHost(environment) {
   return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip);
 }
 function composeBuild2({ rest, sub }) {
-  const words = positionals(rest, SERVICE_TAKES);
+  const words = positionals(rest, COMPOSE_SERVICE_TAKES);
   const services = sub === "run" ? words.slice(0, 1) : words;
   if (services.length === 0 || services.some((s) => s.value === "web" || marked(s.value)))
     return `docker compose ${sub} of the web image`;

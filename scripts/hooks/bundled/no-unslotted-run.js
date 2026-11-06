@@ -1697,6 +1697,9 @@ var BUILD_TAKES = new Set([
   "--ssh",
   "-m"
 ]);
+var union = (...sets) => new Set(sets.flatMap((set) => [...set]));
+var COMPOSE_SERVICE_TAKES = union(SERVICE_TAKES, COMPOSE_TAKES);
+var COMPOSE_BUILD_TAKES = union(BUILD_TAKES, COMPOSE_TAKES);
 function subcommand(args, takes) {
   let k = 0;
   while (k < args.length && args[k].value.startsWith("-"))
@@ -1723,7 +1726,7 @@ function composeBuild(args) {
 function beforeService(rest) {
   for (let k = 0;k < rest.length; k++) {
     const v = rest[k].value;
-    if (SERVICE_TAKES.has(v))
+    if (COMPOSE_SERVICE_TAKES.has(v))
       k++;
     else if (!v.startsWith("-") || v === "-")
       return rest.slice(0, k);
