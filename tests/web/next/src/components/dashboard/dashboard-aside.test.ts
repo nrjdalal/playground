@@ -112,7 +112,7 @@ describe("the aside window on every dashboard page", () => {
   test("counts on the Inbox square what needs you and came since your last look, so a look clears it", async () => {
     const aside = await source("components/dashboard/dashboard-aside.tsx")
     expect(aside).toContain('const inboxSeenAt = useMark("inbox")')
-    expect(aside).toContain("newInInboxCount(inboxView(inbox.data.items).shown, inboxSeenAt)")
+    expect(aside).toContain("newInInboxCount(inboxView(loudItems(inbox.data)).shown, inboxSeenAt)")
     expect(aside).toContain('count > 0 ? `${count} new` : fresh.inbox && "new"')
     expect(aside).not.toContain("inbox.data?.count")
   })

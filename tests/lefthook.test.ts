@@ -232,7 +232,9 @@ test("the pre-commit type checks fail a staged type error in a test or a package
       join(dir, "package.json"),
       JSON.stringify({
         scripts: {
-          "check-types:tests": (await manifest("package.json")).scripts["check-types:tests"],
+          "check-types:tests": (await manifest("package.json")).scripts[
+            "check-types:tests"
+          ]!.replaceAll("packages/scripts/src/", `${join(ROOT, "packages/scripts/src")}/`),
         },
       }),
     )
@@ -901,6 +903,78 @@ test("the install's prepare puts back a hook that was deleted or replaced while 
     await Bun.write(hook, "#!/bin/sh\necho foreign\n")
     expect(prepare(dir)).toMatchObject({ code: 0 })
     expect(await Bun.file(hook).text()).toBe(installed)
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+}, 60_000)
+
+// Two fast tests turned four branches red in CI on 5 Nov while pre-commit never ran them: each now runs when a file it reads is staged, checked here on lefthook itself with each run swapped for an echo
+test("pre-commit runs the native-title and dashboard-map tests when a file they read is staged, and skips them otherwise", async () => {
+  const config = Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
+    "pre-commit": { commands: Record<string, { glob?: string[]; run?: string }>; piped?: boolean }
+  }
+  const { "dashboard-map": map, "native-title": title } = config["pre-commit"].commands
+  expect(title?.run).toBe("bun run test:file tests/web/next/src/native-title.test.ts")
+  expect(map?.run).toBe("bun run test:file tests/packages/scripts/src/verify/dashboard-map.test.ts")
+  const dir = mkdtempSync(join(tmpdir(), "lefthook-fast-tests-"))
+  const run = (argv: string[]) => {
+    const result = Bun.spawnSync(argv, { cwd: dir, env: SCRATCH_ENV, stdin: "ignore" })
+    return { code: result.exitCode, out: result.stdout.toString() + result.stderr.toString() }
+  }
+  const git = (...args: string[]) =>
+    run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args])
+  // stage one file, run the hook, then put the tree back
+  const ran = async (file: string) => {
+    await Bun.write(join(dir, file), "staged\n")
+    expect(git("add", file)).toMatchObject({ code: 0 })
+    const hook = run(["bun", join(ROOT, LEFTHOOK_BIN), "run", "pre-commit"])
+    expect(git("reset", "-q", "--hard")).toMatchObject({ code: 0 })
+    expect(git("clean", "-q", "-fd")).toMatchObject({ code: 0 })
+    expect(hook.code).toBe(0)
+    return { map: hook.out.includes("map-ran"), title: hook.out.includes("title-ran") }
+  }
+  try {
+    expect(git("init", "-q")).toMatchObject({ code: 0 })
+    // JSON is YAML, so the steps go in as lefthook read them
+    await Bun.write(
+      join(dir, "lefthook.yml"),
+      JSON.stringify({
+        "pre-commit": {
+          commands: {
+            "dashboard-map": { ...map, run: "echo map-ran" },
+            "native-title": { ...title, run: "echo title-ran" },
+          },
+          piped: config["pre-commit"].piped,
+        },
+      }),
+    )
+    expect(git("add", ".")).toMatchObject({ code: 0 })
+    expect(git("commit", "-q", "--no-verify", "-m", "base")).toMatchObject({ code: 0 })
+
+    expect(await ran("web/next/src/components/hint.tsx")).toEqual({ map: true, title: true })
+    expect(await ran("web/next/src/app/(protected)/dashboard/page.tsx")).toEqual({
+      map: true,
+      title: true,
+    })
+    expect(await ran("api/hono/src/routers/inbox.ts")).toEqual({ map: true, title: false })
+    expect(await ran("api/hono/src/plugins/changelog/router.ts")).toEqual({
+      map: true,
+      title: false,
+    })
+    expect(await ran("packages/scripts/src/verify/dashboard-map.json")).toEqual({
+      map: true,
+      title: false,
+    })
+    expect(await ran("tests/web/next/src/native-title.test.ts")).toEqual({
+      map: false,
+      title: true,
+    })
+    expect(await ran("tests/packages/scripts/src/verify/dashboard-map.test.ts")).toEqual({
+      map: true,
+      title: false,
+    })
+    expect(await ran("docs/playground/x.md")).toEqual({ map: false, title: false })
+    expect(await ran("packages/scripts/src/pr-merge/held.ts")).toEqual({ map: false, title: false })
   } finally {
     rmSync(dir, { force: true, recursive: true })
   }

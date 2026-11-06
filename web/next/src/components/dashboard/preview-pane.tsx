@@ -11,6 +11,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react"
 
 import { useDashboard } from "@/components/dashboard/dashboard"
+import { ReadOnlyLine } from "@/components/dashboard/read-only-line"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -236,7 +237,7 @@ export function PreviewPane() {
           placeholder="https://<stack>.localhost/"
           className="h-7 min-w-0 flex-1 text-xs md:text-xs"
         />
-        {shown?.vibe && shown.path && (
+        {shown?.vibe && shown.path && !config.hosted && (
           <Button
             type="button"
             aria-label="Stop"
@@ -283,27 +284,29 @@ export function PreviewPane() {
               : null}
           </span>
           {/* the owner's own click alone sends it, to the dispatcher through the outbox as his chat does, which routes it to the worktree's session */}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 shrink-0 text-xs"
-            disabled={!dispatcher || !shown.path}
-            onClick={() => {
-              outbox.send(dispatcher!, {
-                attachments: [],
-                text: doneMessage({
-                  branch: shown.branch!,
-                  path: shown.path!,
-                  session: shown.session,
-                }),
-              })
-              setHanded(shown.path)
-            }}
-          >
-            <RiCheckDoubleLine />
-            Done
-          </Button>
+          {!config.hosted && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 shrink-0 text-xs"
+              disabled={!dispatcher || !shown.path}
+              onClick={() => {
+                outbox.send(dispatcher!, {
+                  attachments: [],
+                  text: doneMessage({
+                    branch: shown.branch!,
+                    path: shown.path!,
+                    session: shown.session,
+                  }),
+                })
+                setHanded(shown.path)
+              }}
+            >
+              <RiCheckDoubleLine />
+              Done
+            </Button>
+          )}
         </div>
       )}
       {stop.error && (
@@ -333,7 +336,9 @@ export function PreviewPane() {
                   ? `Starting ${stoppedName} on a copy of your data. Its log is .turbo/vibe-dev.log in the worktree.`
                   : `${stoppedName} is stopped. Start runs it as it stands, on a copy of your data.`}
               </p>
-              {booting && stopped ? (
+              {config.hosted ? (
+                <ReadOnlyLine />
+              ) : booting && stopped ? (
                 <Button
                   size="sm"
                   variant="outline"

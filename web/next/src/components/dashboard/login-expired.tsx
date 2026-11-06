@@ -4,12 +4,14 @@ import type { Worker } from "@api/hono"
 import { useMutation } from "@tanstack/react-query"
 import * as React from "react"
 
+import { ReadOnlyLine } from "@/components/dashboard/read-only-line"
 import { AddAccountDialog } from "@/components/settings/add-account-dialog"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { apiClient, unwrap } from "@/lib/api/client"
+import { config } from "@/lib/config"
 
 // Restarts a session whose login expired, on the account just added or, with none, on this Mac's own login.
 const restartSession = (sessionId: string, account?: string) =>
@@ -46,26 +48,30 @@ export function LoginExpired({ label, worker }: { label: string; worker: Worker 
           Add a Claude account and {label} restarts on it, with its conversation kept. Signed in
           again on this Mac already? Restart it on that login.
         </p>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <AddAccountDialog
-            disabled={restart.isPending}
-            onAdded={(account) => {
-              if (account.provider === "claude" && account.email) restart.mutate(account.email)
-            }}
-            trigger={<Button size="sm" />}
-          >
-            Add account
-          </AddAccountDialog>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={restart.isPending}
-            onClick={() => restart.mutate(undefined)}
-          >
-            {restart.isPending ? <Spinner /> : null}
-            Restart
-          </Button>
-        </div>
+        {config.hosted ? (
+          <ReadOnlyLine className="mt-2" />
+        ) : (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <AddAccountDialog
+              disabled={restart.isPending}
+              onAdded={(account) => {
+                if (account.provider === "claude" && account.email) restart.mutate(account.email)
+              }}
+              trigger={<Button size="sm" />}
+            >
+              Add account
+            </AddAccountDialog>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={restart.isPending}
+              onClick={() => restart.mutate(undefined)}
+            >
+              {restart.isPending ? <Spinner /> : null}
+              Restart
+            </Button>
+          </div>
+        )}
         {refused ? <p className="mt-2 whitespace-pre-wrap select-text">{refused}</p> : null}
       </AlertDescription>
     </Alert>

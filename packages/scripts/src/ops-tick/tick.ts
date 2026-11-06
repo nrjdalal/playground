@@ -19,6 +19,7 @@ import {
 } from "../../../../scripts/ops/optimizer/auto_end"
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { pending } from "../ops-outbox/drain"
+import { focusCard } from "../playground/focus"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
 import { guardProbe } from "./guard-probe"
@@ -129,8 +130,12 @@ const loadReport = async (ctx: Context): Promise<string[]> =>
     .slice(0, 4)
     .map(({ command, cpu, pid }) => `${command} pid ${pid}: ${Math.round(cpu)}% CPU`)
 
-// Posts one Inbox alert update under the ops manager's name with bun run ask, and answers its item's id; --silent, so a failure's last line is ask's own, not bun's "error: script ... exited" after it.
-const postAlert = async (ctx: Context, title: string): Promise<{ by: string; id: string }> => {
+// Posts one Inbox alert update under the ops manager's name with bun run ask, its text the line that links where the owner looks next, and answers its item's id; --silent, so a failure's last line is ask's own, not bun's "error: script ... exited" after it.
+const postAlert = async (
+  ctx: Context,
+  title: string,
+  text: string,
+): Promise<{ by: string; id: string }> => {
   const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
     agents?: unknown
   } | null
@@ -138,7 +143,7 @@ const postAlert = async (ctx: Context, title: string): Promise<{ by: string; id:
   const posted = await ctx.run(
     ["bun", "run", "--silent", "--cwd", ctx.repo, "ask", "new"],
     120_000,
-    JSON.stringify({ from: by, kind: "update", preview: { outcome: "alert" }, title }),
+    JSON.stringify({ from: by, kind: "update", preview: { outcome: "alert", text }, title }),
   )
   const id = lines(posted.out)
     .map((l) => l.trim())
@@ -147,13 +152,28 @@ const postAlert = async (ctx: Context, title: string): Promise<{ by: string; id:
   return { by, id }
 }
 
+// Once focus has ended, by off or at its end, one Inbox update under the ops manager's name names what queued while it stood (focusCard)
+const focusCardBeat = async (ctx: Context) => {
+  await focusCard(join(ctx.ops, ".."), ctx.now, async (card) => {
+    const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
+      agents?: unknown
+    } | null
+    const posted = await ctx.run(
+      ["bun", "run", "--cwd", ctx.repo, "ask", "new"],
+      120_000,
+      JSON.stringify({ from: managerOf(roster?.agents, "ops"), ...card }),
+    )
+    if (posted.code !== 0) throw new Error(`bun run ask new: ${lines(posted.out).at(-1)}`)
+  })
+}
+
 // The usage marks, the login flip, the load, the train's slot wait and the near-limit marks, each routed as the old tick routed it.
 const tick = async (ctx: Context) => {
   const marks = lines((await python(ctx, "usage/week-marks.py", false)).out)
   for (const line of marks.filter((l) => l.includes("ALERT"))) {
     // an alert that fails to post is named to the builder beside its line, which prints once a week and so goes out either way
     if (/ALERT 9[78]\b/.test(line))
-      await postAlert(ctx, line).catch((error: Error) =>
+      await postAlert(ctx, line, USAGE_LINK).catch((error: Error) =>
         ctx.send("builder", `Inbox alert not posted: ${error.message}`),
       )
     await ctx.send("builder", line)
@@ -566,7 +586,7 @@ const relayMovedAt = async (outbox: string): Promise<number> => {
   return Math.max(...times)
 }
 
-// Whether this machine runs the relay at all, by its roster row or its resume record; with neither, the Ops sweep relays the outbox (playbook SWEEP.md step 2), so no relay is down.
+// Whether this machine runs the relay at all, by its roster row or its resume record; with neither, Ops' sweep relays the outbox (playbook SWEEP.md step 2), so the watch judges the sweep and never names the relay.
 const hasRelay = async (ctx: Context): Promise<boolean> => {
   if (await Bun.file(join(ctx.ops, "..", "resume", `${RELAY}.sh`)).exists()) return true
   const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
@@ -575,14 +595,55 @@ const hasRelay = async (ctx: Context): Promise<boolean> => {
   return Array.isArray(roster?.agents) && roster.agents.some((a: Agent) => a?.name === RELAY)
 }
 
+// Ops' sweep runs every 15 minutes (SESSIONS.md, Keep the sweep running), so on a machine with no relay a line may wait two sweeps before it counts as late.
+const SWEEP_CYCLE_MS = 15 * 60_000
+
+// When the watch first found no cursor.json, kept in tick/relay-watch-start until one exists: a relay that has never run leaves no cursor for pending() to read, so the lines queued since then are what it judges.
+const neverRanSince = async (ctx: Context, outbox: string): Promise<string | undefined> => {
+  const path = join(ctx.ops, "tick", "relay-watch-start")
+  if (await Bun.file(join(outbox, "cursor.json")).exists()) {
+    await unlink(path).catch(() => {})
+    return undefined
+  }
+  const held = (
+    await Bun.file(path)
+      .text()
+      .catch(() => "")
+  ).trim()
+  if (held) return held
+  await writeAtomic(path, ctx.now.toISOString())
+  return ctx.now.toISOString()
+}
+
+// The week-usage alert's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
+export const USAGE_LINK = "- 💰 Each account's week shows on the [System page](/dashboard/system)."
+// Pure: the relay-down alert's link line, naming the row that relays on this machine: the relay runner under AI Runners, else Ops under Orchestrators, whose sweep relays.
+export const relayLink = (relay: boolean): string =>
+  relay
+    ? `- 🔎 The relay's row is under AI Runners in the sidebar (${RELAY} on hover), and this Mac's state is on the [System page](/dashboard/system).`
+    : "- 🔎 Ops' row is under Orchestrators in the sidebar, since its sweep relays here, and this Mac's state is on the [System page](/dashboard/system)."
+
+// The Inbox alert's title: the relay's own on a machine that runs it, else the sweep's, each with the next step and naming only what this machine runs.
+const relayDown = (relay: boolean, moved: number): string => {
+  const since = moved ? `since ${isoSeconds(new Date(moved))}` : "since the watch began"
+  if (relay)
+    return moved
+      ? `The ops relay is down: no ops line has gone out ${since}. Resume ${RELAY}.`
+      : `The ops relay has never run: no ops line has gone out ${since}. Resume ${RELAY}.`
+  return moved
+    ? `Ops' sweep is late: no ops line has gone out ${since}. Ops runs its sweep, whose step 2 runs ops:outbox.`
+    : `The outbox relay has never run: no ops line has gone out ${since}, and this machine relays through Ops' sweep. Ops runs its sweep, whose step 2 runs ops:outbox.`
+}
+
 type RelayWatch = { at?: string; by?: string; id?: string; pendingSince?: string }
 
-// The ops relay's watch from outside it: drain.ts's pending peek (which moves nothing) is timed from the first cycle it reads pending, and one Inbox alert update is posted straight to the dashboard with bun run ask, under the ops manager's name, once a line has waited two cycles with no cursor of the relay's moving since, since the relay rewrites its cursors only when a line is pending; the alert is resolved once a cursor moves after it, or when its item is gone; its id is kept in tick/relay-watch.json, so it is posted once a stop; a machine with no relay (hasRelay) posts nothing.
+// The ops relay's watch: a line pending() reads is timed from the first cycle that reads it, and once it has waited two cycles of whoever relays (relayDown) with no cursor moved since, one Inbox alert goes up under the ops manager's name, its id kept in tick/relay-watch.json so it posts once a stop, resolved once a cursor moves after it or its item is gone.
 const relayWatch = async (ctx: Context) => {
   const outbox = join(ctx.ops, "outbox")
   const statePath = join(ctx.ops, "tick", "relay-watch.json")
   const state = (await readJson(statePath).catch(() => null)) as RelayWatch | null
   const moved = await relayMovedAt(outbox)
+  const start = await neverRanSince(ctx, outbox)
   if (state?.id && state.by) {
     if (moved <= Date.parse(state.at ?? "")) return
     const done = await ctx.run([
@@ -604,7 +665,7 @@ const relayWatch = async (ctx: Context) => {
     await unlink(statePath)
     return
   }
-  if (!(await hasRelay(ctx)) || (await pending(outbox)).length === 0) {
+  if ((await pending(outbox, start)).length === 0) {
     if (state) await unlink(statePath)
     return
   }
@@ -613,11 +674,9 @@ const relayWatch = async (ctx: Context) => {
     await writeAtomic(statePath, JSON.stringify({ pendingSince: ctx.now.toISOString() }))
     return
   }
-  if (ctx.now.getTime() - since < 2 * RELAY_CYCLE_MS) return
-  const { by, id } = await postAlert(
-    ctx,
-    `The ops relay is down: no ops line has gone out ${moved ? `since ${isoSeconds(new Date(moved))}` : "with no run on record"}. Resume ${RELAY}.`,
-  )
+  const relay = await hasRelay(ctx)
+  if (ctx.now.getTime() - since < 2 * (relay ? RELAY_CYCLE_MS : SWEEP_CYCLE_MS)) return
+  const { by, id } = await postAlert(ctx, relayDown(relay, moved), relayLink(relay))
   await writeAtomic(
     statePath,
     JSON.stringify({ at: ctx.now.toISOString(), by, id, pendingSince: state?.pendingSince }),
@@ -645,6 +704,7 @@ export const BEATS: Beat[] = [
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
   { cron: "*/5 * * * *", name: "relay-watch", run: relayWatch, to: "the Inbox, by bun run ask" },
   { cron: "*/10 * * * *", name: "guard-probe", run: guardProbe, to: "dispatcher" },
+  { cron: "* * * * *", name: "focus-card", run: focusCardBeat, to: "the Inbox, by bun run ask" },
   {
     cron: "* * * * *",
     name: "dashboard-watch",

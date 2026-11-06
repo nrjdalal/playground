@@ -1,7 +1,7 @@
 // playground update: the release skill's step 5 as one script, then the Dashboard's roll.
 import { basename, join } from "node:path"
 
-import { CORE_SKILLS } from "./orgs"
+import { BUNDLED_ROOT, CORE_SKILLS } from "./orgs"
 import { unlinked } from "./unlinked"
 
 // A step's argv run to its end; `show` streams its output to the terminal instead of keeping it.
@@ -17,6 +17,8 @@ export const spawnRun: Run = async (argv, show = false) => {
 
 const MANIFEST = /(^|\/)(bun\.lock|package\.json)$/
 const PACKAGE = /(^|\/)package\.json$/
+// core's skill roots and each bundled extension's, whose skills a session reads once ext.bundled turns it on
+const SKILL_ROOTS = [...CORE_SKILLS, `${BUNDLED_ROOT}/[^/]+/skills`]
 
 // What the merge changed asks for: an install for a lockfile or a package.json, a build for a package with a dist (packages/scripts runs from source).
 export const updateSteps = (changed: string[]) => ({
@@ -28,7 +30,7 @@ export const updateSteps = (changed: string[]) => ({
   skills: [
     ...new Set(
       changed.flatMap((path) =>
-        CORE_SKILLS.flatMap((root) => path.match(new RegExp(`^${root}/[^/]+(?=/)`))?.[0] ?? []),
+        SKILL_ROOTS.flatMap((root) => path.match(new RegExp(`^${root}/[^/]+(?=/)`))?.[0] ?? []),
       ),
     ),
   ].sort((a, b) => basename(a).localeCompare(basename(b))),

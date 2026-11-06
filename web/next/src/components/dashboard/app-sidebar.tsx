@@ -65,6 +65,7 @@ import {
 
 import { countLabel } from "@/components/dashboard/count-badge"
 import { useDashboard } from "@/components/dashboard/dashboard"
+import { TemplatePicker } from "@/components/dashboard/template-picker"
 import { StatusIcon } from "@/components/dashboard/worker-light"
 import { Hint, OFF_FOCUSABLE } from "@/components/hint"
 import { GroupCount } from "@/components/shell/group-count"
@@ -123,6 +124,7 @@ import {
   rowText,
   statusParts,
 } from "@/lib/agents"
+import { config } from "@/lib/config"
 import {
   checkerOf,
   dispatcherOf,
@@ -570,7 +572,7 @@ export function useDashboardUpdate(): MenuUpdate | null {
   const close = useCloseSheet()
   const hover = updateHover(data?.update, new Date(now))
   const message = updateMessage(data?.update, new Date(now))
-  if (!allowed || !hover || !message) return null
+  if (!allowed || !hover || !message || config.hosted) return null
   const live = dispatcherOf(workers, dispatcher)
   const to = live?.name ?? null
   const label = live ? chatLabel(live, dispatcher) : dispatcherLabel(null, true)
@@ -636,8 +638,16 @@ export function DashboardDispatchers({ rows = 1 }: { rows?: number }) {
               read={read}
             />
           ) : undefined
+        // Alpha's plus, in its effort's place, starts a session from a template
+        const action =
+          i === 0 && !muted && !config.hosted ? (
+            <TemplatePicker
+              className={cn("right-1.5", TOGGLE_SHOWN)}
+              secondRunning={shown.slots.slice(1).some((slot) => slot.worker)}
+            />
+          ) : undefined
         return worker ? (
-          row(worker, [], view, muted, { label, trailing })
+          row(worker, [], view, muted, { action, label, trailing })
         ) : (
           <NoDispatcherRow
             key={name || i}
@@ -780,7 +790,7 @@ function MemberRow({
 const TOGGLE_SHOWN =
   "peer-data-active/menu-button:text-sidebar-accent-foreground md:opacity-0 md:group-hover/menu-item:opacity-100 md:group-has-[:focus-visible]/menu-item:opacity-100 group-data-[open]/menu-item:opacity-100"
 const EFFORT_HIDDEN =
-  "max-md:invisible md:group-hover/menu-item:invisible md:group-has-[:focus-visible]/menu-item:invisible group-data-[open]/menu-item:invisible"
+  "max-md:invisible md:group-hover/menu-item:invisible md:group-has-[:focus-visible]/menu-item:invisible group-data-[open]/menu-item:invisible group-has-data-[popup-open]/menu-item:invisible"
 
 const MODEL_ICON = "text-muted-foreground flex shrink-0 group-data-[collapsible=icon]:hidden"
 
@@ -874,6 +884,7 @@ export type RowMember = {
 function SessionRowView({
   agent = null,
   close,
+  action,
   drag,
   label,
   light,
@@ -892,6 +903,8 @@ function SessionRowView({
   waitsOn = null,
   worker,
 }: {
+  // a button in its effort's place, shown as a toggle is (Alpha's plus, TemplatePicker)
+  action?: React.ReactNode
   agent?: Agent | null
   close: () => void
   // a dispatcher's name on its row (dispatcherRowLabel), which leads in place of its title
@@ -1020,7 +1033,11 @@ function SessionRowView({
         </span>
       </Hint>
       {trailing}
-      <ModelIcons effort={worker.effort} model={worker.model} toggles={expandable} />
+      <ModelIcons
+        effort={worker.effort}
+        model={worker.model}
+        toggles={expandable || Boolean(action)}
+      />
     </SidebarMenuButton>
   )
   return (
@@ -1042,6 +1059,7 @@ function SessionRowView({
       ) : (
         row
       )}
+      {action}
       {expandable && (
         <Chevron label={`${open ? "Hide" : "Show"} ${what}`} onClick={onToggle} open={open} />
       )}
@@ -1390,35 +1408,47 @@ function ManagersGroup({
   )
   const names = sessions.map((worker) => worker.name)
   const moveTo = (from: number, to: number) => managers.move(arrayMove(names, from, to))
+  const label = (
+    <>
+      Orchestrators
+      <LabelChevron open={open} />
+      <GroupCount count={count} />
+    </>
+  )
   return (
     <SidebarGroup>
-      <ContextMenu>
-        <ContextMenuTrigger
-          render={
-            <SidebarGroupLabel
-              className="w-full pl-2.5"
-              render={labelToggle(open, setOpen)}
-              aria-description={MENU_HINT}
-              onKeyDown={openMenuByKey}
-            />
-          }
-        >
-          Orchestrators
-          <LabelChevron open={open} />
-          <GroupCount count={count} />
-        </ContextMenuTrigger>
-        <ContextMenuContent>
-          <ContextMenuGroup>
-            <ContextMenuItem
-              className="text-xs"
-              disabled={managers.order.length === 0}
-              onClick={managers.reset}
-            >
-              Reset order to A to Z
-            </ContextMenuItem>
-          </ContextMenuGroup>
-        </ContextMenuContent>
-      </ContextMenu>
+      {/* the order is a write, so the hosted build keeps A to Z with no Reset, no menu and no drag */}
+      {config.hosted ? (
+        <SidebarGroupLabel className="w-full pl-2.5" render={labelToggle(open, setOpen)}>
+          {label}
+        </SidebarGroupLabel>
+      ) : (
+        <ContextMenu>
+          <ContextMenuTrigger
+            render={
+              <SidebarGroupLabel
+                className="w-full pl-2.5"
+                render={labelToggle(open, setOpen)}
+                aria-description={MENU_HINT}
+                onKeyDown={openMenuByKey}
+              />
+            }
+          >
+            {label}
+          </ContextMenuTrigger>
+          <ContextMenuContent>
+            <ContextMenuGroup>
+              <ContextMenuItem
+                className="text-xs"
+                disabled={managers.order.length === 0}
+                onClick={managers.reset}
+              >
+                Reset order to A to Z
+              </ContextMenuItem>
+            </ContextMenuGroup>
+          </ContextMenuContent>
+        </ContextMenu>
+      )}
       <SidebarMenu
         aria-busy={muted || undefined}
         className={cn("space-y-0.5", muted && "opacity-60")}
@@ -1435,7 +1465,7 @@ function ManagersGroup({
               <span>None running</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
-        ) : muted ? (
+        ) : muted || config.hosted ? (
           sessions.map((worker) => row(worker, membersOf(worker)))
         ) : (
           <DndContext
@@ -1591,6 +1621,7 @@ function useSessionRows(source?: SidebarSource) {
     view?: string,
     muted = false,
     extra: {
+      action?: React.ReactNode
       label?: string
       manager?: { drag: RowDrag; move: RowMove }
       trailing?: React.ReactNode
@@ -1598,6 +1629,7 @@ function useSessionRows(source?: SidebarSource) {
   ) => (
     <SessionRow
       key={worker.sessionId}
+      action={extra.action}
       drag={extra.manager?.drag}
       move={extra.manager?.move}
       agent={agentOf(worker)}
@@ -2047,35 +2079,42 @@ export function ThreadsGroup({
                   {countLabel(thread.unread)}
                 </SidebarMenuBadge>
               )}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <SidebarMenuAction
-                      showOnHover
-                      aria-label={`More for ${thread.title}`}
-                      className={cn(
-                        "right-1.5",
-                        thread.unread > 0 && "max-md:right-7",
-                        capped && "max-md:right-10",
-                      )}
-                    />
-                  }
-                >
-                  <RiMoreLine />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" side="right">
-                  {threadActions(thread).map(({ label, patch }) => (
-                    <DropdownMenuItem
-                      key={label}
-                      onClick={() =>
-                        runAction(thread, { label, patch }, { patch: onPatch, rename: setRenaming })
-                      }
-                    >
-                      {label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+              {/* each of its actions is a write, so the hosted build draws no menu */}
+              {!config.hosted && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <SidebarMenuAction
+                        showOnHover
+                        aria-label={`More for ${thread.title}`}
+                        className={cn(
+                          "right-1.5",
+                          thread.unread > 0 && "max-md:right-7",
+                          capped && "max-md:right-10",
+                        )}
+                      />
+                    }
+                  >
+                    <RiMoreLine />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" side="right">
+                    {threadActions(thread).map(({ label, patch }) => (
+                      <DropdownMenuItem
+                        key={label}
+                        onClick={() =>
+                          runAction(
+                            thread,
+                            { label, patch },
+                            { patch: onPatch, rename: setRenaming },
+                          )
+                        }
+                      >
+                        {label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </SidebarMenuItem>
           )
         })}
