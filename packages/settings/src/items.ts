@@ -296,15 +296,33 @@ export const showItem = (data: string, ref: Ref, rev?: string) => {
     return content && { ...ref, content, state: accepted ? "accepted" : "proposed" }
   }
   const [path] = candidates(ref.kind, ref.key)
-  for (const [state, at] of [
-    ["accepted", path!],
-    ["proposed", join(PROPOSED, path!)],
-  ] as const) {
-    const listed = extGit(dir, ["ls-tree", "-r", "--name-only", rev, "--", at])
+  const proposed = join(PROPOSED, path!)
+  // the revision's own state from its trailers when it wrote or judged this item: a proposal reads from proposed/, a reject from proposed/ just before it removed it
+  const told = extGit(dir, [
+    "log",
+    "-1",
+    "--format=%(trailers:key=Item,valueonly)%x00%(trailers:key=State,valueonly)",
+    "--end-of-options",
+    rev,
+  ])
+  const [item, own] = told.out.split("\0").map((part) => part.trim())
+  const order =
+    item !== `${ref.kind} ${ref.key}`
+      ? ([
+          ["accepted", path!, rev],
+          ["proposed", proposed, rev],
+        ] as const)
+      : own === "accepted"
+        ? ([["accepted", path!, rev]] as const)
+        : own === "rejected"
+          ? ([["rejected", proposed, `${rev}^`]] as const)
+          : ([["proposed", proposed, rev]] as const)
+  for (const [state, at, tree] of order) {
+    const listed = extGit(dir, ["ls-tree", "-r", "--name-only", tree, "--", at])
     if (listed.code !== 0) return null
     const names = listed.out.split("\n").filter(Boolean)
     if (!names.length) continue
-    const show = (name: string) => mustGit(dir, ["show", `${rev}:${name}`])
+    const show = (name: string) => mustGit(dir, ["show", `${tree}:${name}`])
     const content: Content = { attachments: [], body: null, files: null, value: null }
     if (names.length > 1 || names[0] !== at)
       content.files = Object.fromEntries(names.map((name) => [relative(at, name), show(name)]))
