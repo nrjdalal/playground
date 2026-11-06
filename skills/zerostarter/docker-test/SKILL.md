@@ -17,16 +17,18 @@ It exits with the build's code, or 255 when the box cannot take it; nothing fall
 With no runner host set (`RUNNER_HOST`, or the data folder's `ops/runner-host/ip`), it exits 255 at once, and the live dashboard's Postgres stays up: set one up (`scripts/ops/runner-host/host.sh setup <ip>`, then write its address to that ip file), or build the web image on a machine with no live dashboard running.
 The api image still builds here, so a recipe below that names `api` runs as written; a full-stack one runs only on a Mac whose Docker VM holds no live dashboard's Postgres.
 
-Full stack, the same Dockerfiles prod ships:
+Full stack, the same Dockerfiles prod ships, built through run-slot, then started with `--no-build`, since a compose `up` builds every missing image at once.
+run-slot runs one docker build at a time on the machine, a compose build one service at a time, each in a BuildKit builder capped at half the Docker VM's memory, so a build that outgrows the cap fails there rather than filling the Docker VM the live dashboard's Postgres shares.
+A build that needs more than the cap needs a larger VM, the owner's setting.
 
 ```bash
-docker compose build --no-cache && docker compose up
+~/.playground/ops/run-slot.sh <your name> -- docker compose build --no-cache && docker compose up --no-build
 ```
 
 Scope to one service while iterating:
 
 ```bash
-docker compose build --no-cache api && docker compose up -d api
+~/.playground/ops/run-slot.sh <your name> -- docker compose build --no-cache api && docker compose up -d --no-build api
 curl -sf --retry 30 --retry-delay 1 --retry-connrefused http://localhost:4000/api/health
 docker compose logs -f api
 docker compose down

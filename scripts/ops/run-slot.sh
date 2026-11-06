@@ -88,10 +88,11 @@ stale() {
 }
 # a setting's value as JSON, as the settings reader in this script's checkout prints it, its default on a machine with no extensions; a reader that cannot answer says why on stderr
 setting() {
-  local root
-  root=$(python3 -I -c 'import os, sys; print(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[1])))))' "$SELF")
-  "$(command -v bun || echo "$HOME/.bun/bin/bun")" "$root/packages/scripts/src/playground/setting.ts" "$1" </dev/null
+  "$BUN" "$(checkout_root)/packages/scripts/src/playground/setting.ts" "$1" </dev/null
 }
+BUN=$(command -v bun || echo "$HOME/.bun/bin/bun")
+# the checkout this script sits in, past the state folder's link to it
+checkout_root() { python3 -I -c 'import os, sys; print(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(sys.argv[1])))))' "$SELF"; }
 # The item size a session's runs and starts count, and its load units (load is split by item so a big plan never
 # blocks small ones; small:medium:big weigh 1:2:3): RUN_SLOT_SIZE, else small for commit-<worktree>, a pre-commit step that runs in
 # seconds and as its branch's big item waited 815s behind smaller runs, else the roster entry's size (a checker falls back to its worker's, and
@@ -719,6 +720,24 @@ heavy_build() {
   # runs the build bare inside the commit's own slot, so a big one stays in the queue); the cache folder is lefthook.yml's pre-commit default
   ! turbo_cached build "$top" "TURBO_CACHE_DIR=${TURBO_CACHE_DIR:-$HOME/.cache/turbo/playground}" ${vars[@]+"${vars[@]}"}
 }
+# packages/scripts/src/docker-build.ts, the docker build reader run-slot shares with the hooks
+docker_reader() { "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" "$@" </dev/null; }
+# A docker build, as docker_reader reads it past the hooks' wrappers: run (one image), each (a compose build of no service or several, built one at a time), refuse <why>, or nothing; a chain with a docker build in any step is refused, so each build is a run of its own
+docker_kind() {
+  local found line words
+  # the reader starts only for a command that names docker or portless, so every other run skips its bun start
+  case " $* " in *docker*|*portless*) ;; *) return ;; esac
+  found=$(docker_reader kind -- "$@")
+  [ "$found" != none ] && { echo "$found"; return; }
+  while IFS= read -r line; do
+    IFS=$'\x1f' read -ra words <<< "$line"
+    [ ${#words[@]} -gt 0 ] || continue
+    case "$(docker_reader kind -- "${words[@]}")" in
+      none) ;;
+      *) echo "refuse run-slot.sh refuses a chain that builds a docker image (${words[*]}): run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"; return ;;
+    esac
+  done < <(chain_steps "$@" | grep -E "docker|portless")
+}
 # a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
 light_run() {
   [ -n "$(quick_kind "$@")" ] && return
@@ -762,6 +781,10 @@ case "$UNITS" in 1|2|3) ;; *) SIZE=medium UNITS=2 ;; esac
 HEAVY=
 heavy_build "$@" && HEAVY=1
 light_run "$@" && SIZE=small UNITS=1
+DOCKER=$(docker_kind "$@")
+case "$DOCKER" in refuse\ *) echo "${DOCKER#refuse }" >&2; rlog refused "docker"; exit 2 ;; ?*) HEAVY=1 ;; esac
+# a model-bound run skips the queue's lanes, run-slot-docker among them, and a build fills the VM rather than waiting on a model
+[ -n "$DOCKER" ] && [ -n "$MODEL_BOUND" ] && { echo "run-slot.sh refuses --model-bound for a docker build, which fills the Docker VM rather than waiting on a model: run it without --model-bound, so it takes run-slot-docker, one docker build at a time" >&2; rlog refused "docker"; exit 2; }
 [ -n "$HEAVY" ] && SIZE=big UNITS=3
 # Merging keeps going: a run that gates a merge (Checks, local CI, the merge train, the dashboard's build) goes before the
 # rest and may use the small reserve, as may an org's run (below) and the run-slot.priority pick. A checker's run is ranked by its worker's size (size_of), and
@@ -806,6 +829,7 @@ PY
 # Caps pytest-xdist's `-n auto` at 4 workers (a 15-worker round pushed load5 to 26).
 export PYTEST_XDIST_AUTO_NUM_WORKERS=4
 SLOT=""
+DOCKER_SLOT=""
 CHILD=""
 # seconds between a waiter's looks, and a held clone's (the tests shorten both)
 POLL=${RUN_SLOT_POLL:-15}
@@ -816,13 +840,15 @@ CLONE_POLL=${RUN_SLOT_POLL:-5}
 # or its waiter ends. The dashboard's own build and the merge train take run-slot-2 outside the queue, as in single-slot mode.
 QUEUE="$OPS/run-slot.waiters"
 TICKET=""
-if [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ]; then
+ticket() {
+  [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] || return 0
   mkdir -p "$QUEUE"
   TICKET="$QUEUE/$(python3 -I -c 'import time; print(time.time_ns())')-$$-$WHO"
   # "s2" marks a waiter that can take run-slot-2 in single-slot mode (#i162); an empty ticket is an older copy that takes run-slot only.
   # Then its rank (class and units, 01 to 23), units and size, which order the queue, and ask for the owner's own ask, which an older copy ignores
   echo "s2 $CLASS$UNITS $UNITS $SIZE${ASK:+ $ASK}" > "$TICKET"
-fi
+}
+ticket
 # A pinned ticket keeps its place by age: one with no rank, from an older copy or local CI (plain "s2", or empty), which no newer ticket
 # passes, since those take a slot only while theirs is the oldest live ticket and any other order deadlocks them (a review's round 1), and
 # one that has waited AGED seconds, 20 minutes, which no newer ticket of its class passes, so the slots drain and a run too big for the free
@@ -966,6 +992,13 @@ free() {
     rmdir "$SLOT" 2>/dev/null
   fi
   SLOT=""
+  if [ -n "$DOCKER_SLOT" ] && [ "$(cut -d' ' -f2 "$DOCKER_SLOT.holder" 2>/dev/null)" = "$$" ]; then
+    # however the build ended, a TERM included, its builder stops before the next build may start, so its idle memory goes back to the VM
+    env -u BUILDX_BUILDER docker buildx stop "$DOCKER_BUILDER" >/dev/null 2>&1
+    rm -f "$DOCKER_SLOT.holder"
+    rmdir "$DOCKER_SLOT" 2>/dev/null
+  fi
+  DOCKER_SLOT=""
   [ -n "$TICKET" ] && rm -f "$TICKET"
   [ -n "${MEM_TOLD:-}" ] && rm -f "$MEM_TOLD-suite" "$MEM_TOLD-clone" "$MEM_TOLD-idle" "$MEM_TOLD-swap" "$MEM_TOLD-busy"
 }
@@ -1046,10 +1079,36 @@ clone_ends() {
 }
 absolute() { (cd -- "$1" 2>/dev/null && pwd -P) || case "$1" in /*) printf %s "$1" ;; *) printf %s "$PWD/$1" ;; esac; }
 
+# A docker build runs in playground-capped, a docker-container BuildKit capped at half the Docker VM's memory, made when missing and never the default (no --use), loading its image into the engine's store
+DOCKER_BUILDER=playground-capped
+# half the VM, as the engine reports it, so the cap follows the VM's size (6 Nov 01:38Z: the VM went from 3 GiB to 8 GiB) and the other half stays for the engine, the kernel and the live dashboard's Postgres
+docker_memory() {
+  local total
+  total=$(docker info --format '{{.MemTotal}}' 2>/dev/null)
+  case "$total" in ''|*[!0-9]*) return 1 ;; esac
+  echo "$((total / 2 / 1048576))m"
+}
+capped_builder() {
+  local memory have
+  memory=$(docker_memory) || return 1
+  if have=$(docker buildx inspect "$DOCKER_BUILDER" 2>/dev/null); then
+    case "$have" in *"memory=\"$memory\""*) return ;; esac
+    # a builder made under another VM size keeps its old cap, so it is made again at this one's
+    docker buildx rm "$DOCKER_BUILDER" >/dev/null 2>&1 || return 1
+  fi
+  docker buildx create --name "$DOCKER_BUILDER" --driver docker-container --driver-opt "memory=$memory" \
+    --driver-opt "memory-swap=$memory" --driver-opt default-load=true >/dev/null
+}
+
 # runs the command as the leader of a process group of its own (macOS has no setsid(1)), which reap stops once it ends, and exits with its code; where Claude Code's sandbox refuses the new group or the nice, it says so on stderr and runs the command without it
 run_command() {
   local code
   [ "${KIND:-}" = clone ] && set -- python3 -I -c "$CLONE_WORKSPACES" "$@"
+  if [ -n "${DOCKER:-}" ]; then
+    capped_builder || { echo "run-slot.sh: could not make the capped builder $DOCKER_BUILDER, so this docker build does not run uncapped" >&2; rlog end "rc=1 ran=0s"; exit 1; }
+    export BUILDX_BUILDER=$DOCKER_BUILDER DOCKER_BUILDKIT=1
+  fi
+  [ "${DOCKER:-}" = each ] && set -- "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" each -- "$@"
   python3 -I -c '
 import os, sys
 for step, call in (("its own process group", os.setsid), ("nice " + os.environ.get("RUN_SLOT_NICE", "10"), lambda: os.nice(int(os.environ.get("RUN_SLOT_NICE", "10"))))):
@@ -1334,6 +1393,21 @@ if [ -n "$MODEL_BOUND" ]; then
   echo "run-slot.sh: $WHO holds $(basename "$SLOT")" >&2
   TOOK=$(date +%s); rlog start "$(basename "$SLOT") waited=$((TOOK - ASKED))s"
   run_command "$@"
+fi
+# One docker build at a time on the machine, since each fills the Docker VM the live dashboard's Postgres shares (6 Nov 00:38Z: a parallel compose build got it killed): run-slot-docker is taken before the ticket, so a waiting build holds no place in the queue, and reclaimed only once its holder's pid has gone
+if [ -n "$DOCKER" ]; then
+  [ -n "$TICKET" ] && rm -f "$TICKET" && TICKET=""
+  waited=0
+  until mkdir "$OPS/run-slot-docker" 2>/dev/null; do
+    reclaim "$OPS/run-slot-docker"
+    reread
+    [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for run-slot-docker, one docker build at a time ($(cat "$OPS/run-slot-docker.holder" 2>/dev/null))" >&2
+    sleep "$CLONE_POLL"
+    waited=$((waited + CLONE_POLL))
+  done
+  DOCKER_SLOT="$OPS/run-slot-docker"
+  echo "$WHO $$ $(date -u +%FT%TZ)" > "$DOCKER_SLOT.holder"
+  ticket
 fi
 KIND=$(quick_kind "$@")
 # the merge train's quick run starts at once, past the quick slot's race: only pr:merge's types gate runs as ops-merge-train, inside the merge lock, which keeps it to one run at a time (PG-796, 3 Nov: its 1 s metrics step waited 263 s for the slot, and its cached build ran past the gate's 600 s twice)

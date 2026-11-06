@@ -56,142 +56,8 @@ import { homedir } from "os";
 import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
 
-// scripts/hooks/role.ts
-import { homedir as homedir2 } from "os";
-import { join as join2 } from "path";
-
-// packages/config/src/kinds.ts
-var ROSTER_KINDS = [
-  "assistant",
-  "builder",
-  "dispatcher",
-  "ops",
-  "optimizer",
-  "orchestrator",
-  "planner",
-  "probe",
-  "researcher",
-  "reviewer",
-  "runner",
-  "tester",
-  "worker"
-];
-var isRosterKind = (value) => ROSTER_KINDS.includes(value);
-var FACTORY_ROLE_OF_KIND = {
-  assistant: "lead",
-  builder: "lead",
-  dispatcher: "dispatcher",
-  ops: "lead",
-  optimizer: "lead",
-  orchestrator: "lead",
-  planner: "lead",
-  probe: "probe",
-  researcher: "worker",
-  reviewer: "reviewer",
-  runner: "runner",
-  tester: "tester",
-  worker: "worker"
-};
-var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
-var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
-var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
-var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
-var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
-var DEFAULT_SESSION_NAMES = {
-  aliases: {},
-  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
-};
-var NAMES = Symbol.for("playground.sessionNames");
-var held = globalThis;
-var setSessionNames = (next) => {
-  held[NAMES] = next;
-};
-var getSessionNames = () => held[NAMES] ?? DEFAULT_SESSION_NAMES;
-var namedKinds = () => {
-  const { aliases, names } = getSessionNames();
-  return new Map([
-    ...Object.entries(names).map(([kind, name]) => [name, kind]),
-    [`${names.dispatcher}-2`, "dispatcher"],
-    ...Object.entries(aliases),
-    ["optimizer", "optimizer"]
-  ]);
-};
-var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
-function roleOfName(name) {
-  const kind = placedKindOfName(name);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
-}
-var SEATLESS = new Set(["ended", "parked"]);
-
-// scripts/hooks/role.ts
-var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
-var names;
-function loadNames(environment = process.env) {
-  names ??= (async () => {
-    try {
-      const setting = join2(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
-      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
-        env: { ...process.env, ...environment },
-        stderr: "ignore",
-        stdout: "pipe"
-      });
-      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
-`);
-      if (await read.exited === 0)
-        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
-    } catch {}
-  })();
-  return names;
-}
-async function registryName(sessionId, environment = process.env) {
-  const dir = join2(environment.CLAUDE_CONFIG_DIR || join2(homedir2(), ".claude"), "sessions");
-  for await (const file of new Bun.Glob("*.json").scan(dir)) {
-    try {
-      const entry = await Bun.file(join2(dir, file)).json();
-      if (entry.sessionId === sessionId && typeof entry.name === "string")
-        return entry.name;
-    } catch {}
-  }
-}
-async function rosterRole(name, environment = process.env) {
-  const path = join2(dataDirOf(environment), "roster.json");
-  try {
-    const roster = await Bun.file(path).json();
-    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
-  } catch {
-    return "";
-  }
-}
-async function sessionRole(environment, sessionId) {
-  if (environment.PLAYGROUND_ROLE)
-    return environment.PLAYGROUND_ROLE;
-  if (typeof sessionId !== "string")
-    return "";
-  try {
-    const name = await registryName(sessionId, environment) ?? "";
-    const role = name && await rosterRole(name, environment);
-    if (role)
-      return role;
-    await loadNames(environment);
-    return roleOfName(name);
-  } catch {
-    return "";
-  }
-}
-async function fromFactory(raw, environment = process.env) {
-  return await sessionRole(environment, sessionOf(raw)) !== "";
-}
-function sessionOf(raw) {
-  try {
-    return JSON.parse(raw).session_id;
-  } catch {
-    return;
-  }
-}
-
 // scripts/hooks/shell.ts
-import { homedir as homedir3 } from "os";
+import { homedir as homedir2 } from "os";
 import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
@@ -217,7 +83,7 @@ function filled(script, mark, value) {
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
-var held2 = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
+var held = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
 var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
@@ -594,7 +460,7 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join3 = (parts, separator = "") => {
+var join2 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -959,7 +825,7 @@ function word(lx) {
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
-      out.value += homedir3();
+      out.value += homedir2();
       lx.i++;
     } else {
       out.value += c;
@@ -1467,7 +1333,7 @@ var tildeSign = (name, dir, env) => (name === "cd" || name === "pushd") && env.o
 async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
-    return homedir3();
+    return homedir2();
   const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
   const sign = typed ? undefined : tildeSign(name, dir, env);
   const base = sign && (sign === "-" ? env.old?.dir : env.cwd);
@@ -1482,7 +1348,7 @@ function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
   const [dir] = dirs;
   if (!dir) {
-    return name === "cd" ? { paths: [homedir3()], unread: false } : { back: true, paths: [homedir3()], unread: true };
+    return name === "cd" ? { paths: [homedir2()], unread: false } : { back: true, paths: [homedir2()], unread: true };
   }
   if (dir.value === "-")
     return { back: true, paths: [], unread: true };
@@ -1631,7 +1497,7 @@ async function scriptOf(operand, cmd, env) {
   return script;
 }
 async function outputs(cmds, env) {
-  return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join2(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -1642,7 +1508,7 @@ async function record(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join3([await existing(path, env), out]) : out));
+    env.files.set(path, held(r.op === ">>" ? join2([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -1651,7 +1517,7 @@ async function record(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join3([await existing(path, env), input]) : input));
+      env.files.set(path, held(append ? join2([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -1680,7 +1546,7 @@ async function outputOf(cmd, env) {
         return unknown(LARGE);
       parts.push(part);
     }
-    return join3(parts);
+    return join2(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -1720,7 +1586,7 @@ function printf([format = "", ...args]) {
 }
 async function stdinOf(cmd, env) {
   tick();
-  return held2(await stdinText(cmd, env));
+  return held(await stdinText(cmd, env));
 }
 async function stdinText(cmd, env) {
   const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
@@ -1797,7 +1663,7 @@ function knownVariables(command, environment, cwd) {
   return known;
 }
 
-// scripts/hooks/no-mac-web-build.ts
+// scripts/hooks/docker-build.ts
 var DOCKERS = new Set(["docker", "docker-compose"]);
 var DOCKER_TAKES = new Set([
   "--config",
@@ -1856,15 +1722,18 @@ var SERVICE_TAKES = new Set([
   "-v",
   "-w"
 ]);
-var INSPECT_TIMEOUT_MS = 8000;
-var WEB_DOCKERFILE = "web/next/Dockerfile";
-var API_HERE = "The api image still builds here (docker compose build api).";
-var BOX_ROUTE = `Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. ${API_HERE}`;
-var NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or build the web image on a machine with no live dashboard running. ${API_HERE}`;
-async function hasRunnerHost(environment) {
-  const ip = environment.RUNNER_HOST || (await Bun.file(join4(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
-  return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip);
-}
+var BUILD_TAKES = new Set([
+  "--build-arg",
+  "--builder",
+  "--memory",
+  "--provenance",
+  "--sbom",
+  "--ssh",
+  "-m"
+]);
+var union = (...sets) => new Set(sets.flatMap((set) => [...set]));
+var COMPOSE_SERVICE_TAKES = union(SERVICE_TAKES, COMPOSE_TAKES);
+var COMPOSE_BUILD_TAKES = union(BUILD_TAKES, COMPOSE_TAKES);
 function positionals(args, takes) {
   const out = [];
   for (let k = 0;k < args.length; k++) {
@@ -1883,18 +1752,223 @@ function subcommand(args, takes) {
   return { rest: args.slice(k + 1), sub: args[k] };
 }
 var help = (args) => args.some((a) => a.value === "-h" || a.value === "--help");
+var COMPOSE_ROOT_TAKES = new Set([...COMPOSE_TAKES, ...DOCKER_TAKES]);
 function composeBuild(args) {
-  const { rest, sub } = subcommand(args, COMPOSE_TAKES);
-  if (!sub || help(rest))
+  const found = subcommand(args, COMPOSE_ROOT_TAKES);
+  const { rest, sub } = found.sub?.value === "alpha" ? subcommand(found.rest, new Set) : found;
+  if (!sub)
     return;
+  const own = sub.value === "run" ? beforeService(rest) : rest;
+  if (help(own))
+    return;
+  if (sub.value === "watch")
+    return { kind: "compose", rest, sub: "watch" };
   if (!["build", "create", "run", "up"].includes(sub.value))
     return;
-  if (rest.some((a) => a.value === "--no-build"))
+  if (own.some((a) => a.value === "--no-build"))
     return;
-  const words = positionals(rest, SERVICE_TAKES);
-  const services = sub.value === "run" ? words.slice(0, 1) : words;
+  return { kind: "compose", rest, sub: sub.value };
+}
+function beforeService(rest) {
+  for (let k = 0;k < rest.length; k++) {
+    const v = rest[k].value;
+    if (COMPOSE_SERVICE_TAKES.has(v))
+      k++;
+    else if (!v.startsWith("-") || v === "-")
+      return rest.slice(0, k);
+  }
+  return rest;
+}
+function dockerBuild(args, compose) {
+  if (compose)
+    return composeBuild(args);
+  const { rest, sub } = subcommand(args, DOCKER_TAKES);
+  if (!sub)
+    return;
+  if (sub.value === "compose")
+    return composeBuild(rest);
+  const image = (words) => help(words) ? undefined : { kind: "image", rest: words, sub: "build" };
+  if (sub.value === "build")
+    return image(rest);
+  if (sub.value === "bake")
+    return help(rest) ? undefined : { kind: "bake", rest, sub: "bake" };
+  if (["builder", "buildx", "image"].includes(sub.value)) {
+    const inner = subcommand(rest, new Set(["--builder"]));
+    if (inner.sub?.value === "build" || inner.sub?.value === "b")
+      return image(inner.rest);
+    if (sub.value !== "image" && ["bake", "f"].includes(inner.sub?.value ?? "") && !help(inner.rest))
+      return { kind: "bake", rest: inner.rest, sub: "bake" };
+  }
+}
+function portlessCompose(name, args) {
+  let words = args;
+  if (name === "bun") {
+    if (args[0]?.value !== "x")
+      return;
+    words = args.slice(1);
+  }
+  if (name !== "portless") {
+    if (!["bun", "bunx", "npx"].includes(name))
+      return;
+    let k = 0;
+    while (k < words.length && words[k].value.startsWith("-"))
+      k += ["--package", "-p"].includes(words[k].value) ? 2 : 1;
+    if (program(words[k]?.value ?? "").replace(/@.*$/, "") !== "portless")
+      return;
+    words = words.slice(k + 1);
+  }
+  return words[0]?.value === "compose" ? words.slice(1) : undefined;
+}
+
+// scripts/hooks/role.ts
+import { homedir as homedir3 } from "os";
+import { join as join3 } from "path";
+
+// packages/config/src/kinds.ts
+var ROSTER_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "orchestrator",
+  "planner",
+  "probe",
+  "researcher",
+  "reviewer",
+  "runner",
+  "tester",
+  "worker"
+];
+var isRosterKind = (value) => ROSTER_KINDS.includes(value);
+var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
+  builder: "lead",
+  dispatcher: "dispatcher",
+  ops: "lead",
+  optimizer: "lead",
+  orchestrator: "lead",
+  planner: "lead",
+  probe: "probe",
+  researcher: "worker",
+  reviewer: "reviewer",
+  runner: "runner",
+  tester: "tester",
+  worker: "worker"
+};
+var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
+var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
+var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
+var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
+var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
+var DEFAULT_SESSION_NAMES = {
+  aliases: {},
+  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
+};
+var NAMES = Symbol.for("playground.sessionNames");
+var held2 = globalThis;
+var setSessionNames = (next) => {
+  held2[NAMES] = next;
+};
+var getSessionNames = () => held2[NAMES] ?? DEFAULT_SESSION_NAMES;
+var namedKinds = () => {
+  const { aliases, names } = getSessionNames();
+  return new Map([
+    ...Object.entries(names).map(([kind, name]) => [name, kind]),
+    [`${names.dispatcher}-2`, "dispatcher"],
+    ...Object.entries(aliases),
+    ["optimizer", "optimizer"]
+  ]);
+};
+var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
+function roleOfName(name) {
+  const kind = placedKindOfName(name);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+var SEATLESS = new Set(["ended", "parked"]);
+
+// scripts/hooks/role.ts
+var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
+var names;
+function loadNames(environment = process.env) {
+  names ??= (async () => {
+    try {
+      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
+        env: { ...process.env, ...environment },
+        stderr: "ignore",
+        stdout: "pipe"
+      });
+      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
+`);
+      if (await read.exited === 0)
+        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
+    } catch {}
+  })();
+  return names;
+}
+async function registryName(sessionId, environment = process.env) {
+  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir3(), ".claude"), "sessions");
+  for await (const file of new Bun.Glob("*.json").scan(dir)) {
+    try {
+      const entry = await Bun.file(join3(dir, file)).json();
+      if (entry.sessionId === sessionId && typeof entry.name === "string")
+        return entry.name;
+    } catch {}
+  }
+}
+async function rosterRole(name, environment = process.env) {
+  const path = join3(dataDirOf(environment), "roster.json");
+  try {
+    const roster = await Bun.file(path).json();
+    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
+    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
+  } catch {
+    return "";
+  }
+}
+async function sessionRole(environment, sessionId) {
+  if (environment.PLAYGROUND_ROLE)
+    return environment.PLAYGROUND_ROLE;
+  if (typeof sessionId !== "string")
+    return "";
+  try {
+    const name = await registryName(sessionId, environment) ?? "";
+    const role = name && await rosterRole(name, environment);
+    if (role)
+      return role;
+    await loadNames(environment);
+    return roleOfName(name);
+  } catch {
+    return "";
+  }
+}
+async function fromFactory(raw, environment = process.env) {
+  return await sessionRole(environment, sessionOf(raw)) !== "";
+}
+function sessionOf(raw) {
+  try {
+    return JSON.parse(raw).session_id;
+  } catch {
+    return;
+  }
+}
+
+// scripts/hooks/no-mac-web-build.ts
+var INSPECT_TIMEOUT_MS = 8000;
+var WEB_DOCKERFILE = "web/next/Dockerfile";
+var API_HERE = "The api image still builds here (docker compose build api).";
+var BOX_ROUTE = `Build the web image on the box instead: commit, then from the checkout run bash ~/.playground/ops/runner-host/ci.sh web HEAD, which builds HEAD's tree there and never on the Mac. ${API_HERE}`;
+var NO_HOST_ROUTE = `No runner host is set (RUNNER_HOST, or the data folder's ops/runner-host/ip), so there is no box to build it on, and the live dashboard's Postgres stays up: set one up (scripts/ops/runner-host/host.sh setup <ip>, then write its address to that ip file), or build the web image on a machine with no live dashboard running. ${API_HERE}`;
+async function hasRunnerHost(environment) {
+  const ip = environment.RUNNER_HOST || (await Bun.file(join4(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
+  return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip);
+}
+function composeBuild2({ rest, sub }) {
+  const words = positionals(rest, COMPOSE_SERVICE_TAKES);
+  const services = sub === "run" ? words.slice(0, 1) : words;
   if (services.length === 0 || services.some((s) => s.value === "web" || marked(s.value)))
-    return `docker compose ${sub.value} of the web image`;
+    return `docker compose ${sub} of the web image`;
 }
 function dockerfile(args) {
   for (let k = 0;k < args.length; k++) {
@@ -1907,8 +1981,6 @@ function dockerfile(args) {
   }
 }
 function imageBuild(args) {
-  if (help(args))
-    return;
   const file = dockerfile(args);
   if (!file)
     return;
@@ -1917,20 +1989,11 @@ function imageBuild(args) {
     return `docker build -f ${WEB_DOCKERFILE}`;
 }
 function webBuild(args, compose) {
-  if (compose)
-    return composeBuild(args);
-  const { rest, sub } = subcommand(args, DOCKER_TAKES);
-  if (!sub)
-    return;
-  if (sub.value === "compose")
-    return composeBuild(rest);
-  if (sub.value === "build")
-    return imageBuild(rest);
-  if (["builder", "buildx", "image"].includes(sub.value)) {
-    const inner = subcommand(rest, new Set(["--builder"]));
-    if (inner.sub?.value === "build" || inner.sub?.value === "b")
-      return imageBuild(inner.rest);
-  }
+  const build = dockerBuild(args, compose);
+  if (build?.kind === "compose")
+    return composeBuild2(build);
+  if (build?.kind === "image")
+    return imageBuild(build.rest);
 }
 async function dashboardRuns(what, environment) {
   const route = async () => await hasRunnerHost(environment) ? BOX_ROUTE : NO_HOST_ROUTE;
@@ -1976,6 +2039,9 @@ var visit = async (_cmd, { args, first, name }, env) => {
   };
   if (DOCKERS.has(name))
     return judge(args, name === "docker-compose");
+  const compose = portlessCompose(name, args);
+  if (compose)
+    return judge(compose, true);
   if (first && (first.unknown || marked(first.value)) && webBuild(args, false))
     return judge(args, false);
   if (PRINTERS.has(name) || name === "ssh")

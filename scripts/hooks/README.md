@@ -507,6 +507,7 @@ Only the first reading moves the folder, sets variables and records files for th
 
 - A factory session builds the web image on the box: `scripts/hooks/no-mac-web-build.ts`, registered beside no-glm-heavy-path, refuses a factory session's web image build on the Mac while the live dashboard's Postgres runs in the same Docker VM.
   On 21 Oct a tester's web build took the 3.1 GB VM's out-of-memory killer to every Postgres in it, the dashboard's included, and the build peaks at about 4 GB over baseline (measured on the box), so no memory cap makes it safe here.
+  It reads each docker call through `scripts/hooks/docker-build.ts`, which no-unslotted-run and run-slot read too.
   A web image build is `docker compose build` (or `docker-compose build`) with no service named, `web` among them or a service it cannot read, `docker compose up`, `create` or `run` on the same terms unless given `--no-build` (compose builds a missing image, and docker-compose.yml names none), and `docker build`, `buildx build`,
   `image build` or `builder build` whose `-f` or `--file` names `web/next/Dockerfile` or a path it cannot read, through a wrapper, `bash -c` or run-slot.sh;
   an `ssh` call, a printed command and `--help` pass.
@@ -642,6 +643,13 @@ Only the first reading moves the folder, sets variables and records files for th
   and turbo running `build`, `check-types`, `lint` or `test` (`turbo run <task>` or `turbo <task>`), by name, path or versioned package (`turbo@latest`), through `bunx`, `npx` (past their own options, `-y` or `-p turbo`) or `bun x`, but for `--help`, `--version` and `--dry-run`,
   whose directory (every folder the shell may be in, [The folder a hook reads](#the-folder-a-hook-reads), or a `bun --cwd`, `bun run --cwd`, `bun install --cwd`, `bun test --cwd` or turbo's `--cwd`, so one typed from anywhere counts, and a clone's destination) is inside a worktree under `.claude/worktrees/`,
   unless the command runs through `~/.playground/ops/run-slot.sh`, naming that form (18 Oct: five worktree installs at once drove load1 to 66.8).
+  It refuses a docker image build outside run-slot from any folder, since every folder's build fills the one Docker VM the live dashboard's Postgres shares (6 Nov 00:38Z: a parallel `docker compose build --no-cache` got it killed).
+  A docker build is the forms `scripts/hooks/docker-build.ts` reads for no-mac-web-build too, past docker's, buildx's and compose's own options: `docker build` and its aliases (`image build`, `builder build`, `buildx build`, `buildx b`), `docker buildx bake`, its alias `buildx f`, `docker bake` and `builder bake` or `builder f` (the docker CLI forwards `builder` to buildx),
+  and `docker compose build` (or `docker-compose`, or `portless compose` by name or through `bunx`, `npx` or `bun x`),
+  with `up`, `create` and `run` unless given `--no-build`, and `watch` (or `alpha watch`);
+  `--help`, `--version` and `version` pass.
+  A bake, and a compose `up`, `create`, `run` or `watch`, which run-slot refuses too since each builds its images at once, is refused with run-slot's own fix (build through run-slot, then `up --no-build`) rather than the run-slot form.
+  run-slot then runs one at a time on the machine ([scripts/ops/README.md](../ops/README.md#run-slot)).
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
   A commit's pre-commit steps take `run-slot-commit` through `packages/scripts/src/commit-slot.ts`, which hands each to run-slot as `commit-<worktree>` marked `RUN_SLOT_COMMIT_STEP=1`, as `run-slot.sh <who> -- git commit` takes it, and playbook's **slots** rule says which slot each way of committing takes.
   The build runs bare when turbo's dry run finds every build task cached, while a type check takes the slot whenever it would, since the build's cache says nothing of its cost.
