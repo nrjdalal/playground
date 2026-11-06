@@ -594,6 +594,7 @@ describe("stalledPrs", () => {
         { commitAge: idle, number: 3, repo: "work/site" },
         { commitAge: 93 * 24 * 60, number: 700, repo: "work/site" },
         { commitAge: idle, number: 5, repo: "work/other" },
+        { commitAge: idle, number: 6, repo: "work/other" },
         { commitAge: idle, number: 9 },
       ]),
       [
