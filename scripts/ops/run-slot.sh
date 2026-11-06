@@ -663,14 +663,14 @@ def can_be(w, names):
     return False
 
 
-reserved = {"!", "{", "if", "then", "else", "elif", "while", "until", "do"}
+reserved = {"!", "{", "coproc", "do", "elif", "else", "function", "if", "then", "until", "while"}
 unread = any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3])
 cases = 0
 for k, step in enumerate(steps):
-    # past VAR=x and the reserved words that lead a command (if, then, do, ! and the rest)
+    # past VAR=x and the reserved words that lead a command (if, then, do, !, coproc, function and its name, and the rest)
     i = 0
     while i < len(step) and (re.match(r"[A-Za-z_][A-Za-z0-9_]*=", step[i]) or step[i] in reserved):
-        i += 1
+        i += 2 if step[i] == "function" else 1
     cases += (step[i : i + 1] == ["case"]) - (step[i : i + 1] == ["esac"])
     # inside a case, a pattern (a word before ) or | that follows a ;, ;;, ;&, ;;& or |) names no program, so `*)` reads as no glob of a program
     if cases > 0 and seps[k + 1] in (")", "|") and seps[k] in ("", ";", ";;", ";&", ";;&", "|"):
@@ -1047,8 +1047,8 @@ heavy_build() {
 # packages/scripts/src/docker-build.ts, the docker build reader run-slot shares with the hooks
 docker_reader() { "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" "$@" </dev/null; }
 # A docker build, as docker_reader reads it past the hooks' wrappers: run (one image), each (a compose build of no service or several, built one at a time), refuse <why>, or nothing; a chain with a docker build in any step is refused, so each build is a run of its own, and so is a chain whose words name docker or portless and whose steps chain_steps cannot read
-# the pieces of a command's words that hold a glob or brace character, one a line, each word split at blanks, quotes, backquotes and the shell's ; | & ( ) < >
-glob_pieces() { printf '%s\n' "$@" | tr -s "[:space:];|&()<>\"'\`" '\n' | grep -E '[*?[]|[{].*(,|[.][.])'; }
+# the pieces of a command's words that hold a glob or brace character, one a line, each word split at blanks, quotes, backquotes and the shell's ; | & ( ) < >, its backslashes dropped as an outer shell's quote removal drops them
+glob_pieces() { printf '%s\n' "$@" | tr -d '\\' | tr -s "[:space:];|&()<>\"'\`" '\n' | grep -E '[*?[]|[{].*(,|[.][.])'; }
 docker_kind() {
   local found line words steps pieces rc=0 fix="run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"
   local glob="refuse run-slot.sh refuses a chain with a program word written as a glob or a brace that can expand to docker or podman: $fix"
