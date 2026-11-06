@@ -1636,6 +1636,11 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ["GNU cp to a literal path", "gcp x /tmp/y"],
     ["GNU rm of a literal path elsewhere", "grm -rf /tmp/scratch-dir"],
     ["GNU install with a mode from a variable", `ginstall -m "$M" x /tmp/y`],
+    ["install with a group and an owner from variables", `install -g "$G" -o "$O" x /tmp/y`],
+    ["install past a group holding a t", "install -gstaff x /tmp/y"],
+    ["GNU ln with a suffix from a variable", `gln -S "$B" /tmp/src /tmp/dst`],
+    ["GNU cp with a long suffix from a variable", `gcp --suffix "$B" x /tmp/y`],
+    ["git commit with a variable git does not read from a variable", `FOO="$F" git commit -m x`],
     [
       "GNU cp by its gnubin path of a variable after the end of options",
       `/opt/homebrew/opt/coreutils/libexec/gnubin/cp -- "$S" /tmp/y`,

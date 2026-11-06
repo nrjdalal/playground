@@ -113,6 +113,22 @@ export const groups: Group[] = [
         "rm of a dashed operand after the end of options after a cd to a variable",
         `cd "$D"; rm -rf -- -x`,
       ],
+      ["install to a variable past a group holding a t", `install -gstaff x "$D"`],
+      [
+        "GNU cp to a variable past a suffix opening with a t and the end of options",
+        `gcp -Stmp -- x "$D"`,
+      ],
+      [
+        "GNU ln of one operand past its suffix as its own word after a cd to a variable",
+        `cd "$D"; gln -S bak /tmp/src`,
+      ],
+      [
+        "GNU ln of one operand past its long suffix after a cd to a variable",
+        `cd "$D"; gln --suffix bak /tmp/src`,
+      ],
+      ["cp into a target folder from a variable in one quoted word", `cp "-t$D" x`],
+      ["install of folders from a variable by its long option", `install --directory "$D" /tmp/a`],
+      ["install of folders from a variable by a cluster holding d", `install -vd "$D" /tmp/a`],
     ],
   },
   {
