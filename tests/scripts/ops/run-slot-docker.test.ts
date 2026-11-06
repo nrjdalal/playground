@@ -26,7 +26,7 @@ case " $* " in
   *" buildx create "*) for a; do case "$a" in memory=*) echo "\${a#memory=}" > ${made} ;; esac; done; exit 0 ;;
   *" buildx rm "*) rm -f ${made}; exit 0 ;;
   *" buildx stop "*) exit 0 ;;
-  *" config --services "*) printf 'api\\nweb\\n'; exit 0 ;;
+  *" config "*"--services "*) printf 'api\\nweb\\n'; exit 0 ;;
   *" compose "*"build "*) while [ "$1" != build ]; do shift; done; shift
     echo "start $*" >> ${log}; sleep 0.3; echo "end $*" >> ${log}; exit 0 ;;
 esac
@@ -94,6 +94,22 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     ])
     expect(err).toContain("docker-build: building api (1 of 2)")
     expect(err).toContain("docker-build: building web (2 of 2)")
+  })
+
+  test("a docker compose build past a project option lists its services with that option, and builds each in turn", async () => {
+    const m = dockerMachine()
+    expect(
+      (await m.docker("worker-d", ["docker", "compose", "build", "--profile", "p"]).done()).code,
+    ).toBe(0)
+    expect(m.dockerCalls()).toContain(
+      "BUILDX_BUILDER=playground-capped compose config --profile p --services",
+    )
+    expect(m.builds()).toEqual([
+      "start --profile p api",
+      "end --profile p api",
+      "start --profile p web",
+      "end --profile p web",
+    ])
   })
 
   test("a docker compose build naming two services builds them one after another", async () => {

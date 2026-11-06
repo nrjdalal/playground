@@ -71,6 +71,11 @@ export const BUILD_TAKES = new Set([
   "-m",
 ])
 
+// compose's project options may follow its subcommand too (`build --profile p`), so a reading of the services skips their values as well
+const union = (...sets: Set<string>[]) => new Set(sets.flatMap((set) => [...set]))
+export const COMPOSE_SERVICE_TAKES = union(SERVICE_TAKES, COMPOSE_TAKES)
+export const COMPOSE_BUILD_TAKES = union(BUILD_TAKES, COMPOSE_TAKES)
+
 // The words after the options that `takes` names, with each value skipped; an attached value (--file=x) is one word.
 export function positionals(args: Word[], takes: Set<string>): Word[] {
   const out: Word[] = []
@@ -108,11 +113,11 @@ function composeBuild(args: Word[]): DockerBuild | undefined {
   return { kind: "compose", rest, sub: sub.value }
 }
 
-// The words before a compose run's service, its first word past the options SERVICE_TAKES names.
+// The words before a compose run's service, its first word past the options COMPOSE_SERVICE_TAKES names.
 function beforeService(rest: Word[]): Word[] {
   for (let k = 0; k < rest.length; k++) {
     const v = rest[k].value
-    if (SERVICE_TAKES.has(v)) k++
+    if (COMPOSE_SERVICE_TAKES.has(v)) k++
     else if (!v.startsWith("-") || v === "-") return rest.slice(0, k)
   }
   return rest

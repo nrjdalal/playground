@@ -8,7 +8,7 @@ import {
   dockerBuild,
   portlessCompose,
   positionals,
-  SERVICE_TAKES,
+  COMPOSE_SERVICE_TAKES,
 } from "./docker-build"
 import { fromFactory } from "./role"
 import {
@@ -44,7 +44,7 @@ async function hasRunnerHost(environment: Record<string, string | undefined>): P
 
 // compose build, or a compose up, create or run that builds web's missing image (every one without --no-build, since docker-compose.yml names no image), when it names no service, web among them, or a service the hook cannot read; run's first word is its one service.
 function composeBuild({ rest, sub }: DockerBuild): string | undefined {
-  const words = positionals(rest, SERVICE_TAKES)
+  const words = positionals(rest, COMPOSE_SERVICE_TAKES)
   const services = sub === "run" ? words.slice(0, 1) : words
   if (services.length === 0 || services.some((s) => s.value === "web" || marked(s.value)))
     return `docker compose ${sub} of the web image`

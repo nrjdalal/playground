@@ -1,7 +1,8 @@
 // run-slot.sh's docker build reader and runner, on the hooks' own reading (scripts/hooks/docker-build.ts, past shell.ts's wrappers): `kind -- <command>` prints run, each, refuse <why> or none, and `each -- <command>` runs a compose build one service at a time.
 import {
   atOnce,
-  BUILD_TAKES,
+  COMPOSE_BUILD_TAKES,
+  COMPOSE_TAKES,
   buildName,
   DOCKERS,
   type DockerBuild,
@@ -29,7 +30,11 @@ export function read(argv: string[]): Found | undefined {
       : dockerBuild(reading.args, name === "docker-compose")
     if (!build) continue
     const at = argv.length - reading.args.length - 1
-    return { build, front: argv.slice(0, at), services: positionals(build.rest, BUILD_TAKES) }
+    return {
+      build,
+      front: argv.slice(0, at),
+      services: positionals(build.rest, COMPOSE_BUILD_TAKES),
+    }
   }
 }
 
@@ -76,6 +81,18 @@ function subAt(argv: string[], build: DockerBuild): number | undefined {
   return build.rest.every((word, k) => argv[sub + 1 + k] === word.value) ? sub : undefined
 }
 
+// The project options among a compose build's own (-f, --profile, --env-file and the rest of COMPOSE_TAKES, with their values), which config --services needs to list the same services.
+function project(options: string[]): string[] {
+  const out: string[] = []
+  for (let k = 0; k < options.length; k++) {
+    const name = options[k].split("=")[0]
+    if (!COMPOSE_TAKES.has(name)) continue
+    out.push(options[k])
+    if (!options[k].includes("=") && k + 1 < options.length) out.push(options[++k])
+  }
+  return out
+}
+
 const stamp = () => new Date().toISOString().replace(/\.\d+Z$/, "Z")
 
 // Builds each service of a compose build in turn, the named ones or else every one `config --services` lists, and stops at the first that fails.
@@ -90,10 +107,13 @@ export async function each(argv: string[]): Promise<number> {
   const options = build.rest.filter((word) => !named.has(word)).map((word) => word.value)
   let list = services.map((word) => word.value)
   if (list.length === 0) {
-    const config = Bun.spawnSync([...prefix.slice(0, -1), "config", "--services"], {
-      stderr: "inherit",
-      stdin: "ignore",
-    })
+    const config = Bun.spawnSync(
+      [...prefix.slice(0, -1), "config", ...project(options), "--services"],
+      {
+        stderr: "inherit",
+        stdin: "ignore",
+      },
+    )
     if (config.exitCode !== 0) return config.exitCode ?? 1
     list = config.stdout.toString().split("\n").filter(Boolean)
   }
