@@ -98,8 +98,15 @@ const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 // The removers whose macOS build stops reading options at the first operand, as getopt does, or reads none but a leading -- (unlink), so a later dashed word is an operand
 const GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"])
-// rsync's options that write the path given as their value, read only by their exact long name since rsync takes no shortened one: its backup, partial and temp folders, its log file and its batch files
-const RSYNC_PATH = /^--(?:backup-dir|log-file|only-write-batch|partial-dir|temp-dir|write-batch)=/
+// rsync's options that write the path given as their value, read by any prefix since macOS's openrsync takes a shortened long name: its backup, partial and temp folders, its log file and its batch files
+const RSYNC_PATHS = [
+  "backup-dir",
+  "log-file",
+  "only-write-batch",
+  "partial-dir",
+  "temp-dir",
+  "write-batch",
+]
 // rsync's -T, its temp folder, with its value attached in a short cluster whose earlier letters take no value (-B, -e, -f, -M and -@ do)
 const RSYNC_TEMP = /^-[^-@BefMT]*T(?=.)/
 // Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
@@ -995,7 +1002,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         ? writeTargets(tool, args, gnu, posix)
         : tool === "rsync"
           ? args.flatMap((word) => {
-              const cut = (RSYNC_PATH.exec(word.value) ?? RSYNC_TEMP.exec(word.value))?.[0].length
+              const long = /^--([^=]+)=/.exec(word.value)
+              const path = long && RSYNC_PATHS.some((name) => name.startsWith(long[1]))
+              const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length
               return cut ? [after(word, cut)] : []
             })
           : []

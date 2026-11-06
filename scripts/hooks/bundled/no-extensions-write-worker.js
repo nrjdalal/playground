@@ -2427,7 +2427,14 @@ var GIT_READS = new Set([
 var EXPORTS3 = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"]);
 var GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"]);
-var RSYNC_PATH = /^--(?:backup-dir|log-file|only-write-batch|partial-dir|temp-dir|write-batch)=/;
+var RSYNC_PATHS = [
+  "backup-dir",
+  "log-file",
+  "only-write-batch",
+  "partial-dir",
+  "temp-dir",
+  "write-batch"
+];
 var RSYNC_TEMP = /^-[^-@BefMT]*T(?=.)/;
 var WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"]);
 var GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/;
@@ -3126,7 +3133,9 @@ async function inspect(raw, environment, unknown = false) {
     const option = (word) => /^-./.test(word.value);
     const stop = !GETOPT_REMOVERS.has(tool) || gnu && !posix ? -1 : tool === "unlink" && !gnu ? Number(args[0]?.value === "--") : args.findIndex((word) => !option(word));
     const values = tool === "mv" ? writeTargets(tool, args, gnu, posix) : tool === "rsync" ? args.flatMap((word) => {
-      const cut = (RSYNC_PATH.exec(word.value) ?? RSYNC_TEMP.exec(word.value))?.[0].length;
+      const long = /^--([^=]+)=/.exec(word.value);
+      const path = long && RSYNC_PATHS.some((name) => name.startsWith(long[1]));
+      const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length;
       return cut ? [after(word, cut)] : [];
     }) : [];
     const operands = remover ? [
