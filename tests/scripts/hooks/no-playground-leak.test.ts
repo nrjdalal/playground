@@ -16,7 +16,7 @@ let config = ""
 // The hook's lists: its terms as the repo holds them, and made-up cleared conversations.
 let lists = ""
 // Checkouts: Acme's (`lw`), one whose unpushed commit names a session (`leaky`), one on a branch named for one (`named`), one on an ordinary probe branch (`infra`), one with a tag whose message names OLD.dispatcher (`tagged`), and OLD.dispatcher's own (`made`).
-const dirs = { infra: "", leaky: "", made: "", lw: "", named: "", tagged: "" }
+const dirs = { infra: "", leaky: "", lw: "", made: "", named: "", tagged: "" }
 
 function git(dir: string, ...args: string[]): void {
   const proc = Bun.spawnSync(

@@ -28,7 +28,7 @@ describe("the pr skill", () => {
     )
   })
 
-  test("names no ticket scheme in its Links line", async () => {
+  test("its Links line holds no `#n` placeholder", async () => {
     const text = await Bun.file(join(SKILL, "SKILL.md")).text()
     expect(text).not.toMatch(/#n\b/)
   })

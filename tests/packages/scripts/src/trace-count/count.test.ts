@@ -479,7 +479,7 @@ describe("a refusal names where each hit is", () => {
   })
 })
 
-// The commit's list step reads this machine's list, which the sandboxed tree test cannot see, so a listed key in a staged file fails the commit (PG-1211); each key is built at run time, so this file adds no hit of its own.
+// The commit's list step reads this machine's list, which the sandboxed tree test cannot see, so a listed key in a staged file fails the commit; each key is built at run time, so this file adds no hit of its own.
 describe("the commit's list gate", () => {
   const scratch = mkdtempSync(join(tmpdir(), "trace-count-gate-"))
   afterAll(() => rmSync(scratch, { force: true, recursive: true }))

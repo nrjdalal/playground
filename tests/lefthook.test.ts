@@ -898,7 +898,7 @@ test("the pre-commit trace count refuses a commit that raises a count or holds a
       skipped: true,
     })
 
-    // the list step reads the data folder's list: a staged file holding a listed key fails, and another made-up key passes (PG-1211)
+    // the list step reads the data folder's list: a staged file holding a listed key fails, and another made-up key passes
     const listed = { ...SCRATCH_ENV, PLAYGROUND_DATA_DIR: data }
     mkdirSync(join(data, "extensions", "hooks"), { recursive: true })
     await Bun.write(
