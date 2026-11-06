@@ -81,6 +81,8 @@ const READERS = new Set([
 ])
 // find's actions that write, remove or run
 const FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/
+// find's actions that write the file named by the next word, a dash-led one too
+const FIND_WRITES = /^-(?:fls|fprint|fprint0|fprintf)$/
 const GIT_READS = new Set([
   "blame",
   "cat-file",
@@ -100,8 +102,8 @@ const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
 const GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"])
 // Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
 const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
-// Homebrew's GNU coreutils under their g prefix (gcp, grm), each read as the remover or writer it names
-const GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/
+// Homebrew's GNU coreutils and findutils under their g prefix (gcp, grm, gfind), each read as the remover, writer or wrapper it names
+const GNU_NAMED = /^g(cp|dd|find|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink|xargs)$/
 // A writer's options that take a value rather than name a target, by short letter (`gnu` for a GNU build alone, `bsd` for macOS's alone) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner, strip program, and macOS's destdir, hash, link flags, metalog and tags, mkdir's mode, touch's adjustment, date, reference file and stamp; cp's, install's and ln's -t names their target folder, and macOS install's -M its metalog, read apart
 const WRITER_TAKES: Record<
   string,
@@ -807,6 +809,18 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, first, name, xargs } = parsed
+    // findutils' g names are read again as find and xargs, so every check those two take reads them
+    const findutils = GNU_NAMED.exec(name)?.[1]
+    if (first && (findutils === "find" || findutils === "xargs"))
+      return examine(
+        {
+          ...cmd,
+          words: cmd.words.map((word) => (word === first ? { ...word, value: findutils } : word)),
+        },
+        env,
+        visit,
+        false,
+      )
     // every folder the shell may be in, so a write a cd the reader cannot be sure of would land in the root is judged there too
     for (const here of places(env)) {
       const into = cmd.redirects.find(
@@ -984,10 +998,19 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         : tool === "unlink" && !gnu
           ? Number(args[0]?.value === "--")
           : args.findIndex((word) => !option(word))
+    const values =
+      tool === "find"
+        ? args.flatMap((word, k) =>
+            FIND_WRITES.test(word.value) && args[k + 1] ? [args[k + 1]] : [],
+          )
+        : []
     const operands = remover
-      ? args.filter(
-          (word, k) => (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !option(word),
-        )
+      ? [
+          ...args.filter(
+            (word, k) => (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !option(word),
+          ),
+          ...values,
+        ]
       : WRITERS.has(tool)
         ? writeTargets(tool, args, gnu, posix)
         : []
