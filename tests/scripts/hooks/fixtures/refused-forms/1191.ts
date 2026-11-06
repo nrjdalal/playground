@@ -8,19 +8,19 @@ export const groups: Group[] = [
     rows: () => [
       [
         "find printing to a dash-led relative file after a cd to a variable",
-        `cd "$D"; find /tmp -fprint -x`,
+        `cd "$D"; find /tmp/x -fprint -x`,
       ],
       [
         "find printing null-ended names to a dash-led relative file after a cd to a variable",
-        `cd "$D"; find /tmp -fprint0 -x`,
+        `cd "$D"; find /tmp/x -fprint0 -x`,
       ],
       [
         "find printing a format to a dash-led relative file after a cd to a variable",
-        `cd "$D"; find /tmp -fprintf -x /%p`,
+        `cd "$D"; find /tmp/x -fprintf -x /%p`,
       ],
       [
         "find listing to a dash-led relative file after a cd to a variable",
-        `cd "$D"; find /tmp -fls -x`,
+        `cd "$D"; find /tmp/x -fls -x`,
       ],
       [
         "GNU find by its g name deleting the shell's folder after a cd to a variable",
@@ -28,15 +28,15 @@ export const groups: Group[] = [
       ],
       [
         "GNU find by its g name printing to a relative file after a cd to a variable",
-        `cd "$D"; gfind /tmp -fprint x`,
+        `cd "$D"; gfind /tmp/x -fprint x`,
       ],
       [
         "GNU find by its g name printing to a dash-led relative file after a cd to a variable",
-        `cd "$D"; gfind /tmp -fprint -x`,
+        `cd "$D"; gfind /tmp/x -fprint -x`,
       ],
       [
         "GNU find by its g name listing to a dash-led relative file after a cd to a variable",
-        `cd "$D"; gfind /tmp -fls -x`,
+        `cd "$D"; gfind /tmp/x -fls -x`,
       ],
       [
         "GNU xargs by its g name running rm on a list after a cd to a variable",

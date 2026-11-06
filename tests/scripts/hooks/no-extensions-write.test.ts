@@ -1731,11 +1731,11 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
     ],
     [
       "find printing to an absolute file after a cd to a variable",
-      `cd "$X"; find /tmp -fprint /tmp/out`,
+      `cd "$X"; find /tmp/x -fprint /tmp/out`,
     ],
     [
       "GNU find by its g name printing to an absolute file after a cd to a variable",
-      `cd "$X"; gfind /tmp -fprint /tmp/out`,
+      `cd "$X"; gfind /tmp/x -fprint /tmp/out`,
     ],
     [
       "GNU find by its g name deleting an absolute path after a cd to a variable",
