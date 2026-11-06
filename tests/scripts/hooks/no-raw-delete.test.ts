@@ -93,6 +93,7 @@ describe("a delete the hook lets run", () => {
     'S=ls; bash <<< "$S"',
     "pkexec <<< 'ls'",
     "echo ls | pkexec su",
+    "pkexec --version <<< 'rm -rf x'",
   ])("%s", async (command) => {
     expect(await check(input(command))).toBeUndefined()
   })

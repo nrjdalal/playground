@@ -5857,6 +5857,7 @@ var ROOT_SHELLS = new Map([
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
 var BARE_ROOT = new Set(["pkexec"]);
+var BARE_EXITS = new Set(["--help", "--version"]);
 function stdinShell(cmd) {
   cmd = spreadSplit(cmd);
   const parsed = parse3(cmd);
@@ -5972,7 +5973,7 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   }
   if (first && wrappers.length)
     return "root";
-  if (!first && wrappers.some((wrapper) => BARE_ROOT.has(wrapper)))
+  if (!first && wrappers.some((wrapper) => BARE_ROOT.has(wrapper)) && !before.some((w) => !w.quoted && BARE_EXITS.has(w.value)))
     return "root";
   return fed && first ? "shell" : undefined;
 }
@@ -6494,7 +6495,9 @@ function walk(lx, scope, nested, inherit) {
         lx.i++;
       const [, fd] = redirect;
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1");
+      lx.hereString = op === "<<<";
       const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx);
+      lx.hereString = false;
       const entry = { fd, op, target };
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -6677,8 +6680,9 @@ function dollar(lx) {
   if (next === "(") {
     lx.i += 2;
     const from = lx.commands.length;
+    const here = lx.hereString;
     nest(lx);
-    return substituted(lx.commands.slice(from), lx.known);
+    return substituted(lx.commands.slice(from), lx.known, here);
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}");
@@ -6749,7 +6753,7 @@ function backtick(lx) {
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
   return unknown2("a command substitution");
 }
-function substituted(inner, known) {
+function substituted(inner, known, here = false) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
     return unknown2("a command substitution");
@@ -6769,7 +6773,7 @@ function substituted(inner, known) {
     return { reads: [input.target], value: READ };
   }
   const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value));
-  if (first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
+  if (here && first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
     return { inferred: "a command substitution", value: args.map((w) => w.value).join(" ") };
   return unknown2("a command substitution");
 }

@@ -58,6 +58,8 @@ export type Command = {
 }
 type Lexer = {
   commands: Command[]
+  // set while the lexer reads a here-string's word, the one place a substitution's echo is read (substituted)
+  hereString?: boolean
   i: number
   known: Record<string, string>
   scope: number
@@ -283,6 +285,7 @@ const ROOT_SHELLS = new Map([
 ])
 // The privilege wrappers that start a root shell when no program follows them (pkexec(1): "If no program is specified, the default shell will be run")
 const BARE_ROOT = new Set(["pkexec"])
+const BARE_EXITS = new Set(["--help", "--version"])
 // Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper or su among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell or su not handed a command (`sudo -s`, `nice doas -s`, `su root`, `busybox su`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; "code" for an interpreter of another language (`python3`, `node18`) that a pipe or xargs feeds, whatever its options or inline program, unless it runs a script file or a module of its own; a reserved word, a function's name or an assignment before it skipped
 export function stdinShell(cmd: Command): StdinKind | undefined {
   cmd = spreadSplit(cmd)
@@ -409,7 +412,13 @@ function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): Stdin
   }
   // a program the hook cannot read, behind a wrapper, may be a root shell
   if (first && wrappers.length) return "root"
-  if (!first && wrappers.some((wrapper) => BARE_ROOT.has(wrapper))) return "root"
+  // `--help` and `--version` print and exit, starting no shell
+  if (
+    !first &&
+    wrappers.some((wrapper) => BARE_ROOT.has(wrapper)) &&
+    !before.some((w) => !w.quoted && BARE_EXITS.has(w.value))
+  )
+    return "root"
   // a program the hook cannot read (`$SHELL`, `"$X"`) may be a shell
   return fed && first ? "shell" : undefined
 }
@@ -990,7 +999,9 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       const [, fd] = redirect
       // zsh's >!, >>! and >&! override noclobber as >| does
       const op = redirect[2].replace(/!$/, "|").replace(/^(>[>&])\|$/, "$1")
+      lx.hereString = op === "<<<"
       const target = src.startsWith("<(", lx.i) ? procSub(lx) : word(lx)
+      lx.hereString = false
       const entry: Redirect = { fd, op, target }
       if (op === "<<" || op === "<<-") {
         pending.push({
@@ -1181,8 +1192,9 @@ function dollar(lx: Lexer): Text {
   if (next === "(") {
     lx.i += 2
     const from = lx.commands.length
+    const here = lx.hereString
     nest(lx)
-    return substituted(lx.commands.slice(from), lx.known)
+    return substituted(lx.commands.slice(from), lx.known, here)
   }
   if (next === "{") {
     const end = balanced(src, lx.i + 1, "{", "}")
@@ -1252,7 +1264,7 @@ function backtick(lx: Lexer): Text {
 }
 
 // `$(cat <<'EOF' ... EOF)`, `$(cat file)` and `$(< file)` are read; any other command substitution is unknown.
-function substituted(inner: Command[], known: Record<string, string>): Text {
+function substituted(inner: Command[], known: Record<string, string>, here = false): Text {
   const [only] = inner
   if (inner.length !== 1 || only.stdin || only.group) return unknown("a command substitution")
   const made = mktempPath(only, known)
@@ -1279,6 +1291,7 @@ function substituted(inner: Command[], known: Record<string, string>): Text {
   // `$(echo …)` prints its words joined by spaces, when none is an option or a part it cannot read
   const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value))
   if (
+    here &&
     first?.value === "echo" &&
     !first.quoted &&
     only.redirects.length === 0 &&

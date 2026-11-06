@@ -915,6 +915,7 @@ describe("a quoted argument is read as a command line only where a program runs 
       "pkexec running a program of its own",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | pkexec cat",
     ],
+    ["pkexec printing its version, starting no shell", "pkexec --version"],
     ["a quoted ~- used as a literal folder name", "mkdir '~-' && touch '~-/f'"],
     ["a write under ~+, the worktree itself", "touch ~+/f"],
     ["a write under ~- after a cd out of the worktree", "cd /usr; touch ~-/f"],
