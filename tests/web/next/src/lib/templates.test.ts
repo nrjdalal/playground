@@ -106,7 +106,7 @@ describe("the template editor", () => {
       "default",
       "default",
     ])
-    expect(templatesWrite(rows, DEFAULTS)).toEqual({ value: rows })
+    expect(templatesWrite(rows, DEFAULTS, DEFAULTS)).toEqual({ value: rows })
     expect(templateWords(edited)).toBe("Orchestrator · Opus · High · orchestrator.md")
   })
 
@@ -114,7 +114,21 @@ describe("the template editor", () => {
     const rows = withTemplate(DEFAULTS, { ...orchestrator, brief: "night.md" })
     const reset = resetTemplate(rows, orchestrator.id, DEFAULTS)
     expect(reset).toEqual(DEFAULTS)
-    expect(templatesWrite(reset, DEFAULTS)).toEqual({ reset: true })
+    expect(templatesWrite(reset, rows, DEFAULTS)).toEqual({ reset: true })
+  })
+
+  test("a save that changes nothing writes nothing, so a default saved as it is never asks for a reset the setting does not hold", () => {
+    const unchanged = withTemplate(
+      DEFAULTS,
+      templateOf(templateForm(orchestrator), orchestrator.id),
+    )
+    expect(templatesWrite(unchanged, DEFAULTS, DEFAULTS)).toEqual({ none: true })
+    const stored = withTemplate(DEFAULTS, { ...orchestrator, effort: "high" })
+    expect(
+      templatesWrite(withTemplate(stored, { ...orchestrator, effort: "high" }), stored, DEFAULTS),
+    ).toEqual({
+      none: true,
+    })
   })
 
   test("an added template takes a fresh id from its label, sorts by label, and Remove takes it away while a default stays", () => {
@@ -137,7 +151,7 @@ describe("the template editor", () => {
     ])
     expect(templateState(added, DEFAULTS)).toBe("added")
     expect(newTemplateId("Night shift", rows)).toBe("night-shift-2")
-    expect(templatesWrite(rows, DEFAULTS)).toEqual({ value: rows })
+    expect(templatesWrite(rows, DEFAULTS, DEFAULTS)).toEqual({ value: rows })
     expect(withoutTemplate(rows, "night-shift", DEFAULTS)).toEqual(DEFAULTS)
     expect(withoutTemplate(rows, "orchestrator", DEFAULTS)).toEqual(rows)
   })

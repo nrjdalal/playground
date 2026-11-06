@@ -94,13 +94,16 @@ export const settingFields = (): { field: Field; key: string }[] =>
 
 export type Checked = { key: string; ok: true; value: unknown } | { message: string; ok: false }
 
+// A refusal as one line, "<key>: ✖ <reason> → at <path>" for each reason, the shape the Dashboard's Templates editor reads back.
+const refusalLine = (key: string, error: z.ZodError) =>
+  `${key}: ${z.prettifyError(error).replaceAll("\n", " ")}`
+
 // A value as a write would store it: its key resolved, its value parsed by the key's schema, and nothing secret-shaped.
 export const checkSetting = (key: string, value: unknown): Checked => {
   const name = resolveKey(key)
   if (!name) return { message: `no setting ${key}; playground settings list names them`, ok: false }
   const parsed = fields.get(name)!.schema.safeParse(value)
-  if (!parsed.success)
-    return { message: `${name}: ${z.prettifyError(parsed.error).replaceAll("\n", " ")}`, ok: false }
+  if (!parsed.success) return { message: refusalLine(name, parsed.error), ok: false }
   const secret = secretIn(parsed.data)
   if (secret)
     return {
@@ -122,7 +125,7 @@ export const checkAgainst = (
   const error = new z.ZodError(
     refusals.map(({ message, path }) => ({ code: "custom" as const, input: value, message, path })),
   )
-  return `${key}: ${z.prettifyError(error).replaceAll("\n", " ")}`
+  return refusalLine(key, error)
 }
 
 // An extension's links: each GitHub org, lowercase as a repo's origin is matched, whose repos read it, or * for every repo.

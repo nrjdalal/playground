@@ -52,8 +52,10 @@ From a terminal, `playground accounts add --provider claude --email <email>` sig
 ### Templates
 
 Templates lists the sessions the plus on Alpha's row in the sidebar can start ([the Dashboard](/docs/dashboard)), each with its kind, its model or GLM, its effort, its account and its brief, and whether it is a **Default**, an **Edited default** or one you **Added**.
-**Edit** opens a form of its label, kind and backend, then on Claude its model, effort and account (**Default**, or a Claude account from Accounts), and its brief, a file name in the data folder or `scripts/briefs`.
-A default's own values stay in Playground: saving an edit keeps your copy over it, and **Reset** puts the default back.
+**Edit** opens a form of its kind and backend, then on Claude its model, effort and account (**Default**, or a Claude account from Accounts), and its brief, a file name in the data folder or `scripts/briefs`; one you added also takes a new label, while a default keeps its name.
+A default's own values stay in Playground, and **Reset** puts them back.
+A save keeps the whole list as it is then: a default Playground changes later reads **Edited default**, with Reset taking the new values, and a default Playground adds later shows once the list is back to the defaults alone.
+A save that changes nothing writes nothing.
 **Add template** makes a new one, and **Remove** takes one you added away; Reset and Remove each ask first.
 Each save is the same change `playground settings set sessions.templates` makes, checked the same way: a brief that is not a file name, or an account `usage.accounts` does not list, is refused, and the reason shows beside its field.
 **Edit templates** at the foot of the plus's list opens this section.

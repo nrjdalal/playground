@@ -1,8 +1,14 @@
-import { ROSTER_KINDS, ROSTER_ROLE_OF_KIND } from "@packages/config/kinds"
+import { ROSTER_KINDS, ROSTER_ROLE_OF_KIND, type RosterKind } from "@packages/config/kinds"
 import type { InferResponseType } from "hono/client"
 
 import { apiClient, unwrap } from "@/lib/api/client"
-import { EFFORT_LABELS, isEffort, isModel, MODEL_LABELS } from "@/lib/session-setting"
+import {
+  EFFORT_LABELS,
+  isEffort,
+  isModel,
+  MODEL_LABELS,
+  type SessionEffort,
+} from "@/lib/session-setting"
 
 export type TemplateRow = InferResponseType<
   (typeof apiClient.v1.sessions.templates)["$get"],
@@ -55,9 +61,9 @@ export type Template = {
   account?: string
   backend: "claude" | "glm"
   brief: string
-  effort?: string
+  effort?: SessionEffort
   id: string
-  kind: string
+  kind: RosterKind
   label: string
   model?: string
 }
@@ -110,14 +116,20 @@ export const resetTemplate = (rows: Template[], id: string, defaults: Template[]
   return original ? withTemplate(rows, original) : rows
 }
 
-// Pure: the write a new list takes: a reset of the setting once it holds the defaults alone, else the list.
+const sameList = (a: Template[], b: Template[]) =>
+  a.length === b.length && a.every((row) => b.some((other) => same(row, other)))
+
+// Pure: the write a new list takes: none while it is the list read, a reset of the setting once it holds the defaults alone, else the list.
 export const templatesWrite = (
   rows: Template[],
+  read: Template[],
   defaults: Template[],
-): { reset: true } | { value: Template[] } =>
-  rows.length === defaults.length && rows.every((row) => templateState(row, defaults) === "default")
-    ? { reset: true }
-    : { value: rows }
+): { none: true } | { reset: true } | { value: Template[] } =>
+  sameList(rows, read)
+    ? { none: true }
+    : sameList(rows, defaults)
+      ? { reset: true }
+      : { value: rows }
 
 // Pure: a fresh id for an added template, from its label, unlike every id listed.
 export const newTemplateId = (label: string, rows: Template[]): string => {
@@ -146,13 +158,14 @@ export const templateForm = (template?: Template): TemplateForm => ({
 // Pure: the template the editor's fields save, an empty field left out and a GLM template without the Claude-only account, effort and model.
 export const templateOf = (form: TemplateForm, id: string): Template => {
   const claude = form.backend !== "glm"
-  const optional = { account: form.account, effort: form.effort, model: form.model.trim() }
+  const effort = isEffort(form.effort) ? form.effort : undefined
+  const optional = { account: form.account, effort, model: form.model.trim() }
   return {
     ...Object.fromEntries(Object.entries(optional).filter(([, value]) => claude && value)),
     backend: claude ? "claude" : "glm",
     brief: form.brief.trim(),
     id,
-    kind: form.kind,
+    kind: TEMPLATE_KINDS.find((kind) => kind === form.kind) ?? "orchestrator",
     label: form.label.trim(),
   }
 }
@@ -189,13 +202,14 @@ export async function readTemplateSetting(): Promise<{ defaults: Template[]; row
   return { defaults: data.default as Template[], rows: data.value as Template[] }
 }
 
-// Saves a new list through the settings write path, a reset once it holds the defaults alone, or throws the API's words whole.
+// Saves a new list through the settings write path, nothing while it is the list read, a reset once it holds the defaults alone, or throws the API's words whole.
 export async function writeTemplates(
   rows: Template[],
-  defaults: Template[],
+  { defaults, read }: { defaults: Template[]; read: Template[] },
   { reason, scope }: { reason: string; scope: string },
 ): Promise<void> {
-  const write = templatesWrite(rows, defaults)
+  const write = templatesWrite(rows, read, defaults)
+  if ("none" in write) return
   const json = { by: "Settings", reason, scope }
   const { error } = await unwrap(
     "reset" in write
@@ -220,7 +234,7 @@ export const templateWords = (template: Template): string =>
       : isModel(template.model)
         ? MODEL_LABELS[template.model]
         : (template.model ?? "Claude"),
-    isEffort(template.effort) ? EFFORT_LABELS[template.effort] : template.effort,
+    template.effort && EFFORT_LABELS[template.effort],
     template.account,
     template.brief,
   ]

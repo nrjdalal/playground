@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import * as React from "react"
 
 import { ConfirmDialog } from "@/components/common/confirm-dialog"
+import { readLiveChecks } from "@/components/first-run/checks"
 import { Hint } from "@/components/hint"
 import { Button } from "@/components/ui/button"
 import {
@@ -38,6 +39,7 @@ import {
 } from "@/components/ui/select"
 import { toast } from "@/components/ui/toast"
 import { ACCOUNTS_QUERY_KEY, readAccounts } from "@/lib/accounts"
+import { LIVE_CHECKS_QUERY_KEY } from "@/lib/onboard"
 import { EFFORT_LABELS, MODEL_LABELS } from "@/lib/session-setting"
 import {
   kindWord,
@@ -94,9 +96,10 @@ export function Templates() {
   if (pending) shown.current = pending
   const section = React.useRef<HTMLElement>(null)
   const landed = React.useRef(false)
-  const settled = !setting.isPending && !accounts.isPending
+  const checks = useQuery({ queryKey: LIVE_CHECKS_QUERY_KEY, queryFn: readLiveChecks })
+  const settled = !setting.isPending && !accounts.isPending && !checks.isPending
 
-  // Accounts above reads the same accounts list, so once both reads settle the section stays where the scroll puts it.
+  // This Mac's checks and Accounts above draw from the same reads, so once all three settle the section stays where the scroll puts it.
   React.useEffect(() => {
     if (!settled || landed.current) return
     landed.current = true
@@ -117,10 +120,14 @@ export function Templates() {
           ? resetTemplate(rows, template.id, defaults)
           : withoutTemplate(rows, template.id, defaults)
       const verb = action === "reset" ? "Reset" : "Removed"
-      await writeTemplates(next, defaults, {
-        reason: `${verb} the ${template.label} template in Settings`,
-        scope: scope!,
-      })
+      await writeTemplates(
+        next,
+        { defaults, read: rows },
+        {
+          reason: `${verb} the ${template.label} template in Settings`,
+          scope: scope!,
+        },
+      )
       return `${template.label} ${action === "reset" ? "reset" : "removed"}`
     },
     onError: (error) => toast.add({ title: error.message, type: "error" }),
@@ -295,10 +302,14 @@ function TemplateDialog({
       const saved = templateOf(form, template?.id ?? newTemplateId(form.label, rows))
       const next = withTemplate(rows, saved)
       try {
-        await writeTemplates(next, defaults, {
-          reason: `${template ? "Edited" : "Added"} the ${saved.label} template in Settings`,
-          scope,
-        })
+        await writeTemplates(
+          next,
+          { defaults, read: rows },
+          {
+            reason: `${template ? "Edited" : "Added"} the ${saved.label} template in Settings`,
+            scope,
+          },
+        )
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return { refused: templateRefusal(message, next.indexOf(saved)) }
@@ -322,6 +333,7 @@ function TemplateDialog({
   })
 
   const busy = save.isPending
+  const isDefault = Boolean(template && defaults.some((row) => row.id === template.id))
   const error = (name: TemplateField) => refusal?.fields[name]
   const select = (name: TemplateField, label: string, options: Option[]) => (
     <form.Field name={name}>
@@ -368,7 +380,7 @@ function TemplateDialog({
             value={field.state.value}
             onChange={(event) => field.handleChange(event.target.value)}
             aria-invalid={Boolean(error(name))}
-            disabled={busy}
+            disabled={busy || (name === "label" && isDefault)}
           />
           {error(name) ? (
             <FieldError>{error(name)}</FieldError>
@@ -401,13 +413,19 @@ function TemplateDialog({
         <DialogHeader>
           <DialogTitle>{template ? `Edit ${template.label}` : "Add a template"}</DialogTitle>
           <DialogDescription>
-            {template && defaults.some((row) => row.id === template.id)
+            {isDefault
               ? "A default: your edits save over it, and Reset brings it back."
-              : "The sidebar's plus starts a session from it."}
+              : "The sidebar's plus starts a session from it."}{" "}
+            A save keeps the whole list as it is then, so a default added to Playground later shows
+            once the list is back to the defaults alone.
           </DialogDescription>
         </DialogHeader>
         <FieldGroup ref={fields} className="min-h-0 overflow-y-auto">
-          {text("label", "Label", "The name the sidebar's list shows.")}
+          {text(
+            "label",
+            "Label",
+            isDefault ? "A default keeps its name." : "The name the sidebar's list shows.",
+          )}
           {select("kind", "Kind", KINDS)}
           {select("backend", "Backend", BACKENDS)}
           <form.Subscribe selector={(state) => state.values.backend}>
