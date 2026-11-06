@@ -845,6 +845,54 @@ describe("a quoted argument is read as a command line only where a program runs 
       "sudo with a shortened user option and a harmless command",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | sudo --us root ls",
     ],
+    [
+      "env's split string naming sudo and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env -S 'sudo ls'",
+    ],
+    [
+      "busybox running a harmless applet",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | busybox ls",
+    ],
+    [
+      "nice running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | nice ls",
+    ],
+    [
+      "time running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | time ls",
+    ],
+    [
+      "timeout running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | timeout 5 ls",
+    ],
+    [
+      "stdbuf running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | stdbuf -o0 ls",
+    ],
+    [
+      "command running a harmless program",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | command ls",
+    ],
+    [
+      "a quoted env's split string naming sudo and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'env' -S 'sudo ls'",
+    ],
+    [
+      "a second env behind nice whose split string names sudo and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env nice env -S 'sudo ls'",
+    ],
+    [
+      "an abbreviated split-string option naming sudo and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'env' --split='sudo ls'",
+    ],
+    [
+      "argv0's option ahead of a split string naming sudo and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env nice env -a name -S 'sudo ls'",
+    ],
+    [
+      "a lone dash ahead of a split string naming sudo and a harmless command",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'env' - -S 'sudo ls'",
+    ],
     ["a quoted ~- used as a literal folder name", "mkdir '~-' && touch '~-/f'"],
     ["a write under ~+, the worktree itself", "touch ~+/f"],
     ["a write under ~- after a cd out of the worktree", "cd /usr; touch ~-/f"],
