@@ -292,11 +292,13 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
         expect(r.err).toContain(CHAIN)
       })
 
-    test("an unplaced first word before a shell's -c", async () => {
-      const r = await run(["launcher", "sh", "-c", "docker build ."])
-      expect(r.code).toBe(2)
-      expect(r.err).toContain(CANNOT)
-    })
+    // review round 1 of #1158: any single-dash cluster holding c gives the shell its script, -ce as well as -c and -ec
+    for (const dashC of ["-c", "-ec", "-ce"])
+      test(`an unplaced first word before a shell's ${dashC}`, async () => {
+        const r = await run(["launcher", "sh", dashC, "docker build ."])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CANNOT)
+      })
 
     test("an eval step", async () => {
       const r = await run(["sh", "-c", "eval docker build ."])
