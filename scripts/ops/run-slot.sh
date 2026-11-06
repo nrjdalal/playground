@@ -917,7 +917,25 @@ ran_last3() {
 ran_short() { ran_last3 within 10 "$@"; }
 # each of the last 3 ran over 60 s (1 Nov: a two-file test:file line ran 39, 421 and 226 s back to back in the one quick slot, and the quick lane's waiters waited 63 min in the hour from 12:00Z)
 ran_long() { ran_last3 over 60 "$@"; }
-# the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue; a line the rule calls quick that ran long its last 3 times goes to the queue, since its file count says nothing of its time
+# whether a test file this line names (tests/... or ./tests/..., read as one) ran over 60 s in a quick run within that file's last 3 runs, under any
+# line, so a new line naming a known-slow file beside others reads that file's history (issue 1242: since 5 Nov 19 quick runs of 188 to 857 s did)
+file_ran_long() {
+  local a files=""
+  for a in "$@"; do case "$a" in tests/*.test.ts | tests/*.test.tsx | ./tests/*.test.ts | ./tests/*.test.tsx) files="$files ${a#./}" ;; esac; done
+  [ -n "$files" ] || return 1
+  tail -n 20000 "$OPS/run-slot.runs.log" 2>/dev/null | FILES="$files" awk '
+    $2 == "ask" { c = $0; for (k = 0; k < 4; k++) sub(/^[^ ]+ /, "", c); line[$4] = c; next }
+    $2 == "start" { lane[$4] = $5; next }
+    $2 == "end" && ($4 in line) {
+      ran = 0; for (i = 5; i <= NF; i++) if ($i ~ /^ran=[0-9]+s$/) ran = substr($i, 5) + 0
+      long = lane[$4] == "run-slot-quick" && ran > 60
+      n = split(line[$4], w, " ")
+      for (i = 1; i <= n; i++) { f = w[i]; sub(/^\.\//, "", f); if (f ~ /^tests\/.*\.test\.tsx?$/) h[f] = substr(h[f] long, length(h[f] long) > 3 ? length(h[f] long) - 2 : 1) }
+      delete line[$4]; delete lane[$4]
+    }
+    END { n = split(ENVIRON["FILES"], want, " "); for (i = 1; i <= n; i++) if (index(h[want[i]], "1")) exit 0; exit 1 }'
+}
+# the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue; a line the rule calls quick that ran long its last 3 times goes to the queue, since its file count says nothing of its time, and so does a quick line naming a test file that ran long in a quick run within its own last 3 runs (file_ran_long)
 quick_kind() {
   # a read command takes no slot and runs a bare true, so three short true runs in the log would take can-take and head down the quick lane, past their own exits (issue 285)
   [ -n "$CAN_TAKE" ] && return
@@ -926,6 +944,7 @@ quick_kind() {
   kind=$(quick_rule "$@")
   [ "$kind" = quick ] && ran_long "$@" && kind=""
   [ -z "$kind" ] && ran_short "$@" && kind=quick
+  [ "$kind" = quick ] && file_ran_long "$@" && kind=""
   echo "$kind"
 }
 # whether turbo's dry run, in the run's checkout and with its env words, finds every check-types task and the builds under it cached; a dry run that fails or takes over 10 s counts as not cached (retro 5, 31 Oct: the dry run takes about 0.2 s, while 88 of 226 check-types runs ended in 10 s or less and waited 19,953 s, and the rest ran up to 190 s)

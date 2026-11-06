@@ -279,7 +279,7 @@ describe("a quick run takes its own slot past a full queue", () => {
   const quick = async (
     argv: string[],
     ran: number[] = [],
-    as: { env?: Record<string, string>; waiter?: boolean; who?: string } = {},
+    as: { env?: Record<string, string>; log?: string; waiter?: boolean; who?: string } = {},
   ) => {
     const who = as.who ?? "worker-q"
     const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
@@ -300,12 +300,13 @@ describe("a quick run takes its own slot past a full queue", () => {
     const marker = "tests/a.test.ts"
     writeFileSync(
       join(m.ops, "run-slot.runs.log"),
-      ran
-        .map(
-          (s, i) =>
-            `2026-10-31T10:00:0${i}Z ask worker-q ${900 + i} ${[...argv, marker].join(" ")}\n2026-10-31T10:00:0${i}Z ask worker-r ${800 + i} bun run lint\n2026-10-31T10:01:0${i}Z end worker-r ${800 + i} rc=0 ran=1s\n2026-10-31T10:01:0${i}Z end worker-q ${900 + i} rc=0 ran=${s}s\n`,
-        )
-        .join(""),
+      as.log ??
+        ran
+          .map(
+            (s, i) =>
+              `2026-10-31T10:00:0${i}Z ask worker-q ${900 + i} ${[...argv, marker].join(" ")}\n2026-10-31T10:00:0${i}Z ask worker-r ${800 + i} bun run lint\n2026-10-31T10:01:0${i}Z end worker-r ${800 + i} rc=0 ran=1s\n2026-10-31T10:01:0${i}Z end worker-q ${900 + i} rc=0 ran=${s}s\n`,
+          )
+          .join(""),
     )
     const p = Bun.spawn(["bash", SCRIPT, who, "--", ...argv, marker], {
       cwd: m.root,
@@ -410,6 +411,39 @@ describe("a quick run takes its own slot past a full queue", () => {
       await quick(["bun", "run", "test:file", "tests/b.test.ts"], [37, 36, 33, 39, 421, 226]),
     ).toBe(true)
     expect(took).toBe("run-slot-quick")
+  })
+
+  // issue 1242: run-slot.runs.log since 5 Nov held 19 quick runs of 188 to 857 s, each a new line naming a slow file beside others, which the line's own history never saw
+  // runs: [command, lane, seconds] for each earlier run, oldest first, as run-slot.runs.log's ask, start and end lines record them
+  const history = (runs: [string, string, number][]) =>
+    runs
+      .map(
+        ([line, lane, s], i) =>
+          `2026-10-31T10:0${i}:00Z ask worker-p ${700 + i} ${line}\n2026-10-31T10:0${i}:00Z start worker-p ${700 + i} ${lane} waited=0s\n2026-10-31T10:0${i}:30Z end worker-p ${700 + i} rc=0 ran=${s}s\n`,
+      )
+      .join("")
+  test("a new line naming a file that ran long in a quick run goes to the queue", async () => {
+    const log = history([["bun run test:file tests/slow.test.ts", "run-slot-quick", 400]])
+    expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(false)
+  })
+
+  test("while a line whose files all ran short takes quick", async () => {
+    const log = history([
+      ["bun run test:file tests/b.test.ts", "run-slot-quick", 5],
+      ["bun run test:file tests/a.test.ts tests/c.test.ts", "run-slot-quick", 8],
+    ])
+    expect(await quick(["bun", "run", "test:file", "tests/b.test.ts"], [], { log })).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  test("and a file's long quick run counts only within its last 3 runs", async () => {
+    const log = history([
+      ["bun run test:file tests/slow.test.ts", "run-slot-quick", 400],
+      ["bun run test:file tests/slow.test.ts tests/c.test.ts", "run-slot-2", 9],
+      ["bun run test:file tests/slow.test.ts tests/d.test.ts", "run-slot-2", 9],
+      ["bun run test:file tests/slow.test.ts tests/e.test.ts", "run-slot-2", 9],
+    ])
+    expect(await quick(["bun", "run", "test:file", "tests/slow.test.ts"], [], { log })).toBe(true)
   })
 
   test("and so does a docs:wrap that ran long", async () => {
