@@ -1834,6 +1834,39 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "rsync with its backup flag, a prefix of its backup folder option, after a cd to a variable",
       `cd "$X"; rsync -a --backup --suffix=.bak /tmp/a /tmp/b`,
     ],
+    [
+      "find printing to an absolute file after a cd to a variable",
+      `cd "$X"; find /tmp/x -fprint /tmp/out`,
+    ],
+    [
+      "GNU find by its g name printing to an absolute file after a cd to a variable",
+      `cd "$X"; gfind /tmp/x -fprint /tmp/out`,
+    ],
+    [
+      "GNU find by its g name deleting an absolute path after a cd to a variable",
+      `cd "$X"; gfind /tmp/x -delete`,
+    ],
+    [
+      "GNU find by its g name printing names after a cd to a variable",
+      `cd "$X"; gfind /tmp -name x -print`,
+    ],
+    ["GNU xargs by its g name running echo", "echo a | gxargs echo"],
+    [
+      "GNU xargs by its g name running echo after a cd to a variable",
+      `cd "$X"; echo a | gxargs echo`,
+    ],
+    [
+      "GNU find by its g name printing to a held absolute file after a cd to a variable",
+      `O=/tmp/out; cd "$X"; gfind /tmp/x -fprint "$O"`,
+    ],
+    [
+      "GNU find by a path to its g name printing to an absolute file after a cd to a variable",
+      `cd "$X"; /opt/homebrew/bin/gfind /tmp/x -fprint /tmp/out`,
+    ],
+    [
+      "GNU find by its g name in capitals printing names after a cd to a variable",
+      `cd "$X"; GFIND /tmp/x -name x`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
@@ -2262,5 +2295,63 @@ describe("a refusal for a value the hook does not hold names it in readable text
     const reason = await bash(command, "/tmp")
     expect(reason).toContain(named)
     expect(reason).not.toContain("\u0000")
+  })
+})
+
+describe("a held path runs past a quoted heredoc's body, which the shell expands nothing in (PG-1128)", () => {
+  test.each([
+    [
+      "cp to a held path after a quoted heredoc whose body holds arithmetic",
+      `D=/tmp/d; cat > /tmp/s.sh <<'EOF'\necho $((i + 1))\nEOF\ncp x "$D/y"`,
+    ],
+    [
+      "cp to a held path after a quoted heredoc whose body holds a [[ -eq ]] test",
+      `D=/tmp/d; cat > /tmp/s.sh <<'EOF'\n[[ $n -eq 1 ]] && echo one\nEOF\ncp x "$D/y"`,
+    ],
+    [
+      "cp to a held path after a double-quoted heredoc whose body holds a subscript",
+      `D=/tmp/d; cat > /tmp/s.sh <<"EOF"\necho \${a[i]}\nEOF\ncp x "$D/y"`,
+    ],
+    [
+      "rm of a held path after a backslashed tab-stripped heredoc whose body holds arithmetic",
+      `D=/tmp/d; cat > /tmp/s.sh <<-\\EOF\n\techo $((i))\n\tEOF\nrm -rf "$D"`,
+    ],
+    [
+      "rm of a held path after a quoted heredoc to an interpreter whose body holds an indirection",
+      `D=/tmp/d; python3 - <<'EOF'\nprint("\${!x} \${(P)y}")\nEOF\nrm -rf "$D"`,
+    ],
+    [
+      "rm of a held path after two quoted heredocs on one line",
+      `D=/tmp/d; cat <<'A' > /tmp/a <<'B'\n$((i))\nA\n\${a[i]}\nB\nrm -rf "$D"`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+})
+
+describe("a held path past any other heredoc or a quote the scan cannot place is refused (PG-1128)", () => {
+  test.each([
+    [
+      "cp after an unquoted heredoc whose body holds arithmetic",
+      `D=/tmp/d; cat > /tmp/s.sh <<EOF\necho $((i + 1))\nEOF\ncp x "$D/y"`,
+    ],
+    [
+      "cp after a quoted heredoc and an unquoted one whose body holds a subscript",
+      `D=/tmp/d; cat <<'A' > /tmp/a <<B\nok\nA\n\${a[i]}\nB\ncp x "$D/y"`,
+    ],
+    [
+      "cp after a quoted heredoc beside a single-quoted read operand with a subscript",
+      `D=/tmp/d; cat > /tmp/f <<'EOF'\nok\nEOF\nread 'a[i]' < /tmp/f; cp x "$D/y"`,
+    ],
+    [
+      "cp after a quoted heredoc beside a single-quoted printf -v operand with a subscript",
+      `D=/tmp/d; cat > /tmp/f <<'EOF'\nok\nEOF\nprintf -v 'a[i]' x; cp x "$D/y"`,
+    ],
+    [
+      "cp into the guarded folder after a quoted heredoc",
+      `cat > /tmp/s.sh <<'EOF'\necho $((i))\nEOF\ncp x ${LIST}`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeDefined()
   })
 })

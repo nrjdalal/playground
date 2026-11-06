@@ -4,7 +4,7 @@ import { renderNotes, type NoteCommit } from "./notes"
 type Compared = {
   commits: {
     author: { login: string } | null
-    commit: { message: string }
+    commit: { author: { name: string } | null; message: string }
     parents: unknown[]
     sha: string
   }[]
@@ -35,6 +35,7 @@ for (let page = 1; ; page++) {
     commits.push({
       login: c.author?.login ?? null,
       message: c.commit.message,
+      name: c.commit.author?.name || null,
       parents: c.parents.length,
       sha: c.sha,
     })
