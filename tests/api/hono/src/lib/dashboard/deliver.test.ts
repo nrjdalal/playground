@@ -174,15 +174,15 @@ describe("refusal", () => {
     expect(refusal("", 1)).toBeNull()
   })
 
-  test("the paste rule keeps room for a reply's tag, with five files beside the words", () => {
-    // what deliver() would be asked to send: the words tagged with a picked reply, as withReply puts it, and five files, whose Attached lines no cap counts
+  test("the paste rule fills the box to deliver()'s cap, with five files beside the words", () => {
+    // what deliver() would be asked to send: the words as typed and five files, whose Attached lines no cap counts
     const fits = (pasted: string, before: string, after: string) =>
-      !refusal(normalize(`re #i99999: ${before}${pasted}${after}`), MAX_ATTACHMENTS)
-    const typed = "Made-up meeting notes. ".repeat(400).slice(0, 7000)
+      !refusal(normalize(`${before}${pasted}${after}`), MAX_ATTACHMENTS)
+    const typed = "Made-up meeting notes. ".repeat(400).slice(0, 7100)
     for (const [pasted, words, asFile, after = ""] of [
       ["x".repeat(995), typed, true],
-      ["x".repeat(1000), typed.slice(0, 6984), false],
-      ["x".repeat(1000), typed.slice(0, 6985), true],
+      ["x".repeat(1000), typed.slice(0, 7000), false],
+      ["x".repeat(1000), typed.slice(0, 7001), true],
       // lone carriage returns are line ends
       [Array(MAX_LINES).fill("z").join("\r"), "", false],
       [
@@ -972,7 +972,7 @@ describe("deliver with attachments", () => {
   })
 })
 
-// deliver() types into a session's pane as if the owner typed it, so only the owner's own clicks reach it, and nothing else speaks for the owner: the composer and the owner's answer to an inbox item. An ops job, a script or any other route sends through SendMessage instead.
+// deliver() types into a session's pane as if the owner typed it, so only the owner's own clicks reach it, and nothing else speaks for the owner: the composer, and the owner's answer to an inbox item or his comment through its Reply. An ops job, a script or any other route sends through SendMessage instead.
 const ROOT = join(import.meta.dir, "../../../../../..")
 const DELIVER = "api/hono/src/lib/dashboard/deliver.ts"
 const CALLERS = ["api/hono/src/routers/dashboard.ts", "api/hono/src/routers/inbox.ts"]
@@ -997,7 +997,7 @@ const deliverCallers = (files: Record<string, string>): string[] =>
     .map(([path]) => path)
 
 describe("who calls deliver()", () => {
-  test("only the composer's and the ask answer's routes", async () => {
+  test("only the composer's route and the inbox's, its answer and its Reply", async () => {
     const listed = Bun.spawnSync(
       ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
       {
@@ -1034,7 +1034,7 @@ describe("who calls deliver()", () => {
   })
 })
 
-// The one route beside deliver()'s that types into a pane: a herdr prompt's answer, the owner's own Submit on its card, which answerFeed() hands to answerHerdr() past its guards: the same contract as deliver() for the composer. cmux.test.ts holds typeKeys() to feed.ts.
+// The one route beside deliver()'s that types into a pane: a herdr prompt's answer, the owner's own Submit on its card, which answerFeed() hands to answerHerdr() past its guards: the same contract as deliver() for the composer. herdr.test.ts holds typeKeys() to feed.ts.
 const HERDR_ANSWER_ROUTE = {
   file: "api/hono/src/routers/dashboard.ts",
   path: "/workers/:sessionId/feed/:requestId",
