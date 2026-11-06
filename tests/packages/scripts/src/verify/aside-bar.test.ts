@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 
 import {
   clearResult,
+  driftResult,
   menuResult,
   paneResult,
   reachResult,
@@ -159,5 +160,64 @@ describe("the on-top probe", () => {
     const show = source.indexOf("await browser.eval(SHOW)")
     expect(show).toBeGreaterThan(0)
     expect(source.indexOf("await browser.eval<boolean | null>(ON_TOP)")).toBeGreaterThan(show)
+  })
+})
+
+describe("driftResult", () => {
+  test("passes when a row jump took the pane to its end and the aside stayed put", () => {
+    const result = driftResult(
+      "aside-bar 1440 row jump",
+      { handleGap: 0, paneEnd: true, scrollTop: 0 },
+      true,
+    )
+    expect(result.ok).toBe(true)
+    expect(result.detail).toBe("the aside stays put, the bar's handle on its bottom edge")
+  })
+
+  test("fails when a row jump scrolls the aside and carries the handle up its pane", () => {
+    const result = driftResult(
+      "aside-bar 1440 row jump",
+      { handleGap: 42, paneEnd: true, scrollTop: 42 },
+      true,
+    )
+    expect(result.ok).toBe(false)
+    expect(result.detail).toBe(
+      "the aside scrolled 42px, leaving the bar's handle 42px above its bottom edge",
+    )
+  })
+
+  test("fails a row jump that left the pane short of its end, since it asked the aside for nothing", () => {
+    const result = driftResult(
+      "aside-bar 1440 row jump",
+      { handleGap: 0, paneEnd: false, scrollTop: 0 },
+      true,
+    )
+    expect(result.ok).toBe(false)
+    expect(result.detail).toStartWith("the card sat too high to take the Inbox pane to its end")
+  })
+
+  test("passes a hidden square's focus whatever the pane's scroll", () => {
+    expect(
+      driftResult("aside-bar 1440 hidden square", { handleGap: 0, paneEnd: false, scrollTop: 0 })
+        .ok,
+    ).toBe(true)
+  })
+
+  test("fails on a scroll alone, with no handle drawn", () => {
+    expect(
+      driftResult("aside-bar 1440 hidden square", {
+        handleGap: null,
+        paneEnd: false,
+        scrollTop: 42,
+      }).ok,
+    ).toBe(false)
+  })
+
+  test("fails with no tab bar", () => {
+    expect(driftResult("aside-bar 1440 hidden square", null)).toEqual({
+      check: "aside-bar 1440 hidden square",
+      detail: "no tab bar beside the chat",
+      ok: false,
+    })
   })
 })

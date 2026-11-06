@@ -317,7 +317,7 @@ describe("the aside's tabs", () => {
     expect(aside).toContain('const CHAT_BOTTOM = "mb-3"')
     expect(aside).toContain('const PANE_BOTTOM = "pb-3"')
     expect(aside).toContain(
-      "className={`relative flex h-full min-h-0 flex-col overflow-hidden px-6 ${SIDE_TOP}`}",
+      "className={`relative flex h-full min-h-0 flex-col overflow-clip px-6 ${SIDE_TOP}`}",
     )
     expect(aside).toContain(
       '${value === "inbox" ? "-mt-3 has-[[data-preview-frame]]:pb-0" : "pt-(--pane-top) [--pane-top:--spacing(1)]"} ${paneBottom}`',
