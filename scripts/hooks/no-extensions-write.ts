@@ -826,6 +826,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // findutils' g names are read again as find and xargs, so every check those two take reads them; the words swap in place, keeping the Command steadyAt knows and the program's path
     const findutils = GNU_NAMED.exec(name)?.[1]
     if (first && (findutils === "find" || findutils === "xargs")) {
+      // a g name env -S splits out of its string is no word of the command, so there is no word to swap
+      if (!cmd.words.includes(first))
+        return refuse(
+          `${name} inside env -S's string, which the hook reads as find or xargs only as a word of its own; run it without env -S`,
+        )
       const { words } = cmd
       const value = first.value.replace(/g(find|xargs)$/, "$1")
       cmd.words = words.map((word) => (word === first ? { ...word, value } : word))
