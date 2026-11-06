@@ -530,6 +530,15 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       ["sh", "-c", "x=`/usr/local/bin/doc?er build .`"],
       ["sh", "-c", 'echo "$(/usr/local/bin/doc?er build .)"'],
       ["sh", "-c", 'case x in $(/bin/s? -c "/usr/local/bin/doc?er build .")) ;; esac'],
+      // review round 4 of #1219: a case inside a substitution closes a pattern with a ) that does not end it
+      ["sh", "-c", "case x in $(case y in a) ;; esac; /usr/local/bin/doc?er build .)) ;; esac"],
+      ["sh", "-c", "case $(case y in a) ;; esac; /usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["sh", "-c", 'echo "$(case y in a) ;; esac; /usr/local/bin/doc?er build .)"'],
+      [
+        "sh",
+        "-c",
+        'case x in $(case y in a) ;; esac; /bin/s? -c "/usr/local/bin/doc?er build .")) ;; esac',
+      ],
     ])
       test(`a docker glob in a script run-slot does not open: ${argv.join(" ")}`, async () => {
         const r = await run(argv)
