@@ -210,6 +210,75 @@ describe("a run through run-slot, a light run, or one outside the worktrees runs
   })
 })
 
+// #1083: a docker build fills the one Docker VM every folder shares, the live dashboard's Postgres among them, so it goes through run-slot from any folder.
+describe("a docker build outside run-slot is refused from any folder, naming the run-slot form (#1083)", () => {
+  test.each([
+    ["docker build", "docker build ."],
+    ["docker image build", "docker image build -t a ."],
+    ["docker builder build", "docker builder build ."],
+    ["docker buildx build", "docker buildx build ."],
+    ["docker buildx b", "docker buildx b ."],
+    ["docker buildx build past buildx's --builder", "docker buildx --builder x build ."],
+    ["docker buildx bake", "docker buildx bake"],
+    ["docker build past docker's --context", "docker --context desktop-linux build ."],
+    ["docker build past docker's -c", "docker -c desktop-linux build ."],
+    ["docker build past docker's -H", "docker -H unix:///var/run/docker.sock build ."],
+    ["docker build past docker's --host", "docker --host unix:///x build ."],
+    ["docker build past docker's --config", "docker --config /tmp/c build ."],
+    ["docker build past docker's -l", "docker -l debug build ."],
+    ["docker build past docker's --log-level", "docker --log-level debug build ."],
+    ["docker build past docker's TLS files", "docker --tlscacert a --tlscert b --tlskey c build ."],
+    ["docker build past docker's flags", "docker -D --tls --tlsverify build ."],
+    ["docker build by its path", "/usr/local/bin/docker build ."],
+    ["docker build behind env words", "env DOCKER_BUILDKIT=1 docker build ."],
+    ["docker build inside bash -c", "bash -c 'docker build .'"],
+    ["docker compose build", "docker compose build"],
+    ["docker compose build of one service", "docker compose build api"],
+    ["docker compose build --no-cache", "docker compose build --no-cache"],
+    ["docker-compose build", "docker-compose build"],
+    ["docker compose build past -f", "docker compose -f docker-compose.yml build"],
+    ["docker compose build past --file", "docker compose --file a.yml build"],
+    ["docker compose build past -p", "docker compose -p x build"],
+    ["docker compose build past --project-name", "docker compose --project-name x build"],
+    ["docker compose build past --project-directory", "docker compose --project-directory . build"],
+    ["docker compose build past --profile", "docker compose --profile a build"],
+    ["docker compose build past --env-file", "docker compose --env-file .env build"],
+    ["docker compose build past --ansi", "docker compose --ansi never build"],
+    ["docker compose build past --parallel", "docker compose --parallel 1 build"],
+    ["docker compose build past --progress", "docker compose --progress plain build"],
+    ["docker compose build past its flags", "docker compose --all-resources --compatibility build"],
+    ["docker compose build past docker's own options", "docker --context x compose build"],
+    ["docker compose up --build", "docker compose up --build"],
+    ["docker compose up, which builds a missing image", "docker compose up -d"],
+    ["docker compose run --build", "docker compose run --build api"],
+    ["docker compose create --build", "docker compose create --build"],
+  ])("%s", async (_name, command) => {
+    for (const cwd of [WORKTREE, OUTSIDE]) {
+      const reason = await bash(command, cwd)
+      expect(reason).toContain("no-unslotted-run hook refuses")
+      expect(reason).toContain("from any folder")
+      expect(reason).toContain("~/.playground/ops/run-slot.sh <your name> -- ")
+    }
+  })
+
+  test.each([
+    ["docker --version", "docker --version"],
+    ["docker -v", "docker -v"],
+    ["docker version", "docker version"],
+    ["docker build --help", "docker build --help"],
+    ["docker buildx build -h", "docker buildx build -h"],
+    ["docker buildx version", "docker buildx version"],
+    ["docker compose build --help", "docker compose build --help"],
+    ["docker compose version", "docker compose version"],
+    ["docker compose up --no-build", "docker compose up --no-build -d"],
+    ["docker run", "docker run --rm alpine true"],
+    ["docker compose build through run-slot", `${SLOT} docker compose build`],
+    ["docker build through run-slot", `${SLOT} docker build .`],
+  ])("%s runs", async (_name, command) => {
+    for (const cwd of [WORKTREE, OUTSIDE]) expect(await bash(command, cwd)).toBeUndefined()
+  })
+})
+
 describe("it fails open, and acts for a factory session alone", () => {
   test("on input it cannot read", async () => {
     expect(await check("{not json", {}, MAIN)).toBeUndefined()

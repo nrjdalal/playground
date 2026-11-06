@@ -56,6 +56,122 @@ import { homedir } from "os";
 import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
 
+// scripts/hooks/docker-build.ts
+var DOCKERS = new Set(["docker", "docker-compose"]);
+var DOCKER_TAKES = new Set([
+  "--config",
+  "--context",
+  "--host",
+  "--log-level",
+  "--tlscacert",
+  "--tlscert",
+  "--tlskey",
+  "-c",
+  "-H",
+  "-l"
+]);
+var COMPOSE_TAKES = new Set([
+  "--ansi",
+  "--env-file",
+  "--file",
+  "--parallel",
+  "--profile",
+  "--progress",
+  "--project-directory",
+  "--project-name",
+  "-f",
+  "-p"
+]);
+var SERVICE_TAKES = new Set([
+  "--attach",
+  "--build-arg",
+  "--builder",
+  "--cap-add",
+  "--cap-drop",
+  "--entrypoint",
+  "--env",
+  "--env-from-file",
+  "--exit-code-from",
+  "--label",
+  "--memory",
+  "--name",
+  "--no-attach",
+  "--progress",
+  "--publish",
+  "--pull",
+  "--scale",
+  "--ssh",
+  "--timeout",
+  "--user",
+  "--volume",
+  "--wait-timeout",
+  "--workdir",
+  "-e",
+  "-l",
+  "-m",
+  "-p",
+  "-t",
+  "-u",
+  "-v",
+  "-w"
+]);
+var BUILD_TAKES = new Set([
+  "--build-arg",
+  "--builder",
+  "--memory",
+  "--provenance",
+  "--sbom",
+  "--ssh",
+  "-m"
+]);
+function positionals(args, takes) {
+  const out = [];
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (takes.has(v))
+      k++;
+    else if (!v.startsWith("-") || v === "-")
+      out.push(args[k]);
+  }
+  return out;
+}
+function subcommand(args, takes) {
+  let k = 0;
+  while (k < args.length && args[k].value.startsWith("-"))
+    k += takes.has(args[k].value) ? 2 : 1;
+  return { rest: args.slice(k + 1), sub: args[k] };
+}
+var help = (args) => args.some((a) => a.value === "-h" || a.value === "--help");
+function composeBuild(args) {
+  const { rest, sub } = subcommand(args, COMPOSE_TAKES);
+  if (!sub || help(rest))
+    return;
+  if (!["build", "create", "run", "up"].includes(sub.value))
+    return;
+  if (rest.some((a) => a.value === "--no-build"))
+    return;
+  return { kind: "compose", rest, sub: sub.value };
+}
+function dockerBuild(args, compose) {
+  if (compose)
+    return composeBuild(args);
+  const { rest, sub } = subcommand(args, DOCKER_TAKES);
+  if (!sub)
+    return;
+  if (sub.value === "compose")
+    return composeBuild(rest);
+  const image = (words) => help(words) ? undefined : { kind: "image", rest: words, sub: "build" };
+  if (sub.value === "build")
+    return image(rest);
+  if (["builder", "buildx", "image"].includes(sub.value)) {
+    const inner = subcommand(rest, new Set(["--builder"]));
+    if (inner.sub?.value === "build" || inner.sub?.value === "b")
+      return image(inner.rest);
+    if (sub.value === "buildx" && inner.sub?.value === "bake" && !help(inner.rest))
+      return { kind: "bake", rest: inner.rest, sub: "bake" };
+  }
+}
+
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
 import { join as join2 } from "path";
@@ -1798,64 +1914,6 @@ function knownVariables(command, environment, cwd) {
 }
 
 // scripts/hooks/no-mac-web-build.ts
-var DOCKERS = new Set(["docker", "docker-compose"]);
-var DOCKER_TAKES = new Set([
-  "--config",
-  "--context",
-  "--host",
-  "--log-level",
-  "--tlscacert",
-  "--tlscert",
-  "--tlskey",
-  "-c",
-  "-H",
-  "-l"
-]);
-var COMPOSE_TAKES = new Set([
-  "--ansi",
-  "--env-file",
-  "--file",
-  "--parallel",
-  "--profile",
-  "--progress",
-  "--project-directory",
-  "--project-name",
-  "-f",
-  "-p"
-]);
-var SERVICE_TAKES = new Set([
-  "--attach",
-  "--build-arg",
-  "--builder",
-  "--cap-add",
-  "--cap-drop",
-  "--entrypoint",
-  "--env",
-  "--env-from-file",
-  "--exit-code-from",
-  "--label",
-  "--memory",
-  "--name",
-  "--no-attach",
-  "--progress",
-  "--publish",
-  "--pull",
-  "--scale",
-  "--ssh",
-  "--timeout",
-  "--user",
-  "--volume",
-  "--wait-timeout",
-  "--workdir",
-  "-e",
-  "-l",
-  "-m",
-  "-p",
-  "-t",
-  "-u",
-  "-v",
-  "-w"
-]);
 var INSPECT_TIMEOUT_MS = 8000;
 var WEB_DOCKERFILE = "web/next/Dockerfile";
 var API_HERE = "The api image still builds here (docker compose build api).";
@@ -1865,36 +1923,11 @@ async function hasRunnerHost(environment) {
   const ip = environment.RUNNER_HOST || (await Bun.file(join4(dataDirOf(environment), "ops", "runner-host", "ip")).text().catch(() => "")).replace(/\n+$/, "");
   return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip);
 }
-function positionals(args, takes) {
-  const out = [];
-  for (let k = 0;k < args.length; k++) {
-    const v = args[k].value;
-    if (takes.has(v))
-      k++;
-    else if (!v.startsWith("-") || v === "-")
-      out.push(args[k]);
-  }
-  return out;
-}
-function subcommand(args, takes) {
-  let k = 0;
-  while (k < args.length && args[k].value.startsWith("-"))
-    k += takes.has(args[k].value) ? 2 : 1;
-  return { rest: args.slice(k + 1), sub: args[k] };
-}
-var help = (args) => args.some((a) => a.value === "-h" || a.value === "--help");
-function composeBuild(args) {
-  const { rest, sub } = subcommand(args, COMPOSE_TAKES);
-  if (!sub || help(rest))
-    return;
-  if (!["build", "create", "run", "up"].includes(sub.value))
-    return;
-  if (rest.some((a) => a.value === "--no-build"))
-    return;
+function composeBuild2({ rest, sub }) {
   const words = positionals(rest, SERVICE_TAKES);
-  const services = sub.value === "run" ? words.slice(0, 1) : words;
+  const services = sub === "run" ? words.slice(0, 1) : words;
   if (services.length === 0 || services.some((s) => s.value === "web" || marked(s.value)))
-    return `docker compose ${sub.value} of the web image`;
+    return `docker compose ${sub} of the web image`;
 }
 function dockerfile(args) {
   for (let k = 0;k < args.length; k++) {
@@ -1907,8 +1940,6 @@ function dockerfile(args) {
   }
 }
 function imageBuild(args) {
-  if (help(args))
-    return;
   const file = dockerfile(args);
   if (!file)
     return;
@@ -1917,20 +1948,11 @@ function imageBuild(args) {
     return `docker build -f ${WEB_DOCKERFILE}`;
 }
 function webBuild(args, compose) {
-  if (compose)
-    return composeBuild(args);
-  const { rest, sub } = subcommand(args, DOCKER_TAKES);
-  if (!sub)
-    return;
-  if (sub.value === "compose")
-    return composeBuild(rest);
-  if (sub.value === "build")
-    return imageBuild(rest);
-  if (["builder", "buildx", "image"].includes(sub.value)) {
-    const inner = subcommand(rest, new Set(["--builder"]));
-    if (inner.sub?.value === "build" || inner.sub?.value === "b")
-      return imageBuild(inner.rest);
-  }
+  const build = dockerBuild(args, compose);
+  if (build?.kind === "compose")
+    return composeBuild2(build);
+  if (build?.kind === "image")
+    return imageBuild(build.rest);
 }
 async function dashboardRuns(what, environment) {
   const route = async () => await hasRunnerHost(environment) ? BOX_ROUTE : NO_HOST_ROUTE;

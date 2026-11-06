@@ -2,6 +2,7 @@
 import { join } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
+import { DOCKERS, type DockerBuild, dockerBuild, positionals, SERVICE_TAKES } from "./docker-build"
 import { fromFactory } from "./role"
 import {
   type Env,
@@ -15,65 +16,6 @@ import {
   type Word,
 } from "./shell"
 
-const DOCKERS = new Set(["docker", "docker-compose"])
-// Options that take the next word as their value: docker's own before its subcommand, compose's before build, create, run or up, and those of compose build, create, run and up, one set for all four (so `-p` is run's publish here and compose's project name above).
-const DOCKER_TAKES = new Set([
-  "--config",
-  "--context",
-  "--host",
-  "--log-level",
-  "--tlscacert",
-  "--tlscert",
-  "--tlskey",
-  "-c",
-  "-H",
-  "-l",
-])
-const COMPOSE_TAKES = new Set([
-  "--ansi",
-  "--env-file",
-  "--file",
-  "--parallel",
-  "--profile",
-  "--progress",
-  "--project-directory",
-  "--project-name",
-  "-f",
-  "-p",
-])
-const SERVICE_TAKES = new Set([
-  "--attach",
-  "--build-arg",
-  "--builder",
-  "--cap-add",
-  "--cap-drop",
-  "--entrypoint",
-  "--env",
-  "--env-from-file",
-  "--exit-code-from",
-  "--label",
-  "--memory",
-  "--name",
-  "--no-attach",
-  "--progress",
-  "--publish",
-  "--pull",
-  "--scale",
-  "--ssh",
-  "--timeout",
-  "--user",
-  "--volume",
-  "--wait-timeout",
-  "--workdir",
-  "-e",
-  "-l",
-  "-m",
-  "-p",
-  "-t",
-  "-u",
-  "-v",
-  "-w",
-])
 // docker inspect is killed past this, well inside the hook's registered 15s, since a hook past its limit lets the call through and a Docker VM wedged by memory is the case this hook is for; a second later the read gives up even on pipes the killed process left open.
 export const INSPECT_TIMEOUT_MS = 8_000
 const WEB_DOCKERFILE = "web/next/Dockerfile"
@@ -93,36 +35,12 @@ async function hasRunnerHost(environment: Record<string, string | undefined>): P
   return /^[0-9]{1,3}(\.[0-9]{1,3}){3}$/.test(ip)
 }
 
-// The words after the options that `takes` names, with each value skipped; an attached value (--file=x) is one word.
-function positionals(args: Word[], takes: Set<string>): Word[] {
-  const out: Word[] = []
-  for (let k = 0; k < args.length; k++) {
-    const v = args[k].value
-    if (takes.has(v)) k++
-    else if (!v.startsWith("-") || v === "-") out.push(args[k])
-  }
-  return out
-}
-
-// The subcommand after docker's own options, and the words after it.
-function subcommand(args: Word[], takes: Set<string>): { rest: Word[]; sub?: Word } {
-  let k = 0
-  while (k < args.length && args[k].value.startsWith("-")) k += takes.has(args[k].value) ? 2 : 1
-  return { rest: args.slice(k + 1), sub: args[k] }
-}
-
-const help = (args: Word[]) => args.some((a) => a.value === "-h" || a.value === "--help")
-
 // compose build, or a compose up, create or run that builds web's missing image (every one without --no-build, since docker-compose.yml names no image), when it names no service, web among them, or a service the hook cannot read; run's first word is its one service.
-function composeBuild(args: Word[]): string | undefined {
-  const { rest, sub } = subcommand(args, COMPOSE_TAKES)
-  if (!sub || help(rest)) return
-  if (!["build", "create", "run", "up"].includes(sub.value)) return
-  if (rest.some((a) => a.value === "--no-build")) return
+function composeBuild({ rest, sub }: DockerBuild): string | undefined {
   const words = positionals(rest, SERVICE_TAKES)
-  const services = sub.value === "run" ? words.slice(0, 1) : words
+  const services = sub === "run" ? words.slice(0, 1) : words
   if (services.length === 0 || services.some((s) => s.value === "web" || marked(s.value)))
-    return `docker compose ${sub.value} of the web image`
+    return `docker compose ${sub} of the web image`
 }
 
 // The Dockerfile -f or --file names, attached or as the next word.
@@ -137,7 +55,6 @@ function dockerfile(args: Word[]): Word | undefined {
 
 // docker build, buildx build, builder build or image build with web's Dockerfile, or one the hook cannot read.
 function imageBuild(args: Word[]): string | undefined {
-  if (help(args)) return
   const file = dockerfile(args)
   if (!file) return
   const path = file.value.replace(/^\.\//, "")
@@ -147,15 +64,9 @@ function imageBuild(args: Word[]): string | undefined {
 
 // What web image build a docker or docker-compose call runs, if any.
 function webBuild(args: Word[], compose: boolean): string | undefined {
-  if (compose) return composeBuild(args)
-  const { rest, sub } = subcommand(args, DOCKER_TAKES)
-  if (!sub) return
-  if (sub.value === "compose") return composeBuild(rest)
-  if (sub.value === "build") return imageBuild(rest)
-  if (["builder", "buildx", "image"].includes(sub.value)) {
-    const inner = subcommand(rest, new Set(["--builder"]))
-    if (inner.sub?.value === "build" || inner.sub?.value === "b") return imageBuild(inner.rest)
-  }
+  const build = dockerBuild(args, compose)
+  if (build?.kind === "compose") return composeBuild(build)
+  if (build?.kind === "image") return imageBuild(build.rest)
 }
 
 // The live dashboard's Postgres, as the dashboard supervisor last wrote its name to dashboard-db: a reason to refuse when it runs or when the hook cannot tell, undefined when the named container is stopped or gone.
