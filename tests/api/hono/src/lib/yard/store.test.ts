@@ -496,9 +496,12 @@ describe.skipIf(!dockerUp())("Yard's store", () => {
       ).rejects.toMatchObject({ status: 429 })
     })
 
+    // a fixed hour of its own, so no write crosses an hour's edge and no other test's write counts in it (PG-892)
     test("a member's token, invite and channel writes stop at the hour's cap", async () => {
-      for (let i = 1; i < store.WRITES_HOUR; i++) await store.createToken(db, web("ed"), `t${i}`)
-      await expect(store.createToken(db, web("ed"), "one-more")).rejects.toMatchObject({
+      const now = Date.UTC(2026, 9, 31, 12, 30, 0)
+      for (let i = 0; i < store.WRITES_HOUR; i++)
+        await store.createToken(db, web("ed"), `t${i}`, now)
+      await expect(store.createToken(db, web("ed"), "one-more", now)).rejects.toMatchObject({
         status: 429,
       })
     })

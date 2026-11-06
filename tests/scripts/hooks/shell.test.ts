@@ -232,3 +232,17 @@ describe("stdinShell reads env's split string as the words it runs", () => {
     expect(stdinShell(lex(line).commands[0])).toBe(kind)
   })
 })
+
+describe("stdinShell reads su with no command of its own as a root shell", () => {
+  test.each<[string, string, StdinKind | undefined]>([
+    ["su alone", "su", "root"],
+    ["su with a user", "su root", "root"],
+    ["su with its shell option", "su -s /bin/sh root", "root"],
+    ["busybox's su applet with its shell option", "busybox su -s /bin/sh", "root"],
+    ["su behind sudo", "sudo su", "root"],
+    ["su given a command of its own", "su -c ls", undefined],
+    ["su with a user given a command of its own", "su root -c 'ls -la'", undefined],
+  ])("%s", (_, line, kind) => {
+    expect(stdinShell(lex(line).commands[0])).toBe(kind)
+  })
+})

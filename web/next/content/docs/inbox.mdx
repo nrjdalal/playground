@@ -19,7 +19,7 @@ Each item is a card of one of three kinds:
 - **Decision**: something a session will do only with your yes, such as a question only you can answer, a Slack message, a ship to main, a new Linear ticket, a delete, a database change, a spend, accepting an extension proposal, adding an app to your apps or taking one off, opening System Settings for a permission agent-desktop needs, or setting a guard setting, a value a guard reads to allow or deny a session's call.
   The card shows exactly what happens when you approve it, except a secret ask, which takes a value instead, and a card that shows you one (see Give a secret).
   Each pull request, ticket or page a card names is a link, so you can open it and check for yourself: a ship's pull requests and a delete's worktrees and branches included.
-  On an accept, your **Approve** has the dashboard accept the proposal itself, and the card then shows what that gave ([Extensions](/docs/extensions#review)).
+  On an accept, your **Approve** has the dashboard accept the proposal itself, or each of a set in the order the card lists them, and the card then shows what that gave ([Extensions](/docs/extensions#review)).
   On a guard setting, your **Approve** has the dashboard write the value the card shows, and a card its session changed after you read it asks you to read it again.
 - **Draft**: a Slack message or a Linear comment, ready to send in your name.
   The card shows its words, and Open thread shows where it goes.
@@ -112,7 +112,7 @@ Paste the value into the masked box, then press **Submit** or Enter.
 The value goes straight to that project, once for each environment, or into the Keychain, and is kept nowhere else: not in the Inbox, the chat, a log or the session.
 The card then shows only when you gave it and how each environment went, or that the Keychain saved it, green when every one took it and red when one did not.
 When the value was saved but the session that asked was not told yet, the card stays green and says so in a gray line underneath, with **Retry**, which tells the session again and never saves the value a second time.
-A secret card's comment box goes through **Reply** alone, never with Submit, and Reply refuses a comment that is the value itself, so the value never lands in a chat.
+A secret card's comment box goes through **Reply** alone, never with Submit, and Reply refuses a comment that is the same as what the field holds, so a value still in the field is never sent to a chat by mistake.
 
 A session that needs you to have a value already in the Keychain, such as a key to paste into another app, posts a **Show a secret** card.
 The card names the Keychain item in full, such as `playground-glm`, and why you need it.
@@ -125,7 +125,7 @@ Only your own click on this Mac shows a value, so a session never reads one thro
 ## Send a draft
 
 A reply to a Slack conversation shows **So far** first: one short line for each message that led up to it, who said it and the gist, oldest first.
-Your words follow under **Your reply**.
+Your words follow under **Your message**.
 A Slack decision shows the same lines above the message it sends.
 
 Change the words where they stand, then:

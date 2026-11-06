@@ -91,7 +91,14 @@ export const ciSteps: TypeSteps = ({ canary, checkout, hooks, prepare, worktree 
     ...(prepare === "none" ? [] : [install]),
     ...(hooks ? [BUNDLES] : []),
     {
-      argv: ["bunx", "turbo", "run", "check-types", `--filter=...[${canary}]`],
+      argv: [
+        "bunx",
+        "turbo",
+        "run",
+        "check-types",
+        `--filter=...[${canary}]`,
+        "--filter=@packages/scripts",
+      ],
       name: "check-types",
       types: true,
     },

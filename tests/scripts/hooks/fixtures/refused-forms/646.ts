@@ -1,0 +1,187 @@
+import { type Group } from "./_shared"
+
+// The forms the review of this file's source found refused, with #603's; rows are data, as refused-forms.ts says.
+export const groups: Group[] = [
+  {
+    folders: ["checkout", "home"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      [
+        "rm of a relative path after a cd to a variable",
+        `cd "$D"; rm -rf extensions/.no-such-folder`,
+      ],
+      [
+        "rm of a relative path after a chained cd to a variable",
+        `cd "$D" && rm -rf extensions/.no-such-folder`,
+      ],
+      [
+        "rm of a relative path after a cd to an unquoted variable",
+        "cd $D; rm -rf extensions/.no-such-folder",
+      ],
+      [
+        "rm of a relative path after a cd to a substitution",
+        `cd "$(cat p)"; rm -rf extensions/.no-such-folder`,
+      ],
+      [
+        "rm of a relative path after a pushd to a variable",
+        `pushd "$D"; rm -rf extensions/.no-such-folder`,
+      ],
+      ["mv of a relative path after a cd to a variable", `cd "$D"; mv policy.json /tmp/p.json`],
+      ["git with a config taken from the environment", "git --config-env=core.pager=P log"],
+      [
+        "git with a config taken from the environment as its own word",
+        "git --config-env core.pager=P log",
+      ],
+      ["git with a pager variable from a variable", `GIT_PAGER="$P" git log`],
+      ["git with an editor variable from a variable", `GIT_EDITOR="$E" git commit`],
+      ["git with an exported pager variable from a variable", `export GIT_PAGER="$P"; git log`],
+      [
+        "git with a counted config value from a variable",
+        `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0="$P" git log`,
+      ],
+      ["git with config parameters from a variable", `GIT_CONFIG_PARAMETERS="$C" git log`],
+      ["git with a global config file from a variable", `GIT_CONFIG_GLOBAL="$G" git log`],
+      ["cp to a variable", `cp x "$D"`],
+      ["cp to a path under a variable", `cp x "$D/x"`],
+      ["cp into a target folder from a variable", `cp -t "$D" x`],
+      ["cp into a long target folder from a variable", `cp --target-directory="$D" x`],
+      ["cp to a substitution", `cp x "$(cat p)"`],
+      ["ln to a path under a variable", `ln -s x "$D/x"`],
+      ["install to a path under a variable", `install x "$D/x"`],
+      ["tee to a path under a variable", `tee "$D/x" < y`],
+      ["tee appending to a path under a variable", `echo x | tee -a "$D/x"`],
+      ["dd to a path under a variable", `dd if=x of="$D/x"`],
+      ["touch of a path under a variable", `touch "$D/x"`],
+      ["mkdir of a path under a variable", `mkdir -p "$D/x"`],
+      ["mkdir of a path under a variable past its mode", `mkdir -m 755 "$D/x"`],
+      ["cp into a target folder from a variable in a short cluster", `cp -rt "$D" x`],
+      ["cp into a target folder from a variable attached", `cp -t"$D" x`],
+      ["cp into a target folder attached inside a short cluster", `cp -rt"$D" x`],
+      ["cp into a long target folder as its own word", `cp --target-directory "$D" x`],
+      ["cp into a shortened long target folder", `cp --target="$D" x`],
+      ["cp to a variable after the end of options", `cp -- x "$D"`],
+      ["tee to a second path under a variable", `tee /tmp/a "$D/x"`],
+      ["dd with an operand from a variable", `dd if=x "$O"`],
+      ["install of folders from a variable", `install -d "$D" /tmp/a`],
+      ["git with a config home from a variable", `XDG_CONFIG_HOME="$C" git log`],
+      ["git with a home from a variable", `HOME="$H" git log`],
+      ["ln of a lone operand after a cd to a variable", `cd "$D"; ln -s /tmp/x`],
+      ["GNU rm by its g prefix on a variable", `grm -rf "$D"`],
+      ["GNU mv by its g prefix to a variable", `gmv x "$D"`],
+      ["GNU rmdir by its g prefix on a variable", `grmdir "$D"`],
+      ["GNU unlink by its g prefix on a variable", `gunlink "$D"`],
+      ["GNU rm by its g prefix of a relative path after a cd to a variable", `cd "$D"; grm -rf x`],
+      ["GNU cp by its g prefix to a variable", `gcp x "$D"`],
+      ["GNU ln by its g prefix to a path under a variable", `gln -s x "$D/x"`],
+      ["GNU install by its g prefix to a path under a variable", `ginstall x "$D/x"`],
+      ["GNU dd by its g prefix to a path under a variable", `gdd if=x of="$D/x"`],
+      ["GNU tee by its g prefix to a path under a variable", `gtee "$D/x"`],
+      ["GNU touch by its g prefix of a path under a variable", `gtouch "$D/x"`],
+      ["GNU mkdir by its g prefix of a path under a variable", `gmkdir -p "$D/x"`],
+      ["GNU cp by its g prefix with a word from a variable before its target", `gcp "$S" /tmp/y`],
+      [
+        "GNU ln by its g prefix with a word from a variable before its target",
+        `gln -s "$S" /tmp/y`,
+      ],
+      [
+        "GNU install by its g prefix with a word from a variable before its target",
+        `ginstall "$S" /tmp/y`,
+      ],
+      [
+        "GNU cp by its gnubin path with a word from a variable before its target",
+        `/opt/homebrew/opt/coreutils/libexec/gnubin/cp "$S" /tmp/y`,
+      ],
+      [
+        "GNU cp by its gnubin path to a variable",
+        `/opt/homebrew/opt/coreutils/libexec/gnubin/cp x "$D"`,
+      ],
+      ["install of a relative folder after a cd to a variable", `cd "$D"; install -d x /tmp/a`],
+      [
+        "a redirect to a relative path holding an = after a cd to a variable",
+        `cd "$D"; echo x > a=/tmp/y`,
+      ],
+      [
+        "a redirect to a relative path opening with a dash after a cd to a variable",
+        `cd "$D"; echo x > -a/tmp/y`,
+      ],
+      ["cp to a relative path holding an = after a cd to a variable", `cd "$D"; cp x a=/tmp/y`],
+      [
+        "rm of a relative path holding an = after a cd to a variable",
+        `cd "$D"; rm -rf x=/usr/share/x`,
+      ],
+      [
+        "rm of a dashed operand after the end of options after a cd to a variable",
+        `cd "$D"; rm -rf -- -x`,
+      ],
+      ["install to a variable past a group holding a t", `install -gstaff x "$D"`],
+      [
+        "GNU cp to a variable past a suffix opening with a t and the end of options",
+        `gcp -Stmp -- x "$D"`,
+      ],
+      [
+        "GNU ln of one operand past its suffix as its own word after a cd to a variable",
+        `cd "$D"; gln -S bak /tmp/src`,
+      ],
+      [
+        "GNU ln of one operand past its long suffix after a cd to a variable",
+        `cd "$D"; gln --suffix bak /tmp/src`,
+      ],
+      ["cp into a target folder from a variable in one quoted word", `cp "-t$D" x`],
+      ["install of folders from a variable by its long option", `install --directory "$D" /tmp/a`],
+      ["install of folders from a variable by a cluster holding d", `install -vd "$D" /tmp/a`],
+      [
+        "GNU ln of one operand past a suffix with its value attached after a cd to a variable",
+        `cd "$D"; gln --suffix=bak /tmp/src`,
+      ],
+      [
+        "GNU ln of one operand past a long flag after a cd to a variable",
+        `cd "$D"; gln --force /tmp/src`,
+      ],
+      ["macOS cp to a variable past a -t after its first operand", `cp x -t /tmp/d "$D"`],
+      ["macOS mkdir of a variable past a -m after its first operand", `mkdir /tmp/x -m "$D"`],
+      ["macOS touch of a variable past a -r after its first operand", `touch /tmp/x -r "$D"`],
+      ["macOS install to a variable past a -m after its first operand", `install x /tmp/y -m "$D"`],
+      ["GNU install to a variable past its strip flag", `ginstall x --strip "$D"`],
+      ["macOS install of a folder from a variable past its safe-copy flag", `install -d -S "$D"`],
+      [
+        "macOS install of a folder from a variable past a destdir ending in g",
+        `install -d -Dxg "$D"`,
+      ],
+      ["macOS install of a folder from a variable past a hash ending in g", `install -d -hg "$D"`],
+      [
+        "macOS install of a folder from a variable past link flags ending in g",
+        `install -d -lg "$D"`,
+      ],
+      ["macOS install of a folder from a variable past tags ending in g", `install -d -Tg "$D"`],
+      ["macOS install with a metalog from a variable", `install -M "$D" x /tmp/y`],
+      [
+        "macOS install with a relative metalog after a cd to a variable",
+        `cd "$D"; install -Mlog x /tmp/y`,
+      ],
+      [
+        "GNU mkdir of a variable after its first operand under POSIXLY_CORRECT in the call",
+        `POSIXLY_CORRECT=1 gmkdir /tmp/x -m "$D"`,
+      ],
+      [
+        "GNU touch of a variable after its first operand under POSIXLY_CORRECT exported",
+        `export POSIXLY_CORRECT=1; gtouch /tmp/x -r "$D"`,
+      ],
+      [
+        "GNU mkdir of a relative folder after its first operand under POSIXLY_CORRECT after a cd to a variable",
+        `cd "$D"; POSIXLY_CORRECT=1 gmkdir /tmp/x -m sub`,
+      ],
+    ],
+  },
+  {
+    folders: ["data folder"],
+    guards: ["no-extensions-write"],
+    rows: () => [
+      ["a redirect to a relative file after a cd to a variable", `cd "$X"; echo x > policy.json`],
+      ["touch of a relative file after a cd to a variable", `cd "$X"; touch policy.json`],
+      [
+        "a redirect into the root after a cd that may not run",
+        "true || cd /tmp; echo x > extensions/policy.json",
+      ],
+    ],
+  },
+]

@@ -893,6 +893,22 @@ describe("a quoted argument is read as a command line only where a program runs 
       "a lone dash ahead of a split string naming sudo and a harmless command",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | 'env' - -S 'sudo ls'",
     ],
+    [
+      "su given a harmless command of its own",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | su -c ls",
+    ],
+    [
+      "su with a user given a harmless command of its own",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | su root -c 'ls -la'",
+    ],
+    [
+      "busybox's su applet given a harmless command of its own",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | busybox su -c ls",
+    ],
+    [
+      "busybox running another harmless applet",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | busybox cat",
+    ],
     ["a quoted ~- used as a literal folder name", "mkdir '~-' && touch '~-/f'"],
     ["a write under ~+, the worktree itself", "touch ~+/f"],
     ["a write under ~- after a cd out of the worktree", "cd /usr; touch ~-/f"],
@@ -1631,6 +1647,164 @@ describe("a read of the root, and writes elsewhere, run", () => {
   })
 })
 
+describe("a write the hook can place outside the root runs, after a cd it cannot read too (PG-646)", () => {
+  test.each([
+    ["rm of a relative path after a cd to a literal path", "cd /tmp/x && rm -rf build"],
+    ["a reader after a cd to a variable", `cd "$X"; ls`],
+    [
+      "a program after a cd to the checkout's top",
+      `cd "$(git rev-parse --show-toplevel)" && bun test`,
+    ],
+    ["git status after a cd to a variable", `cd "$X" && git status`],
+    ["a redirect to an absolute path after a cd to a variable", `cd "$X"; echo x > /tmp/y`],
+    ["rm of an absolute path after a cd to a variable", `cd "$X"; rm -rf /tmp/scratch-dir`],
+    ["cp of a relative file to an absolute path after a cd to a variable", `cd "$X"; cp a /tmp/b`],
+    [
+      "a redirect to a file the line holds after a cd to a variable",
+      `F=/tmp/y; cd "$X"; echo x > "$F"`,
+    ],
+    ["a plain git log", "git log"],
+    ["a plain git status", "git status"],
+    ["git -c of a pager", "git -c core.pager=less log"],
+    ["a git author name from a variable", `GIT_AUTHOR_NAME="$N" git commit -m x`],
+    ["cp to a literal path elsewhere", "cp x /tmp/y"],
+    ["cp to a path the line holds", `D=/tmp/d; cp x "$D/y"`],
+    [
+      "cp to a path the line holds beside trap, sched and autoload as words",
+      `D=/tmp/d; echo trap sched autoload; cp x "$D/y"`,
+    ],
+    [
+      "cp to a path the line holds after a program named by its path",
+      `D=/tmp/d; /bin/echo hi; cp x "$D/y"`,
+    ],
+    ["cp of a variable to a literal path", `cp "$S" /tmp/y`],
+    ["touch with a reference file from a variable", `touch -r "$R" /tmp/y`],
+    ["dd reading a variable to a literal path", `dd if="$S" of=/tmp/y`],
+    ["tee to a literal path", "echo x | tee /tmp/y"],
+    ["tee to its own output", "echo x | tee -"],
+    ["a reading redirect after a cd to a variable", `cd "$X"; wc -l < notes.txt`],
+    ["cp to an absolute path holding an = after a cd to a variable", `cd "$X"; cp x /tmp/a=b`],
+    ["dd to an absolute path after a cd to a variable", `cd "$X"; dd if=x of=/tmp/y`],
+    ["cp into an absolute target folder after a cd to a variable", `cd "$X"; cp -t /tmp/d x`],
+    ["ln between absolute paths after a cd to a variable", `cd "$X"; ln -s /tmp/x /tmp/y`],
+    ["cp to a path the line holds after a cd to a variable", `D=/tmp/d; cd "$X"; cp x "$D/y"`],
+    ["mkdir with a mode from a variable", `mkdir -m "$M" /tmp/x`],
+    ["cp of a variable into a literal target folder", `cp -t /tmp/d "$S"`],
+    ["ln of a variable to a literal path", `ln -s "$S" /tmp/l`],
+    ["install of a variable past its mode", `install -m 644 "$S" /tmp/i`],
+    ["install of literal folders", "install -d /tmp/a /tmp/b"],
+    ["touch with a date from a variable", `touch -d "$W" /tmp/y`],
+    ["touch with a stamp from a variable", `touch -t "$W" /tmp/y`],
+    [
+      "git with a pager the call sets over an exported one",
+      `export GIT_PAGER="$P"; GIT_PAGER=less git log`,
+    ],
+    ["git with a variable git does not read from a variable", `FOO="$F" git log`],
+    ["git with a pager the line holds", `P=less; GIT_PAGER="$P" git log`],
+    ["git with a literal config home", "XDG_CONFIG_HOME=/tmp/c git log"],
+    ["git with a literal home", "HOME=/tmp/h git log"],
+    ["GNU cp of a variable after the end of options", `gcp -- "$S" /tmp/y`],
+    ["GNU cp of a variable the line holds", `S=/tmp/s; gcp "$S" /tmp/y`],
+    ["GNU cp to a literal path", "gcp x /tmp/y"],
+    ["GNU rm of a literal path elsewhere", "grm -rf /tmp/scratch-dir"],
+    ["GNU install with a mode from a variable", `ginstall -m "$M" x /tmp/y`],
+    ["install with a group and an owner from variables", `install -g "$G" -o "$O" x /tmp/y`],
+    ["install past a group holding a t", "install -gstaff x /tmp/y"],
+    ["GNU ln with a suffix from a variable", `gln -S "$B" /tmp/src /tmp/dst`],
+    ["GNU cp with a long suffix from a variable", `gcp --suffix "$B" x /tmp/y`],
+    ["git commit with a variable git does not read from a variable", `FOO="$F" git commit -m x`],
+    ["GNU mkdir with a mode from a variable after its first operand", `gmkdir /tmp/x -m "$M"`],
+    ["macOS install of folders past a destdir from a variable", `install -d -D "$R" /tmp/a`],
+    [
+      "GNU cp by its gnubin path of a variable after the end of options",
+      `/opt/homebrew/opt/coreutils/libexec/gnubin/cp -- "$S" /tmp/y`,
+    ],
+    [
+      "rm past an option before its first operand after a cd to a variable",
+      `cd "$X"; rm -f /tmp/x`,
+    ],
+    [
+      "GNU rm past an option after its first operand after a cd to a variable",
+      `cd "$X"; grm /tmp/x -f`,
+    ],
+    [
+      "unlink of an absolute path past its end of options after a cd to a variable",
+      `cd "$X"; unlink -- /tmp/x`,
+    ],
+    ["find with its expression after a cd to a variable", `cd "$X"; find /tmp/x -delete`],
+    ["rsync of absolute paths after a cd to a variable", `cd "$X"; rsync -a /tmp/a /tmp/b`],
+    [
+      "GNU rm by its gnubin path past an option after its first operand after a cd to a variable",
+      `cd "$X"; /opt/homebrew/opt/coreutils/libexec/gnubin/rm /tmp/x -f`,
+    ],
+    [
+      "GNU mv to an absolute target folder after a cd to a variable",
+      `cd "$X"; gmv -t /tmp/d /tmp/f`,
+    ],
+    [
+      "GNU mv to an absolute target folder attached after a cd to a variable",
+      `cd "$X"; gmv -t/tmp/d /tmp/f`,
+    ],
+    [
+      "GNU mv to an absolute target folder by its long option after a cd to a variable",
+      `cd "$X"; gmv --target-directory=/tmp/d /tmp/f`,
+    ],
+    [
+      "rsync with an absolute log file attached after a cd to a variable",
+      `cd "$X"; rsync -a --log-file=/tmp/l /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute temp folder attached to its short option after a cd to a variable",
+      `cd "$X"; rsync -a -T/tmp/t /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a filter rule holding a T after a cd to a variable",
+      `cd "$X"; rsync -a -f'+ Tx' /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute partial folder by a shortened long option after a cd to a variable",
+      `cd "$X"; rsync -a --partial-d=/tmp/p /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a log format by a shortened long option after a cd to a variable",
+      `cd "$X"; rsync -a --log-file-f=x /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a relative link folder it only reads after a cd to a variable",
+      `cd "$X"; rsync -a --link-dest=prev /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute partial folder as the next word after a cd to a variable",
+      `cd "$X"; rsync -a --partial-dir /tmp/p /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with an absolute temp folder after a cluster ending in its short option after a cd to a variable",
+      `cd "$X"; rsync -aT /tmp/t /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with a dash-led block size after its short option after a cd to a variable",
+      `cd "$X"; rsync -a -B -1 /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with its partial flag, a prefix of its partial folder option, after a cd to a variable",
+      `cd "$X"; rsync -a --partial --progress /tmp/a /tmp/b`,
+    ],
+    [
+      "rsync with its backup flag, a prefix of its backup folder option, after a cd to a variable",
+      `cd "$X"; rsync -a --backup --suffix=.bak /tmp/a /tmp/b`,
+    ],
+  ])("%s", async (_, command) => {
+    expect(await bash(command, WORK)).toBeUndefined()
+  })
+
+  test.each([
+    ["a write after a sure cd out of the root", "cd /tmp && echo x > y"],
+    ["a reader after a cd to a variable", `cd "$X"; cat policy.json`],
+  ])("%s, from the root", async (_, command) => {
+    expect(await bash(command, ROOT)).toBeUndefined()
+  })
+})
+
 describe("a playground CLI call that changes what a guard reads is refused, naming the owner's route", () => {
   test.each([
     [
@@ -1981,6 +2155,11 @@ describe("a refusal for a value the hook does not hold names it in readable text
     ["a variable", "rm -f $X/x", "rm on $X/x,"],
     ["a loop variable", 'for d in a b; do rm -f "$d/x"; done', 'rm on "$d/x",'],
     ["a variable inside a nested shell's script", 'bash -c "rm -f $X/x"', "rm on $…/x,"],
+    [
+      "a held variable after a command named by a variable from the environment",
+      'D=/tmp/d; $EDITOR f; cp x "$D/y"',
+      'cp on "$D/y",',
+    ],
     [
       "git -c with a variable",
       'git -c core.pager="$P" log',
