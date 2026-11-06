@@ -640,6 +640,16 @@ describe("hold", () => {
     expect(again.code).toBe(0)
     expect(agentOf(again.roster, "worker-greed")).not.toHaveProperty("hold")
   })
+
+  test("a call that leaves the park and names a hold drops it too, so a bare park after it is refused", async () => {
+    const config = configWith([{ ...WITH_PR, hold: "#12", status: "parked" }])
+    const left = await run(config, ["set", "worker-greed", "status=working", "hold=#5"])
+    expect(left.code).toBe(0)
+    expect(agentOf(left.roster, "worker-greed")).not.toHaveProperty("hold")
+    const parked = await run(config, ["set", "worker-greed", "status=parked"])
+    expect(parked.code).toBe(2)
+    expect(parked.err).toContain("add hold=#<n>, hold=#i<n> or hold=d-<n>")
+  })
 })
 
 describe("assign, report and backlog", () => {

@@ -224,11 +224,11 @@ function checkPairs(name: string, pairs: [string, string][]): void {
   checkHold(pairs)
 }
 
-// a call that parks a row, or clears a parked row's hold, leaves it holding one, so the sweep can tell its lead once the wait ends; a call that moves it off parked drops its hold, so a later park names a fresh one. A row parked before this check keeps taking writes that leave its park alone.
+// a call that parks a row, or clears a parked row's hold, leaves it holding one, so the sweep can tell its lead once the wait ends; a call that moves it off parked drops its hold, one it names included, so a later park names a fresh one. A row parked before this check keeps taking writes that leave its park alone.
 function parkHold(entry: Agent, pairs: [string, string][], moved: boolean): void {
   const touched = moved || pairs.some(([k]) => k === "status" || k === "hold")
   if (entry.status !== "parked") {
-    if (touched && !pairs.some(([k]) => k === "hold")) delete entry.hold
+    if (touched) delete entry.hold
     return
   }
   if (touched && !entry.hold)

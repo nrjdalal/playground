@@ -123,8 +123,9 @@ function sweep(
 
   // a parked row's hold that has closed, or that no read reaches, prints once a row and hold; one known closed stays in the cursor, so it is not read again
   const holds = mine.flatMap((row) => {
-    const { hold, name } = row
-    if (row.status !== "parked" || typeof hold !== "string" || !HELD_ON.test(hold)) return []
+    const hold = readableHold(row)
+    if (hold === null) return []
+    const { name } = row
     const closed = `closed ${name} ${hold}`
     if (prev?.holds?.includes(closed)) return [{ key: closed, text: "" }]
     const state = r.holds[hold]
@@ -179,6 +180,15 @@ const ownerOf = (agents: Row[], row: Row): string => {
 
 // A hold the sweep reads: an issue or PR (#<n>) or an Inbox item (#i<n>); a decision (d-<n>) never closes, so its row is caught by its ETA alone.
 const HELD_ON = /^#i?\d+$/
+
+// The hold a parked row names that the sweep reads, else null.
+const readableHold = (row: Row): string | null =>
+  row.status === "parked" &&
+  typeof row.name === "string" &&
+  typeof row.hold === "string" &&
+  HELD_ON.test(row.hold)
+    ? row.hold
+    : null
 
 // Reads each hold on this machine: an issue or PR through gh in factory.repo, an Inbox item through bun run ask get in the Dashboard's checkout, which holds the Inbox's database; null when neither reads.
 export const readHold =
@@ -266,15 +276,9 @@ export async function runSweep(
   const agents = listOf(roster, "agents") as Row[]
   const holds: Record<string, HoldState> = {}
   for (const row of agents) {
-    const held = row.hold
+    const held = readableHold(row)
     if (
-      row.status !== "parked" ||
-      typeof row.name !== "string" ||
-      typeof held !== "string" ||
-      !HELD_ON.test(held)
-    )
-      continue
-    if (
+      held === null ||
       ownerOf(agents, row) !== lead ||
       prev?.holds?.includes(`closed ${row.name} ${held}`) ||
       held in holds
