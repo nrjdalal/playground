@@ -59,6 +59,10 @@ export const groups: Group[] = [
         `cd "$D"; env -S 'gfind . -delete'`,
       ],
       [
+        "GNU find by its g name in mixed case printing to a dash-led relative file after a cd to a variable",
+        `cd "$D"; GFind /tmp/x -fprint -x`,
+      ],
+      [
         "GNU xargs by its g name running rm on a list after a cd to a variable",
         `cd "$D"; gxargs rm < /tmp/list`,
       ],

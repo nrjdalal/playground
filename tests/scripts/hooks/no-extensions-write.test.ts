@@ -1859,6 +1859,10 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "GNU find by a path to its g name printing to an absolute file after a cd to a variable",
       `cd "$X"; /opt/homebrew/bin/gfind /tmp/x -fprint /tmp/out`,
     ],
+    [
+      "GNU find by its g name in capitals printing names after a cd to a variable",
+      `cd "$X"; GFIND /tmp/x -name x`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
