@@ -25,7 +25,7 @@ The factory's sessions start and end as its work needs them; none of that waits 
 Sessions that work together share a workspace as full-height columns ([SESSIONS.md](SESSIONS.md#spawn)): the managers one (the dispatcher, the Planner, the Builder, Ops), and each worker its own, with its checkers and probes beside it.
 
 - **Workers** are spawned by the Builder, one per chore, and close with their checkers once their chore is done.
-  A worker ends when its chore is done: its PR merged (or dropped with the Builder's ok), its branch pushed (`git push -u origin <branch>`), so its commits show on origin even with no PR,
+  A worker ends when its chore is done: its PR merged (or dropped with the Builder's ok), its branch pushed (`git push origin <branch>`), so its commits show on origin even with no PR,
   its probes cleaned up, and its final report sent, naming the pushed head.
   Its worktrees, their containers and its branches go when it ends ([SESSIONS.md](SESSIONS.md#end)'s cleanup), as its reviewer's and tester's do; one the cleanup keeps, named in its lead's line, the nightly clean (below) tries again once its PR is merged or closed, or the lead removes it by hand from the main checkout with `playground rm --worktree <path>`.
   Remove a worktree another session holds only once that session is closed or off the roster and no live session's cwd is inside it: a clean tree is not a free tree, since a reviewer keeps its worktree across PRs (**rounds**).
@@ -33,7 +33,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   Ending is automatic, by [SESSIONS.md](SESSIONS.md#end)'s path: `pr:merge` and the train's land end the merged PR's worker, reviewer and tester, and ops-tick's auto-end beat ends the rest every 5 minutes, each with one line to its lead.
   The Builder closes a session by hand only on a `Not ended` line, whose reason names what to fix first.
   The Builder may also end a worker mid-chore to drop or reassign the chore, recording why.
-  A parked chore gets its branch pushed (`git push -u origin <branch>`) and a handoff note ([SESSIONS.md](SESSIONS.md#write-a-handoff)), `~/.playground/handoffs/<ID>.md`, and its worker closes, its final report naming the pushed head; the chore restarts later from the note, its branch and its PR.
+  A parked chore gets its branch pushed (`git push origin <branch>`) and a handoff note ([SESSIONS.md](SESSIONS.md#write-a-handoff)), `~/.playground/handoffs/<ID>.md`, and its worker closes, its final report naming the pushed head; the chore restarts later from the note, its branch and its PR.
 - **Runners** belong to Ops.
   A long-running job joins an open runner; Ops spawns a runner when none is open, or another one for isolation or load.
   Each job runs as its own background task with its own log and health check, all listed in that runner's roster task.
