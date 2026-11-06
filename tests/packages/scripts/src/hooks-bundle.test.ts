@@ -98,7 +98,7 @@ test("no-desktop-owner-app's bundle finds the main checkout it sits in, with PLA
   writeFileSync(join(main, "api", "hono", "src", "bin", "dashboard-ask.ts"), "")
   writeFileSync(
     join(main, "package.json"),
-    `${JSON.stringify({ scripts: { ask: "bun api/hono/src/bin/dashboard-ask.ts" } })}\n`,
+    `${JSON.stringify({ scripts: { ask: JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).scripts.ask } })}\n`,
   )
   copyFileSync(
     join(ROOT, BUNDLED, "no-desktop-owner-app.js"),
