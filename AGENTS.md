@@ -10,20 +10,11 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
   Create it under `.claude/worktrees/` (repo-root relative, one directory per worktree; never `/tmp`, home, or a sibling of the repo), and fork its branch from the latest `canary`: fetch first, then branch from `origin/canary` (`git fetch origin canary && git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary`, then `bun install` in it, which its git hooks need,
   through `~/.playground/ops/run-slot.sh <your name> --` in a factory session), so the change builds on current main, and set up its `.env`, or none, by the `dev` skill's Start.
 - ALWAYS: Settle a new or altered database schema before generating or applying a migration: work goes ahead on its own, but a breaking change goes through the owner first.
-  Show the shape and name the choices that are costly to reverse; a shape is cheap to argue about and expensive to change once rows exist, and the live dashboard's database already holds real ones.
-  An additive change (a new table, a new nullable column, an index) goes ahead after the PR's reviewer session reviews its shape on Opus at high effort (code-review-loop's step 4) and a dump of the live dashboard's database, which the dashboard runner's lead takes before the merge and the PR names.
-  Anything else is a breaking change (a drop, a rename, a type change of real rows, a change others depend on, anything that cannot be undone) and waits for the owner's go through the Inbox.
-  See the `db-migration` skill.
+  An additive change (a new table, a new nullable column, an index) goes ahead after its reviewer's shape review and a dump of the live dashboard's database; anything else is breaking (a drop, a rename, a type change of real rows) and waits for the owner's go through the Inbox.
+  The `db-migration` skill's step 0 holds both whole, with the shape to show first.
 - ALWAYS: Point local database work at a disposable container of the worktree's own, published on loopback alone: `docker run -d --name playground-<worktree>-db -e POSTGRES_PASSWORD=<pw> -p 127.0.0.1::5432 postgres:alpine`, then `docker port playground-<worktree>-db 5432` for its port.
-  One exception: first run's pglaunch database, on all interfaces as the owner chose (`.agents/dashboard/stack.md`).
-  A second: a Vibeground's copy, which the owner chose to hold real data, so a Vibeground shows real rows while its database changes stay in a copy that is thrown away.
-  Its container is seeded by one `pg_dump` inside the live dashboard's container, the only read of the live database, and its branch's migrations run on the copy alone (`api/hono/src/lib/dashboard/vibe.ts`); its real rows stay out of every screenshot and PR, and only the owner's own clicks start or stop one.
-  Set the URL in the worktree's own `.env`, started from `.env.example` rather than copied from another checkout, and never point it at the live dashboard's database.
-  Playground has no shared database, but the live dashboard's local Postgres (the one its `POSTGRES_URL` names) holds every real session and transcript, so a migration or a rename applied there breaks the running dashboard.
-  Seed fake rows; real rows must never reach a screenshot or a PR.
-  Remove the container with `docker rm -fv`, since a remove without `-v` leaves its data volume behind; `tests/test_docker_rm_volumes.py` refuses one.
-  See the `db-migration` skill.
-  A worktree that works on the merge lock's Redis (`@packages/redis`) runs its own the same way, `docker run -d --name playground-<worktree>-redis -p 127.0.0.1::6379 redis:alpine`, with `REDIS_URL` in its `.env`; left blank, the lock keeps to its folder.
+  Never point it at the live dashboard's database, whose local Postgres holds every real session and transcript, so a migration or a rename applied there breaks the running dashboard; seed fake rows, since real rows never reach a screenshot or a PR.
+  The `db-migration` skill's step 3 holds the rest whole: the two exceptions (first run's pglaunch database and a Vibeground's copy), the worktree's `.env`, the removal with `docker rm -fv`, and the merge lock's Redis container.
 - ALWAYS: Keep documentation in sync with every change.
   Whenever code, structure, conventions, or tooling change, update the matching docs in the same change (e.g. `web/next/content/docs/`, `README.md`, the `llms.txt`/`llms-full.txt` context routes, skill docs under `skills/`, and these agent guides `AGENTS.md`/`CLAUDE.md`).
   Docs must never drift.
@@ -54,7 +45,7 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
   Sorting the subject too would put it in a different position on every endpoint, which is the drift this rule exists to prevent.
 - ALWAYS: Version every root `catalog` entry with a caret range (`^1.2.3`), never an exact pin or a tilde.
   `packages/scripts/src/deps-manager.ts` rewrites exact and tilde specs on `postinstall`, including specs it promotes into the catalog from a workspace dep, and reports the rest (wildcards, dist-tags, compound ranges) for a manual fix.
-  There is no opt-out: no pin survives an install, so pinning deliberately means changing the rule in that script and recording why in `docs/dependencies.md`.
+  It has no opt-out ([docs/dependencies.md](./docs/dependencies.md)).
 - Do not comment unnecessarily.
   Only comment if it is absolutely necessary.
 - Keep comments on a single line; do not split one across multiple `//` lines or use multi-line `/* */` blocks.
@@ -97,28 +88,13 @@ Write a compaction's summary as a handoff to the session that carries on under y
 
 ## Logging in (agents)
 
-Signs in as `LocalAgent`.
-The route is gated: set `AGENT_SIGNIN_ENABLED=true` in `.env` first (it is off by default, so the route 404s without it and a deployed default env never exposes it).
-Then sign in with curl (a browser posts it as a form, the `dev` skill's Agent login):
-
-```bash
-WEB=$(bunx portless get playground); API=$(bunx portless get api.playground)
-curl -sS -c cookies.txt -X POST -H "Origin: $WEB" "$API/api/agents/sign-in-as"
-curl -sS -b cookies.txt "$API/api/v1/user"
-```
-
-Local-only (needs `NODE_ENV=local` and `AGENT_SIGNIN_ENABLED=true`) and requires a trusted `Origin` header.
-See `api/hono/src/routers/agents.ts` if needed.
+Sign in as `LocalAgent` by the `dev` skill's Agent login, which holds the curl: local-only (`NODE_ENV=local`), gated on `AGENT_SIGNIN_ENABLED=true` in `.env`, which is off by default, and a trusted `Origin` header.
 On a worktree's stack the dashboard then shows the fixture's made-up sessions under its Test data badge, never the live ones (the dashboard section's source rule).
 
 ## Skills
 
 ZeroStarter's skills live in `skills/zerostarter`, which `.agents/skills` (the path ZeroStarter's CLI syncs through), `.claude/skills` and `.github/skills` link to, so every agent tool reads the same files.
-A ZeroStarter sync also overlays `lefthook.yml` with the starter's and drops the docs this repo adds to the docs-wrap job's glob, so after one, restore each until `tests/lefthook.test.ts` passes, then run `bun node_modules/.bin/lefthook install`, since the sync's own install rewrote the shared `.git/hooks` outside run-slot.
-Its publish-step files (`auto-release.yml`, `changelog.config.json`, `release-version.ts`, `changelog-manager.ts`, the `changelogen` catalog entry) stay out, since they commit and tag on `canary`; a ship's GitHub release notes still take their shape, rendered at the ship by `bun run release:notes` with no commit (the `release` skill's step 4).
-In `skills/zerostarter/.sync.json`, each skill that takes the update keeps the entry the sync wrote, so `skills-manager.ts --outdated` reads it as synced rather than edited here.
-Each is a `SKILL.md` with a `description` trigger and a literal procedure; only the description is scanned until a skill matches.
-Start with `codebase-map` to orient, then load the task skill that fits.
+Before you run a ZeroStarter sync, read [scripts/README.md](./scripts/README.md#a-zerostarter-sync): it overlays files this repo keeps its own.
 **Custom** skills are maintained in this repo; **vendored** skills are copied verbatim from an upstream project (re-vendor to update, do not hand-edit).
 
 **Custom**
@@ -198,12 +174,8 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - Format with `bun run format` (oxfmt, `.oxfmtrc.jsonc`), not prettier, whose semicolons and 80-column wraps survive an oxfmt pass.
 - `scripts/link-skills.sh` installs the home skill set and links the factory's settings, its brief templates, the `playground` command and the ops scripts into the main checkout, so a pull there updates them.
   Re-run it after adding, renaming or removing a skill ([scripts/README.md](./scripts/README.md#link-skillssh-and-rerere)).
-- The main checkout stays clean, since every installed skill follows it.
-  turbo.json's `cacheDir` keeps each worktree's turbo cache inside that worktree (turbo would otherwise share the main checkout's `.turbo/cache`), so no build, dev stack or pre-commit hook in a worktree leaves files there.
-  The pre-commit hook sets `TURBO_CACHE_DIR` to `~/.cache/turbo/playground`, one folder outside every checkout, so worktrees share entries keyed by their inputs and the main checkout stays clean.
-- Every worktree shares one `.git/hooks`, and lefthook.yml's `lefthook: bun node_modules/.bin/lefthook` makes each hook run the committing worktree's own lefthook, never the binary of whichever worktree last ran `bun install` (which goes when that worktree is removed).
-  So a worktree commits, pushes or merges once it has run `bun install`; one that stops on `error: Script not found "node_modules/.bin/lefthook"` needs it.
-  lefthook rewrites the shared hooks whenever the committing worktree's config differs from the last install's, so a worktree branched before this setting puts the old hook back on its next commit until it rebases onto `canary`.
+- The main checkout stays clean, since every installed skill follows it; each worktree keeps its own turbo cache ([scripts/README.md](./scripts/README.md#shared-git-hooks-and-the-turbo-cache)).
+- A worktree commits, pushes or merges once it has run its own `bun install`, since each shared git hook runs the committing worktree's own lefthook; one that stops on `error: Script not found "node_modules/.bin/lefthook"` needs it ([scripts/README.md](./scripts/README.md#shared-git-hooks-and-the-turbo-cache)).
 - Run `bun run test:skills`, CI's `auto-test.yml` steps, before pushing a change to a hook, a script, a skill's frontmatter, or a command that starts a database or stops a process ([scripts/README.md](./scripts/README.md#bun-run-testskills)).
 - The em-dash rule above has one exception: an output format the user specified, such as linear's table, where `—` marks an empty cell.
   `scripts/check-em-dashes.sh` skips inline code and table cells that hold only an em-dash.
@@ -300,28 +272,13 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
    GitHub Actions' `Audit, Lint, and Build` and `test` are green there, and nothing is left you would change.
 3. Mark it ready at 5/5 and merge it with `bun run pr:merge <n>`, or let merge-on-ready land it (`bun run pr:train ready`): the only ways a Playground PR reaches `canary`.
    Their gates, the merge lock and the merge queue are written in [packages/scripts/src/pr-merge/README.md](./packages/scripts/src/pr-merge/README.md); read it before a merge or a ruling on a gate.
-4. `main`, which the main checkout and so every installed skill follows, moves only through the `release` skill, run by Ops on the owner's standing go-ahead (playbook's **release** rule).
-   Once a release lands, bring the main checkout up to it by the skill's step 5 (pull, install, build, restart each ops job whose source changed, `scripts/link-skills.sh`), and say what landed.
+4. `main`, which the main checkout and so every installed skill follows, moves only through the `release` skill, run by Ops on the owner's standing go-ahead (playbook's **release** rule), whose step 5 then brings the main checkout up to it; say what landed.
 
 Read [.agents/skill-trial.md](./.agents/skill-trial.md) before you try a skill headless before it merges.
-
-### Findings from other sessions
-
-Every skill tells the `dispatcher` session what it learned: a hurdle it got past, a fix, a faster way.
-When one arrives:
-
-1. Check it against the skill and, when it can be checked, reproduce it.
-   A claim is not evidence.
-2. Take it through ***Shipping a Playground PR**, above.
-3. Reply to the sender with the PR once it has merged.
-
-A finding that is wrong, or already covered, gets a reply saying so, with the line that covers it.
 
 ### Standalone
 
 Playground stands on its own: every skill runs only Playground's own scripts, and its rules come from the owner, from ZeroStarter, and from the repos the skills work in.
 Other teams' agent setups, their skills, scripts and agents included, are not a source to read, copy or port from.
-The upstream skills core keeps are the one exception: each sits at `extensions/core/skills/<name>/` as upstream's files at the sha `extensions/core/upstream/SOURCE` pins, under upstream's `LICENSE` beside it, while the root `NOTICE` covers this repo's own code ([ADR 0014](./.agents/adr/0014-upstream-skills-are-vendored-byte-for-byte.md)).
-Only `bun run vendor:upstream` changes them, and `tests/extensions/core/upstream/drift.test.ts` holds them to the pin.
-Our skills and briefs call them through the Skill tool, never forking one, but for `pr` (below), and add only Playground's own layer ([ADR 0009](./.agents/adr/0009-learnings-live-in-the-repo.md)).
-`pr` is the one copy, since the gates and the Changelog read its added blocks: `extensions/core/skills/pr/` is upstream's SKILL.md and CREDITS.md byte for byte plus a TL;DR and a Links block, which `tests/extensions/core/skills/pr/drift.test.ts` holds against a pinned copy.
+The upstream skills core keeps under `extensions/core/skills/` are the one exception: they change only through `bun run vendor:upstream`, and [ADR 0014](./.agents/adr/0014-upstream-skills-are-vendored-byte-for-byte.md) holds the pin, the licence and `pr`'s added blocks.
+Our skills and briefs call them through the Skill tool, never forking one but `pr`, and add only Playground's own layer ([ADR 0009](./.agents/adr/0009-learnings-live-in-the-repo.md)).
