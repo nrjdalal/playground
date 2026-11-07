@@ -12,6 +12,8 @@ const MAIN = "/m/pg"
 const TREES = `${MAIN}/.claude/worktrees`
 const OUTSIDE = `${TREES}/review-501`
 const INSTALLED = `${TREES}/review-505`
+// a folder the PR ships with a bare repository's shape, whose config git would read
+const EMBEDDED = `${OUTSIDE}/emb`
 const SKILLS = `${HOME}/.playground/orgs/home/abc123/skills`
 const STATE = `${SKILLS}/code-review-loop/scripts/state.py`
 const CORE_STATE = `${MAIN}/extensions/core/skills/code-review-loop/scripts/state.py`
@@ -33,9 +35,15 @@ const SESSIONS: Record<string, string[]> = {
   "s-unread": [pull("acme-owner/widgets", 509)],
 }
 
+const HELD: Record<string, string[]> = {
+  [EMBEDDED]: ["HEAD", "objects", "refs"],
+  [INSTALLED]: [".git", "node_modules"],
+  [OUTSIDE]: [".git", "bunfig.toml"],
+}
+
 const lookup: Lookup = {
   author: async (repo, pr) => PRS[`${repo}#${pr}`],
-  holds: (folder, entry) => folder === (entry === "node_modules" ? INSTALLED : OUTSIDE),
+  holds: (folder, entry) => HELD[folder]?.includes(entry) ?? false,
   main: MAIN,
   prsOf: async (sessionId) => SESSIONS[String(sessionId)] ?? [],
 }
@@ -127,6 +135,38 @@ describe("no-outside-pr-code keeps a checker of an outside author's PR in read m
       "a sub-agent's call, which carries its parent's session",
       call("bun test", OUTSIDE, "s-out", "Bash", { agent_id: "a-1" }),
     ],
+    [
+      "gh's clone handing git the PR's hooks folder",
+      call(`gh repo clone acme-owner/widgets /m/x -- -c core.hooksPath=${OUTSIDE}/.githooks`),
+    ],
+    [
+      "gh's fork clone handing git an option",
+      call(`gh repo fork acme-owner/widgets --clone -- -c core.hooksPath=${OUTSIDE}/.githooks`),
+    ],
+    [
+      "python on a path that climbs out of the data folder's orgs",
+      call(`python3 ${HOME}/.playground/orgs/../../../tmp/s/skills/p.py`),
+    ],
+    [
+      "a program whose path climbs out of the main checkout's extensions",
+      call(`${MAIN}/extensions/../../../tmp/s/skills/p.py`),
+    ],
+    ["a git read in a bare repo the PR ships", call(`git -C ${EMBEDDED} diff HEAD~1 HEAD`)],
+    ["a git read below that bare repo", call("git diff HEAD~1 HEAD", `${EMBEDDED}/refs`)],
+    [
+      "git's own -c reopening bare repos",
+      call(`git -c safe.bareRepository=all -C ${EMBEDDED} diff`),
+    ],
+    ["git's --git-dir naming that bare repo", call(`git --git-dir=${EMBEDDED} diff HEAD~1 HEAD`)],
+    ["git's --work-tree", call(`git --work-tree=${OUTSIDE} --git-dir=${EMBEDDED} log`)],
+    ["a GIT_DIR prefix", call(`GIT_DIR=${EMBEDDED} git log`)],
+    ["a GIT_WORK_TREE prefix", call(`GIT_WORK_TREE=${OUTSIDE} git diff`, OUTSIDE)],
+    ["a second -C", call(`git -C ${OUTSIDE} -C emb diff`)],
+    [
+      "playground add, which starts a session no read mode holds",
+      call("playground add --brief /s/brief-x.md"),
+    ],
+    ["a manager verb of the playground command", call("playground builder")],
   ])("%s", async (_, raw) => {
     expect(await judge(raw)).toContain("no-outside-pr-code")
   })
@@ -203,6 +243,8 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
     ["a case on a read", call("case $(git -C /m/x rev-parse HEAD) in abc) echo same;; esac")],
     ["a loop of reads", call(`for f in a b; do cat ${OUTSIDE}/$f; done | head -40`)],
     ["the playground command", call("playground rules clock")],
+    ["playground's skill lookup", call("playground ext which triage-and-implement")],
+    ["a git read in the clone's own folder", call("git diff HEAD~1 HEAD", OUTSIDE)],
     ["ls and wc", call(`ls ${OUTSIDE} && wc -l ${OUTSIDE}/a.ts`)],
   ])("%s", async (_, raw) => {
     expect(await judge(raw)).toBeUndefined()
@@ -223,7 +265,7 @@ describe("no-outside-pr-code reads the session's PRs to choose read mode", () =>
 
   test.each([
     ["one outside PR among its PRs", "s-mixed", "outside author"],
-    ["a PR the hook cannot read", "s-unread", "outside author"],
+    ["a PR the hook cannot read", "s-unread", "GitHub did not answer for acme-owner/widgets#509"],
     ["no PR on its row", "s-none", "bun scripts/roster.ts set <this session's name> pr=<pull url>"],
     [
       "only an issue on its row",
@@ -232,6 +274,11 @@ describe("no-outside-pr-code reads the session's PRs to choose read mode", () =>
     ],
   ])("a checker with %s is in read mode", async (_, session, words) => {
     expect(await judge(call("bun test", OUTSIDE, session))).toContain(words)
+  })
+
+  test("a GIT_DIR the session exports keeps git out, since the walk would not find that repository", async () => {
+    const exported = { ...as("reviewer"), GIT_DIR: EMBEDDED }
+    expect(await check(call("git log", OUTSIDE), exported, lookup)).toContain("outside author")
   })
 
   test.each(["worker", "lead", ""])("a %s session is never in read mode", async (role) => {
@@ -296,7 +343,26 @@ describe("no-outside-pr-code's live lookup", () => {
     await roster([{ kind: "tester", name: "j8d4nf-tester", prs: [issue] }])
     const prs = await live(environment).prsOf("s-issue")
     expect(prs).toEqual([issue])
-    expect(await readMode("s-issue", { ...lookup, prsOf: async () => prs })).toBe("none")
+    expect(await readMode("s-issue", { ...lookup, prsOf: async () => prs })).toContain(
+      "names no PR",
+    )
+  })
+
+  test("git in a bare repo a PR ships, whose config names a diff program, is refused, and in the clone it reads", async () => {
+    const clone = join(scratch, "review-601")
+    const embedded = join(clone, "emb")
+    for (const dir of [join(clone, ".git"), join(embedded, "objects"), join(embedded, "refs")])
+      mkdirSync(dir, { recursive: true })
+    await Bun.write(join(embedded, "HEAD"), "ref: refs/heads/main\n")
+    await Bun.write(join(embedded, "config"), "[diff]\n\texternal = ./run.sh\n")
+    const machine = {
+      ...live(environment),
+      author: lookup.author,
+      prsOf: async () => [pull("acme-owner/widgets", 501)],
+    }
+    const judgeHere = (command: string) => check(call(command), as("reviewer"), machine)
+    expect(await judgeHere(`git -C ${embedded} diff HEAD~1 HEAD`)).toContain("outside author")
+    expect(await judgeHere(`git -C ${clone} diff HEAD~1 HEAD`)).toBeUndefined()
   })
 
   test("no registry entry, and a roster that does not parse, name no PR", async () => {
