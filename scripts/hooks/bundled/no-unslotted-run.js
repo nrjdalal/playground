@@ -2720,7 +2720,7 @@ var COMMIT_TAKES = new Set([
 var REUSED = new Set(["-c", "-C", "--fixup", "--reedit-message", "--reuse-message", "--squash"]);
 var LINT_BUDGET = 8000;
 var NO_WRITE = new Set(["add", "diff", "fetch", "log", "show", "status"]);
-var mayWrite = (cmd, name, args) => cmd.redirects.some((r) => r.op.includes(">")) || name !== "git" || !NO_WRITE.has(args.find((a) => !a.value.startsWith("-"))?.value ?? "");
+var mayWrite = (cmd, name, args) => cmd.redirects.some((r) => r.op.includes(">")) || name !== "cat" && (name !== "git" || !NO_WRITE.has(args.find((a) => !a.value.startsWith("-"))?.value ?? ""));
 async function message(cmd, rest, env, wrote) {
   const { flags } = parseFlags(rest, COMMIT_TAKES);
   const last = (names) => flags.findLast((f) => names.includes(f.name))?.name;
@@ -2956,8 +2956,7 @@ function inspect(raw, environment, main) {
     const slot = slotWords(parsed);
     if (slot)
       return slot.length ? examine({ ...cmd, words: slot }, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, commits, false) : undefined;
-    const refused = name === "git" ? await commitLint(cmd, args, env, wrote) : undefined;
-    wrote ||= mayWrite(cmd, name, args);
+    const refused = await commits(cmd, parsed, env);
     if (refused)
       return refused;
     const words = () => {

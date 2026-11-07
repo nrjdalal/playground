@@ -66,11 +66,11 @@ const LINT_BUDGET = 8000
 
 // git subcommands that write no file a later commit's message could be read from, unless a redirect writes one
 const NO_WRITE = new Set(["add", "diff", "fetch", "log", "show", "status"])
-// Whether a command may write a file, which a later commit on the line may read its message from
+// Whether a command may write a file, which a later commit on the line may read its message from; cat writes none but by a redirect, so a commit's own $(cat …) read counts as no writer
 const mayWrite = (cmd: Command, name: string, args: Word[]) =>
   cmd.redirects.some((r) => r.op.includes(">")) ||
-  name !== "git" ||
-  !NO_WRITE.has(args.find((a) => !a.value.startsWith("-"))?.value ?? "")
+  (name !== "cat" &&
+    (name !== "git" || !NO_WRITE.has(args.find((a) => !a.value.startsWith("-"))?.value ?? "")))
 
 // The message of a git commit as commit-msg would get it: its -m values joined as paragraphs, or the file or stdin -F names; undefined when the commit skips commit-msg, opens an editor, reuses another commit's message, holds a message the hook cannot read, or reads it from a file an earlier command on the line may have written.
 async function message(
@@ -141,7 +141,7 @@ async function commitLint(
   let out = ""
   let err = ""
   let code: number
-  let signal: string | null
+  let signal: unknown
   try {
     await Bun.write(file, text)
     const proc = Bun.spawn([process.execPath, lint, "--edit", file], {
@@ -332,9 +332,9 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   const inWorktree = (dir: string | undefined) =>
     dir !== undefined && resolve(dir).startsWith(worktrees)
   const directory = typeof cwd === "string" ? cwd : undefined
-  // a commit run-slot queues waits for its slot all the same, so its message is linted there too
   // whether an earlier command on the line may have written a file a commit reads its message from
   let wrote = false
+  // a commit run-slot queues waits for its slot all the same, so its message is linted there too
   const commits: Visit = async (cmd, { args, name }, env) => {
     const refused = name === "git" ? await commitLint(cmd, args, env, wrote) : undefined
     wrote ||= mayWrite(cmd, name, args)
@@ -353,8 +353,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
             false,
           )
         : undefined
-    const refused = name === "git" ? await commitLint(cmd, args, env, wrote) : undefined
-    wrote ||= mayWrite(cmd, name, args)
+    const refused = await commits(cmd, parsed, env)
     if (refused) return refused
     const words = () => {
       const at = first ? cmd.words.indexOf(first) : -1
