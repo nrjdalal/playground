@@ -147,9 +147,11 @@ pre-push:
     ensure-branches:
       run: bun packages/scripts/src/ensure-remote-branches.ts {1}
     hooks-bundle:
-      # CI builds a PR on its merge ref, the head merged with canary, so a canary change to a bundle input can stale a head whose own bundles are fresh; a push touching a bundle input checks the bundles of the head merged with the local origin/canary, merges included, in about a second, so it takes no run slot
+      # CI builds a PR on its merge ref, the head merged with canary, so a canary change to a bundle input can stale a head whose own bundles are fresh; a push of a branch that touched a bundle input since it forked from the local origin/canary, a docs-only push included, checks the bundles of the head merged with it, in about a second, so it takes no run slot
+      files: git diff --name-only origin/canary...HEAD
       glob: *bundle-inputs
-      run: bun --no-env-file packages/scripts/src/hooks-bundle.ts --check --merged origin/canary
+      # lefthook reads files: only for a run that names {files}, so the list goes in a shell comment, quoted so YAML keeps it
+      run: "bun --no-env-file packages/scripts/src/hooks-bundle.ts --check --merged origin/canary # {files}"
   # the jobs that read the pushed refs on stdin run from .lefthook/pre-push/, since lefthook skips every pre-push command while the checked-out branch has nothing new against its upstream, and runs a script on every push
   scripts:
     # what each pushed ref sends, so a commit made with hooks off is refused before it reaches the remote

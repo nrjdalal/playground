@@ -1,6 +1,6 @@
 import { existsSync, realpathSync } from "node:fs"
 import { readdir, unlink } from "node:fs/promises"
-import { basename, dirname, join, relative, resolve } from "node:path"
+import { basename, dirname, join, relative } from "node:path"
 
 import type { BunPlugin } from "bun"
 
@@ -12,9 +12,8 @@ export const HOOKS = join("scripts", "hooks")
 export const BUNDLED = join(HOOKS, "bundled")
 const SETTINGS = join("scripts", "factory-settings.json")
 
-// A tree git holds, read by path from the checkout's root: which files it holds, each folder's file names, every path, and each file's text, read once.
+// A tree git holds, read by path from the checkout's root: each folder's file names, every path, and each file's text, read once.
 export type Tree = {
-  has: (path: string) => boolean
   names: (dir: string) => string[]
   paths: () => string[]
   text: (path: string) => string | undefined
@@ -36,7 +35,6 @@ export function treeAt(root: string, oid: string): Tree {
   }
   const texts = new Map<string, string>()
   return {
-    has: (path) => blobs.has(path),
     names: (dir) =>
       [...blobs.keys()].filter((path) => dirname(path) === dir).map((path) => basename(path)),
     paths: () => [...blobs.keys()],
@@ -49,26 +47,17 @@ export function treeAt(root: string, oid: string): Tree {
   }
 }
 
-// The files a relative import may name, as Bun's resolver tries them.
-const RESOLVED = ["", ".ts", ".tsx", ".js", "/index.ts"]
 const SOURCE = /\.[cm]?[jt]sx?$/
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")
 
-// The resolve filter for the sources a tree holds that the working copy lacks, matching only a specifier that ends in one of their names, or none when the working copy holds them all: every specifier a JS resolve hook sees, one it returns nothing for included, loses Bun's side-effects reading, so zod's own relative imports would stop tree-shaking.
-function absentFilter(root: string, tree: Tree): RegExp | undefined {
-  const absent = tree
+// The sources a tree holds that the working copy lacks: Bun resolves every import from the working files, so a build of the tree that reaches one fails.
+export const lacking = (root: string, tree: Tree): string[] =>
+  tree
     .paths()
     .filter(
       (path) =>
-        /^(?:scripts|packages)\//.test(path) &&
-        SOURCE.test(path) &&
-        !path.includes("node_modules/") &&
-        !existsSync(join(root, path)),
+        SOURCE.test(path) && !path.includes("node_modules/") && !existsSync(join(root, path)),
     )
-  if (!absent.length) return undefined
-  const names = [...new Set(absent.map((path) => escape(basename(path).replace(SOURCE, ""))))]
-  return new RegExp(`^\\.{0,2}/(?:.*/)?(?:${names.join("|")})(?:\\.[cm]?[jt]sx?)?$`)
-}
 
 // no-extensions-write runs its check in this Worker, which it starts by URL beside its own file.
 const WORKERS = ["no-extensions-write-worker"]
@@ -78,22 +67,11 @@ const BANNER =
   'const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));'
 
 // Each module of the checkout reads import.meta.dir as its own source's folder under the checkout the bundle sits in, so a path it builds from there (main-checkout.ts's checkout, a guard's own folder) holds as it does from source.
-// With a tree, the checkout's own sources and their relative imports are read from it, so a file the working copy lacks or has edited reads as the tree holds it; a package's import, zod's, still resolves from the checkout's node_modules.
+// With a tree, each checkout source an import resolves to is read from it, so a file the working copy has edited reads as the tree holds it; a package's import, zod's, still resolves from the checkout's node_modules.
 const sourceDirs = (root: string, tree?: Tree): BunPlugin => ({
   name: "source-dirs",
   setup(build) {
     const filter = new RegExp(`^${escape(root)}/(?!.*/node_modules/).*\\.[cm]?[jt]sx?$`)
-    const absent = tree && absentFilter(root, tree)
-    // a source the working copy lacks resolves to the tree's file; every other import resolves as Bun resolves it, and onLoad reads its text from the tree
-    if (tree && absent)
-      build.onResolve({ filter: absent }, ({ importer, kind, path }) => {
-        if (!kind.startsWith("entry-point") && !filter.test(importer)) return undefined
-        const base = path.startsWith("/") ? path : resolve(dirname(importer), path)
-        const found = RESOLVED.map((tail) => base + tail).find((file) =>
-          tree.has(relative(root, file)),
-        )
-        return found && !existsSync(found) ? { path: found } : undefined
-      })
     build.onLoad({ filter }, async ({ path }) => {
       const text = tree ? tree.text(relative(root, path)) : await Bun.file(path).text()
       if (text === undefined)
@@ -171,9 +149,10 @@ export function checkedTree(root: string, ref?: string): { note?: string; tree?:
     return { tree: treeAt(root, index.out.trim()) }
   }
   const merged = gitIn(root, ["merge-tree", "--write-tree", "--name-only", "HEAD", ref])
-  if (merged.code !== 0 && merged.code !== 1)
-    throw new Error(`hooks-bundle: git merge-tree HEAD ${ref}: ${merged.err.trim()}`)
   const [oid, ...rest] = merged.out.split("\n")
+  // a ref git cannot read exits 1 too, as a conflict does, but with no tree's oid
+  if ((merged.code !== 0 && merged.code !== 1) || !/^[0-9a-f]{40,64}$/.test(oid!.trim()))
+    throw new Error(`hooks-bundle: git merge-tree HEAD ${ref}: ${merged.err.trim()}`)
   const conflicts = merged.code === 1 ? rest.slice(0, rest.indexOf("")) : []
   const outside = [...new Set(conflicts)].filter((path) => !path.startsWith(`${BUNDLED}/`))
   if (outside.length)
@@ -211,7 +190,19 @@ if (import.meta.main) {
     }
     const { note, tree } = checkedTree(ROOT, ref)
     if (note) console.error(note)
-    const drift = tree ? await stale(ROOT, tree) : []
+    const drift = tree
+      ? await stale(ROOT, tree).catch((error) => {
+          const absent = ref ? lacking(ROOT, tree) : []
+          if (!absent.length) throw error
+          const named =
+            absent.slice(0, 5).join(", ") +
+            (absent.length > 5 ? ` and ${absent.length - 5} more` : "")
+          console.error(
+            `hooks-bundle: the head merged with ${ref} holds sources this checkout lacks (${named}) and fails to build here, so its bundles go unchecked; merge ${ref} in first, then push again`,
+          )
+          process.exit(1)
+        })
+      : []
     if (drift.length) {
       console.error(
         ref
