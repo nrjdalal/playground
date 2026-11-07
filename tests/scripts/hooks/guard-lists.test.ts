@@ -84,7 +84,7 @@ describe("no-playground-leak fails closed on its lists", () => {
     probe: "probe",
     sessions: { roles: ["worker"], sins: ["envy"] },
   }
-  const CLEARED = { C0000000001: { name: "#cleared" } }
+  const CLEARED = { C0MADE0601: { name: "#cleared" } }
   // A Linear comment, which the guard keeps dispatcher's terms out of whatever ext.links names.
   const write = (body: string) =>
     JSON.stringify({

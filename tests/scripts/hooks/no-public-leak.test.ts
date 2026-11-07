@@ -17,7 +17,7 @@ const TERMS = {
   handles: ["quillco", "qmarsh"],
   linearKeys: ["VX"],
   names: ["Quilla Marsh"],
-  slackIds: ["C0FAKE1234"],
+  slackIds: ["C0MADE0401"],
 }
 let scratch = ""
 let stored = ""
@@ -191,7 +191,7 @@ describe("a write to the public repository holding private text is refused", () 
   test.each([
     ["a handle", "thanks @qmarsh", "qmarsh"],
     ["a company term", "built for Vantorix", "Vantorix"],
-    ["a Slack id", "settled in C0FAKE1234", "C0FAKE1234"],
+    ["a Slack id", "settled in C0MADE0401", "C0MADE0401"],
     ["a Linear key", "fixes VX-42", "VX-42"],
     ["an email address", "mail quilla@example.com", "quilla@example.com"],
     ["an archive link", "see https://github.com/acme/archive/pull/9", "acme/archive"],
@@ -360,7 +360,7 @@ describe("it fails closed on its list", () => {
       ],
       [
         "a Slack MCP post",
-        mcp("mcp__slack-shared__chat_post_message", { channel: "C0FAKE9999", text: "hi" }),
+        mcp("mcp__slack-shared__chat_post_message", { channel: "C0MADE0404", text: "hi" }),
       ],
     ])("refuses %s", async (_, raw) => {
       expect(await run(raw, lacks())).toContain("holds no hooks/no-public-leak.json")

@@ -1,7 +1,7 @@
 import type { Message, Slack } from "../../../../../../extensions/slack/skills/slack/scripts/slack"
 
 export const OWNER = "U0OWNER"
-export const DM = "D0FIXTURE"
+export const DM = "D0MADE0201"
 
 // A DM held in memory, answering the Slack methods dm send and the DM watch call; beforePost runs before each post lands, so a test can drop an owner message in mid-send.
 export function fakeDm(start: Message[] = [], beforePost?: (text: string) => void) {
