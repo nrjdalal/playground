@@ -75,6 +75,29 @@ describe("run-slot.focus", () => {
     expect(existsSync(join(m.ops, "run-slot.focus"))).toBe(false)
   })
 
+  // issue 1491: a second process moves the focus between the presence check and the read, and canary's cut after the check prints its error (seen 7 Nov)
+  // the fake head stands in for that process at the point both sides pass through: focus_holder's switch_on is the second focus read (the first is the startup switch sweep's), and this one removes the file after reading, so each side's read meets no file
+  test("the focus file going between the presence check and the read reads as no focus, with no cut error", async () => {
+    const m = machine({ idle: 30 })
+    m.hold("run-slot", 2, "medium")
+    await set(m, "worker-f", "focus", "--for", "30m", "--reason", "demo")
+    writeFileSync(
+      join(m.bin, "head"),
+      `#!/bin/bash\nn=$(cat "${m.ops}/head-count" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "${m.ops}/head-count"\nout=$(/usr/bin/head "$@"); rc=$?\ncase "$*" in *run-slot.focus*) [ "$n" -ge 2 ] && rm -f "${m.ops}/run-slot.focus" ;; esac\nprintf '%s' "$out"\nexit $rc\n`,
+    )
+    chmodSync(join(m.bin, "head"), 0o755)
+    const queued = m.start("worker-q", { RUN_SLOT_SIZE: "small" })
+    expect(await queued.saw(WAITING)).toBe(true)
+    // the wait's own lines aside, stderr names no read error: the vanished file reads as no focus (canary fails here on its cut: line)
+    const stray = queued
+      .stderr()
+      .split("\n")
+      .filter((l) => l !== "" && l.search(WAITING) !== 0)
+    expect(stray).toEqual([])
+    expect(existsSync(join(m.ops, "run-slot.focus"))).toBe(false)
+    await stop(queued.p)
+  })
+
   test("on, the focused session's own reviewer and tester run while another session's run waits", async () => {
     const m = machine()
     await set(m, "abc-worker", "focus", "--for", "30m", "--reason", "an urgent ticket")
