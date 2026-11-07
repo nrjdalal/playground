@@ -12,8 +12,8 @@ OPS=${RUN_SLOT_OPS:-${PLAYGROUND_DATA_DIR:-$HOME/.playground}/ops}
 # this copy's path and arguments, so a waiter can run a newer copy in its place (reread, below)
 SELF=$0
 ARGS=("$@")
-# LANES is capacity()'s one lanes verdict for a count (lanes_now), so a value from the caller's env would steer every slot check outside a count
-unset LANES
+# LANES is capacity()'s one lanes verdict for a count (lanes_now), and HELD5 its one load5 verdict (load5_held), so a value from the caller's env would steer every slot check outside a count
+unset LANES HELD5
 # a waiter that runs a newer copy hands it its first ask's time, so the runs log has one ask and the whole wait; the command never sees it
 REREAD=""
 case "${RUN_SLOT_ASKED:-}" in
@@ -1284,7 +1284,8 @@ ticket() {
   TICKET="$QUEUE/$(python3 -I -c 'import time; print(time.time_ns())')-$$-$WHO"
   # "s2" marks a waiter that can take run-slot-2 in single-slot mode (#i162); an empty ticket is an older copy that takes run-slot only.
   # Then its rank (class and units, 01 to 23), units and size, which order the queue, and ask for the owner's own ask, which an older copy ignores
-  echo "s2 $CLASS$UNITS $UNITS $SIZE${ASK:+ $ASK}" > "$TICKET"
+  # then ask or -, and the second it first asked at, which a reread's new ticket keeps (load5_held)
+  echo "s2 $CLASS$UNITS $UNITS $SIZE ${ASK:--} $ASKED" > "$TICKET"
 }
 ticket
 # A pinned ticket keeps its place by age: one with no rank, from an older copy or local CI (plain "s2", or empty), which no newer ticket
@@ -1497,7 +1498,7 @@ look_mark() {
   next_sig
   NSIG0=$NSIG
   LOOKED=1 LOAD0= DUE= BURST= G0=open
-  unset LANES
+  unset LANES HELD5
   [ "$LOOKER" = 1 ] || return 0
   cheap_load
   LOAD0=$LOAD
@@ -1506,6 +1507,8 @@ look_mark() {
   gate_sig
   G0=$G
   LANES=${G%% *}
+  HELD5=unread
+  load5_held || :
 }
 MQ=${PLAYGROUND_MERGE_QUEUE:-${PLAYGROUND_DATA_DIR:-$HOME/.playground}/merge-queue.json}
 LOOKER=1
@@ -1715,18 +1718,27 @@ load_line() {
   cap=$(switch_on run-slot.load5-cap && tail -n 1 "$OPS/run-slot.load5-cap" | grep -xE '[0-9]{1,3}'); [ -n "$cap" ] || cap=22; [ "$cap" -le 22 ] || cap=22
   echo "$cap"
 }
-# sets OLDEST to the second the queue's oldest ticket asked at, its name's leading nanosecond, else now, so the wait loop, first_waiter, room, slots and can-take time the load5 hold from one waiter
+# sets OLDEST to the earliest second a ticket in the queue first asked at, its line's sixth field, which survives a reread, else its name's leading nanosecond (an older copy's), else now, so the wait loop, first_waiter, room, slots and can-take time the load5 hold from one waiter; builtins alone
 oldest_asked() {
-  local t
+  local t a
+  OLDEST=
   for t in "$QUEUE"/[0-9]*; do
     [ -e "$t" ] || break
-    t=${t##*/} OLDEST=${t:0:10}
-    return
+    a=; read -r _ _ _ _ _ a _ < "$t" 2>/dev/null
+    case "$a" in '' | *[!0-9]*) a=${t##*/} a=${a:0:10} ;; esac
+    { [ -z "$OLDEST" ] || [ "$a" -lt "$OLDEST" ]; } && OLDEST=$a
   done
-  OLDEST=$(date +%s)
+  [ -n "$OLDEST" ] || OLDEST=$(date +%s)
 }
-# whether load5 holds slots 2 to 4 shut: at or over load_line's cap, until the queue's oldest waiter has waited LOAD_WAIT s (issue 1403, 7 Nov 11:07Z: two checker suites in run-slot and run-slot-2 took load5 to 17.96 on their own)
-load5_held() { [ "$(load5)" -ge "$(load_line)" ] && oldest_asked && [ $(($(date +%s) - OLDEST)) -lt "$LOAD_WAIT" ]; }
+# whether load5 holds slots 2 to 4 shut: at or over load_line's cap, until the queue's oldest waiter has waited LOAD_WAIT s (issue 1403, 7 Nov 11:07Z: two checker suites in run-slot and run-slot-2 took load5 to 17.96 on their own); one verdict for a count or a look (HELD5, as LANES), the clock first
+load5_held() {
+  case "${HELD5-}" in 1) return 0 ;; 0) return 1 ;; esac
+  local h=0
+  oldest_asked
+  [ $(($(date +%s) - OLDEST)) -lt "$LOAD_WAIT" ] && [ "$(load5)" -ge "$(load_line)" ] && h=1
+  [ "${HELD5-}" = unread ] && HELD5=$h
+  [ "$h" = 1 ]
+}
 # whether the load rules open slot $1 to this run now
 slot_open() {
   local s=$1
@@ -1878,7 +1890,7 @@ lanes_now() {
   esac
 }
 capacity() {
-  local s n=0 LANES=${LANES:-unread}
+  local s n=0 LANES=${LANES:-unread} HELD5=${HELD5:-unread}
   for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
     { [ -d "$OPS/$s" ] || slot_open "$s"; } && n=$((n + 1))
   done
