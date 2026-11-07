@@ -84,13 +84,13 @@ describe("no-playground-leak fails closed on its lists", () => {
     probe: "probe",
     sessions: { roles: ["worker"], sins: ["envy"] },
   }
-  const CLEARED = { C0000000001: { name: "#cleared" } }
+  const CLEARED = { C0MADE0601: { name: "#cleared" } }
   // A Linear comment, which the guard keeps dispatcher's terms out of whatever ext.links names.
   const write = (body: string) =>
     JSON.stringify({
       cwd: scratch,
       hook_event_name: "PreToolUse",
-      tool_input: { body, issueId: "CEDAR-1" },
+      tool_input: { body, issueId: "MADECEDAR-1" },
       tool_name: "mcp__linear-shared__save_comment",
     })
   const read = JSON.stringify({

@@ -77,7 +77,7 @@ const QUIET_LOAD = { "vm.loadavg": "{ 2.10 3.40 4.00 }" }
 
 // ps's lines as the load report reads them: CPU, pid, command
 const PS =
-  "  300.0  4242 /Users/acme/.bun/bin/bun\n   90.0   311 /Applications/cmux.app/Contents/MacOS/cmux\n   10.0   12 launchd\n    0.0  1 kernel_task\n    0.0  2 idle"
+  "  300.0  4242 /Users/me/.bun/bin/bun\n   90.0   311 /Applications/cmux.app/Contents/MacOS/cmux\n   10.0   12 launchd\n    0.0  1 kernel_task\n    0.0  2 idle"
 
 // bun run ask new's stdout, the posted item's id on a line of its own
 const ASKED = { "ask new": "f167b6b9-f570-4f15-a4b4-eb15b8c4876f\n#i601\n" }
@@ -302,6 +302,96 @@ describe("tick", () => {
     await beat("tick").run(ctx)
     expect(sent).toEqual([])
     expect(inputs).toEqual([])
+  })
+
+  // PG-1349: a week alert waited in the owner's Inbox for the owner's Done after its week had reset
+  test("an Inbox week alert resolves itself once usage.json reads that account's week back under its mark, and stays while the week is over it (PG-1349)", async () => {
+    const ops = scratch()
+    writeFileSync(
+      join(ops, "..", "roster.json"),
+      JSON.stringify({ agents: [{ kind: "ops", name: OLD.ops, role: "manager" }] }),
+    )
+    const reading = (login: number, spare: number) =>
+      writeFileSync(
+        join(ops, "..", "usage.json"),
+        JSON.stringify({
+          account: "acme@example.com",
+          accounts: { "pride@example.com": { week: spare } },
+          rate_limits: { seven_day: { used_percentage: login } },
+        }),
+      )
+    const resolves = (runs: string[][]) => runs.filter((argv) => argv.includes("resolve"))
+    const quiet = { ...QUIET_LOAD, "week-marks.py": "acme@example.com: week 91%" }
+    reading(91, 98)
+    const posted = fake(ops, at(13, 3), { ...QUIET_LOAD, ...ASKED, "week-marks.py": MARKS })
+    await beat("tick").run(posted.ctx)
+    expect(alertTitles(posted.inputs)).toEqual([
+      "ALERT 98 pride@example.com: week at 98%, past 98%",
+    ])
+    const over = fake(ops, at(13, 18), quiet)
+    await beat("tick").run(over.ctx)
+    expect(resolves(over.runs)).toEqual([])
+    reading(91, 2)
+    const reset = fake(ops, at(13, 33), quiet)
+    await beat("tick").run(reset.ctx)
+    expect(resolves(reset.runs)).toEqual([
+      [
+        "bun",
+        "run",
+        "--silent",
+        "--cwd",
+        "/repo",
+        "ask",
+        "resolve",
+        "f167b6b9-f570-4f15-a4b4-eb15b8c4876f",
+        "--by",
+        OLD.ops,
+        "--note",
+        "pride@example.com's week reset: now 2%",
+      ],
+    ])
+    const after = fake(ops, at(13, 48), quiet)
+    await beat("tick").run(after.ctx)
+    expect(resolves(after.runs)).toEqual([])
+  })
+
+  test("a week alert whose item is gone is dropped, and one whose resolve fails is tried again on the next tick (PG-1349)", async () => {
+    const ops = scratch()
+    writeFileSync(
+      join(ops, "..", "usage.json"),
+      JSON.stringify({
+        account: "pride@example.com",
+        rate_limits: { seven_day: { used_percentage: 98 } },
+      }),
+    )
+    const posted = fake(ops, at(13, 3), {
+      ...QUIET_LOAD,
+      ...ASKED,
+      "week-marks.py": "ALERT 97 pride@example.com: week at 97%, past 97%",
+    })
+    await beat("tick").run(posted.ctx)
+    writeFileSync(
+      join(ops, "..", "usage.json"),
+      JSON.stringify({
+        account: "pride@example.com",
+        rate_limits: { seven_day: { used_percentage: 1 } },
+      }),
+    )
+    const quiet = { ...QUIET_LOAD, "week-marks.py": "pride@example.com: week 1%" }
+    const failing = fake(ops, at(13, 18), {
+      ...quiet,
+      "ask resolve": { code: 1, err: "ask: the dashboard is down\n" },
+    })
+    await expect(beat("tick").run(failing.ctx)).rejects.toThrow("ask: the dashboard is down")
+    const gone = fake(ops, at(13, 33), {
+      ...quiet,
+      "ask resolve": { code: 1, err: "ask: no inbox item f167b6b9-f570-4f15-a4b4-eb15b8c4876f\n" },
+    })
+    await beat("tick").run(gone.ctx)
+    expect(gone.runs.filter((argv) => argv.includes("resolve"))).toHaveLength(1)
+    const after = fake(ops, at(13, 48), quiet)
+    await beat("tick").run(after.ctx)
+    expect(after.runs.filter((argv) => argv.includes("resolve"))).toEqual([])
   })
 })
 
@@ -1615,6 +1705,101 @@ describe("the focus card", () => {
     })
     await beat("focus-card").run(ended.ctx)
     expect(ended.runs).toHaveLength(1)
+  })
+
+  // PG-1349: the focus card waited for the owner's Done after everything it pointed at was answered
+  test("resolves itself once no ask that came in while focus stood is open, and stays while one is (PG-1349)", async () => {
+    const ops = scratch()
+    writeFileSync(
+      join(ops, "..", "roster.json"),
+      JSON.stringify({ agents: [{ kind: "ops", name: OLD.ops, role: "manager" }] }),
+    )
+    writeFileSync(
+      join(ops, "..", "focus.json"),
+      JSON.stringify({
+        reason: "a timed demo",
+        session: "worker-f",
+        since: "2026-10-19T08:00:00.000Z",
+        until: "2026-10-19T09:00:00.000Z",
+      }),
+    )
+    const ended = fake(ops, new Date("2026-10-19T09:00:30.000Z"), ASKED)
+    await beat("focus-card").run(ended.ctx)
+    expect(ended.runs).toEqual([["bun", "run", "--silent", "--cwd", "/repo", "ask", "new"]])
+    const open = [
+      "bun",
+      "run",
+      "--silent",
+      "--cwd",
+      "/repo",
+      "ask",
+      "open",
+      "--since",
+      "2026-10-19T08:00:00.000Z",
+      "--until",
+      "2026-10-19T09:00:00.000Z",
+    ]
+    const waiting = fake(ops, new Date("2026-10-19T09:05:00.000Z"), {
+      "ask open": "#i600 decision from worker-q · Ship the made-up fix?\n",
+    })
+    await beat("focus-card").run(waiting.ctx)
+    expect(waiting.runs).toEqual([open])
+    const clear = fake(ops, new Date("2026-10-19T09:10:00.000Z"), { "ask open": "" })
+    await beat("focus-card").run(clear.ctx)
+    expect(clear.runs).toEqual([
+      open,
+      [
+        "bun",
+        "run",
+        "--silent",
+        "--cwd",
+        "/repo",
+        "ask",
+        "resolve",
+        "f167b6b9-f570-4f15-a4b4-eb15b8c4876f",
+        "--by",
+        OLD.ops,
+        "--note",
+        "Everything that came in while focus stood is answered",
+      ],
+    ])
+    const after = fake(ops, new Date("2026-10-19T09:15:00.000Z"))
+    await beat("focus-card").run(after.ctx)
+    expect(after.runs).toEqual([])
+  })
+
+  // PG-1349 round 1: a kept card that had resolved stayed after a later card failed, and every beat after threw on it, so no new card posted
+  test("a kept card already resolved is dropped, one whose resolve fails stays for the next beat, and the beat still posts a new card", async () => {
+    const ops = scratch()
+    mkdirSync(join(ops, "tick"), { recursive: true })
+    const window = { since: "2026-10-19T07:00:00.000Z", until: "2026-10-19T07:30:00.000Z" }
+    const doneCard = { by: OLD.ops, id: "aaaaaaaa-0000-4000-8000-000000000001", ...window }
+    const downCard = { by: OLD.ops, id: "bbbbbbbb-0000-4000-8000-000000000002", ...window }
+    writeFileSync(join(ops, "tick", "focus-cards.json"), JSON.stringify([doneCard, downCard]))
+    writeFileSync(
+      join(ops, "..", "focus.json"),
+      JSON.stringify({
+        reason: "a timed demo",
+        session: "worker-f",
+        since: "2026-10-19T08:00:00.000Z",
+        until: "2026-10-19T09:00:00.000Z",
+      }),
+    )
+    const ended = fake(ops, new Date("2026-10-19T09:00:30.000Z"), {
+      ...ASKED,
+      "ask open": "",
+      [`resolve ${doneCard.id}`]: { code: 1, err: "ask: This update is already resolved\n" },
+      [`resolve ${downCard.id}`]: { code: 1, err: "ask: the dashboard is down\n" },
+    })
+    await expect(beat("focus-card").run(ended.ctx)).rejects.toThrow("ask: the dashboard is down")
+    expect(ended.runs.at(-1)).toEqual(["bun", "run", "--silent", "--cwd", "/repo", "ask", "new"])
+    const kept = JSON.parse(readFileSync(join(ops, "tick", "focus-cards.json"), "utf8")) as {
+      id: string
+    }[]
+    expect(kept.map((card) => card.id)).toEqual([
+      downCard.id,
+      "f167b6b9-f570-4f15-a4b4-eb15b8c4876f",
+    ])
   })
 
   test("a post that fails throws, so the beat names it and the next one tries again", async () => {

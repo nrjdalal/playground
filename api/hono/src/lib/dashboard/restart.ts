@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
 import { unstickPath } from "@/lib/dashboard/unstick"
 
-// A session whose Claude login expired, restarted from the app: spawn.sh closes the pane it opened, then resumes the same conversation on the account the owner just added, or with none on this Mac's own login, so no step needs a terminal. A fixture stack runs nothing: it clears the session's login block, as a fresh start would.
+// A session whose Claude login expired, restarted from the app: spawn.sh closes the pane it opened, then resumes the same conversation on the account the owner just added, or with none on this Mac's own login, a reviewer or tester with --pr naming its PRs since the close ends its row, so no step needs a terminal. A fixture stack runs nothing: it clears the session's login block, as a fresh start would.
 
 export type Run = (argv: string[]) => Promise<{ code: number; stderr: string; stdout: string }>
 
@@ -22,10 +22,20 @@ const run: Run = async (argv) => {
 
 const said = (text: string) => text.trim().split("\n").at(-1) ?? ""
 
-// Pure: spawn.sh's two steps, a close by the pane's label and a resume of the same session id in its folder, with --account only when one is named.
+// Pure: the PRs a restart's resume names with --pr (its pr first, as spawn.sh sets an ended row's pr to the first named), since the close ends the row and spawn.sh refuses a checker's start on an ended row that names none: a checker's pr, then the rest of its prs, else null, which the route refuses before the close; none for a session that is no checker or has no row.
+export const restartPrs = (
+  checker: boolean,
+  row?: { pr?: string; prs?: string[] },
+): string[] | null | undefined => {
+  if (!checker || !row) return undefined
+  const prs = [...new Set([row.pr, ...(row.prs ?? [])].filter((u): u is string => !!u))]
+  return prs.length ? prs : null
+}
+
+// Pure: spawn.sh's two steps, a close by the pane's label and a resume of the same session id in its folder, with --account only when one is named and --pr with a checker's prs, since the close ends its row.
 export const restartArgv = (
   root: string,
-  session: { account?: string; cwd: string; name: string; sessionId: string },
+  session: { account?: string; cwd: string; name: string; prs?: string[]; sessionId: string },
 ): string[][] => {
   const spawn = join(root, "scripts", "spawn.sh")
   return [
@@ -37,6 +47,7 @@ export const restartArgv = (
       session.cwd,
       session.sessionId,
       ...(session.account ? ["--account", session.account] : []),
+      ...(session.prs?.length ? ["--pr", session.prs.join(",")] : []),
     ],
   ]
 }
@@ -52,7 +63,7 @@ export function fixtureRestart(name: string, path = unstickPath()): void {
 }
 
 export async function restartSession(
-  session: { account?: string; cwd: string; name: string; sessionId: string },
+  session: { account?: string; cwd: string; name: string; prs?: string[]; sessionId: string },
   {
     live = readsLive(),
     root = checkoutRoot(),

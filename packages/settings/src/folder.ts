@@ -166,6 +166,12 @@ export const filesIn = (dir: string): string[] => {
   return existsSync(dir) ? walk(dir).sort() : []
 }
 
+// A scope's script files, each <scope>/scripts/<key>/<path> split on its slashes: the folders an org's own job may run from, read alike by the jobs render and a settings write.
+export const scriptFilesOf = (data: string, scope: string): string[][] =>
+  filesIn(scopeDir(data, scope))
+    .map((file) => file.split("/"))
+    .filter((parts) => parts[0] === "scripts" && parts.length >= 3)
+
 // The scope folders present under the root, each a git repository, by name.
 export const scopesIn = (data: string): string[] => {
   const root = extensionsDir(data)

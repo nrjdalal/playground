@@ -18,7 +18,7 @@ export type Entry = {
   toolUseId?: string
 }
 
-const TEXT_LIMIT = 4000
+export const TEXT_LIMIT = 4000
 const SUMMARY_LIMIT = 300
 // A tool's input and its result put more of the transcript on screen than its one-line summary, so each is clipped tighter than a message.
 const DETAIL_LIMIT = 2000

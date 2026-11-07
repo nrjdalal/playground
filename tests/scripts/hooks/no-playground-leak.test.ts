@@ -253,7 +253,7 @@ describe(`a Acme write holding a ${OLD.dispatcher} term is refused`, () => {
     [
       "the backend's model",
       "mcp__linear-shared__save_comment",
-      { body: "Ran on GLM-5.3 today", issueId: "ACME-1" },
+      { body: "Ran on GLM 5.3 today", issueId: "ACME-1" },
     ],
   ])("%s", async (_, tool, input) => {
     const reason = await mcp(tool, input)
@@ -1247,7 +1247,7 @@ describe("an org whose extension gates its Slack sends", () => {
   // Acme's extension declares its Slack gate: the servers its workspace posts through, its self-DM and the send path every other post takes
   const GATE = {
     path: "the acme extension's post.ts",
-    selfDm: "D0SELF0001",
+    selfDm: "D0MADE0501",
     servers: ["slack-acme", "claude_ai_Slack"],
   }
   const gated = async (gate: unknown) => {
@@ -1274,7 +1274,7 @@ describe("an org whose extension gates its Slack sends", () => {
   ])("refuses %s on its server to any other conversation, naming its send path", async (tool) => {
     const reason = await mcp(
       `mcp__slack-acme__${tool}`,
-      { channel: "C0OTHER001", text: "the fix is up" },
+      { channel: "C0MADE0101", text: "the fix is up" },
       await gated(GATE),
     )
     expect(reason).toContain("gates its Slack sends")
@@ -1286,7 +1286,7 @@ describe("an org whose extension gates its Slack sends", () => {
     expect(
       await mcp(
         "mcp__claude_ai_Slack__slack_send_message",
-        { channel_id: "C0OTHER001", message: "hi" },
+        { channel_id: "C0MADE0101", message: "hi" },
         env,
       ),
     ).toContain("gates its Slack sends")
@@ -1303,23 +1303,23 @@ describe("an org whose extension gates its Slack sends", () => {
   })
 
   test.each([
-    ["chat_delete", "mcp__slack-acme__chat_delete", { channel: "D0SELF0001", ts: "1.2" }],
+    ["chat_delete", "mcp__slack-acme__chat_delete", { channel: "D0MADE0501", ts: "1.2" }],
     [
       "reactions_add",
       "mcp__slack-acme__reactions_add",
-      { channel: "C0OTHER001", name: "eyes", timestamp: "1.2" },
+      { channel: "C0MADE0101", name: "eyes", timestamp: "1.2" },
     ],
     [
       "reactions_remove",
       "mcp__slack-acme__reactions_remove",
-      { channel: "C0OTHER001", name: "eyes", timestamp: "1.2" },
+      { channel: "C0MADE0101", name: "eyes", timestamp: "1.2" },
     ],
-    ["conversations_join", "mcp__slack-acme__conversations_join", { channel: "C0OTHER001" }],
-    ["conversations_leave", "mcp__slack-acme__conversations_leave", { channel: "C0OTHER001" }],
+    ["conversations_join", "mcp__slack-acme__conversations_join", { channel: "C0MADE0101" }],
+    ["conversations_leave", "mcp__slack-acme__conversations_leave", { channel: "C0MADE0101" }],
     [
       "conversations_mark",
       "mcp__slack-acme__conversations_mark",
-      { channel: "C0OTHER001", ts: "1.2" },
+      { channel: "C0MADE0101", ts: "1.2" },
     ],
     ["usergroups_create", "mcp__slack-acme__usergroups_create", { name: "fixers" }],
     [
@@ -1330,12 +1330,12 @@ describe("an org whose extension gates its Slack sends", () => {
     [
       "the connector's slack_schedule_message",
       "mcp__claude_ai_Slack__slack_schedule_message",
-      { channel_id: "C0OTHER001", message: "hi", post_at: 1 },
+      { channel_id: "C0MADE0101", message: "hi", post_at: 1 },
     ],
     [
       "the connector's slack_send_message_draft",
       "mcp__claude_ai_Slack__slack_send_message_draft",
-      { channel_id: "C0OTHER001", message: "hi" },
+      { channel_id: "C0MADE0101", message: "hi" },
     ],
     [
       "the connector's slack_create_canvas",
@@ -1354,11 +1354,11 @@ describe("an org whose extension gates its Slack sends", () => {
   test("lets every read on its server through, the connector's slack_read_ and slack_search_ tools included", async () => {
     const env = await gated(GATE)
     for (const [tool, input] of [
-      ["mcp__slack-acme__conversations_replies", { channel: "C0OTHER001", ts: "1.2" }],
+      ["mcp__slack-acme__conversations_replies", { channel: "C0MADE0101", ts: "1.2" }],
       ["mcp__slack-acme__users_search", { query: "a" }],
       ["mcp__slack-acme__users_conversations", { limit: 100 }],
       ["mcp__slack-acme__usergroups_me", {}],
-      ["mcp__claude_ai_Slack__slack_read_channel", { channel_id: "C0OTHER001" }],
+      ["mcp__claude_ai_Slack__slack_read_channel", { channel_id: "C0MADE0101" }],
       ["mcp__claude_ai_Slack__slack_search_public", { query: "the fix" }],
     ] as const)
       expect(await mcp(tool, input, env)).toBeUndefined()
@@ -1366,7 +1366,7 @@ describe("an org whose extension gates its Slack sends", () => {
 
   test("refuses a curl that writes to Slack's API while any org declares a gate, naming its send path, and lets a read and an ungated machine's curl be judged as before", async () => {
     const post =
-      'curl -H "Authorization: Bearer $SLACK_TOKEN" -d channel=C0OTHER001 -d text="PR is up" https://slack.com/api/chat.postMessage'
+      'curl -H "Authorization: Bearer $SLACK_TOKEN" -d channel=C0MADE0101 -d text="PR is up" https://slack.com/api/chat.postMessage'
     const asCurl = async (command: string, environment: Record<string, string>) =>
       check(
         JSON.stringify({
@@ -1383,22 +1383,22 @@ describe("an org whose extension gates its Slack sends", () => {
       expect(await asCurl(post, env)).toContain("slack.gatedSends")
       expect(
         await asCurl(
-          "curl https://slack.com/api/reactions.add?channel=C0OTHER001&name=eyes&timestamp=1.2",
+          "curl https://slack.com/api/reactions.add?channel=C0MADE0101&name=eyes&timestamp=1.2",
           env,
         ),
       ).toContain("slack.gatedSends")
       // every other Slack URL is refused: an incoming webhook, a path that is not /api/<method>, a host behind user info or a trailing dot
       for (const write of [
         "curl -X POST -H 'Content-type: application/json' -d '{\"text\":\"hi\"}' https://hooks.slack.com/services/T0AAA/B0BBB/XXXX",
-        "curl -d channel=C0OTHER001 -d text=hi https://slack.com//api/chat.postMessage",
-        "curl -d channel=C0OTHER001 -d text=hi https://slack.com/api/conversations.history/../chat.postMessage",
+        "curl -d channel=C0MADE0101 -d text=hi https://slack.com//api/chat.postMessage",
+        "curl -d channel=C0MADE0101 -d text=hi https://slack.com/api/conversations.history/../chat.postMessage",
         // joined, so the user info does not read as an address
         [
-          "curl -d channel=C0OTHER001 -d text=hi https://x:y",
+          "curl -d channel=C0MADE0101 -d text=hi https://x:y",
           "slack.com/api/chat.postMessage",
         ].join("@"),
-        "curl -d channel=C0OTHER001 -d text=hi https://slack.com./api/chat.postMessage",
-        "curl -d channel=C0OTHER001 -d text=hi slack.com/api/chat.postMessage",
+        "curl -d channel=C0MADE0101 -d text=hi https://slack.com./api/chat.postMessage",
+        "curl -d channel=C0MADE0101 -d text=hi slack.com/api/chat.postMessage",
       ])
         expect([write, await asCurl(write, env)]).toEqual([
           write,
@@ -1406,7 +1406,7 @@ describe("an org whose extension gates its Slack sends", () => {
         ])
       expect(
         await asCurl(
-          'curl -G -d channel=C0OTHER001 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/conversations.history',
+          'curl -G -d channel=C0MADE0101 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/conversations.history',
           env,
         ),
       ).toBeUndefined()
@@ -1414,10 +1414,10 @@ describe("an org whose extension gates its Slack sends", () => {
     // the reads the firefighting watcher makes, and the token check, stay open under a gate
     for (const env of [await gated(GATE), await gated({ servers: "slack-acme" })])
       for (const read of [
-        'curl -G -d channel=C0OTHER001 -d limit=100 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/conversations.history',
-        'curl -G -d channel=C0OTHER001 -d ts=1.2 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/conversations.replies',
+        'curl -G -d channel=C0MADE0101 -d limit=100 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/conversations.history',
+        'curl -G -d channel=C0MADE0101 -d ts=1.2 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/conversations.replies',
         'curl -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/auth.test',
-        'curl -G -d query=CEDAR-1 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/search.messages',
+        'curl -G -d query=MADECEDAR-1 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/search.messages',
       ])
         expect([read, await asCurl(read, env)]).toEqual([read, undefined])
     expect(await asCurl(post, await gated(GATE))).toContain("the acme extension's post.ts")
@@ -1445,12 +1445,12 @@ describe("an org whose extension gates its Slack sends", () => {
       )
     for (const run of [
       "bun --no-env-file /Users/someone/.claude-ext/acme-blue/skills/templates/scripts/post.ts review-request --pr https://github.com/acme-blue/app/pull/7 --ticket ACME-1",
-      "bun --no-env-file /Users/someone/.claude-ext/acme-blue/skills/templates/scripts/post.ts triage-start --ticket ACME-1 --thread C0OTHER001/1.2",
+      "bun --no-env-file /Users/someone/.claude-ext/acme-blue/skills/templates/scripts/post.ts triage-start --ticket ACME-1 --thread C0MADE0101/1.2",
     ])
       expect([run, await asBash(run)]).toEqual([run, undefined])
     for (const [tool, input] of [
-      ["mcp__slack-acme__conversations_history", { channel: "C0OTHER001", limit: 100 }],
-      ["mcp__slack-acme__conversations_replies", { channel: "C0OTHER001", ts: "1.2" }],
+      ["mcp__slack-acme__conversations_history", { channel: "C0MADE0101", limit: 100 }],
+      ["mcp__slack-acme__conversations_replies", { channel: "C0MADE0101", ts: "1.2" }],
     ] as const)
       expect(await mcp(tool, input, env)).toBeUndefined()
   })
@@ -1460,39 +1460,39 @@ describe("an org whose extension gates its Slack sends", () => {
     expect(
       await mcp(
         "mcp__slack-acme__chat_post_message",
-        { channel: "D0SELF0001", text: "CEDAR-1 \u00B7 triaging" },
+        { channel: "D0MADE0501", text: "MADECEDAR-1 \u00B7 triaging" },
         env,
       ),
     ).toBeUndefined()
     expect(
       await mcp(
         "mcp__slack-acme__chat_update",
-        { channel: "D0SELF0001", text: "CEDAR-1 \u00B7 done", ts: "1.2" },
+        { channel: "D0MADE0501", text: "MADECEDAR-1 \u00B7 done", ts: "1.2" },
         env,
       ),
     ).toBeUndefined()
     expect(
       await mcp(
         "mcp__claude_ai_Slack__slack_send_message",
-        { channel_id: "D0SELF0001", message: "hi" },
+        { channel_id: "D0MADE0501", message: "hi" },
         env,
       ),
     ).toBeUndefined()
     expect(
       await mcp(
         "mcp__slack-acme__chat_post_message",
-        { channel: "D0SELF0001", text: `from ${OLD.dispatcher}` },
+        { channel: "D0MADE0501", text: `from ${OLD.dispatcher}` },
         env,
       ),
     ).toContain(OLD.dispatcher)
   })
 
   test.each([
-    ["a second channel key", { channel: "D0SELF0001", channel_id: "C0OTHER001", text: "hi" }],
-    ["a conversation key", { channel: "D0SELF0001", conversation: "C0OTHER001", text: "hi" }],
-    ["a channel list", { channel: "D0SELF0001", channels: ["C0OTHER001"], text: "hi" }],
+    ["a second channel key", { channel: "D0MADE0501", channel_id: "C0MADE0101", text: "hi" }],
+    ["a conversation key", { channel: "D0MADE0501", conversation: "C0MADE0101", text: "hi" }],
+    ["a channel list", { channel: "D0MADE0501", channels: ["C0MADE0101"], text: "hi" }],
     ["no channel", { text: "hi" }],
-    ["a channel that is not text", { channel: ["D0SELF0001"], text: "hi" }],
+    ["a channel that is not text", { channel: ["D0MADE0501"], text: "hi" }],
   ])("refuses a self-DM post with %s", async (_, input) => {
     expect(await mcp("mcp__slack-acme__chat_post_message", input, await gated(GATE))).toContain(
       "gates its Slack sends",
@@ -1502,10 +1502,10 @@ describe("an org whose extension gates its Slack sends", () => {
   test("leaves reads, other servers and every org with no declaration as they are", async () => {
     const env = await gated(GATE)
     expect(
-      await mcp("mcp__slack-acme__conversations_history", { channel: "C0OTHER001" }, env),
+      await mcp("mcp__slack-acme__conversations_history", { channel: "C0MADE0101" }, env),
     ).toBeUndefined()
     expect(
-      await mcp("mcp__slack-other__chat_post_message", { channel: "C0OTHER001", text: "hi" }, env),
+      await mcp("mcp__slack-other__chat_post_message", { channel: "C0MADE0101", text: "hi" }, env),
     ).toBeUndefined()
     for (const none of [
       await gated(""),
@@ -1514,7 +1514,7 @@ describe("an org whose extension gates its Slack sends", () => {
       expect(
         await mcp(
           "mcp__slack-acme__chat_post_message",
-          { channel: "C0OTHER001", text: "the fix is up" },
+          { channel: "C0MADE0101", text: "the fix is up" },
           none,
         ),
       ).toBeUndefined()
@@ -1522,8 +1522,8 @@ describe("an org whose extension gates its Slack sends", () => {
 
   test.each([
     ["servers as text", { ...GATE, servers: "slack-acme" }],
-    ["no send path", { selfDm: "D0SELF0001", servers: ["slack-acme"] }],
-    ["a self-DM that is a channel", { ...GATE, selfDm: "C0OTHER001" }],
+    ["no send path", { selfDm: "D0MADE0501", servers: ["slack-acme"] }],
+    ["a self-DM that is a channel", { ...GATE, selfDm: "C0MADE0101" }],
     ["a key it does not know", { ...GATE, extra: true }],
   ])(
     "a declaration with %s refuses every write on a Slack server, naming the fix, and lets a read and another server through",
@@ -1532,7 +1532,7 @@ describe("an org whose extension gates its Slack sends", () => {
       expect(
         await mcp(
           "mcp__github-shared__chat_post_message",
-          { channel: "D0SELF0001", text: "hi" },
+          { channel: "D0MADE0501", text: "hi" },
           env,
         ),
       ).toBeUndefined()
@@ -1541,14 +1541,14 @@ describe("an org whose extension gates its Slack sends", () => {
         "mcp__slack-other__chat_post_message",
         "mcp__slack-other__reactions_add",
       ]) {
-        const reason = await mcp(tool, { channel: "D0SELF0001", text: "hi" }, env)
+        const reason = await mcp(tool, { channel: "D0MADE0501", text: "hi" }, env)
         expect(reason).toContain("slack.gatedSends")
         expect(reason).toContain(
           '{"path": "<its send path>", "selfDm": "D\u2026", "servers": ["<MCP server>"]}',
         )
       }
       expect(
-        await mcp("mcp__slack-acme__conversations_history", { channel: "C0OTHER001" }, env),
+        await mcp("mcp__slack-acme__conversations_history", { channel: "C0MADE0101" }, env),
       ).toBeUndefined()
     },
   )

@@ -603,8 +603,8 @@ describe("a turn that ended on an API error (#1637)", () => {
 describe("the job's one folder", () => {
   test("its ledger and its heartbeat share opsDirOf, which follows PLAYGROUND_DATA_DIR, else ~/.playground", () => {
     expect(opsDirOf({ PLAYGROUND_DATA_DIR: "/data/dashboard" })).toBe("/data/dashboard/ops")
-    expect(opsDirOf({ CLAUDE_CONFIG_DIR: "/elsewhere", HOME: "/home/made-up" })).toBe(
-      "/home/made-up/.playground/ops",
+    expect(opsDirOf({ CLAUDE_CONFIG_DIR: "/elsewhere", HOME: "/home/someone" })).toBe(
+      "/home/someone/.playground/ops",
     )
   })
 })

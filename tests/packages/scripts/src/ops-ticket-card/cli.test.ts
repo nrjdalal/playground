@@ -232,16 +232,16 @@ describe("the beat", () => {
 describe("its readers", () => {
   test("the lines file's lines with their Linear state, kept to the prefixes named, none meaning every prefix", () => {
     const file = {
-      clock: { "ABC-1": {}, "XYZ-2": {} },
+      clock: { "ABC-1": {}, "MADEXYZ-2": {} },
       lines: {
         "ABC-1": { id: "ABC-1", open: true, shownAt: 1, state: "In Progress" },
-        "XYZ-2": { id: "XYZ-2", open: false, shownAt: 2, theirs: true },
+        "MADEXYZ-2": { id: "MADEXYZ-2", open: false, shownAt: 2, theirs: true },
       },
     }
     expect(linesIn(file, ["ABC"]).map((l) => l.id)).toEqual(["ABC-1"])
     expect(linesIn(file, [])).toEqual([
       { id: "ABC-1", mine: false, open: true, shownAt: 1, state: "In Progress" },
-      { id: "XYZ-2", mine: false, open: false, shownAt: 2, theirs: true },
+      { id: "MADEXYZ-2", mine: false, open: false, shownAt: 2, theirs: true },
     ])
   })
 

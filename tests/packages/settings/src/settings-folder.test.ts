@@ -16,6 +16,7 @@ import {
   extensionsDir,
   scopeDir,
   type Who,
+  writeFiles,
 } from "../../../../packages/settings/src"
 
 process.env.PLAYGROUND_LOGIN = "made-up-me"
@@ -233,5 +234,110 @@ describe("settings over the extensions folder", () => {
     } finally {
       process.env.PLAYGROUND_LOGIN = ME
     }
+  })
+})
+
+// PG-1196: a job turned on by its enabled field alone is stored as that field alone, and every reader (policy.json, readSetting, which merge-train's own schedule read goes through, and the Settings list the job toggles read) sees the registry's job under it.
+describe("a job set by its enabled field alone (PG-1196)", () => {
+  test("its row holds enabled alone, while policy.json and readSetting read the whole job, merge-train's schedule included", () => {
+    const data = fresh()
+    const key = "jobs.opsMergeTrain"
+    expect(set(data, key, ME, { enabled: true }, who("turn the train on")).ok).toBe(true)
+    expect(file(data, `${ME}/settings.json`)).toEqual({ [key]: { enabled: true } })
+    const read = readSetting(data, key)!
+    expect(read.rows).toEqual([{ key, scope: ME, value: { enabled: true } }])
+    expect(read.value).toEqual({ ...(read.default as object), enabled: true })
+    expect((read.value as { schedule: { every: number } }).schedule.every).toBeGreaterThan(0)
+    expect(file(data, "policy.json").values[key]).toEqual(read.value)
+    expect(listSettings(data).values[key]).toEqual(read.value)
+  })
+
+  test("a job the registry does not name is refused at write, and nothing is stored", () => {
+    const data = fresh()
+    expect(set(data, "jobs.opsMadeUp", ME, { enabled: true }, who("no such job")).ok).toBe(false)
+    expect(existsSync(join(extensionsDir(data), ME, "settings.json"))).toBe(false)
+  })
+})
+
+describe("an org's own job row (PG-1363)", () => {
+  const key = "jobs.opsWatch"
+  const row = {
+    callsModel: false,
+    command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+    config: { prefixes: ["INC"] },
+    description: "Watches an org's own queue.",
+    enabled: true,
+    heartbeat: "ops-watch",
+    schedule: { every: 60 },
+  }
+  // a data folder whose acme scope ships the ops-watch script folder
+  const shipped = () => {
+    const data = fresh()
+    set(data, "folderFixture.count", ME, 2, who("make the login"))
+    writeFiles(data, "acme", new Map([["scripts/ops-watch/cli.ts", "console.log(1)"]]), {
+      author: "owner",
+      reason: "ship the script",
+    })
+    return data
+  }
+
+  test("set writes a row the render takes at the org's scope, and reset takes it out", () => {
+    const data = shipped()
+    expect(set(data, key, "acme", row, who("run acme's watch"))).toEqual({
+      key,
+      ok: true,
+      scope: "acme",
+      value: row,
+    })
+    expect(file(data, "acme/settings.json")[key]).toEqual(row)
+    expect(resetSetting(data, { key, scope: "acme" }, who("stop acme's watch")).ok).toBe(true)
+    expect(file(data, "acme/settings.json")[key]).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "a script folder the org does not ship",
+      { ...row, command: "{bun} {data}/ops/other/cli.ts" },
+      "its command must run a script in a folder its org ships",
+    ],
+    ["a stop group", { ...row, stop: "dashboard" }, "an org's job names no stop group"],
+    [
+      "another job's heartbeat",
+      { ...row, heartbeat: "ops-dashboard" },
+      "its heartbeat must be its own name",
+    ],
+    ["a value that is no job", { enabled: true }, "heartbeat Invalid input"],
+  ])(
+    "a row with %s is refused with the render's reason, and nothing is stored",
+    (_, value, why) => {
+      const data = shipped()
+      const result = set(data, key, "acme", value, who("a bad row"))
+      expect(result).toMatchObject({ ok: false })
+      expect("message" in result && result.message).toContain(why)
+      expect(existsSync(join(extensionsDir(data), "acme", "settings.json"))).toBe(false)
+    },
+  )
+
+  test("a second org's row for a job another org adds is refused with the render's reason, so an org earlier in A to Z order cannot take it over", () => {
+    const data = shipped()
+    writeFiles(data, "aaa", new Map([["scripts/ops-watch/cli.ts", "console.log(2)"]]), {
+      author: "owner",
+      reason: "ship the script",
+    })
+    expect(set(data, key, "acme", row, who("run acme's watch")).ok).toBe(true)
+    const result = set(data, key, "aaa", row, who("run aaa's watch"))
+    expect(result).toMatchObject({ ok: false })
+    expect("message" in result && result.message).toContain("acme already adds ops-watch")
+    expect(existsSync(join(extensionsDir(data), "aaa", "settings.json"))).toBe(false)
+    expect(set(data, key, "acme", { ...row, enabled: false }, who("pause acme's watch")).ok).toBe(
+      true,
+    )
+  })
+
+  test("the login's scope takes no row for a job the registry lacks", () => {
+    const data = shipped()
+    const result = set(data, key, ME, row, who("at the login"))
+    expect(result).toMatchObject({ ok: false })
+    expect(file(data, `${ME}/settings.json`)[key]).toBeUndefined()
   })
 })

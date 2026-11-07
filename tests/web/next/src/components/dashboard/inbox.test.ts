@@ -3,14 +3,21 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import type { InboxItem } from "../../../../../../api/hono/src/lib/dashboard/inbox"
-import { type Choices, choicesOf } from "../../../../../../packages/config/src/inbox"
+import {
+  type AskQuestion,
+  type Choices,
+  choicesOf,
+  questionsOf,
+} from "../../../../../../packages/config/src/inbox"
 import { DashboardContext } from "../../../../../../web/next/src/components/dashboard/dashboard"
 import {
   AskChoices,
+  choicesKey,
   FOLDS_OPEN,
   Inbox,
   InboxCard,
   NewPill,
+  picksKey,
   ShelfDismiss,
   ShelfLabel,
 } from "../../../../../../web/next/src/components/dashboard/inbox"
@@ -23,6 +30,7 @@ import {
   Questionnaire,
   QuestionnaireItem,
 } from "../../../../../../web/next/src/components/ui/questionnaire"
+import { EMPTY_PICKS, readPicks, savePicks } from "../../../../../../web/next/src/lib/ask-picks"
 import { cardDraftKey, readDrafts, saveDraft } from "../../../../../../web/next/src/lib/drafts"
 import { INBOX_QUERY_KEY, SHELF_LABELS, type Shelf } from "../../../../../../web/next/src/lib/inbox"
 import { tipsOf } from "../../tooltips"
@@ -130,6 +138,80 @@ describe("a queued answer's poster", () => {
     } as InboxItem)
     expect(html).toContain("Queued for")
     expect(html).toContain('aria-description="dispatcher"')
+  })
+})
+
+describe("a multi-question ask (#1250)", () => {
+  const multi = {
+    ...decision,
+    id: "id-48",
+    preview: {
+      questions: [
+        {
+          options: [{ description: "a day of soak", label: "staging" }, { label: "main" }],
+          question: "Which base?",
+          recommended: 0,
+        },
+        { options: [{ label: "now" }, { label: "later" }], question: "When?" },
+      ],
+      text: "Pick for each.",
+      type: "ask",
+    },
+    ref: 48,
+    title: "Port it, and when?",
+  } as InboxItem
+
+  test("picksKey changes when an in-place edit grows, shrinks, reorders or rewords the questions, so the card drops stale picks (#1250)", () => {
+    const q = (question: string, labels: string[]): AskQuestion => ({
+      options: labels.map((label, index) => ({
+        go: true,
+        index,
+        label,
+        letter: String.fromCharCode(65 + index),
+      })),
+      question,
+    })
+    const base = [q("Base?", ["staging", "main"]), q("When?", ["now", "later"])]
+    const same = [q("Base?", ["staging", "main"]), q("When?", ["now", "later"])]
+    expect(picksKey(base)).toBe(picksKey(same))
+    expect(picksKey(base)).not.toBe(picksKey([...base, q("Who?", ["ops"])]))
+    expect(picksKey(base)).not.toBe(picksKey([base[0]!]))
+    expect(picksKey(base)).not.toBe(picksKey([base[1]!, base[0]!]))
+    expect(picksKey(base)).not.toBe(picksKey([q("Base?", ["staging", "trunk"]), base[1]!]))
+  })
+
+  test("shows its words alone, with no On Approve line (#1250)", () => {
+    const html = opened(multi)
+    expect(html).toContain("Pick for each.")
+    expect(html).not.toContain("On Approve")
+  })
+
+  test("shows its first question lettered, the recommended one badged in place, with Next and Send in the footer", () => {
+    const html = opened(multi)
+    expect(html).toContain("Which base?")
+    expect(html).toContain("A. staging")
+    expect(html).toContain("Recommended")
+    expect(named(html, "Next")).not.toBe("")
+    expect(named(html, "Send")).not.toBe("")
+  })
+
+  // once answered the stepper is gone and its result reads one pick per question and the note; the header sits outside every QuestionnaireItem, so the result renders as a plain description, not a QuestionnaireDescription, which throws there
+  test("renders its answer as one pick per question and the note once answered", () => {
+    const answered = {
+      ...multi,
+      answer: {
+        at: "2026-10-12T10:05:00.000Z",
+        choice: "approve",
+        note: "Soak it.",
+        options: [0, 1],
+      },
+      status: "approved",
+    } as InboxItem
+    const html = opened(answered)
+    expect(html).toContain("A. staging · B. later")
+    expect(html).toContain("You: ")
+    expect(html).toContain("Soak it.")
+    expect(html).not.toContain("When?")
   })
 })
 
@@ -273,8 +355,10 @@ describe("one action where two overlapped, and Draft where the app has a draft A
   test("a card's answer names the updatedAt it showed, so the API refuses one to words its poster edited since", () => {
     const card = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
     const client = readFileSync(join(web, "src/lib/inbox.ts"), "utf8")
-    expect(card).toContain("answerItem(item, action, text, note.trim() || undefined, option)")
-    expect(client).toContain("json: { action, note, option, seen: updatedAt, text }")
+    expect(card).toContain(
+      "answerItem(item, action, text, note.trim() || undefined, option, options)",
+    )
+    expect(client).toContain("json: { action, note, option, options, seen: updatedAt, text }")
   })
 
   test("an unread update's line ends in a single tick, Mark as read; once read, a muted double tick named Read, folded, its row keeping Dismiss (#882)", () => {
@@ -335,7 +419,7 @@ describe("one action where two overlapped, and Draft where the app has a draft A
   })
 
   test("a Linear comment offers no Draft, since Linear's API creates none", () => {
-    const html = render(false, draft("https://linear.app/acme/issue/DUNE-1/x"))
+    const html = render(false, draft("https://linear.app/acme/issue/MADEDUNE-1/x"))
     expect(named(html, "Send")).not.toBe("")
     expect(named(html, "Draft")).toBe("")
   })
@@ -1894,5 +1978,132 @@ describe("a draft card's changed words", () => {
   test("are another card's alone: a card shows its own words when only another's are kept", () => {
     saveDraft(cardDraftKey("id-42"), { attachments: [], text: "for another card" })
     expect(box(opened(draft))).toBe("hi")
+  })
+})
+
+// A remount is a fresh static render that reads the picks store (no effects run), as a draft card's words come back under cardDraftKey. The store is seeded, then the card rendered, so each case proves what a list refresh or a shelf move gives back.
+describe("an ask card's answer in progress (PG-1345)", () => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+  const store = new Map<string, string>()
+  beforeAll(() =>
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        removeItem: (key: string) => void store.delete(key),
+        setItem: (key: string, value: string) => void store.set(key, value),
+      } as Storage,
+    }),
+  )
+  afterEach(() => {
+    for (const id of Object.keys(readPicks())) savePicks(id, EMPTY_PICKS)
+  })
+  afterAll(() => {
+    if (real) Object.defineProperty(globalThis, "localStorage", real)
+    else delete (globalThis as { localStorage?: Storage }).localStorage
+  })
+
+  const single = (labels: string[]) =>
+    ({
+      ...decision,
+      id: "id-70",
+      preview: { options: labels.map((label) => ({ label })), text: "Pick a base.", type: "ask" },
+      ref: 70,
+      title: "Which base?",
+    }) as InboxItem
+  const multiItem = {
+    ...decision,
+    id: "id-71",
+    preview: {
+      questions: [
+        { options: [{ label: "staging" }, { label: "main" }], question: "Which base?" },
+        { options: [{ label: "now" }, { label: "later" }], question: "When?" },
+      ],
+      text: "Pick for each.",
+      type: "ask",
+    },
+    ref: 71,
+    title: "Port it, and when?",
+  } as InboxItem
+  const singleSig = (labels: string[]) =>
+    choicesKey(choicesOf({ options: labels.map((label) => ({ label })), type: "ask" }))
+  const multiSig = picksKey(
+    questionsOf({
+      questions: [
+        { options: [{ label: "staging" }, { label: "main" }], question: "Which base?" },
+        { options: [{ label: "now" }, { label: "later" }], question: "When?" },
+      ],
+      type: "ask",
+    }),
+  )
+  // the value of every choice input the remount rendered checked, each `${letter}: ${label}` as AskChoices and QuestionChoices stamp it; the primitive carries value and data-checked on the input, not the choice root
+  const picked = (html: string) =>
+    [...html.matchAll(/<[^>]*data-slot="questionnaire-choice-input"[^>]*>/g)]
+      .map((m) => m[0])
+      .filter((tag) => /data-checked(?:=""|[\s>])/.test(tag))
+      .map((tag) => tag.match(/value="([^"]*)"/)?.[1] ?? "")
+  const note = (html: string) =>
+    html.match(/<textarea[^>]*aria-label="Comment"[^>]*>([^<]*)<\/textarea>/)?.[1]
+
+  test("a single ask gives back its pick and Note on remount", () => {
+    savePicks("id-70", {
+      ...EMPTY_PICKS,
+      note: "Soak it.",
+      pick: 1,
+      sig: singleSig(["staging", "main"]),
+    })
+    const html = opened(single(["staging", "main"]))
+    expect(picked(html)).toEqual(["B: main"])
+    expect(note(html)).toBe("Soak it.")
+  })
+
+  test("a fresh single ask keeps none", () => {
+    const html = opened(single(["staging", "main"]))
+    expect(picked(html)).toEqual([])
+    expect(note(html)).toBe("")
+  })
+
+  test("a multi ask gives back each pick and the question in sight", () => {
+    savePicks("id-71", { ...EMPTY_PICKS, picks: [0, 1], sig: multiSig, step: 1 })
+    const html = opened(multiItem)
+    expect(picked(html)).toEqual(expect.arrayContaining(["A: staging", "B: later"]))
+    // step 1 restored, not reset to 0: the second question is the active one, the first is held hidden
+    const active = html.match(/<fieldset[^>]*data-active[^>]*>([\s\S]*?)<\/fieldset>/)?.[1] ?? ""
+    expect(active).toContain("When?")
+    expect(active).not.toContain("Which base?")
+  })
+
+  test("a single ask drops a pick whose options changed under the unmounted card, keeping the Note", () => {
+    savePicks("id-70", {
+      ...EMPTY_PICKS,
+      note: "Soak it.",
+      pick: 1,
+      sig: singleSig(["staging", "main"]),
+    })
+    const html = opened(single(["revert", "delete", "wait"]))
+    expect(picked(html)).toEqual([])
+    expect(note(html)).toBe("Soak it.")
+  })
+
+  test("an answered card renders its result, not a kept answer's choices", () => {
+    savePicks("id-70", {
+      ...EMPTY_PICKS,
+      note: "Soak it.",
+      pick: 1,
+      sig: singleSig(["staging", "main"]),
+    })
+    const answered = {
+      ...single(["staging", "main"]),
+      answer: { at: "2026-10-12T10:05:00.000Z", choice: "approve", option: 0 },
+      status: "approved",
+    } as InboxItem
+    expect(picked(opened(answered, "done"))).toEqual([])
+  })
+
+  test("another card's entry leaves this card untouched", () => {
+    savePicks("id-99", { ...EMPTY_PICKS, note: "other", pick: 0, sig: singleSig(["a", "b"]) })
+    const html = opened(single(["staging", "main"]))
+    expect(picked(html)).toEqual([])
+    expect(note(html)).toBe("")
   })
 })

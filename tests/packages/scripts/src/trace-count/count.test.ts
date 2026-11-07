@@ -38,15 +38,15 @@ const OLD_SKILL = ["light", "review"].join("")
 const LIST = {
   companies: ["Vantorix"],
   handles: ["qmarsh"],
-  linearKeys: ["VX"],
+  linearKeys: ["MADEVX"],
   names: ["Quilla Marsh"],
-  slackIds: ["C0FAKE1234"],
+  slackIds: ["C0MADE0401"],
 }
 
 describe("the trace count", () => {
   test("counts each kind, its list-fed kinds from the list", () => {
     const text = [
-      "Quilla Marsh and @qmarsh at Vantorix, in C0FAKE1234, on VX-12",
+      "Quilla Marsh and @qmarsh at Vantorix, in C0MADE0401, on MADEVX-12",
       `mail ${["quilla", "qwerty.io"].join("@")}, see #123, as ${OLD_NAME.dispatcher} and ${OLD_NAME.builder} said`,
       "https://github.com/octo/vault/pull/4",
       `run ${OLD_SKILL} and ${OLD_SKILL}-scan, not playground-review`,
@@ -159,15 +159,15 @@ describe("the trace count", () => {
   })
 
   test("reads past tests/ for issue numbers alone, so a test's other traces still count", () => {
-    const counts = count([{ path: "tests/a.test.ts", text: `${ref(123)} VX-12 ${OLD}` }], LIST)
+    const counts = count([{ path: "tests/a.test.ts", text: `${ref(123)} MADEVX-12 ${OLD}` }], LIST)
     expect(counts.issueRefs).toBe(0)
     expect(counts.linearKeys).toBe(1)
     expect(counts.oldNames).toBe(1)
   })
 
   test("counts a key only through the list: no fixed key kind, so an empty list counts none", () => {
-    expect(count([{ path: "a.md", text: "fixes VX-42" }], LIST).linearKeys).toBe(1)
-    const empty = count([{ path: "a.md", text: "fixes VX-42" }], EMPTY_LIST)
+    expect(count([{ path: "a.md", text: "fixes MADEVX-42" }], LIST).linearKeys).toBe(1)
+    const empty = count([{ path: "a.md", text: "fixes MADEVX-42" }], EMPTY_LIST)
     expect(empty).not.toHaveProperty("archiveKeys")
     expect(Object.values(empty).every((n) => n === 0)).toBe(true)
   })

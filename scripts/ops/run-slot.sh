@@ -52,6 +52,8 @@ switch_on() {
 # whether pid $1 runs: kill -0 reaches it, or the kernel refuses the signal (another user's process, or one outside Claude Code's sandbox, which also refuses the setuid ps) rather than finding no such process
 alive() {
   local err
+  # a signal that goes through costs no process; only a refused one is read again for why
+  kill -0 "$1" 2>/dev/null && return 0
   err=$(LC_ALL=C kill -0 "$1" 2>&1) || case "$err" in *"not permitted"*) true ;; *) false ;; esac
 }
 # whether focus for session $1 spares session $2's runs, neither holding nor preempting them: its own, its own reviewer's and tester's (by name or by the roster row's worker), and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov)
@@ -1258,6 +1260,8 @@ DOCKER_SLOT=""
 CHILD=""
 # seconds between a waiter's looks, and a held clone's (the tests shorten both)
 POLL=${RUN_SLOT_POLL:-15}
+# the longest a commit or quick start waits on load5 (issue 1385)
+LOAD_WAIT=${RUN_SLOT_LOAD_WAIT:-300}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
 # the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake (clone_brake) it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
 CLONE_GAP=180
@@ -1273,6 +1277,7 @@ clone_brake() {
 # ticket, run-slot.waiters/<ns>-<pid>-<who>, and only the oldest ticket whose pid is alive may take a slot; a ticket goes once its slot is taken
 # or its waiter ends. The dashboard's own build and the merge train take run-slot-2 outside the queue, as in single-slot mode.
 QUEUE="$OPS/run-slot.waiters"
+NEXTF="$OPS/run-slot.next"
 TICKET=""
 ticket() {
   [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] || return 0
@@ -1388,6 +1393,121 @@ reread() {
   [ -n "$TICKET" ] && rm -f "$TICKET"
   RUN_SLOT_ASKED=$ASKED exec bash "$SELF" "${ARGS[@]}"
 }
+# A waiter's idle poll starts one process, its sleep (issue 1338, 7 Nov: sixteen waiters started about 60 processes a second between them, which held load5
+# between 30 and 42 on 15 cores with the CPU half idle, so the slots they waited for stayed shut): it reads what its last look read through bash builtins
+# alone (a glob, read, test) and looks again only once one of them has changed. REF is touched at each look, so a file not older than it changed since,
+# or was written in the look's own second, which -nt's whole seconds on bash 3.2 cannot tell apart (one look more at most)
+REF="$OPS/.run-slot-ref-$$"
+# whether this script was written since the last look, a replaced copy included, by its mtime; a copy that kept an older mtime waits for the next look's reread
+self_changed() { ! [ "$SELF" -ot "$REF" ]; }
+# SIG: each run-slot entry of the ops folder and the queue by name, with the line of each holder and of the switches whose line counts, each peer's holder
+# lines, and a mark for each holder's or ticket's pid that has ended, since a killed run leaves its line; the runs log, the lanes' and gauges' caches,
+# run-slot.next (the oldest waiter's own write), this script and the switches' history stay out
+cheap_sig() {
+  local f l d p
+  SIG=
+  for f in "$OPS"/run-slot* "$QUEUE"/*; do
+    case "$f" in *.runs.log | */run-slot.lanes* | */run-slot.gauges* | *.lifted-* | *.expired-* | */run-slot.sh | */run-slot.next) continue ;; esac
+    SIG="$SIG|$f"
+    p=
+    case "$f" in
+      *.holder | */run-slot.priority | */run-slot.load5-cap | */run-slot.focus) l=; read -r l < "$f" 2>/dev/null; SIG="$SIG=$l"; [ "${f%.holder}" = "$f" ] || { p=${l#* }; p=${p%% *}; } ;;
+      "$QUEUE"/*) p=${f##*/}; p=${p#*-}; p=${p%%-*} ;;
+    esac
+    case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac
+  done
+  for d in "$@"; do
+    for f in "$d"/run-slot*.holder; do l=; read -r l < "$f" 2>/dev/null; SIG="$SIG|$f=$l"; p=${l#* }; p=${p%% *}; case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac; done
+  done
+}
+# the load's line, its 1- and 5-minute loads in whole numbers, which a waiter at the head looks again on (two processes, so only the head reads it)
+cheap_load() { local l; l=$(loadavg); set -- $l; LOAD="${2%%.*} ${3%%.*}"; }
+# whether this waiter's ticket is the queue's oldest, the one that names who goes next in run-slot.next
+oldest_is_me() { local a=("$QUEUE"/*); [ -n "$TICKET" ] && [ "${a[0]}" = "$TICKET" ]; }
+# the lines a waiter behind the head watches: who the oldest waiter names next, and the lead's pick and focus, which name a session whatever its place
+next_sig() { local f l; NSIG=; for f in "$NEXTF" "$OPS/run-slot.priority" "$OPS/run-slot.focus"; do l=; read -r l < "$f" 2>/dev/null; NSIG="$NSIG|$l"; done; }
+# the epoch second the first rule a look reads by the clock alone turns, nothing while none will: a ticket reaching AGED (the queue's order),
+# run-slot.priority's hour, a switch's expiry and a holder line with no pid going stale at 2 hours, so a waiter at the head looks again then
+due_at() {
+  local now f m e l d=
+  now=$(date +%s)
+  for f in "$QUEUE"/* "$OPS/run-slot.priority" "$OPS"/run-slot*.holder; do
+    [ -e "$f" ] || continue
+    case "$f" in
+      */run-slot.priority) m=3600 ;;
+      *.holder) l=; read -r _ l _ < "$f" 2>/dev/null; case "$l" in '' | *[!0-9]*) m=7200 ;; *) continue ;; esac ;;
+      *) m=$AGED ;;
+    esac
+    e=$(mtime "$f") || continue
+    e=$((e + m))
+    [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e
+  done
+  for f in $SWITCHES; do
+    [ -e "$OPS/$f" ] || continue
+    l=; read -r l < "$OPS/$f" 2>/dev/null
+    if [[ "$l" =~ ^[^\ ]+\ [0-9-]{10}T[0-9:]{8}Z\ ([0-9-]{10}T[0-9:]{8}Z)\  ]]; then
+      e=$(date -u -j -f %Y-%m-%dT%H:%M:%SZ "${BASH_REMATCH[1]}" +%s 2>/dev/null || date -u -d "${BASH_REMATCH[1]}" +%s 2>/dev/null) || continue
+    else
+      e=$(mtime "$OPS/$f") || continue
+      e=$((e + 14400))
+    fi
+    [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e
+  done
+  echo "$d"
+}
+# G: the gauges' verdict the slots a look counts open on, open while they shut none: the lanes (lanes_open, which rewrites run-slot.lanes), and in
+# single-slot mode memory's room, which opens run-slot-2 alone
+gate_sig() { G=shut; lanes_open && G=open; switch_on run-slot.single && ! mem_ok && G="$G nomem"; return 0; }
+# whether this waiter may sleep again with no look: its script is unchanged and the oldest waiter alive. A waiter at the head (one with no ticket, the
+# head of either order, or the oldest) looks again on anything its last look decides by: a file it read (SIG, merge-queue.json), the load's whole numbers,
+# the clock's next turn (due_at), the burst's minute while one held it, and the gauges while they shut a slot (gate_sig, about 25 processes, which
+# keeps run-slot.lanes fresh for room and can-take); any other, which a new waiter or a run's end never moves to the head, looks once it is the oldest or
+# next_sig changes, so the queue's waiters look once when the oldest names another rather than each time the folder changes
+cheap_idle() {
+  local a pid
+  self_changed && return 1
+  a=("$QUEUE"/*)
+  if [ -e "${a[0]}" ]; then pid=${a[0]##*/}; pid=${pid#*-}; pid=${pid%%-*}; alive "$pid" || return 1; fi
+  if [ "$LOOKER" = 1 ]; then
+    cheap_sig $PEERS
+    [ "$SIG" = "$SIG0" ] || return 1
+    [ -e "$MQ" ] && ! [ "$MQ" -ot "$REF" ] && return 1
+    [ -z "$DUE" ] || [ "$SECONDS" -lt "$DUE" ] || return 1
+    cheap_load
+    [ "$LOAD" = "$LOAD0" ] || return 1
+    [ -z "$BURST" ] || burst_held > /dev/null || return 1
+    [ "$G0" = open ] && return 0
+    gate_sig
+    [ "$G" = "$G0" ]
+  else
+    [ "${a[0]}" = "$TICKET" ] && return 1
+    next_sig
+    [ "$NSIG" = "$NSIG0" ]
+  fi
+}
+# marks a look: what it reads from here on counts as seen, and a waiter at the head reads the load, the clock's next turn and the gauges' verdict, which
+# the look's slot counts then take (LANES), so G0 is the verdict the look acted on
+look_mark() {
+  local d
+  : > "$REF" 2>/dev/null
+  cheap_sig $PEERS
+  SIG0=$SIG
+  next_sig
+  NSIG0=$NSIG
+  LOOKED=1 LOAD0= DUE= BURST= G0=open
+  unset LANES
+  [ "$LOOKER" = 1 ] || return 0
+  cheap_load
+  LOAD0=$LOAD
+  d=$(due_at)
+  [ -z "$d" ] || DUE=$((SECONDS + d - $(date +%s)))
+  gate_sig
+  G0=$G
+  LANES=${G%% *}
+}
+MQ=${PLAYGROUND_MERGE_QUEUE:-${PLAYGROUND_DATA_DIR:-$HOME/.playground}/merge-queue.json}
+LOOKER=1
+LOOKED=
 
 # run-slot.priority (a lead's pick, under an hour old) works with the queue (builder, 12 Oct: a priority naming the 8th waiter deadlocked it):
 # the named session may take a slot whatever its place, and the reservation holds only while that session is itself waiting in the queue
@@ -1447,6 +1567,7 @@ free() {
   fi
   DOCKER_SLOT=""
   [ -n "$TICKET" ] && rm -f "$TICKET"
+  [ -e "$REF" ] && rm -f "$REF"
   [ -n "${MEM_TOLD:-}" ] && rm -f "$MEM_TOLD-suite" "$MEM_TOLD-clone" "$MEM_TOLD-idle" "$MEM_TOLD-swap" "$MEM_TOLD-busy"
 }
 trap 'free' EXIT
@@ -1585,7 +1706,7 @@ reclaim() {
   [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rmdir "$1" 2>/dev/null
 }
 
-# the 5-minute load run-slot-2 in single-slot mode starts under: 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's terminal reads time out), 22 at most
+# the 5-minute load run-slot-2 in single-slot mode starts under, and a commit or quick start waits under (issue 1385): 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's terminal reads time out), 22 at most
 # its cap is the file's last line, the one a set writes below its reason or an old-shape file's only one
 load_line() {
   local cap
@@ -1627,7 +1748,7 @@ slot_open() {
 # counted 19 shuts by the CPU, 12 by memory and 6 by load1 from readings alone), while a read subcommand writes neither
 lanes_open() {
   local idle swap tps mbs load need="" verdict=shut why="" seen free level
-  # a read subcommand takes the verdict a waiter wrote in the last 30 s, so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
+  # a read subcommand takes the verdict a waiter wrote in the last 30 s (the head rewrites it each poll while the gauges shut a slot, gate_sig), so room, can-take and head see the lanes as the queue's head saw them, since the CPU gate can flip between two readings seconds apart (issue 1216: 55% then 33% idle); with none that fresh it reads the gauges itself
   if [ -n "$CAN_TAKE" ] && seen=$(fresh_lanes); then [ "$seen" = open ]; return; fi
   read -r idle swap tps mbs _ <<< "$(gauges)"
   load=$(loadavg | awk '{print $2}')
@@ -1656,7 +1777,7 @@ lanes_open() {
   fi
   [ "$verdict" = open ]
 }
-# the lanes verdict a waiter wrote in the last 30 s, two of its looks; an older one, as a copy from before every look rewrote it leaves, reads as none
+# the lanes verdict a waiter wrote in the last 30 s, two of the head's polls at POLL 15; an older one, as a copy from before every look rewrote it leaves, or one the head last wrote with the lanes open, reads as none
 fresh_lanes() {
   local m age v
   m=$(mtime "$OPS/run-slot.lanes") || return 1
@@ -1733,7 +1854,7 @@ held_for() {
   [ "$h" -ge 0 ] || h=0
   echo "$h"
 }
-# lanes_open, once per capacity() count: its slot checks share the first one's verdict, since a reading per slot counted slot 2 shut on a stale reading and slots 3 and 4 open on one that landed between them; outside a count LANES is unset, so each check reads afresh and a waiter still reads the gauges on every poll
+# lanes_open, once per capacity() count: its slot checks share the first one's verdict, since a reading per slot counted slot 2 shut on a stale reading and slots 3 and 4 open on one that landed between them; a waiter at the head's look takes the verdict look_mark read for every check, and outside a look and a count LANES is unset, so each check reads afresh
 lanes_now() {
   case "${LANES-}" in
     open) return 0 ;;
@@ -1743,7 +1864,7 @@ lanes_now() {
   esac
 }
 capacity() {
-  local s n=0 LANES=unread
+  local s n=0 LANES=${LANES:-unread}
   for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
     { [ -d "$OPS/$s" ] || slot_open "$s"; } && n=$((n + 1))
   done
@@ -1784,7 +1905,7 @@ SWAPINS_MAX=100
 BUSY_TOLD="run-slot.sh: another look is reading the CPU's idle share and the swap-ins, so slots 2 to 4 stay shut until it lands"
 # `<idle> <swapins> <disk0 transfers/s> <disk0 MB/s> <the last reading's swapins>`: the CPU's idle share in top's second sample (top -l 2 -n 0), the swap-ins a second in
 # vm_stat -c 2 1's last row (as spawn.sh's swapins() reads them) and disk_rate's two figures, which lanes lines log and no verdict reads (a bound on disk load waits on a day of them), each - when unread; every look shares one reading through run-slot.gauges
-# (`<epoch> <idle> <swapins> <tps> <MB/s> <last swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and some 27 waiters each look every 15 s;
+# (`<epoch> <idle> <swapins> <tps> <MB/s> <last swapins>`) for 10 s, since a top takes a second and about 0.7 s of system CPU, and the heads of a queue of some 27 waiters each read them every 15 s while they shut a slot;
 # one look refreshes it, under gauges_lock, while the rest keep the reading they have, or `busy busy` when there is none yet, since without the
 # lock every look that found it stale ran its own top (3 Nov, 10:53Z: 16 to 23 tops at once from 26 waiters, and load1 56.8); the refresher
 # removes the lock only while it still carries the mtime it took, so a refresher that ran past a takeover leaves the new holder's lock
@@ -1928,16 +2049,68 @@ if [ -n "$KIND" ]; then
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
   # the waiter ran its command with no slot), so each wait checks it ended as it should, and the waiter stops when it did not
   clone_held && { echo "run-slot.sh: run-slot.clone-off holds this clone, so $WHO stops" >&2; exit 143; }
-  # the quick slot takes no load wait: its load comes mostly from outside run-slot and one slot adds about a core at most, so a hold kept 44 quick runs waiting 201 min for 8 min of work (issue 547); ran_long sends a line that runs long to the queue
+  # a commit or quick start waits on load5 under load_line's cap, for LOAD_WAIT s at most (scripts/ops/README.md's run-slot bullets; issue 1385); its idle poll starts its load read and its sleep (issue 1338), so it reads the cap again only when the switch file appears, goes or changes, or once a minute
+  if [ "$KIND" != clone ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ "$WHO" != ops-tick ]; then
+    # LT0 the wait's start, LCAP the cap, LCT when it was read, LCF the switch file, LCE and LE whether it stood then and now, LDONE set on each way out; load5 is parsed inline, not through load5(), so a poll starts one process for it
+    LT0=$SECONDS LSAID= LDONE= LCAP=$(load_line) LCT=$SECONDS LCE=
+    LCF="$OPS/run-slot.load5-cap"
+    [ -e "$LCF" ] && LCE=1
+    : > "$REF" 2>/dev/null
+    while :; do
+      self_changed && reread
+      LE=; [ -e "$LCF" ] && LE=1
+      if [ "$LE" != "$LCE" ] || [ $((SECONDS - LCT)) -ge 60 ] || { [ -n "$LE" ] && ! [ "$LCF" -ot "$REF" ]; }; then
+        LCAP=$(load_line) LCT=$SECONDS LCE=$LE
+        : > "$REF" 2>/dev/null
+      fi
+      L5=; read -r _ _ L5 _ <<< "$(loadavg)"; L5=${L5%%.*}
+      # an unread load holds no start
+      case "$L5" in '' | *[!0-9]*) LDONE=1; break ;; esac
+      [ "$L5" -lt "$LCAP" ] && { LDONE=1; break; }
+      [ $((SECONDS - LT0)) -ge "$LOAD_WAIT" ] && { echo "run-slot.sh: load5 $L5 is still at or over $LCAP after $((SECONDS - LT0))s, so this $KIND run starts" >&2; LDONE=1; break; }
+      [ -z "$LSAID" ] && { echo "run-slot.sh: waiting for load5 under $LCAP (now $L5) before the $KIND slot, ${LOAD_WAIT}s at most" >&2; LSAID=1; }
+      sleep "$POLL"
+    done
+    # a loop bash dropped mid-expansion (the rule above) set no flag, so the waiter stops rather than run
+    [ -n "$LDONE" ] || exit 143
+  fi
+  # the clone's spacing is shared, so one waiter works it out about every 15 to 24 s for all of them (issue 1338): run-slot.clone-verdict holds the CPU slots' and
+  # the clone lane's holder lines it was worked out under, then its verdict, and a waiter takes one written no earlier than its own last tick under the same lines, so a verdict serves up to 48 s
+  CLONE_VERDICT="$OPS/run-slot.clone-verdict"
+  clone_holders() { local s l; HL=; for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-clone; do l=; [ -d "$OPS/$s" ] && { read -r l < "$OPS/$s.holder" 2>/dev/null; l="held $l"; }; HL="$HL|$l"; done; }
+  clone_verdict() {
+    local h v
+    clone_holders
+    if [ -n "$CT0" ] && [ $((SECONDS - CT0)) -lt "$CTICK" ] && [ "$HL" = "$CHL" ]; then spaced=$CSP; return; fi
+    h= v=
+    { read -r h; read -r v; } < "$CLONE_VERDICT" 2>/dev/null
+    if [ -n "$CT0" ] && [ -e "$CLONE_VERDICT" ] && ! [ "$REF" -nt "$CLONE_VERDICT" ] && [ "$h" = "$HL" ]; then
+      CSP=$v
+    else
+      CSP=$(clone_spaced)
+      printf '%s\n%s\n' "$HL" "$CSP" > "$CLONE_VERDICT" 2>/dev/null
+    fi
+    : > "$REF" 2>/dev/null
+    CT0=$SECONDS CHL=$HL spaced=$CSP
+  }
+  # each waiter ticks every 15 to 24 s, its own length, so waiters that started together do not all find the verdict stale in the same second
+  CT0= CHL= CSP= CTICK=$((15 + RANDOM % 10))
+  : > "$REF" 2>/dev/null
   GOT=
+  polls=0
   while :; do
     spaced=
-    [ "$KIND" = clone ] && spaced=$(clone_spaced)
+    self_changed && reread
+    [ "$KIND" = clone ] && clone_verdict
     if [ -z "$spaced" ]; then
-      mkdir "$OPS/run-slot-$KIND" 2>/dev/null && { GOT=1; break; }
-      reclaim "$OPS/run-slot-$KIND"
+      if ! [ -d "$OPS/run-slot-$KIND" ]; then
+        mkdir "$OPS/run-slot-$KIND" 2>/dev/null && { GOT=1; break; }
+      fi
+      [ $((polls % 3)) -eq 0 ] && reclaim "$OPS/run-slot-$KIND"
     fi
-    reread
+    # the full reread, a stat, every 12th poll, about a minute; a newer mtime than the last tick's is read at the top of the poll, before a tick moves it
+    [ $((polls % 12)) -eq 0 ] && reread
+    polls=$((polls + 1))
     if [ $((waited % 300)) -eq 0 ]; then
       if [ -n "$spaced" ]; then echo "run-slot.sh: this clone waits $spaced" >&2; else echo "run-slot.sh: waiting for the $KIND slot ($(cat "$OPS/run-slot-$KIND.holder" 2>/dev/null))" >&2; fi
     fi
@@ -1993,22 +2166,44 @@ if [ -n "$CAN_TAKE" ]; then
 fi
 
 waited=0
+# a waiter that is not at the head and has waited 5 minutes polls at twice POLL (issue 1338)
+case "$POLL" in *[!0-9]*) SLOW_POLL=$POLL ;; *) SLOW_POLL=$((2 * POLL)) ;; esac
+nap() { if [ "$LOOKER" = 0 ] && [ "$waited" -ge 300 ]; then sleep "$SLOW_POLL"; else sleep "$POLL"; fi; }
 while :; do
-  reread
-  # HEAD: first in the queue (any slot); S2: first among waiters that can take run-slot-2, so an older copy at the head cannot idle it
-  HEAD=1; S2=1
-  if [ -n "$TICKET" ] && prio_for "$WHO"; then
-    [ "$(prio_first)" = "$(basename "$TICKET")" ] || { HEAD=0; S2=0; }
-  elif [ -n "$TICKET" ]; then
-    [ "$(first_waiter)" = "$(basename "$TICKET")" ] || HEAD=0
-    [ "$(first_waiter s2)" = "$(basename "$TICKET")" ] || S2=0
+  if [ -n "$LOOKED" ] && cheap_idle; then
+    nap
+    waited=$((waited + 15))
+    continue
   fi
+  reread
+  look_mark
+  # HEAD: first in the queue (any slot); S2: first among waiters that can take run-slot-2, so an older copy at the head cannot idle it
+  HEAD=1; S2=1; fw= fw2=
+  if [ -n "$TICKET" ] && prio_for "$WHO"; then
+    [ "$(prio_first)" = "${TICKET##*/}" ] || { HEAD=0; S2=0; }
+    oldest_is_me && { fw=$(first_waiter); fw2=$(first_waiter s2); }
+  elif [ -n "$TICKET" ]; then
+    fw=$(first_waiter); fw2=$(first_waiter s2)
+    [ "$fw" = "${TICKET##*/}" ] || HEAD=0
+    [ "$fw2" = "${TICKET##*/}" ] || S2=0
+  fi
+  # the oldest waiter names who goes next, "<first_waiter> <first_waiter s2> <prio_first>", under the priority pick too, so a waiter its look passed over, the
+  # pick's next ticket included once its first has gone, looks again at once (its poll reads run-slot.next)
+  if [ -n "$TICKET" ] && oldest_is_me; then
+    pf=; [ -e "$OPS/run-slot.priority" ] || [ -e "$OPS/run-slot.focus" ] && pf=$(prio_first)
+    nx=; read -r nx < "$NEXTF" 2>/dev/null
+    [ "$nx" = "${fw:--} ${fw2:--} ${pf:--}" ] || printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null
+  fi
+  prev=$LOOKER
+  LOOKER=0
+  { [ -z "$TICKET" ] || [ "$HEAD" = 1 ] || [ "$S2" = 1 ] || oldest_is_me; } && LOOKER=1
+  [ "$LOOKER" = "$prev" ] || look_mark
   if [ "$HEAD" = 0 ] && [ "$S2" = 0 ]; then
     if [ $((waited % 300)) -eq 0 ]; then
-      pos=$(ordered_waiters | cut -d' ' -f2 | grep -nxF "$(basename "$TICKET")" | cut -d: -f1)
+      pos=$(ordered_waiters | cut -d' ' -f2 | grep -nxF "${TICKET##*/}" | cut -d: -f1)
       echo "run-slot.sh: queued behind $(( ${pos:-1} - 1 )) waiter(s) ahead of it in the queue's order" >&2
     fi
-    sleep "$POLL"
+    nap
     waited=$((waited + 15))
     continue
   fi
@@ -2027,6 +2222,7 @@ while :; do
     continue
   fi
   if added=$(burst_held); then
+    BURST=1
     [ $((waited % 300)) -eq 0 ] && echo "run-slot.sh: waiting for the load to show the $added run(s) the last minute added" >&2
     sleep "$POLL"
     waited=$((waited + 15))
