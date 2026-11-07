@@ -390,7 +390,8 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       ["pane", "run", "w5:p1", `exec bash '${lw(r.home, "launch", "worker-c.sh")}'`],
     ])
     expect(readFileSync(lw(r.home, "runtimes", "worker-c"), "utf8")).toBe("herdr\n")
-    const launch = launchOf(r)
+    // two sessions restore here, and a folder lists its files in no fixed order on Linux, so worker-a's launch is read by its name
+    const launch = readFileSync(lw(r.home, "launch", "worker-a.sh"), "utf8")
     expect(launch).toContain(`--resume ${ids.a} -n worker-a --model claude-sonnet-5-5`)
     expect(launch).toContain("acme@example.net")
     expect(execLine(r, "worker-a")).toBe(

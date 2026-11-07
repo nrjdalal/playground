@@ -116,11 +116,14 @@ describe("the job registry", () => {
       ).jobs.find((job) => job.name === name)!
     const on = { ...JOBS["ops-sweep"]!, enabled: true }
     const { runtime: _, ...noRuntime } = on
-    // the last row carries the retired flag that marked a terminal job, as an install stored it before the flag left the schema
+    // the needsCmux rows carry the retired flag that marked a terminal job, in each shape an install stored it before the flag left the schema: whole or with enabled alone, true or false
     for (const row of [
       { ...on, runtime: "made-up" },
       { ...on, madeUp: true },
       { ...noRuntime, needsCmux: true },
+      { ...on, needsCmux: false },
+      { enabled: true, needsCmux: true },
+      { enabled: true, needsCmux: false },
     ]) {
       const job = stored("ops-sweep", row)
       expect(job.disabled).toBeUndefined()
