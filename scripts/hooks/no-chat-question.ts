@@ -58,8 +58,6 @@ const ACTION = new RegExp(
 )
 // A ? that is not inside a word or a URL's query (x?status=todo).
 const QUESTION = /\?(?![\w/=&%#-])/
-// A markdown table row, whose ? is a cell's own ("| Did it still answer then? | yes |"), a question the row answers, never one put to the owner.
-const TABLE_LINE = /^\s*\|/
 const BLOCKQUOTE = /^\s*>/
 // A fenced code block, or one left open to the reply's end.
 const FENCE = /```[\s\S]*?(?:```|$)/g
@@ -142,12 +140,12 @@ export function asksDecision(reply: string, names: string[] = [], owner: string[
     .replace(/\*\*|__/g, "")
     .split("\n")
     .filter((line) => line.trim() && !BLOCKQUOTE.test(line))
-  return lines.some((line) => {
+  return lines.some((line, i) => {
     const own = ownWords(line, toAgentLine).replace(QUOTE_SPAN, '""').replace(POINTER, "")
     return (
       SAY.test(own) ||
       PHRASES.test(own) ||
-      (!TABLE_LINE.test(own) && QUESTION.test(own)) ||
+      (QUESTION.test(own) && !answeredRow(line, lines[i + 1])) ||
       ACTION.test(own) ||
       !!toOwnerLine?.test(own)
     )
@@ -157,6 +155,21 @@ export function asksDecision(reply: string, names: string[] = [], owner: string[
 const STEP = /^\s*\d+[.)]\s/
 const TABLE_ROW = /^\s*\|.*\|\s*$/
 const TABLE_RULE = /^\s*\|\s*:?-{3,}/
+
+// Pure: whether a table row answers its own questions, so its ? puts none to the owner: a header (the rule follows it, "| PR | Merged? |"), or a row whose every cell holding a ? has a later cell holding words and no ? ("| Did it still answer then? | yes |").
+function answeredRow(line: string, next: string | undefined): boolean {
+  if (!TABLE_ROW.test(line)) return false
+  if (next !== undefined && TABLE_RULE.test(next)) return true
+  const cells = line
+    .trim()
+    .slice(1, -1)
+    .split("|")
+    .map((cell) => cell.trim())
+  return cells.every(
+    (cell, n) =>
+      !QUESTION.test(cell) || cells.slice(n + 1).some((later) => later && !QUESTION.test(later)),
+  )
+}
 // A sentence saying the steps went to the dispatcher as a draft, never one that says they did not or will later (not, never, n't, be, get, gets, to or will before the verb): a past-tense hand-off verb, then the dispatcher, then "as a draft", or the reason's own "the dispatcher has the draft".
 const DRAFT_HANDED =
   /(?<!(?:\bnot|\bnever|n't|\bbe|\bget|\bgets|\bto|\bwill)\s+(?:\w+\s+)?)\b(?:(?:forwarded|gave|handed|passed|sent)\b[^.;!?\n]*?\bdispatcher\b[^.;!?\n]*?\bas a draft\b|went to the dispatcher as a draft\b|the dispatcher has the draft\b)/i

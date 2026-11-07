@@ -412,6 +412,24 @@ describe("what passes", () => {
     expect(asksDecision("| Step | Who |\n|---|---|\n| Merge now | your call |")).toBe(true)
   })
 
+  test.each([
+    ["a header row with a ? column", "| PR | Merged? |\n|---|---|\n| 1493 | yes |", false],
+    [
+      "a row whose last cell asks",
+      "| PR | Score | Next |\n|---|---|---|\n| 1493 | 3/5 | Merge after the fix? |",
+      true,
+    ],
+    ["a one-cell row", "| Merge PR 12 now? |", true],
+    [
+      "a row whose answer cell is empty",
+      "| Check | Result |\n|---|---|\n| Ship it today? |  |",
+      true,
+    ],
+    ["a line opening with a pipe and no closing one", "| Ship it today?", true],
+  ])("a table's ? asks only when no cell after it answers it: %s", (_name, reply, asks) => {
+    expect(asksDecision(reply)).toBe(asks)
+  })
+
   test("a table of answered questions naming a progress card passes", async () => {
     expect(
       await stop(
