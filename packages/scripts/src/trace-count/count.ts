@@ -45,17 +45,21 @@ export const LEFT_OUT = [
 // In the seed but never counted, nor swapped: a lockfile, whose integrity hashes can spell a list value by chance and break the install when rewritten.
 export const LOCKFILES = [/(?:^|\/)bun\.lock$/, /(?:^|\/)package-lock\.json$/]
 
-// Left out of one kind alone: the dashboard's and the Changelog's fixtures and the recorded replays mimic real data, so their PR numbers are no provenance, and a test's issue numbers are its own made-up data.
-const LEFT_OUT_OF: Partial<Record<Kind, RegExp[]>> = {
-  issueRefs: [
-    /^api\/hono\/src\/fixtures\/dashboard\.json$/,
-    /^api\/hono\/src\/plugins\/changelog\/fixture\.ts$/,
-    /^packages\/scripts\/src\/parity\/replay\/fixtures\//,
-    /^tests\//,
-  ],
-}
+// Made-up data: the dashboard's and the Changelog's fixtures and the recorded replays mimic real data, and the tests hold their own.
+export const MADE_UP_DATA = [
+  /^api\/hono\/src\/fixtures\/dashboard\.json$/,
+  /^api\/hono\/src\/plugins\/changelog\/fixture\.ts$/,
+  /^packages\/scripts\/src\/parity\/replay\/fixtures\//,
+  /^tests\//,
+]
+
+// Left out of one kind alone: made-up data's PR and issue numbers are no provenance.
+const LEFT_OUT_OF: Partial<Record<Kind, RegExp[]>> = { issueRefs: MADE_UP_DATA }
 
 const LIVE = new RegExp(LIVE_NAMES.join("|"), "g")
+// A file's text as the kinds read it: past every live name and every public repository.
+export const readable = (text: string, repos: Repos): string =>
+  readPast(text.replace(LIVE, ""), repos)
 
 // No person's address, so no trace: a domain reserved for examples (RFC 2606 and 6761) or the fixtures' local.host, an ssh remote's git user, and a package's version.
 const NOT_A_PERSON = [
@@ -66,7 +70,7 @@ const NOT_A_PERSON = [
 
 // Each kind's hits in one file's text, past the live names, the read-past repositories and the kinds its path is left out of.
 const hitsIn = (path: string, text: string, kinds: [Kind, RegExp][], repos: Repos): Counts => {
-  const said = readPast(text.replace(LIVE, ""), repos)
+  const said = readable(text, repos)
   const hits: Counts = {}
   for (const [kind, re] of kinds) {
     if (LEFT_OUT_OF[kind]?.some((out) => out.test(path))) continue

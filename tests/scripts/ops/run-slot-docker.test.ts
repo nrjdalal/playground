@@ -272,6 +272,7 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     }
     const CHAIN = "refuses a chain that builds a docker image"
     const CANNOT = "cannot read this chain's steps, so it refuses one that names docker or portless"
+    const GLOB = "a program word written as a glob or a brace that can expand to docker or podman"
 
     test("a wrapper with an option value before sh -c", async () => {
       const r = await run(["nice", "-n", "5", "sh", "-c", "docker build ."])
@@ -419,6 +420,165 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
 
     test("while a stdin-fed shell that names no docker runs as before", async () => {
       const r = await run(["sh", "-c", `echo 'touch "$MARKER"' | sh`])
+      expect(r.code).toBe(0)
+      expect(r.ran).toBe(true)
+    })
+
+    // #1209: a program word written as an unquoted glob or brace runs whatever the shell expands it to, so one that can expand to a shell reads as a chain run-slot cannot read
+    for (const script of [
+      'echo "docker build ." | /bin/s[h]',
+      '/bin/s? -c "docker build ."',
+      'nice /bin/ba?h -c "docker build ."',
+      '/bin/{s,x}h -c "docker build ."',
+    ])
+      test(`a globbed shell program word: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CANNOT)
+      })
+
+    // #1209: and one that can expand to docker or podman is refused, though no word names either
+    for (const script of [
+      "/usr/local/bin/doc?er build .",
+      'printf "FROM scratch\\n" | /usr/local/bin/doc*r build -',
+      "nice /opt/homebrew/bin/pod[m]an build .",
+      "/usr/local/bin/doc{k,}er build .",
+    ])
+      test(`a globbed docker program word: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(GLOB)
+      })
+
+    // #1209: a glob or brace in an argument, or a quoted glob program word, reads as before
+    for (const script of [
+      'ls doc?er > /dev/null 2>&1; touch "$MARKER"',
+      'ls doc{k,}er > /dev/null 2>&1; touch "$MARKER"',
+      'echo docker; ls /bin/s[h] > /dev/null; touch "$MARKER"',
+      '"/usr/local/bin/doc?er" build . 2> /dev/null; touch "$MARKER"',
+      // round 2 of #1209: a case pattern names no program, so `*)` reads as no glob of one
+      'case "$1" in a|doc?er) exit 1 ;; *) touch "$MARKER" ;; esac',
+      'case x in a) case y in *) :;; esac;; *) touch "$MARKER";; esac',
+      // round 3 of #1219: a substitution in single quotes runs nothing, and one whose glob can be no docker or shell reads as before
+      "echo '$(/usr/local/bin/doc?er build .)'; touch \"$MARKER\"",
+      'echo $(ls /bin/s*.none 2> /dev/null); touch "$MARKER"',
+      // round 6 of #1219: a substitution read to the script's end runs as before when no glob in it can be docker or a shell
+      'x=$(echo "$(echo a)"); ls /bin/s*.none 2> /dev/null; touch "$MARKER"',
+      'x=$(echo ${HOME}); ls *.ts 2> /dev/null; touch "$MARKER"',
+      'x=$(git rev-parse "a)b" 2> /dev/null); ls *.ts 2> /dev/null; touch "$MARKER"',
+    ])
+      test(`while a glob that is no program word runs as before: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(0)
+        expect(r.ran).toBe(true)
+      })
+
+    // review round 1 of #1209: every step is read for a docker-able program word before an unreadable one ends the read, past a reserved word that leads it, with a bracket class fnmatch does not read failing closed, behind a wrapper's options as wrapper_option reads them, and with [^x] and a letter range expanded
+    for (const script of [
+      "$X; /usr/local/bin/doc?er build .",
+      "echo hi | sh; /usr/local/bin/doc?er build .",
+      "/usr/local/bin/doc?er compose run web sh",
+      "if true; then /usr/local/bin/doc?er build .; fi",
+      "for f in a b; do /usr/local/bin/doc?er build .; done",
+      "{ /usr/local/bin/doc?er build .; }",
+      "! /usr/local/bin/doc?er build .",
+      "/usr/local/bin/[[:lower:]]ocker build .",
+      "timeout -s KILL 60 /usr/local/bin/doc?er build .",
+      "sudo -u me nice -n 5 /usr/local/bin/doc?er build .",
+      "env A=1 /usr/local/bin/doc?er build .",
+      "nice --frobnicate /usr/local/bin/doc?er build .",
+      "/usr/local/bin/doc[^x]er build .",
+      "/usr/local/bin/doc{j..l}er build .",
+      "case $1 in a) (/usr/local/bin/doc?er build .) ;; esac",
+      "case x in *) /usr/local/bin/d?cker build . ;; esac",
+      "case x in a|b) /usr/local/bin/d?cker build . ;; esac",
+      "function f { /usr/local/bin/doc?er build .; }; f",
+      "coproc /usr/local/bin/doc?er build .",
+      // review round 2 of #1219: an arm's command that | ends is no pattern
+      "case x in x) true; /usr/local/bin/doc?er build . | cat;; esac",
+      "case x in x) cat /dev/null | /usr/local/bin/doc?er build . | cat;; esac",
+      "case x in a) echo ;& *) /usr/local/bin/doc?er build . ;; esac",
+    ])
+      test(`a docker program word in a step: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(GLOB)
+      })
+
+    for (const script of [
+      "echo docker | ! /bin/s?",
+      "echo docker | case x in a|*) /bin/s? ;; esac",
+      "case x in x) true; echo docker | /bin/s? | cat;; esac",
+      'case x in x) true; sh -c "docker build ." | cat;; esac',
+      "case x in x) true; echo docker | sh | cat;; esac",
+    ])
+      test(`a shell after a reserved word, a case pattern or in a case arm: ${script}`, async () => {
+        const r = await run(["sh", "-c", script])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(CANNOT)
+      })
+
+    // review round 1 of #1209, the lead's ruling: a glob in a script run-slot does not open (a nested -c, one fed on stdin, eval's words, a chain behind an unplaced first word) is read piece by piece as a program word
+    for (const argv of [
+      ["sh", "-c", 'sh -c "/usr/local/bin/doc?er build ."'],
+      ["sh", "-c", 'echo "/usr/local/bin/doc?er build ." | sh'],
+      ["sh", "-c", "eval /usr/local/bin/doc?er build ."],
+      ["launcher", "sh", "-c", "/usr/local/bin/doc?er build ."],
+      ["sh", "-c", "echo /usr/local/bin/doc\\?er build . | sh"],
+      ["sh", "-c", "eval /usr/local/bin/doc\\?er build ."],
+      // review round 3 of #1219: a command substitution's script, in a case word or pattern or in a word it does not lead
+      ["sh", "-c", "case x in $(/usr/local/bin/doc?er build .)) ;; esac"],
+      ["sh", "-c", "case $(/usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["sh", "-c", "case x in `/usr/local/bin/doc?er build .`) ;; esac"],
+      ["sh", "-c", "echo `/usr/local/bin/doc?er build .`"],
+      ["sh", "-c", "x=`/usr/local/bin/doc?er build .`"],
+      ["sh", "-c", 'echo "$(/usr/local/bin/doc?er build .)"'],
+      ["sh", "-c", 'case x in $(/bin/s? -c "/usr/local/bin/doc?er build .")) ;; esac'],
+      // review round 4 of #1219: a case inside a substitution closes a pattern with a ) that does not end it
+      ["sh", "-c", "case x in $(case y in a) ;; esac; /usr/local/bin/doc?er build .)) ;; esac"],
+      ["sh", "-c", "case $(case y in a) ;; esac; /usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["sh", "-c", 'echo "$(case y in a) ;; esac; /usr/local/bin/doc?er build .)"'],
+      [
+        "sh",
+        "-c",
+        'case x in $(case y in a) ;; esac; /bin/s? -c "/usr/local/bin/doc?er build .")) ;; esac',
+      ],
+      // review round 5 of #1219: a heredoc body's, a quoted or a comment's ) does not end a substitution
+      ["sh", "-c", "case x in $(cat <<E\n)\nE\n/usr/local/bin/doc?er build .)) ;; esac"],
+      ["sh", "-c", "case $(cat <<E\n)\nE\n/usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["sh", "-c", "case $(cat <<-E\n\t)\n\tE\n/usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["sh", "-c", 'echo "$(cat <<E\n)\nE\n/usr/local/bin/doc?er build .)"'],
+      [
+        "sh",
+        "-c",
+        'case $(cat <<E\n)\nE\n/bin/s? -c "/usr/local/bin/doc?er build .") in *) ;; esac',
+      ],
+      ["sh", "-c", "case $(echo ')'; /usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["sh", "-c", "case $(: # )\n/usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["bash", "-c", 'echo "$(echo ${x%)}; /usr/local/bin/doc?er build .)"'],
+      ["bash", "-c", 'echo "$(echo ${x:-)}; /usr/local/bin/doc?er build .)"'],
+      ["sh", "-c", "case x in $(f()case y in a) ;; esac; /usr/local/bin/doc?er build .)) ;; esac"],
+      ["bash", "-c", "case $(echo $'\\')'\n/usr/local/bin/doc?er build .) in *) ;; esac"],
+      ["bash", "-c", "echo $'\\''; case x in $(/usr/local/bin/doc?er build .)) ;; esac"],
+      ["bash", "-c", "case x in $(cat <<'E'\n)\nE\n/usr/local/bin/doc?er build .)) ;; esac"],
+      ["bash", "-c", "case x in $(cat <<<')'; /usr/local/bin/doc?er build .)) ;; esac"],
+      // review round 6 of #1219: a $( or backquote inside a substitution's double quote does not let its ) end the substitution
+      ["sh", "-c", 'echo "$(echo "$(echo ")")"; /usr/local/bin/doc?er build .)"'],
+      ["sh", "-c", 'echo "$(echo "`echo ")"`"; /usr/local/bin/doc?er build .)"'],
+      ["sh", "-c", 'case x in $(echo "$(echo ")")"; /usr/local/bin/doc?er build .)) ;; esac'],
+    ])
+      test(`a docker glob in a script run-slot does not open: ${argv.join(" ")}`, async () => {
+        const r = await run(argv)
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(GLOB)
+      })
+
+    test("while a glob argument behind a wrapper runs as before", async () => {
+      const r = await run([
+        "sh",
+        "-c",
+        'nice ls /usr/local/bin/doc?er > /dev/null 2>&1; touch "$MARKER"',
+      ])
       expect(r.code).toBe(0)
       expect(r.ran).toBe(true)
     })

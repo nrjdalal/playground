@@ -1,6 +1,7 @@
 import { z } from "zod"
 
-import { defineSettings } from "@/settings"
+// By relative path, as owner.ts imports, since no-main-checkout imports this file from outside the package.
+import { defineSettings } from "./settings"
 
 // The live dashboard's pair: the branch its checkout stays on and the container holding its database, which every stack elsewhere refuses, so a test row never reaches the board the owner reads.
 export const liveSettings = defineSettings({

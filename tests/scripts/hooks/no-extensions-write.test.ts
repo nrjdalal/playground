@@ -909,6 +909,12 @@ describe("a quoted argument is read as a command line only where a program runs 
       "busybox running another harmless applet",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | busybox cat",
     ],
+    ["a harmless here-string on a brace group around bash", "{ bash; } <<< 'ls -la'"],
+    ["a harmless here-string on descriptor 3 duplicated onto bash's stdin", "bash 3<<< 'ls' <&3"],
+    [
+      "pkexec running a program of its own",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | pkexec cat",
+    ],
     [
       "env's lone dash ahead of a harmless program",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - ls",
@@ -1834,6 +1840,39 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
       "rsync with its backup flag, a prefix of its backup folder option, after a cd to a variable",
       `cd "$X"; rsync -a --backup --suffix=.bak /tmp/a /tmp/b`,
     ],
+    [
+      "find printing to an absolute file after a cd to a variable",
+      `cd "$X"; find /tmp/x -fprint /tmp/out`,
+    ],
+    [
+      "GNU find by its g name printing to an absolute file after a cd to a variable",
+      `cd "$X"; gfind /tmp/x -fprint /tmp/out`,
+    ],
+    [
+      "GNU find by its g name deleting an absolute path after a cd to a variable",
+      `cd "$X"; gfind /tmp/x -delete`,
+    ],
+    [
+      "GNU find by its g name printing names after a cd to a variable",
+      `cd "$X"; gfind /tmp -name x -print`,
+    ],
+    ["GNU xargs by its g name running echo", "echo a | gxargs echo"],
+    [
+      "GNU xargs by its g name running echo after a cd to a variable",
+      `cd "$X"; echo a | gxargs echo`,
+    ],
+    [
+      "GNU find by its g name printing to a held absolute file after a cd to a variable",
+      `O=/tmp/out; cd "$X"; gfind /tmp/x -fprint "$O"`,
+    ],
+    [
+      "GNU find by a path to its g name printing to an absolute file after a cd to a variable",
+      `cd "$X"; /opt/homebrew/bin/gfind /tmp/x -fprint /tmp/out`,
+    ],
+    [
+      "GNU find by its g name in capitals printing names after a cd to a variable",
+      `cd "$X"; GFIND /tmp/x -name x`,
+    ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeUndefined()
   })
@@ -2300,5 +2339,21 @@ describe("a held path past any other heredoc or a quote the scan cannot place is
     ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeDefined()
+  })
+})
+
+// An eval of literal text is followed as the line its words make, so it runs where those commands would; refused-forms/1198.ts holds the forms it refuses
+describe("an eval of literal text runs", () => {
+  test.each([
+    ["an eval of one quoted line", "eval 'echo hi'"],
+    ["an eval of literal words", "eval echo hi"],
+    ["an eval of a chain", "eval 'cd /tmp && ls'"],
+    ["an eval of a heredoc read by a substitution", "eval \"$(cat <<'EOF'\necho hi\nEOF\n)\""],
+    ["an eval of plain words", "eval git status"],
+    ["an eval of each plain character", "eval echo a-b.c/d=e,f:g@h%i"],
+    ["an eval of a quoted glob operator", "eval 'ls ^x'"],
+    ["an eval of an escaped glob operator", "eval echo \\^x"],
+  ])("%s runs from the checkout and the home", async (_, command) => {
+    for (const cwd of [CHECKOUT, HOME]) expect(await bash(command, cwd)).toBeUndefined()
   })
 })
