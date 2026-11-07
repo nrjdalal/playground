@@ -107,6 +107,9 @@ writeFileSync(
 const GLM_ORG_REPO = join(SCRATCH, "glm-org-repo")
 git(SCRATCH, "init", "-q", GLM_ORG_REPO)
 git(GLM_ORG_REPO, "remote", "add", "origin", "https://github.com/acme-blue/demo.git")
+// A file of the org's checkout, and a link to it from the session's own checkout, for the read rows a glob or a link reaches it through.
+writeFileSync(join(GLM_ORG_REPO, "README.md"), "demo\n")
+symlinkSync(join("..", "glm-org-repo", "README.md"), join(GLM_REPO, "org-link.md"))
 // The leak guard's lists as core holds them, with ext.links guarding a made-up org's repositories, as its own test sets them.
 const LISTS = join(CHECKOUT, "extensions", "core", "lists")
 const LEAK = join(SCRATCH, "leak")

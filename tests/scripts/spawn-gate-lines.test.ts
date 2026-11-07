@@ -25,16 +25,16 @@ describe("the capacity gate refuses and spawns nothing", () => {
       expect(existsSync(join(r.home, "top.calls"))).toBe(false)
     })
 
-    test("a --firefighting start passes a load over the cores while a trigger file stands, and the memory gate still holds it", async () => {
-      const args = ["runner", "runner-x", "b.md", "--size", "small", "--firefighting"]
+    test("a --priority start passes a load over the cores while priority.json stands, and the memory gate still holds it", async () => {
+      const args = ["runner", "runner-x", "b.md", "--size", "small", "--priority"]
       const trigger = (home: string) =>
-        writeFileSync(join(home, ".playground", "firefighting-stop.json"), "{}")
+        writeFileSync(join(home, ".playground", "priority.json"), "{}")
       const r = await spawn(args, [], { FAKE_LOAD5: "24.00" }, script, undefined, trigger)
       expect(r.code).toBe(0)
       expect(capacityLog(r)).toEqual([
         expect.objectContaining({
           readings: expect.objectContaining({
-            priority: expect.stringMatching(/\/\.playground\/firefighting-stop\.json$/),
+            priority: expect.stringMatching(/\/\.playground\/priority\.json$/),
           }),
           verdict: "pass",
         }),
