@@ -7,7 +7,7 @@ import { swapper, swapTree } from "../../../../../packages/scripts/src/trace-cou
 const LIST = {
   companies: ["Vantorix", "Vantorix Labs"],
   handles: ["qmarsh", "tbell"],
-  linearKeys: ["VX", "OPS"],
+  linearKeys: ["MADEVX", "MADEOPS"],
   names: ["Quilla", "Marsh", "Tobin"],
   slackIds: ["U0MADE0402", "C0MADE0403"],
 }
@@ -25,12 +25,14 @@ describe("the swap pass", () => {
     )
     expect(swap("@qmarsh and tbell").text).toBe("@octo-avery and octo-blair")
     expect(swap("in U0MADE0402 and C0MADE0403").text).toBe("in U0MADEUP01 and C0MADEUP02")
-    expect(swap("VX-12, ops-7 and OPS-").text).toBe("BRAVO-12, acme-7 and OPS-")
+    expect(swap("MADEVX-12, madeops-7 and MADEOPS-").text).toBe(
+      "MADEBRAVO-12, madeacme-7 and MADEOPS-",
+    )
     expect(swap("Vantorix Labs ships vantorix, VANTORIX").text).toBe("Acme ships acme, ACME")
   })
 
   test("the same text always swaps the same way, and a swapped text counts no list value", () => {
-    const text = "Quilla (qmarsh) at Vantorix asked in U0MADE0402 about VX-3"
+    const text = "Quilla (qmarsh) at Vantorix asked in U0MADE0402 about MADEVX-3"
     expect(swap(text)).toEqual(swap(text))
     expect(swap(text).counts).toEqual({
       companies: 1,
@@ -50,9 +52,9 @@ describe("the swap pass", () => {
   })
 
   test("each Linear team takes its own made-up team, so keys stay distinct and sort as before", () => {
-    const keys = ["VX-2", "OPS-2", "VX-1", "OPS-10"]
+    const keys = ["MADEVX-2", "MADEOPS-2", "MADEVX-1", "MADEOPS-10"]
     const swapped = keys.map((key) => swap(key).text)
-    expect(swapped).toEqual(["BRAVO-2", "ACME-2", "BRAVO-1", "ACME-10"])
+    expect(swapped).toEqual(["MADEBRAVO-2", "MADEACME-2", "MADEBRAVO-1", "MADEACME-10"])
     expect(new Set(swapped).size).toBe(keys.length)
     const order = (list: string[]) =>
       list.map((_, i) => i).sort((a, b) => list[a]!.localeCompare(list[b]!))
@@ -61,9 +63,9 @@ describe("the swap pass", () => {
 
   test("no stand-in matches a list entry, the teams' included, or the pass refuses to run", () => {
     expect(() => swapper(LIST, REPOS)).not.toThrow()
-    expect(() => swapper({ ...LIST, linearKeys: ["VX", "OPS", "BRAVO"] }, REPOS)).toThrow(
-      "a stand-in matches the list's linearKeys",
-    )
+    expect(() =>
+      swapper({ ...LIST, linearKeys: ["MADEVX", "MADEOPS", "MADEBRAVO"] }, REPOS),
+    ).toThrow("a stand-in matches the list's linearKeys")
   })
 
   test("a value inside a longer word, and each public repository, stay", () => {
