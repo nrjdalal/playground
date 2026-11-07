@@ -1392,10 +1392,11 @@ reread() {
 }
 # A waiter's idle poll starts one process, its sleep (issue 1338, 7 Nov: sixteen waiters started about 60 processes a second between them, which held load5
 # between 30 and 42 on 15 cores with the CPU half idle, so the slots they waited for stayed shut): it reads what its last look read through bash builtins
-# alone (a glob, read, test) and looks again only once one of them has changed. REF is touched at each look, so a file newer than it changed since
-REF="$OPS/.run-slot-ref-$$"
+# alone (a glob, read, test) and looks again only once one of them has changed. REF is touched at each look, so a file not older than it changed since,
+# or was written in the look's own second, which -nt's whole seconds on bash 3.2 cannot tell apart (one look more at most)
+REF="$OPS/.run-slot-ref-$"
 # whether this script was written since the last look, a replaced copy included, by its mtime; a copy that kept an older mtime waits for the next look's reread
-self_changed() { [ "$SELF" -nt "$REF" ]; }
+self_changed() { ! [ "$SELF" -ot "$REF" ]; }
 # SIG: each run-slot entry of the ops folder and the queue by name, with the line of each holder and of the switches whose line counts, each peer's holder
 # lines, and a mark for each holder's or ticket's pid that has ended, since a killed run leaves its line; the runs log, the lanes' and gauges' caches,
 # run-slot.next (the oldest waiter's own write), this script and the switches' history stay out
@@ -1467,7 +1468,7 @@ cheap_idle() {
   if [ "$LOOKER" = 1 ]; then
     cheap_sig $PEERS
     [ "$SIG" = "$SIG0" ] || return 1
-    [ "$MQ" -nt "$REF" ] && return 1
+    [ -e "$MQ" ] && ! [ "$MQ" -ot "$REF" ] && return 1
     [ -z "$DUE" ] || [ "$SECONDS" -lt "$DUE" ] || return 1
     cheap_load
     [ "$LOAD" = "$LOAD0" ] || return 1
@@ -1481,7 +1482,8 @@ cheap_idle() {
     [ "$NSIG" = "$NSIG0" ]
   fi
 }
-# marks a look: what it reads from here on counts as seen, and a waiter at the head reads the load, the clock's next turn and the gauges' verdict
+# marks a look: what it reads from here on counts as seen, and a waiter at the head reads the load, the clock's next turn and the gauges' verdict, which
+# the look's slot counts then take (LANES), so G0 is the verdict the look acted on
 look_mark() {
   local d
   : > "$REF" 2>/dev/null
@@ -1490,6 +1492,7 @@ look_mark() {
   next_sig
   NSIG0=$NSIG
   LOOKED=1 LOAD0= DUE= BURST= G0=open
+  unset LANES
   [ "$LOOKER" = 1 ] || return 0
   cheap_load
   LOAD0=$LOAD
@@ -1497,6 +1500,7 @@ look_mark() {
   [ -z "$d" ] || DUE=$((SECONDS + d - $(date +%s)))
   gate_sig
   G0=$G
+  LANES=${G%% *}
 }
 MQ=${PLAYGROUND_MERGE_QUEUE:-${PLAYGROUND_DATA_DIR:-$HOME/.playground}/merge-queue.json}
 LOOKER=1
@@ -1847,7 +1851,7 @@ held_for() {
   [ "$h" -ge 0 ] || h=0
   echo "$h"
 }
-# lanes_open, once per capacity() count: its slot checks share the first one's verdict, since a reading per slot counted slot 2 shut on a stale reading and slots 3 and 4 open on one that landed between them; outside a count LANES is unset, so each check reads afresh
+# lanes_open, once per capacity() count: its slot checks share the first one's verdict, since a reading per slot counted slot 2 shut on a stale reading and slots 3 and 4 open on one that landed between them; a waiter at the head's look takes the verdict look_mark read for every check, and outside a look and a count LANES is unset, so each check reads afresh
 lanes_now() {
   case "${LANES-}" in
     open) return 0 ;;
@@ -1857,7 +1861,7 @@ lanes_now() {
   esac
 }
 capacity() {
-  local s n=0 LANES=unread
+  local s n=0 LANES=${LANES:-unread}
   for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
     { [ -d "$OPS/$s" ] || slot_open "$s"; } && n=$((n + 1))
   done
@@ -2156,8 +2160,13 @@ while :; do
     [ "$fw" = "${TICKET##*/}" ] || HEAD=0
     [ "$fw2" = "${TICKET##*/}" ] || S2=0
   fi
-  # the oldest waiter names who goes next, the priority pick's included, so a waiter its look passed over looks again at once (its poll reads run-slot.next)
-  if [ -n "$TICKET" ] && oldest_is_me; then nx=; read -r nx < "$NEXTF" 2>/dev/null; [ "$nx" = "${fw:--} ${fw2:--}" ] || printf '%s\n' "${fw:--} ${fw2:--}" > "$NEXTF" 2>/dev/null; fi
+  # the oldest waiter names who goes next, "<first_waiter> <first_waiter s2> <prio_first>", under the priority pick too, so a waiter its look passed over, the
+  # pick's next ticket included once its first has gone, looks again at once (its poll reads run-slot.next)
+  if [ -n "$TICKET" ] && oldest_is_me; then
+    pf=; [ -e "$OPS/run-slot.priority" ] || [ -e "$OPS/run-slot.focus" ] && pf=$(prio_first)
+    nx=; read -r nx < "$NEXTF" 2>/dev/null
+    [ "$nx" = "${fw:--} ${fw2:--} ${pf:--}" ] || printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null
+  fi
   prev=$LOOKER
   LOOKER=0
   { [ -z "$TICKET" ] || [ "$HEAD" = 1 ] || [ "$S2" = 1 ] || oldest_is_me; } && LOOKER=1

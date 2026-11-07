@@ -183,6 +183,48 @@ describe("a waiter behind the head", () => {
     await Promise.all([stop(pick.p), stop(next.p)])
   })
 
+  // round 3 of the review: run-slot.next named first_waiter's pair alone, which held while the pick's first ticket took run-slot and went, so the pick's second, behind an older waiter that every look named, never looked and run-slot sat free
+  test("the priority pick's second run takes run-slot within a poll or two of its first run's end", async () => {
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+    m.hold("run-slot", 1, "small")
+    m.hold("run-slot-2", 2, "medium")
+    writeFileSync(join(m.ops, "run-slot.priority"), "worker-p\n")
+    const path = m.env().PATH
+    const poll = { RUN_SLOT_POLL: "1", RUN_SLOT_SIZE: "small" }
+    const asleep = (w: Waiter) => /^\+0 sleep 1$/m.test(w.err)
+    // the older waiter fits the units throughout, so first_waiter names it at every look, and it leaves run-slot to the pick
+    const older = waiter(m, path, "worker-w", ["touch"], poll)
+    while (!asleep(older)) await Bun.sleep(50)
+    const gate = join(m.root, "gate")
+    const first = waiter(
+      m,
+      path,
+      "worker-p",
+      ["bash", "-c", `until [ -e "${gate}" ]; do sleep 0.1; done; touch "$0"`],
+      poll,
+    )
+    while (!asleep(first)) await Bun.sleep(50)
+    const second = waiter(m, path, "worker-p", ["touch"], poll)
+    while (!asleep(second)) await Bun.sleep(50)
+    m.release("run-slot")
+    while (!/^run-slot\.sh: worker-p holds run-slot$/m.test(first.err)) await Bun.sleep(50)
+    // the older waiter looks at the first run's take before its end
+    const seen = older.err.length
+    while (
+      !/^\++\d+ look_mark$/m.test(older.err.slice(seen)) ||
+      !asleep({ ...older, err: older.err.slice(seen) })
+    )
+      await Bun.sleep(50)
+    const from = second.err.length
+    writeFileSync(gate, "")
+    await first.p.exited
+    const sleeps = () => second.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
+    while (!existsSync(second.marker) && sleeps() < 10) await Bun.sleep(50)
+    expect(sleeps()).toBeLessThanOrEqual(3)
+    expect(existsSync(older.marker)).toBe(false)
+    await Promise.all([stop(older.p), stop(second.p)])
+  })
+
   // a waiter killed past its trap leaves its ticket, the oldest, at the queue's front; the waiters behind it watch that ticket's pid
   test("starts within a poll or two of a freed slot when the oldest waiter was killed and left its ticket", async () => {
     const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
