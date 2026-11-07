@@ -92,6 +92,10 @@ git(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
 mkdirSync(join(GLM_REPO, "web", "next", "src"), { recursive: true })
 writeFileSync(join(GLM_REPO, "web", "next", "src", "x.ts"), "x\n")
 git(GLM_REPO, "add", ".")
+// A checkout of the made-up org acme-blue, which the leak data folder's ext.links guards, for a GLM session's org rows.
+const GLM_ORG_REPO = join(SCRATCH, "glm-org-repo")
+git(SCRATCH, "init", "-q", GLM_ORG_REPO)
+git(GLM_ORG_REPO, "remote", "add", "origin", "https://github.com/acme-blue/demo.git")
 // The leak guard's lists as core holds them, with ext.links guarding a made-up org's repositories, as its own test sets them.
 const LISTS = join(CHECKOUT, "extensions", "core", "lists")
 const LEAK = join(SCRATCH, "leak")
@@ -264,8 +268,16 @@ const guardsOf = (
     run: (raw, home) => c.extensionsWrite(raw, { HOME: home }),
   },
   "no-glm-heavy-path": {
-    folders: { "glm repo": [GLM_REPO, HOME] },
-    run: (raw) => c.glmHeavyPath(raw, { ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic" }, 1),
+    folders: { "glm org repo": [GLM_ORG_REPO, HOME], "glm repo": [GLM_REPO, HOME] },
+    run: (raw) =>
+      c.glmHeavyPath(
+        raw,
+        {
+          ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic",
+          PLAYGROUND_DATA_DIR: join(LEAK, "playground"),
+        },
+        1,
+      ),
   },
   "no-headless-login": {
     folders: { checkout: [CHECKOUT, "/nonexistent"] },
