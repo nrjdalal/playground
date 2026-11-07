@@ -635,8 +635,8 @@ describe("the merge train's quick run skips the quick slot's race", () => {
   })
 })
 
-// #547: load from outside run-slot kept 44 quick runs waiting 201 min for 8 min of work after the 15 s pass (2 Nov), and the one quick slot adds about a core at most, so it runs whatever load5 reads
-describe("the quick slot runs whatever load5 reads", () => {
+// #547: load from outside run-slot kept 44 quick runs waiting 201 min for 8 min of work after the 15 s pass (2 Nov), so the quick and commit lanes' load5 wait has a bound (issue 1385, run-slot-commit-load.test.ts)
+describe("the quick and commit lanes start once their load5 wait's bound has passed", () => {
   // A machine whose fake bun and git touch their last argument, at the load5 asked for
   const loaded = (load5: number) => {
     const m = machine({ load1: 2, load5 })
@@ -647,21 +647,27 @@ describe("the quick slot runs whatever load5 reads", () => {
     return m
   }
 
-  test("a quick-rule run with no runs on record starts at once at load5 30", async () => {
-    const run = loaded(30).start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
+  test("a quick-rule run with no runs on record at load5 30", async () => {
+    const run = loaded(30).start("worker-q", { RUN_SLOT_LOAD_WAIT: "1" }, undefined, [
+      "bun",
+      "run",
+      "docs:wrap",
+    ])
     expect(await run.ran()).toBe(true)
+    expect(
+      await run.saw(/load5 30 is still at or over 22 after \d+s, so this quick run starts/g),
+    ).toBe(true)
   })
 
-  test("and so does one over run-slot.load5-cap's lower line", async () => {
-    const m = loaded(13)
-    writeFileSync(join(m.ops, "run-slot.load5-cap"), "12\n")
-    const run = m.start("worker-q", {}, undefined, ["bun", "run", "docs:wrap"])
+  test("a commit at load5 30", async () => {
+    const run = loaded(30).start("worker-q", { RUN_SLOT_LOAD_WAIT: "1" }, undefined, [
+      "git",
+      "commit",
+    ])
     expect(await run.ran()).toBe(true)
-  })
-
-  test("a commit takes its slot at load5 30, as before", async () => {
-    const run = loaded(30).start("worker-q", {}, undefined, ["git", "commit"])
-    expect(await run.ran()).toBe(true)
+    expect(
+      await run.saw(/load5 30 is still at or over 22 after \d+s, so this commit run starts/g),
+    ).toBe(true)
   })
 
   test("and so does a node_modules clone at load1 30, with clone-off unset and load5 under its margin", async () => {
