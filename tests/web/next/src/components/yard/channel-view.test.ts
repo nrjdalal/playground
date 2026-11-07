@@ -17,6 +17,16 @@ describe("Yard's composer", () => {
     expect(yard).toEqual(boxClasses(await read("dashboard/composer.tsx")))
   })
 
+  // the dashboard's phone tab bar holds its Menu, so the hosted dashboard's channel pads for no floating one
+  test("rests above the floating Menu in Yard's own shell alone", async () => {
+    const source = await read("yard/channel-view.tsx")
+    const page = (path: string) =>
+      Bun.file(join(import.meta.dir, "../../../../../../web/next/src/app", path)).text()
+    expect(source).toContain('shell === "yard" && "max-md:pb-26"')
+    expect(await page("(protected)/dashboard/yard/[id]/page.tsx")).toContain('shell="dashboard"')
+    expect(await page("(yard)/yard/(app)/c/[id]/page.tsx")).toContain('shell="yard"')
+  })
+
   // its words live in its own state alone, so a build reload waits while they show (build-reload.ts)
   test("holds a build reload while it holds typed words", async () => {
     const source = await read("yard/channel-view.tsx")

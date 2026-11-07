@@ -7,6 +7,7 @@ import {
   feedItemNeed,
   feedNeeds,
   hashAnchor,
+  hashTarget,
   isAnswered,
   isNeedsYouAnchor,
   mayHaveGone,
@@ -629,5 +630,28 @@ describe("lostPrompt", () => {
   test("none while its prompt is in the Feed, or it waits on nothing", () => {
     expect(lostPrompt(worker({ feed: picker(), lifecycle: "needsInput" }))).toBeNull()
     expect(lostPrompt(worker({ lifecycle: "running" }))).toBeNull()
+  })
+})
+
+describe("hashTarget", () => {
+  test("a card's hash on a fresh load asks as a link, so the Inbox leaves its shelf shut", () => {
+    expect(hashTarget(null, "needs-you-a")).toEqual({ anchor: "needs-you-a", source: "link" })
+  })
+
+  test("a row's click keeps its source once the same anchor reaches the hash", () => {
+    const click = { anchor: "needs-you-a", source: "click" } as const
+    expect(hashTarget(click, "needs-you-a")).toBe(click)
+  })
+
+  test("a different card's hash after a click asks as a link", () => {
+    const click = { anchor: "needs-you-a", source: "click" } as const
+    expect(hashTarget(click, "needs-you-b")).toEqual({ anchor: "needs-you-b", source: "link" })
+  })
+
+  test("a hash that names no card changes nothing", () => {
+    const click = { anchor: "needs-you-a", source: "click" } as const
+    expect(hashTarget(click, "fn-1")).toBe(click)
+    expect(hashTarget(click, "")).toBe(click)
+    expect(hashTarget(null, "fn-1")).toBeNull()
   })
 })

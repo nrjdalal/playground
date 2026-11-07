@@ -13,7 +13,7 @@ import {
 import { writeAtomic } from "../write-atomic"
 import type { Context } from "./tick"
 
-// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees, branches, worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, an Inbox update when 1 GB or more was freed, and one delete decision for what only the owner's Approve may remove.
+// ops-tick's nightly-clean beat: what no merge's cleanup reaches, in order: stale worktrees (trashed, each restorable), branches (each head archived as a tag first), worktree containers and Docker's dangling images and build cache, the turbo cache over 2 days old; then one log line, one outbox line to ops naming each removal, an Inbox update when 1 GB or more was freed, and one delete decision for the containers and volumes only the owner's Approve may remove.
 
 const GB = 1024 ** 3
 // The freed-space finding's link, a dashboard path the card resolves against the app's own URL, so no host is written here.
@@ -21,13 +21,12 @@ export const FREED_LINK = "- 💾 Free disk shows on the [System page](/dashboar
 const TURBO_CACHE = join(homedir(), ".cache", "turbo", "playground")
 
 export type Pr = { headRefOid: string; state: "CLOSED" | "MERGED" | "OPEN"; url: string }
-// repo is the repository's https URL, which a branch with no PR links its compare under.
+// repo is the repository's https URL, which the branch step's archive tags are pushed through.
 export type Prs = { byBranch: Map<string, Pr>; byNumber: Map<number, Pr>; repo?: string }
 export type Ref = { name: string; sha: string }
-// link is the page the owner opens to judge it: a worktree's or branch's PR, else a pushed branch's compare.
+// A leftover the decision list names: the containers and volumes only the owner's Approve removes.
 export type Target = {
   kind: "branch" | "container" | "volume" | "worktree"
-  link?: string
   name: string
 }
 export type Worktree = { branch: string | null; path: string }
@@ -78,7 +77,7 @@ export const staleWorktrees = (worktrees: Worktree[], prs: Prs): (Worktree & { p
     return pr !== undefined && pr.state !== "OPEN" ? [{ ...w, pr }] : []
   })
 
-// Pure: what the branch step does. A local branch merged into origin/canary, or one whose merged or closed PR still holds its head, goes with -D (the main checkout's HEAD is main, so -d would refuse one merged into canary alone), and a remote one whose merged or closed PR holds its head is deleted on origin, since GitHub restores it from the PR's page; an unmerged local branch with no PR, or one ahead of its PR's head, goes to the decision list. A kept branch (canary, main, the live dashboard's), one a worktree has checked out, and one with an open PR stay.
+// Pure: what the branch step does. A local branch merged into origin/canary, or one whose merged or closed PR still holds its head, goes with -D (the main checkout's HEAD is main, so -d would refuse one merged into canary alone), and a remote one whose merged or closed PR holds its head is deleted on origin, since GitHub restores it from the PR's page; an unmerged local branch with no PR, or one ahead of its PR's head, goes to the archive list, whose head is tagged on origin before any delete, so the tag holds the old head. A kept branch (canary, main, the live dashboard's), one a worktree has checked out, and one with an open PR stay.
 export const staleBranches = (input: {
   checkedOut: Set<string>
   keep: Set<string>
@@ -86,11 +85,11 @@ export const staleBranches = (input: {
   merged: Set<string>
   prs: Map<string, Pr>
   remote: Ref[]
-}): { decide: string[]; local: string[]; remote: string[] } => {
+}): { archive: string[]; local: string[]; remote: string[] } => {
   const done = (pr: Pr | undefined, sha: string) =>
     pr !== undefined && pr.state !== "OPEN" && pr.headRefOid === sha
   const out = {
-    decide: [] as string[],
+    archive: [] as string[],
     local: [] as string[],
     remote: [] as string[],
   }
@@ -98,7 +97,7 @@ export const staleBranches = (input: {
     if (input.keep.has(b.name) || input.checkedOut.has(b.name)) continue
     const pr = input.prs.get(b.name)
     if (input.merged.has(b.name) || done(pr, b.sha)) out.local.push(b.name)
-    else if (pr?.state !== "OPEN") out.decide.push(b.name)
+    else if (pr?.state !== "OPEN") out.archive.push(b.name)
   }
   for (const r of input.remote)
     if (!input.keep.has(r.name) && done(input.prs.get(r.name), r.sha)) out.remote.push(r.name)
@@ -176,31 +175,21 @@ export async function pruneTurbo(dir: string, now: Date, days = 2): Promise<stri
   return `removed ${removed}, kept ${kept}, freed ${Math.round(freed / 1_048_576)} MB`
 }
 
-// Pure: the page a branch on the decision list links: its newest PR, else its compare once it is pushed, else none, since an unpushed branch has no page.
-export const branchLink = (name: string, prs: Prs, pushed: Set<string>): string | undefined =>
-  prs.byBranch.get(name)?.url ??
-  (prs.repo && pushed.has(name) ? `${prs.repo}/compare/${name}` : undefined)
-
 const WHY =
-  "The nightly cleanup found these left over: a worktree with work no merge landed, a branch with no merged PR, or a container or volume over 1 GB that no rule removes. Approve removes each on the next night's run; Deny keeps them, and they are not asked again."
+  "The nightly cleanup found these left over: a container or unused volume over 1 GB that no rule removes. Approve removes each on the next night's run; Deny keeps them, and they are not asked again."
 
-// Pure: the night's delete decision, each target named whole (playground rm --decision matches full paths), as many as fit the Inbox's 4,000 characters, the rest waiting for the next night; its why links each named target's PR or compare, as many as fit.
+// Pure: the night's delete decision for the containers and volumes, each named whole, as many as fit the Inbox's 4,000 characters, the rest waiting for the next night; the worktrees and branches the run removed go to the log and the outbox line, not here.
 export const decisionOf = (
   from: string,
   targets: Target[],
 ): { item: object; targets: Target[] } => {
   const named: Target[] = []
   let what = ""
-  let why = WHY
   for (const t of targets) {
     const line = `- ${t.kind} \`${t.name}\`\n`
     if (what.length + line.length > 3800) break
     named.push({ kind: t.kind, name: t.name })
     what += line
-    if (!t.link) continue
-    const pr = /\/pull\/(\d+)$/.exec(t.link)?.[1]
-    const linked = `${why === WHY ? "\n\n" : "\n"}- ${t.kind} \`${t.kind === "worktree" ? basename(t.name) : t.name}\`: [${pr ? `#${pr}` : "compare"}](${t.link})`
-    if (why.length + linked.length <= 3900) why += linked
   }
   return {
     item: {
@@ -209,7 +198,7 @@ export const decisionOf = (
       preview: {
         type: "delete",
         what: what.trimEnd(),
-        why,
+        why: WHY,
       },
       title: `Delete ${named.length} leftover${named.length === 1 ? "" : "s"} the nightly cleanup found`,
     },
@@ -217,7 +206,7 @@ export const decisionOf = (
   }
 }
 
-// Pure: whether a cleanWorktree line kept work only the owner's Approve may drop: uncommitted or unpushed work, or rm's unlanded-work refusal that names --discard.
+// Pure: whether a cleanWorktree line kept work the standing approval may trash: uncommitted or unpushed work, or rm's unlanded-work refusal that names --discard.
 export const discardable = (line: string): boolean =>
   /: (uncommitted work|unpushed commits)$/.test(line) ||
   line.includes("--discard removes it anyway")
@@ -226,10 +215,31 @@ export const discardable = (line: string): boolean =>
 const ask = async (ctx: Context, args: string[], stdin?: string) =>
   ctx.run(["bun", "run", "--silent", "--cwd", ctx.repo, "ask", ...args], 120_000, stdin)
 
+const cliOf = (ctx: Context): string =>
+  join(ctx.repo, "packages", "scripts", "src", "playground", "cli.ts")
+
+// A worktree's trash move under the owner's standing approval, the nightly cleanup acting on its own: playground rm --worktree --discard with the fixed reason nightly-clean, no delete decision asked, the id it prints the one playground rm --restore brings back.
+const trashWorktree = (ctx: Context, path: string) =>
+  ctx.run([
+    "bun",
+    "--no-env-file",
+    cliOf(ctx),
+    "rm",
+    "--worktree",
+    path,
+    "--discard",
+    "--reason",
+    "nightly-clean",
+  ])
+
 const idOf = (out: string): string | undefined =>
   lines(out)
     .map((l) => l.trim())
     .find((l) => /^[0-9a-f-]{36}$/.test(l))
+
+// Pure: the trash id a playground rm trash move printed, the one playground rm --restore takes.
+export const trashIdOf = (out: string): string | undefined =>
+  /\d{8}T\d{6}Z-[A-Za-z0-9][A-Za-z0-9-]*\/\d+/.exec(out)?.[0]
 
 // Carries out last night's approved targets, closes a denied or set-aside one (a denied one's targets kept out of later asks, a set-aside one's asked again), and answers whether it is still open.
 async function settleLast(
@@ -255,7 +265,7 @@ async function settleLast(
   }
   if (status === "open") return true
   if (status === "approved") {
-    const cli = join(ctx.repo, "packages", "scripts", "src", "playground", "cli.ts")
+    const cli = cliOf(ctx)
     const runs: Record<Target["kind"], (name: string) => string[]> = {
       branch: (name) => ["git", "-C", main, "branch", "-D", name],
       container: (name) => ["docker", "rm", "-fv", name],
@@ -305,6 +315,9 @@ export const nightlyClean =
     const before = deps.free(data)
     const said: string[] = []
     const decide: Target[] = []
+    // Each removal and each kept leftover, named for the outbox line to ops: a removal with its trash id or archive tag, a keep with why.
+    const removed: string[] = []
+    const kept: string[] = []
     let mark = before
     const step = async (name: string, body: () => Promise<string>) => {
       const line = await body().catch((err: Error) => `failed: ${err.message}`)
@@ -358,7 +371,17 @@ export const nightlyClean =
           pushed: w.pr.headRefOid,
         })
         out.push(line)
-        if (discardable(line)) decide.push({ kind: "worktree", link: w.pr.url, name: w.path })
+        if (!discardable(line)) continue
+        // The owner's standing approval: trashed with no decision, the 7-day trash holds it and playground rm --restore brings it back.
+        const moved = await trashWorktree(ctx, w.path)
+        const id = trashIdOf(moved.out)
+        if (moved.code === 0 && id) {
+          out.push(`trashed ${w.path} as ${id}, restorable with playground rm --restore ${id}`)
+          removed.push(`worktree ${w.path} as trash ${id} (playground rm --restore ${id})`)
+        } else {
+          out.push(`kept ${w.path}: its trash move failed: ${lines(moved.out).at(-1) ?? ""}`)
+          kept.push(`worktree ${w.path} kept: its trash move failed`)
+        }
       }
       return out.length ? out.join("; ") : "none stale"
     })
@@ -367,23 +390,79 @@ export const nightlyClean =
       const listed = (await git(["worktree", "list", "--porcelain"])).out
       const checkedOut = [...listed.matchAll(/^branch refs\/heads\/(.+)$/gm)].map((m) => m[1]!)
       const merged = await git(["branch", "--merged", "origin/canary", "--format=%(refname:short)"])
+      const locals = await local()
       const plan = staleBranches({
         checkedOut: new Set(checkedOut),
         keep: new Set(["canary", "main", cleanup?.liveBranch ?? ""]),
-        local: await local(),
+        local: locals,
         merged: new Set(merged.code === 0 ? lines(merged.out) : []),
         prs: prs.byBranch,
         remote,
       })
-      let locals = 0
-      for (const name of plan.local) if ((await git(["branch", "-D", name])).code === 0) locals++
+      let deleted = 0
+      for (const name of plan.local) if ((await git(["branch", "-D", name])).code === 0) deleted++
       let remotes = 0
       for (const name of plan.remote)
         if ((await git(["push", "-q", "origin", "--delete", name])).code === 0) remotes++
-      const pushed = new Set(remote.map((r) => r.name))
-      for (const name of plan.decide)
-        decide.push({ kind: "branch", link: branchLink(name, prs, pushed), name })
-      return `deleted ${locals} local, ${remotes} remote; ${plan.decide.length} to decide`
+      // The archive tag is pushed through the git refs API, as the ship's tag step does, before any delete, so the tag holds the old head and git branch <name> archive/<name> brings the branch back. A branch whose origin head is not the local head the tag would hold stays whole, since the tag would not hold what the origin delete drops.
+      const shas = new Map(locals.map((r) => [r.name, r.sha]))
+      const api = prs.repo?.replace(/^https:\/\/github\.com\//, "repos/")
+      const out: string[] = []
+      for (const name of plan.archive) {
+        const tag = `archive/${name}`
+        const sha = shas.get(name) ?? ""
+        const originRef = remote.find((r) => r.name === name)
+        if (originRef && originRef.sha !== sha) {
+          const why = `origin's head is ${originRef.sha}, not the local head ${sha}`
+          out.push(`kept ${name}: ${why}`)
+          kept.push(`branch ${name} kept: ${why}`)
+          continue
+        }
+        const made = api
+          ? await ctx.run([
+              "gh",
+              "api",
+              "-X",
+              "POST",
+              `${api}/git/refs`,
+              "-f",
+              `ref=refs/tags/${tag}`,
+              "-f",
+              `sha=${sha}`,
+            ])
+          : { code: 1, out: "no repository read" }
+        if (made.code !== 0) {
+          // The tag already at this head, as a retried night finds, holds it: the deletes go on.
+          const there = await git(["ls-remote", "origin", `refs/tags/${tag}`])
+          const at =
+            lines(there.out)[0]?.split(/\t/)[1] === `refs/tags/${tag}`
+              ? (lines(there.out)[0]?.split(/\t/)[0] ?? "")
+              : ""
+          if (there.code !== 0 || at !== sha) {
+            out.push(`kept ${name}: its ${tag} tag failed: ${lines(made.out).at(-1) ?? ""}`)
+            kept.push(`branch ${name} kept: its ${tag} tag failed`)
+            continue
+          }
+        }
+        const originDeleted =
+          !originRef || (await git(["push", "-q", "origin", "--delete", name])).code === 0
+        if (!originDeleted) {
+          out.push(`kept ${name}: its origin delete failed, its ${tag} tag holds the head`)
+          kept.push(`branch ${name} kept: its origin delete failed`)
+          continue
+        }
+        const localDeleted = (await git(["branch", "-D", name])).code === 0
+        if (localDeleted) {
+          out.push(
+            `archived ${name} as ${tag} at ${sha}, deleted${originRef ? " on origin and" : ""} locally`,
+          )
+          removed.push(`branch ${name} as tag ${tag} at ${sha}`)
+        } else {
+          out.push(`kept ${name}: its local delete failed, its ${tag} tag holds the head`)
+          kept.push(`branch ${name} kept: its local delete failed`)
+        }
+      }
+      return `deleted ${deleted} local, ${remotes} remote; ${out.length ? out.join("; ") : "none to archive"}`
     })
     await step("docker", async () => {
       const listed = await ctx.run([
@@ -425,6 +504,12 @@ export const nightlyClean =
       Date.parse(state.at ?? "") || ctx.now.getTime() - 86_400_000,
     )
     said.push(`trash: ${purged} batches purged since the last run`)
+    const named = [...removed, ...kept]
+    if (named.length)
+      await ctx.send(
+        "ops",
+        `nightly-clean removed ${removed.length}, kept ${kept.length}: ${named.join("; ")}`,
+      )
     const after = deps.free(data)
     const roster = await Bun.file(join(data, "roster.json"))
       .json()

@@ -1,3 +1,4 @@
+import { reachesConsole } from "@packages/auth/access"
 import { cn } from "cn"
 import { redirect } from "next/navigation"
 
@@ -23,8 +24,13 @@ export default async function YardAppLayout({ children }: { children: React.Reac
   return (
     <SidebarShell
       homeHref="/yard"
-      nav={<YardGroups />}
-      footer={<YardFooter login={session?.user.login ?? session?.user.name ?? ""} />}
+      nav={<YardGroups shell="yard" />}
+      footer={
+        <YardFooter
+          login={session?.user.login ?? session?.user.name ?? ""}
+          owner={Boolean(session?.user && reachesConsole(session.user, "owner"))}
+        />
+      }
     >
       <YardLive />
       <div className={cn("h-svh", PAGE_PANE)}>{children}</div>
