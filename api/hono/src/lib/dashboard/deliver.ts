@@ -441,6 +441,11 @@ const pastes = new Map<string, Paste[]>()
 const unsent = new Set<string>()
 // The messages Claude Code held when their try ended (QUEUED), by id, with when they were pasted, so a retry reads them again rather than pasting them twice; this process's own, as `unsent` is.
 const queued = new Map<string, number>()
+// Per session, the message with an id whose box read empty after its paste with nothing to show it went, by id and when it was pasted: it may sit undrawn with its Enter lost, so no other message is pasted there until it shows, goes or ages past QUEUED_MS, whichever path sends it (the composer's outbox or an Inbox answer).
+const unproven = new Map<string, { at: number; id: string }>()
+const proven = (sessionId: string, id: string | undefined): void => {
+  if (id && unproven.get(sessionId)?.id === id) unproven.delete(sessionId)
+}
 
 const oneAtATime = <T>(key: string, work: () => Promise<T>): Promise<T> => {
   const next = (typingLines.get(key) ?? Promise.resolve()).then(work, work)
@@ -535,7 +540,10 @@ export async function deliver(
   return oneAtATime(sessionId, async () => {
     // Behind the session's line, so a retry that arrives while its first try is still typing reads the row that try commits.
     const at = delivery.id ? await deps.delivered(delivery.id) : null
-    if (at) return { at: at.toISOString(), ok: true, replayed: true, sessionId }
+    if (at) {
+      proven(sessionId, delivery.id)
+      return { at: at.toISOString(), ok: true, replayed: true, sessionId }
+    }
     const found = await target(delivery.to, own)
     if (!("worker" in found)) return found
     if (found.worker.sessionId !== sessionId) {
@@ -571,7 +579,10 @@ export async function deliver(
         ? (queued.get(delivery.id) ?? (told <= deps.now().getTime() ? told : undefined))
         : undefined
       if (delivery.id && queuedAt !== undefined) {
-        if (holdsQueued(screen, text)) return stillQueued(queuedAt)
+        if (holdsQueued(screen, text)) {
+          proven(sessionId, delivery.id)
+          return stillQueued(queuedAt)
+        }
         if (!(input === "holds" && holdsMessage(screen, text))) {
           let went: boolean | null = null
           try {
@@ -693,12 +704,14 @@ export async function deliver(
       // A message with an id that Claude Code holds after the send waits as QUEUED, its row left for the retry that sees it arrive; it gets no Enter, since Claude Code takes it on its own.
       // the hold is timed from the paste, not from this read after herdr's answer and the settle, since Claude Code stamps a queued_command at its Enter
       let pastedAt: number | undefined
-      const queueIt = (): TypingStopped => {
+      const queueIt = (seen: boolean): TypingStopped => {
         const now = deps.now().getTime()
         const held = pastedAt ?? now
         // an entry past the bound has settled, or its message was discarded; a retry still carries its queuedAt
         for (const [id, at] of queued) if (now - at >= QUEUED_MS) queued.delete(id)
         if (delivery.id) queued.set(delivery.id, held)
+        if (seen) proven(sessionId, delivery.id)
+        else if (delivery.id) unproven.set(sessionId, { at: held, id: delivery.id })
         return new TypingStopped(stillQueued(held), "held")
       }
       // `sent` is the paste the box should hold, `own` whether it is this message's, whose Enter left unsent is this message's to retry, and `known` whether the box was already seen holding it. A message with an id never seen in the box, the queue or the transcript waits as QUEUED, so the next message waits for it, and its next try presses Enter on it once Claude Code draws it.
@@ -710,10 +723,10 @@ export async function deliver(
         known = false,
       ): Promise<void> => {
         const { after: first, seen } = await settled(at, lost, sent, known)
-        if (own && delivery.id && holdsQueued(first, sent)) throw queueIt()
+        if (own && delivery.id && holdsQueued(first, sent)) throw queueIt(true)
         if (inputState(first) === "empty") {
           if (lost) throw new TypingFailed(1, true, lost)
-          if (!seen && own && delivery.id) throw queueIt()
+          if (!seen && own && delivery.id) throw queueIt(false)
           return
         }
         if (!holdsMessage(first, sent)) throw unseen(first)
@@ -723,7 +736,7 @@ export async function deliver(
           throw new TypingFailed(1, true, error)
         }
         const { after: second } = await settled(at, lost, sent, true)
-        if (own && delivery.id && holdsQueued(second, sent)) throw queueIt()
+        if (own && delivery.id && holdsQueued(second, sent)) throw queueIt(true)
         if (inputState(second) === "empty") return
         if (!holdsMessage(second, sent)) throw unseen(second)
         // With an id the outbox tries it again on its own, and that try presses Enter on it, so it waits queued rather than failing in front of the owner.
@@ -783,6 +796,20 @@ export async function deliver(
             }
             const left = (pastes.get(sessionId) ?? []).filter((paste) => paste !== stuck)
             pastes.set(sessionId, left)
+            proven(sessionId, stuck.id)
+          }
+          const earlier = unproven.get(sessionId)
+          if (earlier && earlier.id !== delivery.id) {
+            if (deps.now().getTime() - earlier.at < QUEUED_MS) {
+              throw new TypingStopped(
+                refused(
+                  "INPUT_NOT_EMPTY",
+                  `${worker.name} may still be taking an earlier message from here that has not shown yet, so this one waits until it does. Nothing was typed.`,
+                ),
+                "nothing",
+              )
+            }
+            unproven.delete(sessionId)
           }
           const at = deps.now().getTime()
           pastedAt = at
@@ -847,6 +874,7 @@ export async function deliver(
       const result = await attempt()
       if (!(result instanceof BeforeTyping)) {
         if (delivery.id && result.ok) unsent.delete(delivery.id)
+        if (result.ok || result.code !== "QUEUED") proven(sessionId, delivery.id)
         return result
       }
       refusedBeforeTyping = result.message
