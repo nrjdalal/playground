@@ -634,9 +634,30 @@ export async function deliver(
         )
       }
       // herdr pastes the message and then presses Enter, and Claude Code can still be taking a pasted image's path in when the Enter comes, so the Enter is lost and the message sits in the box. So the box is read after the send: empty, it went; holding this message, it gets one more Enter and is read again; holding it still, or holding text that does not start as it does, it is typed but not submitted, and no client retries it unseen, but for a message with an id still holding it, which waits as INPUT_NOT_EMPTY for its retry's Enter. The box read empty just before the send, so what it holds then is this message unless someone typed into it meanwhile. After a prompt that failed as typed (`lost`), an empty box cannot tell a message that went from one never pasted, so it stays interrupted, and the outbox reads it delivered once the transcript holds it.
-      // The box after a send: its first empty read, else its last.
-      const settled = async (at: string, lost: unknown): Promise<string> => {
+      // Whether the transcript already holds the paste, read once its box reads empty: a session that took it at once, before any read saw it, writes its line.
+      const tookIt = async (sent: string): Promise<boolean> => {
+        try {
+          return (
+            wentIn(await deps.said(worker), {
+              at: pastedAt ?? deps.now().getTime(),
+              images,
+              text: sent,
+            }) === true
+          )
+        } catch {
+          return false
+        }
+      }
+      // The box after a send: its first empty read once the message has been seen in the box or the queue, or the transcript holds it, else its last; `seen` says whether it was. An empty read alone proves nothing: Claude Code slow under load had not drawn a paste whose Enter it then lost, so the box read empty, the message read typed, and the next one was pasted after it and went with it as one prompt.
+      const settled = async (
+        at: string,
+        lost: unknown,
+        sent: string,
+        known: boolean,
+      ): Promise<{ after: string; seen: boolean }> => {
         let after = ""
+        let seen = known
+        let asked = false
         for (let i = 0; i < SETTLE_READS; i++) {
           await deps.wait(SETTLE_GAP_MS)
           try {
@@ -644,9 +665,19 @@ export async function deliver(
           } catch (error) {
             throw new TypingFailed(1, true, lost ?? error)
           }
-          if (inputState(after) === "empty") break
+          if (holdsQueued(after, sent) || holdsMessage(after, sent)) seen = true
+          if (inputState(after) !== "empty") continue
+          if (lost || seen) break
+          // the transcript is read at the first empty read and the last, not at each
+          if (!asked || i === SETTLE_READS - 1) {
+            asked = true
+            if (await tookIt(sent)) {
+              seen = true
+              break
+            }
+          }
         }
-        return after
+        return { after, seen }
       }
       // A box with no message of ours in it: no Enter goes into text that is not ours.
       const unseen = (after: string): TypingStopped =>
@@ -670,17 +701,19 @@ export async function deliver(
         if (delivery.id) queued.set(delivery.id, held)
         return new TypingStopped(stillQueued(held), "held")
       }
-      // `sent` is the paste the box should hold, and `own` whether it is this message's, whose Enter left unsent is this message's to retry.
+      // `sent` is the paste the box should hold, `own` whether it is this message's, whose Enter left unsent is this message's to retry, and `known` whether the box was already seen holding it. A message with an id never seen in the box, the queue or the transcript waits as QUEUED, so the next message waits for it, and its next try presses Enter on it once Claude Code draws it.
       const submitted = async (
         at: string,
         lost: unknown,
         sent = text,
         own = true,
+        known = false,
       ): Promise<void> => {
-        const first = await settled(at, lost)
+        const { after: first, seen } = await settled(at, lost, sent, known)
         if (own && delivery.id && holdsQueued(first, sent)) throw queueIt()
         if (inputState(first) === "empty") {
           if (lost) throw new TypingFailed(1, true, lost)
+          if (!seen && own && delivery.id) throw queueIt()
           return
         }
         if (!holdsMessage(first, sent)) throw unseen(first)
@@ -689,7 +722,7 @@ export async function deliver(
         } catch (error) {
           throw new TypingFailed(1, true, error)
         }
-        const second = await settled(at, lost)
+        const { after: second } = await settled(at, lost, sent, true)
         if (own && delivery.id && holdsQueued(second, sent)) throw queueIt()
         if (inputState(second) === "empty") return
         if (!holdsMessage(second, sent)) throw unseen(second)
@@ -728,7 +761,7 @@ export async function deliver(
           }
           if (stuck && isThis(stuck)) {
             pastedAt = stuck.at
-            await submitted(again.surface, null)
+            await submitted(again.surface, null, text, true, true)
             pastes.set(
               sessionId,
               (pastes.get(sessionId) ?? []).filter((paste) => paste !== stuck),
@@ -737,7 +770,7 @@ export async function deliver(
           }
           if (stuck) {
             try {
-              await submitted(again.surface, null, stuck.text, false)
+              await submitted(again.surface, null, stuck.text, false, true)
             } catch (error) {
               if (!(error instanceof TypingStopped || error instanceof TypingFailed)) throw error
               throw new TypingStopped(

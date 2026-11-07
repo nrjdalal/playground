@@ -914,14 +914,12 @@ describe("statusLine", () => {
 
 // One mark at a time, in one fixed slot so nothing shifts: a loader alone until the session's transcript holds the message, then one tick.
 test("statusMark draws a loader until the message is delivered, then one tick", () => {
-  for (const busy of [false, true]) {
-    expect(statusMark(message("a", { state: "queued" }), busy)).toBe("sending")
-    expect(statusMark(message("a", { code: "QUEUED", state: "queued" }), busy)).toBe("sending")
-    expect(statusMark(message("a", { state: "sending" }), busy)).toBe("sending")
-    expect(statusMark(message("a", { state: "typed" }), busy)).toBe("sending")
-    expect(statusMark(message("a", { state: "delivered" }), busy)).toBe("delivered")
-    expect(statusMark(message("a", { state: "failed" }), busy)).toBe("failed")
-  }
+  expect(statusMark(message("a", { state: "queued" }))).toBe("sending")
+  expect(statusMark(message("a", { code: "QUEUED", state: "queued" }))).toBe("sending")
+  expect(statusMark(message("a", { state: "sending" }))).toBe("sending")
+  expect(statusMark(message("a", { state: "typed" }))).toBe("sending")
+  expect(statusMark(message("a", { state: "delivered" }))).toBe("delivered")
+  expect(statusMark(message("a", { state: "failed" }))).toBe("failed")
   // its line has landed while its try still runs: delivered, as the bubble it now shows on is
   for (const state of ["queued", "sending"] as const) {
     expect(statusMark(message("a", { code: "QUEUED", entryId: "e1", state }))).toBe("delivered")

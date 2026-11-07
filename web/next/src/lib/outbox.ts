@@ -271,13 +271,16 @@ export function outboxReducer(messages: OutboxMessage[], action: OutboxAction): 
           state: "failed",
           unanswered: m.unanswered || UNANSWERED.has(action.code),
         }
-      // one still sending keeps its state, so the next message waits for its answer, while its line stands in for its pending copy
+      // one still sending keeps its state, so the next message waits for its answer, and one Claude Code holds stays queued, so its next try records its row and the next message waits for it, while its line stands in for its pending copy
       case "delivered":
         return {
           ...m,
           deliveredAt: action.at,
           entryId: action.entryId,
-          state: m.state === "sending" ? "sending" : "delivered",
+          state:
+            m.state === "sending" || (m.state === "queued" && m.code === QUEUED)
+              ? m.state
+              : "delivered",
         }
     }
   })
@@ -351,6 +354,8 @@ const CUT_OFF = "INTERRUPTED"
 // When a message could have reached its session, if the transcript may hold it: from when it was written, for a typed message, one still sending, one whose request went unanswered and one cut off while typing alike. Its entry never precedes that, while typedAt comes after the Enter, herdr's answer, the box's settle and the row's commit, which on a loaded machine run past the Enter's own stamp on a message queued mid-turn.
 const reachableSince = (m: OutboxMessage): number | null => {
   if (m.state === "typed" || m.state === "sending") return Date.parse(m.at)
+  // held by Claude Code, which writes its line when it takes it
+  if (m.state === "queued" && m.code === QUEUED) return Date.parse(m.at)
   // still waiting to be sent again after a try that got no answer, which may have landed
   if (m.state === "queued" && m.unanswered) return Date.parse(m.at)
   if (
@@ -435,11 +440,15 @@ export function matchDeliveries(
   const sending = messages.filter(
     (m) => m.state === "sending" && m.entryId === null && m.to === session.name,
   )
+  // one Claude Code holds lands with its line, not with the next try that reads it, so the chat never draws the line and its pending copy both
+  const held = messages.filter(
+    (m) => m.state === "queued" && m.code === QUEUED && m.entryId === null && m.to === session.name,
+  )
   const unanswered = messages.filter(
     (m) =>
       (m.state === "failed" || (m.state === "queued" && m.unanswered)) && m.to === session.name,
   )
-  for (const m of [...typed, ...sending, ...unanswered]) {
+  for (const m of [...typed, ...sending, ...held, ...unanswered]) {
     const entry = findDelivery(m, entries, claimed)
     if (!entry) continue
     claimed.add(entry.id)
@@ -516,17 +525,18 @@ export function statusLine(
   }
 }
 
-// The mark his footer draws for a message, in one fixed-width slot whatever the state: a spinner while on its way, one faint tick while Claude Code holds it (QUEUED, or typed while its session works), one tick once typed, two once delivered; statusLine's words are its hover and its screen-reader text.
-export type StatusMarkKind = "delivered" | "failed" | "queued" | "sending" | "sent"
+// The mark his footer draws for a message, one at a time in one fixed-width slot: a spinner until the session's transcript holds it, then one tick, or a red mark when it failed; statusLine's words are its hover and its screen-reader text.
+export type StatusMarkKind = "delivered" | "failed" | "sending"
 
-export const statusMark = (
-  { code, state }: Pick<OutboxMessage, "code" | "state">,
-  busy = false,
-): StatusMarkKind => {
-  if (state === "queued") return code === QUEUED ? "queued" : "sending"
-  if (state === "typed") return busy ? "queued" : "sent"
-  return state
-}
+export const statusMark = ({
+  entryId,
+  state,
+}: Pick<OutboxMessage, "entryId" | "state">): StatusMarkKind =>
+  state === "failed"
+    ? "failed"
+    : state === "delivered" || entryId !== null
+      ? "delivered"
+      : "sending"
 
 // The one action his pending message's footer offers in its slot: Unsend while it waits here, Dismiss once typed into an idle session and held a moment (typedHeld); none while Claude Code holds it, since it goes on its own.
 export const pendingAction = (
