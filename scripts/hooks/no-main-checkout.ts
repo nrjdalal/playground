@@ -467,7 +467,7 @@ function writes(name: string, args: Word[]): Word[] {
 }
 
 // The files a command writes, by a redirect or by name, each one the hook can place.
-function writeTargets(cmd: Command, name: string, args: Word[]): Word[] {
+export function writeTargets(cmd: Command, name: string, args: Word[]): Word[] {
   const targets = [
     ...cmd.redirects
       .filter(
