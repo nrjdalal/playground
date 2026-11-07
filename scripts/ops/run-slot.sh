@@ -30,7 +30,7 @@ stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
-SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
+SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
   local f="$OPS/$1" line ends now m
@@ -210,8 +210,8 @@ if [ "${1:-}" = size ]; then
   size_of "$2"
   exit
 fi
-# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, focus, load5-cap, single,
-# or the runner host's off or slot-off, for 4 hours unless --for says; a value (load5-cap's cap) goes on the line below. A set with no reason is refused
+# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, focus, idle-min, load5-cap, single,
+# or the runner host's off or slot-off, for 4 hours unless --for says; a value (idle-min's bar, load5-cap's cap) goes on the line below. A set with no reason is refused
 if [ "${1:-}" = set ]; then
   usage='usage: run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]'
   [ $# -ge 3 ] || { echo "$usage" >&2; exit 2; }
@@ -227,8 +227,8 @@ if [ "${1:-}" = set ]; then
   case "$who" in *[!A-Za-z0-9._#-]*|"") echo "run-slot.sh: <who> is a session name (letters, digits, . _ - #)" >&2; exit 2 ;; esac
   case "$name" in
     off|slot-off) path=runner-host/$name ;;
-    3-off|4-off|clone-off|focus|load5-cap|single) path=run-slot.$name ;;
-    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, focus, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
+    3-off|4-off|clone-off|focus|idle-min|load5-cap|single) path=run-slot.$name ;;
+    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, focus, idle-min, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
   esac
   [ -n "$reason" ] || { echo "run-slot.sh: a set takes --reason \"<why>\", so whoever finds the switch on knows why it stands" >&2; exit 2; }
   case "$span" in [0-9]*m) unit=60 ;; [0-9]*h) unit=3600 ;; *) unit= ;; esac
@@ -1739,7 +1739,13 @@ slot_open() {
   fi
   return 0
 }
-# whether the gauges open slots 2 to 4: mem_ok passing and the CPU 40% idle or more under load1 45 (5 Nov, 06:19 to 07:45Z: a 50% bar from load1 30
+# the CPU idle share slots 2 to 4 open at under load1 45: 40, or run-slot.idle-min's bar while it stands, a whole number from 0 to 100 on the file's last line as load_line reads its cap (issue 1431: a constant bar left Ops no way to put more of a machine's cores to use short of a code change); any other value keeps 40
+idle_min() {
+  local bar
+  bar=$(switch_on run-slot.idle-min && tail -n 1 "$OPS/run-slot.idle-min" | grep -xE '[0-9]{1,3}'); [ -n "$bar" ] && [ "$bar" -le 100 ] || bar=40
+  echo "$bar"
+}
+# whether the gauges open slots 2 to 4: mem_ok passing and the CPU idle at idle_min's bar or more, 40% unless run-slot.idle-min says, under load1 45 (5 Nov, 06:19 to 07:45Z: a 50% bar from load1 30
 # to 45 left the CPU at a median 48% idle, and 14 of its 30 CPU shuts read 40 to 49% idle) (dispatcher, 3 Nov: the resting sessions held load1 at 14 to 20 on 15 cores while the CPU sat 53 to 67% idle, so the old load1 lines of 12
 # and the cores left one lane open with 24 to 33 runs waiting; retro 36, 4 Nov: at a load1 30 stop the lanes were shut 109 of 120 minutes
 # with the CPU about half idle, and heavy runs waited up to 122 minutes); load1 45 stays a hard stop for the spikes, load1 64 after a burst
@@ -1756,7 +1762,7 @@ lanes_open() {
     -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
     busy) told busy "$BUSY_TOLD" ;;
   esac
-  if [ "${load%.*}" -lt 45 ] 2>/dev/null; then need=40; fi
+  if [ "${load%.*}" -lt 45 ] 2>/dev/null; then need=$(idle_min); fi
   if [ -z "$need" ]; then
     why=load1
   elif [ "$idle" = - ] || [ "$idle" = busy ] || ! [ "${idle%.*}" -ge "$need" ] 2>/dev/null; then
