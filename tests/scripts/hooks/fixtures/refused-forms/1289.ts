@@ -78,6 +78,7 @@ export const groups: Group[] = [
         "a headless claude run through pnpm dlx",
         "pnpm dlx @anthropic-ai/claude-code@latest --print hi",
       ],
+      ["wget with its URLs in a file", "wget -i urls.txt"],
     ],
   },
   {
