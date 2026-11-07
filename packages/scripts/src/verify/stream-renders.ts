@@ -92,7 +92,7 @@ export const STREAM_RENDERS_SCRIPT = `(() => {
   window.WebSocket = class extends Native {
     constructor(...args) {
       super(...args)
-      if (!String(args[0]).includes("/dashboard/ws")) return
+      if (!String(args[0]).includes("/api/v1/ws")) return
       this.addEventListener("message", (event) => {
         if (frame) return
         try {
