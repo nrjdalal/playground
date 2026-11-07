@@ -78,7 +78,7 @@ describe("pickIdle", () => {
     expect(IDLE_COMPACT).toEqual({ contextTokens: 200_000, fromMinutes: 50, toMinutes: 58 })
   })
 
-  test("a transcript that moved after the last turn, such as a compaction's own lines, starts the wait again", () => {
+  test("a transcript that moved after the last turn starts the wait again", () => {
     const read = live(
       CASES.map(([w]) => w),
       () => iso(ago(5)),
@@ -101,10 +101,18 @@ describe("pickIdle", () => {
   })
 })
 
+// A Claude Code screen's last lines as herdr's screen read gives them: the input box between the rule carrying the session's name and a plain rule, then the status line.
+const screen = (box: string) =>
+  [`${"─".repeat(30)} aaaaaa-worker ─`, box, "─".repeat(40), "  ⏵⏵ bypass permissions on"].join(
+    "\n",
+  )
+
 describe("compactIdle", () => {
-  const deps = (sent: [string, string][], fail?: string) => ({
+  const deps = (sent: [string, string][], fail?: string, drafts: string[] = []) => ({
     live: async () => live(CASES.map(([w]) => w)),
     now: () => NOW,
+    screen: async (surface: string) =>
+      screen(drafts.some((name) => surface.endsWith(name)) ? "❯ half a thought" : "❯"),
     send: async (surface: string, text: string) => {
       if (surface.endsWith(fail ?? "\0")) throw new Error("herdr refused: agent_blocked")
       sent.push([surface, text])
@@ -139,6 +147,18 @@ describe("compactIdle", () => {
     ])
     expect(said[1]).toBe(
       "could not compact bbbbbb-runner: 200k tokens, idle 50 min: herdr refused: agent_blocked",
+    )
+  })
+
+  test("a pane whose input box holds a draft gets no /compact, since the draft would go out with it", async () => {
+    const sent: [string, string][] = []
+    const said = await compactIdle(deps(sent, undefined, ["aaaaaa-worker"]))
+    expect(sent.map(([surface]) => surface)).toEqual([
+      "herdr:playground:bbbbbb-runner",
+      "herdr:playground:cccccc-reviewer",
+    ])
+    expect(said[0]).toBe(
+      "skipped aaaaaa-worker: 250k tokens, idle 55 min: its input box is not empty",
     )
   })
 })
@@ -182,5 +202,29 @@ describe("lastTurn", () => {
     )
     expect(await lastTurn(path)).toEqual({ at: ago(55), context: 245_002 })
     expect(await lastTurn(join(dir, "missing.jsonl"))).toBeNull()
+  })
+
+  test("a compaction after the last turn reads as no turn, so a compacted session waits for its next one", async () => {
+    const path = join(dir, "compacted.jsonl")
+    const turn = {
+      message: { usage: { cache_read_input_tokens: 300_000, input_tokens: 1 } },
+      timestamp: iso(ago(110)),
+      type: "assistant",
+    }
+    const rows = [
+      turn,
+      { subtype: "compact_boundary", timestamp: iso(ago(55)), type: "system" },
+      {
+        isCompactSummary: true,
+        message: { content: "summary" },
+        timestamp: iso(ago(55)),
+        type: "user",
+      },
+    ]
+    await Bun.write(path, rows.map((row) => JSON.stringify(row)).join("\n"))
+    expect(await lastTurn(path)).toBeNull()
+    const next = { ...turn, message: { usage: { input_tokens: 9_000 } }, timestamp: iso(ago(1)) }
+    await Bun.write(path, [...rows, next].map((row) => JSON.stringify(row)).join("\n"))
+    expect(await lastTurn(path)).toEqual({ at: ago(1), context: 9_000 })
   })
 })

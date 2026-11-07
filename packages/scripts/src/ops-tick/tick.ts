@@ -645,9 +645,12 @@ export const trashPurge =
     await appendFile(join(ctx.ops, "log", "trash-purge.log"), `${isoSeconds(ctx.now)} ${line}\n`)
   }
 
-// The idle-compaction trial (ADR 0020): `bun run idle-compact` sends /compact to each worker or runner of 200k+ tokens 50 to 58 minutes after its last turn, and each line it prints lands in ops/log/idle-compact.log; a failed pass throws, so the beat reads failed.
+// The idle-compaction trial (ADR 0020): `bun run idle-compact` sends /compact to each worker or runner of 200k+ tokens 50 to 58 minutes after its last turn, and each line it prints lands in ops/log/idle-compact.log; a failed pass throws, so the beat reads failed. PLAYGROUND_LIVE_READS names the live machine outright, since the main checkout reads it only as a person's own clone, which ops-tick's environment could turn into a refusal, and a stray PLAYGROUND_FIXTURE beside it refuses into the log.
 export const idleCompact = async (ctx: Context) => {
-  const pass = await ctx.run(["bun", "run", "--silent", "--cwd", ctx.repo, "idle-compact"], 120_000)
+  const pass = await ctx.run(
+    ["env", "PLAYGROUND_LIVE_READS=1", "bun", "run", "--silent", "--cwd", ctx.repo, "idle-compact"],
+    120_000,
+  )
   const said = lines(pass.out)
   if (said.length > 0) {
     await mkdir(join(ctx.ops, "log"), { recursive: true })

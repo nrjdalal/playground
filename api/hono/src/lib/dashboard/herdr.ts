@@ -512,7 +512,7 @@ export async function readScreen(surface: string, lines: number): Promise<string
   return read.data.read.text
 }
 
-// A message into one session as one ordered submission, the text by bracketed paste and then Enter (`agent prompt`, Agent automation § Choose the control surface). herdr has no draft guard, so deliver() reads the input first. It sends only for deliver.ts (herdr.test.ts's "who prompts").
+// A message into one session as one ordered submission, the text by bracketed paste and then Enter (`agent prompt`, Agent automation § Choose the control surface). herdr has no draft guard, so deliver() and compactIdle() read the input first. It sends only for deliver.ts and idle-compact.ts's `/compact` (herdr.test.ts's "who prompts").
 export async function prompt(surface: string, text: string): Promise<void> {
   const { pane, server } = paneAt(surface)
   await request(server.socket, "agent.prompt", { target: pane, text }, 10_000)

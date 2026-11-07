@@ -849,13 +849,24 @@ describe("the beats that send no line", () => {
     )
   })
 
-  test("the idle compact runs bun run idle-compact every 5 minutes and logs each line it prints", async () => {
+  test("the idle compact runs bun run idle-compact on the live machine every 5 minutes and logs each line it prints", async () => {
     expect(beat("idle-compact").cron).toBe("*/5 * * * *")
     const ops = scratch()
     const said = "compacted aaaaaa-worker: 250k tokens, idle 55 min\n"
     const { ctx, runs, sent } = fake(ops, at(20, 5), { "idle-compact": said })
     await beat("idle-compact").run(ctx)
-    expect(runs).toEqual([["bun", "run", "--silent", "--cwd", "/repo", "idle-compact"]])
+    expect(runs).toEqual([
+      [
+        "env",
+        "PLAYGROUND_LIVE_READS=1",
+        "bun",
+        "run",
+        "--silent",
+        "--cwd",
+        "/repo",
+        "idle-compact",
+      ],
+    ])
     expect(sent).toEqual([])
     expect(await Bun.file(join(ops, "log", "idle-compact.log")).text()).toContain(
       "compacted aaaaaa-worker: 250k tokens, idle 55 min",

@@ -4,9 +4,9 @@ A factory session's prompt cache lasts an hour after its last request. When a se
 
 ## Decision
 
-- **One send on the owner's standing yes.** ops-tick's idle-compact beat runs `bun run idle-compact` every 5 minutes. `compactIdle()` in `api/hono/src/lib/dashboard/idle-compact.ts` sends `/compact` through herdr's `prompt()` to each worker or runner, checkers included, idle 50 to 58 minutes since its last request at 200k+ tokens with nothing waiting on anyone (no prompt, question or usage limit). A dispatcher, a lead and every other role are left alone, and each send is one line in `ops/log/idle-compact.log`.
-- **The window.** 50 minutes leaves the cache warm, 58 minutes is the last beat before it expires, and a 5-minute beat meets every session once inside it; the transcript's own change resets the wait, so a compaction's lines keep it from compacting again.
-- **A trial.** It is permanent only once the trial's A/B, on the issue that asked for it, meets its bar: the mean weighted cost of a return after a long idle, over the 7 days after the merge, at most 70% of the 7 days before. A miss reverts the beat.
+- **One send on the owner's standing yes.** ops-tick's idle-compact beat runs `bun run idle-compact` every 5 minutes. `compactIdle()` in `api/hono/src/lib/dashboard/idle-compact.ts` sends `/compact` through herdr's `prompt()` to each worker or runner, checkers included, idle 50 to 58 minutes since its last request at 200k+ tokens with nothing waiting on anyone (no prompt, question or usage limit), and only while its input box is empty, since herdr's paste would send a draft with it; the beat names the live machine with `PLAYGROUND_LIVE_READS`. A dispatcher, a lead and every other role are left alone, and each send is one line in `ops/log/idle-compact.log`.
+- **The window.** 50 minutes leaves the cache warm, 58 minutes is the last beat before it expires, and a 5-minute beat meets every session once inside it; a compaction writes no usage line, so `lastTurn()` reads a session compacted since its last turn as having no turn, and it waits for its next real one.
+- **A trial.** It is permanent only once the trial's A/B, on the issue that asked for it, meets its bar: the mean weighted cost of a return after a long idle, together with the compaction it got, over the 7 days after the merge, at most 70% of the 7 days before. A miss reverts the beat.
 
 ## Consequences
 

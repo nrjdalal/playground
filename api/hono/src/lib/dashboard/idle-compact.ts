@@ -1,6 +1,6 @@
-import { stat } from "node:fs/promises"
-
+import { inputState } from "@/lib/dashboard/deliver"
 import { prompt } from "@/lib/dashboard/herdr"
+import { readScreen } from "@/lib/dashboard/terminal"
 import { type Live, listLive, type Worker } from "@/lib/dashboard/workers"
 
 // The idle-compaction trial (ADR 0020): a worker or runner whose prompt cache is about to expire, 50 to 58 minutes after its last turn, gets `/compact` while the cache is warm, so its next turn reads a short summary rather than writing its whole history to the cache again.
@@ -13,18 +13,23 @@ export type Picked = { context: number; idleMinutes: number; name: string; surfa
 
 const TAIL_BYTES = 512 * 1024
 
-// The newest main-thread assistant line with a usage in the transcript's last 512 KB, or null.
+// The roles the trial compacts: workers (checkers included) and runners, never a dispatcher, a lead or any other.
+const compactable = (role: Worker["role"]): boolean => role === "worker" || role === "runner"
+
+// The newest main-thread assistant line with a usage in the transcript's last 512 KB, or null, and null too when a compaction came after it, since a compaction writes no usage line and the session holds only its summary until its next turn.
 export async function lastTurn(path: string): Promise<LastTurn | null> {
   const file = Bun.file(path)
-  const size = (await stat(path).catch(() => null))?.size ?? 0
+  const size = (await file.exists()) ? file.size : 0
   if (size === 0) return null
   const lines = (await file.slice(Math.max(0, size - TAIL_BYTES)).text()).split("\n")
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!
-    if (!line.includes('"usage"')) continue
+    const boundary = line.includes('"compact_boundary"')
+    if (!boundary && !line.includes('"usage"')) continue
     let row: {
       isSidechain?: boolean
       message?: { usage?: Record<string, unknown> }
+      subtype?: string
       timestamp?: string
       type?: string
     }
@@ -33,6 +38,7 @@ export async function lastTurn(path: string): Promise<LastTurn | null> {
     } catch {
       continue
     }
+    if (row.type === "system" && row.subtype === "compact_boundary" && !row.isSidechain) return null
     const usage = row.message?.usage
     const at = Date.parse(row.timestamp ?? "")
     if (row.type !== "assistant" || row.isSidechain || !usage || Number.isNaN(at)) continue
@@ -54,7 +60,7 @@ export function pickIdle(
 ): Picked[] {
   const picked: Picked[] = []
   for (const worker of workers) {
-    if (worker.role !== "worker" && worker.role !== "runner") continue
+    if (!compactable(worker.role)) continue
     const surface = live.surfaces.get(worker.sessionId)
     if (!worker.herdr || !surface) continue
     if (worker.light !== "idle" || worker.feed.length > 0 || worker.questions.length > 0) continue
@@ -72,22 +78,29 @@ export function pickIdle(
 export type CompactDeps = {
   live: () => Promise<Live>
   now: () => number
+  screen: (surface: string) => Promise<string>
   send: (surface: string, text: string) => Promise<void>
   turn: (path: string) => Promise<LastTurn | null>
 }
 
-const LIVE_DEPS: CompactDeps = { live: listLive, now: Date.now, send: prompt, turn: lastTurn }
+const LIVE_DEPS: CompactDeps = {
+  live: listLive,
+  now: Date.now,
+  screen: (surface) => readScreen(surface, 40),
+  send: prompt,
+  turn: lastTurn,
+}
 
-// One pass: reads the live sessions, sends `/compact` through herdr's prompt to each one pickIdle names (or none, with dry), and says one line a session.
+// One pass: reads the live sessions, and for each one pickIdle names reads its screen and sends `/compact` through herdr's prompt only while its input box is empty (herdr has no draft guard, so a draft would go out with it), or sends none with dry; it says one line a session.
 export async function compactIdle({
   dry = false,
   ...deps
 }: Partial<CompactDeps> & { dry?: boolean } = {}): Promise<string[]> {
-  const { live, now, send, turn } = { ...LIVE_DEPS, ...deps }
+  const { live, now, screen, send, turn } = { ...LIVE_DEPS, ...deps }
   const read = await live()
   const turns = new Map<string, LastTurn>()
   for (const worker of read.workers) {
-    if (worker.role !== "worker" && worker.role !== "runner") continue
+    if (!compactable(worker.role)) continue
     const path = read.transcripts.get(worker.sessionId)
     const last = path ? await turn(path) : null
     if (last) turns.set(worker.sessionId, last)
@@ -100,6 +113,10 @@ export async function compactIdle({
       continue
     }
     try {
+      if (inputState(await screen(pick.surface)) !== "empty") {
+        said.push(`skipped ${what}: its input box is not empty`)
+        continue
+      }
       await send(pick.surface, "/compact")
       said.push(`compacted ${what}`)
     } catch (err) {
