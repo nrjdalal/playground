@@ -15,6 +15,7 @@ import {
   STUCK_QUEUED_MS as API_STUCK_QUEUED_MS,
 } from "../../../../../api/hono/src/lib/dashboard/inbox"
 import { CLOCKS_STOPPED_AT } from "../../../../../packages/config/src/inbox"
+import { listedItem } from "../../../../../scripts/hooks/no-chat-question"
 import {
   ACKS_STAMPED_FROM,
   canDraft,
@@ -69,6 +70,7 @@ import {
 import { QUEUED_POLL_MS } from "../../../../../web/next/src/lib/outbox"
 import { statusIcon } from "../../../../../web/next/src/lib/status-icons"
 import { fullTime } from "../../../../../web/next/src/lib/time"
+import { AFTER, ITEMS } from "../../../../scripts/hooks/inbox-items"
 
 // Remix's icons resolve from the web app's own packages, which this directory cannot see.
 const web = join(import.meta.dir, "../../../../../web/next")
@@ -2140,5 +2142,19 @@ describe("commentRefused", () => {
     expect(commentRefused("Which project is this for?", "sk-made-up-123")).toBeNull()
     expect(commentRefused("sk-made-up-123", "")).toBeNull()
     expect(commentRefused("", "  ")).toBeNull()
+  })
+})
+
+// no-chat-question's Stop gate restates the list's rule as listedItem, since a hook loads no web code; both decide every item the same (PG-1486)
+describe("the Stop gate's listed rule", () => {
+  test.each(ITEMS.filter((c) => !c.hidden))("$name: listed as the Inbox lists it", ({ item }) => {
+    const full = {
+      createdAt: AFTER,
+      delivery: null,
+      id: "x",
+      ref: 1,
+      ...item,
+    } as unknown as InboxItem
+    expect(listedItem(item)).toBe(inboxView([full]).shown.length === 1)
   })
 })
