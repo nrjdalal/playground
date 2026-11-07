@@ -120,7 +120,7 @@ Standing lines:
 - No demo stacks for the owner: never build or hold a demo stack for him. Anything he should try reaches him on the live dashboard, as a merge (or through local-canary). A tester's own stack is for tests only, never his way to try a change.
 - When a PR gains scope after review, rebuild its body from the live one (`gh api repos/<repo>/pulls/<n> --jq .body`) before you edit it: reviewers edit bodies on GitHub, so a copy kept locally goes stale (worker-misty-tapir).
 - Cost rules (the dispatcher, 9 Oct, from the cost table: one hour of the factory cost ~9% of the week, review as much as build):
-  - Fresh context: over about 300k context, at your next stop (a push, a merge, a verdict), write a handoff (PR, head, next step) to ~/.playground/handoffs/<you>.md, end yourself in the roster, and tell the Builder; a fresh session resumes from it.
+  - Fresh context: over about 300k context, at your next stop (a push, a merge, a verdict), write a handoff (playbook's SESSIONS.md, Write a handoff) to ~/.playground/handoffs/<you>.md, end yourself in the roster, and tell the Builder; a fresh session resumes from it.
   - One reviewer per PR across all its rounds; never spawn a new reviewer per round. A delta re-score goes to the same reviewer.
   - Close each checker the moment its PR merges or parks.
 - Use `gh api` REST for PRs, issues and comments; GraphQL runs out (worker-quiet-moth, 9 Oct). A sweep over many PRs is the exception: one batched GraphQL query (extensions/core/skills/playbook/GITHUB-BULK-READS.md).
