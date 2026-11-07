@@ -29,7 +29,7 @@ import {
   HerdrRefused,
   HerdrTimedOut,
 } from "../../../../../../api/hono/src/lib/dashboard/herdr"
-import type { Entry } from "../../../../../../api/hono/src/lib/dashboard/transcript"
+import { clip, type Entry } from "../../../../../../api/hono/src/lib/dashboard/transcript"
 import type { Live, Worker } from "../../../../../../api/hono/src/lib/dashboard/workers"
 import {
   MESSAGE_MAX_CHARS,
@@ -1727,6 +1727,14 @@ describe("deliver to a herdr session", () => {
       expect(next).toMatchObject({ code: "INPUT_NOT_EMPTY", ok: false })
       expect(enters).toEqual([])
       expect(sent).toHaveLength(1)
+    })
+
+    test("a one-line message past the transcript's clip is proven by its clipped line", async () => {
+      const { deps } = herdr(undefined, "s-long")
+      const text = "long ".repeat(1000).trim()
+      deps.said = async () => [OLDER, tookLine(clip(text, 4000), deps.now(), 0)]
+      const id = "11111111-2222-4333-8444-00000000000e"
+      expect(await deliver({ actor, id, text, to: "dispatcher" }, deps)).toMatchObject({ ok: true })
     })
 
     // a reviewer: a message of files alone has no first line of words, so its transcript entry is matched by its files
