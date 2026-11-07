@@ -396,6 +396,22 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(took).toBe("run-slot-2")
   })
 
+  test("and an env NODE_ENV=x bun install takes run-slot-quick", async () => {
+    expect(await quick(["env", "NODE_ENV=x", "bun", "install"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  // install after another subcommand is that subcommand's word: a script named install, or a package bunx runs
+  test("but a bun run install takes the queue", async () => {
+    expect(await quick(["bun", "run", "install"])).toBe(true)
+    expect(took).toBe("run-slot-2")
+  })
+
+  test("and so does a bun x install", async () => {
+    expect(await quick(["bun", "x", "install"])).toBe(true)
+    expect(took).toBe("run-slot-2")
+  })
+
   test("git push", async () => {
     expect(await quick(["git", "-C", "x", "push", "-u", "origin"])).toBe(true)
     expect(took).toBe("run-slot-commit")
