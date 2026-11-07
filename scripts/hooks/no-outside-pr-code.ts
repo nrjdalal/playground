@@ -74,7 +74,7 @@ const UTILITIES = new Set([
 ])
 // Interpreters that read no config from the folder they run in, so an installed skill's script runs as its author wrote it; bun is left out, since it reads the folder's bunfig.toml, whose preload runs first, and the shells are judged as shells.
 const INTERPRETERS = new Set(["node", "python", "python3"])
-// gh's command groups a checker posts and reads with, A to Z; `pr checkout` is left out, since a checkout runs the git hooks of the folder it lands in, and so is any `--`, which hands gh's clone git's own options.
+// gh's command groups a checker posts and reads with, A to Z; a checkout (`pr checkout` or `pr co`, wherever the verb sits among gh's flags, and `issue develop`) is left out, since it runs the git hooks of the folder it lands in, and so is any `--`, which hands gh's clone git's own options.
 const GH = new Set(["api", "issue", "label", "pr", "repo", "run", "search"])
 // git's subcommands that read the repo and run nothing it holds, A to Z, with any option but the ones that start a program or write a file.
 const GIT_READS = new Set([
@@ -98,7 +98,15 @@ const GIT_READS = new Set([
   "show",
   "status",
 ])
-const GIT_RUNS = /^(?:-O|--open-files-in-pager|--output|--ext-diff|--textconv)/
+// git's options that start a program or write a file, by their full names, since git takes any unambiguous start of one (`--open=`, `--out=`); -O takes its pager inside a cluster of short flags too.
+const GIT_RUN_NAMES = ["ext-diff", "open-files-in-pager", "output", "textconv"]
+const gitRuns = (w: string) => {
+  if (/^-[^-]*O/.test(w)) return true
+  const long = /^--([^=]+)/.exec(w)?.[1]
+  return long !== undefined && GIT_RUN_NAMES.some((name) => name.startsWith(long))
+}
+// A remote's name, which a fetch takes from the clone's own config; a path would fetch from a repository the PR ships, whose config runs on the upload side.
+const REMOTE = /^[A-Za-z0-9_][\w.-]*$/
 const QUIET = new Set(["-q", "--quiet"])
 // sed's scripts that run and write nothing: `-n` printing a range of lines or patterns, or one substitution whose flags write no file
 const SED_ADDRESS = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`
@@ -117,10 +125,10 @@ const REASONS = {
     "it serves an outside author's PR, whose tests, scripts and installs run that author's code on this machine. Read the PR instead: the Read, Grep and Glob tools, gh pr diff, git diff and git show <rev> in the clone, and move the clone with git fetch and git checkout --detach. Score on the PR's own GitHub checks, and say in the verdict that its code was read, not run.",
 }
 
-// A path with its .. steps and symlinks resolved, so a climb out of a folder is judged where it lands.
+// A path with its symlinks and .. steps resolved in order, as the system resolves them, so a climb out of a folder is judged where it lands; the native call, since node's own resolves .. before it follows a link.
 function real(path: string): string {
   try {
-    return realpathSync(path)
+    return realpathSync.native(path)
   } catch {
     return resolve(path)
   }
@@ -133,6 +141,14 @@ function bareAt(folder: string, lookup: Lookup): boolean {
     if (lookup.holds(at, "HEAD") && lookup.holds(at, "objects") && lookup.holds(at, "refs"))
       return true
     if (dirname(at) === at) return false
+  }
+}
+
+// Whether a folder, or one above it up to its work tree's root, holds node_modules, from which a git hook's lefthook runs at that root.
+function installedAt(folder: string, lookup: Lookup): boolean {
+  for (let at = folder; ; at = dirname(at)) {
+    if (lookup.holds(at, "node_modules")) return true
+    if (lookup.holds(at, ".git") || dirname(at) === at) return false
   }
 }
 
@@ -151,21 +167,26 @@ function gitAllows(
   if ("GIT_DIR" in environment || "GIT_WORK_TREE" in environment) return false
   const dashC = words[1] === "-C"
   const [sub, ...all] = words.slice(dashC ? 3 : 1)
-  const at = dashC && folder ? resolve(folder, words[2]) : folder
-  if (at === undefined || bareAt(at, lookup)) return false
-  if (readsWords(words)) return true
-  if (GIT_READS.has(sub)) return !all.some((w) => GIT_RUNS.test(w))
+  // the folder git really uses, its symlinks followed as git follows them
+  const written =
+    dashC && folder ? (isAbsolute(words[2]) ? words[2] : `${folder}/${words[2]}`) : folder
+  const at = written === undefined ? undefined : real(written)
+  if (at === undefined || bareAt(at, lookup) || all.some(gitRuns)) return false
   const rest = all.filter((w) => !QUIET.has(w))
   const plain = (w: string) => !w.startsWith("-") && !w.includes("::")
-  if (sub === "fetch") return rest.every((w) => plain(w) || w === "--no-tags" || w === "--prune")
+  // a remote takes no verb but the two that read it, since `remote add` names a source a fetch then reads
+  const verb = all.find(plain)
+  if (sub === "remote" && verb !== undefined && verb !== "get-url" && verb !== "show") return false
+  if (readsWords(words) || GIT_READS.has(sub)) return true
+  if (sub === "fetch") {
+    const [source, ...refs] = rest.filter((w) => w !== "--no-tags" && w !== "--prune")
+    return (
+      (source === undefined || REMOTE.test(source) || GITHUB_URL.test(source)) && refs.every(plain)
+    )
+  }
   if (sub === "clone") return rest.length === 2 && GITHUB_URL.test(rest[0]) && plain(rest[1])
   if (sub === "checkout" || sub === "switch")
-    return (
-      rest.length === 2 &&
-      rest[0] === "--detach" &&
-      plain(rest[1]) &&
-      !lookup.holds(at, "node_modules")
-    )
+    return rest.length === 2 && rest[0] === "--detach" && plain(rest[1]) && !installedAt(at, lookup)
   if (sub !== "worktree") return false
   if (rest[0] === "list") return true
   if (rest[0] !== "add") return false
@@ -226,10 +247,13 @@ export async function inspect(
         here.cwd !== undefined &&
         !lookup.holds(here.cwd, "bunfig.toml")
       )
-    if (name === "gh")
-      return (
-        GH.has(words[1]) && !(words[1] === "pr" && words[2] === "checkout") && !words.includes("--")
-      )
+    if (name === "gh") {
+      const [group, ...rest] = words.slice(1)
+      const checkout =
+        (group === "pr" && rest.some((w) => w === "checkout" || w === "co")) ||
+        (group === "issue" && rest.includes("develop"))
+      return GH.has(group) && !checkout && !words.includes("--")
+    }
     if (INTERPRETERS.has(name) && args[0] && !args[0].value.startsWith("-"))
       return skillScript(pathOf(args[0], here))
     return false

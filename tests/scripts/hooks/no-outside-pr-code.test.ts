@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync } from "node:fs"
+import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -167,6 +167,22 @@ describe("no-outside-pr-code keeps a checker of an outside author's PR in read m
       call("playground add --brief /s/brief-x.md"),
     ],
     ["a manager verb of the playground command", call("playground builder")],
+    ["gh's own alias for a PR's checkout", call("gh pr co 501")],
+    ["gh's checkout after a flag", call("gh pr -R acme-owner/widgets checkout 501")],
+    ["gh's issue develop with a checkout", call("gh issue develop 501 --checkout")],
+    [
+      "git grep's pager by an abbreviated option",
+      call(`git -C ${OUTSIDE} grep --open="touch X; true" needle`),
+    ],
+    ["git log's output file by an abbreviated option", call(`git -C ${OUTSIDE} log --out=/x`)],
+    ["git grep's pager in a cluster of short flags", call(`git -C ${OUTSIDE} grep -iO/bin/sh foo`)],
+    ["a fetch from a relative path the PR ships", call("git fetch ./evil", OUTSIDE)],
+    ["a fetch from an absolute path", call(`git -C ${OUTSIDE} fetch /abs/evil pull/1/head`)],
+    ["a remote added at a path", call(`git -C ${OUTSIDE} remote add x ./evil`)],
+    [
+      "a detached checkout from below an installed clone's root",
+      call(`git -C ${INSTALLED}/src checkout --detach abc`),
+    ],
   ])("%s", async (_, raw) => {
     expect(await judge(raw)).toContain("no-outside-pr-code")
   })
@@ -245,6 +261,12 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
     ["the playground command", call("playground rules clock")],
     ["playground's skill lookup", call("playground ext which triage-and-implement")],
     ["a git read in the clone's own folder", call("git diff HEAD~1 HEAD", OUTSIDE)],
+    ["git log's one-line form", call(`git -C ${OUTSIDE} log --oneline -5`)],
+    ["a remote's URL", call(`git -C ${OUTSIDE} remote get-url origin`)],
+    [
+      "a fetch from the PR's GitHub URL",
+      call(`git -C ${OUTSIDE} fetch https://github.com/acme-owner/widgets.git pull/501/head`),
+    ],
     ["ls and wc", call(`ls ${OUTSIDE} && wc -l ${OUTSIDE}/a.ts`)],
   ])("%s", async (_, raw) => {
     expect(await judge(raw)).toBeUndefined()
@@ -363,6 +385,24 @@ describe("no-outside-pr-code's live lookup", () => {
     const judgeHere = (command: string) => check(call(command), as("reviewer"), machine)
     expect(await judgeHere(`git -C ${embedded} diff HEAD~1 HEAD`)).toContain("outside author")
     expect(await judgeHere(`git -C ${clone} diff HEAD~1 HEAD`)).toBeUndefined()
+  })
+
+  test("a symlink that leads into a shipped bare repo is followed as git follows it", async () => {
+    const base = join(scratch, "review-602")
+    const evil = join(base, "evil")
+    for (const dir of [join(evil, "objects"), join(evil, "refs"), join(evil, "sub")])
+      mkdirSync(dir, { recursive: true })
+    await Bun.write(join(evil, "HEAD"), "ref: refs/heads/main\n")
+    await Bun.write(join(evil, "config"), "[diff]\n\texternal = ./run.sh\n")
+    symlinkSync(join(evil, "sub"), join(base, "link"))
+    const machine = {
+      ...live(environment),
+      author: lookup.author,
+      prsOf: async () => [pull("acme-owner/widgets", 501)],
+    }
+    expect(
+      await check(call(`git -C ${base}/link/.. diff HEAD~1 HEAD`), as("reviewer"), machine),
+    ).toContain("outside author")
   })
 
   test("no registry entry, and a roster that does not parse, name no PR", async () => {
