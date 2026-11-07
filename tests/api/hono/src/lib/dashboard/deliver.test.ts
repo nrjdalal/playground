@@ -232,7 +232,7 @@ describe("refusal", () => {
   })
 
   test("everything else goes, a leading # or @ and a / mid-text included", () => {
-    for (const text of ["# heading", "@greed look", "run /acme CEDAR-1 next", "a\n/b"]) {
+    for (const text of ["# heading", "@greed look", "run /acme MADECEDAR-1 next", "a\n/b"]) {
       expect(refusal(text)).toBeNull()
     }
   })

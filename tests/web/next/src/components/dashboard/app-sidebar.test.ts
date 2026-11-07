@@ -741,7 +741,7 @@ describe("SessionRow's dropdown and group", () => {
     state: "working",
     status: null,
     task: null,
-    ticket: "CEDAR-1234",
+    ticket: "MADECEDAR-1234",
     title: null,
     worker: null,
     workspace: null,
@@ -896,17 +896,17 @@ describe("SessionRow's dropdown and group", () => {
   test(`its line leads with the ticket and the pull request joined (PG-12#173), and its tooltip says the rest`, () => {
     const html = render({ agent: agent({ state: "idle" }) }, { light: "idle" })
     expect(textOf(html, openTag(html, /<span class="[^"]*text-xs[^"]*">/))).toBe(
-      "CEDAR-1234#197 Message dispatcher from the dashboard",
+      "MADECEDAR-1234#197 Message dispatcher from the dashboard",
     )
     expect(leftIcon(html)).toEqual({ icon: "ready", tone: "text-success" })
     expect(html).not.toContain("text-2xs")
     expect(descriptionOf(html)).toBe(
-      "worker-greed · CEDAR-1234#197 Message dispatcher from the dashboard · Ready · PR ready: 5/5 at its head",
+      "worker-greed · MADECEDAR-1234#197 Message dispatcher from the dashboard · Ready · PR ready: 5/5 at its head",
     )
     expect(tipsOf(html)[0]).toBe(
       [
         "worker-greed",
-        "CEDAR-1234#197 Message dispatcher from the dashboard",
+        "MADECEDAR-1234#197 Message dispatcher from the dashboard",
         "Ready",
         "PR ready: 5/5 at its head",
       ].join("\n"),
@@ -917,7 +917,7 @@ describe("SessionRow's dropdown and group", () => {
     const html = render({ agent: agent({ kind: "worker" }) })
     expect(
       textOf(html, openTag(html, /<span class="[^"]*text-xs[^"]*">/)).replaceAll("\u00a0", " "),
-    ).toBe("CEDAR-1234#197 Message dispatcher from the dashboard")
+    ).toBe("MADECEDAR-1234#197 Message dispatcher from the dashboard")
   })
 
   test("with neither id the kind follows the title at once, a worker's title alone, the title giving way first", () => {
@@ -1068,7 +1068,7 @@ describe("SessionRow's dropdown and group", () => {
     )
     expect(tipLines(html)).toContain("Parked · held for the reset")
     expect(html).toContain(
-      "worker-greed · CEDAR-1234 Message dispatcher from the dashboard · Parked · held for the reset",
+      "worker-greed · MADECEDAR-1234 Message dispatcher from the dashboard · Parked · held for the reset",
     )
   })
 })

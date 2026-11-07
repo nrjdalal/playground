@@ -297,7 +297,7 @@ describe("another factory's runs (slots.peers)", () => {
 })
 
 // localci and the merge train take their slots themselves; they ask run-slot.sh, so an off-switch reaches them too (18 Oct: localci took slot 3 past run-slot.3-off)
-// R3-2, 31 Oct: ops-unstick's slot-stuck alert named the oldest ticket, which can rank behind by design
+// R3.2, 31 Oct: ops-unstick's slot-stuck alert named the oldest ticket, which can rank behind by design
 describe("head", () => {
   test("prints the ticket the queue serves next, a medium one ahead of an older big one, and changes nothing", async () => {
     const m = machine()
