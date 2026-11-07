@@ -334,9 +334,22 @@ describe("the parent gate refuses a stacked PR while its parent is unmerged (PG-
     expect(parent({ body: stacked("Stacked on #12, Stacked on #13"), parents: merged })?.ok).toBe(
       true,
     )
-    expect(parent({ body: SKILL_BODY, parents: [] })?.ok).toBe(true)
+    expect(parent({ body: SKILL_BODY, parents: [] })).toBeUndefined()
     expect(parent({ body: SKILL_BODY })).toBeUndefined()
     expect(parent({})).toBeUndefined()
+  })
+
+  test("a list of parents on one line names each, and a declared parent left out of the states reads as never read", () => {
+    const merged = [
+      { n: 78, state: "MERGED" },
+      { n: 75, state: "MERGED" },
+    ]
+    for (const line of ["Stacked on #78 and #75", "stacked on #78, #75", "Stacked on #78 & #75"])
+      expect(parent({ body: stacked(line), parents: merged })?.ok).toBe(true)
+    const gate = parent({ body: stacked("Stacked on #78 and #75"), parents: [merged[0]!] })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("#75")
+    expect(gate?.detail).not.toContain("#78")
   })
 
   test("one unmerged parent among merged ones refuses, naming that one alone", () => {
