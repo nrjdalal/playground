@@ -301,15 +301,22 @@ describe("an org's own job row (PG-1363)", () => {
       "its command must run a script in a folder its org ships",
     ],
     ["a stop group", { ...row, stop: "dashboard" }, "an org's job names no stop group"],
-    ["another job's heartbeat", { ...row, heartbeat: "ops-dashboard" }, "its heartbeat must be its own name"],
+    [
+      "another job's heartbeat",
+      { ...row, heartbeat: "ops-dashboard" },
+      "its heartbeat must be its own name",
+    ],
     ["a value that is no job", { enabled: true }, "heartbeat Invalid input"],
-  ])("a row with %s is refused with the render's reason, and nothing is stored", (_, value, why) => {
-    const data = shipped()
-    const result = set(data, key, "acme", value, who("a bad row"))
-    expect(result).toMatchObject({ ok: false })
-    expect("message" in result && result.message).toContain(why)
-    expect(existsSync(join(extensionsDir(data), "acme", "settings.json"))).toBe(false)
-  })
+  ])(
+    "a row with %s is refused with the render's reason, and nothing is stored",
+    (_, value, why) => {
+      const data = shipped()
+      const result = set(data, key, "acme", value, who("a bad row"))
+      expect(result).toMatchObject({ ok: false })
+      expect("message" in result && result.message).toContain(why)
+      expect(existsSync(join(extensionsDir(data), "acme", "settings.json"))).toBe(false)
+    },
+  )
 
   test("a second org's row for a job another org adds is refused with the render's reason, so an org earlier in A to Z order cannot take it over", () => {
     const data = shipped()
@@ -322,7 +329,9 @@ describe("an org's own job row (PG-1363)", () => {
     expect(result).toMatchObject({ ok: false })
     expect("message" in result && result.message).toContain("acme already adds ops-watch")
     expect(existsSync(join(extensionsDir(data), "aaa", "settings.json"))).toBe(false)
-    expect(set(data, key, "acme", { ...row, enabled: false }, who("pause acme's watch")).ok).toBe(true)
+    expect(set(data, key, "acme", { ...row, enabled: false }, who("pause acme's watch")).ok).toBe(
+      true,
+    )
   })
 
   test("the login's scope takes no row for a job the registry lacks", () => {

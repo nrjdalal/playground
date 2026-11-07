@@ -16,7 +16,7 @@ A fresh install has every job off but two: `jobs.opsDashboard`, the Dashboard's 
 Settings > Jobs on the Dashboard lists every job with what it does, when it runs, whether it is on and whether your settings set it.
 Its switch saves the job's `enabled` field alone at your login's scope, with a reason, over any other field your scope's value holds.
 
-A session cannot write a job's setting (the `no-extensions-write` hook refuses `playground settings set` and `reset` of every `jobs.<name>`, and `settings import-jobs` but its `--dry-run`), so it asks you with an Inbox guard decision whose value is `{"enabled": true}` or `{"enabled": false}` alone; your Approve writes it the same way ([Inbox](/docs/inbox)).
+A session cannot write a job's setting (the `no-extensions-write` hook refuses `playground settings set` and `reset` of every `jobs.<name>`, and `settings import-jobs` but its `--dry-run`), so it asks you with an Inbox guard decision: for a registry job its value is `{"enabled": true}` or `{"enabled": false}` alone, and for an org's own job it is the whole row ([below](#an-orgs-own-job)); your Approve writes it the same way ([Inbox](/docs/inbox)).
 
 From your own terminal, set your scope's value, which replaces any value it held, with a reason:
 
@@ -71,7 +71,7 @@ An org runs a job of its own, one the registry does not know, by shipping its sc
 - the row as `jobs.<camelName>` in `<org>/settings.json`, with every field a job has: `callsModel`, `command`, `description`, `enabled`, `heartbeat` and `schedule`, and `cwd` and `config` when it needs them.
 
 You place the row, turn the job on or off and change its `config` with `playground settings set jobs.<camelName> '<row>' --scope <org> --reason "<why>"`, or by approving a guard decision that carries the row, and take it out with `playground settings reset jobs.<camelName> --scope <org>`.
-The write checks the row as the render reads it (below), against the script folders that org's extensions hold at the time, and refuses it at your login's scope.
+The write checks the row as the render reads it (below), against the script folders that org's extensions hold at the time, and refuses it at your login's scope or when another org already adds the job.
 
 ```json
 {

@@ -31,6 +31,7 @@ import {
   resetSetting,
   SCOPE_NAME,
   setSetting,
+  settingRows,
   slackSettings,
 } from "@packages/settings"
 import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm"
@@ -372,7 +373,7 @@ const orgJobKeySchema = z
   .regex(/^jobs\.[a-z][A-Za-z0-9]*$/)
   .refine(orgJobKey)
 
-// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS), a registry job's or an org's own job's (a whole row, which the write checks against that org's script folders), the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes (a job's enabled field alone), or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
+// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS), a registry job's or an org's own job's (a whole row, which the write checks against that org's script folders), the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes (a registry job's enabled field alone, an org's own job's whole row), or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
 const guardSchema = z
   .strictObject({
     key: z.union([z.enum(GUARD_SETTING_KEYS), z.enum(JOB_KEYS), orgJobKeySchema]),
@@ -1911,7 +1912,12 @@ function guardWrite(data: string, preview: InboxGuard, ref: number, actor: strin
       : { exitCode: 1, line: reset.message }
   }
   // a job's enabled field goes over the row its scope holds, never the registry's fields, so the rest still follow the registry
-  const held = readSetting(data, key)?.rows.find((row) => row.scope === scope)?.value
+  // an org's own job is no setting readSetting knows, so its row is read from its scope's settings directly
+  const held = (
+    orgJobKey(key)
+      ? settingRows(data).filter((row) => row.key === key)
+      : (readSetting(data, key)?.rows ?? [])
+  ).find((row) => row.scope === scope)?.value
   const next = JOB_KEYS.includes(key)
     ? { ...(held as object | undefined), ...(value as object) }
     : value

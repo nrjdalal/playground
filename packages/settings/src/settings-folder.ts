@@ -4,7 +4,15 @@ import { join } from "node:path"
 // By relative path, so a test outside the package type-checks it, where @/ is not its src.
 import { stableJson } from "./diff"
 import { guardedOrgs } from "./ext"
-import { deriveHooks, extGit, extLog, filesIn, scopesIn, writeFiles, writeRoot } from "./folder"
+import {
+  deriveHooks,
+  extGit,
+  extLog,
+  scopesIn,
+  scriptFilesOf,
+  writeFiles,
+  writeRoot,
+} from "./folder"
 import { jobSchema, orgJob, orgJobKey } from "./jobs"
 import { CORE, extensionsDir, loginOf, scopeDir } from "./rendered"
 import { secretIn } from "./secrets"
@@ -152,15 +160,10 @@ const commit = (
 
 // The script folders a scope ships, each <scope>/scripts/<key>/, by key.
 const scriptKeys = (data: string, scope: string): string[] => [
-  ...new Set(
-    filesIn(scopeDir(data, scope))
-      .map((file) => file.split("/"))
-      .filter((parts) => parts[0] === "scripts" && parts.length >= 3)
-      .map((parts) => parts[1]!),
-  ),
+  ...new Set(scriptFilesOf(data, scope).map((parts) => parts[1]!)),
 ]
 
-// An org's own job row as a write stores it, checked as the render reads it (orgJob): the job's schema, its own heartbeat, no stop group and a command and cwd in a script folder the scope ships.
+// An org's own job row as a write stores it, checked as the render reads it (orgJob): the job's schema, its own heartbeat, no stop group, a command and cwd in a script folder the scope ships, and no other org already adding the job, since the render runs the first org's row in A to Z order and refuses the rest.
 const orgJobRow = (
   data: string,
   input: { key: string; scope: string; value: unknown },
@@ -173,6 +176,18 @@ const orgJobRow = (
     scriptKeys(data, input.scope),
   )
   if ("refused" in read) return { message: `${input.key}: ${read.refused}`, ok: false, status: 400 }
+  const login = loginOf(data)
+  const holder = scopesIn(data).find(
+    (scope) =>
+      scope !== input.scope &&
+      input.key in readValues(data, scope) &&
+      !(
+        "refused" in
+        orgJob(input.key, scope, readValues(data, scope)[input.key], login, scriptKeys(data, scope))
+      ),
+  )
+  if (holder)
+    return { message: `${input.key}: ${holder} already adds ${read.name}`, ok: false, status: 400 }
   const secret = secretIn(input.value)
   if (secret)
     return {
