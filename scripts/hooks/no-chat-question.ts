@@ -1,8 +1,9 @@
-// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, or keeps steps or a table the owner comes back to (keepsForOwner), until it is an item in the owner's Inbox (playbook's ask rule), so nothing the owner needs scrolls away in chat; every manager but the dispatcher sends steps to the dispatcher as a draft instead. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, a lead's with the route up to the dispatcher, who posts it, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open (or, for steps, done, as a progress card does) through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
+// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, or keeps steps or a table the owner comes back to (keepsForOwner), until it is an item in the owner's Inbox (playbook's ask rule), so nothing the owner needs scrolls away in chat; every manager but the dispatcher sends steps to the dispatcher as a draft instead. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, a lead's with the route up to the dispatcher, who posts it, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open (or, for steps, is listed in the Inbox, as a progress card is) through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
 
 import "../../packages/env/src/aliases"
 import { join } from "node:path"
 
+import { CLOCKS_STOPPED_AT } from "../../packages/config/src/inbox"
 import {
   DISPATCHER_SLOT_LABELS,
   ID_NAME_SOURCE,
@@ -240,7 +241,39 @@ function dashboardCheckout(): Promise<string> {
   return dashboard
 }
 
-// One item's standing, read by the checkout's own bun run ask, killed past the limit: its status, or what was done with it when that left the status as it was: archived or dismissed by the owner, or settled by its poster, which reads done as an update does.
+// An Inbox item as bun run ask get prints it, the fields the list's rule reads.
+export type AskedItem = {
+  answer?: Record<string, unknown> | null
+  delivery?: { status?: unknown } | null
+  kind?: unknown
+  readAt?: string | null
+  status?: unknown
+  updatedAt?: string
+}
+
+// Pure: whether the Inbox lists the item, inboxView's listed rule in web/next/src/lib/inbox.ts restated, since the hook reads bun run ask's JSON and loads no web code (a test runs both over the same items); an archived item is out of the list, as the API keeps it out of the items it sends.
+export function listedItem(item: AskedItem): boolean {
+  const answer = item.answer ?? null
+  const dismissedAt = answer?.dismissedAt ? answer.dismissedAt : null
+  if (answer && "archivedAt" in answer && !("dismissedAt" in answer)) return false
+  const chosen = item.kind !== "update" && answer && "choice" in answer ? answer : null
+  const sendFailed = item.kind !== "update" && item.delivery?.status === "failed" && !dismissedAt
+  const needsYou =
+    item.kind === "update"
+      ? item.readAt === null
+      : (item.status === "open" && chosen?.choice !== "replied") || sendFailed
+  const reopenable = item.status === "open" && chosen?.choice === "replied" && !chosen.ackedAt
+  return (
+    needsYou ||
+    (reopenable && !dismissedAt) ||
+    (item.kind === "update" &&
+      !dismissedAt &&
+      !(answer && "choice" in answer) &&
+      Date.parse(item.readAt ?? item.updatedAt ?? "") >= Date.parse(CLOCKS_STOPPED_AT))
+  )
+}
+
+// One item's standing (standingOf), read by the checkout's own bun run ask, killed past the limit: open, or listed for one the Inbox lists that is not open (an update), else what was done with it when that left its status as it was (archived or dismissed by the owner, settled by its poster), else its status.
 export async function readStatus(
   ref: string,
   checkout: string,
@@ -252,11 +285,16 @@ export async function readStatus(
       checkout,
       timeoutMs,
     ),
-  ) as {
-    answer?: { archivedAt?: unknown; choice?: unknown; dismissed?: unknown; dismissedAt?: unknown }
-    status?: unknown
-  }
-  if (typeof item.status !== "string") throw new Error(`bun run ask printed no status for ${ref}`)
+  ) as AskedItem
+  const standing = standingOf(item)
+  if (!standing) throw new Error(`bun run ask printed no status for ${ref}`)
+  return standing
+}
+
+// Pure: what the gate reads an item as (readStatus), or null for one with no status.
+export function standingOf(item: AskedItem): string | null {
+  if (typeof item.status !== "string") return null
+  if (listedItem(item)) return item.status === "open" ? "open" : "listed"
   if (item.answer?.choice === "settled") return "settled"
   if (item.answer?.dismissed === true) return "dismissed"
   if (item.answer?.archivedAt && !item.answer.dismissedAt) return "archived"
@@ -292,9 +330,9 @@ async function managerRole(
   return manager(roleOfName(name))
 }
 
-// An ask of the owner waits on an open item alone; steps also take a progress card, an update, which reads done from its post on and after the owner's Done.
+// An ask of the owner waits on an open item alone; steps also take any card the Inbox lists, a progress card (an update) the owner has not sent to Done, dismissed or seen resolved.
 const ASK_COUNTS = ["open"]
-const STEPS_COUNTS = ["open", "done"]
+const STEPS_COUNTS = ["open", "listed"]
 
 // Fails closed: the stop passes only when some #iN the reply names reads a status `counted` holds; the reason says what each one read as.
 async function gate(

@@ -15,6 +15,7 @@ import {
   STEPS_REASON,
 } from "../../../scripts/hooks/no-chat-question"
 import { capital, OLD, OLD_NAMES } from "../../session-names"
+import { ITEMS } from "./inbox-items"
 import { storeWith } from "./render-set"
 
 const script = join(import.meta.dir, "..", "..", "..", "scripts", "hooks", "no-chat-question.ts")
@@ -387,20 +388,20 @@ describe("what passes", () => {
   })
 
   // a progress card counts for steps alone, so it never stands in for the decision a chat ask puts to the owner (#1486)
-  test("a decision asked beside a progress card is refused, since the card reads done, not open", async () => {
+  test("a decision asked beside a progress card is refused, since the card is listed, not open", async () => {
     expect(
       await stop("Should I merge PR 12 now? Progress is in #i42.", {
-        statuses: { "#i42": "done" },
+        statuses: { "#i42": "listed" },
       }),
-    ).toBe(`${REASON} (#i42 is done, not open)`)
+    ).toBe(`${REASON} (#i42 is listed, not open)`)
     expect(
       await stop(
         `Should I merge PR 12 now?\n1. Rotate the key.\n2. Restart the API.\n3. Check /api/health.\nProgress is in #i42.`,
         {
-          statuses: { "#i42": "done" },
+          statuses: { "#i42": "listed" },
         },
       ),
-    ).toBe(`${REASON} (#i42 is done, not open)`)
+    ).toBe(`${REASON} (#i42 is listed, not open)`)
   })
 
   // a table row answers its own cell's question, so its ? is no ask; a row's other words still are; on 7 Nov two such rows beside a progress card each brought a copy of the card (#1486)
@@ -435,7 +436,7 @@ describe("what passes", () => {
       await stop(
         "| Check | Result |\n|---|---|\n| Did it still answer then? | yes |\n\nProgress is in #i42.",
         {
-          statuses: { "#i42": "done" },
+          statuses: { "#i42": "listed" },
         },
       ),
     ).toBeUndefined()
@@ -495,7 +496,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
 
   test("a named item that is not open fails closed with why", async () => {
     expect(await stop(`${STEPS}\nTracked in #i40.`, { statuses: { "#i40": "approved" } })).toBe(
-      `${STEPS_REASON} (#i40 is approved, not open or done)`,
+      `${STEPS_REASON} (#i40 is approved, not open or listed)`,
     )
   })
 
@@ -515,18 +516,18 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
     ).toBeUndefined()
   })
 
-  // an update reads done from the moment it is posted, and when the owner marks it Done, so a gate that took open alone asked for a copy of the card on every progress edit (#1486)
-  test("passed: 3 numbered steps that name a progress card, which reads done", async () => {
+  // an update is stored done from the moment it is posted while the Inbox still lists it, so a gate that took open alone asked for a copy of the card on every progress edit (#1486)
+  test("passed: 3 numbered steps that name a progress card the Inbox lists", async () => {
     expect(
-      await stop(`${STEPS}\nProgress is in #i42.`, { statuses: { "#i42": "done" } }),
+      await stop(`${STEPS}\nProgress is in #i42.`, { statuses: { "#i42": "listed" } }),
     ).toBeUndefined()
   })
 
-  test.each(["archived", "denied", "dismissed", "settled"])(
+  test.each(["archived", "denied", "dismissed", "done", "settled"])(
     "refused: 3 numbered steps whose only card is %s",
     async (standing) => {
       expect(await stop(`${STEPS}\nProgress is in #i42.`, { statuses: { "#i42": standing } })).toBe(
-        `${STEPS_REASON} (#i42 is ${standing}, not open or done)`,
+        `${STEPS_REASON} (#i42 is ${standing}, not open or listed)`,
       )
     },
   )
@@ -686,39 +687,15 @@ describe("the dashboard read's time limits (#1269)", () => {
       { itemStatus, sessionName: () => undefined },
     )
 
-  // bun run ask get prints the whole item: an update keeps status done whatever the owner does, so what the owner did is read from its answer (#1486)
-  test.each([
-    { item: { status: "done" }, name: "a posted update", standing: "done" },
-    {
-      item: { answer: { dismissedAt: "t" }, status: "done" },
-      name: "an update the owner marked Done",
-      standing: "done",
+  // bun run ask get prints the whole item: an update is stored done from its post on, so whether the Inbox lists it, and what was done with it, is read from its answer and readAt (#1486)
+  test.each(ITEMS.filter((c) => c.standing))(
+    "$name reads $standing",
+    async ({ item, standing }) => {
+      const dashboard = stubDashboard({}, item)
+      stubs.push(dashboard)
+      expect(await readStatus("#i1", dashboard)).toBe(standing as string)
     },
-    {
-      item: { answer: { dismissed: true, dismissedAt: "t" }, status: "done" },
-      name: "an update the owner dismissed",
-      standing: "dismissed",
-    },
-    {
-      item: { answer: { archivedAt: "t" }, status: "done" },
-      name: "an update the owner archived",
-      standing: "archived",
-    },
-    {
-      item: { answer: { at: "t", choice: "settled", dismissedAt: "t" }, status: "done" },
-      name: "a decision its poster settled",
-      standing: "settled",
-    },
-    {
-      item: { answer: { archivedAt: "t" }, status: "open" },
-      name: "an open decision the owner archived",
-      standing: "archived",
-    },
-  ])("$name reads $standing", async ({ item, standing }) => {
-    const dashboard = stubDashboard({}, item)
-    stubs.push(dashboard)
-    expect(await readStatus("#i1", dashboard)).toBe(standing)
-  })
+  )
 
   test("an open item bun run ask takes 5s to read, as under a load spike, reads as open", async () => {
     const dashboard = stubDashboard({ "#i1": 5000 })
