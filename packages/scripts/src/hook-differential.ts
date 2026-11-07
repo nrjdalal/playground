@@ -19,7 +19,7 @@ import { dataDirOf } from "@packages/env/data-dir"
 import { rosterRole } from "../../../scripts/hooks/role"
 import { LOADS, markOf, SKILL, TYPED } from "../../../scripts/hooks/writing-first"
 
-// Measures a head's hooks against a canary sha, each form or call reaching each hook's check() as data alone and never run, under --role's role and a scratch data folder, a hook canary lacks against an allow-all baseline: `sweep --forms <module>` passes the forms a module exports from the home, the data folder and a worktree, `replay` the last day's Bash calls from this machine's transcripts, `--role session` each under its own session's role and the writing-first marks its own transcript gives it; a clean head's result is stored under its key and printed again for a day without a run; started bare it queues itself through run-slot, as commit-slot.ts queues a commit's build.
+// Measures a head's hooks against a canary sha, each form or call reaching each hook's check() as data alone and never run, under --role's role and a scratch data folder, a hook canary lacks against an allow-all baseline: `sweep --forms <module>` passes the forms a module exports from the home, the data folder and a worktree, `replay` the last day's Bash calls from this machine's transcripts, `--role session` each under its own session's role and the writing-first marks its own transcript gives it, `--glm` every Bash call a GLM model made, from every transcript on disk, as a GLM session's; a clean head's result is stored under its key and printed again for a day without a run; started bare it queues itself through run-slot, as commit-slot.ts queues a commit's build.
 
 export type Check = (
   raw: string,
@@ -32,7 +32,7 @@ type Env = Record<string, string | undefined>
 type Tally = { inClass: number; outClass: number }
 
 const USAGE =
-  "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>] [--role session]> --canary <sha> --hook <name> [--hook <name> ...] [--role <role>] [--all] [--fresh]"
+  "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>] [--role session] [--glm]> --canary <sha> --hook <name> [--hook <name> ...] [--role <role>] [--all] [--fresh]"
 
 const DAY = 24 * 3600 * 1000
 
@@ -124,17 +124,22 @@ const allows = (check: Check, call: Call, env: Env, main?: string, repo?: string
 
 const bare = (home: string) => (): Env => ({ HOME: home, PATH: process.env.PATH })
 
-// Each call's env: the home, PATH and the scratch data folder; PLAYGROUND_ROLE set to --role's role, or with --role session to the role the roster gives the call's session by its transcript name, its session named in a scratch registry (CLAUDE_CONFIG_DIR); a name the roster lacks keeps the default, PLAYGROUND_ROLE unset, where a hook places the session by its name itself
+// The endpoint spawn.sh's GLM launch points ANTHROPIC_BASE_URL at, which no-glm-heavy-path's onGlm reads as a GLM session
+export const GLM_BASE_URL = "https://api.z.ai/api/anthropic"
+
+// Each call's env: the home, PATH and the scratch data folder, with --glm ANTHROPIC_BASE_URL at the GLM endpoint; PLAYGROUND_ROLE set to --role's role, or with --role session to the role the roster gives the call's session by its transcript name, its session named in a scratch registry (CLAUDE_CONFIG_DIR); a name the roster lacks keeps the default, PLAYGROUND_ROLE unset, where a hook places the session by its name itself
 export const envOf =
   ({
     config,
     data,
+    glm,
     home,
     role,
     roles,
   }: {
     config?: string
     data: string
+    glm?: boolean
     home: string
     role?: string
     roles?: Map<string, string>
@@ -142,6 +147,7 @@ export const envOf =
   (call: Call): Env => {
     const own = role === "session" ? roles?.get(call.name ?? "") || undefined : role
     return {
+      ...(glm ? { ANTHROPIC_BASE_URL: GLM_BASE_URL } : {}),
       ...(config === undefined ? {} : { CLAUDE_CONFIG_DIR: config }),
       HOME: home,
       PATH: process.env.PATH,
@@ -240,14 +246,20 @@ const typed = (content: unknown) =>
       (TYPED.test(part.text) || COMMAND.test(part.text)),
   )
 
-// Every Bash call of the transcripts under `projects` newer than `since`, a sub-agent's nested ones included, one per folder and command; bySession keeps one per session, load state, folder and command, each with its session, the name its transcript's agent-name lines last gave it, and whether its transcript had loaded writing-for-agents since its last compaction, a load before `since` included
-export async function calls(projects: string, since: number, bySession = false): Promise<Call[]> {
+// Every Bash call of the transcripts under `projects` newer than `since`, a sub-agent's nested ones included, one per folder and command; bySession keeps one per session, load state, folder and command, each with its session, the name its transcript's agent-name lines last gave it, and whether its transcript had loaded writing-for-agents since its last compaction, a load before `since` included; glm keeps only the calls a GLM model made, by each call's own `message.model`, from every transcript whatever its age
+export async function calls(
+  projects: string,
+  since: number,
+  bySession = false,
+  glm = false,
+): Promise<Call[]> {
   const found = new Map<string, Call>()
   const names = new Map<string, string>()
+  const from = glm ? 0 : since
   const files = existsSync(projects) ? readdirSync(projects, { recursive: true }) : []
   for (const file of files.map(String).filter((f) => f.endsWith(".jsonl"))) {
     const path = join(projects, file)
-    if (statSync(path).mtimeMs < since) continue
+    if (statSync(path).mtimeMs < from) continue
     let loaded = false
     for (const line of (await Bun.file(path).text()).split("\n")) {
       const named = bySession && line.includes('"agent-name"')
@@ -256,7 +268,7 @@ export async function calls(projects: string, since: number, bySession = false):
       let entry: {
         agentName?: unknown
         cwd?: unknown
-        message?: { content?: unknown }
+        message?: { content?: unknown; model?: unknown }
         sessionId?: unknown
         subtype?: unknown
         timestamp?: string
@@ -278,6 +290,7 @@ export async function calls(projects: string, since: number, bySession = false):
         continue
       }
       if (entry.type === "user" && typed(entry.message?.content)) loaded = true
+      const model = typeof entry.message?.model === "string" ? entry.message.model : ""
       const content = Array.isArray(entry.message?.content) ? entry.message.content : []
       for (const part of content as {
         input?: { command?: unknown; skill?: unknown }
@@ -288,7 +301,8 @@ export async function calls(projects: string, since: number, bySession = false):
         if (part.name === "Skill" && typeof part.input?.skill === "string")
           loaded ||= LOADS.test(part.input.skill)
         if (part.name !== "Bash" || typeof part.input?.command !== "string") continue
-        if (Date.parse(entry.timestamp ?? "") < since || typeof entry.cwd !== "string") continue
+        if (Date.parse(entry.timestamp ?? "") < from || typeof entry.cwd !== "string") continue
+        if (glm && !model.startsWith("glm")) continue
         found.set(
           `${bySession ? `${session}\0${loaded}` : ""}\0${entry.cwd}\0${part.input.command}`,
           {
@@ -391,6 +405,7 @@ type Options = {
   all: boolean
   formsAt?: string
   fresh: boolean
+  glm: boolean
   hooks: string[]
   hours: number
   mode: "replay" | "sweep"
@@ -415,20 +430,21 @@ export function parse(args: string[]): Options | undefined {
   const formsAt = option(args, "--forms")
   const hours = Number(option(args, "--hours") ?? 24)
   const role = option(args, "--role")
+  const glm = args.includes("--glm")
   if (
     (mode !== "sweep" && mode !== "replay") ||
     !ref ||
     hooks.length === 0 ||
-    (mode === "sweep" && !formsAt) ||
+    (mode === "sweep" && (!formsAt || glm || role === "session")) ||
     !(hours > 0) ||
-    (args.includes("--role") && (!role || role.startsWith("-"))) ||
-    (mode === "sweep" && role === "session")
+    (args.includes("--role") && (!role || role.startsWith("-")))
   )
     return undefined
   return {
     all: args.includes("--all"),
     formsAt,
     fresh: args.includes("--fresh"),
+    glm,
     hooks,
     hours,
     mode,
@@ -460,7 +476,7 @@ const cleanTree = (root: string) =>
 const formsBlob = (root: string, options: Options) =>
   git(root, ["hash-object", resolve(options.formsAt!)])
 
-// A run's key: the head's tree at a clean worktree, the canary sha, the mode with its inputs (the forms module's blob, or the hours and the newest transcript), the sorted hooks, --all and --role; a worktree with any modified or untracked file has none
+// A run's key: the head's tree at a clean worktree, the canary sha, the mode with its inputs (the forms module's blob, or the hours and the newest transcript), the sorted hooks, --all, --role and --glm; a worktree with any modified or untracked file has none
 export function keyOf({
   canary,
   options,
@@ -486,6 +502,7 @@ export function keyOf({
         options.hooks.toSorted(),
         options.all,
         options.role ?? "",
+        options.glm,
       ]),
     )
     .digest("hex")
@@ -562,7 +579,7 @@ async function main(args: string[]): Promise<number> {
     console.error(USAGE)
     return 2
   }
-  const { formsAt, hooks, hours, mode, ref, role } = options
+  const { formsAt, glm, hooks, hours, mode, ref, role } = options
   const root = git(process.cwd(), ["rev-parse", "--show-toplevel"])
   const missing = hooks.filter((h) => !existsSync(join(root, "scripts/hooks", `${h}.ts`)))
   if (missing.length > 0) {
@@ -587,7 +604,7 @@ async function main(args: string[]): Promise<number> {
   })
   const list =
     mode === "replay"
-      ? await calls(projects, Date.now() - hours * 3600 * 1000, role === "session")
+      ? await calls(projects, Date.now() - hours * 3600 * 1000, role === "session", glm)
       : []
   const real = dataDirOf(process.env, home)
   const session =
@@ -608,14 +625,21 @@ async function main(args: string[]): Promise<number> {
     const head: Check = (await import(join(root, "scripts/hooks", `${hook}.ts`))).check
     const main = TAKES_MAIN.includes(hook) ? headMain : undefined
     // a scratch data folder per hook, so the marks one hook's replay writes never reach the next's
-    const env = envOf({ ...session, data: scratchData(real), home, role })
+    const env = envOf({ ...session, data: scratchData(real), glm, home, role })
     const { changed, counts } =
       mode === "sweep"
         ? await sweep(canary, head, forms, home, main, headMain, env)
         : await replay(canary, head, list, home, main, headMain, env)
     const baseline = absent ? { baseline: "allow-all: canary has no such hook" } : {}
     result.counts.push(
-      JSON.stringify({ hook, ...baseline, ...(role ? { role } : {}), ...defaulted, ...counts }),
+      JSON.stringify({
+        hook,
+        ...baseline,
+        ...(glm ? { glm } : {}),
+        ...(role ? { role } : {}),
+        ...defaulted,
+        ...counts,
+      }),
     )
     console.log(result.counts.at(-1))
     for (const line of linesOf(hook, changed, options.all)) {
