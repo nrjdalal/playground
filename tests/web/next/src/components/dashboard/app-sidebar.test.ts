@@ -8,6 +8,7 @@ import {
   keepsNested,
   navGroups,
   OpsJobRow,
+  PLUS_SHOWN,
   SessionRow,
   ThreadsGroup,
 } from "../../../../../../web/next/src/components/dashboard/app-sidebar"
@@ -671,6 +672,41 @@ describe("SessionRow's dropdown and group", () => {
     // a row with nothing to open keeps its effort in sight
     const plain = render({}, { effort: "high", model: "claude-opus-5-5" })
     expect(plain).not.toContain("max-md:invisible")
+  })
+
+  // Alpha's plus shows only while the pointer is over its own box, the effort's place, so the effort stays in sight with the pointer elsewhere on the row
+  test("the dispatcher's plus shows on hover over the effort's place alone, keyboard focus, while open and on a phone, and the effort hides only while it shows", () => {
+    const plus = new Set(PLUS_SHOWN.split(" "))
+    expect(plus.has("md:hover:opacity-100")).toBe(true)
+    expect(plus.has("md:group-hover/menu-item:opacity-100")).toBe(false)
+    for (const kept of [
+      "group-data-[open]/menu-item:opacity-100",
+      "md:group-has-[:focus-visible]/menu-item:opacity-100",
+      "md:opacity-0",
+    ])
+      expect(plus.has(kept)).toBe(true)
+    const action = createElement("button", {
+      "data-sidebar": "menu-action",
+      type: "button",
+    }) as Props["action"]
+    const html = render({ action }, { effort: "high", model: "claude-opus-5-5" })
+    const effort = classesOf(
+      openTag(
+        html,
+        new RegExp(`<span[^>]*>(?=<svg[^>]*><path d="${pathOf(RiSignalCellular3Fill)}")`),
+      ),
+    )
+    expect(effort.has("md:group-has-[[data-sidebar=menu-action]:hover]/menu-item:invisible")).toBe(
+      true,
+    )
+    expect(effort.has("md:group-hover/menu-item:invisible")).toBe(false)
+    for (const kept of [
+      "group-data-[open]/menu-item:invisible",
+      "group-has-data-[popup-open]/menu-item:invisible",
+      "max-md:invisible",
+      "md:group-has-[:focus-visible]/menu-item:invisible",
+    ])
+      expect(effort.has(kept)).toBe(true)
   })
 
   test("open, it lists each subagent and running process with its state, a finished subagent as Done", () => {
