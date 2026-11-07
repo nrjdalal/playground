@@ -7482,6 +7482,7 @@ var COPIERS = new Set(["cp", "ditto", "rsync"]);
 var BUSY_RUN = /\b(?:bun|cp|ditto|npm|pip[\d.]*|pipx|pnpm|python[\d.]*|rsync|uv|yarn)\b/i;
 var GIT_CALL = /\bgit\b[\s\S]*\b(?:commit|push)\b/i;
 var ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i;
+var RUNNER_CALL = /\b(?:bash|bun|bunx|deno|node|npm|npx|pnpm|sh|tsx|yarn|zsh)\b/i;
 var heavy = (path) => OPUS_PATHS.some((p) => p.endsWith("/") ? path.startsWith(p) : path === p);
 async function onGlm(raw, environment = process.env) {
   if (/(?:^|\/\/|\.)api\.z\.ai(?:[:/]|$)/.test(environment.ANTHROPIC_BASE_URL ?? ""))
@@ -7765,10 +7766,14 @@ function packageScripts(dir) {
       return found;
   }
 }
+var FOLDER_FIX = "Name the folder literally, in a call of its own, or report to your lead.";
 function orgScript(parsed, env) {
-  const { args, name } = parsed;
+  const { args, first, name } = parsed;
+  const own = first?.value.includes("/") ? scriptDir(pathOf(first, env)) : undefined;
+  if (own)
+    return { why: `it runs ${own}` };
   if (name === "playground" && args.find((a) => !a.value.startsWith("-"))?.value === "dm")
-    return ORG_SCRIPT_DIRS[1][1];
+    return { why: `it runs ${ORG_SCRIPT_DIRS[1][1]}` };
   if (!RUNNERS.has(name))
     return;
   let at = env.cwd;
@@ -7780,18 +7785,18 @@ function orgScript(parsed, env) {
     at = value ? pathOf(value, { ...env, cwd: at }) : undefined;
   }
   if (!at)
-    return;
+    return {
+      fix: FOLDER_FIX,
+      why: "the hook cannot tell which script it runs, since it runs in a folder a value it cannot read names"
+    };
   const scripts = packageScripts(at);
   for (const a of args) {
     if (a.value.startsWith("-") || unreadValue(a))
       continue;
-    const hit = scriptDir(pathOf(a, { ...env, cwd: at }));
-    if (hit)
-      return hit;
     const script = scripts.get(a.value);
-    const ran = script?.command.split(/\s+/).map((word) => scriptDir(resolve3(script.at, word))).find(Boolean);
-    if (ran)
-      return ran;
+    const hit = scriptDir(pathOf(a, { ...env, cwd: at })) ?? script?.command.split(/\s+/).map((word) => scriptDir(resolve3(script.at, word))).find(Boolean);
+    if (hit)
+      return { why: `it runs ${hit}` };
   }
 }
 var CLAUDE_PACKAGE = /^@anthropic-ai\/claude-code(?:@\S*)?$/;
@@ -7918,7 +7923,7 @@ function orgCall(parsed, env, dir, sub, orgs) {
     return orgRefusal(`this ${name} call`, "it reads its URL from a file the hook cannot read", "Give the URL literally, in a call of its own, or report to your lead.");
   const script = orgScript(parsed, env);
   if (script)
-    return orgRefusal(`this ${name} call`, `it runs ${script}`);
+    return orgRefusal(`this ${name} call`, script.why, script.fix);
   if (name !== "gh" && name !== "git" && !FETCHERS.has(name))
     return;
   if (!Array.isArray(orgs))
@@ -8000,7 +8005,8 @@ async function inspect(raw, environment, load5, limit) {
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
   const command = toolInput.command;
-  if (!mayRefuse(command.replace(/["'\\]/g, ""), load5, limit))
+  const text = command.replace(/["'\\]/g, "");
+  if (!mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text))
     return;
   const directory = typeof cwd === "string" ? cwd : undefined;
   const env = {

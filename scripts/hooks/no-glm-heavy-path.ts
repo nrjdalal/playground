@@ -109,6 +109,8 @@ const BUSY_RUN = /\b(?:bun|cp|ditto|npm|pip[\d.]*|pipx|pnpm|python[\d.]*|rsync|u
 const GIT_CALL = /\bgit\b[\s\S]*\b(?:commit|push)\b/i
 // what an org tool's refusal can match, read before the call is parsed
 const ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i
+// a runner, which an org script's folder rule reads once the call parses
+const RUNNER_CALL = /\b(?:bash|bun|bunx|deno|node|npm|npx|pnpm|sh|tsx|yarn|zsh)\b/i
 
 export const heavy = (path: string): boolean =>
   OPUS_PATHS.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p))
@@ -449,11 +451,14 @@ function packageScripts(dir: string): Map<string, { at: string; command: string 
     if (dirname(at) === at) return found
   }
 }
-// What org script a call runs: a runner's word that resolves into an org script's folder from the folder it runs in, or names a package script whose command does, whatever the runner; or the playground CLI's dm command
-function orgScript(parsed: Parsed, env: Env): string | undefined {
-  const { args, name } = parsed
+const FOLDER_FIX = "Name the folder literally, in a call of its own, or report to your lead."
+// Why a call runs an org script: its program word is the script (each has a shebang), the playground CLI's dm command, or a runner's word that resolves into an org script's folder from the folder it runs in, or names a package script whose command does, whatever the runner; a runner in a folder the hook cannot read is refused, failing closed as git's is
+function orgScript(parsed: Parsed, env: Env): { fix?: string; why: string } | undefined {
+  const { args, first, name } = parsed
+  const own = first?.value.includes("/") ? scriptDir(pathOf(first, env)) : undefined
+  if (own) return { why: `it runs ${own}` }
   if (name === "playground" && args.find((a) => !a.value.startsWith("-"))?.value === "dm")
-    return ORG_SCRIPT_DIRS[1][1]
+    return { why: `it runs ${ORG_SCRIPT_DIRS[1][1]}` }
   if (!RUNNERS.has(name)) return
   let at = env.cwd
   for (let i = 0; i < args.length; i++) {
@@ -464,18 +469,22 @@ function orgScript(parsed: Parsed, env: Env): string | undefined {
       : args[++i]
     at = value ? pathOf(value, { ...env, cwd: at }) : undefined
   }
-  if (!at) return
+  if (!at)
+    return {
+      fix: FOLDER_FIX,
+      why: "the hook cannot tell which script it runs, since it runs in a folder a value it cannot read names",
+    }
   const scripts = packageScripts(at)
   for (const a of args) {
     if (a.value.startsWith("-") || unreadValue(a)) continue
-    const hit = scriptDir(pathOf(a, { ...env, cwd: at }))
-    if (hit) return hit
     const script = scripts.get(a.value)
-    const ran = script?.command
-      .split(/\s+/)
-      .map((word) => scriptDir(resolve(script.at, word)))
-      .find(Boolean)
-    if (ran) return ran
+    const hit =
+      scriptDir(pathOf(a, { ...env, cwd: at })) ??
+      script?.command
+        .split(/\s+/)
+        .map((word) => scriptDir(resolve(script.at, word)))
+        .find(Boolean)
+    if (hit) return { why: `it runs ${hit}` }
   }
 }
 // Claude Code's npm package, which a package runner runs as claude
@@ -705,7 +714,7 @@ function orgCall(
       "Give the URL literally, in a call of its own, or report to your lead.",
     )
   const script = orgScript(parsed, env)
-  if (script) return orgRefusal(`this ${name} call`, `it runs ${script}`)
+  if (script) return orgRefusal(`this ${name} call`, script.why, script.fix)
   if (name !== "gh" && name !== "git" && !FETCHERS.has(name)) return
   if (!Array.isArray(orgs))
     return orgRefusal(
@@ -802,7 +811,8 @@ async function inspect(
     )
   if (tool !== "Bash" || typeof toolInput?.command !== "string") return
   const command = toolInput.command
-  if (!mayRefuse(command.replace(/["'\\]/g, ""), load5, limit)) return
+  const text = command.replace(/["'\\]/g, "")
+  if (!mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text)) return
   const directory = typeof cwd === "string" ? cwd : undefined
   const env: Env = {
     cwd: directory,
