@@ -4,7 +4,7 @@ import { parseArgs } from "node:util"
 
 import { endFocus, startFocus } from "../pr-merge/held"
 
-// playground focus: one session gets the Mac for a stretch, while every merge, every other session's heavy run and every new session but its own reviewer and tester and a firefighting start waits, and the Inbox holds what comes in quiet; focus.json in the data folder is the one record each part reads, every part ends at its `until` by itself, and ops-tick's focus-card beat posts the Inbox card once it has.
+// playground focus: one session gets the Mac for a stretch, while every merge, every other session's heavy run and every new session but its own reviewer and tester and a priority start waits, and the Inbox holds what comes in quiet; focus.json in the data folder is the one record each part reads, every part ends at its `until` by itself, and ops-tick's focus-card beat posts the Inbox card once it has.
 
 export const MAX_MINUTES = 180
 const DEFAULT_MINUTES = 120
