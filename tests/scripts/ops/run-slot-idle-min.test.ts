@@ -49,6 +49,15 @@ describe("run-slot.idle-min sets the CPU idle bar for slots 2 to 4", () => {
     },
   )
 
+  test("past its expiry a switch set to 15 keeps the bar at 40: a 20% idle reading shuts them", () => {
+    const m = machine({ idle: 20, load1: 18 })
+    writeFileSync(
+      join(m.ops, "run-slot.idle-min"),
+      "ops 2026-10-22T08:10:00Z 2026-10-22T12:10:00Z more of the cores in use\n15\n",
+    )
+    expect(slots(m)).toBe("1\n")
+  })
+
   test("run-slot.sh set writes the value on the line below, and a 20% idle reading then opens them", async () => {
     const m = machine({ idle: 20, load1: 18 })
     expect(
