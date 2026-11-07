@@ -145,19 +145,15 @@ async function registryName(sessionId, environment = process.env) {
     } catch {}
   }
 }
-async function rosterKind(name, environment = process.env) {
+async function rosterRole(name, environment = process.env) {
   const path = join2(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? kind : undefined;
+    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
   } catch {
-    return;
+    return "";
   }
-}
-async function rosterRole(name, environment = process.env) {
-  const kind = await rosterKind(name, environment);
-  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
 }
 async function sessionRole(environment, sessionId) {
   if (environment.PLAYGROUND_ROLE)
@@ -308,6 +304,20 @@ var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
+var LEADS = new Set([
+  "!",
+  "-",
+  "builtin",
+  "command",
+  "elif",
+  "exec",
+  "if",
+  "nocorrect",
+  "noglob",
+  "time",
+  "until",
+  "while"
+]);
 var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
 var ZSH_ARRAYS = new Set([
   "aliases",
