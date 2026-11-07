@@ -304,7 +304,7 @@ describe("renderNotes (PG-1213)", () => {
           handles: ["pat-dev"],
           linearKeys: ["VX"],
           names: ["Pat"],
-          slackIds: ["C0FAKE1234"],
+          slackIds: ["C0MADE1234"],
         }),
       },
       {
