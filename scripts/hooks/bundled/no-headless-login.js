@@ -2280,5 +2280,6 @@ if (import.meta.main) {
 }
 export {
   KEYCHAIN_SERVICE,
-  check
+  check,
+  headless
 };
