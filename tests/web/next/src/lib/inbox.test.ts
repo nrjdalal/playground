@@ -58,6 +58,7 @@ import {
   sendWhy,
   SHELF_LABELS,
   shelfRow,
+  shelfToOpen,
   STUCK_QUEUED_MS,
   updatedSince,
   upfrontLink,
@@ -468,6 +469,18 @@ describe("a link to an item", () => {
     expect(inboxTarget("needs-you-id-41", items)).toBe(true)
     expect(inboxTarget("needs-you-feed-abc", items)).toBe(false)
     expect(inboxTarget("id-41", items)).toBe(false)
+  })
+
+  test("opens the Done shelf only for a click: a page loaded with a Done card's hash starts with it shut", () => {
+    const shelves = [
+      ["progress", null, []],
+      ["done", null, [items[4]!]],
+    ] as const
+    const anchor = `needs-you-${items[4]!.id}`
+    expect(shelfToOpen(anchor, "link", shelves, [])).toBeNull()
+    expect(shelfToOpen(anchor, "click", shelves, [])).toBe("done")
+    expect(shelfToOpen(anchor, "click", shelves, ["done"])).toBeNull()
+    expect(shelfToOpen("needs-you-id-41", "click", shelves, [])).toBeNull()
   })
 })
 
