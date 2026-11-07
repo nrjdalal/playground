@@ -1251,11 +1251,11 @@ export const deliveryFailed = (item: InboxItem): boolean =>
 
 // The delivery failures that come before anything is typed (deliver.ts's DELIVERY_FAILURES says which, and UPLOAD_FAILED, a Slack send's files refused before its words), and LOST, an answer Claude Code held that neither its screen nor its transcript shows QUEUED_MS on, so Retry cannot type the answer twice; after any other (INTERRUPTED, or ERROR when the adapter threw) the answer may be in the session already, so its card offers Check it for me.
 export const RETRY_CODES = [
-  "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
   "LOST",
   "NOT_FOUND",
   "ON_PICKER",
+  "SESSIONS_FAILED",
   "UPLOAD_FAILED",
 ] as const
 
@@ -1364,6 +1364,19 @@ export function inboxOrder(items: InboxItem[], now = new Date()): InboxItem[] {
 
 type Row = typeof inboxItem.$inferSelect
 
+// The codes a sessions read's failure was recorded under before they took the sessions' name, each read as its new code for one ship (ADR 0015), after which this alias goes.
+const DELIVERY_CODE_ALIASES = new Map([
+  ["CMUX_FAILED", "SESSIONS_FAILED"],
+  ["CMUX_UNAVAILABLE", "SESSIONS_UNAVAILABLE"],
+])
+
+// A stored delivery as the API reads it: a failure recorded under an old code reads under its new one, while the row stays as stored.
+const deliveryOf = (stored: unknown): InboxDelivery | null => {
+  const delivery = (stored as InboxDelivery | null) ?? null
+  if (delivery?.status !== "failed") return delivery
+  return { ...delivery, code: DELIVERY_CODE_ALIASES.get(delivery.code) ?? delivery.code }
+}
+
 const toItem = (row: Row): InboxItem =>
   ({
     answer:
@@ -1378,7 +1391,7 @@ const toItem = (row: Row): InboxItem =>
         | InboxSettled
         | null) ?? null,
     createdAt: row.createdAt.toISOString(),
-    delivery: (row.delivery as InboxDelivery | null) ?? null,
+    delivery: deliveryOf(row.delivery),
     from: row.from,
     id: row.id,
     kind: row.kind,
