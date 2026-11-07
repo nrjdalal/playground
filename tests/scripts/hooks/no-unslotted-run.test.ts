@@ -425,7 +425,10 @@ const forms = (subject: string, file: string): [string, string][] => [
   ["-F with a path", `git commit -F ${file}`],
   ["-F with an absolute path", `git commit -F ${join(REPO, file)}`],
   ["-F - from a heredoc", `git commit -F - <<'EOF'\n${subject}\n\nbody line\nEOF`],
-  ["-m from a heredoc substitution", `git commit -m "$(cat <<'EOF'\n${subject}\n\nbody line\nEOF\n)"`],
+  [
+    "-m from a heredoc substitution",
+    `git commit -m "$(cat <<'EOF'\n${subject}\n\nbody line\nEOF\n)"`,
+  ],
   ["several -m", `git commit -m "${subject}" -m "body line" -m "another line"`],
   ["git -C from another folder", `cd ${OUTSIDE} && git -C ${REPO} commit -m "${subject}"`],
   ["through run-slot", `${SLOT} git commit -m "${subject}"`],

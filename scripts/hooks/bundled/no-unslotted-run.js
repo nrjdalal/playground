@@ -2762,7 +2762,9 @@ async function commitLint(cmd, args, env) {
   const text = await message(cmd, args.slice(k + 1), { ...env, cwd: dir });
   if (text === undefined)
     return;
-  const top = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--show-toplevel"], { stderr: "ignore" });
+  const top = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--show-toplevel"], {
+    stderr: "ignore"
+  });
   const root = top.success ? top.stdout.toString().trim() : "";
   const lint = join5(root, "node_modules", ".bin", "commitlint");
   if (!root || !existsSync(lint))
@@ -2929,7 +2931,7 @@ function inspect(raw, environment, main) {
     const { args, first, name } = parsed;
     const slot = slotWords(parsed);
     if (slot)
-      return slot.length ? examine({ ...cmd, words: slot }, env, commits, false) : undefined;
+      return slot.length ? examine({ ...cmd, words: slot }, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, commits, false) : undefined;
     if (name === "git") {
       const refused = await commitLint(cmd, args, env);
       if (refused)

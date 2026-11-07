@@ -103,7 +103,9 @@ async function commitLint(cmd: Command, args: Word[], env: Env): Promise<string 
   if (args[k]?.value !== "commit" || !dir) return
   const text = await message(cmd, args.slice(k + 1), { ...env, cwd: dir })
   if (text === undefined) return
-  const top = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--show-toplevel"], { stderr: "ignore" })
+  const top = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--show-toplevel"], {
+    stderr: "ignore",
+  })
   const root = top.success ? top.stdout.toString().trim() : ""
   const lint = join(root, "node_modules", ".bin", "commitlint")
   if (!root || !existsSync(lint)) return
@@ -296,8 +298,16 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   const visit: Visit = async (cmd, parsed, env) => {
     const { args, first, name } = parsed
     const slot = slotWords(parsed)
-    // run-slot.sh queues the words after its -- as one heavy run
-    if (slot) return slot.length ? examine({ ...cmd, words: slot }, env, commits, false) : undefined
+    // run-slot.sh queues the words after its -- as one heavy run, in a process of its own, so a cd among them moves no folder for the commands after it
+    if (slot)
+      return slot.length
+        ? examine(
+            { ...cmd, words: slot },
+            { ...env, files: new Map(env.files), vars: new Map(env.vars) },
+            commits,
+            false,
+          )
+        : undefined
     if (name === "git") {
       const refused = await commitLint(cmd, args, env)
       if (refused) return refused
