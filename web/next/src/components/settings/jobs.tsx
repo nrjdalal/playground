@@ -156,7 +156,7 @@ function JobConfig({
   const id = `job-config-${job.name}-${job.scope}`
   return (
     <form
-      className="mt-1"
+      className="mt-1 flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault()
         void form.handleSubmit()
@@ -174,26 +174,28 @@ function JobConfig({
         {(field) => {
           const error = field.state.meta.errors[0]
           return (
-            <Field data-invalid={Boolean(error)}>
-              <FieldLabel htmlFor={id} className="text-xs">
-                Config
-              </FieldLabel>
-              <Textarea
-                aria-invalid={Boolean(error)}
-                className="font-mono text-xs md:text-xs"
-                disabled={save.isPending}
-                id={id}
-                onBlur={field.handleBlur}
-                onChange={(event) => field.handleChange(event.target.value)}
-                spellCheck={false}
-                value={field.state.value}
-              />
-              {error && <FieldError>{String(error)}</FieldError>}
-              {refused && (
-                <FieldDescription className="text-destructive text-xs">
-                  The job refused its config: {refused}
-                </FieldDescription>
-              )}
+            <>
+              <Field data-invalid={Boolean(error)}>
+                <FieldLabel htmlFor={id} className="text-xs">
+                  Config
+                </FieldLabel>
+                <Textarea
+                  aria-invalid={Boolean(error)}
+                  className="font-mono text-xs md:text-xs"
+                  disabled={save.isPending}
+                  id={id}
+                  onBlur={field.handleBlur}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                  spellCheck={false}
+                  value={field.state.value}
+                />
+                {error && <FieldError>{String(error)}</FieldError>}
+                {refused && (
+                  <FieldDescription className="text-destructive text-xs">
+                    The job refused its config: {refused}
+                  </FieldDescription>
+                )}
+              </Field>
               <div>
                 <Button
                   disabled={save.isPending || Boolean(error) || field.state.value === shown}
@@ -204,7 +206,7 @@ function JobConfig({
                   Save
                 </Button>
               </div>
-            </Field>
+            </>
           )
         }}
       </form.Field>
