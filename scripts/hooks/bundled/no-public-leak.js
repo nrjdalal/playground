@@ -53,6 +53,7 @@ var dataDir = (env = process.env) => dataDirOf(env);
 var HIDDEN = new Set(["ci"]);
 var ARTICLES = new Set(["a", "an", "the"]);
 var COMMANDS = new Set(["bun", "bunx", "gh", "git", "npx", "playground"]);
+var CONTRIBUTORS_HEADING = "### \u2764\uFE0F Contributors";
 function ownerWords(name, login, owner) {
   const own = new Set(owner.map((word) => word.toLowerCase()));
   if (!own.has(login.toLowerCase()))
@@ -10353,13 +10354,12 @@ var SAID = {
   }
 };
 var SHIP = /^\s*gh release (?:create|edit)\b[^`$();&|<>\n]*$/;
-var CONTRIBUTORS = /^### \u2764\uFE0F Contributors\r?$/;
 var CONTRIBUTOR = /^- ((?:\S+ )*)@([\w-]+)\s*$/;
 function ownLinesPast(text, owner) {
   let contributors = false;
   return text.split(`
 `).map((line) => {
-    if (CONTRIBUTORS.test(line)) {
+    if (line.replace(/\r$/, "") === CONTRIBUTORS_HEADING) {
       contributors = true;
       return line;
     }
@@ -10368,7 +10368,7 @@ function ownLinesPast(text, owner) {
       contributors = false;
     const names = m?.[1].trim() ?? "";
     const login = m?.[2] ?? "";
-    const mine = contributors && ownerWords(login, login, owner).length === 1 && ownerWords(names, login, owner).join(" ") === names.split(/\s+/).filter(Boolean).join(" ");
+    const mine = contributors && owner.some((word) => word.toLowerCase() === login.toLowerCase()) && ownerWords(names, login, owner).join(" ") === names.split(/\s+/).filter(Boolean).join(" ");
     return mine ? "" : line;
   }).join(`
 `);

@@ -532,7 +532,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   Its reason names the kind and the plain-words fix, never the text.
   It reads every write through no-playground-leak's engine (`inspectAs` with its own `Policy`), so the shapes it reads are that guard's gh, `gh api`, curl and GitHub MCP writes; git commits and pushes, Linear and Slack are outside it.
   Each public repository's own name, which holds its owner's handle, is read past.
-  So is the owner's own line in a ship's notes, as `bun run release:notes` writes it: in a plain `gh release create` or `edit` (one command, with no substitution, chain, pipe or redirect), a line that reads `- <names> @<login>` with the login and every name in `owner.names` (`ownerWords` in `notes.ts`, the renderer's own rule), inside the renderer's Contributors section.
+  So is the owner's own line in a ship's notes, as `bun run release:notes` writes it: in a plain `gh release create` or `edit` (one command, with no substitution, chain, pipe or redirect), a line that reads `- <names> @<login>` or `- @<login>` with the login and every name in `owner.names` (`ownerWords` in `notes.ts`, the renderer's own rule), inside the renderer's Contributors section.
   That section opens at the exact `### ❤️ Contributors` line and ends at the first line that is neither blank nor a contributor's, so a heading of any shape, a fence or prose closes it.
   The same names on any other line, in the ship's title, or in any other write are refused.
   Its kinds are `packages/scripts/src/trace-count/kinds.ts`, which the trace ratchet counts too, and its list is read as [Guard lists](#guard-lists) says; on a fresh clone with no list, the list-free kinds still refuse.

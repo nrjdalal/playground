@@ -57,6 +57,9 @@ function line(
   return `- ${scope ? `**${scope}:** ` : ""}${breaking ? "⚠️  " : ""}${text} (${refs})`
 }
 
+// The Contributors section's heading, which the leak guard reads the owner's line under.
+export const CONTRIBUTORS_HEADING = "### ❤️ Contributors"
+
 // The words of a contributor's name its line carries: those owner.names lists, when it lists the login too, else none; the leak guard reads past a ship's Contributors line by the same rule.
 export function ownerWords(name: string, login: string, owner: string[]): string[] {
   const own = new Set(owner.map((word) => word.toLowerCase()))
@@ -105,7 +108,7 @@ export function renderNotes({
     const words = ownerWords(name ?? "", login, owner)
     return `- ${words.length ? `${words.join(" ")} ` : ""}@${login}`
   })
-  if (contributors.length) sections.push(`### ❤️ Contributors\n\n${contributors.join("\n")}`)
+  if (contributors.length) sections.push(`${CONTRIBUTORS_HEADING}\n\n${contributors.join("\n")}`)
   return (
     [`[compare changes](https://github.com/${repo}/compare/${from}...${to})`, ...sections].join(
       "\n\n",

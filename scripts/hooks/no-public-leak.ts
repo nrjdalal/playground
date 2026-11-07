@@ -1,7 +1,7 @@
 // PreToolUse hook for the factory's sessions (role.ts), registered in both settings files: refuses a write to a public repository (a pull request, an issue, a review or a comment, through gh, gh api, curl or the GitHub MCP) whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or an email address or an archive link, since everything written there is public once the repository is. Its reason names the kind of text, never the text; it reads every write as no-playground-leak does, through that guard's engine, and each kind as the trace ratchet counts it (packages/scripts/src/trace-count/kinds.ts).
 import "../../packages/env/src/aliases"
 import { dataDir } from "../../packages/env/src/data-dir"
-import { ownerWords } from "../../packages/scripts/src/release-notes/notes"
+import { CONTRIBUTORS_HEADING, ownerWords } from "../../packages/scripts/src/release-notes/notes"
 import {
   EMPTY_LIST,
   isPublicList,
@@ -42,8 +42,7 @@ const SAID: Partial<Record<Kind, Hit>> = {
 
 // A plain ship notes write, one `gh release create` or `edit` with no substitution, chain, pipe or redirect, the one call whose notes may name the owner.
 const SHIP = /^\s*gh release (?:create|edit)\b[^`$();&|<>\n]*$/
-// The heading the notes renderer writes, and a line its Contributors section holds: `- <names> @<login>` or the login alone.
-const CONTRIBUTORS = /^### ❤️ Contributors\r?$/
+// A line the renderer's Contributors section holds: `- <names> @<login>` or the login alone.
 const CONTRIBUTOR = /^- ((?:\S+ )*)@([\w-]+)\s*$/
 // The notes with the owner's own Contributors line read past: the section opens at the renderer's heading and stays open while each line is blank or a contributor's, and a line there whose login and every name owner.names lists is read past, so the same names anywhere else are still refused.
 function ownLinesPast(text: string, owner: string[]): string {
@@ -51,7 +50,7 @@ function ownLinesPast(text: string, owner: string[]): string {
   return text
     .split("\n")
     .map((line) => {
-      if (CONTRIBUTORS.test(line)) {
+      if (line.replace(/\r$/, "") === CONTRIBUTORS_HEADING) {
         contributors = true
         return line
       }
@@ -61,7 +60,7 @@ function ownLinesPast(text: string, owner: string[]): string {
       const login = m?.[2] ?? ""
       const mine =
         contributors &&
-        ownerWords(login, login, owner).length === 1 &&
+        owner.some((word) => word.toLowerCase() === login.toLowerCase()) &&
         ownerWords(names, login, owner).join(" ") === names.split(/\s+/).filter(Boolean).join(" ")
       return mine ? "" : line
     })
