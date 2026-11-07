@@ -6154,6 +6154,20 @@ var JOBS = {
     neverPause: true,
     schedule: { every: 60 }
   }),
+  "ops-restore": {
+    ...launchd("ops-restore", {
+      description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
+      schedule: { every: 60 }
+    }),
+    cwd: "{dashboard}",
+    program: [
+      "{bun}",
+      "--no-env-file",
+      "{dashboard}/packages/scripts/src/ops-restore/cli.ts",
+      "--main",
+      "{checkout}"
+    ]
+  },
   "ops-session-resume": launchd("ops-session-resume", {
     description: "Queues a carry-on line for each factory session once its usage limit resets.",
     schedule: { every: 60 }
