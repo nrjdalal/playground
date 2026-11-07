@@ -77,7 +77,7 @@ describe("the slots gate admits a new worker only when run-slot has room for its
     expect(capacityLog(r)).toEqual([
       expect.objectContaining({
         readings: expect.objectContaining({
-          firefighting: expect.stringMatching(/\/\.playground\/firefighting-stop\.json$/),
+          priority: expect.stringMatching(/\/\.playground\/firefighting-stop\.json$/),
           lanes_free: 0,
           waiters: 8,
         }),
@@ -93,11 +93,45 @@ describe("the slots gate admits a new worker only when run-slot has room for its
     expect(r.err).toContain("the slots gate holds it")
   })
 
-  test("a --firefighting worker start with no trigger file standing is refused, as before", async () => {
-    const r = await urgent([...worker, "--firefighting"], fullQueue)
-    expect(r.code).not.toBe(0)
-    expect(placing(r)).toEqual([])
-    expect(r.err).toContain("--firefighting starts only while a firefighting trigger file stands")
+  test.each(["--priority", "--firefighting"])(
+    "a %s worker start with no priority file standing is refused, naming the files",
+    async (flag) => {
+      const r = await urgent([...worker, flag], fullQueue)
+      expect(r.code).not.toBe(0)
+      expect(placing(r)).toEqual([])
+      expect(r.err).toContain("--priority starts only while a priority file stands in")
+      expect(r.err).toContain("priority.json or priority-start.json")
+    },
+  )
+
+  // --priority and its old name, --firefighting, each pass a full queue under every file, the two new ones and the three old names they replace (#1334)
+  test.each(
+    ["--priority", "--firefighting"].flatMap((flag) =>
+      [
+        "priority.json",
+        "priority-start.json",
+        "firefighting-stop.json",
+        "firefighting-headstart.json",
+        "firefighting-start.json",
+      ].map((file) => [flag, file]),
+    ),
+  )("a %s worker start passes a full queue while %s stands (#1334)", async (flag, file) => {
+    const r = await urgent([...worker, flag!], (home) => {
+      fullQueue(home)
+      writeFileSync(join(home, ".playground", file!), "{}")
+    })
+    expect(r.code).toBe(0)
+    expect(capacityLog(r)).toEqual([
+      expect.objectContaining({
+        readings: expect.objectContaining({
+          priority: expect.stringMatching(
+            new RegExp(`/\\.playground/${file!.replaceAll(".", "\\.")}$`),
+          ),
+          waiters: 8,
+        }),
+        verdict: "pass",
+      }),
+    ])
   })
 
   test.each([
