@@ -606,7 +606,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(after).not.toContain(`${replied.tag} `)
   })
 
-  test("resolve closes the poster's own alert update; another session, a non-alert item and an unknown id are refused (#658)", async () => {
+  test("resolve closes the poster's own alert update; another session, a decision and an unknown id are refused (#658)", async () => {
     const alertPost = {
       from: "worker-envy",
       kind: "update",
@@ -629,7 +629,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(refused.stderr).toContain("Only worker-envy")
     // a decision settles, it does not resolve; an unknown id is unknown; no --by is usage
     expect((await cli(["resolve", (await post()).id, "--by", "worker-envy"])).stderr).toContain(
-      "Only an alert update resolves",
+      "Only an update resolves",
     )
     expect((await cli(["resolve", "#i999999", "--by", "worker-envy"])).stderr).toContain(
       "no inbox item",
@@ -774,7 +774,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       ["new", "--thread"],
       ["new", "--board", "t4sk"],
       ["open", "--from"],
-      ["open", "--since", "x"],
+      ["open", "--until"],
     ]) {
       const result = await cli(args)
       expect(result.code).toBe(2)
