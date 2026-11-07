@@ -231,8 +231,8 @@ export const withReadyDraft = (facts: PrFacts, gates: Gate[], detail: string): G
 // Pure: the PRs a body says it is stacked on, each `Stacked on #N` (playbook DISPATCH.md's stack line) in any case, a list of them on one line (`#N and #M`, `#N, #M`) included, once each, in order.
 export const parentsOf = (body: string): number[] => [
   ...new Set(
-    [...body.matchAll(/\bstacked on (#\d+(?:\s*(?:,|&|\band\b)?\s*#\d+)*)/gi)].flatMap((match) =>
-      [...(match[1] ?? "").matchAll(/#(\d+)/g)].map((number) => Number(number[1])),
+    [...body.matchAll(/\bstacked on (#\d+(?:(?:\s*(?:,|&|\band\b)\s*|\s+)#\d+)*)/gi)].flatMap(
+      (match) => [...(match[1] ?? "").matchAll(/#(\d+)/g)].map((number) => Number(number[1])),
     ),
   ),
 ]
@@ -254,7 +254,9 @@ function parentGate(facts: PrFacts): Gate | undefined {
           ? [
               `stacked on #${n}, closed without merging: once its lines land another way, remove the \`Stacked on #${n}\` line from the body (no push)`,
             ]
-          : [`stacked on #${n}, whose state could not be read (${state})`],
+          : [
+              `stacked on #${n}, whose state could not be read (${state}); if #${n} is not a PR, reword the \`Stacked on\` line`,
+            ],
   )
   if (why.length > 0) return { detail: why.join("; "), name: "parent", ok: false }
   return {
