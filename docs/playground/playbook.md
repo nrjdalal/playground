@@ -185,7 +185,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   So a herdr session ends through `spawn.sh close <name>`, which closes only the pane spawn.sh opened under that name, never the caller's own, and marks the session ended on the roster.
 - A new session's name reads like `k3m9px-worker`: a new 6-letter id, then what the session is, so no name is ever used twice, and its checkers get ids of their own, as `b7k2mq-reviewer` and `h4n8zt-tester`.
 - Every session starts at high effort; the owner picks a dispatcher's, the Assistant's or the hosted session's (the one the Dashboard runs on the Agent SDK) in the menu left of Send in its Dashboard composer.
-  A lead picks any other session's model and effort with spawn.sh's `--model` and `--effort` at a start or a resume, by brief-rush's model classes, and the owner's word in the **override** shape outranks the class.
+  A lead picks any other session's model by brief-rush's model classes and its effort, high by brief-rush's model rule, with spawn.sh's `--model` and `--effort` at a start or a resume, and the owner's word in the **override** shape outranks both.
 - Every session runs on `models.default` (Opus) unless it was started on GLM or with spawn.sh's `--model` naming another of `models.claude`, and every subagent it starts for work runs on Sonnet unless its call names a model,
   from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`.
   The owner picks another model for a dispatcher, the Assistant or the hosted session in the menu left of Send in its Dashboard composer.
