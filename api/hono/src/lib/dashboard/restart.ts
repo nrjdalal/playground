@@ -22,12 +22,15 @@ const run: Run = async (argv) => {
 
 const said = (text: string) => text.trim().split("\n").at(-1) ?? ""
 
-// Pure: the PRs a restart's resume names with --pr, since the close ends the row and spawn.sh refuses a checker's start on an ended row that names none: a checker's prs, else its pr alone, else null, which the route refuses before the close; none for a session that is no checker.
+// Pure: the PRs a restart's resume names with --pr (its pr first, as spawn.sh sets an ended row's pr to the first named), since the close ends the row and spawn.sh refuses a checker's start on an ended row that names none: a checker's pr, then the rest of its prs, else null, which the route refuses before the close; none for a session that is no checker or has no row.
 export const restartPrs = (
   checker: boolean,
   row?: { pr?: string; prs?: string[] },
-): string[] | null | undefined =>
-  !checker ? undefined : row?.prs?.length ? row.prs : row?.pr ? [row.pr] : null
+): string[] | null | undefined => {
+  if (!checker || !row) return undefined
+  const prs = [...new Set([row.pr, ...(row.prs ?? [])].filter((u): u is string => !!u))]
+  return prs.length ? prs : null
+}
 
 // Pure: spawn.sh's two steps, a close by the pane's label and a resume of the same session id in its folder, with --account only when one is named and --pr with a checker's prs, since the close ends its row.
 export const restartArgv = (
