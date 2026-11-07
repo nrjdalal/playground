@@ -42,6 +42,48 @@ export const groups: Group[] = [
       ["mongosh of a remote cluster", "mongosh mongodb+srv://app@cluster.example.net/app"],
       ["redis-cli to a remote host", "redis-cli -h cache.example.com"],
       ["a script given a remote database URL", "bun run seed.ts postgres://app@db.example.com/app"],
+      // round 1: the paths a shell call opens past its argument words, and the hosts a client reads past its first
+      ["a redirect from a file in an org's checkout", "cat < ../glm-org-repo/README.md"],
+      [
+        "a loop fed a file in an org's checkout",
+        'while read l; do echo "$l"; done < ../glm-org-repo/README.md',
+      ],
+      [
+        "a substitution reading a file in an org's checkout",
+        'echo "$(< ../glm-org-repo/README.md)"',
+      ],
+      [
+        "a path in an org's checkout printed into xargs",
+        "echo ../glm-org-repo/README.md | xargs cat",
+      ],
+      ["a glob naming an org's checkout", "cat ../glm-org-rep*/README.md"],
+      ["a path through ~+ into an org's checkout", "ls ~+/../glm-org-repo"],
+      ["a symlink in its own checkout to a file in an org's checkout", "cat org-link.md"],
+      ["psql through PGHOSTADDR", "PGHOSTADDR=10.0.0.5 psql app"],
+      ["psql of a remote hostaddr", `psql "hostaddr=10.0.0.5 dbname=app"`],
+      [
+        "psql of a conninfo whose second host is remote",
+        `psql "host=127.0.0.1 dbname=app host=db.example.com"`,
+      ],
+      [
+        "psql of a URL whose second host is remote",
+        "psql postgresql://app@127.0.0.1:1,db.example.com/app",
+      ],
+      [
+        "psql of a URL naming its host as a parameter",
+        `psql "postgresql:///app?host=db.example.com"`,
+      ],
+      ["psql of a service name", "psql service=prod"],
+      ["psql through PGSERVICE", "PGSERVICE=prod psql"],
+      ["mysql through MYSQL_HOST", "MYSQL_HOST=db.example.com mysql app"],
+      ["mongosh of a positional remote host", "mongosh db.example.com:27017/app"],
+      ["a pg_ program to a remote host", "pg_basebackup -h db.example.com -D out"],
+      ["pgcli to a remote host", "pgcli -h db.example.com app"],
+      ["psql to a remote host inside docker exec", "docker exec x psql -h db.example.com app"],
+      [
+        "psql to a remote host inside docker run",
+        "docker run --rm postgres psql -h db.example.com",
+      ],
     ],
   },
 ]

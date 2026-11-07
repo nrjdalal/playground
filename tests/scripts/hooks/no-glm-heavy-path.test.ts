@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -1084,6 +1084,65 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
     }
   })
 
+  test("a read of an org's checkout through what the shell opens is refused on GLM: a redirect, a substitution, a glob, ~+ and a link", async () => {
+    writeFileSync(join(ORG, "README.md"), "demo\n")
+    symlinkSync(join("..", "read-org-repo", "README.md"), join(REPO, "org-link.md"))
+    for (const raw of [
+      input("cat < ../read-org-repo/README.md"),
+      input('while read l; do echo "$l"; done < ../read-org-repo/README.md'),
+      input('echo "$(< ../read-org-repo/README.md)"'),
+      input("echo ../read-org-repo/README.md | xargs cat"),
+      input("cat ../read-org-rep*/README.md"),
+      input("ls ~+/../read-org-repo"),
+      input("cat org-link.md"),
+      input("sort -o out.txt ../read-org-repo/README.md"),
+      input("echo x > ../read-org-repo/notes.md"),
+    ]) {
+      const { claude, glm } = await both(raw)
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+      expect(glm).toContain("glm rule")
+    }
+  })
+
+  test("a shell read that opens nothing in a guarded checkout passes on GLM: its own files by a redirect, a glob of its docs or ~+, and echo's plain words inside the checkout", async () => {
+    for (const raw of [
+      input("cat < README.md"),
+      input("cat docs/*.md"),
+      input("ls ~+/src"),
+      input('echo "$(< README.md)"'),
+      input("echo hi there", ORG),
+      input("printf '%s\\n' done", ORG),
+      input("cat ../read-loos*/notes.md"),
+    ])
+      expect(await refusal(raw, ON_GLM, CALM)).toBeUndefined()
+  })
+
+  test("a database client reading a host past its first is refused on GLM: hostaddr, a later host, a URL's host list and parameters, a service, MYSQL_HOST, a positional mongo host, a pg_ program, pgcli and docker", async () => {
+    for (const [command, names] of [
+      ["PGHOSTADDR=10.0.0.5 psql app", "10.0.0.5"],
+      [`psql "hostaddr=10.0.0.5 dbname=app"`, "10.0.0.5"],
+      [`psql "host=127.0.0.1 dbname=app host=db.example.com"`, "db.example.com"],
+      ["psql postgresql://app@127.0.0.1:1,db.example.com/app", "db.example.com"],
+      [`psql "postgresql:///app?host=db.example.com"`, "db.example.com"],
+      ["psql service=prod", "cannot tell"],
+      ["PGSERVICE=prod psql", "cannot tell"],
+      ["MYSQL_HOST=db.example.com mysql app", "db.example.com"],
+      ["mongosh db.example.com:27017/app", "db.example.com"],
+      ["pg_basebackup -h db.example.com -D out", "db.example.com"],
+      ["pgcli -h db.example.com app", "db.example.com"],
+      ["docker exec x psql -h db.example.com app", "db.example.com"],
+      ["docker run --rm postgres psql -h db.example.com", "db.example.com"],
+      ["docker exec -e PGHOST=db.example.com x psql app", "db.example.com"],
+      ["docker compose exec db psql -h db.example.com app", "db.example.com"],
+    ]) {
+      const { claude, glm } = await both(input(command))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain(names)
+      expect(glm).toContain("glm rule")
+    }
+  })
+
   test("a database client on this machine passes on GLM", async () => {
     for (const command of [
       "psql -h 127.0.0.1 -U postgres app",
@@ -1094,7 +1153,16 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
       "redis-cli",
       "redis-cli -h 127.0.0.1 ping",
       "docker exec playground-x-db psql -U postgres -c 'select 1'",
+      "docker exec x psql -h 127.0.0.1 app",
       "echo postgres://app@db.example.com/app",
+      "mongosh -h",
+      "mongosh app",
+      "mongosh ./scripts/seed.js",
+      "mongosh localhost:27017/app",
+      "psql postgresql://app@%2Fvar%2Frun/app",
+      `psql "host=127.0.0.1 hostaddr=127.0.0.1 dbname=app"`,
+      "psql postgresql://app@127.0.0.1:5432,localhost/app",
+      `psql "postgresql:///app?host=/tmp"`,
     ])
       expect(await refusal(input(command), ON_GLM, CALM)).toBeUndefined()
   })
