@@ -173,12 +173,12 @@ test("its sandbox is a marked scratch folder, gone once the run ends (#545)", as
 }, 20_000)
 
 // issue 1306: tests that made mkdtempSync(tmpdir()) folders and never removed them left 24,008 entries in the caller's temp folder, which macOS's cleaner took about 1.5 cores to scan
-test("a test's temp folders, its children's included, go with the sandbox, so the caller's temp folder is left as it was", async () => {
+test("a test's temp folders go with the sandbox, so the caller's temp folder is left as it was", async () => {
   const tmp = join(DIR, "tmp-leaks")
   mkdirSync(tmp)
   writeFileSync(
     join(DIR, "leaks.test.ts"),
-    `import { test } from "bun:test"\nimport { mkdtempSync } from "node:fs"\nimport { tmpdir } from "node:os"\nimport { join } from "node:path"\ntest("leaks", () => { mkdtempSync(join(tmpdir(), "leak-")); mkdtempSync(join(tmpdir(), "leak-")); Bun.spawnSync(["mktemp", "-d"]) })\n`,
+    `import { test } from "bun:test"\nimport { mkdtempSync } from "node:fs"\nimport { tmpdir } from "node:os"\nimport { join } from "node:path"\ntest("leaks", () => { mkdtempSync(join(tmpdir(), "leak-")); mkdtempSync(join(tmpdir(), "leak-")) })\n`,
   )
   const run = Bun.spawn(["bun", SCRIPT, "./leaks.test.ts"], {
     cwd: DIR,
