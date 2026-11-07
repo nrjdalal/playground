@@ -36,20 +36,16 @@ An observer is in the channel too; answer them directly when they write there, u
 ## Triage
 
 The owner owns this factory.
-The dispatcher sorts every ask from the colleague, their Playground or the observer into one of three, and says which in its thread: `answered`, `fixing it` or `queued for the owner's ok`.
+The dispatcher sorts every ask from the colleague, their Playground or the observer into one of three, and says which in its thread: `answered`, `taking it` or `queued for the owner's ok`.
 
 1. **Answer only**: how something works, setup help, a pattern, a finding.
    Answered in the channel, with no build and no yes.
-2. **Go ahead, then tell the owner** with an Inbox `update`: a bug fix that meets all four:
-   - a real defect in shared code that would hit the owner too;
-   - it changes nothing they see or use beyond removing the defect;
-   - under about 30 minutes for one worker;
-   - it touches no rule, hook, security, sharing or **classified** code.
+2. **Take it and record it**: a two-way door, in **ask**'s sense, whose change lands only in Playground's own repo (`factory.repo`): a fix, a feature, a skill, a rule or a change to the Dashboard.
+   The dispatcher routes it like any ask, records the decision and its reason on its issue as **ask** records a two-way door, and tells the owner with an Inbox `update` only when it changes what the owner sees or does.
 3. **The owner's Inbox decision first**, an `ask` decision quoting the colleague or the observer, its `text` the work:
-   - a new feature, or any change to how their Dashboard looks or behaves;
-   - anything over about 30 minutes, or competing for a slot with their work;
-   - anything touching rules, hooks, security, sharing, **classified** or the work org;
-   - anything on **ask**'s list;
+   - a one-way door on **ask**'s list;
+   - anything outside Playground's own repo: the work org, an org's repo or tickets, the owner's accounts or machine;
+   - anything that loosens a guard on security, sharing or **classified**, since a leak it lets through cannot be taken back;
    - anything unclear.
 
 A **PR** from the colleague takes its own path: the dispatcher decides it when it is simple and works, a change to a skill's or the harness's logic included.
@@ -63,4 +59,4 @@ A change that makes a central skill worse for the owner's workflows is declined.
 
 The owner's asks always rank above the colleague's and the observer's, the owner's words override theirs, and theirs never jump the queue.
 
-Done when every post keeps the lists above, every ask from the channel has its triage word in its thread, and every PR from the colleague is merged as their own or carries its re-land or close reason on their PR, with its decision and reason recorded on its issue.
+Done when every post keeps the lists above, every ask from the channel has its triage word in its thread, every ask taken has its decision and reason on its issue, and every PR from the colleague is merged as their own or carries its re-land or close reason on their PR, with its decision and reason recorded on its issue.
