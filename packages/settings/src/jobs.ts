@@ -232,15 +232,18 @@ const plistOf = (name: string, job: Job, fill: Fill): string => {
   ].join("\n")
 }
 
-// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs) as jobs.json in the shape every reader parses, and an enabled launchd job's plist by label. A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands, less an old needsCmux (withoutNeedsCmux).
+// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, and an enabled launchd job's plist by label. A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands, less an old needsCmux (withoutNeedsCmux); one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it.
 export const renderJobs = (
   values: Record<string, unknown>,
   existing: { name?: unknown }[],
   fill: Fill,
-  org: Record<string, Job> = {},
+  org: Record<string, OrgJob> = {},
 ): { jobs: Record<string, unknown>[]; plists: Map<string, string> } => {
   const plists = new Map<string, string>()
-  const row = (name: string, { command, cwd, enabled, program, ...job }: Job) => {
+  const row = (
+    name: string,
+    { command, cwd, enabled, program, ...job }: Job & { org?: string },
+  ) => {
     if (enabled && job.launchd && program)
       plists.set(job.launchd, plistOf(name, { ...job, cwd, enabled, program }, fill))
     return {
@@ -261,9 +264,10 @@ export const renderJobs = (
   ]
   const known = new Set([...Object.keys(JOBS), ...Object.keys(org)])
   jobs.push(
-    ...(existing
+    ...existing
       .filter((job) => typeof job.name === "string" && !known.has(job.name))
-      .map(withoutNeedsCmux) as Record<string, unknown>[]),
+      .map((job) => withoutNeedsCmux(job) as Record<string, unknown>)
+      .map((job) => (typeof job.org === "string" ? { ...job, disabled: true } : job)),
   )
   return { jobs: jobs.sort((a, b) => String(a.name).localeCompare(String(b.name))), plists }
 }
@@ -283,28 +287,40 @@ const inFolder = (path: string, keys: string[]): boolean => {
   )
 }
 
-// Why an org's job may not run as its row says, or undefined: it beats under its own name and names no stop group, which ops stops before each start, it runs in a terminal, its command {bun} [--no-env-file] then a script in a folder its org ships, then plain words or {data}, from that folder or one under it.
-const outsideFolder = (name: string, job: Job, keys: string[]): string | undefined => {
-  if (job.heartbeat !== name) return `its heartbeat must be its own name, ${name}`
-  if (job.stop) return "an org's job names no stop group, which ops stops before each start"
+// Where an org's job runs, its cwd, or why it may not run as its row says: it beats under its own name and names no stop group, which ops stops before each start, it runs in a terminal, its command {bun} [--no-env-file] then a script in a folder its org ships, then plain words or {data}, from that folder unless its cwd names one under it.
+const runsFrom = (
+  name: string,
+  job: Job,
+  keys: string[],
+): { cwd: string } | { refused: string } => {
+  const refused = (why: string) => ({ refused: why })
+  if (job.heartbeat !== name) return refused(`its heartbeat must be its own name, ${name}`)
+  if (job.stop)
+    return refused("an org's job names no stop group, which ops stops before each start")
   if (job.launchd || job.program)
-    return "an org's job runs in a terminal, with a command and no launchd label or program"
+    return refused(
+      "an org's job runs in a terminal, with a command and no launchd label or program",
+    )
   const words = (job.command ?? "").split(" ")
-  if (words[0] !== "{bun}") return "its command must start with {bun}"
+  if (words[0] !== "{bun}") return refused("its command must start with {bun}")
   const at = words[1] === "--no-env-file" ? 2 : 1
   const script = words[at] ?? ""
   if (!script.startsWith(OPS) || !inFolder(script.slice(OPS.length), keys))
-    return `its command must run a script in a folder its org ships, ${OPS}<key>/<file>`
+    return refused(`its command must run a script in a folder its org ships, ${OPS}<key>/<file>`)
   if (!words.slice(at + 1).every((word) => word === "{data}" || PLAIN.test(word)))
-    return "its command's arguments must be plain words or {data}"
+    return refused("its command's arguments must be plain words or {data}")
   const key = script.slice(OPS.length).split("/")[0]!
   const cwd = job.cwd ?? `${OPS}${key}`
   if (
     cwd !== `${OPS}${key}` &&
     !(cwd.startsWith(`${OPS}${key}/`) && inFolder(cwd.slice(OPS.length), [key]))
   )
-    return `its cwd must be ${OPS}${key} or a folder under it`
+    return refused(`its cwd must be ${OPS}${key} or a folder under it`)
+  return { cwd }
 }
+
+// An org's own job, marked with the org that adds it, which its jobs.json row keeps so a later pass can tell it from a row kept by hand.
+export type OrgJob = Job & { org: string }
 
 const REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()])
 
@@ -313,8 +329,8 @@ export const orgJobs = (
   rows: { key: string; scope: string; value: unknown }[],
   login: string,
   scripts: Record<string, string[]>,
-): { jobs: Record<string, Job>; refused: string[] } => {
-  const jobs: Record<string, Job> = {}
+): { jobs: Record<string, OrgJob>; refused: string[] } => {
+  const jobs: Record<string, OrgJob> = {}
   const addedBy = new Map<string, string>()
   const refused: string[] = []
   for (const { key, scope, value } of rows) {
@@ -330,16 +346,12 @@ export const orgJobs = (
         return parsed.error.issues
           .map((issue) => `${issue.path.join(".") || "row"} ${issue.message}`)
           .join("; ")
-      const outside = outsideFolder(name, parsed.data, scripts[scope] ?? [])
-      if (outside) return outside
+      const runs = runsFrom(name, parsed.data, scripts[scope] ?? [])
+      if ("refused" in runs) return runs.refused
       const first = addedBy.get(name)
       if (first) return `${first} already adds ${name}`
       addedBy.set(name, scope)
-      const folder = parsed.data.command!.split(" ").find((word) => word.startsWith(OPS))!
-      jobs[name] = {
-        ...parsed.data,
-        cwd: parsed.data.cwd ?? folder.split("/").slice(0, 3).join("/"),
-      }
+      jobs[name] = { ...parsed.data, cwd: runs.cwd, org: scope }
     })()
     if (why) refused.push(`jobs: refused ${scope} ${key}: ${why}`)
   }
@@ -349,6 +361,7 @@ export const orgJobs = (
 const LISTED_FIELDS = [
   "callsModel",
   "command",
+  "config",
   "cwd",
   "description",
   "disabledWhy",

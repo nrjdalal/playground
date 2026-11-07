@@ -87,11 +87,12 @@ An org runs a job of its own, one the registry does not know, by shipping its sc
 The render takes the row only when it runs in a terminal, stays in its org's own script folder and keeps to its own name:
 
 - its `command` is `{bun}`, then `--no-env-file` if it wants it, then a script in a folder that org ships, `{data}/ops/<key>/<file>`, then plain words or `{data}`;
-- its `cwd` is that folder or one under it, and that folder when the row leaves it out.
+- its `cwd` is that folder or one under it, and that folder when the row leaves it out;
 - its `heartbeat` is the job's own name, and it names no `stop` group, since ops stops a job's group before each start.
 
 Any other row is refused: one off that shape, one naming `launchd` or `program`, a second org's row for a job the first adds (scopes in A to Z order), and a row for such a job at your login's scope.
 Each refusal is a `jobs: refused <scope> <key>: <why>` line in `<data>/ops/up.log`, and its job does not run; the rest of the render is written as usual.
+The job's `jobs.json` row names its org in `org`, so when its row is later refused or removed, the job stays listed as paused and the runner stops it, until a row of its name renders again.
 
 `config` is the job's own settings.
 Playground checks only that it is an object, and writes it into the job's `jobs.json` row, where the job reads it and checks each field itself.
