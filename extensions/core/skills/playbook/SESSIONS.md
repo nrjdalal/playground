@@ -80,6 +80,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
      After a restart, `python3 scripts/ops/up.py --sessions` prints the `spawn.sh resume <name> <dir> <session-id>` line that brings each session back, with `--backend glm` for a session whose newest turn ran on GLM;
      `--brief <file>`, with resume alone, makes the resumed session's first prompt tell it to read `~/.playground/<file>` and follow it, so it comes back working rather than idle.
      Without it, the first prompt has the session act on the `after-resume` hook's instruction (re-arm its background tasks, re-send its unanswered messages, the **context** rule), so a session idle at the restart still takes a turn, and names whom it reports to now, from its roster row ([scripts/README.md](../../../../scripts/README.md#spawnsh) holds the order).
+     A `SendMessage` that reports `Failed to send` may still arrive, so a sender re-sends one time at most, its first line marked `re-send`, and the receiver drops a copy it already holds.
+     The after-resume re-send takes the same `re-send` marker.
      After a resume, restart any dev stack you served, then re-arm your watches: run CronList before CronCreate, since a resume keeps the session's crons and drops only its background tasks.
      Done when the restarted stack answers its `/api/health` and each watch is armed once.
      Before a close that a resume follows (an account move), wait until the session has no run-slot run in flight, since the close kills that run.
