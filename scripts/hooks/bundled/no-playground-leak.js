@@ -9126,15 +9126,22 @@ function candidate(command) {
   const maybe = policy.anyWrite ? MAYBE_ANY : MAYBE;
   return command.includes("$'") || maybe.test(command.replace(/[\\'"]/g, ""));
 }
+async function factoryTerms(environment = process.env, checkout = CHECKOUT, lists = join5(coreDir(), "lists")) {
+  const loaded = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join5(lists, "playground-terms.json"));
+  if (loaded.refusal !== undefined)
+    return { refusal: loaded.refusal };
+  terms = loaded.list;
+  return { pattern: pattern(environment, checkout) };
+}
 async function check(raw, environment = process.env, checkout = CHECKOUT, lists = join5(coreDir(), "lists")) {
-  const loadedTerms = await guardList("no-playground-leak", "playground-terms", isTerms, EMPTY_TERMS, environment, join5(lists, "playground-terms.json"));
+  const loadedTerms = await factoryTerms(environment, checkout, lists);
+  if (loadedTerms.refusal !== undefined)
+    return refusedList(raw, loadedTerms.refusal);
   const loadedCleared = await guardList("no-playground-leak", "slack-cleared", isCleared, {}, environment, join5(lists, "slack-cleared.json"));
-  const refusal = loadedTerms.refusal ?? loadedCleared.refusal;
-  if (refusal)
-    return refusedList(raw, refusal);
-  terms = loadedTerms.list ?? EMPTY_TERMS;
-  CLEARED = loadedCleared.list ?? {};
-  TERM = pattern(environment, checkout);
+  if (loadedCleared.refusal !== undefined)
+    return refusedList(raw, loadedCleared.refusal);
+  CLEARED = loadedCleared.list;
+  TERM = loadedTerms.pattern;
   const read = await readPolicy(dataDir(environment));
   if (read.refusal !== undefined)
     return refusedList(raw, `no-playground-leak hook refused this call: ${read.refusal}, then run the call again.`);
@@ -9222,7 +9229,9 @@ if (import.meta.main) {
   }
 }
 export {
+  REPHRASE,
   check,
+  factoryTerms,
   inspectAs,
   refusedList,
   rosterNames,
