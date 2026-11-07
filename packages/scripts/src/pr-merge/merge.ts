@@ -14,6 +14,7 @@ import {
   gatesOf,
   marksReady,
   mergeLine,
+  parentsOf,
   withReadyDraft,
   type Check,
   type Comment,
@@ -181,7 +182,7 @@ async function filesOf(run: Run, repo: string, n: number): Promise<string[]> {
     .filter(Boolean)
 }
 
-// Everything the gates read about one PR, from gh: its state, head and base, the files its diff touches, every comment with its author, how far canary is ahead of its head, and its merge with canary now.
+// Everything the gates read about one PR, from gh: its state, head and base, the files its diff touches, every comment with its author, how far canary is ahead of its head, the state of each PR its body says it is stacked on, and its merge with canary now.
 export async function factsOf(
   run: Run,
   repo: string,
@@ -214,6 +215,22 @@ export async function factsOf(
     readHeld(heldPath(), repo, n, Date.now()),
   ])
   const owner = repo.split("/")[0] ?? ""
+  const parents = await Promise.all(
+    parentsOf(view.body ?? "").map(async (parent) => ({
+      n: parent,
+      state: await gh(run, [
+        "pr",
+        "view",
+        String(parent),
+        "-R",
+        repo,
+        "--json",
+        "state",
+        "--jq",
+        ".state",
+      ]).catch((error: Error) => `unreadable: ${error.message}`),
+    })),
+  )
   const { canary, conflicts, mergeTree } = await mergeOf(git, n, view.headRefOid)
   const lost = await lostLines(git, `origin/${BASE}`, view.headRefOid, mergeTree)
   return {
@@ -233,6 +250,7 @@ export async function factsOf(
     mergeTree,
     n,
     owner,
+    parents,
     state: view.state,
   }
 }
