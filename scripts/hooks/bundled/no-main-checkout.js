@@ -2651,6 +2651,8 @@ function steadyNames(named, commands) {
     const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
     if (!NAME_SETTERS.has(name) && loop === -1)
       continue;
+    if (bareExport(parses[at]))
+      continue;
     const vNames = cmd.words.flatMap((w, k) => k > 0 && /^-[^-\s]*v/.test(w.value) ? [{ ...w, value: w.value.slice(w.value.indexOf("v") + 1) }, cmd.words[k + 1]] : []);
     const names = loop !== -1 ? [cmd.words[loop + 1]] : PRINTS.has(name) ? vNames : cmd.words;
     for (const word of names) {
@@ -2665,7 +2667,10 @@ function steadyNames(named, commands) {
     }
   }
   const set = new Map;
+  const exports = new Map;
   const where = new Map;
+  const open = [];
+  const loops = new Map;
   let chain = 0;
   let depth = 0;
   for (const [at, cmd] of commands.entries()) {
@@ -2688,9 +2693,24 @@ function steadyNames(named, commands) {
     }
     if (depth < 0)
       return () => NONE;
+    while (open.length > 0 && depth < open.at(-1).depth)
+      open.pop();
+    if (open.length > 0)
+      loops.set(cmd, new Map(open.map((o) => [o.key, o.values])));
+    const head = forList(cmd, named);
+    if (head)
+      open.push({ depth, ...head });
     const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&";
     if (!top || cmd.detached || !always && cmd.follows !== "&&")
       continue;
+    if (bareExport(parses[at])) {
+      for (const w of parses[at].args) {
+        const key = w.value.slice(0, w.value.indexOf("="));
+        if (holdable(key, named, counts))
+          exports.set(key, always ? { at } : { at, chain });
+      }
+      continue;
+    }
     const [first] = cmd.words;
     if (!first || !ASSIGN.test(first.value) || parses[at].name !== "")
       continue;
@@ -2704,13 +2724,27 @@ function steadyNames(named, commands) {
     const here = where.get(cmd);
     if (!here)
       return NONE;
+    const before = (from) => !!from && from.at < here.at && (from.chain === undefined || from.chain === here.chain);
     return {
-      has: (key) => {
-        const from = set.get(key);
-        return !!from && from.at < here.at && (from.chain === undefined || from.chain === here.chain);
-      }
+      exported: (key) => before(exports.get(key)),
+      has: (key) => before(set.get(key)),
+      loop: (key) => loops.get(cmd)?.get(key)
     };
   };
+}
+var bareExport = ({ args, name }) => name === "export" && args.length > 0 && args.every((w) => !w.quoted && ASSIGN.test(w.value) && PLAIN_NAME.test(w.value.slice(0, w.value.indexOf("="))));
+function forList(cmd, named) {
+  const at = cmd.words.findIndex((w) => w.quoted || !(LEADS2.has(w.value) || w.value === "{"));
+  if (at === -1 || cmd.words[at].quoted || cmd.words[at].value !== "for")
+    return;
+  const [key, word, ...values] = cmd.words.slice(at + 1);
+  if (!key || key.quoted || !PLAIN_NAME.test(key.value) || named.counts.get(key.value) !== 1)
+    return;
+  if (!word || word.quoted || word.value !== "in" || values.length === 0)
+    return;
+  if (values.some((w) => marked(w.value) || /[*?[\]{}]/.test(w.value)))
+    return;
+  return { key: key.value, values: values.map((w) => w.value) };
 }
 function heldWord(word, env, steady) {
   return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady)) : undefined;
