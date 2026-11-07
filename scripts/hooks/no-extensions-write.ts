@@ -826,10 +826,11 @@ function cliWrite(words: Word[]): string | undefined {
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
-    if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX)) return
+    const job = key.startsWith(JOB_PREFIX)
+    if (!GUARD_KEYS.has(key) && !job) return
     return PRIVACY_KEYS.has(key) && !scoped
       ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}`
-      : key.startsWith(JOB_PREFIX)
+      : job
         ? `playground settings ${verb} of ${key}, ${BY_APPROVE}`
         : `playground settings ${verb} of ${key}, a key a guard reads`
   }

@@ -1566,6 +1566,26 @@ describe("a guard decision for a job (PG-1196)", () => {
       expect(takes(change), JSON.stringify(change)).toBe(false)
     }
   })
+
+  // #1336: a session proposes a job's config as a new object, which core checks only for being an object
+  test("takes a registry job's config alone, as an object of any fields (#1336)", () => {
+    expect(takes({ key: "jobs.opsSweep", value: { config: {} } })).toBe(true)
+    expect(
+      takes({ key: "jobs.opsSweep", value: { config: { hours: "09-18", made: ["up"] } } }),
+    ).toBe(true)
+  })
+
+  test("refuses a config that is not an object, and a config beside another field (#1336)", () => {
+    for (const value of [
+      { config: [] },
+      { config: "hours=09-18" },
+      { config: null },
+      { config: 7 },
+      { config: {}, enabled: true },
+    ]) {
+      expect(takes({ key: "jobs.opsSweep", value }), JSON.stringify(value)).toBe(false)
+    }
+  })
 })
 
 // PG-1363: the guard decision also places an org's own job, a whole row the setting's write then checks against the org's script folders.
@@ -5584,6 +5604,36 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(readSetting(data, key)!.rows).toEqual([
         { key, scope: "made-up-me", value: { enabled: true, schedule: { every: 7 } } },
       ])
+    })
+
+    test("a job's config Approve writes that object alone over its scope's row, every other field kept (#1336)", async () => {
+      const data = folder()
+      const key = "jobs.opsSweep"
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+      const row = { config: { hours: "00-23" }, enabled: true, schedule: { every: 7 } }
+      expect(setSetting(data, { key, scope: "made-up-me", value: row }, who).ok).toBe(true)
+      const config = { hours: "09-18", made: ["up"] }
+      const card = { ...GUARD, key, scope: "made-up-me", value: { config } }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(readSetting(data, key)!.rows).toEqual([
+        { key, scope: "made-up-me", value: { config, enabled: true, schedule: { every: 7 } } },
+      ])
+      // the stored answer is jsonb, which orders an object's keys its own way, so the line's JSON is read back rather than matched as text
+      const set = (
+        (await store.getItem(db, posted.id))?.answer as { set: { exitCode: number; line: string } }
+      ).set
+      expect(set.exitCode).toBe(0)
+      const prefix = `set ${key} at made-up-me to `
+      expect(set.line.startsWith(prefix)).toBe(true)
+      expect(JSON.parse(set.line.slice(prefix.length))).toEqual({
+        config,
+        enabled: true,
+        schedule: { every: 7 },
+      })
+      expect(settingHistory(data, key)?.[0]?.reason).toBe(
+        `the owner approved it in the Inbox (#i${posted.ref})`,
+      )
     })
 
     test("with no data folder its Approve is refused and the item stays open", async () => {

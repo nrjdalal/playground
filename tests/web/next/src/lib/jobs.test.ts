@@ -11,7 +11,12 @@ import {
   readSetting,
   setSetting,
 } from "../../../../../packages/settings/src/settings-folder"
-import { jobRows, jobToggleWrite } from "../../../../../web/next/src/lib/jobs"
+import {
+  jobConfigWrite,
+  jobRows,
+  jobToggleWrite,
+  parseJobConfig,
+} from "../../../../../web/next/src/lib/jobs"
 
 const scratch = mkdtempSync(join(tmpdir(), "jobs-toggle-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
@@ -27,8 +32,11 @@ const setUp = (name: string) => {
   return data
 }
 
-// The toggle's write as the settings API stores it: PUT /api/v1/settings/:key's body, through setSetting.
-const save = (data: string, write: ReturnType<typeof jobToggleWrite>) =>
+// A toggle's or a config edit's write as the settings API stores it: PUT /api/v1/settings/:key's body, through setSetting.
+const save = (
+  data: string,
+  write: ReturnType<typeof jobToggleWrite> | ReturnType<typeof jobConfigWrite>,
+) =>
   setSetting(
     data,
     { key: write.param.key, scope: write.json.scope, value: write.json.value },
@@ -41,6 +49,7 @@ describe("Settings > Jobs (PG-1196)", () => {
     const rows = jobRows(listSettings(data), ME)
     expect(rows.map((row) => row.name)).toEqual(Object.keys(JOBS))
     expect(rows.find((row) => row.name === "ops-sweep")).toEqual({
+      config: undefined,
       description: JOBS["ops-sweep"]!.description,
       enabled: false,
       key: jobKey("ops-sweep"),
@@ -95,5 +104,50 @@ describe("Settings > Jobs (PG-1196)", () => {
     expect(readSetting(data, key)!.rows).toEqual([
       { key, scope: ME, value: { enabled: false, pausedFor: "made-up" } },
     ])
+  })
+})
+
+// #1336: the owner's own edit of a job's config in Settings > Jobs writes straight through the settings PUT, one click, with no Inbox Approve after it.
+describe("Settings > Jobs' config edit (#1336)", () => {
+  test("a job's row shows the config it reads, its scope's row over the registry's", () => {
+    const data = setUp("config-read")
+    const key = jobKey("ops-sweep")
+    const config = { hours: "09-18" }
+    expect(setSetting(data, { key, scope: ME, value: { config } }, WHO).ok).toBe(true)
+    expect(jobRows(listSettings(data), ME).find((row) => row.key === key)).toMatchObject({
+      config,
+      row: { config },
+      set: true,
+    })
+  })
+
+  test("an edit stores the new config alone over your scope's row, so its enabled field and the rest stay", () => {
+    const data = setUp("config-edit")
+    const key = jobKey("ops-sweep")
+    const row = { config: { hours: "00-23" }, enabled: true, pausedFor: "made-up" }
+    expect(setSetting(data, { key, scope: ME, value: row }, WHO).ok).toBe(true)
+    const job = jobRows(listSettings(data), ME).find((each) => each.key === key)!
+    const config = { hours: "09-18", made: ["up"] }
+    const write = jobConfigWrite(job, config, ME)
+    expect(write).toEqual({
+      json: {
+        by: "Settings",
+        reason: "Set ops-sweep's config in Settings > Jobs",
+        scope: ME,
+        value: { config, enabled: true, pausedFor: "made-up" },
+      },
+      param: { key },
+    })
+    expect(save(data, write).ok).toBe(true)
+    expect(readSetting(data, key)!.rows).toEqual([
+      { key, scope: ME, value: { config, enabled: true, pausedFor: "made-up" } },
+    ])
+  })
+
+  test("an edit saves only a JSON object, and says why it refuses anything else", () => {
+    expect(parseJobConfig('{"hours": "09-18"}')).toEqual({ config: { hours: "09-18" } })
+    expect(parseJobConfig("{hours")).toEqual({ error: "This is not JSON" })
+    for (const text of ["[]", "null", "7", '"made-up"'])
+      expect(parseJobConfig(text)).toEqual({ error: "A config is a JSON object, {...}" })
   })
 })
