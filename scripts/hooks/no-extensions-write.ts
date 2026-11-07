@@ -5,6 +5,8 @@ import { dirname, join, resolve, sep } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { scopesIn } from "../../packages/settings/src/folder"
+// for its side effect: the job registry's settings, each job's default row and old names, which settingFields() then lists
+import "../../packages/settings/src/jobs"
 import {
   CORE,
   extensionsDir,
@@ -12,6 +14,7 @@ import {
   readPolicySync,
   scopeDir,
 } from "../../packages/settings/src/rendered"
+import { settingFields } from "../../packages/settings/src/settings"
 import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
 import { fromFactory, opsLead } from "./role"
 import {
@@ -364,7 +367,7 @@ const parsed = (text: string): unknown => {
   }
 }
 
-// What a job's key holds: the row the login's scope stores, {} when it stores none, whether another scope stores one, and the whole row policy.json renders over the registry's entry
+// What a job's key holds: the row the login's scope stores, {} when it stores none, whether another scope stores one or any scope one under an old name, and the whole row policy.json renders over the registry's entry, the entry itself when no scope stores a row
 export type Held = { elsewhere: boolean; rendered: unknown; stored: Record<string, unknown> }
 
 // Pure: whether a set of the key to the value text, as the CLI parses it, only tunes a number: glm.readOnlyLoad5 to a positive load limit, or a job's row equal field for field to the row the login's scope stores but a schedule of a positive integer interval, where the rendered row already runs on one; a set replaces the stored row and the render reads each field it leaves out from the registry, so the stored row is what it must keep, and a --scope, a row another scope stores, a job policy.json lacks and any other key tune nothing
@@ -424,13 +427,30 @@ function tuningOf(environment: Environment): Tuning {
   const held = (key: string): Held | undefined => {
     const stored = own[key] ?? {}
     if (!isRecord(stored)) return undefined
+    const field = settingFields().find((entry) => entry.key === key)?.field
+    const old = field?.aliases ?? []
     return {
-      elsewhere: theirs.some((at) => at !== undefined && key in at),
-      rendered: values[key],
+      elsewhere:
+        old.some((name) => name in own) ||
+        theirs.some((at) => at !== undefined && [key, ...old].some((name) => name in at)),
+      rendered: values[key] ?? field?.default,
       stored,
     }
   }
   return (key, value, scoped) => tunes(key, value, scoped, held)
+}
+
+// Whether a line is one playground call alone, its first word the CLI's, so no assignment, export, env, wrapper, group, substitution or other command on it moves where its set lands (PLAYGROUND_LOGIN or the data folder) from the scope the hook reads
+const loneCall = (commands: Command[]): boolean => {
+  const [cmd] = commands
+  return (
+    commands.length === 1 &&
+    cmd.words[0]?.value === "playground" &&
+    !cmd.inner &&
+    [...cmd.words, ...cmd.redirects.flatMap((r) => (r.target ? [r.target] : []))].every(
+      (word) => !word.procs,
+    )
+  )
 }
 
 const BY_APPROVE =
@@ -971,7 +991,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   if (tool !== "Bash") return
   const { command } = input
   if (typeof command !== "string") return
-  const tuning = (await opsLead(raw, environment)) ? tuningOf(environment) : NO_TUNING
+  let tuning = (await opsLead(raw, environment)) ? tuningOf(environment) : NO_TUNING
   // nesting makes the lexer's time grow with the square of the length, so a longer command could outlast the hook's timeout
   if (command.length > 131_072) return refuse(TOO_LONG)
   // the root's path from a cwd above it, which a script may name it by
@@ -1317,6 +1337,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   const steered = Object.keys(known).filter((key) => named.counts.has(key))
   if (unknown) for (const key of steered) delete known[key]
   const lexed = lex(command, known)
+  if (!loneCall(lexed.commands)) tuning = NO_TUNING
   steadyAt = steadyNames(named, lexed.commands)
   const env: Env = {
     cwd: directory,
