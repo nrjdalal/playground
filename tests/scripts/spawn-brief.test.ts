@@ -187,14 +187,14 @@ describe("--check runs the gates and starts nothing", () => {
     expect(placing(r)).toEqual([])
   })
 
-  test("a column beside a cmux surface:1 refuses, naming #2076", async () => {
+  test("a column beside an old cmux surface:1 refuses as no herdr pane id", async () => {
     const r = await spawn(
       ["column", "lead", "planner", "dispatcher", "surface:1", "handoff.md", "--check"],
       [],
     )
     expect(r.code).toBe(1)
     expect(r.out).not.toContain("can start")
-    expect(r.err).toContain("surface:1 is a cmux surface, and spawn.sh starts nothing in cmux")
+    expect(r.err).toContain("surface:1 is not a herdr pane id (w1:p2)")
     expect(r.cmux).toBeUndefined()
   })
 

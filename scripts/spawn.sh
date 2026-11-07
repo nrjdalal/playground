@@ -45,7 +45,7 @@ set -euo pipefail
 #   spawn.sh worker    <name> <brief> --title "<t>"    its own workspace, this checkout or --in's folder; reports to the builder (roster.ts who builder), or to --reports-to's session
 #   spawn.sh runner    <name> <brief>                  its own workspace, this checkout; reports to ops (roster.ts who ops)
 #   spawn.sh column    <reviewer|tester|probe|lead|dispatcher> <name> <reports-to> <pane> <brief>
-#                      a column right of a herdr pane id (w1:p2), its spawner's own being $HERDR_PANE_ID; a cmux surface:N is refused
+#                      a column right of a herdr pane id (w1:p2), its spawner's own being $HERDR_PANE_ID
 #   spawn.sh column    <manager> <pane> <brief>        a manager's column names it once: a lead (sessions.names' builder, ops or planner, an <id>-builder, -ops or -planner, or a name the roster kinds) reports to the first dispatcher, and the first dispatcher (sessions.names' dispatcher or an <id>-dispatcher) is briefed by the session running spawn.sh
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
@@ -67,7 +67,6 @@ set -euo pipefail
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
 #   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
-#   --runtime cmux     is refused: spawn.sh starts nothing in cmux
 #     With no --runtime, every start and resume opens in herdr, whatever terminal its spawner runs in.
 #     The runtime is recorded at every start and resume in ~/.playground/runtimes/<name>, a resume rewriting whatever word the pin held.
 #
@@ -857,7 +856,6 @@ while [ $# -gt 0 ]; do
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RUNTIME" ] || usage
     case "$2" in
       --*) usage "--runtime needs a value; \"$2\" starts with --" ;;
-      cmux) usage "--runtime cmux is refused: spawn.sh starts nothing in cmux, and every session opens in herdr" ;;
       herdr) ;;
       *) usage "--runtime takes herdr alone, not \"$2\"" ;;
     esac
@@ -1122,7 +1120,6 @@ case "$MODE" in
     KIND=$ROLE
     [[ $ROLE =~ ^(dispatcher|lead)$ ]] && KIND=$(kind_of "$NAME")
     word "$TO" || refuse "it reports to a session name, not $TO"
-    [[ ! $SURFACE =~ ^surface:[0-9]+$ ]] || refuse "$SURFACE is a cmux surface, and spawn.sh starts nothing in cmux: a column opens beside a herdr pane id (w1:p2), its spawner's own being \$HERDR_PANE_ID"
     [[ $SURFACE =~ ^w[0-9A-Za-z]+:p[0-9A-Za-z]+$ ]] || refuse "$SURFACE is not a herdr pane id (w1:p2): a column in herdr opens beside a pane, its spawner's own being \$HERDR_PANE_ID"
     ;;
   probe)
@@ -1693,7 +1690,7 @@ if [ "$MODE" = column ]; then
 else
   # A worker or runner records whom it reports to, --reports-to's session or its lead's seat, which the Dashboard's tree and every escalation read; a resume keeps the row's.
   [[ $MODE =~ ^(worker|runner)$ ]] && set -- "$@" "reportsTo=$TO"
-  # The roster's surface is a cmux one (surface:N), which a herdr session never has, so a session in a workspace of its own clears a column's old one; its pane's label carries its name.
+  # A session in a workspace of its own clears the roster surface a column's anchor left; its pane's label carries its name.
   set -- "$@" "surface="
 fi
 # set keeps an entry's work for a respawned session, and creates a new one.
