@@ -207,13 +207,15 @@ describe("DashboardHub", () => {
     const hub = new DashboardHub({
       events: false,
       listLive: () =>
-        Promise.reject(Object.assign(new Error("the registry is down"), { code: "CMUX_FAILED" })),
+        Promise.reject(
+          Object.assign(new Error("the registry is down"), { code: "SESSIONS_FAILED" }),
+        ),
     })
     const frames: DashboardFrame[] = []
     const leave = hub.subscribe((frame) => frames.push(frame))
     await until("the error frame", () => frames.length > 0)
     expect(frames[0]).toEqual({
-      code: "CMUX_FAILED",
+      code: "SESSIONS_FAILED",
       dispatcher: DISPATCHER,
       dispatchers: DISPATCHERS,
       message: "the registry is down",

@@ -388,10 +388,10 @@ describe("refusals", () => {
     })
   })
 
-  // A draft that stays while cmux's read fails now and then would otherwise restart the count each time and never give up.
+  // A draft that stays while the sessions read fails now and then would otherwise restart the count each time and never give up.
   test("other reasons share one count, so two that take turns still run out", () => {
     let message = { attempts: 0, code: null as string | null, id: "a", unreached: 0 }
-    const codes = ["INPUT_NOT_EMPTY", "CMUX_FAILED"]
+    const codes = ["INPUT_NOT_EMPTY", "SESSIONS_FAILED"]
     let last: ReturnType<typeof onRefusal> | null = null
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       const code = codes[i % 2]!
@@ -453,14 +453,14 @@ describe("refusals", () => {
     }
   })
 
-  // A message that waited long on a draft or a busy cmux still gets the whole window when the dashboard restarts.
+  // A message that waited long on a draft or a busy terminal still gets the whole window when the dashboard restarts.
   test("no answer counts its own tries, whatever waited before it", () => {
     const sent = { attempts: 8, code: "INPUT_NOT_EMPTY", id: "a", unreached: 0 }
     const action = onRefusal(sent, { code: "NETWORK_ERROR", message: "x" }, "dispatcher", 0)
     expect(action).toMatchObject({ attempts: 8, retryAt: 2000, type: "wait", unreached: 1 })
     const other = onRefusal(
       { attempts: 9, code: "NETWORK_ERROR", id: "a", unreached: 1 },
-      { code: "CMUX_FAILED", message: "x" },
+      { code: "SESSIONS_FAILED", message: "x" },
       "dispatcher",
       0,
     )
@@ -576,12 +576,12 @@ describe("refusals", () => {
 
   // A retry says why after its dot, or shows no dot.
   test.each([
-    ["CMUX_FAILED", false, "retry 3 · the terminal did not answer"],
     ["INPUT_NOT_EMPTY", false, "retry 3 · waiting for Alpha's input to clear"],
     ["NETWORK_ERROR", false, "retry 3 · the server did not answer"],
     ["NOT_FOUND", false, "retry 3 · Alpha is not live"],
     ["ON_PICKER", false, "retry 3 · Alpha is on a prompt"],
     ["ON_PICKER", true, "retry 3 · Alpha is at its usage limit"],
+    ["SESSIONS_FAILED", false, "retry 3 · the terminal did not answer"],
     ["TOO_MANY_REQUESTS", false, "retry 3 · too many messages this minute"],
     ["UNKNOWN_ERROR", false, "retry 3 · the server did not answer"],
     ["SOMETHING_NEW", false, "retry 3"],
@@ -1004,10 +1004,10 @@ describe("a message Claude Code holds", () => {
     expect(list[0]).toMatchObject({ code: "NETWORK_ERROR", queuedAt: T1, state: "queued" })
     // an answered refusal after it keeps it too, waiting or failed, so a later retry still reads the message again
     for (const code of [
-      "CMUX_FAILED",
       "INPUT_NOT_EMPTY",
       "NOT_FOUND",
       "ON_PICKER",
+      "SESSIONS_FAILED",
       "TOO_MANY_REQUESTS",
     ]) {
       list = outboxReducer(list, { id: "a", type: "sending" })

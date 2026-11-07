@@ -86,8 +86,8 @@ describe("rosterSetup", () => {
 
 describe("sessionsSetup", () => {
   test("says the sessions can't be read while the terminal's read fails", () => {
-    expect(sessionsSetup({ code: "CMUX_UNAVAILABLE" })).toBe(SETUP.unreachable)
-    expect(sessionsSetup({ code: "CMUX_FAILED" })).toBe(SETUP.unreachable)
+    expect(sessionsSetup({ code: "SESSIONS_UNAVAILABLE" })).toBe(SETUP.unreachable)
+    expect(sessionsSetup({ code: "SESSIONS_FAILED" })).toBe(SETUP.unreachable)
     expect(sessionsSetup(null, "the read did not answer in time")).toBe(SETUP.unreachable)
   })
 
