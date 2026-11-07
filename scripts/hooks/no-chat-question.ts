@@ -1,4 +1,4 @@
-// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, or keeps steps or a table the owner comes back to (keepsForOwner), until it is an item in the owner's Inbox (playbook's ask rule), so nothing the owner needs scrolls away in chat; every manager but the dispatcher sends steps to the dispatcher as a draft instead. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, a lead's with the route up to the dispatcher, who posts it, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open, or done as a progress card does, through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
+// Stop hook, the inbox gate: refuses a manager's stop while its final reply asks the owner for a decision or for their own action in chat, or keeps steps or a table the owner comes back to (keepsForOwner), until it is an item in the owner's Inbox (playbook's ask rule), so nothing the owner needs scrolls away in chat; every manager but the dispatcher sends steps to the dispatcher as a draft instead. It acts for the dispatcher and the leads (PLAYGROUND_ROLE lead, dispatcher or manager, else the roster's kind for the session's registry name, else that name), judges the hook input's `last_assistant_message` (the transcript can lag the turn's last message, ADR 0001), and refuses every stop that still asks, a lead's with the route up to the dispatcher, who posts it, `stop_hook_active` included, Claude Code's own cap on continuations in a row with no tool call between them bounding it. A reply naming an #iN passes once one of them reads open (or, for steps, done, as a progress card does) through bun run ask in the live dashboard's checkout; when none does, one it cannot read included, it fails closed for that reply. Anything else it cannot read lets the stop through.
 
 import "../../packages/env/src/aliases"
 import { join } from "node:path"
@@ -225,7 +225,7 @@ function dashboardCheckout(): Promise<string> {
   return dashboard
 }
 
-// One item's standing, read by the checkout's own bun run ask, killed past the limit: its status, or what the owner did with it when that left the status as it was (archived, or an update dismissed).
+// One item's standing, read by the checkout's own bun run ask, killed past the limit: its status, or what was done with it when that left the status as it was: archived or dismissed by the owner, or settled by its poster, which reads done as an update does.
 export async function readStatus(
   ref: string,
   checkout: string,
@@ -238,10 +238,11 @@ export async function readStatus(
       timeoutMs,
     ),
   ) as {
-    answer?: { archivedAt?: unknown; dismissed?: unknown; dismissedAt?: unknown }
+    answer?: { archivedAt?: unknown; choice?: unknown; dismissed?: unknown; dismissedAt?: unknown }
     status?: unknown
   }
   if (typeof item.status !== "string") throw new Error(`bun run ask printed no status for ${ref}`)
+  if (item.answer?.choice === "settled") return "settled"
   if (item.answer?.dismissed === true) return "dismissed"
   if (item.answer?.archivedAt && !item.answer.dismissedAt) return "archived"
   return item.status
@@ -276,17 +277,25 @@ async function managerRole(
   return manager(roleOfName(name))
 }
 
-// Fails closed: the stop passes only when some #iN the reply names reads open, or done, as a progress card (an update) reads from its post on and after the owner's Done; the reason says what each one read as.
-async function gate(reply: string, deps: Deps, reason: string): Promise<string | undefined> {
+// An ask of the owner waits on an open item alone; steps also take a progress card, an update, which reads done from its post on and after the owner's Done.
+const ASK_COUNTS = ["open"]
+const STEPS_COUNTS = ["open", "done"]
+
+// Fails closed: the stop passes only when some #iN the reply names reads a status `counted` holds; the reason says what each one read as.
+async function gate(
+  reply: string,
+  deps: Deps,
+  reason: string,
+  counted: readonly string[],
+): Promise<string | undefined> {
   const refs = [...new Set(reply.match(/#i\d+\b/g) ?? [])].slice(0, MAX_REFS)
   if (!refs.length) return reason
-  const anyOpen = Promise.withResolvers<"open">()
-  const counts = (status: string) => status === "open" || status === "done"
+  const anyCounts = Promise.withResolvers<"counted">()
   const reads = Promise.all(
     refs.map((ref) =>
       within(deps.itemStatus(ref)).then(
         (status) => {
-          if (counts(status)) anyOpen.resolve("open")
+          if (counted.includes(status)) anyCounts.resolve("counted")
           return { ref, status }
         },
         (error: unknown) => ({
@@ -296,13 +305,13 @@ async function gate(reply: string, deps: Deps, reason: string): Promise<string |
       ),
     ),
   )
-  const read = await Promise.race([reads, anyOpen.promise]).finally(() => {
+  const read = await Promise.race([reads, anyCounts.promise]).finally(() => {
     for (const run of running) run.kill("SIGKILL")
   })
-  if (read === "open") return
+  if (read === "counted") return
   const why = read.map((r) =>
     "status" in r
-      ? `${r.ref} is ${r.status}, not open or done`
+      ? `${r.ref} is ${r.status}, not ${counted.join(" or ")}`
       : `${r.ref} could not be read with bun run ask (${r.error}), so it does not count`,
   )
   return `${reason} (${why.join("; ")})`
@@ -321,11 +330,11 @@ async function inspect(raw: string, env: Record<string, string | undefined>, dep
   const role = await managerRole(env, sessionId, deps)
   if (!role) return
   if (asks && asksDecision(reply, await rosterNames(env), owner))
-    return gate(reply, deps, role === "lead" ? LEAD_REASON : REASON)
+    return gate(reply, deps, role === "lead" ? LEAD_REASON : REASON, ASK_COUNTS)
   if (!keeps) return
-  if (role === "dispatcher") return gate(reply, deps, STEPS_REASON)
+  if (role === "dispatcher") return gate(reply, deps, STEPS_REASON, STEPS_COUNTS)
   if (DRAFT_HANDED.test(ownLines(reply).join("\n"))) return
-  return gate(reply, deps, DRAFT_REASON)
+  return gate(reply, deps, DRAFT_REASON, STEPS_COUNTS)
 }
 
 // Fails open: an input the hook cannot read, or a session it cannot place, lets the session stop.

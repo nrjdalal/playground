@@ -385,6 +385,23 @@ describe("what passes", () => {
     ).toBeUndefined()
   })
 
+  // a progress card counts for steps alone, so it never stands in for the decision a chat ask puts to the owner (#1486)
+  test("a decision asked beside a progress card is refused, since the card reads done, not open", async () => {
+    expect(
+      await stop("Should I merge PR 12 now? Progress is in #i42.", {
+        statuses: { "#i42": "done" },
+      }),
+    ).toBe(`${REASON} (#i42 is done, not open)`)
+    expect(
+      await stop(
+        `Should I merge PR 12 now?\n1. Rotate the key.\n2. Restart the API.\n3. Check /api/health.\nProgress is in #i42.`,
+        {
+          statuses: { "#i42": "done" },
+        },
+      ),
+    ).toBe(`${REASON} (#i42 is done, not open)`)
+  })
+
   test("a reply naming a closed item and an open one", async () => {
     expect(
       await stop("#i40 is done. The next call is #i41: should it wait?", {
@@ -466,7 +483,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
     ).toBeUndefined()
   })
 
-  test.each(["archived", "denied", "dismissed"])(
+  test.each(["archived", "denied", "dismissed", "settled"])(
     "refused: 3 numbered steps whose only card is %s",
     async (standing) => {
       expect(await stop(`${STEPS}\nProgress is in #i42.`, { statuses: { "#i42": standing } })).toBe(
@@ -647,6 +664,11 @@ describe("the dashboard read's time limits (#1269)", () => {
       item: { answer: { archivedAt: "t" }, status: "done" },
       name: "an update the owner archived",
       standing: "archived",
+    },
+    {
+      item: { answer: { at: "t", choice: "settled", dismissedAt: "t" }, status: "done" },
+      name: "a decision its poster settled",
+      standing: "settled",
     },
     {
       item: { answer: { archivedAt: "t" }, status: "open" },
