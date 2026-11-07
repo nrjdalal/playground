@@ -125,6 +125,13 @@ describe("a write is refused before any session read or handler unless it comes 
     expect(cases.length).toBeGreaterThan(0)
   })
 
+  // PG-1196: Settings > Jobs' toggle writes through the settings PUT, and a guard decision's Approve through the Inbox's answer, so each is walked below.
+  test("the job toggle's write and a guard decision's Approve are among them", () => {
+    const labels = cases.map((c) => c.label)
+    expect(labels).toContain("settings.ts PUT /:key")
+    expect(labels).toContain("inbox.ts POST /:id/answer")
+  })
+
   test.each(cases.map((c) => [c.label, c] as const))("%s", async (_, { file, route, router }) => {
     const foreign = await send(router, route, "http://evil.localhost", peer("127.0.0.1"))
     expect(foreign.status).toBe(403)

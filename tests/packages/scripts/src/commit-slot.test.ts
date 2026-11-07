@@ -18,7 +18,7 @@ const DIR = mkdtempSync(join(tmpdir(), "commit-slot-"))
 
 afterAll(() => rmSync(DIR, { force: true, recursive: true }))
 
-const RUN_SLOT = "/home/u/.playground/ops/run-slot.sh"
+const RUN_SLOT = "/home/someone/.playground/ops/run-slot.sh"
 const WORKTREE = "/repo/.claude/worktrees/pg-1314-slot-commit"
 const at = (
   cwd: string,
@@ -32,7 +32,7 @@ const at = (
     cwd,
     env,
     executable: () => runnable,
-    home: "/home/u",
+    home: "/home/someone",
   })
 const dry = (...statuses: string[]) =>
   JSON.stringify({

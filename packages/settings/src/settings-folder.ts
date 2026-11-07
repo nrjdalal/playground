@@ -59,16 +59,21 @@ export const deriveRoot = (data: string, login: string): void => {
 
 const byScopeKey = (a: Row, b: Row) => (`${a.scope} ${a.key}` < `${b.scope} ${b.key}` ? -1 : 1)
 
-export const listSettings = (data: string) => ({
-  keys: settingFields().map(({ field, key }) => ({
-    aliases: field.aliases ?? [],
-    default: field.default,
-    description: field.description,
-    key,
-  })),
-  rows: settingRows(data).sort(byScopeKey),
-  schemaVersion: SCHEMA_VERSION,
-})
+// Every key with its default, every row, and the values a session of your login reads (each merge field's row over its default), which Settings > Jobs shows.
+export const listSettings = (data: string) => {
+  const rows = settingRows(data).sort(byScopeKey)
+  return {
+    keys: settingFields().map(({ field, key }) => ({
+      aliases: field.aliases ?? [],
+      default: field.default,
+      description: field.description,
+      key,
+    })),
+    rows,
+    schemaVersion: SCHEMA_VERSION,
+    values: settingsFor(rows, loginOrNone(data) ?? "").values,
+  }
+}
 
 const namesOf = (key: string): string[] => [
   key,

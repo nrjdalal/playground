@@ -6171,6 +6171,7 @@ var jobFields = strictObject({
   stop: string2().min(1).optional()
 });
 var jobSchema = preprocess(withoutNeedsCmux, jobFields);
+var jobRowSchema = preprocess(withoutNeedsCmux, jobFields.partial());
 var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
 var terminal = (name, command, job) => ({
   callsModel: false,
@@ -6276,7 +6277,8 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     aliases: OLD_KEYS[name],
     default: job,
     description: `The ${name} ops job: ${job.description}`,
-    schema: jobSchema
+    merge: true,
+    schema: jobRowSchema
   }
 ])));
 // packages/settings/src/models.ts

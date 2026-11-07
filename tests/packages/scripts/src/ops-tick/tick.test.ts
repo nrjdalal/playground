@@ -77,7 +77,7 @@ const QUIET_LOAD = { "vm.loadavg": "{ 2.10 3.40 4.00 }" }
 
 // ps's lines as the load report reads them: CPU, pid, command
 const PS =
-  "  300.0  4242 /Users/acme/.bun/bin/bun\n   90.0   311 /Applications/cmux.app/Contents/MacOS/cmux\n   10.0   12 launchd\n    0.0  1 kernel_task\n    0.0  2 idle"
+  "  300.0  4242 /Users/me/.bun/bin/bun\n   90.0   311 /Applications/cmux.app/Contents/MacOS/cmux\n   10.0   12 launchd\n    0.0  1 kernel_task\n    0.0  2 idle"
 
 // bun run ask new's stdout, the posted item's id on a line of its own
 const ASKED = { "ask new": "f167b6b9-f570-4f15-a4b4-eb15b8c4876f\n#i601\n" }
