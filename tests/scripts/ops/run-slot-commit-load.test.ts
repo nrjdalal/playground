@@ -1,8 +1,8 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { machine, stop } from "./run-slot-fake"
+import { SCRIPT, machine, stop } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -85,11 +85,54 @@ describe("a commit-lane start", () => {
     ).toBe(true)
   })
 
-  test("but the merge train's starts at once", async () => {
+  for (const who of ["ops-merge-train", "ops-dashboard", "ops-tick"])
+    test(`but ${who}'s starts at once`, async () => {
+      const m = loaded(18, 15)
+      const run = m.start(who, {}, undefined, ["git", "merge", "--no-edit"])
+      expect(await run.ran()).toBe(true)
+      expect(await run.saw(WAIT)).toBe(false)
+    })
+
+  // review round 1: the first wait read the cap and the load through load_line, load5 and reread at each poll, 5 to 14 starts a poll, while issue 1338 holds a waiter's idle poll to its sleep
+  test("whose idle poll starts its load read and its sleep alone", async () => {
     const m = loaded(18, 15)
-    const run = m.start("ops-merge-train", {}, undefined, ["git", "merge", "--no-edit"])
-    expect(await run.ran()).toBe(true)
-    expect(await run.saw(WAIT)).toBe(false)
+    // a shim for each external command run-slot.sh calls by name, ahead of the machine's PATH, writes its name to the count file and runs the machine's own
+    const dir = join(m.root, "shims")
+    const count = join(m.root, "starts")
+    mkdirSync(dir)
+    writeFileSync(count, "")
+    const rest = m.env().PATH
+    for (const name of "awk basename cat cut date dirname git grep head ls mkdir mv ps python3 readlink realpath rm rmdir sed sleep sort stat sysctl tail touch tr uptime wc".split(
+      " ",
+    )) {
+      writeFileSync(
+        join(dir, name),
+        `#!/usr/bin/perl\nopen(my $f, ">>", "${count}"); print $f "${name}\\n"; close $f;\n$ENV{PATH} = "${rest}";\nexec { "${name}" } "${name}", @ARGV or exit 127;\n`,
+      )
+      chmodSync(join(dir, name), 0o755)
+    }
+    const marker = join(m.root, "ran-worker-c")
+    const p = Bun.spawn(["bash", SCRIPT, "worker-c", "--", "git", "merge", "--no-edit", marker], {
+      cwd: m.root,
+      env: m.env({ PATH: `${dir}:${rest}`, RUN_SLOT_POLL: "0.5" }),
+      stderr: "pipe",
+    })
+    let err = ""
+    void (async () => {
+      for await (const chunk of p.stderr) err += new TextDecoder().decode(chunk)
+    })()
+    while (!new RegExp(WAIT.source, "m").test(err)) await Bun.sleep(50)
+    // past the second the cap file and the first look share, after which the cap is read again only once a minute
+    await Bun.sleep(2_000)
+    const from = readFileSync(count, "utf8").split("\n").length - 1
+    await Bun.sleep(5_000)
+    const names = readFileSync(count, "utf8").split("\n").slice(from).filter(Boolean)
+    await stop(p)
+    expect(existsSync(marker)).toBe(false)
+    const sleeps = names.filter((n) => n === "sleep").length
+    expect(sleeps).toBeGreaterThanOrEqual(5)
+    expect(names.filter((n) => n !== "sleep" && n !== "sysctl")).toEqual([])
+    expect(names.filter((n) => n === "sysctl").length).toBeLessThanOrEqual(sleeps + 1)
   })
 })
 
