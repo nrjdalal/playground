@@ -1471,7 +1471,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
-    verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
+    verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
   else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;

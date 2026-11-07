@@ -1644,7 +1644,7 @@ except (ValueError, KeyError, TypeError):
   PANE=${placed% *} ws=${placed#* }
   # herdr clears an agent's name after every turn (measured), while a pane's label stays and comes back after a restart, so the label carries the name.
   if [ -z "$placed" ] || ! hr pane rename "$PANE" "$NAME" >/dev/null 2>>"$said_file" || ! hr pane run "$PANE" "exec bash '$LAUNCH_FILE'" >/dev/null 2>>"$said_file"; then
-    herdr_said=$(tr -s '\n' ' ' <"$said_file" 2>/dev/null || true)
+    herdr_said=$(tr -s '\n' ' ' 2>/dev/null <"$said_file" || true)
     herdr_said=${herdr_said% }
     rm -f -- "$LAUNCH_FILE" "$said_file"
     [ -z "$placed" ] || [ "$out" = reused ] || hr pane close "$PANE" >/dev/null 2>&1 || true
