@@ -630,6 +630,7 @@ export const fixtureOnly = async (
     | "send-focus"
     | "send-top"
     | "slash-menu"
+    | "stream-renders"
     | "typing-lag"
     | "upload-keep" = "screenshots",
 ): Promise<Result> => {
@@ -901,6 +902,7 @@ const CHECKS = [
   "send-top",
   "signin",
   "slash-menu",
+  "stream-renders",
   "system",
   "tooltips",
   "typing-lag",

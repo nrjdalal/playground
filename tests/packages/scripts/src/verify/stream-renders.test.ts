@@ -1,0 +1,52 @@
+import { describe, expect, test } from "bun:test"
+
+import {
+  allowance,
+  STEPS,
+  STREAM_RENDERS_SCRIPT,
+  streamRendersResult,
+} from "../../../../../packages/scripts/src/verify/stream-renders"
+
+const read = (renders: Record<string, number>, rows = 9, parts = 420) =>
+  streamRendersResult("s", { parts, renders, rows }, STEPS)
+
+describe("streamRendersResult", () => {
+  test("passes steps that drew their own words and their turn's row alone", () => {
+    const result = read({ AgentLink: 10, StepRow: 10, TranscriptMarkdown: 10 })
+    expect(result.ok).toBe(true)
+    expect(result.detail).toBe(
+      "10 steps into a stream of 9 rows and 420 parts: AgentLink 10, StepRow 10, TranscriptMarkdown 10 draws",
+    )
+  })
+
+  // the stream's clock ticks every 30s and draws every row, its name link and a bubble's words once; a run of 10 steps at 400ms may hold one tick
+  test("allows each component the rows once more, for a clock tick", () => {
+    expect(allowance(9, STEPS)).toBe(29)
+    expect(read({ AgentLink: 29, StepRow: 29, TranscriptMarkdown: 29 }).ok).toBe(true)
+    expect(read({ AgentLink: 10, StepRow: 10, TranscriptMarkdown: 30 }).ok).toBe(false)
+  })
+
+  // before the fix, each step rebuilt every message, so every row drew on every step, and every part's words drew through the dashboard's context
+  test("fails a step that drew the whole stream again, naming each component over its allowance", () => {
+    const result = read({ AgentLink: 90, StepRow: 90, TranscriptMarkdown: 4200 })
+    expect(result.ok).toBe(false)
+    expect(result.detail).toBe(
+      "AgentLink drew 90 times, over 29; StepRow drew 90 times, over 29; TranscriptMarkdown drew 4200 times, over 29, 10 steps into a stream of 9 rows and 420 parts",
+    )
+  })
+
+  test("fails a run in which no row drew, which measured nothing", () => {
+    expect(read({}).detail).toBe("no row drew over 10 steps (9 rows shown)")
+    expect(read({ StepRow: 10 }, 0).ok).toBe(false)
+  })
+})
+
+describe("STREAM_RENDERS_SCRIPT", () => {
+  test("installs the DevTools hook React reports commits to, before React loads, and keeps the socket's workers frame", () => {
+    expect(STREAM_RENDERS_SCRIPT).toContain("window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {")
+    expect(STREAM_RENDERS_SCRIPT).toContain("onCommitFiberRoot")
+    expect(STREAM_RENDERS_SCRIPT).toContain("supportsFiber: true")
+    expect(STREAM_RENDERS_SCRIPT).toContain('data.type === "workers"')
+    expect(STREAM_RENDERS_SCRIPT).toContain("window.__streamRenders = {")
+  })
+})
