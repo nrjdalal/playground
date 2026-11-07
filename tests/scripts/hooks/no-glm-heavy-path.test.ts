@@ -803,6 +803,34 @@ describe("a GLM session's org tools", () => {
     },
   )
 
+  test("a policy it cannot read refuses gh, git and a fetcher on GLM, naming the fix, and passes on Claude", async () => {
+    const broken = join(DIR, "broken-data")
+    writeRoot(extensionsDir(broken), new Map([["policy.json", "{not json"]]))
+    for (const command of ["gh pr list -R qzx-labs/x", "git status", "curl https://example.com"]) {
+      const raw = input(command)
+      expect(await refusal(raw, { PLAYGROUND_DATA_DIR: broken }, CALM)).toBeUndefined()
+      const glm = await refusal(raw, { ...GLM, PLAYGROUND_DATA_DIR: broken }, CALM)
+      expect(glm).toContain("cannot read which orgs ext.links guards")
+      expect(glm).toContain("glm rule")
+    }
+  })
+
+  test("a call it cannot parse that reads as an org tool names the glm rule", async () => {
+    expect(await check("{not json: gh pr list", ON_GLM, CALM)).toContain("glm rule")
+  })
+
+  test("git reaching an org's checkout past -C is refused on GLM, naming the org", async () => {
+    for (const command of [
+      "git --git-dir=../org-repo/.git log -1",
+      "GIT_DIR=../org-repo/.git git log -1",
+      "git --work-tree=../org-repo status",
+    ]) {
+      const { claude, glm } = await both(input(command))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+    }
+  })
+
   test("git and gh in an org's checkout are refused on GLM, naming the org, and pass on Claude", async () => {
     for (const command of ["git log -1", "gh pr list"]) {
       const { claude, glm } = await both(input(command, ORG))
@@ -847,6 +875,35 @@ describe("a GLM session's org tools", () => {
     },
     { $label: "git in a checkout no org owns", command: "git status" },
     { $label: "git searching its log for slack.com", command: "git log --grep slack.com" },
+    // a Linear script named, read, tested or committed, not run
+    {
+      $label: "sed of a Linear script",
+      command: "sed -n 1,5p packages/scripts/src/linear-read/cli.ts",
+    },
+    { $label: "ls of a Linear script's folder", command: "ls packages/scripts/src/linear-read/" },
+    {
+      $label: "rg in a Linear script's folder",
+      command: "rg token packages/scripts/src/linear-write/",
+    },
+    {
+      $label: "a test of a Linear script",
+      command: "bun run test:file tests/packages/scripts/src/linear-read/cli.test.ts",
+    },
+    {
+      $label: "git add of a Linear script",
+      command: "git add packages/scripts/src/linear-read/cli.ts",
+    },
+    {
+      $label: "git log of a Linear script's folder",
+      command: "git log --oneline -- packages/scripts/src/linear-write/",
+    },
+    { $label: "grep for the Linear scripts", command: "grep -n linear: package.json" },
+    { $label: "the account's own repo list", command: "gh repo list" },
+    { $label: "gh api of the signed-in user", command: "gh api user" },
+    {
+      $label: "gh graphql of a repo no org guards",
+      command: `gh api graphql -f query='{ repository(owner: "qzx-labs", name: "x") { pullRequest(number: 1) { id } } }'`,
+    },
   ])("$label passes on GLM", async ({ command }) => {
     expect(await refusal(input(command), ON_GLM, CALM)).toBeUndefined()
   })
