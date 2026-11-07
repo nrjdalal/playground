@@ -14,7 +14,6 @@ import { quarantine, type Roots } from "@packages/safe-delete"
 import {
   CORE,
   type Fill,
-  filesIn,
   importedJob,
   loginOf,
   orgJobs,
@@ -22,8 +21,8 @@ import {
   readPolicyFile,
   readRendered,
   renderJobs,
-  scopeDir,
   scopesIn,
+  scriptFilesOf,
   settingRows,
 } from "@packages/settings"
 
@@ -49,12 +48,7 @@ const orgScripts = (data: string, login: string): Map<string, string[][]> =>
   new Map(
     scopesIn(data)
       .filter((scope) => scope !== login && scope !== CORE)
-      .map((org) => [
-        org,
-        filesIn(scopeDir(data, org))
-          .map((file) => file.split("/"))
-          .filter((parts) => parts[0] === "scripts" && parts.length >= 3),
-      ]),
+      .map((org) => [org, scriptFilesOf(data, org)]),
   )
 
 // Each org's script folder, <org>/scripts/<key>/, into <data>/ops/<key>/, beside the state its job keeps there, which no item holds and this never touches; a file the extensions cannot vouch for is left as it was, with the reason on stderr.
