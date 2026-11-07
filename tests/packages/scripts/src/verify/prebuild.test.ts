@@ -21,6 +21,7 @@ const {
   importedNames,
   isMainCheckout,
   prebuildStep,
+  reach,
   sourcesIn,
   staleInstall,
   unbuilt,
@@ -291,6 +292,36 @@ test("importedNames lists the value names each workspace import takes, by their 
 // pr-merge reaches @packages/config/kinds only through merge.ts, ops-job and ops-tick, outside its own folder.
 test("prebuild given pr-merge reads every source it reaches through a relative import, outside its own folder too", async () => {
   expect(workspaceImports(await sourcesIn("pr-merge"))).toContain("@packages/config/kinds")
+})
+
+// code-review-loop's VERIFY.md has a reviewer run a scratch test from its scratchpad that imports the clone's modules by absolute path
+test("a scratch test outside the checkout reaches the packages a module it imports by absolute path imports", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "prebuild-scratch-"))
+  try {
+    const file = join(dir, "scratch.test.ts")
+    writeFileSync(
+      file,
+      `import * as probe from "${join(ROOT, "packages/scripts/src/playground/probe.ts")}"\n`,
+    )
+    expect(workspaceImports(await reach([file]))).toContain("@packages/config/kinds")
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
+})
+
+test("a scratch test's absolute import outside the checkout stays unread", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "prebuild-elsewhere-"))
+  try {
+    const elsewhere = join(dir, "elsewhere.ts")
+    writeFileSync(elsewhere, `import { slotOfName } from "@packages/config/kinds"\n`)
+    const file = join(dir, "scratch.test.ts")
+    writeFileSync(file, `import * as elsewhere from "${elsewhere}"\n`)
+    const sources = await reach([file])
+    expect(sources).toHaveLength(1)
+    expect(workspaceImports(sources)).toEqual([])
+  } finally {
+    rmSync(dir, { force: true, recursive: true })
+  }
 })
 
 test("every workspace package verify or pr-merge imports is a dependency of @packages/scripts, so its build covers it", async () => {

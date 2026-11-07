@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { WAITER } from "../../../scripts/hooks/after-compact"
 import { check, lastEntry, rearm } from "../../../scripts/hooks/after-resume"
 
 const input = JSON.stringify({
@@ -39,12 +40,13 @@ const transcript = () => {
 
 describe("after a restart, a resumed factory session re-arms its watches and re-sends unanswered asks", () => {
   test.each(["dispatcher", "lead", "worker", "reviewer", "tester", "runner", "probe"])(
-    "a %s gets the instruction as SessionStart context",
+    "a %s gets the instruction as SessionStart context, a manager's with its alerts-wait line",
     async (role) => {
       const out = await check(input, { PLAYGROUND_ROLE: role }, now)
+      const manager = role === "dispatcher" || role === "lead"
       expect(JSON.parse(out ?? "null")).toEqual({
         hookSpecificOutput: {
-          additionalContext: rearm(undefined, now),
+          additionalContext: manager ? `${rearm(undefined, now)} ${WAITER}` : rearm(undefined, now),
           hookEventName: "SessionStart",
         },
       })

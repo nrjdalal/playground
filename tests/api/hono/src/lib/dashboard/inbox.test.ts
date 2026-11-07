@@ -46,6 +46,7 @@ import {
   payloadOf,
 } from "../../../../../../packages/config/src/inbox"
 import { RELAY_ANSWER_KINDS } from "../../../../../../packages/message/src/index"
+import { writeFiles } from "../../../../../../packages/settings/src/folder"
 import { GUARD_SETTING_KEYS } from "../../../../../../packages/settings/src/guard-keys"
 import { judgeItem, putItem } from "../../../../../../packages/settings/src/items"
 import { loginPath } from "../../../../../../packages/settings/src/rendered"
@@ -1561,6 +1562,40 @@ describe("a guard decision for a job (PG-1196)", () => {
       { key: "jobs.opsTicketCard", value: {} },
       { key: "jobs.opsTicketCard", value: true },
       { key: "jobs.opsMadeUp", value: { enabled: true } },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+})
+
+// PG-1363: the guard decision also places an org's own job, a whole row the setting's write then checks against the org's script folders.
+describe("a guard decision for an org's own job (PG-1363)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
+  const row = {
+    callsModel: false,
+    command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+    description: "Watches a made-up org's queue.",
+    enabled: true,
+    heartbeat: "ops-watch",
+    schedule: { every: 60 },
+  }
+
+  test("takes a whole job row for a job the registry lacks, or no value", () => {
+    expect(takes({ key: "jobs.opsWatch", value: row })).toBe(true)
+    expect(takes({ key: "jobs.opsWatch", value: { ...row, config: { prefixes: ["X"] } } })).toBe(
+      true,
+    )
+    expect(takes({ key: "jobs.opsWatch", value: undefined })).toBe(true)
+  })
+
+  test("refuses a row that is no job, a config that is no object, and a key that is no job's name", () => {
+    for (const change of [
+      { key: "jobs.opsWatch", value: { enabled: true } },
+      { key: "jobs.opsWatch", value: { ...row, config: ["X"] } },
+      { key: "jobs.opsWatch", value: { ...row, madeUp: 1 } },
+      { key: "jobs.ops-watch", value: row },
+      { key: "jobs.", value: row },
     ]) {
       expect(takes(change), JSON.stringify(change)).toBe(false)
     }
@@ -5500,6 +5535,39 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         set: {
           exitCode: 0,
           line: `${key} at made-up-me is already {"enabled":true}, so nothing changed`,
+        },
+      })
+    })
+
+    test("an org's own job's Approve places its whole row, and approving the same row again changes nothing (PG-1363)", async () => {
+      const data = folder()
+      writeFiles(data, "acme-test", new Map([["scripts/ops-watch/cli.ts", "console.log(1)"]]), {
+        author: "owner",
+        reason: "ship the script",
+      })
+      const key = "jobs.opsWatch"
+      const row = {
+        callsModel: false,
+        command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+        description: "Watches an org's own queue.",
+        enabled: true,
+        heartbeat: "ops-watch",
+        schedule: { every: 60 },
+      }
+      const card = { ...GUARD, key, scope: "acme-test", value: row }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        set: { exitCode: 0, line: expect.stringContaining(`set ${key} at acme-test to {`) },
+      })
+      const again = await post(decision(card))
+      expect((await approve(again.id, again.updatedAt, data)).ok).toBe(true)
+      expect((await store.getItem(db, again.id))?.answer).toMatchObject({
+        set: {
+          exitCode: 0,
+          line: expect.stringMatching(
+            new RegExp(`^${key} at acme-test is already \\{.*\\}, so nothing changed$`),
+          ),
         },
       })
     })
