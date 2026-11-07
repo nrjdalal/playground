@@ -7835,10 +7835,9 @@ function commandReads(cmd) {
   if (cmd.redirects.length > 0 || cmd.words.some((w) => /[*?[{()$]/.test(w.value)))
     return false;
   const words = cmd.words.map((w) => w.value);
-  if (words.length === 0)
-    return true;
-  if (words.some(marked))
-    return false;
+  return words.length === 0 || !words.some(marked) && readsWords(words);
+}
+function readsWords(words) {
   const [name, ...args] = words;
   if (name === "git") {
     const k = args[0] === "-C" ? 2 : 0;
