@@ -2085,7 +2085,7 @@ describe("an ask card's answer in progress (PG-1345)", () => {
     expect(note(html)).toBe("Soak it.")
   })
 
-  test("an answered card shows none of a kept answer", () => {
+  test("an answered card renders its result, not a kept answer's choices", () => {
     savePicks("id-70", {
       ...EMPTY_PICKS,
       note: "Soak it.",

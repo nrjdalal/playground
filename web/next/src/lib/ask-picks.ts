@@ -8,7 +8,7 @@ export type AskPicks = {
 }
 export type PicksStore = Record<string, AskPicks>
 
-// A cleared entry: no pick, no picks, no note, so putPicks drops it from the store. The card writes it once answered, settled or archived, and the "" signature never matches a live card's.
+// A cleared entry: no pick, no picks, no note, so putPicks drops it from the store; the card writes it once answered, settled or archived.
 export const EMPTY_PICKS: AskPicks = { note: "", pick: null, picks: [], sig: "[]", step: 0 }
 
 export const PICKS_KEY = "dashboard.inbox.picks.v1"
