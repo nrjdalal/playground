@@ -278,12 +278,15 @@ const inFolder = (path: string, keys: string[]): boolean => {
   return (
     keys.includes(key!) &&
     PLAIN.test(path) &&
+    rest.length > 0 &&
     rest.every((segment) => segment !== "" && segment !== "." && segment !== "..")
   )
 }
 
-// Why an org's job may not run as its row says, or undefined: it runs in a terminal, its command {bun} [--no-env-file] then a script in a folder its org ships, then plain words or {data}, from that folder or one under it.
-const outsideFolder = (job: Job, keys: string[]): string | undefined => {
+// Why an org's job may not run as its row says, or undefined: it beats under its own name and names no stop group, which ops stops before each start, it runs in a terminal, its command {bun} [--no-env-file] then a script in a folder its org ships, then plain words or {data}, from that folder or one under it.
+const outsideFolder = (name: string, job: Job, keys: string[]): string | undefined => {
+  if (job.heartbeat !== name) return `its heartbeat must be its own name, ${name}`
+  if (job.stop) return "an org's job names no stop group, which ops stops before each start"
   if (job.launchd || job.program)
     return "an org's job runs in a terminal, with a command and no launchd label or program"
   const words = (job.command ?? "").split(" ")
@@ -327,7 +330,7 @@ export const orgJobs = (
         return parsed.error.issues
           .map((issue) => `${issue.path.join(".") || "row"} ${issue.message}`)
           .join("; ")
-      const outside = outsideFolder(parsed.data, scripts[scope] ?? [])
+      const outside = outsideFolder(name, parsed.data, scripts[scope] ?? [])
       if (outside) return outside
       const first = addedBy.get(name)
       if (first) return `${first} already adds ${name}`

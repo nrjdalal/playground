@@ -285,9 +285,9 @@ def render_jobs():
         return
     if r.returncode in (0, 1) and r.stdout.strip() and "unchanged" not in r.stdout:
         log(r.stdout.strip())
-    kept = [line for line in (r.stderr or "").splitlines() if line.startswith(("jobs: kept ", "jobs: refused "))]
-    if r.returncode == 1 and kept:
-        log(" ".join(kept))
+    named = [line for line in (r.stderr or "").splitlines() if line.startswith(("jobs: kept ", "jobs: refused "))]
+    if r.returncode == 1 and named:
+        log(" ".join(named))
     elif r.returncode not in (0, 3):
         log(f"jobs.json kept: {one_line_answer(r.stderr or r.stdout)}")
 
