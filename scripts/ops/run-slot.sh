@@ -1259,6 +1259,8 @@ DOCKER_SLOT=""
 CHILD=""
 # seconds between a waiter's looks, and a held clone's (the tests shorten both)
 POLL=${RUN_SLOT_POLL:-15}
+# the longest a commit or quick start waits on load5 (issue 1385)
+LOAD_WAIT=${RUN_SLOT_LOAD_WAIT:-300}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
 # the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake (clone_brake) it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
 CLONE_GAP=180
@@ -1703,7 +1705,7 @@ reclaim() {
   [ "$(cat "$1.holder" 2>/dev/null)" = "$line" ] && [ "$(stamp "$1")" = "$dir" ] && rmdir "$1" 2>/dev/null
 }
 
-# the 5-minute load run-slot-2 in single-slot mode starts under: 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's terminal reads time out), 22 at most
+# the 5-minute load run-slot-2 in single-slot mode starts under, and a commit or quick start waits under (issue 1385): 22, or run-slot.load5-cap's cap while it stands (builder, 12 Oct: 12 while the live dashboard's terminal reads time out), 22 at most
 # its cap is the file's last line, the one a set writes below its reason or an old-shape file's only one
 load_line() {
   local cap
@@ -2046,7 +2048,31 @@ if [ -n "$KIND" ]; then
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
   # the waiter ran its command with no slot), so each wait checks it ended as it should, and the waiter stops when it did not
   clone_held && { echo "run-slot.sh: run-slot.clone-off holds this clone, so $WHO stops" >&2; exit 143; }
-  # the quick slot takes no load wait: its load comes mostly from outside run-slot and one slot adds about a core at most, so a hold kept 44 quick runs waiting 201 min for 8 min of work (issue 547); ran_long sends a line that runs long to the queue
+  # a commit or quick start waits on load5 under load_line's cap, for LOAD_WAIT s at most (scripts/ops/README.md's run-slot bullets; issue 1385); its idle poll starts its load read and its sleep (issue 1338), so it reads the cap again only when the switch file appears, goes or changes, or once a minute
+  if [ "$KIND" != clone ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ "$WHO" != ops-tick ]; then
+    # LT0 the wait's start, LCAP the cap, LCT when it was read, LCF the switch file, LCE and LE whether it stood then and now, LDONE set on each way out; load5 is parsed inline, not through load5(), so a poll starts one process for it
+    LT0=$SECONDS LSAID= LDONE= LCAP=$(load_line) LCT=$SECONDS LCE=
+    LCF="$OPS/run-slot.load5-cap"
+    [ -e "$LCF" ] && LCE=1
+    : > "$REF" 2>/dev/null
+    while :; do
+      self_changed && reread
+      LE=; [ -e "$LCF" ] && LE=1
+      if [ "$LE" != "$LCE" ] || [ $((SECONDS - LCT)) -ge 60 ] || { [ -n "$LE" ] && ! [ "$LCF" -ot "$REF" ]; }; then
+        LCAP=$(load_line) LCT=$SECONDS LCE=$LE
+        : > "$REF" 2>/dev/null
+      fi
+      L5=; read -r _ _ L5 _ <<< "$(loadavg)"; L5=${L5%%.*}
+      # an unread load holds no start
+      case "$L5" in '' | *[!0-9]*) LDONE=1; break ;; esac
+      [ "$L5" -lt "$LCAP" ] && { LDONE=1; break; }
+      [ $((SECONDS - LT0)) -ge "$LOAD_WAIT" ] && { echo "run-slot.sh: load5 $L5 is still at or over $LCAP after $((SECONDS - LT0))s, so this $KIND run starts" >&2; LDONE=1; break; }
+      [ -z "$LSAID" ] && { echo "run-slot.sh: waiting for load5 under $LCAP (now $L5) before the $KIND slot, ${LOAD_WAIT}s at most" >&2; LSAID=1; }
+      sleep "$POLL"
+    done
+    # a loop bash dropped mid-expansion (the rule above) set no flag, so the waiter stops rather than run
+    [ -n "$LDONE" ] || exit 143
+  fi
   # the clone's spacing is shared, so one waiter works it out about every 15 to 24 s for all of them (issue 1338): run-slot.clone-verdict holds the CPU slots' and
   # the clone lane's holder lines it was worked out under, then its verdict, and a waiter takes one written no earlier than its own last tick under the same lines, so a verdict serves up to 48 s
   CLONE_VERDICT="$OPS/run-slot.clone-verdict"

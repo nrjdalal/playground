@@ -472,6 +472,12 @@ describe("a stuck or failed record tells the session's manager at once (PG-2184)
       { kind: "worker", name: "k3m9px-worker", status: "working", task: "PG-1: fix it" },
     ]
     writeFileSync(join(config, "playground", "roster.json"), JSON.stringify({ agents }))
+    // the builder's alerts-wait runs, so its alert stays one line; stuck-alert's tests hold the Ops line a manager with none gets
+    mkdirSync(join(config, "playground", "ops", "outbox", "alerts-wait"), { recursive: true })
+    writeFileSync(
+      join(config, "playground", "ops", "outbox", "alerts-wait", "m4n7pq-builder.pid"),
+      String(process.pid),
+    )
     const transcript = join(config, "t.jsonl")
     writeFileSync(
       transcript,
