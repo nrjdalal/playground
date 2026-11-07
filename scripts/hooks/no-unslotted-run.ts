@@ -1,4 +1,5 @@
-// PreToolUse hook: refuses a worktree install, node_modules clone, build, type check or whole suite outside run-slot, since five worktree installs at once drove load1 to 66.8 on 18 Oct, and a docker build from any folder, since one fills the Docker VM the live dashboard's Postgres shares.
+// PreToolUse hook: refuses a worktree install, node_modules clone, build, type check or whole suite outside run-slot, since five worktree installs at once drove load1 to 66.8 on 18 Oct, a docker build from any folder, since one fills the Docker VM the live dashboard's Postgres shares, and a git commit whose message commitlint refuses, since commit-msg finds it only after pre-commit's slot wait.
+import { existsSync } from "node:fs"
 import { join, resolve, sep } from "node:path"
 
 import { atOnce, buildName, DOCKERS, dockerBuild, portlessCompose } from "./docker-build"
@@ -6,13 +7,23 @@ import { bunCall, cwdFlag, mainCheckout, turboWords } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
   ASSIGN,
+  type Command,
   type Env,
+  examine,
+  GIT_TAKES,
   knownVariables,
   lex,
+  parseFlags,
   pathOf,
   places,
   program,
+  readPath,
+  resolveText,
   run,
+  slotWords,
+  stdinOf,
+  type Text,
+  unreadable,
   visible,
   type Visit,
   type Word,
@@ -26,6 +37,94 @@ const refuseDocker = (what: string, cd: string, command: string, fix?: string) =
   fix
     ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}`
     : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`
+
+// git commit's options that take a value, so a word after one reads as git reads it
+const COMMIT_TAKES = new Set([
+  "--author",
+  "-c",
+  "-C",
+  "--cleanup",
+  "--date",
+  "-F",
+  "--file",
+  "--fixup",
+  "-m",
+  "--message",
+  "--pathspec-from-file",
+  "--reedit-message",
+  "--reuse-message",
+  "--squash",
+  "-t",
+  "--template",
+  "--trailer",
+])
+// The options that take the message from another commit, whose text the hook does not read
+const REUSED = new Set(["-C", "-c", "--fixup", "--reedit-message", "--reuse-message", "--squash"])
+// commitlint's run is cut off past this, well inside the hook's 15 s timeout, and the commit then runs as before
+const LINT_BUDGET = 8000
+
+// The message of a git commit as commit-msg would get it: its -m values joined as paragraphs, or the file or stdin -F names; undefined when the commit skips commit-msg, opens an editor, reuses another commit's message, or holds a message the hook cannot read.
+async function message(cmd: Command, rest: Word[], env: Env): Promise<string | undefined> {
+  const { flags } = parseFlags(rest, COMMIT_TAKES)
+  const last = (names: string[]) => flags.findLast((f) => names.includes(f.name))?.name
+  if (["-n", "--no-verify"].includes(last(["-n", "--no-verify", "--verify"]) ?? "")) return
+  if (["-e", "--edit"].includes(last(["-e", "--edit", "--no-edit"]) ?? "")) return
+  if (flags.some((f) => REUSED.has(f.name))) return
+  const notes = flags.filter((f) => f.name === "-m" || f.name === "--message")
+  const files = flags.filter((f) => f.name === "-F" || f.name === "--file")
+  // git refuses -m beside -F itself
+  if (notes.length > 0 === files.length > 0) return
+  const texts: Text[] = []
+  for (const { value } of [...notes, ...files.slice(-1)]) {
+    if (!value) return
+    const text = files.length
+      ? value.value === "-" && !value.unknown
+        ? await stdinOf(cmd, env)
+        : await readPath(value, env)
+      : await resolveText(value, env)
+    if (unreadable(text)) return
+    texts.push(text)
+  }
+  return texts.map((t) => t.value).join("\n\n")
+}
+
+// A git commit's message linted by its checkout's own commitlint, which reads the checkout's config; the refusal with commitlint's problem lines, or undefined when the hook cannot read the message, the checkout holds no commitlint, or the lint passes or runs past its budget.
+async function commitLint(cmd: Command, args: Word[], env: Env): Promise<string | undefined> {
+  let dir = env.cwd
+  let k = 0
+  for (; k < args.length; k++) {
+    const v = args[k].value
+    if (v === "-C") {
+      const next = args[++k]
+      dir = next ? pathOf(next, { ...env, cwd: dir }) : undefined
+    } else if (GIT_TAKES.has(v)) k++
+    else if (!v.startsWith("-")) break
+  }
+  if (args[k]?.value !== "commit" || !dir) return
+  const text = await message(cmd, args.slice(k + 1), { ...env, cwd: dir })
+  if (text === undefined) return
+  const top = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--show-toplevel"], { stderr: "ignore" })
+  const root = top.success ? top.stdout.toString().trim() : ""
+  const lint = join(root, "node_modules", ".bin", "commitlint")
+  if (!root || !existsSync(lint)) return
+  const proc = Bun.spawn([process.execPath, lint], {
+    cwd: root,
+    env: env.process,
+    stderr: "pipe",
+    stdin: new Blob([text]),
+    stdout: "pipe",
+    timeout: LINT_BUDGET,
+  })
+  const [out, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ])
+  if (code === 0 || proc.signalCode) return
+  const problems = `${out}\n${err}`.split("\n").filter((l) => /^\s*[✖⚠]/.test(l))
+  if (problems.length === 0) return
+  return `no-unslotted-run hook refuses this git commit: commitlint, which commit-msg runs only after pre-commit's build has waited for its slot, refuses its message:\n${problems.join("\n")}\nFix the message by the gh-commit skill's Commit step, then commit again.`
+}
 
 // A line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run in any folder, a worktree included, so a heavy run on it goes through run-slot too.
 const anywhere = (what: string, command: string) =>
@@ -191,9 +290,18 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   const inWorktree = (dir: string | undefined) =>
     dir !== undefined && resolve(dir).startsWith(worktrees)
   const directory = typeof cwd === "string" ? cwd : undefined
-  const visit: Visit = async (cmd, { args, first, name }, env) => {
+  // a commit run-slot queues waits for its slot all the same, so its message is linted there too
+  const commits: Visit = async (cmd, { args, name }, env) =>
+    name === "git" ? commitLint(cmd, args, env) : undefined
+  const visit: Visit = async (cmd, parsed, env) => {
+    const { args, first, name } = parsed
+    const slot = slotWords(parsed)
     // run-slot.sh queues the words after its -- as one heavy run
-    if (name === "run-slot.sh") return
+    if (slot) return slot.length ? examine({ ...cmd, words: slot }, env, commits, false) : undefined
+    if (name === "git") {
+      const refused = await commitLint(cmd, args, env)
+      if (refused) return refused
+    }
     const words = () => {
       const at = first ? cmd.words.indexOf(first) : -1
       if (at < 0) return undefined

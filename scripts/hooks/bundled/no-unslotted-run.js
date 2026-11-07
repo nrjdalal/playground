@@ -2,6 +2,7 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-unslotted-run.ts
+import { existsSync } from "fs";
 import { join as join5, resolve as resolve4, sep as sep2 } from "path";
 
 // scripts/hooks/shell.ts
@@ -1351,6 +1352,12 @@ function unwrap(state, inside, budget) {
     xargs: state.xargs
   };
 }
+function slotWords({ args, name }) {
+  if (name !== "run-slot.sh")
+    return;
+  const at = args.findIndex((a) => a.value === "--");
+  return at === -1 ? [] : args.slice(at + 1);
+}
 function shellSlot(args, shell) {
   const { inline, operand } = shellOperand(args, shell);
   if (inline || !operand || program(operand.value) !== "run-slot.sh")
@@ -1972,6 +1979,40 @@ async function readPath(path, env) {
     return unknown("a file path the hook cannot resolve");
   return env.files.get(resolved) ?? await readFile(resolved) ?? unknown(`${resolved}, which does not exist yet`);
 }
+function parseFlags(args, takes) {
+  const flags = [];
+  const positionals = [];
+  for (let k = 0;k < args.length; k++) {
+    const w = args[k];
+    const v = w.value;
+    if (v === "--") {
+      positionals.push(...args.slice(k + 1));
+      break;
+    }
+    if (v.startsWith("--")) {
+      const eq = v.indexOf("=");
+      const name = eq === -1 ? v : v.slice(0, eq);
+      flags.push({
+        name,
+        value: eq !== -1 ? slice(w, eq + 1) : takes.has(name) ? args[++k] : undefined
+      });
+    } else if (v.startsWith("-") && v.length > 1) {
+      for (let c = 1;c < v.length; c++) {
+        const name = `-${v[c]}`;
+        if (!takes.has(name)) {
+          flags.push({ name });
+          continue;
+        }
+        const rest = c + 1 < v.length ? slice(w, v[c + 1] === "=" ? c + 2 : c + 1) : args[++k];
+        flags.push({ name, value: rest });
+        break;
+      }
+    } else
+      positionals.push(w);
+  }
+  return { flags, positionals };
+}
+var unreadable = (text) => Boolean(text.unknown) || Boolean(text.reads?.length) || marked(text.value);
 function knownVariables(command, environment, cwd) {
   const values = {
     HOME: environment.HOME,
@@ -2656,6 +2697,101 @@ if (false) {}
 // scripts/hooks/no-unslotted-run.ts
 var refuse = (what, cd, command) => `no-unslotted-run hook refuses ${what} in a worktree outside run-slot: every heavy run goes through it (playbook's **slots**), so the machine runs a few at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
 var refuseDocker = (what, cd, command, fix) => fix ? `no-unslotted-run hook refuses ${what} from any folder, which run-slot refuses too: ${fix}` : `no-unslotted-run hook refuses ${what} outside run-slot, from any folder: a build fills the Docker VM the live dashboard's Postgres shares (6 Nov: a parallel compose build got it killed), so run-slot runs one docker build at a time, a compose build one service at a time. Run it as ${cd}~/.playground/ops/run-slot.sh <your name> -- ${command}`;
+var COMMIT_TAKES = new Set([
+  "--author",
+  "-c",
+  "-C",
+  "--cleanup",
+  "--date",
+  "-F",
+  "--file",
+  "--fixup",
+  "-m",
+  "--message",
+  "--pathspec-from-file",
+  "--reedit-message",
+  "--reuse-message",
+  "--squash",
+  "-t",
+  "--template",
+  "--trailer"
+]);
+var REUSED = new Set(["-C", "-c", "--fixup", "--reedit-message", "--reuse-message", "--squash"]);
+var LINT_BUDGET = 8000;
+async function message(cmd, rest, env) {
+  const { flags } = parseFlags(rest, COMMIT_TAKES);
+  const last = (names) => flags.findLast((f) => names.includes(f.name))?.name;
+  if (["-n", "--no-verify"].includes(last(["-n", "--no-verify", "--verify"]) ?? ""))
+    return;
+  if (["-e", "--edit"].includes(last(["-e", "--edit", "--no-edit"]) ?? ""))
+    return;
+  if (flags.some((f) => REUSED.has(f.name)))
+    return;
+  const notes = flags.filter((f) => f.name === "-m" || f.name === "--message");
+  const files = flags.filter((f) => f.name === "-F" || f.name === "--file");
+  if (notes.length > 0 === files.length > 0)
+    return;
+  const texts = [];
+  for (const { value } of [...notes, ...files.slice(-1)]) {
+    if (!value)
+      return;
+    const text = files.length ? value.value === "-" && !value.unknown ? await stdinOf(cmd, env) : await readPath(value, env) : await resolveText(value, env);
+    if (unreadable(text))
+      return;
+    texts.push(text);
+  }
+  return texts.map((t) => t.value).join(`
+
+`);
+}
+async function commitLint(cmd, args, env) {
+  let dir = env.cwd;
+  let k = 0;
+  for (;k < args.length; k++) {
+    const v = args[k].value;
+    if (v === "-C") {
+      const next = args[++k];
+      dir = next ? pathOf(next, { ...env, cwd: dir }) : undefined;
+    } else if (GIT_TAKES.has(v))
+      k++;
+    else if (!v.startsWith("-"))
+      break;
+  }
+  if (args[k]?.value !== "commit" || !dir)
+    return;
+  const text = await message(cmd, args.slice(k + 1), { ...env, cwd: dir });
+  if (text === undefined)
+    return;
+  const top = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--show-toplevel"], { stderr: "ignore" });
+  const root = top.success ? top.stdout.toString().trim() : "";
+  const lint = join5(root, "node_modules", ".bin", "commitlint");
+  if (!root || !existsSync(lint))
+    return;
+  const proc = Bun.spawn([process.execPath, lint], {
+    cwd: root,
+    env: env.process,
+    stderr: "pipe",
+    stdin: new Blob([text]),
+    stdout: "pipe",
+    timeout: LINT_BUDGET
+  });
+  const [out, err, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited
+  ]);
+  if (code === 0 || proc.signalCode)
+    return;
+  const problems = `${out}
+${err}`.split(`
+`).filter((l) => /^\s*[\u2716\u26A0]/.test(l));
+  if (problems.length === 0)
+    return;
+  return `no-unslotted-run hook refuses this git commit: commitlint, which commit-msg runs only after pre-commit's build has waited for its slot, refuses its message:
+${problems.join(`
+`)}
+Fix the message by the gh-commit skill's Commit step, then commit again.`;
+}
 var anywhere = (what, command) => `no-unslotted-run hook refuses ${what} on a line that names more folders than the hook carries, since it cannot rule out a worktree: every heavy run goes through run-slot (playbook's **slots**). Run it as ~/.playground/ops/run-slot.sh <your name> -- ${command}, or as a line of its own after a cd to a literal path.`;
 var BUN_SCRIPTS2 = new Set(["build", "check-types", "test"]);
 var RUNNERS2 = new Set(["bunx", "npx"]);
@@ -2788,9 +2924,17 @@ function inspect(raw, environment, main) {
   const worktrees = join5(main, ".claude", "worktrees") + sep2;
   const inWorktree = (dir) => dir !== undefined && resolve4(dir).startsWith(worktrees);
   const directory = typeof cwd === "string" ? cwd : undefined;
-  const visit = async (cmd, { args, first, name }, env) => {
-    if (name === "run-slot.sh")
-      return;
+  const commits = async (cmd, { args, name }, env) => name === "git" ? commitLint(cmd, args, env) : undefined;
+  const visit = async (cmd, parsed, env) => {
+    const { args, first, name } = parsed;
+    const slot = slotWords(parsed);
+    if (slot)
+      return slot.length ? examine({ ...cmd, words: slot }, env, commits, false) : undefined;
+    if (name === "git") {
+      const refused = await commitLint(cmd, args, env);
+      if (refused)
+        return refused;
+    }
     const words = () => {
       const at = first ? cmd.words.indexOf(first) : -1;
       if (at < 0)
