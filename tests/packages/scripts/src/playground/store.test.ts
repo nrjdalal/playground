@@ -617,6 +617,8 @@ describe("playground ext", () => {
         ["scripts/old", "#!/bin/sh\necho old\n"],
         ["skills/s/SKILL.md", "Run run.py with python3.\n"],
         ["skills/s/run.py", "print(1)\n"],
+        ["attachments/0a1b.sh", "#!/bin/sh\necho attached\n"],
+        ["docs/shebang.md", "#! a doc that starts like a script\n"],
       ]),
       { author: "owner", reason: "seeded" },
     )
