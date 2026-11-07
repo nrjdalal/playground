@@ -5,7 +5,7 @@ const CLI = join(import.meta.dir, "../../../../../packages/scripts/src/linear-re
 
 test("fails naming the key when LINEAR_API_KEY is unset", async () => {
   const { LINEAR_API_KEY: _, ...env } = process.env
-  const child = Bun.spawn([process.execPath, "--no-env-file", CLI, "issue", "DUNE-1"], {
+  const child = Bun.spawn([process.execPath, "--no-env-file", CLI, "issue", "MADEDUNE-1"], {
     env,
     stderr: "pipe",
     stdout: "pipe",

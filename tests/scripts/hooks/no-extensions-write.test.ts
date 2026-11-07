@@ -953,6 +953,53 @@ describe("a quoted argument is read as a command line only where a program runs 
   })
 
   test.each([
+    [
+      "bun -e holding a regex with a lookbehind",
+      `bun -e 'const r = /(?<=x)y/; console.log(r.test("xy"))'`,
+    ],
+    [
+      "node -e holding a regex with a lookbehind",
+      `node -e 'const r = /(?<=a)b/; console.log(r.test("ab"))'`,
+    ],
+    [
+      "agent-browser eval holding an anchored regex of a tag",
+      `agent-browser eval 'const ok = /^<div>/.test(document.body.innerHTML); ok'`,
+    ],
+    ["node -pe holding a regex with a lookbehind", `node -pe '/(?<=a)b/.test("ab")'`],
+    [
+      "agent-browser eval after a valued option holding an anchored regex of a tag",
+      `agent-browser --session x eval 'const ok = /^<div>/.test(document.body.innerHTML); ok'`,
+    ],
+    ["node -e opening with a regex with a lookbehind", `node -e '/(?<=a)b/.test("ab")'`],
+    [
+      "bun -e holding a regex with a lookbehind, piped into a reader",
+      `bun -e 'const r = /(?<=a)b/; console.log(r.test("ab"))' | head -1`,
+    ],
+    [
+      "awk reading a file into a variable with getline",
+      `awk 'BEGIN { while ((getline line < "notes.md") > 0) n++; print n }'`,
+    ],
+  ])("%s runs from a worktree", async (_, command) => {
+    expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
+  })
+
+  test.each([
+    ["node -e opening with a regex that tests a string", `node -e '/^a/.test("ab")'`],
+    ["node -pe opening with a regex that tests a string", `node -pe '/^a/.test("ab")'`],
+    ["bun -e opening with a regex that tests a string", `bun -e '/x/.test("x")'`],
+  ])(
+    "%s runs from the home, the data folder and a worktree, as canary reads it",
+    async (_, command) => {
+      for (const cwd of [
+        homedir(),
+        join(homedir(), ".playground"),
+        join(homedir(), "x", ".claude", "worktrees", "y"),
+      ])
+        expect(await at(command, cwd)).toBeUndefined()
+    },
+  )
+
+  test.each([
     ["rm of mktemp's folder", 'T=$(mktemp -d); rm -rf "$T"'],
     ["rm of mktemp's quiet folder", 'T="$(mktemp -dq)"; rm -rf "$T"'],
     ["rm of mktemp's file", 'F=$(mktemp); rm -f "$F"'],

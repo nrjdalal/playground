@@ -324,8 +324,12 @@ export type OrgJob = Job & { org: string }
 
 const REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()])
 
-// One scope's row for a job the registry lacks as that org's job, by its name, or why it is refused.
-const orgJob = (
+// Whether a key names an org's own job: a jobs.<camelName> key the registry lacks, under any spelling, which only orgJob can say is the job's name.
+export const orgJobKey = (key: string): boolean =>
+  key.startsWith("jobs.") && !REGISTRY_KEYS.has(key)
+
+// One scope's row for a job the registry lacks as that org's job, by its name, or why it is refused; a write of the row checks it the same way, against the scope's own script folders.
+export const orgJob = (
   key: string,
   scope: string,
   value: unknown,
@@ -357,7 +361,7 @@ export const orgJobs = (
   const jobs: Record<string, OrgJob> = {}
   const refused: string[] = []
   for (const { key, scope, value } of rows) {
-    if (!key.startsWith("jobs.") || REGISTRY_KEYS.has(key)) continue
+    if (!orgJobKey(key)) continue
     const read = orgJob(key, scope, value, login, scripts[scope] ?? [])
     if ("refused" in read) refused.push(`jobs: refused ${scope} ${key}: ${read.refused}`)
     else if (jobs[read.name])

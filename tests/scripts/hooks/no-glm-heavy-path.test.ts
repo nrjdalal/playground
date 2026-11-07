@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { writeRoot } from "../../../packages/settings/src/folder"
 import { extensionsDir } from "../../../packages/settings/src/rendered"
 import { check, heavy, onGlm, refusal } from "../../../scripts/hooks/no-glm-heavy-path"
+import { storeWith } from "./render-set"
 
 const root = join(import.meta.dir, "..", "..", "..")
 const script = join(root, "scripts", "hooks", "no-glm-heavy-path.ts")
@@ -718,4 +719,253 @@ describe("which sessions it acts for", () => {
     expect(hook({ ...GLM, PLAYGROUND_ROLE: "" }, "s-none")).toEqual({ code: 0, err: "" })
     git(REPO, "reset", "-q", "HEAD", "web/next/src/y.ts")
   }, 30_000)
+})
+
+describe("a GLM session's org tools", () => {
+  // a data folder whose ext.links guards the made-up org acme-blue, and a checkout of one of its repositories
+  const DATA = storeWith(
+    join(DIR, "org-data"),
+    {},
+    { "ext.links": { "made-up-org": ["acme-blue"] } },
+  )
+  const ORG = join(DIR, "org-repo")
+  const ON_GLM = { ...GLM, PLAYGROUND_DATA_DIR: DATA }
+  const ON_CLAUDE = { PLAYGROUND_DATA_DIR: DATA }
+  beforeAll(() => {
+    git(DIR, "init", "-q", ORG)
+    git(ORG, "remote", "add", "origin", "git@github.com:acme-blue/demo.git")
+  })
+  const tool = (name: string, toolInput: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      cwd: REPO,
+      hook_event_name: "PreToolUse",
+      session_id: "s-none",
+      tool_input: toolInput,
+      tool_name: name,
+    })
+  const both = async (raw: string) => ({
+    claude: await refusal(raw, ON_CLAUDE, CALM),
+    glm: await refusal(raw, ON_GLM, CALM),
+  })
+
+  test.each([
+    { $label: "a headless claude run", command: "claude -p hi", names: "headless Claude run" },
+    {
+      $label: "a headless claude run through npx --package=",
+      command: "npx --package=@anthropic-ai/claude-code claude -p hi",
+      names: "headless Claude run",
+    },
+    {
+      $label: "curl to the tracker",
+      command: "curl -s https://api.linear.app/graphql",
+      names: "linear.app",
+    },
+    {
+      $label: "curl to the chat",
+      command: "curl https://slack.com/api/auth.test",
+      names: "slack.com",
+    },
+    {
+      $label: "wget of the docs",
+      command: "wget https://api.notion.com/v1/x",
+      names: "notion.com",
+    },
+    {
+      $label: "gh on an org repo",
+      command: "gh pr list -R acme-blue/demo",
+      names: "acme-blue/demo",
+    },
+    { $label: "gh api of an org", command: "gh api orgs/acme-blue/teams", names: "acme-blue" },
+    {
+      $label: "gh api of an org repo past options that take a value",
+      command: "gh api -X GET -H 'Accept: x' repos/acme-blue/demo/pulls",
+      names: "acme-blue/demo",
+    },
+    {
+      $label: "git clone of an org repo",
+      command: "git clone https://github.com/acme-blue/x",
+      names: "acme-blue",
+    },
+    {
+      $label: "gh on a repo it cannot read",
+      command: "gh pr list -R $R",
+      names: "--repo <owner>/<name>",
+    },
+    { $label: "gh search with no scope", command: "gh search prs fix", names: "every org" },
+    {
+      $label: "gh graphql scoped to a repo no org guards",
+      command: `gh api graphql -f query='{ repository(owner: "qzx-labs", name: "x") { pullRequest(number: 1) { id } } }'`,
+      names: "REST",
+    },
+    {
+      $label: "gh graphql mutation",
+      command: `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "PRRT_x"}) { thread { isResolved } } }'`,
+      names: "REST",
+    },
+  ])(
+    "$label is refused on GLM, naming it and the glm rule, and passes on Claude",
+    async ({ command, names }) => {
+      const { claude, glm } = await both(input(command))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain(names)
+      expect(glm).toContain("glm rule")
+      expect(glm).toContain("report to your lead")
+    },
+  )
+
+  test("a runner's call that resolves into an org script's folder is refused on GLM, whatever the runner, and passes on Claude", async () => {
+    const scripts = join(DIR, "scripts-repo")
+    mkdirSync(join(scripts, "packages", "scripts"), { recursive: true })
+    await Bun.write(
+      join(scripts, "package.json"),
+      JSON.stringify({
+        scripts: {
+          build: "turbo build",
+          dm: "bun --no-env-file packages/scripts/src/dm/cli.ts",
+          "linear:read": "bun --no-env-file packages/scripts/src/linear-read/cli.ts",
+        },
+      }),
+    )
+    for (const [command, names] of [
+      ["bun run linear:read MADE-1", "Linear script"],
+      ["bun linear:read MADE-1", "Linear script"],
+      ["pnpm linear:read MADE-1", "Linear script"],
+      ["npm run-script linear:read MADE-1", "Linear script"],
+      ["yarn linear:read MADE-1", "Linear script"],
+      ["bun run --cwd packages/scripts linear:read MADE-1", "Linear script"],
+      ["bun --cwd packages/scripts run linear:read MADE-1", "Linear script"],
+      ["cd packages/scripts && bun src/linear-read/cli.ts MADE-1", "Linear script"],
+      ["bun --cwd packages/scripts src/linear-read/cli.ts MADE-1", "Linear script"],
+      ["bun --cwd=packages/scripts src/linear-read/cli.ts MADE-1", "Linear script"],
+      ["bun dm send x.md", "DM sender"],
+      ["node ./packages/scripts/src/dm/cli.ts send", "DM sender"],
+      ["./packages/scripts/src/linear-read/cli.ts MADE-1", "Linear script"],
+      ["bun --cwd $D run linear:read MADE-1", "a folder a value it cannot read names"],
+      ["cd $D && bun run dm hi", "a folder a value it cannot read names"],
+      ["cd $D && bun run build", "a folder a value it cannot read names"],
+      ["cd $D && ./cli.ts MADE-1", "names its program"],
+      ["$P/cli.ts MADE-1", "names its program"],
+    ]) {
+      const { claude, glm } = await both(input(command, scripts))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain(names)
+      expect(glm).toContain("glm rule")
+    }
+    for (const command of [
+      "bun run build",
+      "bun run test:file tests/packages/scripts/src/linear-read/cli.test.ts",
+      "cd packages/scripts && git log -1 -- src/linear-read/",
+    ])
+      expect(await refusal(input(command, scripts), ON_GLM, CALM)).toBeUndefined()
+  })
+
+  test("a policy it cannot read refuses gh, git and a fetcher on GLM, naming the fix, and passes on Claude", async () => {
+    const broken = join(DIR, "broken-data")
+    writeRoot(extensionsDir(broken), new Map([["policy.json", "{not json"]]))
+    for (const command of ["gh pr list -R qzx-labs/x", "git status", "curl https://example.com"]) {
+      const raw = input(command)
+      expect(await refusal(raw, { PLAYGROUND_DATA_DIR: broken }, CALM)).toBeUndefined()
+      const glm = await refusal(raw, { ...GLM, PLAYGROUND_DATA_DIR: broken }, CALM)
+      expect(glm).toContain("cannot read which orgs ext.links guards")
+      expect(glm).toContain("glm rule")
+    }
+  })
+
+  test("a call it cannot parse that reads as an org tool names the glm rule", async () => {
+    expect(await check("{not json: gh pr list", ON_GLM, CALM)).toContain("glm rule")
+  })
+
+  test("git reaching an org's checkout past -C is refused on GLM, naming the org", async () => {
+    for (const command of [
+      "git --git-dir=../org-repo/.git log -1",
+      "GIT_DIR=../org-repo/.git git log -1",
+      "git --work-tree=../org-repo status",
+    ]) {
+      const { claude, glm } = await both(input(command))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+    }
+  })
+
+  test("git and gh in an org's checkout are refused on GLM, naming the org, and pass on Claude", async () => {
+    for (const command of ["git log -1", "gh pr list"]) {
+      const { claude, glm } = await both(input(command, ORG))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+    }
+  })
+
+  test.each([
+    { $label: "the tracker", name: "mcp__linear-shared__list_issues" },
+    {
+      $label: "the chat",
+      name: "mcp__slack-shared__conversations_history",
+      input: { channel: "C0" },
+    },
+    { $label: "the docs", name: "mcp__notion-shared__authenticate" },
+    {
+      $label: "the repos",
+      name: "mcp__github-shared__get_file_contents",
+      input: { owner: "qzx", repo: "x" },
+    },
+  ])(
+    "an MCP tool of $label is refused on GLM and passes on Claude",
+    async ({ name, input: given }) => {
+      const { claude, glm } = await both(tool(name, given))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain(name)
+      expect(glm).toContain("glm rule")
+    },
+  )
+
+  test.each([
+    { $label: "claude's version", command: "claude --version" },
+    { $label: "an interactive claude", command: "claude --resume" },
+    { $label: "a name in echo", command: "echo claude -p and https://slack.com" },
+    { $label: "curl to another host", command: "curl -s https://example.com/x" },
+    { $label: "gh on a repo no org guards", command: "gh pr view 1 -R qzx-labs/playground" },
+    { $label: "gh api of a repo no org guards", command: "gh api repos/qzx-labs/playground/pulls" },
+    {
+      $label: "gh search scoped to a repo no org guards",
+      command: "gh search prs fix --repo qzx-labs/playground",
+    },
+    { $label: "git in a checkout no org owns", command: "git status" },
+    { $label: "git searching its log for slack.com", command: "git log --grep slack.com" },
+    // a Linear script named, read, tested or committed, not run
+    {
+      $label: "sed of a Linear script",
+      command: "sed -n 1,5p packages/scripts/src/linear-read/cli.ts",
+    },
+    { $label: "ls of a Linear script's folder", command: "ls packages/scripts/src/linear-read/" },
+    {
+      $label: "rg in a Linear script's folder",
+      command: "rg token packages/scripts/src/linear-write/",
+    },
+    {
+      $label: "a test of a Linear script",
+      command: "bun run test:file tests/packages/scripts/src/linear-read/cli.test.ts",
+    },
+    {
+      $label: "git add of a Linear script",
+      command: "git add packages/scripts/src/linear-read/cli.ts",
+    },
+    {
+      $label: "git log of a Linear script's folder",
+      command: "git log --oneline -- packages/scripts/src/linear-write/",
+    },
+    { $label: "grep for the Linear scripts", command: "grep -n linear: package.json" },
+    { $label: "the account's own repo list", command: "gh repo list" },
+    { $label: "gh api of the signed-in user", command: "gh api user" },
+    {
+      $label: "gh api of the checkout's own repo by gh's placeholders",
+      command: "gh api repos/{owner}/{repo}/pulls",
+    },
+    {
+      $label: "gh api of a repo no org guards by its full URL",
+      command: "gh api https://api.github.com/repos/qzx-labs/playground/pulls",
+    },
+    { $label: "gh api's markdown render", command: "gh api markdown -f text=hi" },
+  ])("$label passes on GLM", async ({ command }) => {
+    expect(await refusal(input(command), ON_GLM, CALM)).toBeUndefined()
+  })
 })

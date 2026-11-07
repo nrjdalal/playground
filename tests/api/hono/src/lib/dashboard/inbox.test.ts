@@ -46,6 +46,7 @@ import {
   payloadOf,
 } from "../../../../../../packages/config/src/inbox"
 import { RELAY_ANSWER_KINDS } from "../../../../../../packages/message/src/index"
+import { writeFiles } from "../../../../../../packages/settings/src/folder"
 import { GUARD_SETTING_KEYS } from "../../../../../../packages/settings/src/guard-keys"
 import { judgeItem, putItem } from "../../../../../../packages/settings/src/items"
 import { loginPath } from "../../../../../../packages/settings/src/rendered"
@@ -65,7 +66,7 @@ const SLACK = {
 }
 
 const PREVIEWS = {
-  ask: { text: "Port DUNE-1401's fix to staging and main.", type: "ask" },
+  ask: { text: "Port MADEDUNE-1401's fix to staging and main.", type: "ask" },
   budget: { amount: "$40", type: "budget", why: "A second account for a week" },
   delete: { type: "delete", what: "47 stale worktrees", why: "They hold 30 GB" },
   schema: { shape: "inbox_item(id text, ref integer)", type: "schema" },
@@ -247,13 +248,13 @@ describe("what bun run ask takes", () => {
         preview: { link, text: "on it", to: "Cameron's thread" },
         title: "Reply to Cameron",
       }).success
-    expect(draft("https://linear.app/acme/issue/DUNE-2186/x")).toBe(true)
+    expect(draft("https://linear.app/acme/issue/MADEDUNE-2186/x")).toBe(true)
     expect(
       draft(
         "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100",
       ),
     ).toBe(true)
-    expect(draft("http://linear.app/acme/issue/DUNE-2186")).toBe(false)
+    expect(draft("http://linear.app/acme/issue/MADEDUNE-2186")).toBe(false)
     expect(draft("https://acme.slack.com/archives/C0MADEUP01/p1700000000000100")).toBe(false)
   })
 
@@ -778,7 +779,7 @@ describe("an answer", () => {
     expect(checkAnswer(slack, { action: "draft", text: "" })).toHaveProperty("message")
     const linear = item({
       kind: "draft",
-      preview: { link: "https://linear.app/acme/issue/DUNE-1/x", text: "hi", to: "DUNE-1" },
+      preview: { link: "https://linear.app/acme/issue/MADEDUNE-1/x", text: "hi", to: "MADEDUNE-1" },
     })
     expect(checkAnswer(linear, { action: "draft" })).toHaveProperty("message")
     expect(checkAnswer(linear, { action: "send" })).toEqual({
@@ -789,7 +790,7 @@ describe("an answer", () => {
     expect(savesDraft({ link: CHANNEL, text: "hi", to: "@Merritt" })).toBe(true)
     expect(savesDraft({ noLink: "a new DM", text: "hi", to: "@Merritt" })).toBe(true)
     expect(
-      savesDraft({ link: "https://linear.app/acme/issue/DUNE-1/x", text: "hi", to: "x" }),
+      savesDraft({ link: "https://linear.app/acme/issue/MADEDUNE-1/x", text: "hi", to: "x" }),
     ).toBe(false)
     // a draft is a go: its poster closes it with the channel link the draft tool returns
     expect(isGo("draft")).toBe(true)
@@ -1567,6 +1568,40 @@ describe("a guard decision for a job (PG-1196)", () => {
   })
 })
 
+// PG-1363: the guard decision also places an org's own job, a whole row the setting's write then checks against the org's script folders.
+describe("a guard decision for an org's own job (PG-1363)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
+  const row = {
+    callsModel: false,
+    command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+    description: "Watches a made-up org's queue.",
+    enabled: true,
+    heartbeat: "ops-watch",
+    schedule: { every: 60 },
+  }
+
+  test("takes a whole job row for a job the registry lacks, or no value", () => {
+    expect(takes({ key: "jobs.opsWatch", value: row })).toBe(true)
+    expect(takes({ key: "jobs.opsWatch", value: { ...row, config: { prefixes: ["X"] } } })).toBe(
+      true,
+    )
+    expect(takes({ key: "jobs.opsWatch", value: undefined })).toBe(true)
+  })
+
+  test("refuses a row that is no job, a config that is no object, and a key that is no job's name", () => {
+    for (const change of [
+      { key: "jobs.opsWatch", value: { enabled: true } },
+      { key: "jobs.opsWatch", value: { ...row, config: ["X"] } },
+      { key: "jobs.opsWatch", value: { ...row, madeUp: 1 } },
+      { key: "jobs.ops-watch", value: row },
+      { key: "jobs.", value: row },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+})
+
 // Made-up accounts: two Claude rows, one of them own, and a GLM row whose label is no Claude email.
 const ACCOUNTS = [
   { email: "pat@example.com", label: "work", renews: 17 },
@@ -1657,7 +1692,7 @@ describe("slackPlace", () => {
 
   test("is null for no link, a place outside Slack, or a Slack link that names no conversation", () => {
     expect(slackPlace(undefined)).toBeNull()
-    expect(slackPlace("https://linear.app/acme/issue/DUNE-1401")).toBeNull()
+    expect(slackPlace("https://linear.app/acme/issue/MADEDUNE-1401")).toBeNull()
     expect(slackPlace("https://app.slack.com/client/T0000000000")).toBeNull()
     expect(slackPlace("https://evil.example/client/T0000000000/C0MADEUP01")).toBeNull()
   })
@@ -2122,7 +2157,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { action: "draft" },
         { actor, deliver: delivered, upload },
       )
-      const linear = await filedDraft("https://linear.app/acme/issue/DUNE-1401")
+      const linear = await filedDraft("https://linear.app/acme/issue/MADEDUNE-1401")
       await store.answerItem(
         db,
         linear.id,
@@ -3204,19 +3239,19 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       ok: false,
     })
     const settled = await store.settleItem(db, ticket.id, {
-      link: "https://linear.app/team/issue/CEDAR-1",
+      link: "https://linear.app/team/issue/MADECEDAR-1",
     })
     expect(settled.ok && settled.item.answer).toMatchObject({
       choice: "settled",
-      link: "https://linear.app/team/issue/CEDAR-1",
+      link: "https://linear.app/team/issue/MADECEDAR-1",
     })
   })
 
   test("a link's label is kept beside it, needs the link, and is one line", async () => {
     const ticket = await post(decision(PREVIEWS.ticket))
     await store.answerItem(db, ticket.id, { action: "approve" }, { actor })
-    const link = "https://linear.app/acme/issue/DUNE-2186"
-    expect(await store.ackItem(db, ticket.id, { label: "Filed DUNE-2186" })).toMatchObject({
+    const link = "https://linear.app/acme/issue/MADEDUNE-2186"
+    expect(await store.ackItem(db, ticket.id, { label: "Filed MADEDUNE-2186" })).toMatchObject({
       code: "VALIDATION_ERROR",
       ok: false,
     })
@@ -3230,8 +3265,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       code: "VALIDATION_ERROR",
       ok: false,
     })
-    const acked = await store.ackItem(db, ticket.id, { label: " Filed DUNE-2186 ", link })
-    expect(acked.ok && acked.item.answer).toMatchObject({ link, linkLabel: "Filed DUNE-2186" })
+    const acked = await store.ackItem(db, ticket.id, { label: " Filed MADEDUNE-2186 ", link })
+    expect(acked.ok && acked.item.answer).toMatchObject({ link, linkLabel: "Filed MADEDUNE-2186" })
     const other = await post(decision(PREVIEWS.delete))
     const settled = await store.settleItem(db, other.id, {
       label: "Closed acme/app#12",
@@ -3247,14 +3282,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const ticket = await post(decision(PREVIEWS.ticket))
     await store.answerItem(db, ticket.id, { action: "approve" }, { actor })
     await store.ackItem(db, ticket.id, {
-      label: "Filed DUNE-2186",
-      link: "https://linear.app/acme/issue/DUNE-2186",
+      label: "Filed MADEDUNE-2186",
+      link: "https://linear.app/acme/issue/MADEDUNE-2186",
     })
     const again = await store.ackItem(db, ticket.id, {
-      link: "https://linear.app/acme/issue/DUNE-2187",
+      link: "https://linear.app/acme/issue/MADEDUNE-2187",
     })
     expect(again.ok && again.item.answer).toMatchObject({
-      link: "https://linear.app/acme/issue/DUNE-2187",
+      link: "https://linear.app/acme/issue/MADEDUNE-2187",
     })
     expect(again.ok && again.item.answer && "linkLabel" in again.item.answer).toBe(false)
   })
@@ -5500,6 +5535,39 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         set: {
           exitCode: 0,
           line: `${key} at made-up-me is already {"enabled":true}, so nothing changed`,
+        },
+      })
+    })
+
+    test("an org's own job's Approve places its whole row, and approving the same row again changes nothing (PG-1363)", async () => {
+      const data = folder()
+      writeFiles(data, "acme-test", new Map([["scripts/ops-watch/cli.ts", "console.log(1)"]]), {
+        author: "owner",
+        reason: "ship the script",
+      })
+      const key = "jobs.opsWatch"
+      const row = {
+        callsModel: false,
+        command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+        description: "Watches an org's own queue.",
+        enabled: true,
+        heartbeat: "ops-watch",
+        schedule: { every: 60 },
+      }
+      const card = { ...GUARD, key, scope: "acme-test", value: row }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        set: { exitCode: 0, line: expect.stringContaining(`set ${key} at acme-test to {`) },
+      })
+      const again = await post(decision(card))
+      expect((await approve(again.id, again.updatedAt, data)).ok).toBe(true)
+      expect((await store.getItem(db, again.id))?.answer).toMatchObject({
+        set: {
+          exitCode: 0,
+          line: expect.stringMatching(
+            new RegExp(`^${key} at acme-test is already \\{.*\\}, so nothing changed$`),
+          ),
         },
       })
     })

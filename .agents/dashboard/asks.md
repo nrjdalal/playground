@@ -429,14 +429,14 @@
 
 - A `guard` decision asks the owner to set a guard setting, a key a guard reads to allow or deny a call, since no session can write one (`no-extensions-write` refuses it, `scripts/hooks/README.md`): any session posts the card, and only the owner's Approve writes the setting.
   The Ops lead's own set of `glm.readOnlyLoad5`, or of a job's interval alone, is the one exception, so neither needs a card.
-  Its `key` is one of `GUARD_SETTING_KEYS` (`packages/settings/src/guard-keys.ts`, which the hook's `GUARD_KEYS` matches) or a registry job's `jobs.<name>`, `scope` is the owner's login or an org (core changes by a pull request), `value` is what the key's schema takes,
-  checked as it is posted (a job takes `{"enabled": true|false}` alone),
+  Its `key` is one of `GUARD_SETTING_KEYS` (`packages/settings/src/guard-keys.ts`, which the hook's `GUARD_KEYS` matches), a registry job's `jobs.<name>` or an org's own job's `jobs.<camelName>` (a job the registry lacks), `scope` is the owner's login or an org (core changes by a pull request), `value` is what the key's schema takes,
+  checked as it is posted (a registry job takes `{"enabled": true|false}` alone, an org's own job a whole job row, which Approve's write then checks against that org's script folders and refuses at the login's scope or when another org already adds the job),
   or left out to take the setting back to its default, and `why` says why (`guardSchema` in `api/hono/src/lib/dashboard/inbox.ts`);
   Edit is refused.
   The card shows the key, the scope and the value as its JSON, exactly as Approve writes them.
   Approve takes `seen`, the `updatedAt` of the card the owner read, so an Approve with no `seen`, or one read before the poster's `bun run ask edit`, is refused and writes nothing.
   It is claimed as an accept's is, then writes the setting at its scope in the stack's own extensions, a fixture stack's own, through `setSetting` (or `resetSetting` for no value) in `@packages/settings`, its commit's reason `the owner approved it in the Inbox (#iN)`;
-  a job's `enabled` goes over the row its scope holds, never the registry's fields, so the job keeps the registry's command and schedule (`settingsFor`'s merge, `.agents/dashboard/dashboard.md`'s Jobs), and a value its scope already holds writes nothing and reads `<key> at <scope> is already <value>, so nothing changed`.
+  a registry job's `enabled` goes over the row its scope holds, never the registry's fields, so the job keeps the registry's command and schedule (`settingsFor`'s merge, `.agents/dashboard/dashboard.md`'s Jobs), an org's own job's whole row replaces the row its scope holds, and a value its scope already holds writes nothing and reads `<key> at <scope> is already <value>, so nothing changed`.
   The answer keeps `set: {exitCode, line}`, and the card reads `Guard setting: <line>` green or `Guard setting failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`, and after a failed one tells its lead.
 
   ```bash
