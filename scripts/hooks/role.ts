@@ -8,6 +8,7 @@ import {
   FACTORY_ROLE_OF_KIND,
   isRosterKind,
   roleOfName,
+  type RosterKind,
   setSessionNames,
 } from "../../packages/config/src/kinds"
 import { dataDirOf } from "../../packages/env/src/data-dir"
@@ -56,21 +57,30 @@ export async function registryName(
   }
 }
 
-// The role the roster's kind for a name gives, or "" when the roster has no entry of that name with a kind on the list, or cannot be read.
-export async function rosterRole(
+// The roster's kind for a name, or undefined when the roster has no entry of that name with a kind on the list, or cannot be read.
+export async function rosterKind(
   name: string,
   environment: Environment = process.env,
-): Promise<string> {
+): Promise<RosterKind | undefined> {
   const path = join(dataDirOf(environment), "roster.json")
   try {
     const roster = (await Bun.file(path).json()) as {
       agents?: { kind?: unknown; name?: unknown }[]
     }
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind
-    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : ""
+    return isRosterKind(kind) ? kind : undefined
   } catch {
-    return ""
+    return
   }
+}
+
+// The role the roster's kind for a name gives, or "" when the roster has no entry of that name with a kind on the list, or cannot be read.
+export async function rosterRole(
+  name: string,
+  environment: Environment = process.env,
+): Promise<string> {
+  const kind = await rosterKind(name, environment)
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : ""
 }
 
 // The names of the roster's live rows (`live` in scripts/roster-statuses.json, read here rather than imported, so role.ts loads from a bare checkout), or none when either cannot be read; an ended row's name (probe-dashboard) is an everyday word again.
