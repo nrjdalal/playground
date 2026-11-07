@@ -192,7 +192,8 @@ fi
 if [ "${1:-}" = preempt ]; then
   [ $# -eq 1 ] || { echo "usage: run-slot.sh preempt" >&2; exit 2; }
   switch_on run-slot.focus || { echo "run-slot.sh: no focus stands (run-slot.focus), so preempt stops nothing" >&2; exit 2; }
-  h=$(cut -d' ' -f1 "$OPS/run-slot.focus")
+  h=
+  read -r h _ 2>/dev/null < "$OPS/run-slot.focus"
   for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-commit run-slot-clone run-slot-quick $(ls "$OPS" 2>/dev/null | sed -n 's/^\(run-slot-model-[0-9]*\)\.holder$/\1/p' | sort -u); do
     [ -f "$OPS/$s.holder" ] && read -r who pid _ < "$OPS/$s.holder" || continue
     child=$(cat "$OPS/$s.child" 2>/dev/null)
@@ -1520,10 +1521,12 @@ prio_holder() {
   case "$m" in '' | *[!0-9]*) return 1 ;; esac
   [ $(( $(date +%s) - m )) -lt 3600 ] && cut -d' ' -f1 "$OPS/run-slot.priority"
 }
-# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not
+# the session run-slot.focus names while it stands (playground focus); nothing, exit 1, when it does not or goes between the check and the read (issue 1491)
 focus_holder() {
   switch_on run-slot.focus || return 1
-  cut -d' ' -f1 "$OPS/run-slot.focus"
+  local h=
+  read -r h _ 2>/dev/null < "$OPS/run-slot.focus"
+  [ -n "$h" ] && printf '%s\n' "$h"
 }
 # true while focus holds this run: a heavy lane waits for every session but the focus one and ops' upkeep (ops-tick's beats, the dashboard), which keep running (dispatcher, 5 Nov)
 focus_holds() {
