@@ -25,9 +25,11 @@ import {
   nextDue,
   resultOf,
   runner,
+  idleCompact,
   switchAccount,
   trashPurge,
 } from "../../../../../packages/scripts/src/ops-tick/tick"
+import { NO_CHECKOUT } from "../../../../../packages/scripts/src/playground/probe"
 import { storeWith } from "../../../../scripts/hooks/render-set"
 import { OLD, OLD_AS_NAMES, SEEDED_NAMES } from "../../../../session-names"
 import { watchTorn } from "../torn-reads"
@@ -849,37 +851,40 @@ describe("the beats that send no line", () => {
     )
   })
 
-  test("the idle compact runs the idle-compact bin straight on the live machine every 5 minutes and logs each line it prints", async () => {
+  test("the idle compact runs the Dashboard checkout's idle-compact bin straight every 5 minutes and logs each line it prints", async () => {
     expect(beat("idle-compact").cron).toBe("*/5 * * * *")
     const ops = scratch()
     const said = "compacted aaaaaa-worker: 250k tokens, idle 55 min\n"
     const { ctx, runs, sent } = fake(ops, at(20, 5), { "idle-compact": said })
-    await beat("idle-compact").run(ctx)
+    await idleCompact(ctx, "/desk")
     expect(runs).toEqual([
       [
         "env",
         "PLAYGROUND_LIVE_READS=1",
         "bun",
+        "--cwd",
+        "/desk/api/hono",
         "--no-env-file",
-        "/repo/api/hono/src/bin/idle-compact.ts",
+        "/desk/api/hono/src/bin/idle-compact.ts",
       ],
     ])
     expect(runs[0]).not.toContain("run")
-    expect(runs[0]).toContain("/repo/api/hono/src/bin/idle-compact.ts")
+    expect(runs[0]).toContain("/desk/api/hono/src/bin/idle-compact.ts")
     expect(sent).toEqual([])
     expect(await Bun.file(join(ops, "log", "idle-compact.log")).text()).toContain(
       "compacted aaaaaa-worker: 250k tokens, idle 55 min",
     )
   })
 
-  test("the idle compact writes no log line on a quiet pass, and a failed pass reads failed", async () => {
+  test("the idle compact refuses with no Dashboard checkout, writes no log line on a quiet pass, and a failed pass reads failed", async () => {
     const ops = scratch()
-    await beat("idle-compact").run(fake(ops, at(20, 5)).ctx)
+    await expect(idleCompact(fake(ops, at(20, 5)).ctx, null)).rejects.toThrow(NO_CHECKOUT)
+    expect(existsSync(join(ops, "log", "idle-compact.log"))).toBe(false)
+    const quiet = fake(ops, at(20, 5))
+    await idleCompact(quiet.ctx, "/desk")
     expect(existsSync(join(ops, "log", "idle-compact.log"))).toBe(false)
     const failing = fake(ops, at(20, 10), { "idle-compact": { code: 1, err: "herdr is down\n" } })
-    await expect(beat("idle-compact").run(failing.ctx)).rejects.toThrow(
-      "idle-compact: herdr is down",
-    )
+    await expect(idleCompact(failing.ctx, "/desk")).rejects.toThrow("idle-compact: herdr is down")
   })
 })
 
