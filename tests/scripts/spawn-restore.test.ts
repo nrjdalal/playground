@@ -108,20 +108,22 @@ describe("restore resumes every manager its records name, or says which it left 
           )
           if (name !== "worker-c") writeFileSync(lw(home, "runtimes", name), "herdr\n")
         }
-        writeFileSync(lw(home, "runtimes", "optimizer"), "cmux\n")
+        // a pin holding another word, or none, skips no record: every session resumes in herdr
+        writeFileSync(lw(home, "runtimes", "optimizer"), "made-up\n")
       },
     )
     expect(r.out).toBe(
       [
         "skipped builder: its roster row reads ended",
-        "skipped optimizer: it runs in cmux, not herdr",
+        "restored optimizer",
         "restored planner",
         "skipped worker-a: its resume record has no exec line",
         "skipped worker-b: its exec line is not a resume restore runs",
-        "skipped worker-c: it has no runtime pin",
+        "skipped worker-c: its exec line is not a resume restore runs",
         "",
       ].join("\n"),
     )
     expect(r.code).toBe(0)
+    expect(readFileSync(lw(r.home, "runtimes", "optimizer"), "utf8")).toBe("herdr\n")
   })
 })

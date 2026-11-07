@@ -2,13 +2,10 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, machine } from "./run-slot-fake"
+import { SCRIPT, machine, slots } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
-
-const slots = (m: ReturnType<typeof machine>) =>
-  Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() }).stdout.toString()
 
 // Claude Code's sandbox refuses the sysctl command's name lookup, every kern.memorystatus_* reading, the setuid ps, a raised priority, and a signal to any process outside it; the sandboxed machine's fakes refuse the first three.
 describe("run-slot.sh under Claude Code's sandbox", () => {
