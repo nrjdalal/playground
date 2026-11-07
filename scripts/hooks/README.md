@@ -467,7 +467,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD commit` reads as a commit.
   An Opus path's refusal comes first, since that change moves to a Claude worker whatever the load.
   A session is on GLM when its `ANTHROPIC_BASE_URL` points at `api.z.ai`, or when the backend pin spawn.sh keeps under its registry name reads `glm`; a Claude session commits those paths as before.
-  It fails closed only on a call that reads as a git commit or push, an org tool (below), or over that load as an install or clone (one whose directory, paths or refs it cannot read, or whose input does not parse), and passes every other call.
+  It fails closed only on a call that reads as a git commit or push, an org tool or a database client whose host it cannot read (below), a call it cannot parse inside a guarded checkout (below), or over that load as an install or clone (one whose directory, paths or refs it cannot read, or whose input does not parse), and passes every other call.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
 - A factory session on GLM keeps off every org's tracker, chat, docs, repos, checkouts and databases, and off a headless Claude run, as the **glm** rule says: the same hook refuses each such call, naming the rule and its fix: report to your lead, who moves the task to a Claude worker.
   It refuses a headless `claude` (`-p` or `--print`, read by `headless` in `scripts/hooks/no-headless-login.ts`), and Claude Code's npm package run that way by a package runner (`npx`, `npx --package=`, `bunx`, `pnpm dlx`).
@@ -502,6 +502,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   Out of its reach, as residual risk: a URL held in a variable, a program named through one (`G="git -C <dir>"; $G log`), a program that fetches by itself (`bun -e`, Python's urllib), and an org script found through a `PATH` the call sets or run through a link the call makes, each tracked as its own follow-up issue.
   So are a read path held in a variable or built by a substitution the hook cannot read (xargs's `-I` word and `~-` included), a recursive read of a folder above a checkout (`rg` or a `Grep` on the parent, a `**` glob, an absolute `Glob` pattern) and a connection named inside a client's own input (`\connect` in a heredoc or an `-f` file), each tracked as its own follow-up issue.
   A glob or brace past its 200-match or 64-alternative cap leaves its further paths unchecked, tracked with the recursive read.
+  A database URL in a container runner's own words (an `-e` value) goes unchecked once a client word follows, tracked as its own follow-up issue.
 
 ## no-headless-login
 
