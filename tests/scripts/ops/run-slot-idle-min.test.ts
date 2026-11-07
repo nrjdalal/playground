@@ -29,6 +29,12 @@ describe("run-slot.idle-min sets the CPU idle bar for slots 2 to 4", () => {
     expect(slots(withBar("15", 14.9))).toBe("1\n")
   })
 
+  test("the ends 0 and 100 are bars too: 0 opens them at 1% idle, and 100 shuts them at 99.9% and opens them at 100%", () => {
+    expect(slots(withBar("0", 1))).toBe("4\n")
+    expect(slots(withBar("100", 99.9))).toBe("1\n")
+    expect(slots(withBar("100", 100))).toBe("4\n")
+  })
+
   test.each(["abc", "101", "-1", "15.5", ""])(
     "a value that is no whole number from 0 to 100, %j, keeps the bar at 40",
     (value) => {
@@ -60,7 +66,7 @@ describe("run-slot.idle-min sets the CPU idle bar for slots 2 to 4", () => {
     const r = await set(m, "ops", "idle-max", "--reason", "x")
     expect(r.code).toBe(2)
     expect(r.err).toContain(
-      "no switch idle-max (3-off, 4-off, clone-off, focus, idle-min, load5-cap, single, off, slot-off)",
+      "no switch idle-max (3-off, 4-off, clone-off, focus, idle-min, load1-max, load5-cap, single, off, slot-off)",
     )
   })
 })
