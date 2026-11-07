@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  asksDecision,
   check,
   type Deps,
   DASHBOARD_DEADLINE_MS,
@@ -400,6 +401,26 @@ describe("what passes", () => {
         },
       ),
     ).toBe(`${REASON} (#i42 is done, not open)`)
+  })
+
+  // a table row answers its own cell's question, so its ? is no ask; a row's other words still are; on 7 Nov two such rows beside a progress card each brought a copy of the card (#1486)
+  test("a question in a markdown table row is no ask, while a plain question line and a row's ask phrase still are", () => {
+    expect(asksDecision("| Check | Result |\n|---|---|\n| Did it still answer then? | yes |")).toBe(
+      false,
+    )
+    expect(asksDecision("Did it still answer then?")).toBe(true)
+    expect(asksDecision("| Step | Who |\n|---|---|\n| Merge now | your call |")).toBe(true)
+  })
+
+  test("a table of answered questions naming a progress card passes", async () => {
+    expect(
+      await stop(
+        "| Check | Result |\n|---|---|\n| Did it still answer then? | yes |\n\nProgress is in #i42.",
+        {
+          statuses: { "#i42": "done" },
+        },
+      ),
+    ).toBeUndefined()
   })
 
   test("a reply naming a closed item and an open one", async () => {

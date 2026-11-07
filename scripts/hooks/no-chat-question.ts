@@ -58,6 +58,8 @@ const ACTION = new RegExp(
 )
 // A ? that is not inside a word or a URL's query (x?status=todo).
 const QUESTION = /\?(?![\w/=&%#-])/
+// A markdown table row, whose ? is a cell's own ("| Did it still answer then? | yes |"), a question the row answers, never one put to the owner.
+const TABLE_LINE = /^\s*\|/
 const BLOCKQUOTE = /^\s*>/
 // A fenced code block, or one left open to the reply's end.
 const FENCE = /```[\s\S]*?(?:```|$)/g
@@ -145,7 +147,7 @@ export function asksDecision(reply: string, names: string[] = [], owner: string[
     return (
       SAY.test(own) ||
       PHRASES.test(own) ||
-      QUESTION.test(own) ||
+      (!TABLE_LINE.test(own) && QUESTION.test(own)) ||
       ACTION.test(own) ||
       !!toOwnerLine?.test(own)
     )
