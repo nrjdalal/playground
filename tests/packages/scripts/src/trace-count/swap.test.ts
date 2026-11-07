@@ -25,9 +25,7 @@ describe("the swap pass", () => {
     )
     expect(swap("@qmarsh and tbell").text).toBe("@octo-avery and octo-blair")
     expect(swap("in U0MADE0402 and C0MADE0403").text).toBe("in U0MADEUP01 and C0MADEUP02")
-    expect(swap("MADEVX-12, madeops-7 and MADEOPS-").text).toBe(
-      "MADEBRAVO-12, madeacme-7 and MADEOPS-",
-    )
+    expect(swap("MADEVX-12, madeops-7 and MADEOPS-").text).toBe("MADEB-12, madea-7 and MADEOPS-")
     expect(swap("Vantorix Labs ships vantorix, VANTORIX").text).toBe("Acme ships acme, ACME")
   })
 
@@ -54,7 +52,7 @@ describe("the swap pass", () => {
   test("each Linear team takes its own made-up team, so keys stay distinct and sort as before", () => {
     const keys = ["MADEVX-2", "MADEOPS-2", "MADEVX-1", "MADEOPS-10"]
     const swapped = keys.map((key) => swap(key).text)
-    expect(swapped).toEqual(["MADEBRAVO-2", "MADEACME-2", "MADEBRAVO-1", "MADEACME-10"])
+    expect(swapped).toEqual(["MADEB-2", "MADEA-2", "MADEB-1", "MADEA-10"])
     expect(new Set(swapped).size).toBe(keys.length)
     const order = (list: string[]) =>
       list.map((_, i) => i).sort((a, b) => list[a]!.localeCompare(list[b]!))
@@ -63,9 +61,9 @@ describe("the swap pass", () => {
 
   test("no stand-in matches a list entry, the teams' included, or the pass refuses to run", () => {
     expect(() => swapper(LIST, REPOS)).not.toThrow()
-    expect(() =>
-      swapper({ ...LIST, linearKeys: ["MADEVX", "MADEOPS", "MADEBRAVO"] }, REPOS),
-    ).toThrow("a stand-in matches the list's linearKeys")
+    expect(() => swapper({ ...LIST, linearKeys: ["MADEVX", "MADEOPS", "MADEB"] }, REPOS)).toThrow(
+      "a stand-in matches the list's linearKeys",
+    )
   })
 
   test("a value inside a longer word, and each public repository, stay", () => {
