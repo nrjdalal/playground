@@ -1522,6 +1522,48 @@ describe("prepare-only starts", () => {
     ])
   })
 
+  test("P14: a prepare-only worker that ends while its ticket stays in the prepare map unlisted starts no second one that day", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    s.later(1)
+    row(s, { mode: "prepare", status: "ended" })
+    s.relay(1, {}, { "MADE-5": REGISTERED }, [])
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(2, {}, { "MADE-5": REGISTERED }, [])
+    await s.pass(PREPARE)
+    expect(s.titles()).toEqual(["MADE-5 prepare"])
+    expect(s.sent.at(-1)).toBe(
+      "Not starting MADE-5 again today: worker-made-up-1, its session, ended today",
+    )
+  })
+
+  test("P15: a High, Medium or Low claim waits while a focus stands, its session still prepare-only, and claims on the beat after the focus goes", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    writeFileSync(
+      join(s.data, "focus.json"),
+      JSON.stringify(focusFile("the owner's demo", 30, "ff-other")),
+    )
+    s.later(1)
+    s.relay(1, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.sent.at(-1)).toBe("Waiting on MADE-5 (Medium): focus stands for ff-other")
+    expect([s.sent.some((t) => t.startsWith("claim ")), s.state().prepared]).toEqual([
+      false,
+      { "MADE-5": "worker-made-up-1" },
+    ])
+    rmSync(join(s.data, "focus.json"))
+    s.later(1)
+    s.relay(2, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.sent.slice(-2)).toEqual([
+      "claim MADE-5 now: the digest lists it, so take it and go on to the PR",
+      "Claimed MADE-5: worker-made-up-1, its prepare-only worker, takes it now",
+    ])
+    expect(s.state().prepared).toEqual({})
+  })
+
   test("P13: a line someone else took while its ticket waits in the prepare map stops its prepare-only worker", async () => {
     const s = prepared()
     await s.pass(PREPARE)

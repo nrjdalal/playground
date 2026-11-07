@@ -103,6 +103,7 @@ describe("no-prepare-write", () => {
     "gh api repos/made-up/app/pulls",
     "gh pr diff 1",
     "gh pr checks 1",
+    "gh pr checkout 1",
     "gh pr status",
     "gh issue view 1",
     "gh issue list --state open",

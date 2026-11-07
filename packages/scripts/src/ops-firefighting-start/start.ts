@@ -110,6 +110,8 @@ export async function startPass({
     await save()
     await ctx.send(to, text)
   }
+  const rosterSet = (session: string, ...pairs: string[]) =>
+    ctx.run([process.execPath, join(ctx.repo, "scripts", "roster.ts"), "set", session, ...pairs])
   const ticket = new RegExp(
     `^(?:${config.prefixes.map((p) => p.replace(/[^A-Za-z0-9]/g, "")).join("|")})-\\d+$`,
   )
@@ -189,13 +191,7 @@ export async function startPass({
     if (!row || ENDED.has(row.status ?? "")) continue
     const want = preparing.has(session) ? "prepare" : ""
     if ((row.mode ?? "") === want) continue
-    const set = await ctx.run([
-      process.execPath,
-      join(ctx.repo, "scripts", "roster.ts"),
-      "set",
-      session,
-      `mode=${want}`,
-    ])
+    const set = await rosterSet(session, `mode=${want}`)
     if (set.code !== 0)
       await tell(
         id,
@@ -223,9 +219,11 @@ export async function startPass({
     if (!listed.has(line.id) && line.open === true)
       await tell(line.id, `Skipped ${line.id}: no digest of the tracker lists it`)
   const lines = matched.filter((l) => listed.has(l.id))
-  // a prepare-only worker's end, its row still mode=prepare, holds nothing off: the ticket's full start may follow the same day
+  // a prepare-only worker's end, its row still mode=prepare, holds off no full start once the digest lists the ticket, while a ticket still only in the prepare map starts no second prepare-only worker that day
   const endedToday = (id: string) =>
-    rowsFor(id).find((r) => r.name && r.mode !== "prepare" && state.ended[r.name] === day)
+    rowsFor(id).find(
+      (r) => r.name && !(r.mode === "prepare" && listed.has(id)) && state.ended[r.name] === day,
+    )
   // A ticket is held by a live row that carries it or whose title it leads, or by the session this job started for it while that row is not ended, or not yet written.
   const held = (id: string) =>
     rowsFor(id).some((r) => !ENDED.has(r.status ?? "")) ||
@@ -237,6 +235,11 @@ export async function startPass({
   const open = lines.filter(
     (l) => (l.open === true || state.reopened[l.id] !== undefined) && l.theirs !== true,
   )
+  // an Urgent session this job started that is still live holds every lower line, focus file or not, since an Urgent ticket outranks the rest
+  const liveUrgent = open
+    .filter(isUrgent)
+    .map((l) => state.started[l.id])
+    .find((s) => s !== undefined && !ENDED.has(rowOf(s)?.status ?? ""))
   // A prepared ticket the digest now lists is claimed by its own prepare-only session, never started again: outside the last stretch the session is told to claim it now and its row's mode drops; in the last stretch the owner is asked first, as for a start; a line someone else took or closed stops the session.
   for (const [id, session] of Object.entries(state.prepared)) {
     if (!listed.has(id)) continue
@@ -267,16 +270,21 @@ export async function startPass({
       )
       continue
     }
+    // a High, Medium or Low claim waits while any focus stands or an Urgent session the job started lives, as its start would, its session still prepare-only
+    if (!line || !isUrgent(line)) {
+      const holder = (await standing(data, ctx.now))?.session ?? liveUrgent
+      if (holder && holder !== session) {
+        await tell(
+          id,
+          `Waiting on ${id} (${line?.urgency ?? "no urgency"}): focus stands for ${holder}`,
+        )
+        continue
+      }
+    }
     delete state.prepared[id]
     await save()
     await ctx.send(session, `claim ${id} now: the digest lists it, so take it and go on to the PR`)
-    const set = await ctx.run([
-      process.execPath,
-      join(ctx.repo, "scripts", "roster.ts"),
-      "set",
-      session,
-      "mode=",
-    ])
+    const set = await rosterSet(session, "mode=")
     await tell(
       id,
       `Claimed ${id}: ${session}, its prepare-only worker, takes it now${set.code === 0 ? "" : `; its roster row keeps mode=prepare: ${lastLine(set.out)}`}`,
@@ -322,11 +330,6 @@ export async function startPass({
     .sort((a, b) => rankOf(a) - rankOf(b) || (a.shownAt ?? Infinity) - (b.shownAt ?? Infinity))
   // An Urgent start passes this job's own focus, which spawn.sh's start file never does: the focus is lowered for the start and raised again for the session that held it.
   let heldBy: string | undefined
-  // an Urgent session this job started that is still live holds every lower line, focus file or not, since an Urgent ticket outranks the rest
-  const liveUrgent = open
-    .filter(isUrgent)
-    .map((l) => state.started[l.id])
-    .find((s) => s !== undefined && !ENDED.has(rowOf(s)?.status ?? ""))
   // an Urgent that reaches its start in this pass holds every later High, Medium or Low in it, named as the focus raised after the loop will name it: the session of the last such ticket by ID
   let urgentId: string | undefined
   let urgentStarted: string | undefined
@@ -424,14 +427,7 @@ export async function startPass({
     delete state.named[id]
     inProgress++
     await save()
-    const set = await ctx.run([
-      process.execPath,
-      join(ctx.repo, "scripts", "roster.ts"),
-      "set",
-      session,
-      `ticket=${id}`,
-      ...(prepareOnly ? ["mode=prepare"] : []),
-    ])
+    const set = await rosterSet(session, `ticket=${id}`, ...(prepareOnly ? ["mode=prepare"] : []))
     const unset =
       set.code === 0
         ? ""

@@ -34,7 +34,7 @@ const SLACK_READ =
 // A GitHub MCP tool that only reads, by its verb or its _read suffix; every other GitHub tool writes.
 const GITHUB_READ = /^(?:get_|list_|search_)|_read$/
 // The `gh pr` and `gh issue` verbs that only read.
-const GH_READS = new Set(["checks", "diff", "list", "status", "view"])
+const GH_READS = new Set(["checkout", "checks", "diff", "list", "status", "view"])
 
 // The session's roster row's mode, read from the data folder's roster by its registry name; undefined when either does not read.
 async function modeOf(sessionId: unknown, environment: Environment): Promise<string | undefined> {
