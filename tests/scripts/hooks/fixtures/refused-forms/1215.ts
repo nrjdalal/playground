@@ -1,6 +1,6 @@
 import type { Group } from "./_shared"
 
-// #1215: a writing redirect's target through a variable is judged by the path the hook holds for it, an assignment's, a bare export's and a for loop's literal words inside its body each in turn, so a variable the line sets to the root names the root; rows are data, as refused-forms.ts says.
+// #1215: a writing redirect's target through a variable is judged by what the value the hook holds for it names, an assignment's, a bare export's and a for loop's literal words inside its body each in turn, so a variable the line sets to the root names the root; rows are data, as refused-forms.ts says.
 export const groups: Group[] = [
   {
     folders: ["process home", "process worktree"],
