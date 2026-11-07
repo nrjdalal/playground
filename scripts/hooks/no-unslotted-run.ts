@@ -14,6 +14,7 @@ import {
   GIT_TAKES,
   knownVariables,
   lex,
+  parse,
   parseFlags,
   pathOf,
   places,
@@ -66,6 +67,8 @@ const LINT_BUDGET = 8000
 
 // git subcommands that write no file a later commit's message could be read from, unless a redirect writes one
 const NO_WRITE = new Set(["add", "diff", "fetch", "log", "show", "status"])
+// The shell's own commands that write no file, which a later commit's message file stays clear of
+const QUIET = new Set([":", "cd", "export", "popd", "pushd", "set", "true", "unset"])
 // Whether a command may write a file, which a later commit on the line may read its message from; cat writes none but by a redirect, so a commit's own $(cat …) read counts as no writer
 const mayWrite = (cmd: Command, name: string, args: Word[]) =>
   cmd.redirects.some((r) => r.op.includes(">")) ||
@@ -332,11 +335,22 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
   const inWorktree = (dir: string | undefined) =>
     dir !== undefined && resolve(dir).startsWith(worktrees)
   const directory = typeof cwd === "string" ? cwd : undefined
-  // whether an earlier command on the line may have written a file a commit reads its message from
+  // the line's own commands, set once it is read below
+  let line: Command[] = []
+  // whether an earlier command on the line may have written a file a commit reads its message from: each one visited, and each of the line's own commands before it, since a shell or source that runs a script file is followed without a visit
   let wrote = false
+  let outer: Command | undefined
+  const before = (cmd: Command) => {
+    const at = line.indexOf(line.includes(cmd) ? cmd : (outer ?? cmd))
+    return line.slice(0, Math.max(at, 0)).some((earlier) => {
+      const { args, name } = parse(earlier)
+      return !QUIET.has(name) && mayWrite(earlier, name, args)
+    })
+  }
   // a commit run-slot queues waits for its slot all the same, so its message is linted there too
   const commits: Visit = async (cmd, { args, name }, env) => {
-    const refused = name === "git" ? await commitLint(cmd, args, env, wrote) : undefined
+    const refused =
+      name === "git" ? await commitLint(cmd, args, env, wrote || before(cmd)) : undefined
     wrote ||= mayWrite(cmd, name, args)
     return refused
   }
@@ -344,6 +358,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     const { args, first, name } = parsed
     const slot = slotWords(parsed)
     // run-slot.sh queues the words after its -- as one heavy run, in a process of its own, so a cd among them moves no folder for the commands after it
+    outer = cmd
     if (slot)
       return slot.length
         ? examine(
@@ -399,7 +414,9 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     process: environment,
     vars: new Map(),
   }
-  return run(lex(command, env.known), env, visit)
+  const lexed = lex(command, env.known)
+  line = lexed.commands
+  return run(lexed, env, visit)
 }
 
 // Fails open: an error on any call lets it run, so a reader bug cannot block every Bash command.

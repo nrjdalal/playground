@@ -7353,6 +7353,7 @@ var COMMIT_TAKES = new Set([
 var REUSED = new Set(["-c", "-C", "--fixup", "--reedit-message", "--reuse-message", "--squash"]);
 var LINT_BUDGET = 8000;
 var NO_WRITE = new Set(["add", "diff", "fetch", "log", "show", "status"]);
+var QUIET = new Set([":", "cd", "export", "popd", "pushd", "set", "true", "unset"]);
 var mayWrite = (cmd, name, args) => cmd.redirects.some((r) => r.op.includes(">")) || name !== "cat" && (name !== "git" || !NO_WRITE.has(args.find((a) => !a.value.startsWith("-"))?.value ?? ""));
 async function message(cmd, rest, env, wrote) {
   const { flags } = parseFlags(rest, COMMIT_TAKES);
@@ -7578,15 +7579,25 @@ function inspect(raw, environment, main) {
   const worktrees = join5(main, ".claude", "worktrees") + sep2;
   const inWorktree = (dir) => dir !== undefined && resolve4(dir).startsWith(worktrees);
   const directory = typeof cwd === "string" ? cwd : undefined;
+  let line = [];
   let wrote = false;
+  let outer;
+  const before = (cmd) => {
+    const at = line.indexOf(line.includes(cmd) ? cmd : outer ?? cmd);
+    return line.slice(0, Math.max(at, 0)).some((earlier) => {
+      const { args, name } = parse(earlier);
+      return !QUIET.has(name) && mayWrite(earlier, name, args);
+    });
+  };
   const commits = async (cmd, { args, name }, env) => {
-    const refused = name === "git" ? await commitLint(cmd, args, env, wrote) : undefined;
+    const refused = name === "git" ? await commitLint(cmd, args, env, wrote || before(cmd)) : undefined;
     wrote ||= mayWrite(cmd, name, args);
     return refused;
   };
   const visit = async (cmd, parsed, env) => {
     const { args, first, name } = parsed;
     const slot = slotWords(parsed);
+    outer = cmd;
     if (slot)
       return slot.length ? examine({ ...cmd, words: slot }, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, commits, false) : undefined;
     const refused = await commits(cmd, parsed, env);
@@ -7630,7 +7641,9 @@ function inspect(raw, environment, main) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visit);
+  const lexed = lex(command, env.known);
+  line = lexed.commands;
+  return run(lexed, env, visit);
 }
 async function check(raw, environment = process.env, main = mainCheckout(resolve4(__CHECKOUT + "/scripts/hooks", "..", ".."))) {
   try {
