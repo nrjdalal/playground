@@ -193,6 +193,15 @@ test("an org's own job row renders from its installed script folder, and a row p
   expect(readFileSync(join(data, "ops", "ops-watch", "cli.ts"), "utf8")).toBe(
     "console.log('watch')",
   )
+  // a pass that cannot read the orgs (here, no login) keeps each org's job as the last jobs.json had it, and says so where up.py logs it
+  rmSync(join(extensionsDir(data), "login"))
+  const unread = await run(data, jobs)
+  expect(unread.code).toBe(1)
+  expect(unread.err).toContain("jobs: kept each org's job as jobs.json had it")
+  const kept = JSON.parse(readFileSync(jobs, "utf8")).jobs as Record<string, unknown>[]
+  expect(kept.find((job) => job.name === "ops-watch")).toEqual(
+    rendered.find((job) => job.name === "ops-watch"),
+  )
 })
 
 // ext init can stop after making the extensions root, before a first setting writes policy.json.
