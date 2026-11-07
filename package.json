@@ -40,7 +40,6 @@
     "loom-relay": "bun --no-env-file packages/scripts/src/loom-relay/cli.ts",
     "name": "bun packages/scripts/src/name/index.ts",
     "ops:ext-sync": "bun packages/scripts/src/ops-ext-sync/cli.ts",
-    "ops:firefighting-start": "bun --no-env-file packages/scripts/src/ops-firefighting-start/cli.ts",
     "ops:flow": "bun packages/scripts/src/ops-flow/cli.ts",
     "ops:herdr": "bun --no-env-file packages/scripts/src/ops-herdr/cli.ts",
     "ops:machine": "bun packages/scripts/src/ops-machine/cli.ts",

@@ -82,31 +82,25 @@ describe("focus holds every new session", () => {
     expect(other.err).toContain(`focus stands for owner-desk until ${until.toISOString()}`)
   })
 
-  test("on, a --firefighting start goes on while a firefighting trigger file stands, and is refused while none does", async () => {
+  test("on, a --priority start goes on while priority.json stands, and is refused while none does", async () => {
     const until = new Date(Date.now() + 3_600_000)
-    for (const trigger of ["firefighting-stop.json", "firefighting-headstart.json"]) {
-      const r = await spawn([...lead, "--firefighting"], [], {}, script, undefined, (home) => {
-        focus(until)(home)
-        writeFileSync(join(home, ".playground", trigger), "{}")
-      })
-      expect(r.code).toBe(0)
-    }
-    const none = await spawn([...lead, "--firefighting"], [], {}, script, undefined, focus(until))
+    const r = await spawn([...lead, "--priority"], [], {}, script, undefined, (home) => {
+      focus(until)(home)
+      writeFileSync(join(home, ".playground", "priority.json"), "{}")
+    })
+    expect(r.code).toBe(0)
+    const none = await spawn([...lead, "--priority"], [], {}, script, undefined, focus(until))
     expect(none.code).not.toBe(0)
     expect(placing(none)).toEqual([])
     expect(none.err).toContain("--priority starts only while a priority file stands in")
   })
 
-  // priority.json, an org's own priority-<name>.json and the old stop and head-start files pass focus; a job's own start file, priority-start.json or its old name, passes the load and slots gates alone (#1334)
+  // priority.json and an org's own priority-<name>.json pass focus; a job's own start file, priority-start.json, passes the load and slots gates alone (#1334)
   test.each([
     ["--priority", "priority.json", true],
-    ["--firefighting", "priority.json", true],
-    ["--priority", "firefighting-stop.json", true],
     ["--priority", "priority-stop.json", true],
     ["--priority", "priority-headstart.json", true],
     ["--priority", "priority-start.json", false],
-    ["--priority", "firefighting-start.json", false],
-    ["--firefighting", "firefighting-start.json", false],
   ] as [string, string, boolean][])(
     "on, a %s start while %s stands passes focus: %p",
     async (flag, file, passes) => {

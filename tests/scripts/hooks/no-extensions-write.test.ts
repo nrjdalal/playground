@@ -2310,7 +2310,7 @@ describe("a guard decision's keys are the keys the hook gates (PG-1090)", () => 
 
 // PG-1196: the guard decision also sets a job's enabled field, so a session's own write of it stays refused, the owner's Approve or Settings > Jobs the one way in.
 describe("a job's setting is the owner's alone (PG-1196)", () => {
-  test.each(["jobs.opsTicketCard", "jobs.opsSweep", "jobs.opsFirefightingStart"])(
+  test.each(["jobs.opsTicketCard", "jobs.opsSweep"])(
     "a session's own settings set and reset of %s are refused",
     async (key) => {
       expect(await bash(`playground settings set ${key} '{"enabled":true}' --reason r`)).toContain(

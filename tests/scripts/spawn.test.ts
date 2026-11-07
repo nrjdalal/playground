@@ -424,13 +424,13 @@ describe("under the gates it spawns", () => {
     expect(r.roster).toEqual(["set", "reviewer-x", "kind=reviewer", "worker=worker-x"])
   })
 
-  // spawn.sh starts nothing in cmux, so a column beside a cmux surface:N is refused before any cmux or herdr call.
-  test("a column beside a cmux surface:N is refused, naming #2076", async () => {
+  // a column opens beside a herdr pane id alone, so an old cmux surface:N is refused as any other anchor is, before any cmux or herdr call.
+  test("a column beside an old cmux surface:N is refused as no herdr pane id", async () => {
     const r = await spawn(["column", "tester", "tester-x", "worker-x", "surface:7", "t.md"], [])
     expect(r.code).toBe(1)
     expect(r.cmux).toBeUndefined()
     expect(placing(r)).toEqual([])
-    expect(r.err).toContain("surface:7 is a cmux surface, and spawn.sh starts nothing in cmux")
+    expect(r.err).toContain("surface:7 is not a herdr pane id (w1:p2)")
   })
 
   test("a resume reopens the session by name in its folder, its role read from its name", async () => {
