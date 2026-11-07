@@ -844,6 +844,7 @@ describe("a GLM session's org tools", () => {
       ["cd $D && bun run dm hi", "a folder a value it cannot read names"],
       ["cd $D && bun run build", "a folder a value it cannot read names"],
       ["cd $D && ./cli.ts MADE-1", "names its program"],
+      ["$P/cli.ts MADE-1", "names its program"],
     ]) {
       const { claude, glm } = await both(input(command, scripts))
       expect(claude).toBeUndefined()
