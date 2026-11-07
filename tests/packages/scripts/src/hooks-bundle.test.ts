@@ -287,6 +287,9 @@ describe("hooks:bundle during a merge (#673)", () => {
 
 // A scratch checkout whose guard imports a module beside it, its bundles committed, so `--check` can be read against the index (#1320) and against the head merged with another branch (#1365); every root is a mkdtemp folder.
 describe("--check reads a tree git holds, never the working files", () => {
+  const MID = `${[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `export const m${n} = ${n}`).join("\n")}\n`
+  const guard = (extra = "") =>
+    `import { lib } from "./lib"\nimport { m1, m2, m3, m4, m5, m6, m7, m8 } from "./mid"\n\n${extra}console.log("a", lib, m1, m2, m3, m4, m5, m6, m7, m8)\n`
   const env = {
     ...process.env,
     GIT_AUTHOR_EMAIL: "t@t",
@@ -311,9 +314,15 @@ describe("--check reads a tree git holds, never the working files", () => {
       `${JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: "bun scripts/hooks/bundled/a-guard.js" }] }] } })}\n`,
     )
     const write = (name: string, text: string) => writeFileSync(join(root, HOOKS, name), text)
-    write("a-guard.ts", 'import { lib } from "./lib"\n\nconsole.log("a", lib)\n')
+    // mid sits between lib and the guard in each bundle, so a change to lib's lines and one to the guard's merge apart
+    write("a-guard.ts", guard())
     write("lib.ts", 'export const lib = "one"\n')
+    write("mid.ts", MID)
     write("no-extensions-write-worker.ts", "export {}\n")
+    writeFileSync(
+      join(root, "tsconfig.json"),
+      `${JSON.stringify({ compilerOptions: { paths: { "@/*": ["./scripts/hooks/*"] } } })}\n`,
+    )
     const run = (...args: string[]) => {
       const proc = Bun.spawnSync(
         [
@@ -330,7 +339,17 @@ describe("--check reads a tree git holds, never the working files", () => {
     expect(run().code).toBe(0)
     git("add", "-A")
     git("commit", "-q", "--no-verify", "-m", "start")
-    return { git, root, run, write }
+    // a side's change, its bundles rebuilt and committed: canary's on a branch of that name, the head's on main
+    const side = (branch: "canary" | "main", change: () => void) => {
+      git("checkout", "-q", ...(branch === "canary" ? ["-b", "canary"] : ["main"]))
+      change()
+      expect(run().code).toBe(0)
+      git("add", "-A")
+      git("commit", "-q", "--no-verify", "-m", branch)
+    }
+    const mergeTree = () =>
+      Bun.spawnSync(["git", "-C", root, "merge-tree", "--write-tree", "main", "canary"]).exitCode
+    return { git, mergeTree, root, run, side, write }
   }
 
   test("an unstaged guard edit beside a staged file leaves the check green (#1320)", () => {
@@ -360,24 +379,14 @@ describe("--check reads a tree git holds, never the working files", () => {
     expect(stale.stderr).toContain(`stale in ${BUNDLED}: a-guard.js`)
   })
 
-  // canary changes the guard's module to import a file the head's checkout lacks, its own bundles rebuilt; the head gives the guard a top-level name that file also declares, and rebuilds, so each side alone is clean and the merged build differs from both bundles
+  // canary gives lib a top-level name and the head gives the guard the same one, each side rebuilt: git merges the two bundles cleanly, as it merged #1302's, while a build of the merged sources renames one of the two, so the merged bundle reads stale
   test("--merged reads the head merged with the ref, so canary's change to a bundle input stales a clean head (#1365)", () => {
-    const { git, root, run, write } = checkout()
-    git("checkout", "-q", "-b", "canary")
-    write("lib.ts", 'import { more } from "./more"\n\nexport const lib = `two ${more}`\n')
-    write("more.ts", 'export const more = "more"\n')
-    expect(run().code).toBe(0)
-    git("add", "-A")
-    git("commit", "-q", "--no-verify", "-m", "canary")
-    git("checkout", "-q", "main")
-    expect(() => readFileSync(join(root, HOOKS, "more.ts"))).toThrow()
-    write(
-      "a-guard.ts",
-      'import { lib } from "./lib"\n\nconst more = "head"\nconsole.log("a", lib, more)\n',
+    const { mergeTree, run, side, write } = checkout()
+    side("canary", () =>
+      write("lib.ts", 'const helper = (x: string) => `${x}!`\nexport const lib = helper("two")\n'),
     )
-    expect(run().code).toBe(0)
-    git("add", "-A")
-    git("commit", "-q", "--no-verify", "-m", "head")
+    side("main", () => write("a-guard.ts", guard("const helper = 3\nconsole.log(helper)\n")))
+    expect(mergeTree()).toBe(0)
     expect(run("--check")).toEqual({ code: 0, stderr: "" })
     const merged = run("--check", "--merged", "canary")
     expect(merged.code).toBe(1)
@@ -386,11 +395,63 @@ describe("--check reads a tree git holds, never the working files", () => {
     expect(merged.stderr).toContain("run `bun run hooks:bundle`")
   })
 
+  test("--merged reads a merge that conflicts in the bundles alone with its markers, which read stale", () => {
+    const { git, mergeTree, root, run } = checkout()
+    // each side ends the guard's bundle with a line of its own, its sources untouched
+    const bundled = join(root, BUNDLED, "a-guard.js")
+    const sides: [string[], string][] = [
+      [["-b", "canary"], "canary"],
+      [["main"], "head"],
+    ]
+    for (const [checkoutArgs, by] of sides) {
+      git("checkout", "-q", ...checkoutArgs)
+      writeFileSync(bundled, `${readFileSync(bundled, "utf8")}// ${by}\n`)
+      git("add", "-A")
+      git("commit", "-q", "--no-verify", "-m", by)
+    }
+    expect(mergeTree()).toBe(1)
+    const merged = run("--check", "--merged", "canary")
+    expect(merged.code).toBe(1)
+    expect(merged.stderr).toContain(`stale in ${BUNDLED}: a-guard.js once merged with canary`)
+  })
+
   test("--merged with a ref the head already holds reads the head's own tree", () => {
     const { git, run } = checkout()
     git("branch", "canary")
     expect(run("--check", "--merged", "canary")).toEqual({ code: 0, stderr: "" })
   })
+
+  test("--merged with a ref git cannot read fails, naming it", () => {
+    const { run } = checkout()
+    const merged = run("--check", "--merged", "no-such-ref")
+    expect(merged.code).toBe(1)
+    expect(merged.stderr).toContain("git merge-tree HEAD no-such-ref")
+  })
+
+  // canary adds a source the head's checkout lacks, reached by a tsconfig alias as packages/settings reaches its own, or by a relative path: the merged tree cannot be built from this checkout, so the check refuses, naming the merge that lets it build, rather than pass a bundle it never read
+  test.each([
+    ["a tsconfig alias", "@/more"],
+    ["a relative path", "./more"],
+  ])(
+    "--merged refuses a head whose merged tree holds a source canary adds, reached by %s, naming it and the merge",
+    (_, specifier) => {
+      const { root, run, side, write } = checkout()
+      side("canary", () => {
+        write(
+          "lib.ts",
+          `import { more } from "${specifier}"\n\nexport const lib = \`two \${more}\`\n`,
+        )
+        write("more.ts", 'export const more = "more"\n')
+      })
+      side("main", () => write("a-guard.ts", guard('console.log("head")\n')))
+      expect(() => readFileSync(join(root, HOOKS, "more.ts"))).toThrow()
+      const merged = run("--check", "--merged", "canary")
+      expect(merged.code).toBe(1)
+      expect(merged.stderr).toContain("this checkout lacks")
+      expect(merged.stderr).toContain(join(HOOKS, "more.ts"))
+      expect(merged.stderr).toContain("merge canary in first")
+    },
+  )
 
   test("--merged names a conflict outside the bundles and exits 0, since pr:merge's gate reports it", () => {
     const { git, run, write } = checkout()
