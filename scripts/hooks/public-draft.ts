@@ -26,9 +26,9 @@ const ONES = "two|three|four|five|six|seven|eight|nine"
 const TEENS = "ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
 const TENS = "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety"
 const COUNT = `\\d+(?:,\\d{3})*(?:\\.\\d+)?k?\\+?|(?:a |several )?(?:dozens?|hundreds?|thousands?)(?: of)?|(?:${TENS})(?:-(?:one|${ONES}))?|${TEENS}|${ONES}`
-// A work figure: a count beside PR, pull request, commit or session, one word between them at most ("12 merged PRs").
+// A work figure: a count beside PR, pull request, commit or session, one word between them at most ("12 merged PRs"), past a number that ends a fraction or a span ("24/7 sessions").
 export const FIGURE = new RegExp(
-  `(?<![\\w#.-])(?:${COUNT})\\s+(?:[a-z]+\\s+)?(?:PRs?|pull[ -]requests?|commits?|sessions?)(?![\\w-])`,
+  `(?<![\\w#./-])(?:${COUNT})\\s+(?:[a-z]+\\s+)?(?:PRs?|pull[ -]requests?|commits?|sessions?)(?![\\w-])`,
   "i",
 )
 const FIGURE_HIT: Hit = {

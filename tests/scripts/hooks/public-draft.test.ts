@@ -81,6 +81,7 @@ describe("a work figure is a count beside PR, pull request, commit or session", 
     "PR #7 is merged",
     "v2 sessions are faster",
     "In 2026, sessions got faster.",
+    "Support runs 24/7 sessions for every team.",
     "the board shows every session",
     "a session a day",
   ])("passes %j", (text) => {
