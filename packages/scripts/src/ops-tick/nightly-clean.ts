@@ -85,11 +85,11 @@ export const staleBranches = (input: {
   merged: Set<string>
   prs: Map<string, Pr>
   remote: Ref[]
-}): { decide: string[]; local: string[]; remote: string[] } => {
+}): { archive: string[]; local: string[]; remote: string[] } => {
   const done = (pr: Pr | undefined, sha: string) =>
     pr !== undefined && pr.state !== "OPEN" && pr.headRefOid === sha
   const out = {
-    decide: [] as string[],
+    archive: [] as string[],
     local: [] as string[],
     remote: [] as string[],
   }
@@ -97,7 +97,7 @@ export const staleBranches = (input: {
     if (input.keep.has(b.name) || input.checkedOut.has(b.name)) continue
     const pr = input.prs.get(b.name)
     if (input.merged.has(b.name) || done(pr, b.sha)) out.local.push(b.name)
-    else if (pr?.state !== "OPEN") out.decide.push(b.name)
+    else if (pr?.state !== "OPEN") out.archive.push(b.name)
   }
   for (const r of input.remote)
     if (!input.keep.has(r.name) && done(input.prs.get(r.name), r.sha)) out.remote.push(r.name)
@@ -206,7 +206,7 @@ export const decisionOf = (
   }
 }
 
-// Pure: whether a cleanWorktree line kept work only the owner's Approve may drop: uncommitted or unpushed work, or rm's unlanded-work refusal that names --discard.
+// Pure: whether a cleanWorktree line kept work the standing approval may trash: uncommitted or unpushed work, or rm's unlanded-work refusal that names --discard.
 export const discardable = (line: string): boolean =>
   /: (uncommitted work|unpushed commits)$/.test(line) ||
   line.includes("--discard removes it anyway")
@@ -404,13 +404,20 @@ export const nightlyClean =
       let remotes = 0
       for (const name of plan.remote)
         if ((await git(["push", "-q", "origin", "--delete", name])).code === 0) remotes++
-      // The archive tag is pushed through the git refs API, as the ship's tag step does, before any delete, so the tag holds the old head and git branch <name> archive/<name> brings the branch back.
+      // The archive tag is pushed through the git refs API, as the ship's tag step does, before any delete, so the tag holds the old head and git branch <name> archive/<name> brings the branch back. A branch whose origin head is not the local head the tag would hold stays whole, since the tag would not hold what the origin delete drops.
       const shas = new Map(locals.map((r) => [r.name, r.sha]))
       const api = prs.repo?.replace(/^https:\/\/github\.com\//, "repos/")
       const out: string[] = []
-      for (const name of plan.decide) {
+      for (const name of plan.archive) {
         const tag = `archive/${name}`
         const sha = shas.get(name) ?? ""
+        const originRef = remote.find((r) => r.name === name)
+        if (originRef && originRef.sha !== sha) {
+          const why = `origin's head is ${originRef.sha}, not the local head ${sha}`
+          out.push(`kept ${name}: ${why}`)
+          kept.push(`branch ${name} kept: ${why}`)
+          continue
+        }
         const made = api
           ? await ctx.run([
               "gh",
@@ -425,24 +432,34 @@ export const nightlyClean =
             ])
           : { code: 1, out: "no repository read" }
         if (made.code !== 0) {
-          out.push(`kept ${name}: its ${tag} tag failed: ${lines(made.out).at(-1) ?? ""}`)
-          kept.push(`branch ${name} kept: its ${tag} tag failed`)
+          // The tag already at this head, as a retried night finds, holds it: the deletes go on.
+          const there = await git(["ls-remote", "origin", `refs/tags/${tag}`])
+          const at =
+            lines(there.out)[0]?.split(/\t/)[1] === `refs/tags/${tag}`
+              ? (lines(there.out)[0]?.split(/\t/)[0] ?? "")
+              : ""
+          if (there.code !== 0 || at !== sha) {
+            out.push(`kept ${name}: its ${tag} tag failed: ${lines(made.out).at(-1) ?? ""}`)
+            kept.push(`branch ${name} kept: its ${tag} tag failed`)
+            continue
+          }
+        }
+        const originDeleted =
+          !originRef || (await git(["push", "-q", "origin", "--delete", name])).code === 0
+        if (!originDeleted) {
+          out.push(`kept ${name}: its origin delete failed, its ${tag} tag holds the head`)
+          kept.push(`branch ${name} kept: its origin delete failed`)
           continue
         }
-        const pushed = remote.some((r) => r.name === name)
-        const originDeleted =
-          !pushed || (await git(["push", "-q", "origin", "--delete", name])).code === 0
         const localDeleted = (await git(["branch", "-D", name])).code === 0
-        if (originDeleted && localDeleted) {
-          out.push(`archived ${name} as ${tag} at ${sha}, deleted on origin and locally`)
+        if (localDeleted) {
+          out.push(
+            `archived ${name} as ${tag} at ${sha}, deleted${originRef ? " on origin and" : ""} locally`,
+          )
           removed.push(`branch ${name} as tag ${tag} at ${sha}`)
         } else {
-          const why = [
-            ...(originDeleted ? [] : ["its origin delete failed"]),
-            ...(localDeleted ? [] : ["its local delete failed"]),
-          ].join(", ")
-          out.push(`kept ${name}: ${why}, its ${tag} tag holds the head`)
-          kept.push(`branch ${name} kept: ${why}`)
+          out.push(`kept ${name}: its local delete failed, its ${tag} tag holds the head`)
+          kept.push(`branch ${name} kept: its local delete failed`)
         }
       }
       return `deleted ${deleted} local, ${remotes} remote; ${out.length ? out.join("; ") : "none to archive"}`

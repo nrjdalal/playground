@@ -147,7 +147,7 @@ test("branches: merged ones and a done PR's still at its head go, the rest are a
     ],
   })
   expect(plan).toEqual({
-    decide: ["PG-3-ahead", "scratch"],
+    archive: ["PG-3-ahead", "scratch"],
     local: ["PG-1-merged", "PG-2-squashed"],
     remote: ["PG-7-remote"],
   })
@@ -461,6 +461,97 @@ describe("one night's run against a fixture data folder", () => {
     )
     const line = sent.find((s) => s.to === "ops")
     expect(line?.text).toContain("branch scratch kept: its archive/scratch tag failed")
+  })
+
+  // #1515
+  test("a branch whose origin head is not the local head the tag would hold stays whole, named with both shas", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+      "for-each-ref refs/remotes/origin": "HEAD x\nPG-8-gone r8\nscratch s-newer",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.includes("archive/scratch"))).toBe(false)
+    expect(ran.some((r) => r.includes("--delete scratch"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("kept scratch: origin's head is s-newer, not the local head s")
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain("branch scratch kept: origin's head is s-newer")
+  })
+
+  // #1515
+  test("a tag already at the tagged head holds it, so the deletes go on", async () => {
+    const { ctx, deps, inputs, ops, runs } = night({
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+      "for-each-ref refs/remotes/origin": "HEAD x\nPG-8-gone r8\nscratch s",
+      "git/refs": { code: 1, err: "gh: Reference already exists" },
+      "ls-remote": "s\trefs/tags/archive/scratch",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.includes("--delete scratch"))).toBe(true)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(true)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("archived scratch as archive/scratch at s, deleted on origin and locally")
+    expect(inputs.map((i) => JSON.parse(i).kind)).not.toContain("decision")
+  })
+
+  // #1515
+  test("a failed origin delete keeps the branch for the next night's retry, its tag holding the head", async () => {
+    const { ctx, deps, ops, runs, sent } = night({
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+      "for-each-ref refs/remotes/origin": "HEAD x\nPG-8-gone r8\nscratch s",
+      "--delete scratch": { code: 1, err: "remote rejected" },
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.includes("archive/scratch"))).toBe(true)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(false)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(
+      "kept scratch: its origin delete failed, its archive/scratch tag holds the head",
+    )
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain("branch scratch kept: its origin delete failed")
+  })
+
+  // #1515
+  test("an unmerged branch with no origin copy is tagged and deleted locally alone", async () => {
+    const { ctx, deps, inputs, ops, runs, sent } = night({
+      "for-each-ref refs/heads": "main m\nPG-9-done h9\nscratch s",
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.includes("--delete scratch"))).toBe(false)
+    expect(ran.some((r) => r.endsWith("branch -D scratch"))).toBe(true)
+    expect(
+      ran.some((r) => r.includes("ref=refs/tags/archive/scratch") && r.includes("-f sha=s")),
+    ).toBe(true)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain("archived scratch as archive/scratch at s, deleted locally")
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain("branch scratch as tag archive/scratch at s")
+    expect(inputs.map((i) => JSON.parse(i).kind)).not.toContain("decision")
+  })
+
+  // #1515
+  test("a failed trash move keeps the worktree, named in the log and the outbox line", async () => {
+    const { ctx, deps, inputs, ops, runs, sent, wt } = night({
+      "--reason nightly-clean": { code: 1, err: "playground: the roster cannot be read" },
+    })
+    await nightlyClean(deps)(ctx)
+    const ran = runs.map((r) => r.join(" "))
+    expect(ran.some((r) => r.includes(`rm --worktree ${wt("pg-2")}`))).toBe(true)
+    const log = readFileSync(join(ops, "log", "nightly-clean.log"), "utf8")
+    expect(log).toContain(
+      `kept ${wt("pg-2")}: its trash move failed: playground: the roster cannot be read`,
+    )
+    expect(log).not.toContain(`trashed ${wt("pg-2")}`)
+    expect(inputs.map((i) => JSON.parse(i).kind)).toEqual(["update"])
+    const line = sent.find((s) => s.to === "ops")
+    expect(line?.text).toContain(`worktree ${wt("pg-2")} kept: its trash move failed`)
+    expect(line?.text).toContain("removed 0, kept 1")
   })
 
   // PG-1165
