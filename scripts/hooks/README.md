@@ -659,15 +659,22 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 ## no-outside-pr-code
 
 - A reviewer or tester reads an outside author's PR and leaves its code unrun, since its tests, scripts and installs would run that author's code on this machine.
-  `scripts/hooks/no-outside-pr-code.ts` refuses a Bash or Monitor line by a session role.ts places as a `reviewer` or `tester`, its sub-agents included (they run under the session's own hooks and `PLAYGROUND_ROLE`), when the line touches an outside clone and any command on it does more than read or move the clone.
-  An outside clone is a folder named as the reviewer brief names a review clone, `review-<n>` or `review-<repo>-<n>`, whose origin's PR `<n>` has an author other than the repo's owner, on a repo a user owns; an org repo's PRs are its colleagues', so they stay out.
-  It reads the author once with `gh api repos/<repo>/pulls/<n>` and keeps it in the data folder (`hook-outside-pr/`), since it never changes; a PR it cannot read counts as outside.
-  A line touches a clone when a command's folder sits in one (the tool's `cwd`, a `cd`, `env -C`, a shell's `-c` script, a run-slot call's command), when a word names a path in one or a folder holding one (`find`, `cp -r`, a glob), or when it holds a folder or word the hook cannot read while an outside clone exists on this machine.
-  A command reads when `read-only.ts`'s `readsWords` passes it, run by a bare program name with no redirect and no variable set for it.
-  It moves the clone with one of four literal git forms, `git fetch <remote> <refspec>`, `git checkout --detach <rev>`, `git switch --detach <rev>` and `git worktree add [--detach] <path> <rev>`, which run no file the PR holds while the clone has no `node_modules`.
-  Its reason names the reads (the Read, Grep and Glob tools, `gh pr diff`, git's diff, log and show) and asks the verdict to say the code was read, not run, scored on the PR's own GitHub checks.
-  It acts for checkers alone: a worker, a lead and the owner's own sessions run any clone, and checkers run the owner's own PRs and an org repo's as before.
-  It refuses a line it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts`.
+  `scripts/hooks/no-outside-pr-code.ts` puts a session role.ts places as a `reviewer` or `tester` in read mode, its sub-agents included (they carry its session id, `PLAYGROUND_ROLE` and hooks), while its roster row serves an outside PR or names none.
+  It finds the row by the session's registry name, the same read role.ts makes, and takes its PRs from the row's `pr` and the pull URLs in its `prs`.
+  A PR is outside when its author is not the repo's owner on a repo a user owns, read once with `gh api repos/<repo>/pulls/<n>` and kept in the data folder (`hook-outside-pr/`); a PR it cannot read counts as outside, and that failure is kept for an hour.
+  An org repo's PRs are its colleagues', so a checker of those, or of the owner's own PRs, runs them as before.
+  A row with no PR, or only an issue's URL, is read mode too, and its reason names `bun scripts/roster.ts assign` with `pr=`, which a worker sets when it spawns its checker.
+  In read mode a Bash or Monitor line passes only when every command on it is on the allowlist, so a command the hook cannot read is refused.
+  The allowlist holds `read-only.ts`'s `readsWords`, a few utilities that run no file they name (`cat`, `grep`, `jq`, `ls` and the rest of `UTILITIES`), `sed -n` printing a range of lines or patterns, `sed` with one substitution whose flags write no file, and `gh` but for `gh pr checkout`.
+  It holds git's reads (`GIT_READS`: diff, log, show, grep, merge-base, ls-tree, cat-file and the rest) with any option but those that start a program or write a file (`-O`, `--output`).
+  It holds git's literal moves: `fetch` with plain operands, `clone <github url> <dir>`, `worktree add [--detach] <path> <rev>` and `worktree list`, and `checkout` or `switch --detach <rev>` in a folder with no `node_modules` for a git hook's lefthook to load, each with `-q` allowed.
+  It holds a skill's script under the data folder's `orgs/*/skills/` or the main checkout's `extensions/*/skills/` (code-review-loop's `state.py`), run by its path or by node, python or python3; bun is left out, since it reads the folder's `bunfig.toml` first.
+  It holds a shell's `-c` script, whose commands are judged one by one, and a shell running such a skill script; `shell.ts`'s `visitShells` shows the hook each shell a line starts, since the walk follows a script file it cannot read as an empty one.
+  It holds the factory's own run-slot, `<data folder>/ops/run-slot.sh`, whose command after `--` is judged in its place, and the `playground` command in a folder with no `bunfig.toml`, since it runs under bun.
+  A program named by a path, a variable set on a command, and a bare assignment, a loop or a `read` that sets a variable the session exports (`PATH`) are refused, since each can run a file the PR holds.
+  Its reason names the reads (the Read, Grep and Glob tools, `gh pr diff`, `git diff` and `git show <rev>`) and asks the verdict to say the code was read, not run, scored on the PR's own GitHub checks.
+  A checker in read mode cannot run the PR's tests, by design, so CI is its test signal.
+  Its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts`.
   Its registration in both settings files lands in a later ship than its script, as [Registered in both settings files](#registered-in-both-settings-files) says.
 
 ## no-prompt-stop

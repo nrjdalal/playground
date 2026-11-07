@@ -1,12 +1,12 @@
-// PreToolUse hook: refuses a reviewer or tester session (role.ts), its sub-agents included, a Bash or Monitor line that touches an outside author's PR clone unless every command on it only reads or moves the clone to a head, since running the PR's tests, scripts or installs runs its author's code on this machine; reading it passes, by the Read, Grep and Glob tools or read-only.ts's shapes.
+// PreToolUse hook: puts a reviewer or tester session (role.ts), its sub-agents included, in read mode while its roster row serves an outside author's PR or names none, and in read mode refuses a Bash or Monitor line unless every command on it is one the allowlist below names, since running the PR's tests, scripts or installs runs its author's code on this machine.
 import "../../packages/env/src/aliases"
-import { mkdirSync, readdirSync } from "node:fs"
-import { basename, dirname, join, resolve, sep } from "node:path"
+import { existsSync, mkdirSync } from "node:fs"
+import { isAbsolute, join, resolve } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
 import { mainCheckout } from "./no-main-checkout"
 import { readsWords } from "./read-only"
-import { sessionRole } from "./role"
+import { registryName, sessionRole } from "./role"
 import {
   type Command,
   type Env,
@@ -16,72 +16,127 @@ import {
   marked,
   type Parsed,
   pathOf,
-  places,
   run,
-  slotWords,
+  SHELLS,
+  shellOperand,
   type Visit,
-  type Word,
 } from "./shell"
 
 type Environment = Record<string, string | undefined>
 type Pr = { author: string; owner: string; ownerType: string }
 
-// What the hook reads off the machine and GitHub, a seam its tests fill with made-up clones.
+// What the hook reads off the machine and GitHub, a seam its tests fill with made-up sessions and PRs.
 export type Lookup = {
   author: (repo: string, pr: number) => Promise<Pr | undefined>
-  clones: () => Promise<string[]>
-  repoOf: (folder: string) => Promise<string | undefined>
+  holds: (folder: string, entry: "bunfig.toml" | "node_modules") => boolean
+  main: string
+  prsOf: (sessionId: unknown) => Promise<string[]>
 }
 
 const CHECKERS = new Set(["reviewer", "tester"])
 const TOOLS = new Set(["Bash", "Monitor"])
-// A review clone's folder as the reviewer brief names it: review-<n>, or review-<repo>-<n> for a repo with no local checkout.
-const CLONE = /^review-(?:[\w.-]+-)?(\d+)$/
-const GLOB = /[*?[{]/
-const SPECIAL = /[*?[{()$]/
-const WAIT_MS = 5000
+const PULL = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)$/
+// Programs and shell words that run no file they are given, by bare name, A to Z.
+const UTILITIES = new Set([
+  "[",
+  "basename",
+  "break",
+  "case",
+  "cat",
+  "cd",
+  "comm",
+  "continue",
+  "cut",
+  "date",
+  "diff",
+  "dirname",
+  "echo",
+  "exit",
+  "false",
+  "grep",
+  "head",
+  "jq",
+  "ls",
+  "mkdir",
+  "printf",
+  "pwd",
+  "realpath",
+  "sleep",
+  "tail",
+  "test",
+  "tr",
+  "true",
+  "uniq",
+  "wc",
+])
+// Interpreters that read no config from the folder they run in, so an installed skill's script runs as its author wrote it; bun is left out, since it reads the folder's bunfig.toml, whose preload runs first, and the shells are judged as shells.
+const INTERPRETERS = new Set(["node", "python", "python3"])
+// gh's command groups a checker posts and reads with, A to Z; `pr checkout` is left out, since a checkout runs the git hooks of the folder it lands in.
+const GH = new Set(["api", "issue", "label", "pr", "repo", "run", "search"])
+// git's subcommands that read the repo and run nothing it holds, A to Z, with any option but the ones that start a program or write a file.
+const GIT_READS = new Set([
+  "blame",
+  "branch",
+  "cat-file",
+  "describe",
+  "diff",
+  "for-each-ref",
+  "grep",
+  "log",
+  "ls-files",
+  "ls-tree",
+  "merge-base",
+  "merge-tree",
+  "name-rev",
+  "remote",
+  "rev-list",
+  "rev-parse",
+  "shortlog",
+  "show",
+  "status",
+])
+const GIT_RUNS = /^(?:-O|--open-files-in-pager|--output|--ext-diff|--textconv)/
+const QUIET = new Set(["-q", "--quiet"])
+// sed's scripts that run and write nothing: `-n` printing a range of lines or patterns, or one substitution whose flags write no file
+const SED_ADDRESS = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`
+const SED_PRINT = new RegExp(`^${SED_ADDRESS}(?:,${SED_ADDRESS})?p$`)
+const SED_SUBSTITUTE = /^s\/(?:[^/\\]|\\.)*\/(?:[^/\\]|\\.)*\/[gIp\d]*$/
+const GITHUB_URL = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]+?(?:\.git)?$/
 
-// The clone folder a path sits in, itself included, or undefined outside every clone.
-function cloneOf(path: string): string | undefined {
-  for (let at = path; at !== dirname(at); at = dirname(at)) if (CLONE.test(basename(at))) return at
+// Read mode's reason, by why the session is in it.
+const REASONS = {
+  none: 'its roster row names no PR, so the hook cannot rule out an outside author\'s code. Its worker sets the PR it serves: bun scripts/roster.ts assign <this session> "<title>" review worker=<worker> pr=<pull url>.',
+  outside:
+    "it serves an outside author's PR, whose tests, scripts and installs run that author's code on this machine. Read the PR instead: the Read, Grep and Glob tools, gh pr diff, git diff and git show <rev> in the clone, and move the clone with git fetch and git checkout --detach. Score on the PR's own GitHub checks, and say in the verdict that its code was read, not run.",
 }
 
-// The literal git forms that move a clone to a PR's head without running a file it holds: a fetch by remote and refspec, a detached checkout or switch, and the clone's own `worktree add`.
-function movesClone(words: string[]): boolean {
-  if (words[0] !== "git") return false
-  const [sub, ...rest] = words.slice(words[1] === "-C" ? 3 : 1)
+// Whether a path, case ignored as this Mac's file system ignores it, sits under a folder.
+const under = (path: string, folder: string) =>
+  (path + "/").toLowerCase().startsWith(folder.toLowerCase().replace(/\/?$/, "/"))
+
+// git's reads, and the literal forms that fetch or place a PR's code without running a file it holds: a fetch, a fresh clone of a GitHub repo, a worktree add or list, and a detached checkout or switch in a folder with no node_modules for a git hook's lefthook to load.
+function gitAllows(words: string[], folder: string | undefined, lookup: Lookup): boolean {
+  const dashC = words[1] === "-C"
+  const [sub, ...all] = words.slice(dashC ? 3 : 1)
+  const at = dashC && folder ? resolve(folder, words[2]) : folder
+  if (GIT_READS.has(sub)) return !all.some((w) => GIT_RUNS.test(w))
+  const rest = all.filter((w) => !QUIET.has(w))
   const plain = (w: string) => !w.startsWith("-") && !w.includes("::")
-  if (sub === "fetch") return rest.every(plain)
+  if (sub === "fetch") return rest.every((w) => plain(w) || w === "--no-tags" || w === "--prune")
+  if (sub === "clone") return rest.length === 2 && GITHUB_URL.test(rest[0]) && plain(rest[1])
   if (sub === "checkout" || sub === "switch")
-    return rest.length === 2 && rest[0] === "--detach" && plain(rest[1])
-  if (sub !== "worktree" || rest[0] !== "add") return false
+    return (
+      rest.length === 2 &&
+      rest[0] === "--detach" &&
+      plain(rest[1]) &&
+      at !== undefined &&
+      !lookup.holds(at, "node_modules")
+    )
+  if (sub !== "worktree") return false
+  if (rest[0] === "list") return true
+  if (rest[0] !== "add") return false
   const operands = rest[1] === "--detach" ? rest.slice(2) : rest.slice(1)
   return operands.length === 2 && operands.every(plain)
-}
-
-// Whether one reading of a command only reads or moves the clone: a bare program name (a path could name the PR's own script), no variable set for it, no redirect and no word the reader cannot see whole.
-function harmless(cmd: Command, parsed: Parsed): boolean {
-  if (parsed.name === "") return parsed.args.length === 0
-  if (cmd.redirects.length > 0 || parsed.local.size > 0) return false
-  if (parsed.first?.value.includes("/")) return false
-  const words = [parsed.name, ...parsed.args.map((a) => a.value)]
-  if (words.some((w) => marked(w) || SPECIAL.test(w))) return false
-  return readsWords(words) || movesClone(words)
-}
-
-// Each path a word may name: the word itself and what follows an `=` in it, cut at its first glob character, so `--cwd=<dir>` and `review-5*` name their folders.
-function namedPaths(word: Word, here: Env): string[] | undefined {
-  if (word.unknown || marked(word.value)) return
-  const parts = word.value.includes("=")
-    ? [word.value, word.value.slice(word.value.indexOf("=") + 1)]
-    : [word.value]
-  const paths: string[] = []
-  for (const part of parts) {
-    const cut = word.glob && GLOB.test(part) ? part.slice(0, part.search(GLOB)) : part
-    const path = cut === "" ? here.cwd : pathOf({ value: cut }, here)
-    if (path) paths.push(resolve(path))
-  }
-  return paths
 }
 
 export async function inspect(
@@ -89,60 +144,62 @@ export async function inspect(
   directory: string | undefined,
   environment: Environment,
   lookup: Lookup,
-): Promise<string | undefined> {
-  const verdicts = new Map<string, Promise<boolean>>()
-  // An outside clone: its PR's author is not the repo's owner, on a repo a user owns (an org repo's PRs are its colleagues'); a PR the hook cannot read counts as outside.
-  const outside = (clone: string): Promise<boolean> => {
-    let verdict = verdicts.get(clone)
-    if (!verdict) {
-      verdict = (async () => {
-        const repo = await lookup.repoOf(clone)
-        const pr = repo && (await lookup.author(repo, Number(CLONE.exec(basename(clone))![1])))
-        if (!pr) return true
-        return pr.ownerType === "User" && pr.author.toLowerCase() !== pr.owner.toLowerCase()
-      })()
-      verdicts.set(clone, verdict)
+): Promise<boolean> {
+  const data = dataDirOf(environment)
+  const skills = [join(data, "orgs"), join(lookup.main, "extensions")]
+  const slot = join(data, "ops", "run-slot.sh")
+  let allowed = true
+  // A script of a skill installed in the data folder or kept in the main checkout's extensions, run as a program or by an interpreter with no option of its own.
+  const skillScript = (path: string | undefined) =>
+    path !== undefined &&
+    skills.some(
+      (root) => under(path, root) && path.slice(root.length).toLowerCase().includes("/skills/"),
+    )
+  const permitted = (cmd: Command, parsed: Parsed, here: Env): boolean => {
+    const { args, first, local, name } = parsed
+    // a bare assignment reaches a later program only through a variable the session already exports (PATH, BASH_ENV), and one on a command reaches it always
+    if (name === "")
+      return args.length === 0 && [...local.keys()].every((key) => !(key in environment))
+    if (marked(name) || local.size > 0) return false
+    const program = first ? pathOf(first, here) : undefined
+    if (first && first.value.includes("/")) {
+      if (program && under(program, slot) && program.length === slot.length) return true
+      return skillScript(program)
     }
-    return verdict
-  }
-  let listed: Promise<string[]> | undefined
-  const outsideClones = (): Promise<string[]> =>
-    (listed ??= lookup.clones().then(async (all) => {
-      const flags = await Promise.all(all.map(outside))
-      return all.filter((_, k) => flags[k])
-    }))
-  const inOutside = async (path: string) => {
-    const clone = cloneOf(path)
-    return clone !== undefined && (await outside(clone))
-  }
-  const holdsOutside = async (path: string) => {
-    const prefix = path.endsWith(sep) ? path : path + sep
-    return (await outsideClones()).some((clone) => clone.startsWith(prefix))
-  }
-
-  let touched = false
-  let harmlessLine = true
-  const touches = async (parsed: Parsed, here: Env): Promise<boolean> => {
-    const folder = parsed.chdir ? pathOf(parsed.chdir, here) : here.cwd
-    let blind = folder === undefined || here.cwdAnywhere === true || here.cwdUnread === true
-    if (folder !== undefined && (await inOutside(resolve(folder)))) return true
-    for (const word of parsed.args) {
-      const paths = namedPaths(word, here)
-      if (!paths) blind = true
-      for (const path of paths ?? [])
-        if ((await inOutside(path)) || (await holdsOutside(path))) return true
+    const words = [name, ...args.map((a) => a.value)]
+    if (UTILITIES.has(name) || readsWords(words)) return true
+    // a loop's or a read's variable reaches a later program only when the session exports it, as a bare assignment's does
+    if (name === "for") return !(words[1] in environment)
+    if (name === "read")
+      return words.slice(1).every((w) => w.startsWith("-") || !(w in environment))
+    if (name === "git") return gitAllows(words, here.cwd, lookup)
+    if (name === "sed")
+      return words[1] === "-n"
+        ? SED_PRINT.test(words[2] ?? "")
+        : SED_SUBSTITUTE.test(words[1] ?? "")
+    // a shell's -c script is walked on its own, and a script file only an installed skill's runs
+    if (SHELLS.has(name)) {
+      const { inline, operand } = shellOperand(args, name)
+      return inline || (operand !== undefined && skillScript(pathOf(operand, here)))
     }
-    return blind && (await outsideClones()).length > 0
+    // the playground command runs under bun, which reads the folder's bunfig.toml first
+    if (name === "playground")
+      return here.cwd !== undefined && !lookup.holds(here.cwd, "bunfig.toml")
+    if (name === "gh") return GH.has(words[1]) && !(words[1] === "pr" && words[2] === "checkout")
+    if (INTERPRETERS.has(name) && args[0] && !args[0].value.startsWith("-"))
+      return skillScript(pathOf(args[0], here))
+    return false
   }
   const visit: Visit = async (cmd, parsed, env) => {
-    const slot = slotWords(parsed)
-    if (slot)
-      return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
-    for (const reading of [parsed, ...parsed.also]) {
-      if (!harmless(cmd, reading)) harmlessLine = false
-      if (touched) continue
-      for (const here of places(env, directory)) if (await touches(reading, here)) touched = true
+    // the factory's run-slot runs its command after `--`, which is judged in its place
+    if (parsed.name === "run-slot.sh" && parsed.first && permitted(cmd, parsed, env)) {
+      const at = parsed.args.findIndex((a) => a.value === "--")
+      return at === -1
+        ? undefined
+        : examine({ ...cmd, words: parsed.args.slice(at + 1) }, env, visit, false)
     }
+    for (const reading of [parsed, ...parsed.also])
+      if (!permitted(cmd, reading, env)) allowed = false
   }
   const variables = knownVariables(command, environment, directory)
   const env: Env = {
@@ -153,10 +210,28 @@ export async function inspect(
     old: { dir: directory },
     process: environment,
     vars: new Map(),
+    visitShells: true,
   }
   await run(lex(command, variables), env, visit, true)
-  if (!touched || harmlessLine) return
-  return "no-outside-pr-code hook refuses a reviewer or tester running an outside author's PR code: this line touches the clone of a PR whose author is not the repo's owner, and a test run, a script, a build, an install or a copy out of it runs that author's code on this machine. Read the PR instead: the Read, Grep and Glob tools, gh pr diff, or git diff, log and show in the clone; move the clone to a new head with git fetch <remote> <ref> and git checkout --detach <rev>. Score what the PR's own GitHub checks ran, and say in the verdict that its code was read, not run."
+  return allowed
+}
+
+// Why the session is in read mode, or undefined when it serves the owner's own PRs alone: an outside PR's author is not the repo's owner, on a repo a user owns (an org repo's PRs are its colleagues'), and a PR the hook cannot read counts as outside.
+export async function readMode(
+  sessionId: unknown,
+  lookup: Lookup,
+): Promise<keyof typeof REASONS | undefined> {
+  const prs = (await lookup.prsOf(sessionId)).flatMap((url) => {
+    const m = PULL.exec(url)
+    return m ? [{ number: Number(m[2]), repo: m[1] }] : []
+  })
+  if (prs.length === 0) return "none"
+  for (const { number, repo } of prs) {
+    const pr = await lookup.author(repo, number)
+    if (!pr) return "outside"
+    if (pr.ownerType === "User" && pr.author.toLowerCase() !== pr.owner.toLowerCase())
+      return "outside"
+  }
 }
 
 export async function check(
@@ -175,16 +250,20 @@ export async function check(
   const command = (toolInput as { command?: unknown } | undefined)?.command
   if (typeof command !== "string") return
   if (!CHECKERS.has(await sessionRole(environment, sessionId))) return
+  const why = await readMode(sessionId, lookup)
+  if (!why) return
+  const directory = typeof cwd === "string" && isAbsolute(cwd) ? cwd : undefined
+  let allowed = false
   try {
-    return await inspect(command, typeof cwd === "string" ? cwd : undefined, environment, lookup)
-  } catch {
-    return "no-outside-pr-code hook cannot read this line, so it cannot rule out an outside author's PR clone. Run it as plain commands with literal folders."
-  }
+    allowed = await inspect(command, directory, environment, lookup)
+  } catch {}
+  if (allowed) return
+  return `no-outside-pr-code hook keeps this reviewer or tester in read mode, which runs only reads, git's fetch, clone and detached checkout, gh, and an installed skill's scripts: ${REASONS[why]}`
 }
 
 async function output(argv: string[]): Promise<string | undefined> {
   const child = Bun.spawn(argv, { stderr: "ignore", stdout: "pipe" })
-  const timer = setTimeout(() => child.kill(), WAIT_MS)
+  const timer = setTimeout(() => child.kill(), 5000)
   try {
     const text = await new Response(child.stdout).text()
     return (await child.exited) === 0 ? text.trim() : undefined
@@ -193,40 +272,58 @@ async function output(argv: string[]): Promise<string | undefined> {
   }
 }
 
-// The machine's own lookup: a clone's origin by git, a PR's author by gh, kept in the data folder once read since it never changes, and the clones under the main checkout's worktrees folder.
+const isPr = (read: unknown): read is Pr =>
+  typeof read === "object" &&
+  read !== null &&
+  ["author", "owner", "ownerType"].every(
+    (key) => typeof (read as Record<string, unknown>)[key] === "string",
+  )
+
+// The machine's own lookup: the session's roster row by its registry name, and a PR's author by gh, kept in the data folder since it never changes; a read that fails is kept for an hour, so a PR GitHub cannot answer costs one call an hour.
 export function live(environment: Environment): Lookup {
-  const cache = join(dataDirOf(environment), "hook-outside-pr")
-  const trees = join(mainCheckout(resolve(import.meta.dir, "..", "..")), ".claude", "worktrees")
+  const data = dataDirOf(environment)
+  const cache = join(data, "hook-outside-pr")
+  const HOUR = 3600 * 1000
   return {
     author: async (repo, pr) => {
       const file = join(cache, `${repo.replace("/", "__")}__${pr}.json`)
       try {
-        return (await Bun.file(file).json()) as Pr
+        const kept = (await Bun.file(file).json()) as { failedAt?: number } | Pr
+        if (isPr(kept)) return kept
+        if (typeof kept.failedAt === "number" && Date.now() - kept.failedAt < HOUR) return
       } catch {}
       const jq =
         "{author: .user.login, owner: .base.repo.owner.login, ownerType: .base.repo.owner.type}"
       const text = await output(["gh", "api", `repos/${repo}/pulls/${pr}`, "--jq", jq])
-      if (!text) return
-      const read = JSON.parse(text) as Pr
-      if (typeof read.author !== "string" || typeof read.owner !== "string") return
+      let read: unknown
+      try {
+        read = text ? JSON.parse(text) : undefined
+      } catch {}
       try {
         mkdirSync(cache, { recursive: true })
-        await Bun.write(file, JSON.stringify(read))
+        await Bun.write(file, JSON.stringify(isPr(read) ? read : { failedAt: Date.now() }))
       } catch {}
-      return read
+      return isPr(read) ? read : undefined
     },
-    clones: async () => {
+    holds: (folder, entry) => existsSync(join(folder, entry)),
+    // a guard runs from the main checkout (the settings' command cds there), so its folder is the checkout whose extensions hold the factory's own skills
+    main: mainCheckout(process.cwd()),
+    prsOf: async (sessionId) => {
+      if (typeof sessionId !== "string") return []
       try {
-        return readdirSync(trees)
-          .filter((name) => CLONE.test(name))
-          .map((name) => join(trees, name))
+        const name = await registryName(sessionId, environment)
+        if (!name) return []
+        const roster = (await Bun.file(join(data, "roster.json")).json()) as {
+          agents?: { name?: unknown; pr?: unknown; prs?: unknown }[]
+        }
+        const row = roster.agents?.find((agent) => agent?.name === name)
+        const listed = Array.isArray(row?.prs) ? row.prs : []
+        return [...new Set([row?.pr, ...listed])].filter(
+          (url): url is string => typeof url === "string",
+        )
       } catch {
         return []
       }
-    },
-    repoOf: async (folder) => {
-      const url = await output(["git", "-C", folder, "remote", "get-url", "origin"])
-      return url && /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(url)?.[1]
     },
   }
 }
