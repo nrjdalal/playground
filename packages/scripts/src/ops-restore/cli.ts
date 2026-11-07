@@ -18,7 +18,7 @@ export const IN_A_ROW_MS = 600_000
 // A run that holds the main checkout for its upkeep (the ship's step 5, `playground update`, run in a run slot, the links it runs, and any install, since a holder's command names no folder), read from each run slot's holder pid.
 const UPKEEP = /playground update|playground\/update\.ts|link-skills\.sh|bun install/
 
-type State = { failed?: string; last: string; missing: string[]; since: string }
+type State = { failed?: string; last: string; since: string }
 
 // The file a healthy look keeps origin's URL in, since a lost .git takes the URL with it, and the Dashboard's checkout, a worktree of the main checkout, reads its git through that .git too.
 export const originPath = (ops: string): string => join(ops, "restore", "origin.txt")
@@ -53,7 +53,7 @@ export type Restore = {
   upkeep?: (ctx: Context) => Promise<boolean>
 }
 
-// One look: a guard gone on two looks in a row, with no upkeep holding the main checkout, runs the restore once, records what the checkout held before it, and tells ops and the dispatcher what it did; a failed step is told once and not tried again until the guards are back.
+// One look: a guard gone on two looks in a row, with no upkeep holding the main checkout, runs the restore once, records what the checkout held before it, and tells ops and the dispatcher what it did; a failed step is told once and runs no step again until the guards have come back.
 export const restoreBeat =
   ({ guards, main, upkeep = upkeepHeld }: Restore) =>
   async (ctx: Context) => {
@@ -78,10 +78,10 @@ export const restoreBeat =
       return
     }
     await mkdir(dir, { recursive: true })
-    const fresh = !state || ctx.now.getTime() - Date.parse(state.last ?? state.since) > IN_A_ROW_MS
+    const fresh = !state || ctx.now.getTime() - Date.parse(state.last) > IN_A_ROW_MS
     if (fresh) {
       const failed = state?.failed ? { failed: state.failed } : {}
-      await writeAtomic(statePath, JSON.stringify({ ...failed, last: now, missing, since: now }))
+      await writeAtomic(statePath, JSON.stringify({ ...failed, last: now, since: now }))
       return
     }
     await writeAtomic(statePath, JSON.stringify({ ...state, last: now }))
@@ -96,20 +96,24 @@ export const restoreBeat =
     const fail = async (step: string, out: string) => {
       const why = out.trim().split("\n").filter(Boolean).at(-1)?.slice(0, 160) ?? ""
       await writeAtomic(statePath, JSON.stringify({ ...state, failed: step, last: now }))
+      const next = missingGuards(main, registered).length
+        ? "The guards are still gone, a true block: it runs no step again until they are back, and LIFECYCLE.md's true-block route restores the rest."
+        : "The guards are back, so it runs nothing more: Ops finishes the rest by LIFECYCLE.md's steps."
       await tell(
-        `ops-restore: ${missing.length} guards were gone from ${main}, and its restore stopped at ${step}${why ? `: ${why}` : ""}.${statusFile ? ` Its git status before it began is in ${statusFile}.` : ""} It tries again once the guards are back; restore the rest by LIFECYCLE.md's steps, or, with the guards still gone, by its true-block route there.`,
+        `ops-restore: ${missing.length} guards were gone from ${main}, and its restore stopped at ${step}${why ? `: ${why}` : ""}.${statusFile ? ` Its git status before it began is in ${statusFile}.` : ""} ${next}`,
       )
     }
     const git = (...args: string[]) => ctx.run(["git", "-C", main, ...args], 300_000)
-    let held =
-      "had no .git and was restored in place; every worktree of the lost .git, the Dashboard's included, has lost its link to it, which a fresh .git cannot repair, so Ops reattaches each"
-    if (existsSync(join(main, ".git"))) {
-      // what the checkout held before the checkout throws it away, kept whole in a file and named in the report, since the main checkout stays clean and anything but the loss is news
-      const lines = (await git("status", "--porcelain")).out.split("\n").filter(Boolean)
-      const other = lines.filter((line) => !line.startsWith(" D "))
+    // what the checkout held before a checkout throws it away, kept whole in a file and named in the report, since the main checkout stays clean and anything but the loss is news
+    const keep = async (lines: string[]) => {
+      const other = lines.filter((line) => line[1] !== "D")
       statusFile = join(dir, `status-${now}.txt`)
       await writeAtomic(statusFile, `${lines.join("\n")}\n`)
-      held = `had ${lines.length - other.length} files deleted and ${other.length ? `also held ${other.slice(0, 5).join("; ")}${other.length > 5 ? ` and ${other.length - 5} more` : ""}` : "nothing else"} (git status in ${statusFile})`
+      return `${lines.length - other.length} files deleted and ${other.length ? `also held ${other.slice(0, 5).join("; ")}${other.length > 5 ? ` and ${other.length - 5} more` : ""}` : "nothing else"} (git status in ${statusFile})`
+    }
+    let held = ""
+    if (existsSync(join(main, ".git"))) {
+      held = `had ${await keep((await git("status", "--porcelain")).out.split("\n").filter(Boolean))}`
       const back = await git("checkout", "--", ".")
       if (back.code !== 0) return fail("git checkout -- .", back.out)
     } else {
@@ -123,11 +127,18 @@ export const restoreBeat =
         ["init"],
         ["remote", "add", "origin", url],
         ["fetch", "origin"],
-        ["checkout", "-f", "-B", "main", "origin/main"],
+        ["read-tree", "origin/main"],
       ]) {
         const step = await git(...args)
         if (step.code !== 0) return fail(`git ${args.join(" ")}`, step.out)
       }
+      // read against origin/main's tree, a file the same as origin's reads `A  `, so only a change, a loss or a stray file is kept
+      const lines = (await git("status", "--porcelain")).out
+        .split("\n")
+        .filter((line) => line && !line.startsWith("A  "))
+      held = `had no .git and was restored in place; against origin/main it had ${await keep(lines)}; every worktree of the lost .git, the Dashboard's included, has lost its link to it, which a fresh .git cannot repair, so Ops reattaches each`
+      const back = await git("checkout", "-f", "-B", "main", "origin/main")
+      if (back.code !== 0) return fail("git checkout -f -B main origin/main", back.out)
     }
     const runSlot = join(ctx.repo, "scripts", "ops", "run-slot.sh")
     const install = await ctx.run(
