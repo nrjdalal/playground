@@ -237,7 +237,7 @@ esac
       while (!ended && existsSync(path)) await Bun.sleep(20)
       return !ended && !existsSync(marker)
     }
-    return { marker, p, ran, saw, waits }
+    return { marker, p, ran, saw, stderr: () => err, waits }
   }
   const canTake = async (slot: string, who: string, extra: Record<string, string> = {}) => {
     const p = Bun.spawn(["bash", SCRIPT, "can-take", slot, who], { cwd: root, env: env(extra) })
