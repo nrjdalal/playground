@@ -1151,6 +1151,10 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
       "pgcli -h db.example.com app",
       "pgbench -h db.example.com app",
       "mycli -h db.example.com app",
+      "mysqldump -h db.example.com app",
+      "mongo --host db.example.com",
+      "mongosh --host db.example.com",
+      "redis-cli -h db.example.com",
     ]) {
       const reason = await refusal(input(command), { ...GLM, PLAYGROUND_DATA_DIR: open }, CALM)
       expect(reason).toContain("db.example.com")
