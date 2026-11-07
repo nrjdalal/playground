@@ -292,7 +292,9 @@ describe("the command finds the checkout", () => {
         })
         expect(code).toBe(2)
         expect(stderr).toContain("no-stash: ")
-        expect(stderr).toContain("Restoring the main checkout")
+        expect(stderr).toContain(
+          "ops-restore puts it back, else Ops by playbook LIFECYCLE.md, Restoring the main checkout",
+        )
       }
     })
   }
