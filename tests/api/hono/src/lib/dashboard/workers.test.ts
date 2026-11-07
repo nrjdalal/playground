@@ -58,7 +58,7 @@ const session = (over: Record<string, unknown>) => ({
   session_id: "s-greed",
   started_at: "2026-10-06T09:00:00.000Z",
   stored_pid_exists: true,
-  surface_id: "SURF-1",
+  surface_id: "MADESURF-1",
   transcript_path: "/t/s-greed.jsonl",
   updated_at: "2026-10-06T10:00:00.000Z",
   workspace_id: "W1",
@@ -398,13 +398,13 @@ describe("composeWorkers", () => {
       launch_arguments: ["/bin/claude", "-n", DISPATCHER_SECONDARY],
       session_id: "s-glm",
       started_at: "2026-10-06T08:00:00.000Z",
-      surface_id: "SURF-1",
+      surface_id: "MADESURF-1",
     })
     const first = session({
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-opus",
       started_at: "2026-10-06T09:00:00.000Z",
-      surface_id: "SURF-2",
+      surface_id: "MADESURF-2",
     })
     const { workers } = fromRecords({ sessions: [second, first] }, workspaces, new Map(), new Map())
     expect(workers.filter((w) => w.role === "dispatcher").map((w) => w.sessionId)).toEqual([
@@ -423,7 +423,7 @@ describe("composeWorkers", () => {
         launch_arguments: ["/bin/claude", "-n", name],
         session_id: id,
         started_at: at,
-        surface_id: `SURF-${i + 1}`,
+        surface_id: `MADESURF-${i + 1}`,
       }),
     )
     const { workers } = fromRecords({ sessions }, workspaces, new Map(), new Map())
@@ -440,13 +440,13 @@ describe("composeWorkers", () => {
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-old",
       started_at: "2026-10-06T09:00:00.000Z",
-      surface_id: "SURF-1",
+      surface_id: "MADESURF-1",
     })
     const newer = session({
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-new",
       started_at: "2026-10-06T10:00:00.000Z",
-      surface_id: "SURF-2",
+      surface_id: "MADESURF-2",
     })
     const { workers } = fromRecords({ sessions: [newer, older] }, workspaces, new Map(), new Map())
     const named = workers.filter((w) => w.name === DISPATCHER)
@@ -460,13 +460,13 @@ describe("composeWorkers", () => {
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-b",
       started_at: "2026-10-06T09:00:00.000Z",
-      surface_id: "SURF-1",
+      surface_id: "MADESURF-1",
     })
     const earlier = session({
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-a",
       started_at: "2026-10-06T09:00:00.000Z",
-      surface_id: "SURF-2",
+      surface_id: "MADESURF-2",
     })
     const { workers } = fromRecords(
       { sessions: [later, earlier] },
@@ -484,13 +484,13 @@ describe("composeWorkers", () => {
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-garbage",
       started_at: "not a time",
-      surface_id: "SURF-1",
+      surface_id: "MADESURF-1",
     })
     const real = session({
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-real",
       started_at: "2026-10-06T09:00:00.000Z",
-      surface_id: "SURF-2",
+      surface_id: "MADESURF-2",
     })
     const { workers } = fromRecords({ sessions: [garbage, real] }, workspaces, new Map(), new Map())
     const named = workers.filter((w) => w.name === DISPATCHER)
@@ -502,13 +502,13 @@ describe("composeWorkers", () => {
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-new",
       started_at: "2026-10-06T10:00:00.000Z",
-      surface_id: "SURF-1",
+      surface_id: "MADESURF-1",
     })
     const keeper = session({
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-old",
       started_at: "2026-10-06T09:00:00.000Z",
-      surface_id: "SURF-2",
+      surface_id: "MADESURF-2",
     })
     const { workers } = fromRecords(
       { sessions: [demoted, keeper] },
@@ -524,13 +524,13 @@ describe("composeWorkers", () => {
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-old",
       started_at: "2026-10-06T09:00:00.000Z",
-      surface_id: "SURF-1",
+      surface_id: "MADESURF-1",
     })
     const demoted = session({
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-new",
       started_at: "2026-10-06T10:00:00.000Z",
-      surface_id: "SURF-2",
+      surface_id: "MADESURF-2",
     })
     const tasks = new Map([
       ["s-old", "Run the dashboard"],
@@ -547,13 +547,13 @@ describe("composeWorkers", () => {
       agent_lifecycle: "needsInput",
       launch_arguments: ["/bin/claude", "-n", "probe-history"],
       session_id: "s-probe",
-      surface_id: "SURF-P",
+      surface_id: "MADESURF-P",
     })
     const dispatcher = session({
       agent_lifecycle: "needsInput",
       launch_arguments: ["/bin/claude", "-n", DISPATCHER],
       session_id: "s-boss",
-      surface_id: "SURF-D",
+      surface_id: "MADESURF-D",
       workspace_id: "W5",
     })
     const { workers } = fromRecords({ sessions: [probe, dispatcher] }, workspaces, new Map())
@@ -586,7 +586,7 @@ describe("composeWorkers", () => {
       workspace: { ref: "workspace:40", title: "greed" },
     })
     expect(live.transcripts.get("s-greed")).toBe("/t/s-greed.jsonl")
-    expect(live.surfaces.get("s-greed")).toBe("SURF-1")
+    expect(live.surfaces.get("s-greed")).toBe("MADESURF-1")
   })
 
   // The dispatcher is OLD.dispatcher unless a test stack's PLAYGROUND_DISPATCHER renames it, so the fixture takes whichever name this run has.
@@ -643,7 +643,7 @@ describe("composeWorkers", () => {
           session_id: "s-dashboard",
           launch_arguments: ["/bin/claude", "-n", "dashboard-runner"],
           workspace_id: "W50",
-          surface_id: "SURF-50",
+          surface_id: "MADESURF-50",
         }),
       ],
     }
@@ -837,7 +837,7 @@ describe("composeWorkers", () => {
 
   test("a row carries when its transcript last changed, and null when that is unknown", () => {
     const sessions = {
-      sessions: [session({}), session({ session_id: "s-envy", surface_id: "SURF-2" })],
+      sessions: [session({}), session({ session_id: "s-envy", surface_id: "MADESURF-2" })],
     }
     const { workers } = fromRecords(
       sessions,
@@ -954,7 +954,7 @@ describe("composeWorkers", () => {
           session_id: "lone",
           launch_arguments: [],
           launch_backed: false,
-          surface_id: "SURF-9",
+          surface_id: "MADESURF-9",
           workspace_id: "W5",
         }),
       ],
@@ -1239,7 +1239,7 @@ const reused = session({
   stored_pid_arguments: [
     "/System/Library/Frameworks/ManagedSettings.framework/Versions/A/ManagedSettingsAgent",
   ],
-  surface_id: "SURF-GONE",
+  surface_id: "MADESURF-GONE",
   transcript_path: "/c/projects/p/s-ended.jsonl",
   workspace_id: "W-GONE",
 })

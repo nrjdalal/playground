@@ -2,15 +2,16 @@
 
 The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone and `bun run test:skills`.
 AGENTS.md keeps one line for each, and this file holds the text that line stands for.
-It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes.
+It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes, and the rule for an edit script's replacements.
 Read a section before you change its script or its tests, or when it refuses a start you did not expect.
 The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## spawn.sh
 
 - While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start, naming focus's session and its end, but two: a reviewer or tester that reports to the focused session (a resume's, the worker its roster row names),
-  and a `--firefighting` start while `firefighting-stop.json` or `firefighting-headstart.json` stands in the data folder.
-  ops-firefighting-start's own `firefighting-start.json` (below) passes the load and slots gates alone, never focus; with none of the three, a `--firefighting` start is refused.
+  and a `--priority` start while `priority.json`, an urgent window, stands in the data folder.
+  A job's own `priority-start.json` passes the load and slots gates alone, never focus; with no priority file, a `--priority` start is refused.
+  `--firefighting` is `--priority`'s old name, and `firefighting-stop.json` and `firefighting-headstart.json` stand for `priority.json` and ops-firefighting-start's `firefighting-start.json` (below) for `priority-start.json`: aliases until the jobs that write them take the new names.
 - ops-firefighting-start (`bun run ops:firefighting-start`, `jobs.opsFirefightingStart`, off by default) starts the firefighting workers: each minute it reads the relay's `firefighting.json` and runs `spawn.sh worker <name> <brief> --firefighting` for each open ticket whose key `firefighting.start.prefixes` lists,
   that the tracker's digest lists (an entry in the file's `clock` map, which a ticket a mention elsewhere named, such as an integration or port ask, lacks), and that no live roster row holds (by `ticket=`, or a title the ID leads).
   It starts Urgent, High, Medium, Low, then the oldest first, with at most 2 in progress but for an Urgent, which always starts; it fills the standing brief `firefighting.start.brief` at `{TICKET}` and `{NAME}`, opens the worker in `firefighting.start.in` (with none set, it starts nothing and tells the Builder), and sets the new row's `ticket=`.
@@ -31,9 +32,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   each weighing half its item's load units (small 1, medium 2, big 3; `--size`, else small for a reviewer or tester, else what `scripts/ops/run-slot.sh size <name>` reads from the roster and plan.json), under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
   less a quarter of that (`gates.smallReserve`) kept for small items unless the start is small, so a big plan never blocks the small ones, while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the reviewers and testers, which start small, so a held review starts ahead of a new worker,
   refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores so a worker or two can be closed to make room, the refusal naming the load, the starts and the line,
-  while a `--firefighting` start passes it with a trigger file standing (above, any of the three), its row's `readings.firefighting` naming the file, since firefighting comes first; memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, room for its runs:
+  while a `--priority` start passes it with a priority file standing (above, any of them), its row's `readings.priority` naming the file, since priority work comes first; memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, room for its runs:
   `scripts/ops/run-slot.sh room`'s lanes, held lanes, free lanes (open and unheld while the queue's next run fits its load units by run-slot's one gate, `unit_fits`, or a medium run with no waiter, `slots.peers`' holders counted) and live waiters, refusing while no lane is free and a run waits in the queue, or when room gives no reading, so a new worker never joins a queue it has no room in,
-  while a `--firefighting` start passes a full queue with its trigger file standing, as it passes the load gate, its row's `readings.firefighting` naming the file, and a reviewer, tester
+  while a `--priority` start passes a full queue with a priority file standing, as it passes the load gate, its row's `readings.priority` naming the file, and a reviewer, tester
   or resume skips it and work already admitted finishes; and the launching backend's usage:
   Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, which never sits below one day's share of 14.3 points, so a week that has just reset passes its first day,
   or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone, which the dispatcher writes on the owner's go (#i509) and the pass line names, a missing, empty, past or unreadable time leaving the pace on;
@@ -125,6 +126,10 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A brief for a role with a template in `scripts/briefs/` (`new-reviewer.md`, `new-tester.md`, `new-worker.md`) is refused, before any gate or launch, while it still holds a slot that template holds, the refusal naming each slot left and the brief, so a checker never starts on a bare slot; a slot another role's template holds, or one spelled in words, passes.
   A resume of a reviewer or tester whose roster row's `worker=` names a session the roster has ended refuses before any pane opens, naming `bun scripts/roster.ts assign <checker> "<title>" review worker=<live worker> pr=<url>`,
   or, when it serves no live worker, `bun scripts/roster.ts set <checker> status=ended`, since the checker reaper (`checker-worker-gone` in `scripts/ops/optimizer/idle_sessions.ts`) would end it again on its next pass.
+  A reviewer's or tester's start, a resume or a column, on a roster row that reads `ended` names the PR it serves now with `--pr <url>` (its number alone, or its issue's URL while the PR is not yet opened, and a comma list for more than one), since the row still lists the PRs it last served, which auto-end and the sweep read as done:
+  `--pr` sets the row back to starting with `prs` of those PRs alone and `pr` of the first pull request named (none when it names only an issue), and a start there without it refuses before any pane opens, naming `--pr`.
+  On a live row, or none, `--pr` joins `prs`, as `assign` does, and a row with no `pr` takes the first pull request named; a start with no row, or a live one, needs none.
+  The dashboard's login-expired restart closes the pane, which ends the row, so its resume of a checker passes `--pr` with the row's `pr` first, then the rest of its `prs`, read before the close.
   `spawn.sh restore` names such a checker as not restored and runs the rest, and exits 1, so ops:herdr keeps that server's restore owed, each beat counting it as not restored and naming the log that holds its line, until one of those two commands runs.
   A `spawn.sh resume <name> <dir>` with no session id refuses, before any pane opens, a folder whose project folder under `$CLAUDE_CONFIG_DIR/projects` holds no transcript naming the session, since Claude's resume picker would find nothing there.
   That check reads every transcript in the project folder, so the capacity gate reads first, as `--check` runs it, and logs the resume's start only once the check passes.
@@ -205,7 +210,12 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - A hook PR measures its hooks against `canary` with `bun run hooks:differential` ([packages/scripts/src/hook-differential.ts](../packages/scripts/src/hook-differential.ts)), naming each hook with `--hook <name>` and the base with `--canary <sha>`:
   - `sweep --forms <module>` passes the forms the module exports (`forms: { command, inClass }[]`) from the home, the data folder and a worktree;
   - `replay` passes every Bash call of this machine's transcripts from the last 24 hours (`--hours <n>`), a sub-agent's nested transcripts included, each from its own folder.
-- Each form and call reaches the hook only as data, through its `check()` with `HOME` alone in its environment, and none is run.
+- Each form and call reaches the hook only as data, through its `check()` with `HOME`, `PATH` and a data folder of the run's own (`PLAYGROUND_DATA_DIR`) in its environment, and none is run.
+  That folder copies the real data folder's `COPIED` entries (the roster and writing-first's marks, which a `check()` writes) and links every other entry, so a hook's write lands in the copy while each read and each protected path resolves to the real entry; it stays in the temp folder after the run, as the registry `--role session` writes does.
+  A hook canary lacks replays against a baseline that allows every call, so each call it refuses counts as newly refused, and its counts line carries `"baseline":"allow-all: canary has no such hook"`.
+  With no role a role-gated hook allows every call before it judges one, so its counts read 0: `--role <role>` runs every `check()` under `PLAYGROUND_ROLE=<role>`, and its counts line carries the `role`.
+  `--role session`, for a replay alone, judges each call as the session that made it: the role the roster's kind gives the name its transcript's agent-name lines last carry, with that session named in a scratch registry (`CLAUDE_CONFIG_DIR`) and its `session_id` in the input, one call kept per session, folder and command.
+  A session whose name the roster lacks, or that no agent-name line names, keeps the default, `PLAYGROUND_ROLE` unset, where a hook places it by its name itself, and its calls are counted as `default role`.
   A hook whose `check()` takes the main checkout third (`TAKES_MAIN`: no-main-checkout and no-unslotted-run) gets the head's on both sides, the folder above its git common dir, since canary's tree below is no git checkout and would otherwise read as main on canary's side alone; a test holds `TAKES_MAIN` to the hooks whose `check()` declares that parameter.
   Both sides run with `PLAYGROUND_REPO` set to the head's main checkout, the caller's value put back after, so `mainCheckout()` (`packages/scripts/src/main-checkout.ts`, read by no-desktop-owner-app's main-checkout allowance) gives canary's side the same root as the head's.
   `ROOT_READS` names every file in the hooks' import graph that finds a path from its own folder, each with why both sides read alike: pinned, a file that ships with each version, unreached by a Bash call, or only in a refusal's text.
@@ -217,8 +227,13 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   `--all` prints every changed case, and the stored result keeps every one.
   A sweep lists only the cases outside the form's class and the newly refused ones, and transcript text stays out of the repo and the PR.
 - A run at a clean worktree stores its counts and changed cases under a key in the data folder (`hook-differential/results/<key>.json`), once it finds the worktree still clean at the key's tree and a sweep's forms module still the key's blob; a run whose inputs moved under it stores nothing.
-  The key hashes the head's tree sha (`HEAD^{tree}`), the `--canary` sha, the mode with its inputs (a sweep's forms module blob sha, a replay's `--hours` and its newest transcript's mtime), the sorted `--hook` names and `--all`, and those alone: a hook that reads files outside the tree (the home, a gitignored `dist`, the forms module's own imports) needs `--fresh` once those change.
+  The key hashes the head's tree sha (`HEAD^{tree}`), the `--canary` sha, the mode with its inputs (a sweep's forms module blob sha, a replay's `--hours` and its newest transcript's mtime), the sorted `--hook` names, `--all` and `--role`, and those alone: a hook that reads files outside the tree (the home, a gitignored `dist`, the forms module's own imports) needs `--fresh` once those change.
   A run whose key matches a stored result under 24 hours old prints that result under a first line `reused: <key> from <iso>, head <tree sha>, canary <sha>`, queueing and building nothing, so a reviewer at the author's head and base quotes the author's sweep.
   A worktree with any modified or untracked file, any changed part of the key, `--fresh`, or a result 24 hours old runs fresh; a replay's key moves with every new transcript line, so a replay mostly runs fresh.
 - Started bare with no stored result to reuse, it queues itself through `run-slot.sh`, as `commit-slot.ts` queues a commit's build, and says so on stderr with the queue's depth; inside a ticket, or where `run-slot.sh` is not executable, it runs as it is.
   Tests: `bun run test:file tests/packages/scripts/src/hook-differential.test.ts`.
+
+## An edit script's replacements
+
+An edit script that writes code or text with JavaScript passes each replacement that may hold `$` through a replacer function, `s.replace(a, () => b)`, or `split(a).join(b)`, since a string replacement reads `$$`, `$&`, `` $` ``, `$'` and `$1` as patterns: `"a".replace("a", "echo $$")` gives `echo $`, and an edit script once turned `$$` into `$` in `run-slot.sh` with no error.
+In the repo's TypeScript, `tests/packages/scripts/src/replace-dollar.test.ts` fails on a literal replacement holding `$$`, `` $` `` or `$'`, or `$&` after a string search, naming the file, the line and the fix.

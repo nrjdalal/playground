@@ -16,7 +16,7 @@ import { readTemplates, startTemplate, TEMPLATES_QUERY_KEY, templateRowView } fr
 
 const ADD_LABEL = "Add a dispatcher or orchestrator"
 
-// Alpha's plus, in its effort's place (the row's toggle rule, className): a picker of sessions.templates, one row each, its label then its backend or model and effort, muted; a row a gate would refuse shows disabled with its reason. Picking a row starts it, a spinner on the row until the API answers, and a refusal's words show whole in a toast.
+// Alpha's plus, in its effort's place (the row's toggle rule but for hover, which counts over its own box alone, PLUS_SHOWN as className): a picker of sessions.templates, one row each, its label then its backend or model and effort, muted; a row a gate would refuse shows disabled with its reason. Picking a row starts it, a spinner on the row until the API answers, and a refusal's words show whole in a toast.
 export function TemplatePicker({
   className,
   secondRunning,

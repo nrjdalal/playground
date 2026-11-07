@@ -27,6 +27,7 @@ export type Folder =
   | "cli folder"
   | "data folder"
   | "extensions root"
+  | "glm org repo"
   | "glm repo"
   | "home"
   | "main checkout"

@@ -49,6 +49,18 @@ import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
 var dataDir = (env = process.env) => dataDirOf(env);
 
+// packages/scripts/src/release-notes/notes.ts
+var HIDDEN = new Set(["ci"]);
+var ARTICLES = new Set(["a", "an", "the"]);
+var COMMANDS = new Set(["bun", "bunx", "gh", "git", "npx", "playground"]);
+var CONTRIBUTORS_HEADING = "### \u2764\uFE0F Contributors";
+function ownerWords(name, login, owner) {
+  const own = new Set(owner.map((word) => word.toLowerCase()));
+  if (!own.has(login.toLowerCase()))
+    return [];
+  return name.split(/\s+/).filter((word) => own.has(word.toLowerCase()));
+}
+
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
   const numericValues = Object.values(entries).filter((v) => typeof v === "number");
@@ -6045,104 +6057,7 @@ var STALE_MS = 5 * 60000;
 
 // packages/settings/src/items.ts
 var ATTACHMENT_LIMIT = 50 * 1024 * 1024;
-// packages/settings/src/factory.ts
-var repo = string2().regex(/^(?:[A-Za-z0-9-]+\/[A-Za-z0-9._-]+)?$/, "a repository as owner/name, or empty for unset");
-var factorySettings = defineSettings({
-  "factory.archiveRepo": {
-    default: "",
-    description: "The archive repository: a link to it is private history, so the trace ratchet counts it and no-public-leak refuses it in a public write.",
-    schema: repo
-  },
-  "factory.publicRepo": {
-    default: "",
-    description: "The public repository, or a list of them: no-public-leak refuses a write to one that holds private text, and the trace ratchet reads past each one's own name.",
-    schema: union([repo, array(repo)])
-  },
-  "factory.repo": {
-    default: "",
-    description: "The repository the factory's pull requests land in, the checkout's origin when unset: pr:merge needs GitGuardian's check there, Checks reads its PRs, and the roster links a bare PR number into it.",
-    schema: repo
-  }
-});
-// packages/settings/src/firefighting.ts
-var firefightingSettings = defineSettings({
-  "firefighting.start.account": {
-    default: "",
-    description: "The Claude account a firefighting worker logs in as (spawn.sh's --account), an email whose token the Keychain keeps; empty starts it on spawn.sh's own pick.",
-    schema: union([literal(""), email2()])
-  },
-  "firefighting.start.brief": {
-    default: "brief-ff-ticket-template.md",
-    description: "The standing brief under the data folder that ops-firefighting-start fills for each ticket, its {TICKET} and {NAME} replaced by the ticket's ID and the new worker's name.",
-    schema: string2().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder")
-  },
-  "firefighting.start.consultFrom": {
-    default: "",
-    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts nothing and tells the dispatcher "consult <id>" once per ticket, so the owner decides; empty never consults.',
-    schema: union([literal(""), string2().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM in UTC")])
-  },
-  "firefighting.start.daysOff": {
-    default: [],
-    description: "The UTC dates (YYYY-MM-DD) ops-firefighting-start starts nothing on, as a day off; empty starts on every day.",
-    schema: array(string2().regex(/^\d{4}-\d{2}-\d{2}$/, "a YYYY-MM-DD date"))
-  },
-  "firefighting.start.freshMinutes": {
-    default: 10,
-    description: "How many minutes old firefighting.json's lines may be (its lastTry, else its file time) for a start; older ones are a closed window's or a stopped relay's, so the job starts nothing and tells the Builder once.",
-    schema: number2().int().min(1).max(120)
-  },
-  "firefighting.start.hours": {
-    default: "",
-    description: "The UTC window ops-firefighting-start starts in, HH:MM-HH:MM (one past midnight wraps); outside it the job starts nothing and tells the Builder once; empty starts at any time.",
-    schema: union([
-      literal(""),
-      string2().regex(/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/, "HH:MM-HH:MM in UTC")
-    ])
-  },
-  "firefighting.start.in": {
-    default: "",
-    description: "The folder a firefighting worker opens in (spawn.sh's --in), an absolute path; empty starts none, and the job tells the Builder this key is unset.",
-    schema: union([literal(""), string2().regex(/^\/.+/, "an absolute path")])
-  },
-  "firefighting.start.prefixes": {
-    default: [],
-    description: "The ticket keys the job starts for (MADE for MADE-1), each a tracker team's key; empty starts none.",
-    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "a ticket key, upper case"))
-  }
-});
-// packages/settings/src/gates.ts
-var gateSettings = defineSettings({
-  "gates.glmLoad5Max": {
-    default: 30,
-    description: "The load5 a GLM session starts under.",
-    schema: number2().positive()
-  },
-  "gates.glmSwapinsMax": {
-    default: 100,
-    description: "The swap-ins a second a GLM session starts under.",
-    schema: number2().int().positive()
-  },
-  "gates.memoryFreeMin": {
-    default: 8,
-    description: "The free memory share, in percent, a Claude session starts at or over.",
-    schema: number2().int().min(0).max(100)
-  },
-  "gates.reviewReserve": {
-    default: 0.125,
-    description: "The share of the load gate's line a small worker keeps back for reviewers and testers, so a held review starts first; set it under gates.smallReserve, or a small worker's line falls below a medium one's.",
-    schema: number2().min(0).lt(1)
-  },
-  "gates.smallReserve": {
-    default: 0.25,
-    description: "The share of the load gate's line kept for small items, so a big plan never blocks a small one.",
-    schema: number2().min(0).lt(1)
-  },
-  "gates.startsWindow": {
-    default: 300,
-    description: "The seconds a start counts toward the load gate, since the load average lags a session's start.",
-    schema: number2().int().positive()
-  }
-});
+
 // packages/settings/src/jobs.ts
 var withoutNeedsCmux = (row) => {
   if (!row || typeof row !== "object" || !("needsCmux" in row))
@@ -6153,6 +6068,7 @@ var withoutNeedsCmux = (row) => {
 var jobFields = strictObject({
   callsModel: boolean2(),
   command: string2().min(1).optional(),
+  config: record(string2(), unknown()).optional(),
   cwd: string2().min(1).optional(),
   description: string2().min(1),
   disabledWhy: string2().optional(),
@@ -6281,6 +6197,105 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     schema: jobRowSchema
   }
 ])));
+var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
+// packages/settings/src/factory.ts
+var repo = string2().regex(/^(?:[A-Za-z0-9-]+\/[A-Za-z0-9._-]+)?$/, "a repository as owner/name, or empty for unset");
+var factorySettings = defineSettings({
+  "factory.archiveRepo": {
+    default: "",
+    description: "The archive repository: a link to it is private history, so the trace ratchet counts it and no-public-leak refuses it in a public write.",
+    schema: repo
+  },
+  "factory.publicRepo": {
+    default: "",
+    description: "The public repository, or a list of them: no-public-leak refuses a write to one that holds private text, and the trace ratchet reads past each one's own name.",
+    schema: union([repo, array(repo)])
+  },
+  "factory.repo": {
+    default: "",
+    description: "The repository the factory's pull requests land in, the checkout's origin when unset: pr:merge needs GitGuardian's check there, Checks reads its PRs, and the roster links a bare PR number into it.",
+    schema: repo
+  }
+});
+// packages/settings/src/firefighting.ts
+var firefightingSettings = defineSettings({
+  "firefighting.start.account": {
+    default: "",
+    description: "The Claude account a firefighting worker logs in as (spawn.sh's --account), an email whose token the Keychain keeps; empty starts it on spawn.sh's own pick.",
+    schema: union([literal(""), email2()])
+  },
+  "firefighting.start.brief": {
+    default: "brief-ff-ticket-template.md",
+    description: "The standing brief under the data folder that ops-firefighting-start fills for each ticket, its {TICKET} and {NAME} replaced by the ticket's ID and the new worker's name.",
+    schema: string2().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder")
+  },
+  "firefighting.start.consultFrom": {
+    default: "",
+    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts nothing and tells the dispatcher "consult <id>" once per ticket, so the owner decides; empty never consults.',
+    schema: union([literal(""), string2().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM in UTC")])
+  },
+  "firefighting.start.daysOff": {
+    default: [],
+    description: "The UTC dates (YYYY-MM-DD) ops-firefighting-start starts nothing on, as a day off; empty starts on every day.",
+    schema: array(string2().regex(/^\d{4}-\d{2}-\d{2}$/, "a YYYY-MM-DD date"))
+  },
+  "firefighting.start.freshMinutes": {
+    default: 10,
+    description: "How many minutes old firefighting.json's lines may be (its lastTry, else its file time) for a start; older ones are a closed window's or a stopped relay's, so the job starts nothing and tells the Builder once.",
+    schema: number2().int().min(1).max(120)
+  },
+  "firefighting.start.hours": {
+    default: "",
+    description: "The UTC window ops-firefighting-start starts in, HH:MM-HH:MM (one past midnight wraps); outside it the job starts nothing and tells the Builder once; empty starts at any time.",
+    schema: union([
+      literal(""),
+      string2().regex(/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/, "HH:MM-HH:MM in UTC")
+    ])
+  },
+  "firefighting.start.in": {
+    default: "",
+    description: "The folder a firefighting worker opens in (spawn.sh's --in), an absolute path; empty starts none, and the job tells the Builder this key is unset.",
+    schema: union([literal(""), string2().regex(/^\/.+/, "an absolute path")])
+  },
+  "firefighting.start.prefixes": {
+    default: [],
+    description: "The ticket keys the job starts for (MADE for MADE-1), each a tracker team's key; empty starts none.",
+    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "a ticket key, upper case"))
+  }
+});
+// packages/settings/src/gates.ts
+var gateSettings = defineSettings({
+  "gates.glmLoad5Max": {
+    default: 30,
+    description: "The load5 a GLM session starts under.",
+    schema: number2().positive()
+  },
+  "gates.glmSwapinsMax": {
+    default: 100,
+    description: "The swap-ins a second a GLM session starts under.",
+    schema: number2().int().positive()
+  },
+  "gates.memoryFreeMin": {
+    default: 8,
+    description: "The free memory share, in percent, a Claude session starts at or over.",
+    schema: number2().int().min(0).max(100)
+  },
+  "gates.reviewReserve": {
+    default: 0.125,
+    description: "The share of the load gate's line a small worker keeps back for reviewers and testers, so a held review starts first; set it under gates.smallReserve, or a small worker's line falls below a medium one's.",
+    schema: number2().min(0).lt(1)
+  },
+  "gates.smallReserve": {
+    default: 0.25,
+    description: "The share of the load gate's line kept for small items, so a big plan never blocks a small one.",
+    schema: number2().min(0).lt(1)
+  },
+  "gates.startsWindow": {
+    default: 300,
+    description: "The seconds a start counts toward the load gate, since the load average lags a session's start.",
+    schema: number2().int().positive()
+  }
+});
 // packages/settings/src/models.ts
 var id = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id, such as claude-opus-5-5");
 var modelSettings = defineSettings({
@@ -10341,16 +10356,36 @@ var SAID = {
     fix: "Leave the id out, and say what the conversation settled."
   }
 };
-function finder(list, repos) {
+var SHIP = /^\s*gh release (?:create|edit)\b[^`$();&|<>\n]*$/;
+var CONTRIBUTOR = /^- ((?:\S+ )*)@([\w-]+)\s*$/;
+function ownLinesPast(text, owner) {
+  let contributors = false;
+  return text.split(`
+`).map((line) => {
+    if (line.replace(/\r$/, "") === CONTRIBUTORS_HEADING) {
+      contributors = true;
+      return line;
+    }
+    const m = CONTRIBUTOR.exec(line);
+    if (!m && line.trim() !== "")
+      contributors = false;
+    const names = m?.[1].trim() ?? "";
+    const login = m?.[2] ?? "";
+    const mine = contributors && owner.some((word) => word.toLowerCase() === login.toLowerCase()) && ownerWords(names, login, owner).join(" ") === names.split(/\s+/).filter(Boolean).join(" ");
+    return mine ? "" : line;
+  }).join(`
+`);
+}
+function finder(list, repos, owner) {
   const kinds = patterns(list, repos).filter(([kind]) => SAID[kind]);
   return (text) => {
-    const said = readPast(text, repos);
+    const said = readPast(owner ? ownLinesPast(text, owner) : text, repos);
     const found = kinds.find(([, re]) => said.search(re) !== -1);
     return found && SAID[found[0]];
   };
 }
-var policy2 = (list, repos) => ({
-  find: finder(list, repos),
+var policy2 = (list, repos, owner) => ({
+  find: finder(list, repos, owner),
   git: false,
   guard: "no-public-leak",
   guarded: (repo) => repos.public.includes(`${repo.owner}/${repo.repo}`.toLowerCase()),
@@ -10359,6 +10394,14 @@ var policy2 = (list, repos) => ({
   what: "private text",
   why: `Everything written to ${repos.public.join(" or ")} is public once the repository is, and stays cached after, so it names no person, company or private record.`
 });
+var shipWrite = (raw) => {
+  try {
+    const { tool_input: input, tool_name: tool } = JSON.parse(raw);
+    return tool === "Bash" && typeof input?.command === "string" && SHIP.test(input.command);
+  } catch {
+    return false;
+  }
+};
 async function check(raw, environment = process.env) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
@@ -10366,7 +10409,7 @@ async function check(raw, environment = process.env) {
   const read = await readPolicy(dataDir(environment));
   if (read.refusal !== undefined)
     return refusedList(raw, `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`);
-  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings)), raw, environment);
+  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
 }
 if (import.meta.main) {
   const raw = await Bun.stdin.text();

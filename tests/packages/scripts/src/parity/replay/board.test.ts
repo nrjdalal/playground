@@ -19,14 +19,14 @@ const REPORT = [
   "",
   "|  | Ticket&nbsp;&nbsp;&nbsp; | Priority | Age | Assignee | Tier | Next |",
   "| --- | --- | --- | --- | --- | --- | --- |",
-  `| 💻 Mine | [CEDAR-9100](${issue("CEDAR-9100")}) · Inbox rows say when contact began | 🟠 High | 6d | Ada | ${DASH} | Ask Grace: approve #7 (5/5 · CI ✅), then merge |`,
-  `| ✅ Free | [DUNE-9101](${issue("DUNE-9101")}) · Reschedule sends the reminder twice | 🔴 Urgent | 2d | ${DASH} | 🟢 T1 | /acme DUNE-9101 |`,
-  `| 🔍 Check | EMBER-9102 · Regression run skips a \\| piped step | 🟡 Medium | 3d | ${DASH} | 🟡 T2 | Ask Linus: is he on it, then /acme EMBER-9102 |`,
-  `| ⏭️ Skip | [DUNE-9104](${issue("DUNE-9104")}) · Reset token is written to logs | ${DASH} | ${DASH} | Barbara | ${DASH} | Assigned |`,
+  `| 💻 Mine | [MADECEDAR-9100](${issue("MADECEDAR-9100")}) · Inbox rows say when contact began | 🟠 High | 6d | Ada | ${DASH} | Ask Grace: approve #7 (5/5 · CI ✅), then merge |`,
+  `| ✅ Free | [MADEDUNE-9101](${issue("MADEDUNE-9101")}) · Reschedule sends the reminder twice | 🔴 Urgent | 2d | ${DASH} | 🟢 T1 | /acme MADEDUNE-9101 |`,
+  `| 🔍 Check | MADEEMBER-9102 · Regression run skips a \\| piped step | 🟡 Medium | 3d | ${DASH} | 🟡 T2 | Ask Linus: is he on it, then /acme MADEEMBER-9102 |`,
+  `| ⏭️ Skip | [MADEDUNE-9104](${issue("MADEDUNE-9104")}) · Reset token is written to logs | ${DASH} | ${DASH} | Barbara | ${DASH} | Assigned |`,
   "",
   "### 📝 Notes",
   "",
-  `- **[CEDAR-9100](${issue("CEDAR-9100")})** has two findings left.`,
+  `- **[MADECEDAR-9100](${issue("MADECEDAR-9100")})** has two findings left.`,
 ].join("\n")
 
 describe("tableCells", () => {
@@ -71,7 +71,7 @@ describe("foldAsk", () => {
     expect(foldAsk("Soren", "Confirm he is not on it")).toBe(
       "Ask Soren, then Confirm he is not on it",
     )
-    expect(foldAsk(null, "/acme DUNE-9101")).toBe("/acme DUNE-9101")
+    expect(foldAsk(null, "/acme MADEDUNE-9101")).toBe("/acme MADEDUNE-9101")
     expect(foldAsk(null, null)).toBeNull()
   })
 
@@ -88,7 +88,7 @@ describe("parseReport", () => {
     expect(parseReport(REPORT)).toEqual([
       {
         assignee: "Ada",
-        id: "CEDAR-9100",
+        id: "MADECEDAR-9100",
         next: "Ask Grace: approve #7 (5/5 · CI green), then merge",
         priority: "High",
         status: "Mine",
@@ -96,23 +96,23 @@ describe("parseReport", () => {
       },
       {
         assignee: null,
-        id: "DUNE-9101",
-        next: "/acme DUNE-9101",
+        id: "MADEDUNE-9101",
+        next: "/acme MADEDUNE-9101",
         priority: "Urgent",
         status: "Free",
         tier: "T1",
       },
       {
         assignee: null,
-        id: "EMBER-9102",
-        next: "Ask Linus: is he on it, then /acme EMBER-9102",
+        id: "MADEEMBER-9102",
+        next: "Ask Linus: is he on it, then /acme MADEEMBER-9102",
         priority: "Medium",
         status: "Check",
         tier: "T2",
       },
       {
         assignee: "Barbara",
-        id: "DUNE-9104",
+        id: "MADEDUNE-9104",
         next: "Assigned",
         priority: null,
         status: "Skip",
@@ -129,12 +129,12 @@ describe("parseReport", () => {
       "",
       "|  | Ticket | Priority | Age | Assignee | Tier | Ask | Next step |",
       "| --- | --- | --- | --- | --- | --- | --- | --- |",
-      `| 💻 Mine | CEDAR-9100 · Inbox rows | 🟠 High | 6d | Ada | ${DASH} | Grace | #7 · 4/5 · CI ❌ |`,
-      `| ✅ Free | DUNE-9101 · Reminder twice | 🔴 Urgent | 2d | ${DASH} | 🟢 T1 | ${DASH} | /acme DUNE-9101 |`,
+      `| 💻 Mine | MADECEDAR-9100 · Inbox rows | 🟠 High | 6d | Ada | ${DASH} | Grace | #7 · 4/5 · CI ❌ |`,
+      `| ✅ Free | MADEDUNE-9101 · Reminder twice | 🔴 Urgent | 2d | ${DASH} | 🟢 T1 | ${DASH} | /acme MADEDUNE-9101 |`,
     ].join("\n")
     expect(parseReport(older)?.map((row) => row.next)).toEqual([
       "Ask Grace, then #7 · 4/5 · CI red",
-      "/acme DUNE-9101",
+      "/acme MADEDUNE-9101",
     ])
   })
 
@@ -154,7 +154,7 @@ describe("parseReport", () => {
       "✅ 0 free · 🔍 1 to check",
       "",
       "```text",
-      "│ Check │ EMBER-1   │",
+      "│ Check │ MADEEMBER-1   │",
       "```",
     ].join("\n")
     expect(parseReport(boxed)).toBeNull()

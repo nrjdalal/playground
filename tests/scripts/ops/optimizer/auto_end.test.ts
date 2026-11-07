@@ -160,7 +160,7 @@ describe("sweep: ops-tick ends what the detector flags", () => {
     expect(closed).toEqual(["k8wjf3-reviewer"])
     expect(cleaned).toEqual([])
     const text =
-      "Ended k8wjf3-reviewer: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume k8wjf3-reviewer <dir>"
+      "Ended k8wjf3-reviewer: checker-nothing (head scored); resume it on the next push: scripts/spawn.sh resume k8wjf3-reviewer <dir> --pr <PR url>"
     expect(lines).toEqual([
       { text, to: "builder" },
       { text, to: "k8wjf3-worker" },

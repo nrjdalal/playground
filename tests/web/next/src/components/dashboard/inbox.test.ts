@@ -419,7 +419,7 @@ describe("one action where two overlapped, and Draft where the app has a draft A
   })
 
   test("a Linear comment offers no Draft, since Linear's API creates none", () => {
-    const html = render(false, draft("https://linear.app/acme/issue/DUNE-1/x"))
+    const html = render(false, draft("https://linear.app/acme/issue/MADEDUNE-1/x"))
     expect(named(html, "Send")).not.toBe("")
     expect(named(html, "Draft")).toBe("")
   })

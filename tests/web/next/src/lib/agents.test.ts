@@ -515,17 +515,17 @@ describe("rowLines and rowText", () => {
   test("a session with a kind leads with its label, its pull request's number in its colour, then the title it does not repeat", () => {
     const lines = rowLines(
       greed,
-      agent("worker-greed", { kind: "worker", pr, ticket: "NOVA-1234" }),
+      agent("worker-greed", { kind: "worker", pr, ticket: "MADENOVA-1234" }),
       NOW,
     )
     expect([lines.ticket, lines.pr, lines.kind, lines.title]).toEqual([
-      "NOVA-1234",
+      "MADENOVA-1234",
       197,
       null,
       "Dashboard home",
     ])
     // A worker's title carries no role word.
-    expect(rowText(lines).first).toBe("NOVA-1234#197 Dashboard home")
+    expect(rowText(lines).first).toBe("MADENOVA-1234#197 Dashboard home")
     expect(rowText(lines).prClass).toBe("text-success")
   })
 
@@ -550,7 +550,7 @@ describe("rowLines and rowText", () => {
   test("the ticket and pull request joined, then the title, over the model, the effort and the state, each after a separator, with the name and the time on the hover alone", () => {
     const lines = rowLines(
       greed,
-      agent("worker-greed", { eta: "2026-10-06T12:20:00.000Z", pr, ticket: "NOVA-1234" }),
+      agent("worker-greed", { eta: "2026-10-06T12:20:00.000Z", pr, ticket: "MADENOVA-1234" }),
       NOW,
     )
     expect(lines).toEqual({
@@ -562,13 +562,13 @@ describe("rowLines and rowText", () => {
       pr: 197,
       shown: "working",
       state: "Working",
-      ticket: "NOVA-1234",
+      ticket: "MADENOVA-1234",
       title: "Dashboard home",
       tone: "ready",
       when: null,
     })
     expect(rowText(lines)).toEqual({
-      first: "NOVA-1234#197 Dashboard home",
+      first: "MADENOVA-1234#197 Dashboard home",
       prClass: "text-success",
       prWords: "PR ready: 5/5 at its head",
       second: "Opus 5.5 high · Working",
@@ -594,26 +594,26 @@ describe("rowLines and rowText", () => {
     const lines = rowLines(
       worker("worker-greed", "working", {
         model: "claude-opus-5-5",
-        title: "PLUM-2582 rent figure",
+        title: "MADEPLUM-2582 rent figure",
       }),
       agent("worker-greed", {
         pr: { ...pr, number: 151, url: "https://github.com/o/r/pull/151" },
-        ticket: "PLUM-2582",
+        ticket: "MADEPLUM-2582",
       }),
       NOW,
     )
     expect(lines.title).toBe("rent figure")
-    expect(rowText(lines).first).toBe("PLUM-2582#151 rent figure")
+    expect(rowText(lines).first).toBe("MADEPLUM-2582#151 rent figure")
   })
 
   test("a title leading with both, the ask's way, keeps one of each", () => {
     const lines = rowLines(
-      worker("worker-greed", "working", { title: "#197 NOVA-1234 Dashboard home" }),
-      agent("worker-greed", { pr, ticket: "NOVA-1234" }),
+      worker("worker-greed", "working", { title: "#197 MADENOVA-1234 Dashboard home" }),
+      agent("worker-greed", { pr, ticket: "MADENOVA-1234" }),
       NOW,
     )
     expect(lines.title).toBe("Dashboard home")
-    expect(rowText(lines).first).toBe("NOVA-1234#197 Dashboard home")
+    expect(rowText(lines).first).toBe("MADENOVA-1234#197 Dashboard home")
   })
 
   test("a title never repeats a number the line shows: the PG ticket's issue as #N, at its start or its end (the row that read PG-1104#1112 #1104 touched)", () => {
@@ -640,12 +640,12 @@ describe("rowLines and rowText", () => {
 
   test("an id the row does not show stays in the title", () => {
     const lines = rowLines(
-      worker("worker-greed", "working", { title: "#151 PLUM-2582 rent figure" }),
+      worker("worker-greed", "working", { title: "#151 MADEPLUM-2582 rent figure" }),
       agent("worker-greed", { pr }),
       NOW,
     )
-    expect(lines.title).toBe("#151 PLUM-2582 rent figure")
-    expect(rowText(lines).first).toBe("#197 #151 PLUM-2582 rent figure")
+    expect(lines.title).toBe("#151 MADEPLUM-2582 rent figure")
+    expect(rowText(lines).first).toBe("#197 #151 MADEPLUM-2582 rent figure")
   })
 
   test("the time left is a working or stuck worker's alone, and none once it passes", () => {
@@ -835,7 +835,7 @@ describe("orderByStatus", () => {
       order([
         row("worker-none-b", "working", { title: "Beta" }, { title: "Beta" }),
         row("worker-pr-184", "working", { pr: pull({ number: 184 }) }),
-        row("worker-nova-12", "working", { ticket: "NOVA-12" }),
+        row("worker-nova-12", "working", { ticket: "MADENOVA-12" }),
         row("worker-pg-12", "working", {
           pr: pull({ number: 173 }),
           ticket: "PG-12",
@@ -980,7 +980,9 @@ describe("orderByStatus", () => {
 
 describe("ticketOf", () => {
   test("the roster's ticket, else the one its branch names (the API's branchTicket)", () => {
-    expect(ticketOf(agent("worker-a", { branchTicket: "PG-12", ticket: "NOVA-5" }))).toBe("NOVA-5")
+    expect(ticketOf(agent("worker-a", { branchTicket: "PG-12", ticket: "MADENOVA-5" }))).toBe(
+      "MADENOVA-5",
+    )
     expect(ticketOf(agent("worker-a", { branchTicket: "PG-12" }))).toBe("PG-12")
     expect(ticketOf(agent("worker-a", { branch: "vx-ui-menu" }))).toBeNull()
     expect(ticketOf(null)).toBeNull()
