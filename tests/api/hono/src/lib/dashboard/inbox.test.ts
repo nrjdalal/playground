@@ -1567,6 +1567,40 @@ describe("a guard decision for a job (PG-1196)", () => {
   })
 })
 
+// PG-1363: the guard decision also places an org's own job, a whole row the setting's write then checks against the org's script folders.
+describe("a guard decision for an org's own job (PG-1363)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
+  const row = {
+    callsModel: false,
+    command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+    description: "Watches a made-up org's queue.",
+    enabled: true,
+    heartbeat: "ops-watch",
+    schedule: { every: 60 },
+  }
+
+  test("takes a whole job row for a job the registry lacks, or no value", () => {
+    expect(takes({ key: "jobs.opsWatch", value: row })).toBe(true)
+    expect(takes({ key: "jobs.opsWatch", value: { ...row, config: { prefixes: ["X"] } } })).toBe(
+      true,
+    )
+    expect(takes({ key: "jobs.opsWatch", value: undefined })).toBe(true)
+  })
+
+  test("refuses a row that is no job, a config that is no object, and a key that is no job's name", () => {
+    for (const change of [
+      { key: "jobs.opsWatch", value: { enabled: true } },
+      { key: "jobs.opsWatch", value: { ...row, config: ["X"] } },
+      { key: "jobs.opsWatch", value: { ...row, madeUp: 1 } },
+      { key: "jobs.ops-watch", value: row },
+      { key: "jobs.", value: row },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+})
+
 // Made-up accounts: two Claude rows, one of them own, and a GLM row whose label is no Claude email.
 const ACCOUNTS = [
   { email: "pat@example.com", label: "work", renews: 17 },
