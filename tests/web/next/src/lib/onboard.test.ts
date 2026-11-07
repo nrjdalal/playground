@@ -120,7 +120,7 @@ describe("fixJobOf and settled", () => {
 
   test("reads the fix read, with gh's device code while it waits", () => {
     expect(fixJobOf({ data: read })).toEqual(read)
-    const device = { code: "ABCD-1234", url: "https://github.com/login/device" }
+    const device = { code: "MADEABCD-1234", url: "https://github.com/login/device" }
     expect(fixJobOf({ data: { ...read, device, id: "gh-login" } })?.device).toEqual(device)
     for (const body of [
       null,

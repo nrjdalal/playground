@@ -276,7 +276,7 @@ describe("what passes", () => {
   test.each([
     ["a status report", "Both PRs merged. The dashboard runs canary 3f9a2c1."],
     ["a quoted question from a colleague", "Avery asks: “Can we ship the export fix tonight?”"],
-    ["a quoted question with straight quotes", 'Niven said: "should I take DUNE-2186?"'],
+    ["a quoted question with straight quotes", 'Niven said: "should I take MADEDUNE-2186?"'],
     ["a question that says where it was asked", "Avery asks in Slack: can we merge?"],
     ["a blockquoted question", "From the thread:\n> Can we apply it to dev?"],
     ["a question to another agent", `@${capital(LEAD)}, can we take #500 next?`],
