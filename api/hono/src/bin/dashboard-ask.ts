@@ -50,9 +50,11 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 more lists up to 20 further ones, accepted after it in that order;
                                                 Approve stops at the first that fails
                                                 a guard decision names a key a guard reads, or an ops job's
-                                                jobs.<name>, whose value is {"enabled": true|false} alone,
-                                                or an org's own job's jobs.<camelName> with its whole row;
-                                                Approve writes it at its scope, and Settings > Jobs toggles a job too
+                                                jobs.<name>, or an org's own job's jobs.<camelName>, whose value is
+                                                {"enabled": true|false} alone or {"config": {...}} alone, any
+                                                object, or an org's own job's whole row; Approve writes it at its
+                                                scope, a part over the row there, and Settings > Jobs toggles a job
+                                                and edits its config too
                                                 --thread files it under that thread (bun run thread)
                                                 write {now} for a now-time, which new and edit fill with the time
                                                 they post at; a "measured" or "now" time ahead of the clock is refused

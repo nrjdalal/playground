@@ -364,16 +364,19 @@ export const appsChange = (list: string[], preview: InboxApps): { list: string[]
 // The owner's own apps list and the CLI that writes it: the login's scope, its list as accepted (empty when it has none, null when it is not a list of names), and `playground ext`. store/extensions.ts's ownerApps is the real one.
 export type OwnerApps = { login: string; read: () => string[] | null; run: ExtRun }
 
-// A registry job's setting key, which a guard decision turns on or off by its enabled field alone, so its command, schedule and runtime still come from the registry.
+// A registry job's setting key, which a guard decision turns on or off by its enabled field alone, or gives a new config object alone, so its command, schedule and runtime still come from the registry; core checks a config only for being an object, and the job checks each field itself.
 const JOB_KEYS = Object.keys(JOBS).map(jobKey)
-const jobSwitch = z.strictObject({ enabled: z.boolean() })
-// An org's own job's setting key, jobs.<camelName> for a job the registry lacks, whose whole row a guard decision places; the write checks it against the org's script folders
+const jobPart = z.union([
+  z.strictObject({ enabled: z.boolean() }),
+  z.strictObject({ config: z.record(z.string(), z.unknown()) }),
+])
+// An org's own job's setting key, jobs.<camelName> for a job the registry lacks, whose whole row a guard decision places, or whose enabled field or config alone it changes over the row its scope holds; the write checks the row against the org's script folders
 const orgJobKeySchema = z
   .string()
   .regex(/^jobs\.[a-z][A-Za-z0-9]*$/)
   .refine(orgJobKey)
 
-// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS), a registry job's or an org's own job's (a whole row, which the write checks against that org's script folders), the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes (a registry job's enabled field alone, an org's own job's whole row), or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
+// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS), a registry job's or an org's own job's, the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes (a job's enabled field alone or its config alone, or an org's own job's whole row, which the write checks against that org's script folders), or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
 const guardSchema = z
   .strictObject({
     key: z.union([z.enum(GUARD_SETTING_KEYS), z.enum(JOB_KEYS), orgJobKeySchema]),
@@ -384,17 +387,18 @@ const guardSchema = z
   })
   .superRefine((preview, ctx) => {
     if (preview.value === undefined) return
-    if (JOB_KEYS.includes(preview.key) && !jobSwitch.safeParse(preview.value).success) {
-      const message = `${preview.key} takes its enabled field alone, {"enabled": true} or {"enabled": false}: its command, schedule and runtime come from the registry`
+    if (JOB_KEYS.includes(preview.key) && !jobPart.safeParse(preview.value).success) {
+      const message = `${preview.key} takes its enabled field alone, {"enabled": true} or {"enabled": false}, or its config alone, {"config": {...}}: its command, schedule and runtime come from the registry`
       ctx.addIssue({ code: "custom", message, path: ["value"] })
       return
     }
     if (orgJobKey(preview.key)) {
+      if (jobPart.safeParse(preview.value).success) return
       const parsed = jobSchema.safeParse(preview.value)
       if (!parsed.success)
         ctx.addIssue({
           code: "custom",
-          message: `${preview.key} takes a whole job row: ${z.prettifyError(parsed.error).replaceAll("\n", " ")}`,
+          message: `${preview.key} takes its enabled field alone, its config alone or a whole job row: ${z.prettifyError(parsed.error).replaceAll("\n", " ")}`,
           path: ["value"],
         })
       return
@@ -1924,16 +1928,16 @@ function guardWrite(data: string, preview: InboxGuard, ref: number, actor: strin
       ? { exitCode: 0, line: `took ${key} at ${scope} back to its default` }
       : { exitCode: 1, line: reset.message }
   }
-  // a job's enabled field goes over the row its scope holds, never the registry's fields, so the rest still follow the registry
-  // an org's own job is no setting readSetting knows, so its row is read from its scope's settings directly
+  // a job's enabled field or config goes over the row its scope holds, never the registry's fields, so the rest still follow the registry; an org's own job is no setting readSetting knows, so its row is read from its scope's settings directly
   const held = (
     orgJobKey(key)
       ? settingRows(data).filter((row) => row.key === key)
       : (readSetting(data, key)?.rows ?? [])
   ).find((row) => row.scope === scope)?.value
-  const next = JOB_KEYS.includes(key)
-    ? { ...(held as object | undefined), ...(value as object) }
-    : value
+  const part = (JOB_KEYS.includes(key) || orgJobKey(key)) && jobPart.safeParse(value).success
+  if (part && orgJobKey(key) && held === undefined)
+    return { exitCode: 1, line: `${key} has no row at ${scope} to change` }
+  const next = part ? { ...(held as object | undefined), ...(value as object) } : value
   if (held !== undefined && isDeepStrictEqual(held, next))
     return {
       exitCode: 0,
