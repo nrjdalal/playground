@@ -3,8 +3,12 @@ import { join } from "node:path"
 
 import { PAGE_PANE } from "../../../../../../web/next/src/components/shell/page-pane"
 
-const read = (path: string) =>
-  Bun.file(join(import.meta.dir, "../../../../../../web/next/src", path)).text()
+// whitespace collapsed, so a reformat that wraps a line keeps the match
+const read = async (path: string) =>
+  (await Bun.file(join(import.meta.dir, "../../../../../../web/next/src", path)).text()).replace(
+    /\s+/g,
+    " ",
+  )
 
 const IMPORT = 'import { PAGE_PANE } from "@/components/shell/page-pane"'
 
