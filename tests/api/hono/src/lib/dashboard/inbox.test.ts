@@ -1555,18 +1555,18 @@ describe("a guard decision for a job (PG-1196)", () => {
     inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
 
   test("takes a registry job's enabled field alone, or no value", () => {
-    expect(takes({ key: "jobs.opsTicketCard", value: { enabled: true } })).toBe(true)
+    expect(takes({ key: "jobs.opsZaiUsage", value: { enabled: true } })).toBe(true)
     expect(takes({ key: "jobs.opsSweep", value: { enabled: false } })).toBe(true)
-    expect(takes({ key: "jobs.opsTicketCard", value: undefined })).toBe(true)
+    expect(takes({ key: "jobs.opsZaiUsage", value: undefined })).toBe(true)
   })
 
   // #1336: a job the registry does not name is an org's own job, whose enabled field alone is a part Approve writes over the org's row, so only a value that is neither a part nor a whole row is refused
   test("refuses a job decision carrying any field but enabled, and a job the registry does not name with neither a part nor a whole row", () => {
     for (const change of [
-      { key: "jobs.opsTicketCard", value: { command: "made-up", enabled: true } },
-      { key: "jobs.opsTicketCard", value: { enabled: true, schedule: { every: 5 } } },
-      { key: "jobs.opsTicketCard", value: {} },
-      { key: "jobs.opsTicketCard", value: true },
+      { key: "jobs.opsZaiUsage", value: { command: "made-up", enabled: true } },
+      { key: "jobs.opsZaiUsage", value: { enabled: true, schedule: { every: 5 } } },
+      { key: "jobs.opsZaiUsage", value: {} },
+      { key: "jobs.opsZaiUsage", value: true },
       { key: "jobs.opsMadeUp", value: { enabled: true, schedule: { every: 5 } } },
     ]) {
       expect(takes(change), JSON.stringify(change)).toBe(false)
@@ -5591,7 +5591,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
 
     test("a job's Approve stores its enabled field alone at its scope, so every other field still reads the registry's (PG-1196)", async () => {
       const data = folder()
-      const key = "jobs.opsTicketCard"
+      const key = "jobs.opsZaiUsage"
       const card = { ...GUARD, key, scope: "made-up-me", value: { enabled: true } }
       const posted = await post(decision(card))
       expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
@@ -5689,7 +5689,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
 
     test("a job's Approve keeps the other fields its scope's row holds, and stores no registry field (PG-1196)", async () => {
       const data = folder()
-      const key = "jobs.opsTicketCard"
+      const key = "jobs.opsZaiUsage"
       const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
       const row = { enabled: false, schedule: { every: 7 } }
       expect(setSetting(data, { key, scope: "made-up-me", value: row }, who).ok).toBe(true)
