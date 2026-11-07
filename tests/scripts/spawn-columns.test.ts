@@ -219,7 +219,7 @@ describe("under the gates it spawns", () => {
     expect(r.roster).toContain("surface=")
   })
 
-  // A checker's start, as a resume or a column, on the roster row given; the row's status= and prs writes are what auto-end and the sweep read.
+  // A checker's start, as a resume or a column, on the roster row given; the row's status=, prs and pr writes are what auto-end and the sweep read.
   const PR_A = "https://github.com/acme/factory/pull/1"
   const PR_B = "https://github.com/acme/factory/pull/2"
   const checkerStart = (mode: string, row: object | null, extra: string[] = []) => {
@@ -238,16 +238,26 @@ describe("under the gates it spawns", () => {
     )
   }
   const statusAndPrs = (r: { roster?: string[] }) =>
-    r.roster?.filter((arg) => /^(status|prs\+?)=/.test(arg))
+    r.roster?.filter((arg) => /^(status|prs\+?|pr)=/.test(arg))
 
   test.each(["resume", "column"])(
-    "a checker's %s on an ended row listing PR A, naming PR B, sets it live with prs of PR B alone (#1135)",
+    "a checker's %s on an ended row listing PR A, naming PR B, sets it live with prs and pr of PR B alone (#1135)",
     async (mode) => {
       const r = await checkerStart(mode, { pr: PR_A, prs: [PR_A], status: "ended" }, ["--pr", PR_B])
       expect(r.code).toBe(0)
-      expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${PR_B}`])
+      expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${PR_B}`, `pr=${PR_B}`])
     },
   )
+
+  test("a checker's resume on an ended row naming only an issue clears its pr, since no pull request is named yet (#1135)", async () => {
+    const issue = "https://github.com/acme/factory/issues/5"
+    const r = await checkerStart("resume", { pr: PR_A, prs: [PR_A], status: "ended" }, [
+      "--pr",
+      issue,
+    ])
+    expect(r.code).toBe(0)
+    expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${issue}`, "pr="])
+  })
 
   test.each(["resume", "column"])(
     "a checker's %s on an ended row naming no PR is refused before any pane opens, naming --pr (#1135)",
@@ -285,7 +295,7 @@ describe("under the gates it spawns", () => {
       `${PR_A},${PR_B}`,
     ])
     expect(r.code).toBe(0)
-    expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${PR_A},${PR_B}`])
+    expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${PR_A},${PR_B}`, `pr=${PR_A}`])
   })
 
   test.each([
@@ -294,6 +304,11 @@ describe("under the gates it spawns", () => {
       "a worker's start",
       ["worker", "worker-brave-otter", "b.md", "--title", "T", "--pr", "2"],
       "--pr is for",
+    ],
+    [
+      "a probe's column",
+      ["column", "probe", "probe-brave-otter", "worker-x", "w1:p2", "p.md", "--pr", "2"],
+      "not a probe's",
     ],
   ])("--pr is refused before any pane opens: %s", async (_, args, said) => {
     const r = await spawn(args, [], {}, undefined, {

@@ -1684,9 +1684,21 @@ fi
 set -- set "$NAME" "kind=$KIND"
 # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
 [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
-# A checker's --pr replaces an ended row's prs, the PRs it last served, and joins a live row's, as assign does.
+# A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check reads, with the first pull request named (none when it names only an issue); on a live row it joins prs, as assign does.
 if [ -n "$PR_ARG" ]; then
-  [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "prs=$PR_ARG" || set -- "$@" "prs+=$PR_ARG"
+  if [ "$(roster_field "$NAME" status)" = ended ]; then
+    first_pull=
+    IFS=, read -ra prs_named <<<"$PR_ARG"
+    for one in "${prs_named[@]}"; do
+      if [[ $one =~ ^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*)$ ]]; then
+        first_pull=$one
+        break
+      fi
+    done
+    set -- "$@" "prs=$PR_ARG" "pr=$first_pull"
+  else
+    set -- "$@" "prs+=$PR_ARG"
+  fi
 fi
 # A second dispatcher started under an <id>-dispatcher name records its slot, which roster.ts who dispatcher 2 reads; a dispatcher's name with -2 holds slot 2 by its name.
 [ "$MODE" = manager ] && [ "$KIND" = dispatcher ] && [ -z "$FIRST" ] && ! second_dispatcher "$NAME" && set -- "$@" "slot=2"

@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const { fixtureRestart, restartArgv, restartSession } =
+const { fixtureRestart, restartArgv, restartPrs, restartSession } =
   await import("../../../../../../api/hono/src/lib/dashboard/restart")
 type Run = import("../../../../../../api/hono/src/lib/dashboard/restart").Run
 
@@ -27,6 +27,16 @@ const spawn = (...answers: { code: number; stderr?: string }[]) => {
 }
 
 describe("a restart after a login expires", () => {
+  test("a checker's resume names its prs, else its pr alone, and one with neither reads null, which the route refuses before the close; a session that is no checker names none (#1135)", () => {
+    const A = "https://github.com/acme/factory/pull/1"
+    const B = "https://github.com/acme/factory/pull/2"
+    expect(restartPrs(true, { pr: A, prs: [A, B] })).toEqual([A, B])
+    expect(restartPrs(true, { pr: B })).toEqual([B])
+    expect(restartPrs(true, {})).toBeNull()
+    expect(restartPrs(true, undefined)).toBeNull()
+    expect(restartPrs(false, { pr: A, prs: [A] })).toBeUndefined()
+  })
+
   test("closes the pane spawn.sh opened, then resumes the same session on the account added", async () => {
     const { calls, run } = spawn({ code: 0 }, { code: 0 })
     const done = await restartSession(
