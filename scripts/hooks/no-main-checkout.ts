@@ -257,17 +257,21 @@ function liveWrite(args: Word[], env: Env): { cwd: string | undefined; what: str
     return { cwd, what: `git ${sub}` }
 }
 
-// Whether a session writes the live Dashboard's checkout by its role: the runner holding it, or the ops lead, whose name in Claude Code's registry has the roster's ops kind.
+// Whether a session writes the live Dashboard's checkout by its role: the runner holding it, or the ops lead, whose name in Claude Code's registry has the roster's ops kind; a read that throws (no registry folder) names no writer, so check()'s fail-open never lets the call through.
 async function liveWriter(
   raw: string,
   environment: Record<string, string | undefined>,
 ): Promise<boolean> {
-  const session = sessionOf(raw)
-  const role = await sessionRole(environment, session)
-  if (role === "runner") return true
-  if (role !== "lead" || typeof session !== "string") return false
-  const name = await registryName(session, environment)
-  return name !== undefined && (await rosterKind(name, environment)) === "ops"
+  try {
+    const session = sessionOf(raw)
+    const role = await sessionRole(environment, session)
+    if (role === "runner") return true
+    if (role !== "lead" || typeof session !== "string") return false
+    const name = await registryName(session, environment)
+    return name !== undefined && (await rosterKind(name, environment)) === "ops"
+  } catch {
+    return false
+  }
 }
 
 // The one reset the main checkout takes, back to origin/main from its own main with the tree clean and every commit it drops (origin/main..main) on no remote, so it removes only a stray local commit nobody else holds; --keep refuses to drop uncommitted work too.
@@ -537,13 +541,17 @@ async function inspect(raw: string, environment: Record<string, string | undefin
     )
   }
   let writer: Promise<boolean> | undefined
+  // a git write whose tree lands in the live checkout, by the caller's test of its tree, refused unless the session writes it
   const liveRefusal = async (
-    move: { cwd: string | undefined; what: string } | undefined,
+    args: Word[],
+    env: Env,
+    lands: (cwd: string | undefined) => boolean,
     fix: string,
-  ) =>
-    move && !(await (writer ??= liveWriter(raw, environment)))
-      ? refuse(`${move.what} in the live Dashboard's checkout`, fix)
-      : undefined
+  ) => {
+    const move = liveWrite(args, env)
+    if (!move || !lands(move.cwd) || (await (writer ??= liveWriter(raw, environment)))) return
+    return refuse(`${move.what} in the live Dashboard's checkout`, fix)
+  }
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") return inMain(file) ? refuse(`a write to ${file}`) : undefined
   if (tool !== "Bash") return
@@ -585,11 +593,11 @@ async function inspect(raw: string, environment: Record<string, string | undefin
         return path === undefined || inMain(path)
       })
       if (blindWrite) return refuse(`a write to ${blindWrite.value}`, ANYWHERE_FIX)
-      const blindMove = name === "git" ? liveWrite(args, blind) : undefined
-      if (blindMove && (blindMove.cwd === undefined || inLive(blindMove.cwd))) {
-        const verdict = await liveRefusal(blindMove, ANYWHERE_FIX)
-        if (verdict) return verdict
-      }
+      const blindLive =
+        name === "git"
+          ? await liveRefusal(args, blind, (cwd) => cwd === undefined || inLive(cwd), ANYWHERE_FIX)
+          : undefined
+      if (blindLive) return blindLive
     }
     // every folder the shell may be in, so a cd the reader cannot be sure of is judged wherever it may have left the command, by the fail-closed rule above
     for (const here of places(env, directory)) {
@@ -610,11 +618,9 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       if (script) return script
       const ran = runs(name, args, local, here)
       if (ran && inMain(ran.cwd)) return refuse(ran.what, fixFor(sure, ran.fix))
-      const move = name === "git" ? liveWrite(args, here) : undefined
-      if (move && inLive(move.cwd)) {
-        const verdict = await liveRefusal(move, fixFor(sure, LIVE_FIX))
-        if (verdict) return verdict
-      }
+      const moved =
+        name === "git" ? await liveRefusal(args, here, inLive, fixFor(sure, LIVE_FIX)) : undefined
+      if (moved) return moved
       const wrote = writeTargets(cmd, name, args).find((t) => inMain(pathOf(t, here)))
       if (wrote) return refuse(`a write to ${pathOf(wrote, here)}`, fixFor(sure))
     }

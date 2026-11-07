@@ -1015,6 +1015,24 @@ describe("a git write in the live Dashboard's checkout is refused to every sessi
     expect(await live(command, "worker")).toBeUndefined()
   })
 
+  test("a lead whose registry folder is missing is refused, and the main checkout's guard after it holds", async () => {
+    const noRegistry = (command: string, cwd: string) =>
+      check(
+        JSON.stringify({ cwd, session_id: "s-ops", tool_input: { command }, tool_name: "Bash" }),
+        {
+          CLAUDE_CONFIG_DIR: join(LMAIN, "no-such-config"),
+          HOME: "/u",
+          PLAYGROUND_DATA_DIR: DATA_DIR,
+          PLAYGROUND_ROLE: "lead",
+        },
+        LMAIN,
+      )
+    expect(await noRegistry("git commit -m x", LIVE)).toContain("the live Dashboard's checkout")
+    expect(await noRegistry(`git commit -m x; git -C ${LMAIN} reset --hard`, LIVE)).toContain(
+      "no-main-checkout hook refuses",
+    )
+  })
+
   test("a git write in another worktree runs", async () => {
     expect(await live("git commit -m x", "worker", OTHER)).toBeUndefined()
   })

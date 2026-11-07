@@ -7532,14 +7532,18 @@ function liveWrite(args, env) {
     return { cwd, what: `git ${sub}` };
 }
 async function liveWriter(raw, environment) {
-  const session = sessionOf(raw);
-  const role = await sessionRole(environment, session);
-  if (role === "runner")
-    return true;
-  if (role !== "lead" || typeof session !== "string")
+  try {
+    const session = sessionOf(raw);
+    const role = await sessionRole(environment, session);
+    if (role === "runner")
+      return true;
+    if (role !== "lead" || typeof session !== "string")
+      return false;
+    const name = await registryName(session, environment);
+    return name !== undefined && await rosterKind(name, environment) === "ops";
+  } catch {
     return false;
-  const name = await registryName(session, environment);
-  return name !== undefined && await rosterKind(name, environment) === "ops";
+  }
 }
 function keepReset(sub, rest, cwd) {
   if (sub !== "reset" || rest.join(" ") !== "--keep origin/main" || !cwd)
@@ -7776,7 +7780,12 @@ async function inspect(raw, environment, main) {
     return live !== undefined && path !== undefined && (path === live || path.startsWith(live + sep));
   };
   let writer;
-  const liveRefusal = async (move, fix) => move && !await (writer ??= liveWriter(raw, environment)) ? refuse(`${move.what} in the live Dashboard's checkout`, fix) : undefined;
+  const liveRefusal = async (args, env, lands, fix) => {
+    const move = liveWrite(args, env);
+    if (!move || !lands(move.cwd) || await (writer ??= liveWriter(raw, environment)))
+      return;
+    return refuse(`${move.what} in the live Dashboard's checkout`, fix);
+  };
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string")
     return inMain(file) ? refuse(`a write to ${file}`) : undefined;
@@ -7819,12 +7828,9 @@ async function inspect(raw, environment, main) {
       });
       if (blindWrite)
         return refuse(`a write to ${blindWrite.value}`, ANYWHERE_FIX);
-      const blindMove = name === "git" ? liveWrite(args, blind) : undefined;
-      if (blindMove && (blindMove.cwd === undefined || inLive(blindMove.cwd))) {
-        const verdict = await liveRefusal(blindMove, ANYWHERE_FIX);
-        if (verdict)
-          return verdict;
-      }
+      const blindLive = name === "git" ? await liveRefusal(args, blind, (cwd) => cwd === undefined || inLive(cwd), ANYWHERE_FIX) : undefined;
+      if (blindLive)
+        return blindLive;
     }
     for (const here of places(env, directory)) {
       const sure = env.cwdSure !== undefined && here.cwd === env.cwdSure;
@@ -7842,12 +7848,9 @@ async function inspect(raw, environment, main) {
       const ran = runs(name, args, local, here);
       if (ran && inMain(ran.cwd))
         return refuse(ran.what, fixFor2(sure, ran.fix));
-      const move = name === "git" ? liveWrite(args, here) : undefined;
-      if (move && inLive(move.cwd)) {
-        const verdict = await liveRefusal(move, fixFor2(sure, LIVE_FIX));
-        if (verdict)
-          return verdict;
-      }
+      const moved = name === "git" ? await liveRefusal(args, here, inLive, fixFor2(sure, LIVE_FIX)) : undefined;
+      if (moved)
+        return moved;
       const wrote = writeTargets(cmd, name, args).find((t) => inMain(pathOf(t, here)));
       if (wrote)
         return refuse(`a write to ${pathOf(wrote, here)}`, fixFor2(sure));
