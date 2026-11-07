@@ -33,7 +33,7 @@ At the top of every pass, the ops runner (`scripts/ops/up.py`) renders the jobs 
 A machine with no extensions keeps its own `jobs.json`.
 A plist whose job is now off moves to the trash under the `jobs` carve-out ([CLI](/docs/cli)); one the trash refuses stays, and the runner writes why to `<data>/ops/up.log`.
 When that render cannot be trusted, the runner keeps the last `jobs.json` and writes why to `<data>/ops/up.log`.
-A job the registry does not know, such as one of your own scripts, stays in `jobs.json` as it is.
+A job the registry does not know, such as one of your own scripts, stays in `jobs.json` as it is, unless an org's own job of its name ([below](#an-orgs-own-job)) replaces it.
 Each `script` item an org holds as a folder is installed into `<data>/ops/<key>/` in the same pass, beside the state its job keeps there, which the render never touches.
 
 launchd reads `~/Library/LaunchAgents`, not `<data>/ops/launch-agents`: at the switch to settings, each rendered plist is copied into `~/Library/LaunchAgents` and loaded with one `launchctl bootstrap` per plist, by its own label, in place of the plists kept by hand.
@@ -62,3 +62,36 @@ playground ext import-scripts <ops-folder> <job>... --org <org> [--dry-run]
 Each folder named becomes `<org>/scripts/<job>/` in your extensions: its top-level `.py`, `.sh` and `.json` files, but `state.json` and `watch.json`.
 The run prints everything it leaves in the folder by name, so a dry run shows what stays behind.
 A change to the script or its config is then a new revision, put with `playground ext put`, and the next pass installs it.
+
+## An org's own job
+
+An org runs a job of its own, one the registry does not know, by shipping its script and its row together in its extensions:
+
+- the script as `<org>/scripts/<key>/`, which each pass installs into `<data>/ops/<key>/`;
+- the row as `jobs.<camelName>` in `<org>/settings.json`, with every field a job has: `callsModel`, `command`, `description`, `enabled`, `heartbeat` and `schedule`, and `cwd` and `config` when it needs them.
+
+```json
+{
+  "jobs.opsWatch": {
+    "callsModel": false,
+    "command": "{bun} --no-env-file {data}/ops/ops-watch/cli.ts --data {data}",
+    "config": { "prefixes": ["INC"] },
+    "description": "Watches the org's own queue.",
+    "enabled": true,
+    "heartbeat": "ops-watch",
+    "schedule": { "always": true }
+  }
+}
+```
+
+The render takes the row only when it runs in a terminal and stays in its org's own script folder:
+
+- its `command` is `{bun}`, then `--no-env-file` if it wants it, then a script in a folder that org ships, `{data}/ops/<key>/<file>`, then plain words or `{data}`;
+- its `cwd` is that folder or one under it, and that folder when the row leaves it out.
+
+Any other row is refused: one off that shape, one naming `launchd` or `program`, a second org's row for a job the first adds (scopes in A to Z order), and a row for such a job at your login's scope.
+Each refusal is a `jobs: refused <scope> <key>: <why>` line in `<data>/ops/up.log`, and its job does not run; the rest of the render is written as usual.
+
+`config` is the job's own settings.
+Playground checks only that it is an object, and writes it into the job's `jobs.json` row, where the job reads it and checks each field itself.
+A registry job's row takes a `config` the same way.

@@ -17,12 +17,14 @@ import {
   filesIn,
   importedJob,
   loginOf,
+  orgJobs,
   plistProgram,
   readPolicyFile,
   readRendered,
   renderJobs,
   scopeDir,
   scopesIn,
+  settingRows,
 } from "@packages/settings"
 
 import { engineDataOf } from "../ops-job/job"
@@ -42,20 +44,29 @@ const writeIfChanged = (path: string, text: string, mode = 0o644): boolean => {
   return true
 }
 
-// Each org's script folder, <org>/scripts/<key>/, into <data>/ops/<key>/, beside the state its job keeps there, which no item holds and this never touches; the login's own scripts and core's stay where they are, and a file the extensions cannot vouch for is left as it was, with the reason on stderr.
-const installScripts = async (data: string, err: (line: string) => void): Promise<string[]> => {
+// Each org's script files, <org>/scripts/<key>/<path>, by org; the login's own scripts and core's are not an org's.
+const orgScripts = (data: string, login: string): Map<string, string[][]> =>
+  new Map(
+    scopesIn(data)
+      .filter((scope) => scope !== login && scope !== CORE)
+      .map((org) => [
+        org,
+        filesIn(scopeDir(data, org))
+          .map((file) => file.split("/"))
+          .filter((parts) => parts[0] === "scripts" && parts.length >= 3),
+      ]),
+  )
+
+// Each org's script folder, <org>/scripts/<key>/, into <data>/ops/<key>/, beside the state its job keeps there, which no item holds and this never touches; a file the extensions cannot vouch for is left as it was, with the reason on stderr.
+const installScripts = async (
+  data: string,
+  scripts: Map<string, string[][]>,
+  err: (line: string) => void,
+): Promise<string[]> => {
   const changed: string[] = []
-  let login: string
-  try {
-    login = loginOf(data)
-  } catch (error) {
-    err(`jobs: ${(error as Error).message}`)
-    return changed
-  }
-  for (const org of scopesIn(data).filter((scope) => scope !== login && scope !== CORE))
-    for (const file of filesIn(scopeDir(data, org))) {
-      const parts = file.split("/")
-      if (parts[0] !== "scripts" || parts.length < 3) continue
+  for (const [org, files] of scripts)
+    for (const parts of files) {
+      const file = parts.join("/")
       const read = await readRendered(data, `${org}/${file}`)
       if (!read.path) {
         err(`jobs: ${read.refusal ?? `no ${org}/${file}`}`)
@@ -69,7 +80,7 @@ const installScripts = async (data: string, err: (line: string) => void): Promis
   return changed
 }
 
-// The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json, and each org's script folders installed under ops. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job and the usage read on, as does a store with no policy.json yet), and 2 on stderr when policy.json or jobs.json does not parse, so the runner keeps the last jobs.json and logs why. Plists go only into the folder it is handed; one for a job now off moves to the trash through the jobs carve-out, and one the trash refuses stays, named on stderr, the render exiting 1 with everything else written.
+// The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json and each org's own job rows (orgJobs), and each org's script folders installed under ops; each org row refused is a `jobs: refused` line on stderr, the render exiting 1 with everything else written. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job and the usage read on, as does a store with no policy.json yet), and 2 on stderr when policy.json or jobs.json does not parse, so the runner keeps the last jobs.json and logs why. Plists go only into the folder it is handed; one for a job now off moves to the trash through the jobs carve-out, and one the trash refuses stays, named on stderr, the render exiting 1 with everything else written.
 export const renderJobsFile = async (
   options: { data: string; fill: Fill; jobs: string; launchAgents?: string; roots: Roots },
   out: (line: string) => void,
@@ -87,14 +98,26 @@ export const renderJobsFile = async (
     return 2
   }
   const listed = Array.isArray(existing.jobs) ? (existing.jobs as { name?: unknown }[]) : []
-  const { jobs, plists } = renderJobs(values, listed, options.fill)
+  let scripts = new Map<string, string[][]>()
+  let org: ReturnType<typeof orgJobs> = { jobs: {}, refused: [] }
+  if (read.path)
+    try {
+      const login = loginOf(options.data)
+      scripts = orgScripts(options.data, login)
+      const keys = [...scripts].map(([name, files]) => [name, files.map((parts) => parts[1]!)])
+      org = orgJobs(settingRows(options.data), login, Object.fromEntries(keys))
+    } catch (error) {
+      err(`jobs: ${(error as Error).message}`)
+    }
+  for (const line of org.refused) err(line)
+  const { jobs, plists } = renderJobs(values, listed, options.fill, org.jobs)
   const changed = [
     writeIfChanged(options.jobs, `${JSON.stringify({ ...existing, jobs }, null, 2)}\n`)
       ? "jobs.json"
       : "",
-    ...(read.path ? await installScripts(options.data, err) : []),
+    ...(await installScripts(options.data, scripts, err)),
   ]
-  let code = 0
+  let code = org.refused.length ? 1 : 0
   if (options.launchAgents) {
     for (const [label, text] of plists)
       if (writeIfChanged(join(options.launchAgents, `${label}.plist`), text)) changed.push(label)
