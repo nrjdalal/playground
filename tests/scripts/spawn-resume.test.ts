@@ -359,7 +359,8 @@ describe("restore resumes the herdr sessions its resume files list", () => {
         lw(home, "resume", `${name}.sh`),
         `#!/bin/bash\nexec /x/scripts/spawn.sh resume ${name} ${root} ${sid}${extra}\n`,
       )
-      writeFileSync(lw(home, "runtimes", name), k === "c" ? "cmux\n" : "herdr\n")
+      // worker-c's pin holds a word from an older install, which restore reads as herdr
+      writeFileSync(lw(home, "runtimes", name), k === "c" ? "made-up\n" : "herdr\n")
       writeFileSync(lw(home, "backends", name), "claude\n")
       transcript(home, sid)
     }
@@ -371,7 +372,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
     ],
   })
 
-  test("it resumes each one not live with its account and model, skips what the roster ended, what runs in cmux and a live one", async () => {
+  test("it resumes each one not live with its account and model, a pin holding another word included, and skips what the roster ended and a live one", async () => {
     const r = await spawn(
       ["restore"],
       [{ name: "worker-d", pid: 5100 }],
@@ -381,12 +382,14 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       listed,
     )
     expect(r.out).toBe(
-      "restored worker-a\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nskipped worker-d: live\n",
+      "restored worker-a\nskipped worker-b: its roster row reads ended\nrestored worker-c\nskipped worker-d: live\n",
     )
     expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "run")).toEqual([
       ["pane", "run", "w5:p1", `exec bash '${lw(r.home, "launch", "worker-a.sh")}'`],
+      ["pane", "run", "w5:p1", `exec bash '${lw(r.home, "launch", "worker-c.sh")}'`],
     ])
+    expect(readFileSync(lw(r.home, "runtimes", "worker-c"), "utf8")).toBe("herdr\n")
     const launch = launchOf(r)
     expect(launch).toContain(`--resume ${ids.a} -n worker-a --model claude-sonnet-5-5`)
     expect(launch).toContain("acme@example.net")
@@ -412,10 +415,12 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       listed,
     )
     expect(r.out).toBe(
-      "skipped worker-a: its roster row reads done\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nskipped worker-d: live\n",
+      "skipped worker-a: its roster row reads done\nskipped worker-b: its roster row reads ended\nrestored worker-c\nskipped worker-d: live\n",
     )
     expect(r.code).toBe(0)
-    expect(placing(r).filter((c) => c[1] === "run")).toEqual([])
+    expect(placing(r).filter((c) => c[1] === "run")).toEqual([
+      ["pane", "run", "w5:p1", `exec bash '${lw(r.home, "launch", "worker-c.sh")}'`],
+    ])
   })
 
   test("under inscope it reads the roster roster.ts writes, ~/.claude's", async () => {
@@ -464,7 +469,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       },
     )
     expect(r.out).toBe(
-      "skipped worker-a: its exec line is not a resume restore runs\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nrestored worker-d\n",
+      "skipped worker-a: its exec line is not a resume restore runs\nskipped worker-b: its roster row reads ended\nrestored worker-c\nrestored worker-d\n",
     )
   })
 
@@ -486,7 +491,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       onProbes,
     )
     expect(factory.out).toBe(
-      "restored worker-a\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\n",
+      "restored worker-a\nskipped worker-b: its roster row reads ended\nrestored worker-c\n",
     )
     const probes = await spawn(
       ["restore"],
@@ -650,7 +655,12 @@ describe("close ends a herdr session by closing the pane it opened (#994)", () =
   })
 
   test.each([
-    ["a cmux session", {}, opened({ runtime: "cmux" }), "does not read herdr"],
+    [
+      "a session whose pin holds another word",
+      {},
+      opened({ runtime: "made-up" }),
+      "does not read herdr",
+    ],
     ["a session with no runtime pin", {}, opened({ runtime: null }), "does not read herdr"],
     ["a session with no resume record", {}, opened({ record: null }), "has no resume record"],
     [

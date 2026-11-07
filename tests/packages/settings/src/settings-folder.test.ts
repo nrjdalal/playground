@@ -259,6 +259,44 @@ describe("a job set by its enabled field alone (PG-1196)", () => {
   })
 })
 
+describe("a job row an older install stored (PG-1439)", () => {
+  const key = "jobs.opsSweep"
+  const stored = { enabled: true, madeUp: true, runtime: "made-up" }
+  // the login's scope holding a row a write refuses: a key the schema does not name, and a runtime other than herdr
+  const old = () => {
+    const data = fresh()
+    set(data, "folderFixture.count", ME, 2, who("make the login"))
+    writeFiles(
+      data,
+      ME,
+      new Map([["settings.json", JSON.stringify({ "folderFixture.count": 2, [key]: stored })]]),
+      { author: "owner", reason: "a row an older install stored" },
+    )
+    return data
+  }
+
+  test("every read hands it out as the render takes it, so a toggle that sends it back lands", () => {
+    const data = old()
+    const held = readSetting(data, key)!.rows.find((row) => row.scope === ME)!.value
+    expect(held).toEqual({ enabled: true, runtime: "herdr" })
+    expect(listSettings(data).rows.find((row) => row.key === key)!.value).toEqual(held)
+    expect(readSetting(data, key)!.value).toMatchObject({ enabled: true, runtime: "herdr" })
+    const toggled = set(data, key, ME, { ...(held as object), enabled: false }, who("turn it off"))
+    expect(toggled.ok).toBe(true)
+    expect(file(data, `${ME}/settings.json`)[key]).toEqual({ enabled: false, runtime: "herdr" })
+  })
+
+  test("a write that adds a key the schema does not name is still refused, and the stored row stays", () => {
+    const data = old()
+    expect(set(data, key, ME, { enabled: false, madeUp: true }, who("a misspelled key"))).toEqual({
+      message: expect.stringContaining('Unrecognized key: "madeUp"'),
+      ok: false,
+      status: 400,
+    })
+    expect(file(data, `${ME}/settings.json`)[key]).toEqual(stored)
+  })
+})
+
 describe("an org's own job row (PG-1363)", () => {
   const key = "jobs.opsWatch"
   const row = {
