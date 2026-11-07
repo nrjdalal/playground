@@ -4,6 +4,7 @@
 
 A bare `bun test` from the repo root stops at `tests/require-sandbox.ts`, which `bunfig.toml` preloads, since only `test-sandbox.ts` gives a test a scratch home in place of the real one; bun reads `bunfig.toml` from the folder it runs in, so a run from a subfolder goes unguarded.
 That sandbox (`packages/scripts/src/sandbox.ts`) also sets `TZ=UTC`, so a test's children read one zone on the Mac and the runner box; a test of code that reads local time gives its child its own `TZ`.
+It sets `TMPDIR` to the scratch folder's short `t` folder too, so every `mkdtemp(tmpdir())` folder a test or its child makes goes with the scratch when the run ends, rather than staying in the caller's temp folder (24,008 such entries once, issue 1306).
 It keeps uv's Pythons and cache the real home's (`UV_PYTHON_INSTALL_DIR` and `UV_CACHE_DIR`, read before it swaps HOME), so a child's `uv run --python 3.13` finds its Python in place of downloading one.
 It also puts a fake `claude` and a fake `gh` first on PATH, each exiting 99 with a line naming the sandbox, so no test starts a session or reaches GitHub; a test that needs `gh`'s output puts its own fake ahead of the sandbox's on PATH.
 `test-sandbox.ts` hands its tests no `GIT_` variable, since a git hook exports `GIT_DIR` and `GIT_INDEX_FILE` and pre-commit runs tests, so a test's scratch `git init` or commit stays in its own folder; a test that needs a `GIT_` variable sets it on its own git call.
