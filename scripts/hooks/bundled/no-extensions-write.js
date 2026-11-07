@@ -2,9 +2,9 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-extensions-write.ts
-import { existsSync as existsSync2, statSync } from "fs";
+import { existsSync as existsSync3, readFileSync as readFileSync4, statSync as statSync2 } from "fs";
 import { homedir as homedir4 } from "os";
-import { dirname as dirname3, join as join6, resolve as resolve4, sep as sep2 } from "path";
+import { dirname as dirname4, join as join7, resolve as resolve4, sep as sep2 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -54,6 +54,32 @@ import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
 var dataDir = (env = process.env) => dataDirOf(env);
 
+// packages/settings/src/folder.ts
+import {
+  existsSync as existsSync2,
+  mkdirSync,
+  readdirSync,
+  readFileSync as readFileSync2,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync
+} from "fs";
+import { basename, dirname, join as join3, relative } from "path";
+
+// packages/safe-delete/src/index.ts
+var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
+var CARVE_OUTS = {
+  "dashboard-supervisor": {
+    bytes: 256 * 1024 ** 2,
+    files: 4000,
+    folder: "ops/dashboard/builds"
+  },
+  jobs: { bytes: 64 * 1024, files: 1, folder: "ops/launch-agents" }
+};
+
 // packages/settings/src/rendered.ts
 import { existsSync, readFileSync } from "fs";
 import { join as join2 } from "path";
@@ -61,6 +87,18 @@ import { fileURLToPath } from "url";
 var CORE = "core";
 var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
 var extensionsDir = (data) => join2(data, "extensions");
+var scopeDir = (data, scope) => scope === CORE ? coreDir() : join2(data, "extensions", scope);
+var loginPath = (data) => join2(data, "extensions", "login");
+var loginOf = (data, env = process.env) => {
+  if (env.PLAYGROUND_LOGIN)
+    return env.PLAYGROUND_LOGIN;
+  try {
+    const login = readFileSync(loginPath(data), "utf8").trim();
+    if (login)
+      return login;
+  } catch {}
+  throw new Error(`no login for the extensions in ${loginPath(data)}: run playground ext init`);
+};
 var fixFor = (file) => {
   const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
   if (list && !existsSync(join2(coreDir(), "lists", `${list}.json`)))
@@ -99,9 +137,16 @@ var readPolicySync = (data, org) => {
   };
 };
 
+// packages/settings/src/folder.ts
+var STALE_MS = 5 * 60000;
+var scopesIn = (data) => {
+  const root = extensionsDir(data);
+  return existsSync2(root) ? readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync2(join3(root, entry.name, ".git"))).map((entry) => entry.name).sort() : [];
+};
+
 // scripts/hooks/no-main-checkout.ts
-import { readdirSync, readFileSync as readFileSync2, realpathSync } from "fs";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join5, normalize, resolve as resolve3, sep } from "path";
+import { readdirSync as readdirSync2, readFileSync as readFileSync3, realpathSync } from "fs";
+import { basename as basename3, dirname as dirname3, isAbsolute as isAbsolute2, join as join6, normalize, resolve as resolve3, sep } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function joinValues(array, separator = "|") {
@@ -4701,7 +4746,7 @@ var liveSettings = defineSettings({
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
-import { join as join3 } from "path";
+import { join as join4 } from "path";
 
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [
@@ -4772,7 +4817,7 @@ var names;
 function loadNames(environment = process.env) {
   names ??= (async () => {
     try {
-      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const setting = join4(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
       const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
         env: { ...process.env, ...environment },
         stderr: "ignore",
@@ -4787,10 +4832,10 @@ function loadNames(environment = process.env) {
   return names;
 }
 async function registryName(sessionId, environment = process.env) {
-  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir2(), ".claude"), "sessions");
+  const dir = join4(environment.CLAUDE_CONFIG_DIR || join4(homedir2(), ".claude"), "sessions");
   for await (const file of new Bun.Glob("*.json").scan(dir)) {
     try {
-      const entry = await Bun.file(join3(dir, file)).json();
+      const entry = await Bun.file(join4(dir, file)).json();
       if (entry.sessionId === sessionId && typeof entry.name === "string")
         return entry.name;
     } catch {}
@@ -4808,7 +4853,7 @@ async function opsLead(raw, environment = process.env) {
   }
 }
 async function rosterKind(name, environment = process.env) {
-  const path = join3(dataDirOf(environment), "roster.json");
+  const path = join4(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
@@ -4850,7 +4895,7 @@ function sessionOf(raw) {
 
 // scripts/hooks/shell.ts
 import { homedir as homedir3 } from "os";
-import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
+import { basename as basename2, dirname as dirname2, isAbsolute, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
@@ -5507,7 +5552,7 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join4 = (parts, separator = "") => {
+var join5 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -5582,7 +5627,7 @@ var G_WRAPPERS = new Map([
   ["gtimeout", "timeout"]
 ]);
 var program = (value) => {
-  const base = basename(value.replace(/^=/, ""));
+  const base = basename2(value.replace(/^=/, ""));
   const lower = base.toLowerCase();
   if (SHELL_OWN.has(lower) && value !== lower)
     return value;
@@ -6488,10 +6533,10 @@ function places(env, fallback) {
 }
 function ancestors(path) {
   const out = [];
-  for (let dir = dirname(path);; dir = dirname(dir)) {
+  for (let dir = dirname2(path);; dir = dirname2(dir)) {
     tick();
     out.push(dir);
-    if (dir === dirname(dir))
+    if (dir === dirname2(dir))
       return out;
   }
 }
@@ -6668,7 +6713,7 @@ async function scriptOf(operand, cmd, env) {
   return scripts;
 }
 async function outputs(cmds, env) {
-  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join5(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -6679,7 +6724,7 @@ async function record2(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
+    env.files.set(path, held2(r.op === ">>" ? join5([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -6688,7 +6733,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
+      env.files.set(path, held2(append ? join5([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -6717,7 +6762,7 @@ async function outputOf(cmd, env) {
         return unknown(LARGE);
       parts.push(part);
     }
-    return join4(parts);
+    return join5(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -7508,7 +7553,7 @@ function real(path) {
     else
       low = mid;
   }
-  return join5(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
+  return join6(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
 }
 var resolved = (path) => {
   try {
@@ -7519,13 +7564,13 @@ var resolved = (path) => {
 };
 function nearest(path) {
   const rest = [];
-  for (let dir = path;; dir = dirname2(dir)) {
+  for (let dir = path;; dir = dirname3(dir)) {
     const found = resolved(dir);
     if (found !== undefined)
-      return join5(found, ...rest.reverse());
-    if (dir === dirname2(dir))
+      return join6(found, ...rest.reverse());
+    if (dir === dirname3(dir))
       return path;
-    rest.push(basename2(dir));
+    rest.push(basename3(dir));
   }
 }
 var FILE_TOOLS = {
@@ -7585,7 +7630,7 @@ function gitCall(args, env) {
       k++;
   }
   const repo = gitDir?.replace(/\/+$/, "");
-  const tree = repo?.endsWith(`${sep}.git`) ? dirname2(repo) : workTree ?? cwd;
+  const tree = repo?.endsWith(`${sep}.git`) ? dirname3(repo) : workTree ?? cwd;
   return { cwd: tree, rest: args.slice(k + 1).map((a) => a.value), sub: args[k]?.value };
 }
 var GIT_MOVES = new Set([
@@ -7681,7 +7726,7 @@ var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === 
 var GLOB = /[*?[{(]/;
 var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/;
 var GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/;
-var CLI = join6("packages", "scripts", "src", "playground", "cli.ts");
+var CLI = join7("packages", "scripts", "src", "playground", "cli.ts");
 var varsRun = new WeakMap;
 function runsVariable(vars) {
   const [cursor, found] = varsRun.get(vars) ?? [undefined, false];
@@ -7848,29 +7893,62 @@ var parsed = (text) => {
     return text;
   }
 };
-function tunes(key, text, scoped, values) {
+function tunes(key, text, scoped, held) {
   if (scoped)
     return false;
   const value = parsed(text);
   if (key === "glm.readOnlyLoad5")
     return typeof value === "number" && Number.isFinite(value) && value > 0;
-  if (!key.startsWith(JOB_PREFIX))
+  if (!key.startsWith(JOB_PREFIX) || !isRecord(value))
     return false;
-  const current = values[key];
-  if (!isRecord(current) || !isRecord(value))
+  const row = held(key);
+  if (row === undefined || row.elsewhere || !isRecord(row.rendered))
     return false;
-  const [was, now] = [current.schedule, value.schedule];
-  if (!isRecord(was) || !isRecord(now) || typeof was.every !== "number")
+  const ran = row.rendered.schedule;
+  if (!isRecord(ran) || typeof ran.every !== "number")
     return false;
-  const every = now.every;
-  return Object.keys(now).length === 1 && typeof every === "number" && Number.isInteger(every) && every > 0 && Bun.deepEquals({ ...value, schedule: was }, current, true);
+  const { schedule } = value;
+  return isRecord(schedule) && Object.keys(schedule).length === 1 && typeof schedule.every === "number" && Number.isInteger(schedule.every) && schedule.every > 0 && Bun.deepEquals({ ...value, schedule: null }, { ...row.stored, schedule: null }, true);
 }
+var storedAt = (data, scope) => {
+  const file = join7(scopeDir(data, scope), "settings.json");
+  if (!existsSync3(file))
+    return {};
+  try {
+    const values = JSON.parse(readFileSync4(file, "utf8"));
+    return isRecord(values) ? values : undefined;
+  } catch {
+    return;
+  }
+};
 function tuningOf(environment) {
-  const policy = readPolicySync(dataDir(environment));
+  const data = dataDir(environment);
+  const policy = readPolicySync(data);
   if (policy.refusal !== undefined)
     return NO_TUNING;
+  let login;
+  try {
+    login = loginOf(data, environment);
+  } catch {
+    return NO_TUNING;
+  }
+  const others = [CORE, ...scopesIn(data)].filter((scope) => scope !== login);
+  const own = storedAt(data, login);
+  const theirs = others.map((scope) => storedAt(data, scope));
+  if (own === undefined || theirs.some((values) => values === undefined))
+    return NO_TUNING;
   const { values } = policy.settings;
-  return (key, value, scoped) => tunes(key, value, scoped, values);
+  const held = (key) => {
+    const stored = own[key] ?? {};
+    if (!isRecord(stored))
+      return;
+    return {
+      elsewhere: theirs.some((at) => at !== undefined && (key in at)),
+      rendered: values[key],
+      stored
+    };
+  };
+  return (key, value, scoped) => tunes(key, value, scoped, held);
 }
 var BY_APPROVE = "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it";
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
@@ -7885,7 +7963,7 @@ function isCli(word, dirs) {
     return false;
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir }));
   if (program(word.value) === "playground")
-    return !word.value.includes("/") || !paths.some((path) => !!path && existsSync2(path) && statSync(path).isDirectory());
+    return !word.value.includes("/") || !paths.some((path) => !!path && existsSync3(path) && statSync2(path).isDirectory());
   const cli = (sep2 + CLI).toLowerCase();
   return paths.some((path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
 }
@@ -8153,7 +8231,7 @@ function runsOf(parsed, vars, whole, rootLine) {
   values.push(...programLines(parsed, rootLine));
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value));
 }
-function cliWrite(words, tuning = NO_TUNING) {
+function cliWrite(words, tuning) {
   const [command, verb, ...rest] = words.map((w) => marked(w.value) ? undefined : w.value);
   if (command === undefined)
     return words.length ? "playground with a command word it cannot read" : undefined;
@@ -8233,7 +8311,7 @@ async function inspect(raw, environment, unknown = false) {
   };
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string") {
-    const expanded = /^~(?:\/|$)/.test(file) ? join6(home, file.slice(1)) : file;
+    const expanded = /^~(?:\/|$)/.test(file) ? join7(home, file.slice(1)) : file;
     return inRoot(resolve4(directory ?? "", expanded)) ? refuse(`a write to ${file}`) : undefined;
   }
   if (tool !== "Bash")
@@ -8270,7 +8348,7 @@ async function inspect(raw, environment, unknown = false) {
       const glob = GLOB.exec(text.value);
       if (glob && !quotedGlob && !marked(text.value)) {
         const dir = pathOf({ value: `${text.value.slice(0, glob.index)}x` }, env);
-        const folder = dir && dirname3(dir);
+        const folder = dir && dirname4(dir);
         if (folder && (inRoot(folder) || above(folder, true)))
           return `${text.value}, a glob in ${folder}`;
       }

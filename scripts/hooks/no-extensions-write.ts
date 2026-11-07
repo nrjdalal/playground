@@ -1,10 +1,17 @@
 // PreToolUse hook: refuses a factory session's write into the extensions root, where every guard's list, policy.json and each scope's sources live, and its playground CLI call that changes what a guard reads to allow or deny a call, so no session edits a list in one call and makes the guarded call in the next.
-import { existsSync, statSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
-import { extensionsDir, readPolicySync } from "../../packages/settings/src/rendered"
+import { scopesIn } from "../../packages/settings/src/folder"
+import {
+  CORE,
+  extensionsDir,
+  loginOf,
+  readPolicySync,
+  scopeDir,
+} from "../../packages/settings/src/rendered"
 import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
 import { fromFactory, opsLead } from "./role"
 import {
@@ -357,38 +364,73 @@ const parsed = (text: string): unknown => {
   }
 }
 
-// Pure: whether a set of the key to the value text, as the CLI parses it, only tunes a number against policy.json's values: glm.readOnlyLoad5 to a positive load limit, or a job's row equal field for field to the row policy.json holds but its schedule's interval, a positive integer where the row already has one; a set replaces the whole row, so a row that leaves a field out would drop it, and a --scope, a job with no row and any other key tune nothing
+// What a job's key holds: the row the login's scope stores, {} when it stores none, whether another scope stores one, and the whole row policy.json renders over the registry's entry
+export type Held = { elsewhere: boolean; rendered: unknown; stored: Record<string, unknown> }
+
+// Pure: whether a set of the key to the value text, as the CLI parses it, only tunes a number: glm.readOnlyLoad5 to a positive load limit, or a job's row equal field for field to the row the login's scope stores but a schedule of a positive integer interval, where the rendered row already runs on one; a set replaces the stored row and the render reads each field it leaves out from the registry, so the stored row is what it must keep, and a --scope, a row another scope stores, a job policy.json lacks and any other key tune nothing
 export function tunes(
   key: string,
   text: string,
   scoped: boolean,
-  values: Record<string, unknown>,
+  held: (key: string) => Held | undefined,
 ): boolean {
   if (scoped) return false
   const value = parsed(text)
   if (key === "glm.readOnlyLoad5")
     return typeof value === "number" && Number.isFinite(value) && value > 0
-  if (!key.startsWith(JOB_PREFIX)) return false
-  const current = values[key]
-  if (!isRecord(current) || !isRecord(value)) return false
-  const [was, now] = [current.schedule, value.schedule]
-  if (!isRecord(was) || !isRecord(now) || typeof was.every !== "number") return false
-  const every = now.every
+  if (!key.startsWith(JOB_PREFIX) || !isRecord(value)) return false
+  const row = held(key)
+  if (row === undefined || row.elsewhere || !isRecord(row.rendered)) return false
+  const ran = row.rendered.schedule
+  if (!isRecord(ran) || typeof ran.every !== "number") return false
+  const { schedule } = value
   return (
-    Object.keys(now).length === 1 &&
-    typeof every === "number" &&
-    Number.isInteger(every) &&
-    every > 0 &&
-    Bun.deepEquals({ ...value, schedule: was }, current, true)
+    isRecord(schedule) &&
+    Object.keys(schedule).length === 1 &&
+    typeof schedule.every === "number" &&
+    Number.isInteger(schedule.every) &&
+    schedule.every > 0 &&
+    Bun.deepEquals({ ...value, schedule: null }, { ...row.stored, schedule: null }, true)
   )
 }
 
-// The Ops lead's tuning read against policy.json's values, or none when policy.json does not read
+const storedAt = (data: string, scope: string): Record<string, unknown> | undefined => {
+  const file = join(scopeDir(data, scope), "settings.json")
+  if (!existsSync(file)) return {}
+  try {
+    const values: unknown = JSON.parse(readFileSync(file, "utf8"))
+    return isRecord(values) ? values : undefined
+  } catch {
+    return undefined
+  }
+}
+
+// The Ops lead's tuning read against the login's stored rows, every other scope's and policy.json's, or none when the login, a scope's settings.json or policy.json does not read
 function tuningOf(environment: Environment): Tuning {
-  const policy = readPolicySync(dataDir(environment))
+  const data = dataDir(environment)
+  const policy = readPolicySync(data)
   if (policy.refusal !== undefined) return NO_TUNING
+  let login: string
+  try {
+    login = loginOf(data, environment)
+  } catch {
+    return NO_TUNING
+  }
+  const others = [CORE, ...scopesIn(data)].filter((scope) => scope !== login)
+  const own = storedAt(data, login)
+  const theirs = others.map((scope) => storedAt(data, scope))
+  if (own === undefined || theirs.some((values) => values === undefined)) return NO_TUNING
   const { values } = policy.settings
-  return (key, value, scoped) => tunes(key, value, scoped, values)
+  const held = (key: string): Held | undefined => {
+    const stored = own[key] ?? {}
+    if (!isRecord(stored)) return undefined
+    return {
+      elsewhere: theirs.some((at) => at !== undefined && key in at),
+      rendered: values[key],
+      stored,
+    }
+  }
+  return (key, value, scoped) => tunes(key, value, scoped, held)
 }
 
 const BY_APPROVE =
@@ -758,7 +800,7 @@ function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean)
 }
 
 // What of a playground call changes what a guard reads, or undefined; its words split as that command's parseWords splits them, and a word the hook cannot read taken as the worst.
-function cliWrite(words: Word[], tuning: Tuning = NO_TUNING): string | undefined {
+function cliWrite(words: Word[], tuning: Tuning): string | undefined {
   const [command, verb, ...rest] = words.map((w) => (marked(w.value) ? undefined : w.value))
   if (command === undefined)
     return words.length ? "playground with a command word it cannot read" : undefined
