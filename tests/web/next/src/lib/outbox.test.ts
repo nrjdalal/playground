@@ -912,15 +912,38 @@ describe("statusLine", () => {
   })
 })
 
-// A loader, a faint tick while Claude Code holds it, then one tick, then two, in one fixed slot so nothing shifts.
-test("statusMark draws each message as one mark: a spinner on its way, a faint tick while held, a tick once typed, two once delivered", () => {
-  expect(statusMark(message("a", { state: "queued" }))).toBe("sending")
-  expect(statusMark(message("a", { code: "QUEUED", state: "queued" }))).toBe("queued")
-  expect(statusMark(message("a", { state: "sending" }))).toBe("sending")
-  expect(statusMark(message("a", { state: "typed" }))).toBe("sent")
-  expect(statusMark(message("a", { state: "typed" }), true)).toBe("queued")
-  expect(statusMark(message("a", { state: "delivered" }))).toBe("delivered")
-  expect(statusMark(message("a", { state: "failed" }))).toBe("failed")
+// One mark at a time, in one fixed slot so nothing shifts: a loader alone until the session's transcript holds the message, then one tick.
+test("statusMark draws a loader until the message is delivered, then one tick", () => {
+  for (const busy of [false, true]) {
+    expect(statusMark(message("a", { state: "queued" }), busy)).toBe("sending")
+    expect(statusMark(message("a", { code: "QUEUED", state: "queued" }), busy)).toBe("sending")
+    expect(statusMark(message("a", { state: "sending" }), busy)).toBe("sending")
+    expect(statusMark(message("a", { state: "typed" }), busy)).toBe("sending")
+    expect(statusMark(message("a", { state: "delivered" }), busy)).toBe("delivered")
+    expect(statusMark(message("a", { state: "failed" }), busy)).toBe("failed")
+  }
+  // its line has landed while its try still runs: delivered, as the bubble it now shows on is
+  for (const state of ["queued", "sending"] as const) {
+    expect(statusMark(message("a", { code: "QUEUED", entryId: "e1", state }))).toBe("delivered")
+  }
+})
+
+// Claude Code wrote a held message's line while the outbox waited to read it again, and the chat drew that line and the pending bubble both for up to QUEUED_POLL_MS: the owner saw the message twice, then one went.
+test("a message Claude Code holds lands the moment its line is read, so it shows once", () => {
+  const held = message("a", { code: "QUEUED", state: "queued", text: "two words" })
+  const entry = human("e1", "2026-10-06T00:00:01.000Z", "two words")
+  const found = matchDeliveries([held], [entry], SESSION)
+  expect(found).toEqual([{ at: entry.at, entryId: "e1", id: "a" }])
+  const list = outboxReducer([held], { ...found[0]!, type: "delivered" })
+  expect(landed(list[0]!)).toBe(true)
+  // still queued, so its next try records its row, and the session's next message waits for it
+  expect(list[0]).toMatchObject({ entryId: "e1", state: "queued" })
+  const next = message("b", { at: "2026-10-06T00:00:02.000Z", text: "next" })
+  expect(nextToSend([...list, next], "dispatcher", Date.parse(T0))?.id).toBe("a")
+  // a line written before it was sent is never its
+  expect(
+    matchDeliveries([held], [human("e0", "2026-10-05T23:59:59.000Z", "two words")], SESSION),
+  ).toEqual([])
 })
 
 // Claude Code holds a message typed while it compacts, or sent while it works, and takes it once free, so the bubble reads queued with a quiet mark and nothing to undo or retry, then delivered
@@ -939,7 +962,7 @@ describe("a message Claude Code holds", () => {
     list = outboxReducer(list, wait)
     const held = list[0]!
     expect(held).toMatchObject({ code: "QUEUED", state: "queued" })
-    expect(statusMark(held)).toBe("queued")
+    expect(statusMark(held)).toBe("sending")
     for (const busy of [false, true]) {
       expect(pendingAction(held, { busy, held: true })).toBeNull()
     }

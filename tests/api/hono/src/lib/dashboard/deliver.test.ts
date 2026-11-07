@@ -1935,3 +1935,75 @@ test("no delivery or answer copy sends the owner to a terminal", async () => {
     expect({ file, sent }).toEqual({ file, sent: [] })
   }
 })
+
+// Two messages sent to a busy dispatcher reached it as one prompt, the second pasted after the first with no break ("…Inbox preferablythe tick…"): the first's Enter was lost while Claude Code, slow under load, had not yet drawn its paste, so the box read empty after the send and the first read typed, and the second was pasted after it. A fake Claude Code here draws each paste a while after it lands and loses the first paste's Enter.
+describe("a paste Claude Code draws late", () => {
+  const PANE = "herdr:factory:w3:p1"
+  const NOW = Date.parse("2026-10-06T12:00:00.000Z")
+  const FIRST = "What reads the Inbox preferably"
+  const SECOND = "the tick and loader, should be one until sent"
+  // the box as Claude Code holds it, the prompts it took, and how many more reads still show the box as it was before the last paste
+  function lateClaude(lag: number) {
+    const state = live([worker()], { "s-dispatcher": PANE })
+    const { deps } = fakes(state)
+    let box = ""
+    let shown = ""
+    let behind = 0
+    let pastes = 0
+    const took: string[] = []
+    const draw = () => (box ? screen(`❯ ${box}`) : EMPTY)
+    deps.prompt = async (_surface, text) => {
+      shown = draw()
+      box += text
+      behind = lag
+      // the first paste's Enter lands while the paste is still being taken in, and is lost
+      if (pastes++ > 0) {
+        took.push(box)
+        box = ""
+      }
+    }
+    deps.pressEnter = async () => {
+      if (!box) return
+      took.push(box)
+      box = ""
+    }
+    deps.readScreen = async () => {
+      if (behind > 0) {
+        behind--
+        return shown
+      }
+      return draw()
+    }
+    deps.said = async () => [
+      OLDER,
+      ...took.map((text, i): Entry => ({
+        at: new Date(NOW).toISOString(),
+        from: null,
+        id: `took-${i}`,
+        kind: "human",
+        text,
+        tool: null,
+      })),
+    ]
+    return { deps, took }
+  }
+
+  // each message as the outbox sends it: again under its own id and queuedAt while the API reads it held, and the next only once the one before settles
+  async function sendInTurn(deps: DeliverDeps, texts: string[]) {
+    for (const [i, text] of texts.entries()) {
+      const id = `22222222-3333-4444-8555-${String(i + 1).padStart(12, "0")}`
+      let queuedAt: string | undefined
+      for (let tries = 0; tries < 20; tries++) {
+        const result = await deliver({ actor, id, queuedAt, text, to: "dispatcher" }, deps)
+        if (result.ok || result.code !== "QUEUED") break
+        queuedAt = result.queuedAt
+      }
+    }
+  }
+
+  test("two messages reach the session as two prompts, never one joined", async () => {
+    const { deps, took } = lateClaude(12)
+    await sendInTurn(deps, [FIRST, SECOND])
+    expect(took).toEqual([FIRST, SECOND])
+  })
+})
