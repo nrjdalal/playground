@@ -1,4 +1,4 @@
-import { afterAll, expect } from "bun:test"
+import { afterAll, afterEach, expect } from "bun:test"
 import {
   appendFileSync,
   chmodSync,
@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import type { Subprocess } from "bun"
+import type { SpawnOptions, Subprocess } from "bun"
 
 import { slowChild } from "../../slow-child"
 
@@ -47,6 +47,26 @@ export const ran = (ops: string, pid: number, slot: string, ago: number, ended?:
 
 // Ubuntu 26.04's default mkdir, uutils 0.10.0, reports success when another process made the folder between its own check and its mkdir (fixed in uutils 0.11.0), so two looks could each take one of run-slot.sh's mkdir locks; the image keeps GNU's as gnumkdir, which fails there as the Mac's mkdir does, so a machine's fake bin runs that one where it exists
 const GNU_MKDIR = Bun.which("gnumkdir")
+
+// every run a test starts through spawn, stopped after each test it outlives, so a test that fails or times out before its own stop leaves no run-slot.sh behind (issue 1316, 7 Nov: five lived on for days with ppid 1, waiting on gates in removed scratch folders); it starts through runSlot, so the child sits in endChildren's record too, and its TERM trap ends its command's process group while endChildren reaps the group once run-slot.sh is gone without its trap
+const running = new Set<Subprocess>()
+export const spawn = <
+  const In extends SpawnOptions.Writable = "ignore",
+  const Out extends SpawnOptions.Readable = "pipe",
+  const Err extends SpawnOptions.Readable = "inherit",
+>(
+  cmd: string[],
+  options?: RunSlotOptions<In, Out, Err>,
+) => {
+  const p = runSlot(cmd, options)
+  running.add(p)
+  void p.exited.then(() => running.delete(p))
+  return p
+}
+// the sweep's own budget is one stop() at the worst (TERM grace, then KILL wait), so the hook takes 30 s rather than the 5 s default a hook without one reads
+afterEach(async () => {
+  await Promise.all([...running].map(stop))
+}, 30_000)
 
 // 7 Nov 00:38Z, issue 1316: five run-slot.sh processes from these fixtures outlived their tests, each with ppid 1, since a child left running when its test fails or times out is stopped by nothing. runSlot records every run-slot.sh child of these tests, and the file's afterAll ends each one still running, with the command it started, through endChildren. The child stays in the test run's own process group, so a TERM to the run (Ctrl-C, TaskStop, run-slot's trap, the sandbox's deadline) reaches it as canary's helper let it, ending it and, through its trap, its command.
 type RunSlotOptions<
@@ -691,7 +711,7 @@ type Machine = ReturnType<typeof machine>
 // a run through run-slot that ends with `rc` once the test writes its gate file
 export const gated = (m: Machine, who: string, rc: number) => {
   const gate = join(m.root, `gate-${Math.random()}`)
-  const p = runSlot(
+  const p = spawn(
     [
       "bash",
       SCRIPT,
