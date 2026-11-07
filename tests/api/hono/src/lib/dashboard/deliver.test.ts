@@ -2060,4 +2060,22 @@ describe("a paste Claude Code draws late", () => {
     await sendInTurn(deps, [FIRST, SECOND])
     expect(took).toEqual([FIRST, SECOND])
   })
+
+  // the composer's outbox and the Inbox's answers each send in their own order and retry on their own, so neither waits for the other: deliver() holds the second while the first's paste is unproven
+  test("an Inbox answer and a composer message sent in the same second arrive as two prompts", async () => {
+    const { deps, took } = lateClaude(12)
+    const sends = [
+      { id: "33333333-4444-4555-8666-000000000001", text: FIRST },
+      { id: "33333333-4444-4555-8666-000000000002", text: SECOND },
+    ].map((send) => ({ ...send, done: false, queuedAt: undefined as string | undefined }))
+    for (let round = 0; round < 20 && sends.some((send) => !send.done); round++) {
+      for (const send of sends.filter((one) => !one.done)) {
+        const { id, queuedAt, text } = send
+        const result = await deliver({ actor, id, queuedAt, text, to: "dispatcher" }, deps)
+        if (result.ok) send.done = true
+        else if (result.code === "QUEUED") send.queuedAt = result.queuedAt
+      }
+    }
+    expect(took).toEqual([FIRST, SECOND])
+  })
 })
