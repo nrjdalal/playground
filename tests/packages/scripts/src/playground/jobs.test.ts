@@ -160,6 +160,50 @@ test("each org's script folder is installed under ops beside the state its job k
   expect((await run(data, jobs)).out).toBe("jobs: unchanged")
 })
 
+test("an org's own job row renders from its installed script folder, and a row pointing elsewhere is refused on stderr, exit 1 (PG-1335)", async () => {
+  const watch = {
+    callsModel: false,
+    command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+    config: { prefixes: ["INC"] },
+    description: "Watches an org's own queue.",
+    enabled: true,
+    heartbeat: "ops-watch",
+    schedule: { every: 60 },
+  }
+  const settings = {
+    "jobs.opsStray": { ...watch, command: "{bun} {checkout}/x.ts", heartbeat: "ops-stray" },
+    "jobs.opsWatch": watch,
+  }
+  const data = storeWith("org-job", {}, [
+    ["acme/scripts/ops-watch/cli.ts", "console.log('watch')"],
+    ["acme/settings.json", JSON.stringify(settings)],
+  ])
+  const jobs = join(scratch, "org-job-jobs.json")
+  const result = await run(data, jobs)
+  expect(result.code).toBe(1)
+  expect(result.err).toContain("jobs: refused acme jobs.opsStray: ")
+  const rendered = JSON.parse(readFileSync(jobs, "utf8")).jobs as Record<string, unknown>[]
+  expect(rendered.find((job) => job.name === "ops-watch")).toMatchObject({
+    command: `/b/bun --no-env-file ${fill.data}/ops/ops-watch/cli.ts`,
+    config: { prefixes: ["INC"] },
+    cwd: `${fill.data}/ops/ops-watch`,
+    org: "acme",
+  })
+  expect(rendered.map((job) => job.name)).not.toContain("ops-stray")
+  expect(readFileSync(join(data, "ops", "ops-watch", "cli.ts"), "utf8")).toBe(
+    "console.log('watch')",
+  )
+  // a pass that cannot read the orgs (here, no login) keeps each org's job as the last jobs.json had it, and says so where up.py logs it
+  rmSync(join(extensionsDir(data), "login"))
+  const unread = await run(data, jobs)
+  expect(unread.code).toBe(1)
+  expect(unread.err).toContain("jobs: kept each org's job as jobs.json had it")
+  const kept = JSON.parse(readFileSync(jobs, "utf8")).jobs as Record<string, unknown>[]
+  expect(kept.find((job) => job.name === "ops-watch")).toEqual(
+    rendered.find((job) => job.name === "ops-watch"),
+  )
+})
+
 // ext init can stop after making the extensions root, before a first setting writes policy.json.
 test("an extensions root that lacks policy.json gets the registry's defaults, as a fresh machine does", async () => {
   const data = join(scratch, "no-policy")

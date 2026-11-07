@@ -29,7 +29,7 @@ export const groups: Group[] = [
       [
         "a Slack MCP post",
         {
-          input: { channel: "C0FAKE9999", text: "y" },
+          input: { channel: "C0MADE0404", text: "y" },
           tool: "mcp__slack-shared__chat_post_message",
         },
       ],

@@ -1,4 +1,4 @@
-// The steady variables of a line, the one way a hook holds a variable's value: each named once, by a plain assignment the hook reads whole at the line's top level, so a later word that reads it can be lexed again with its value
+// The steady variables of a line, the one way a writer or a cd holds a variable's value: each named once, by a plain assignment the hook reads whole at the line's top level, so a later word that reads it can be lexed again with its value
 import { ASSIGN, type Command, type Env, lex, marked, parse, type Parsed, type Word } from "./shell"
 
 // the line's text as a shell it runs reads it: backslash-newlines, a $ before a quote, and every quote and backslash removed
@@ -362,7 +362,7 @@ const TIED = new Set([
   "watch",
 ])
 
-// The allow-list, the one way a variable's value is held: a name the shell neither sets itself nor ties to another, which a plain NAME=value the hook reads whole names once on a line that names no IFS (the rest of steadyNames places that assignment)
+// The allow-list, the one way a writer or a cd holds a variable's value: a name the shell neither sets itself nor ties to another, which a plain NAME=value the hook reads whole names once on a line that names no IFS (the rest of steadyNames places that assignment)
 function holdable(key: string, named: Namings, counts: Map<string, number>): boolean {
   return (
     counts.get(key) === 1 &&
@@ -373,7 +373,12 @@ function holdable(key: string, named: Namings, counts: Map<string, number>): boo
   )
 }
 
-export type Steady = { has: (key: string) => boolean }
+// has: whether the call holds a steady value for a key; exported: the same for a key a bare `export K=value` sets, which a redirect alone reads; loop: the literal words a for loop around the command gives a key that nothing else on the line names
+export type Steady = {
+  exported?: (key: string) => boolean
+  has: (key: string) => boolean
+  loop?: (key: string) => string[] | undefined
+}
 export const NONE: Steady = { has: () => false }
 
 // The builtins that set a variable by a name among their words, from bash 5.3's bash(1), SHELL BUILTIN COMMANDS, and zsh 5.9's zshbuiltins(1) and zshmodules(1)
@@ -512,6 +517,7 @@ export function steadyNames(named: Namings, commands: Command[]): (cmd: Command)
       (w) => !w.quoted && (w.value === "for" || w.value === "select"),
     )
     if (!NAME_SETTERS.has(name) && loop === -1) continue
+    if (bareExport(parses[at])) continue
     // print and printf name one only by a v in an option cluster (`-v N`, `-vN`, `-rv N`), the last one given winning: every cluster's rest and the word after it count, since any may be the name
     const vNames = cmd.words.flatMap((w, k) =>
       k > 0 && /^-[^-\s]*v/.test(w.value)
@@ -529,7 +535,11 @@ export function steadyNames(named: Namings, commands: Command[]): (cmd: Command)
     }
   }
   const set = new Map<string, { at: number; chain?: number }>()
+  const exports = new Map<string, { at: number; chain?: number }>()
   const where = new Map<Command, { at: number; chain: number }>()
+  // the for loops whose body the walk is in, each with the depth its body sits at, and the loop values each body command takes
+  const open: { depth: number; key: string; values: string[] }[] = []
+  const loops = new Map<Command, Map<string, string[]>>()
   let chain = 0
   let depth = 0
   for (const [at, cmd] of commands.entries()) {
@@ -545,8 +555,19 @@ export function steadyNames(named: Namings, commands: Command[]): (cmd: Command)
       else if (!LEADS.has(value)) break
     }
     if (depth < 0) return () => NONE
+    while (open.length > 0 && depth < open.at(-1)!.depth) open.pop()
+    if (open.length > 0) loops.set(cmd, new Map(open.map((o) => [o.key, o.values])))
+    const head = forList(cmd, named)
+    if (head) open.push({ depth, ...head })
     const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&"
     if (!top || cmd.detached || (!always && cmd.follows !== "&&")) continue
+    if (bareExport(parses[at])) {
+      for (const w of parses[at].args) {
+        const key = w.value.slice(0, w.value.indexOf("="))
+        if (holdable(key, named, counts)) exports.set(key, always ? { at } : { at, chain })
+      }
+      continue
+    }
     const [first] = cmd.words
     // an array assignment (`a=(…)`) makes several words of its name, never one value
     if (!first || !ASSIGN.test(first.value) || parses[at].name !== "") continue
@@ -557,16 +578,53 @@ export function steadyNames(named: Namings, commands: Command[]): (cmd: Command)
   return (cmd) => {
     const here = where.get(cmd)
     if (!here) return NONE
+    const before = (from?: { at: number; chain?: number }) =>
+      !!from && from.at < here.at && (from.chain === undefined || from.chain === here.chain)
     return {
-      has: (key) => {
-        const from = set.get(key)
-        return (
-          !!from && from.at < here.at && (from.chain === undefined || from.chain === here.chain)
-        )
-      },
+      exported: (key) => before(exports.get(key)),
+      has: (key) => before(set.get(key)),
+      loop: (key) => loops.get(cmd)?.get(key),
     }
   }
 }
+
+// An export with no option whose every word is a plain unquoted NAME=value, so each name it sets is counted once, by its own spelling
+const bareExport = ({ args, name }: Parsed): boolean =>
+  name === "export" &&
+  args.length > 0 &&
+  args.every(
+    (w) =>
+      !w.quoted && ASSIGN.test(w.value) && PLAIN_NAME.test(w.value.slice(0, w.value.indexOf("="))),
+  )
+
+// A for loop's variable and the words of its list, when each is a literal with no glob and nothing else on the line names the variable, so in the loop's body it holds one of them: `for id in 1 2; do`, never zsh's `for id (1 2)`, a list that expands, or a select, whose value is typed
+function forList(cmd: Command, named: Namings): { key: string; values: string[] } | undefined {
+  // the command's leading reserved word, after any LEADS word or `{`, the same `for` the depth walk counts
+  const at = cmd.words.findIndex((w) => w.quoted || !(LEADS.has(w.value) || w.value === "{"))
+  if (at === -1 || cmd.words[at].quoted || cmd.words[at].value !== "for") return undefined
+  const [key, word, ...values] = cmd.words.slice(at + 1)
+  if (!key || key.quoted || !PLAIN_NAME.test(key.value) || named.counts.get(key.value) !== 1)
+    return undefined
+  if (!word || word.quoted || word.value !== "in" || values.length === 0) return undefined
+  if (values.some((w) => marked(w.value) || /[*?[\]{}]/.test(w.value))) return undefined
+  return { key: key.value, values: values.map((w) => w.value) }
+}
+
+// Every reading of a word over the values the for loops around it give its variables, the steady ones held too; undefined when one still holds a value the hook cannot read, or the readings pass LOOP_READINGS
+export function heldReadings(word: Word, env: Env, steady: Steady): Word[] | undefined {
+  if (!word.raw || !marked(word.value)) return undefined
+  const known = heldVars(env, { has: (key) => steady.has(key) || !!steady.exported?.(key) })
+  let sets: Record<string, string>[] = [known]
+  for (const key of new Set(word.raw.match(/[A-Za-z_]\w*/g) ?? [])) {
+    const values = steady.loop?.(key)
+    if (!values) continue
+    sets = sets.flatMap((s) => values.map((v) => ({ ...s, [key]: v })))
+    if (sets.length > LOOP_READINGS) return undefined
+  }
+  const words = sets.map((s) => relexed(word.raw!, s))
+  return words.every(Boolean) ? (words as Word[]) : undefined
+}
+const LOOP_READINGS = 64
 
 // A word with a value the lexer could not read, lexed again with the steady variables the call has set by now; undefined when it holds none, or still holds one the hook cannot read
 export function heldWord(word: Word, env: Env, steady: Steady): Word | undefined {

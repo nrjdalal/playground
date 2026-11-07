@@ -31,7 +31,7 @@ export const settingsRouter = new Hono<{ Variables: StoreVariables }>()
     describeRoute({
       tags: ["Settings"],
       description:
-        "Every setting a piece defines, with its default and aliases, every row set at a scope, and the settings' schemaVersion",
+        "Every setting a piece defines, with its default and aliases, every row set at a scope, the values a session of your login reads (a job's row over its registry entry), and the settings' schemaVersion",
       ...responses(),
     }),
     async (c) => c.json({ data: listSettings(dataDir()) }),
