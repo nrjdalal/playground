@@ -30,7 +30,12 @@ describe("run-slot.focus", () => {
     expect(existsSync(join(m.ops, "run-slot.focus"))).toBe(false)
     expect(existsSync(join(m.ops, "run-slot.priority"))).toBe(false)
     expect(queued.stderr()).toMatch(WAITING)
-    expect(queued.stderr()).not.toContain("No such file or directory")
+    // the queued-behind lines are the wait's own, so with them taken out stderr is empty, a missing file's error included
+    const stray = queued
+      .stderr()
+      .split("\n")
+      .filter((l) => l !== "" && l.search(WAITING) !== 0)
+    expect(stray).toEqual([])
   })
 
   test("a set over 180 minutes is refused and writes nothing, and 180 minutes holds", async () => {

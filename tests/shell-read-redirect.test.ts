@@ -5,7 +5,7 @@ import { join } from "node:path"
 const ROOT = join(import.meta.dir, "..")
 
 // An input redirect from a file (not <<, <<< or <(...)), then 2>/dev/null, with nothing that ends the command between them
-const LATE = /(?<![<\d])<\s*(?:"[^"]*"|'[^']*'|[^\s<>()|;&]+)\s+2>\s*\/dev\/null/
+const LATE = /(?<!<)<\s*(?:"[^"]*"|'[^']*'|[^\s<>()|;&]+)\s+2>\s*\/dev\/null/
 
 const FIX = "put 2>/dev/null before the <, or wrap the read in { ...; } 2>/dev/null"
 
@@ -30,6 +30,7 @@ describe("a shell script's read of a file silences its own error", () => {
       'mark=$(wc -l < "$RUNS" 2>/dev/null | tr -d " ")',
       "read -r l < $f 2> /dev/null",
       `said=$(tr -s '\\n' ' ' <"$said_file" 2>/dev/null || true)`,
+      'exec 3< "$f" 2>/dev/null',
     ])
       expect(lateReads(line)).toEqual([1])
     for (const line of [
