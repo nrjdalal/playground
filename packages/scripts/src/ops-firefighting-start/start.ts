@@ -215,8 +215,9 @@ export async function startPass({
   const matched = config.prefixes.length
     ? all.filter((l): l is Line & { id: string } => typeof l?.id === "string" && ticket.test(l.id))
     : []
+  // a ticket in the prepare map is told by its own prepare start, so its line is not skipped here
   for (const line of matched)
-    if (!listed.has(line.id) && line.open === true)
+    if (!listed.has(line.id) && !prepare.has(line.id) && line.open === true)
       await tell(line.id, `Skipped ${line.id}: no digest of the tracker lists it`)
   const lines = matched.filter((l) => listed.has(l.id))
   // a prepare-only worker's end, its row still mode=prepare, holds off no full start once the digest lists the ticket, while a ticket still only in the prepare map starts no second prepare-only worker that day
@@ -235,11 +236,12 @@ export async function startPass({
   const open = lines.filter(
     (l) => (l.open === true || state.reopened[l.id] !== undefined) && l.theirs !== true,
   )
-  // an Urgent session this job started that is still live holds every lower line, focus file or not, since an Urgent ticket outranks the rest
+  // an Urgent session this job started that is still live and has claimed holds every lower line, focus file or not, since an Urgent ticket outranks the rest; a prepare-only one holds none until it claims
+  const unclaimed = new Set(Object.values(state.prepared))
   const liveUrgent = open
     .filter(isUrgent)
     .map((l) => state.started[l.id])
-    .find((s) => s !== undefined && !ENDED.has(rowOf(s)?.status ?? ""))
+    .find((s) => s !== undefined && !unclaimed.has(s) && !ENDED.has(rowOf(s)?.status ?? ""))
   // A prepared ticket the digest now lists is claimed by its own prepare-only session, never started again: outside the last stretch the session is told to claim it now and its row's mode drops; in the last stretch the owner is asked first, as for a start; a line someone else took or closed stops the session.
   for (const [id, session] of Object.entries(state.prepared)) {
     if (!listed.has(id)) continue
@@ -283,8 +285,8 @@ export async function startPass({
     }
     delete state.prepared[id]
     await save()
-    await ctx.send(session, `claim ${id} now: the digest lists it, so take it and go on to the PR`)
     const set = await rosterSet(session, "mode=")
+    await ctx.send(session, `claim ${id} now: the digest lists it, so take it and go on to the PR`)
     await tell(
       id,
       `Claimed ${id}: ${session}, its prepare-only worker, takes it now${set.code === 0 ? "" : `; its roster row keeps mode=prepare: ${lastLine(set.out)}`}`,
@@ -445,7 +447,8 @@ export async function startPass({
       .map((l) => l.id)
       .sort(),
     state,
-    (session) => !ENDED.has(rowOf(session)?.status ?? ""),
+    (session) =>
+      !Object.values(state.prepared).includes(session) && !ENDED.has(rowOf(session)?.status ?? ""),
     heldBy,
   )
   state.watchingSince ??= ctx.now.toISOString()
@@ -546,7 +549,7 @@ async function holdFocus(
   const standingFocus = await standing(data, now)
   const ours = standingFocus?.reason.startsWith(REASON) ?? false
   const started = urgent.map((id) => state.started[id]).filter((s): s is string => s !== undefined)
-  // a session whose roster row ended holds no focus, though its ticket stays open
+  // a session whose roster row ended, or a prepare-only one not yet claimed, holds no focus, though its ticket stays open
   const sessions = started.filter(live)
   if (!sessions.length) {
     if (ours) await focus(ctx, ["off"])

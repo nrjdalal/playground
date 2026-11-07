@@ -1430,6 +1430,32 @@ describe("prepare-only starts", () => {
     )
   })
 
+  test("P7b: a prepare-map ticket with a relay line that waits on the cap is told its wait once across beats, never skipped as unlisted", async () => {
+    const lines = { ...line("MADE-1", "High", 1), ...line("MADE-2", "High", 2) }
+    const waiting = { ...lines, ...line("MADE-5", "Medium", 3) }
+    const s = prepared(lines, { "MADE-5": REGISTERED })
+    s.relay(0, waiting, { "MADE-5": REGISTERED }, ["MADE-1", "MADE-2"])
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(1, waiting, { "MADE-5": REGISTERED }, ["MADE-1", "MADE-2"])
+    await s.pass(PREPARE)
+    expect(s.titles()).toEqual(["MADE-1 firefight", "MADE-2 firefight"])
+    expect(s.sent.filter((t) => t.includes("MADE-5"))).toEqual([
+      "Waiting on MADE-5 (Medium): the cap of 2 in progress is reached",
+    ])
+  })
+
+  test("P16: a prepared Urgent listed in the last stretch consults and raises no focus, so a lower prepare-only line still starts", async () => {
+    const config = { ...PREPARE, consultFrom: "07:30", hours: "04:00-12:00" }
+    const s = prepared()
+    await s.pass(config)
+    s.later(1)
+    s.relay(1, line("MADE-5", "Urgent", 1), { "MADE-6": REGISTERED })
+    await s.pass(config)
+    expect(s.sent.some((t) => t.startsWith("consult MADE-5 (Urgent)"))).toBe(true)
+    expect([s.titles(), s.focus()]).toEqual([["MADE-5 prepare", "MADE-6 prepare"], []])
+  })
+
   test("P8: a prepared ticket listed with its line taken by someone else stops its session, with no claim", async () => {
     const s = prepared()
     await s.pass(PREPARE)
