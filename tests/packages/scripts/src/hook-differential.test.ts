@@ -399,6 +399,8 @@ describe("a run under a role", () => {
     mkdirSync(real, { recursive: true })
     const own = join(DIR, "roles-config")
     mkdirSync(join(own, "skills"), { recursive: true })
+    mkdirSync(join(own, "plugins"), { recursive: true })
+    writeFileSync(join(own, "settings.json"), "{}")
     writeFileSync(
       join(real, "roster.json"),
       JSON.stringify({ agents: [{ kind: "worker", name: "abc-worker", status: "working" }] }),
@@ -412,9 +414,16 @@ describe("a run under a role", () => {
       { CLAUDE_CONFIG_DIR: own, HOME: DIR, PLAYGROUND_DATA_DIR: real },
       DIR,
     )
-    // the installed skills a hook reads (writing-first's installed()) resolve to the real config's, and an entry it lacks stays absent
-    expect(realpathSync(join(config, "skills"))).toBe(realpathSync(join(own, "skills")))
-    expect(existsSync(join(config, "plugins"))).toBe(false)
+    // the installed skills and plugins a hook reads (writing-first's installed()) resolve to the real config's
+    for (const entry of ["plugins", "settings.json", "skills"])
+      expect(realpathSync(join(config, entry))).toBe(realpathSync(join(own, entry)))
+    // an entry the real config lacks stays absent
+    const bare = join(DIR, "roles-bare-config")
+    mkdirSync(join(bare, "skills"), { recursive: true })
+    const { config: partial } = await sessionRoles([], { CLAUDE_CONFIG_DIR: bare, HOME: DIR }, DIR)
+    expect(existsSync(join(partial, "skills"))).toBe(true)
+    expect(existsSync(join(partial, "plugins"))).toBe(false)
+    expect(existsSync(join(partial, "settings.json"))).toBe(false)
     expect([...roles]).toEqual([
       ["abc-worker", "worker"],
       ["stranger", ""],
