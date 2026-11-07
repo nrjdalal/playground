@@ -205,8 +205,8 @@ Ops runs an update when the owner asks for one:
 ## Restoring the main checkout
 
 Every PreToolUse guard runs from the main checkout and fails closed ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#registered-in-both-settings-files)): with its scripts gone every factory session's Bash is refused, its Edit and Write too, while with only its packages gone the guards still run, since each runs a committed bundle that needs none.
-No session can then repair it, so ops-restore does (`packages/scripts/src/ops-restore/cli.ts`, `jobs.opsRestore`, off until Ops turns it on): a launchd job with no hook, run from the Dashboard's checkout, which a wiped main checkout leaves standing.
-Every 5 minutes it reads the guards the factory settings register (the main checkout's while it holds them, else the Dashboard's), and keeps origin's URL in `ops/restore/origin.txt` while the checkout is whole.
+No session can then repair it, so ops-restore does (`packages/scripts/src/ops-restore/cli.ts`, `jobs.opsRestore`, off until the owner turns it on, in Settings > Jobs or by approving the Inbox guard decision Ops posts): a launchd job with no hook, run from the Dashboard's checkout, which a wiped main checkout leaves standing.
+Every 5 minutes it reads the guards the factory settings register (the main checkout's while it holds them, else the Dashboard's), and keeps origin's URL in `ops/restore/origin.txt` while the checkout and its own `.git` are whole.
 It acts only once a guard's bundle and source are both gone on two looks in a row, about 5 minutes apart with no gap over 10, while no run slot's holder runs upkeep (`playground update`, `link-skills.sh` or any `bun install`, read by the holder's pid):
 
 1. It puts the files back: `git -C <main checkout> checkout -- .` while its `.git` is in place, first keeping `git status --porcelain` whole in `ops/restore/status-<time>.txt`, whose path each report names, with anything but the loss, since the main checkout stays clean.
@@ -217,4 +217,4 @@ It acts only once a guard's bundle and source are both gone on two looks in a ro
    A step that fails is told to them once, naming the step, and the job runs no step again until the guards have come back; a stop that leaves them back (at the install or `link-skills.sh`) is Ops' to finish by hand from a session whose guards start.
    While the guards stay gone, after a stopped restore or with the job turned off, no factory session's Bash runs: that is a true block, so the session that finds it tells the dispatcher by SendMessage, and the owner's way back is one GUI action, the Dashboard's restore control, which runs steps 1 to 3 from the dashboard's server, where no factory Bash runs (not built yet).
 
-**Done when** ops-restore's report reads that every guard starts again, or Ops, else the owner's restore control on a true block, has finished a stopped restore's steps.
+**Done when** ops-restore's report reads that every guard's script is back, or Ops, else the owner's restore control on a true block, has finished a stopped restore's steps.

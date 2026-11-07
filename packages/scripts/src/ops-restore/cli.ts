@@ -67,6 +67,8 @@ export const restoreBeat =
     const now = ctx.now.toISOString()
     if (!missing.length) {
       if (state) await unlink(statePath)
+      // with its .git gone, git would answer for a parent repository the checkout sits in, so the URL is read only from the checkout's own
+      if (!existsSync(join(main, ".git"))) return
       const url = await ctx.run(["git", "-C", main, "remote", "get-url", "origin"], 30_000)
       const kept = await Bun.file(originPath(ctx.ops))
         .text()
@@ -89,6 +91,7 @@ export const restoreBeat =
     const apart = ctx.now.getTime() - Date.parse(state.since)
     if (apart < SECOND_LOOK_MS) return
     if (await upkeep(ctx)) return
+    const gone = `${missing.length} ${missing.length === 1 ? "guard was" : "guards were"} gone from ${main}`
     const tell = async (text: string) => {
       for (const to of ["ops", "dispatcher"]) await ctx.send(to, text).catch(() => false)
     }
@@ -100,7 +103,7 @@ export const restoreBeat =
         ? "The guards are still gone, a true block: it runs no step again until they are back, and LIFECYCLE.md's true-block route restores the rest."
         : "The guards are back, so it runs nothing more: Ops finishes the rest by LIFECYCLE.md's steps."
       await tell(
-        `ops-restore: ${missing.length} guards were gone from ${main}, and its restore stopped at ${step}${why ? `: ${why}` : ""}.${statusFile ? ` Its git status before it began is in ${statusFile}.` : ""} ${next}`,
+        `ops-restore: ${gone}, and its restore stopped at ${step}${why ? `: ${why}` : ""}.${statusFile ? ` Its git status before it began is in ${statusFile}.` : ""} ${next}`,
       )
     }
     const git = (...args: string[]) => ctx.run(["git", "-C", main, ...args], 300_000)
@@ -152,7 +155,7 @@ export const restoreBeat =
     if (left.length) return fail("the check after it", `still gone: ${left.join(", ")}`)
     await unlink(statePath)
     await tell(
-      `ops-restore: ${missing.length} guards were gone from ${main} on two looks ${Math.round(apart / 60_000)} minutes apart; it restored the checkout by LIFECYCLE.md's steps, installed and ran link-skills.sh, and every guard starts again. The checkout ${held}.`,
+      `ops-restore: ${gone} on looks ${Math.round(apart / 60_000)} minutes from the first to the last; it restored the checkout by LIFECYCLE.md's steps, installed and ran link-skills.sh, and every guard's script is back. The checkout ${held}.`,
     )
   }
 

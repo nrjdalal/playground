@@ -78,6 +78,29 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     expect(existsSync(join(m.ops, "restore", "state.json"))).toBe(false)
   })
 
+  test("with its .git gone but the guards present, it keeps the URL it had, never a parent repository's", async () => {
+    const m = await machine()
+    const beat = restoreBeat({ guards: GUARDS, main: m.main, upkeep: noUpkeep })
+    await beat(m.ctx(T0))
+    await git(m.root, "init", "-q")
+    await git(m.root, "remote", "add", "origin", "https://example.invalid/dotfiles.git")
+    rmSync(join(m.main, ".git"), { force: true, recursive: true })
+    expect((await git(m.main, "remote", "get-url", "origin")).trim()).toBe(
+      "https://example.invalid/dotfiles.git",
+    )
+    await beat(m.ctx(later(300_000)))
+    expect((await Bun.file(originPath(m.ops)).text()).trim()).toBe(join(m.root, "origin"))
+  })
+
+  test("one guard gone reads in the singular", async () => {
+    const m = await machine({ "bun install": { code: 1, out: "error: x\n" } })
+    rmSync(join(m.main, "scripts", "hooks", "bundled", "no-stash.js"))
+    const beat = restoreBeat({ guards: GUARDS, main: m.main, upkeep: noUpkeep })
+    await beat(m.ctx(T0))
+    await beat(m.ctx(later(300_000)))
+    expect(m.sent[0]!.text).toContain("1 guard was gone from")
+  })
+
   test("a guard gone on one look only is recorded, and nothing runs", async () => {
     const m = await machine()
     m.wipe()
@@ -104,7 +127,9 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     expect(m.runs.some((r) => r.endsWith("scripts/link-skills.sh"))).toBe(true)
     expect(m.sent.map((s) => s.to)).toEqual(["ops", "dispatcher"])
     expect(m.sent[0]!.text).toContain("had 2 files deleted and also held ?? stray.txt")
-    expect(m.sent[0]!.text).toContain("on two looks 5 minutes apart")
+    expect(m.sent[0]!.text).toContain("2 guards were gone from")
+    expect(m.sent[0]!.text).toContain("on looks 5 minutes from the first to the last")
+    expect(m.sent[0]!.text).toContain("every guard's script is back")
     const kept = readdirSync(join(m.ops, "restore")).filter((f) => f.startsWith("status-"))
     expect(kept).toHaveLength(1)
     expect(m.sent[0]!.text).toContain(`git status in ${join(m.ops, "restore", kept[0]!)}`)
@@ -220,7 +245,7 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     expect(missingGuards(m.main, GUARDS)).toEqual(GUARDS)
     await beat(m.ctx(later(900_000)))
     expect(missingGuards(m.main, GUARDS)).toEqual([])
-    expect(m.sent[0]!.text).toContain("on two looks 15 minutes apart")
+    expect(m.sent[0]!.text).toContain("on looks 15 minutes from the first to the last")
   })
 
   test("upkeep is a run slot whose holder runs playground update, read by its pid", async () => {

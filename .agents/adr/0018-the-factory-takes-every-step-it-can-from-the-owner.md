@@ -10,5 +10,5 @@ Five steps went to the owner because a rule said so, not because only the owner 
 
 ## Consequences
 
-- The owner's `!` window is no longer a step in any playbook route these five touched; a step that still needs the owner is a true block or a one-way door, brought up the chain.
+- Once all five have shipped, the owner's `!` window is no longer a step in any playbook route they touched; a step that still needs the owner is a true block or a one-way door, brought up the chain.
 - ops-restore rewrites the main checkout with no one watching, so it acts only on two looks in a row, waits while upkeep holds the checkout, and stops at the first failed step, told once, until the guards are back.
