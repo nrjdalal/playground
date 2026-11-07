@@ -145,15 +145,19 @@ async function registryName(sessionId, environment = process.env) {
     } catch {}
   }
 }
-async function rosterRole(name, environment = process.env) {
+async function rosterKind(name, environment = process.env) {
   const path = join2(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
+    return isRosterKind(kind) ? kind : undefined;
   } catch {
-    return "";
+    return;
   }
+}
+async function rosterRole(name, environment = process.env) {
+  const kind = await rosterKind(name, environment);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
 }
 async function sessionRole(environment, sessionId) {
   if (environment.PLAYGROUND_ROLE)
@@ -256,6 +260,7 @@ var WRAPPERS = new Map(Object.entries({
   nocorrect: ["", ""],
   noglob: ["", ""],
   nohup: ["", ""],
+  pkexec: ["--disable-internal-agent --help --keep-cwd --version", "--user"],
   repeat: ["", ""],
   stdbuf: ["", "-e -i -o --error --input --output"],
   sudo: [
@@ -294,13 +299,29 @@ function optionValue(word, { flags, values }) {
 }
 var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
+  ["pkexec", new Set],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
+var BARE_ROOT = new Set(["pkexec"]);
 var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
 var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
+var LEADS = new Set([
+  "!",
+  "-",
+  "builtin",
+  "command",
+  "elif",
+  "exec",
+  "if",
+  "nocorrect",
+  "noglob",
+  "time",
+  "until",
+  "while"
+]);
 var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
 var ZSH_ARRAYS = new Set([
   "aliases",
@@ -1033,6 +1054,7 @@ function backtick(lx) {
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
   return unknown("a command substitution");
 }
+var echoes = false;
 function substituted(inner, known) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
@@ -1052,6 +1074,11 @@ function substituted(inner, known) {
   if (only.words.length === 0 && only.redirects.length === 1 && input.op === "<" && input.target) {
     return { reads: [input.target], value: READ };
   }
+  const printed = args.map((w) => w.value.replaceAll("\\n", `
+`));
+  const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value)) && printed.every((v) => !v.includes("\\"));
+  if (echoes && first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
+    return { value: printed.join(" ") };
   return unknown("a command substitution");
 }
 var MKTEMP_FLAGS = new Set(["d", "q"]);

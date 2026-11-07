@@ -380,6 +380,18 @@ describe("each refusal of a #646 row names its fix", () => {
   })
 })
 
+describe("each refusal of a #1198 row names the eval and its fix", () => {
+  test.each(CASES.filter((c) => c.id.startsWith("#1198 ")).map((c) => [c.key, c] as const))(
+    "%s",
+    async (_, c) => {
+      const at = GUARDS[c.guard].folders[c.folder] as [string, string]
+      expect(await GUARDS[c.guard].run(input(c.call, at[0]), at[1])).toContain(
+        "a value the hook cannot read; run its commands as calls of their own, with no eval",
+      )
+    },
+  )
+})
+
 describe("every refused form stays refused unless the allow list names it", () => {
   test.each(CASES.map((c) => [c.key, c] as const))(
     "%s",
