@@ -8,6 +8,7 @@ import {
   keepsNested,
   navGroups,
   OpsJobRow,
+  PLUS_SHOWN,
   SessionRow,
   ThreadsGroup,
 } from "../../../../../../web/next/src/components/dashboard/app-sidebar"
@@ -673,6 +674,55 @@ describe("SessionRow's dropdown and group", () => {
     expect(plain).not.toContain("max-md:invisible")
   })
 
+  // Alpha's plus shows only while the pointer is over its own box, the effort's place, so the effort stays in sight with the pointer elsewhere on the row
+  test("the dispatcher's plus shows on hover over the effort's place alone, keyboard focus, while open and on a phone, and the effort hides only while it shows", () => {
+    const plus = new Set(PLUS_SHOWN.split(" "))
+    expect(plus.has("md:hover:opacity-100")).toBe(true)
+    expect(plus.has("md:group-hover/menu-item:opacity-100")).toBe(false)
+    for (const kept of [
+      "group-data-[open]/menu-item:opacity-100",
+      "md:group-has-[:focus-visible]/menu-item:opacity-100",
+      "md:opacity-0",
+    ])
+      expect(plus.has(kept)).toBe(true)
+    const action = createElement("button", {
+      "data-sidebar": "menu-action",
+      type: "button",
+    }) as Props["action"]
+    const html = render({ action }, { effort: "high", model: "claude-opus-5-5" })
+    const effort = classesOf(
+      openTag(
+        html,
+        new RegExp(`<span[^>]*>(?=<svg[^>]*><path d="${pathOf(RiSignalCellular3Fill)}")`),
+      ),
+    )
+    expect(
+      effort.has(
+        "md:[@media(hover:hover)]:group-has-[[data-sidebar=menu-action]:hover]/menu-item:invisible",
+      ),
+    ).toBe(true)
+    expect(effort.has("md:group-hover/menu-item:invisible")).toBe(false)
+    for (const kept of [
+      "group-data-[open]/menu-item:invisible",
+      "group-has-data-[popup-open]/menu-item:invisible",
+      "max-md:invisible",
+      "md:group-has-[:focus-visible]/menu-item:invisible",
+    ])
+      expect(effort.has(kept)).toBe(true)
+  })
+
+  test("the header hands Alpha's plus PLUS_SHOWN, never the toggle's rule", async () => {
+    const source = await Bun.file(join(web, "src/components/dashboard/app-sidebar.tsx")).text()
+    const start = source.indexOf("export function DashboardDispatchers")
+    const group = source.slice(start, source.indexOf("\n}\n", start))
+    const picker = group.slice(
+      group.indexOf("<TemplatePicker"),
+      group.indexOf("/>", group.indexOf("<TemplatePicker")),
+    )
+    expect(picker).toContain("PLUS_SHOWN")
+    expect(picker).not.toContain("TOGGLE_SHOWN")
+  })
+
   test("open, it lists each subagent and running process with its state, a finished subagent as Done", () => {
     const html = render({ open: true }, { tasks })
     expect(html).toMatch(/aria-expanded="true"/)
@@ -741,7 +791,7 @@ describe("SessionRow's dropdown and group", () => {
     state: "working",
     status: null,
     task: null,
-    ticket: "CEDAR-1234",
+    ticket: "MADECEDAR-1234",
     title: null,
     worker: null,
     workspace: null,
@@ -896,17 +946,17 @@ describe("SessionRow's dropdown and group", () => {
   test(`its line leads with the ticket and the pull request joined (PG-12#173), and its tooltip says the rest`, () => {
     const html = render({ agent: agent({ state: "idle" }) }, { light: "idle" })
     expect(textOf(html, openTag(html, /<span class="[^"]*text-xs[^"]*">/))).toBe(
-      "CEDAR-1234#197 Message dispatcher from the dashboard",
+      "MADECEDAR-1234#197 Message dispatcher from the dashboard",
     )
     expect(leftIcon(html)).toEqual({ icon: "ready", tone: "text-success" })
     expect(html).not.toContain("text-2xs")
     expect(descriptionOf(html)).toBe(
-      "worker-greed · CEDAR-1234#197 Message dispatcher from the dashboard · Ready · PR ready: 5/5 at its head",
+      "worker-greed · MADECEDAR-1234#197 Message dispatcher from the dashboard · Ready · PR ready: 5/5 at its head",
     )
     expect(tipsOf(html)[0]).toBe(
       [
         "worker-greed",
-        "CEDAR-1234#197 Message dispatcher from the dashboard",
+        "MADECEDAR-1234#197 Message dispatcher from the dashboard",
         "Ready",
         "PR ready: 5/5 at its head",
       ].join("\n"),
@@ -917,7 +967,7 @@ describe("SessionRow's dropdown and group", () => {
     const html = render({ agent: agent({ kind: "worker" }) })
     expect(
       textOf(html, openTag(html, /<span class="[^"]*text-xs[^"]*">/)).replaceAll("\u00a0", " "),
-    ).toBe("CEDAR-1234#197 Message dispatcher from the dashboard")
+    ).toBe("MADECEDAR-1234#197 Message dispatcher from the dashboard")
   })
 
   test("with neither id the kind follows the title at once, a worker's title alone, the title giving way first", () => {
@@ -1068,7 +1118,7 @@ describe("SessionRow's dropdown and group", () => {
     )
     expect(tipLines(html)).toContain("Parked · held for the reset")
     expect(html).toContain(
-      "worker-greed · CEDAR-1234 Message dispatcher from the dashboard · Parked · held for the reset",
+      "worker-greed · MADECEDAR-1234 Message dispatcher from the dashboard · Parked · held for the reset",
     )
   })
 })

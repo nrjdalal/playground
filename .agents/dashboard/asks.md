@@ -132,10 +132,12 @@
   While `playground focus` stands (its `focus.json` in the data folder, read by `standingFocus()` in `api/hono/src/lib/dashboard/focus.ts`), an item that comes in is stored as any other but held quiet: the list's `quiet` names it (`quietIds`), the count, the tab's dot and the Inbox square's count leave it out (`loudItems` in `web/next/src/lib/tab-dot.ts`), and its card reads Quiet after its kind;
   a look at the Inbox marks it seen with the rest, since the list shows it, while Needs you and a session row's waiting light, which read the list's items, still show it;
   an `alert` update stays loud, the 5% battery alert among them.
-  Once focus ends, by `playground focus off` or at its end, ops-tick's focus card beat posts one update naming the runs that queued while it stood and their wait, and each held item counts again.
+  Once focus ends, by `playground focus off` or at its end, ops-tick's focus card beat posts one update naming the runs that queued while it stood and their wait, and each held item counts again;
+  the beat resolves that card once `bun run ask open --since <focus start> --until <focus end>` lists no ask, since everything it pointed at is answered.
   An update is an outcome, bold with a dot until a click on its title, its tick, its Done or its Dismiss marks it read; Done and Dismiss also move it to Done, and Mark all as read on the open row marks every update read.
   An update whose `approve` holds a web link, a Yard post Yard holds for the owner (`pendingCard` in `api/hono/src/lib/yard/inbound.ts`), shows Approve first, a link button that opens that page in a new tab, since only the owner's signed-in browser approves on Yard; the card records no answer of its own.
-  Its poster clears an alert update that has fixed itself with `bun run ask resolve <id|#iN> --by <your session name>` (`resolveItem()` in `api/hono/src/lib/dashboard/inbox.ts`), which marks it read and merges its keys into the answer, so a resolve after the owner's Dismiss leaves the item dismissed; only the posting session's own alert resolves.
+  Its poster resolves its own update once it has settled, with `bun run ask resolve <id|#iN> --by <your session name> --note "<why>"` (`resolveItem()` in `api/hono/src/lib/dashboard/inbox.ts`): an alert whose cause cleared, a progress card whose last step is done (to-inbox's PROGRESS.md), the focus card once what it pointed at is answered.
+  A resolve marks it read and merges its keys into the answer, so the card moves to Done with its note and the owner presses nothing, and a resolve after the owner's Dismiss leaves the item dismissed; only the posting session resolves its update, and a decision or draft settles instead.
   An answered card's result line names what was picked, in the card's own words (`outcomeLine` in `web/next/src/lib/inbox.ts`):
   `B · Hotfix main` for a lettered pick, `A. staging · C. soon` for a multi-question ask's one pick per question, `Approve · Ship 3f9a2c1 to main` for a yes or no, a bare `Approve` or `Deny` for an unlabelled ask, `Sent`, `Saved as a Slack draft`, `Discarded` or `Archived <time>`,
   then a state only where the answer did not simply go through (`Queued for <taker>`, `Send failed: <why>`, `No link: <why>`), never a word typed for its poster, since its light says the rest.
@@ -216,12 +218,12 @@
    "preview": {"outcome": "merged", "link": "https://github.com/acme/app/pull/270"}}
   EOF
   bun run ask new --thread <id> < item.json   # routes the item to that thread (bun run thread), refused when no thread has the id
-  bun run ask open --from builder   # each open item, oldest first, one line each: its #iN, kind, sender and title; --from keeps one sender's
+  bun run ask open --from builder   # each open item, oldest first, one line each: its #iN, kind, sender and title; --from keeps one sender's, and --since and --until (ISO times) those posted in that window
   bun run ask get <id|#i41> --ack   # the item, with answer {at, choice, option?, options?, editedText?, link?, linkLabel?, noLink?, ackedAt?} once the owner answers (options is one index per question for a multi-question ask; the picked option's letter and label on stderr, each question's pick for a multi-question answer, `ask: picked A: Staging first · B: After the next ship`), marked read (which closes a deny, a clear, a discard or a provided secret, not a go)
   bun run ask ack <id|#i41> --link https://app.slack.com/client/<team>/<channel>/thread/<channel>-1700000000.000100   # once carried out, a go closes with where (a Slack link in its app.slack.com/client form, which reads Open thread, so no --label), which its card links to by the label, or --no-link "<why>" when it has no page or Slack refused a Draft
   bun run ask edit <id|#i41> < item.json   # the poster replaces its own item's title and preview in place, until it closes, checked and its files copied as new does; the card redraws on the next 5s poll
   bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open decision or draft, decided another way; an update asks nothing, so settle refuses it
-  bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster clears its own alert update once it has resolved itself; every other update, a read-only card included, stays editable by its poster until the owner presses its Done or Dismiss
+  bun run ask resolve <id|#i41> --by builder --note "The loop recovered on its own"   # the poster closes its own update once it has settled (a cleared alert, a finished progress card); until then it stays editable by its poster, unless the owner presses its Done or Dismiss
   bun run ask stale --minutes 15   # ops-sweep's chase: each answer given in the last 24h (--since <iso> moves that) its poster has not closed within 15 minutes
   ```
 
@@ -426,14 +428,14 @@
   ```
 
 - A `guard` decision asks the owner to set a guard setting, a key a guard reads to allow or deny a call, since no session can write one (`no-extensions-write` refuses it, `scripts/hooks/README.md`): any session posts the card, and only the owner's Approve writes the setting.
-  Its `key` is one of `GUARD_SETTING_KEYS` (`packages/settings/src/guard-keys.ts`, which the hook's `GUARD_KEYS` matches) or a registry job's `jobs.<name>`, `scope` is the owner's login or an org (core changes by a pull request), `value` is what the key's schema takes,
-  checked as it is posted (a job takes `{"enabled": true|false}` alone),
+  Its `key` is one of `GUARD_SETTING_KEYS` (`packages/settings/src/guard-keys.ts`, which the hook's `GUARD_KEYS` matches), a registry job's `jobs.<name>` or an org's own job's `jobs.<camelName>` (a job the registry lacks), `scope` is the owner's login or an org (core changes by a pull request), `value` is what the key's schema takes,
+  checked as it is posted (a registry job takes `{"enabled": true|false}` alone, an org's own job a whole job row, which Approve's write then checks against that org's script folders and refuses at the login's scope or when another org already adds the job),
   or left out to take the setting back to its default, and `why` says why (`guardSchema` in `api/hono/src/lib/dashboard/inbox.ts`);
   Edit is refused.
   The card shows the key, the scope and the value as its JSON, exactly as Approve writes them.
   Approve takes `seen`, the `updatedAt` of the card the owner read, so an Approve with no `seen`, or one read before the poster's `bun run ask edit`, is refused and writes nothing.
   It is claimed as an accept's is, then writes the setting at its scope in the stack's own extensions, a fixture stack's own, through `setSetting` (or `resetSetting` for no value) in `@packages/settings`, its commit's reason `the owner approved it in the Inbox (#iN)`;
-  a job's `enabled` goes over the row its scope holds, never the registry's fields, so the job keeps the registry's command and schedule (`settingsFor`'s merge, `.agents/dashboard/dashboard.md`'s Jobs), and a value its scope already holds writes nothing and reads `<key> at <scope> is already <value>, so nothing changed`.
+  a registry job's `enabled` goes over the row its scope holds, never the registry's fields, so the job keeps the registry's command and schedule (`settingsFor`'s merge, `.agents/dashboard/dashboard.md`'s Jobs), an org's own job's whole row replaces the row its scope holds, and a value its scope already holds writes nothing and reads `<key> at <scope> is already <value>, so nothing changed`.
   The answer keeps `set: {exitCode, line}`, and the card reads `Guard setting: <line>` green or `Guard setting failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`, and after a failed one tells its lead.
 
   ```bash
