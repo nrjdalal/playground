@@ -7359,7 +7359,6 @@ var MCP_RESOURCE_TOOLS = new Set([
   "ReadMcpResourceTool"
 ]);
 var ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i;
-var RUNNER_CALL = /\b(?:bash|bun|bunx|cd|deno|mongo|mongosh|mysql|mysqldump|node|npm|npx|pg_\w+|pnpm|psql|pushd|redis-cli|sh|tsx|yarn|zsh)\b|\//i;
 var heavy = (path) => OPUS_PATHS.some((p) => p.endsWith("/") ? path.startsWith(p) : path === p);
 async function onGlm(raw, environment = process.env) {
   if (/(?:^|\/\/|\.)api\.z\.ai(?:[:/]|$)/.test(environment.ANTHROPIC_BASE_URL ?? ""))
@@ -7931,6 +7930,7 @@ var DB_CLIENTS = new Set([
   "redis-cli"
 ]);
 var dbClient = (name) => DB_CLIENTS.has(name) || /^pg_\w+$/.test(name);
+var RUNNER_CALL = new RegExp(`\\b(?:${["bash", "bun", "bunx", "cd", "deno", "node", "npm", "npx", "pnpm", "pushd", "sh", "tsx", "yarn", "zsh", ...DB_CLIENTS, "pg_\\w+"].join("|")})\\b|/`, "i");
 var pgClient = (name) => name === "pgbench" || name === "pgcli" || name === "psql" || name.startsWith("pg_");
 var mysqlClient = (name) => name === "mycli" || name === "mysql" || name === "mysqldump";
 var mongoClient = (name) => name === "mongo" || name === "mongosh";

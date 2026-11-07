@@ -115,9 +115,6 @@ const MCP_RESOURCE_TOOLS = new Set([
 ])
 // what an org tool's refusal can match, read before the call is parsed
 const ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i
-// a runner, a path, a cd or a database client, any of which may run an org script, read an org's checkout or reach a database, which their rules read once the call parses
-const RUNNER_CALL =
-  /\b(?:bash|bun|bunx|cd|deno|mongo|mongosh|mysql|mysqldump|node|npm|npx|pg_\w+|pnpm|psql|pushd|redis-cli|sh|tsx|yarn|zsh)\b|\//i
 
 export const heavy = (path: string): boolean =>
   OPUS_PATHS.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p))
@@ -840,6 +837,11 @@ const DB_CLIENTS = new Set([
   "redis-cli",
 ])
 const dbClient = (name: string) => DB_CLIENTS.has(name) || /^pg_\w+$/.test(name)
+// a runner, a path, a cd or a database client, any of which may run an org script, read an org's checkout or reach a database, which their rules read once the call parses; its clients are DB_CLIENTS and every pg_ program, so the prefilter reads each client dbCall does
+const RUNNER_CALL = new RegExp(
+  `\\b(?:${["bash", "bun", "bunx", "cd", "deno", "node", "npm", "npx", "pnpm", "pushd", "sh", "tsx", "yarn", "zsh", ...DB_CLIENTS, "pg_\\w+"].join("|")})\\b|/`,
+  "i",
+)
 const pgClient = (name: string) =>
   name === "pgbench" || name === "pgcli" || name === "psql" || name.startsWith("pg_")
 const mysqlClient = (name: string) => name === "mycli" || name === "mysql" || name === "mysqldump"
