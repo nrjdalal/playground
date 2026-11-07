@@ -159,6 +159,55 @@ export const groups: Group[] = [
         "an inline node program holding a regex, inside a command substitution",
         'echo "$(node -e \'const r = /(?<=a)b/; console.log(r.test("ab"))\')"',
       ],
+      // a division the scan could take for a regex keeps its reading
+      [
+        "an inline node program dividing after a postfix increment, around a guarded playground call",
+        'node -e \'let a = 1; a++ / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline node program dividing after a postfix decrement, around a guarded playground call",
+        'node -e \'let a = 1; a-- / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline node program dividing after a spaced postfix increment, around a guarded playground call",
+        'node -e \'let a = 1; a ++ / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline node program dividing after an element's postfix increment, around a guarded playground call",
+        'node -e \'let a = [1]; a[0]++ / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline node program dividing after a postfix increment, around a removal of a glob reaching the root",
+        'node -e \'let a = 1; a++ / require("child_process").execSync("cd; rmdir .play*/ext*/.no-such-folder") / 1\'',
+      ],
+      [
+        "an inline node program dividing an object literal, around a guarded playground call",
+        'node -e \'x = {} / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline node program dividing an object literal, around a removal of a glob reaching the root",
+        'node -e \'x = {} / require("child_process").execSync("cd; rmdir .play*/ext*/.no-such-folder") / 1\'',
+      ],
+      [
+        "an inline node program dividing after an empty block, around a guarded playground call",
+        'node -e \'if (1) {} / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline node program dividing a member named in, around a guarded playground call",
+        'node -e \'const o = {in: 1}; o.in / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline node program dividing a member named of, around a guarded playground call",
+        'node -e \'const o = {of: 1}; o.of / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline node program dividing an optional member named in, around a guarded playground call",
+        'node -e \'const o = {in: 1}; o?.in / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline node program dividing a private field named in, around a guarded playground call",
+        'node -e \'class A { #in = 1; f() { return this.#in / require("child_process").execSync("playground ext add a b") / 1 } }\'',
+      ],
       // an alias of the shell tag or of spawn
       [
         "an inline bun program whose shell tag, destructured from Bun under its own name, removes a path in the root",
@@ -282,6 +331,11 @@ export const groups: Group[] = [
       [
         "an inline bun program deleting a file in the root through Bun.file, its path joined from the working folder and two strings",
         'bun -e \'await Bun.file(process.cwd() + "/.pla" + "yground/extensions/.no-such-file").delete()\'',
+      ],
+      // a division the scan could take for a regex keeps its reading
+      [
+        "an inline bun program dividing after a postfix increment, around a guarded playground call it spawns",
+        'bun -e \'let a = 1; a++ / Bun.spawnSync(["playground", "ext", "add", "a", "b"]) / 1\'',
       ],
       // dynamic code
       [
