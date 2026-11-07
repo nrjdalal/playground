@@ -523,6 +523,12 @@ describe("what it passes and how it fails", () => {
     expect(await check("{not json: git push", GLM, CALM)).toContain("could not read this call")
     expect(await check("{not json: echo hi", GLM, CALM)).toBeUndefined()
   })
+
+  test("a runner the prefilter lets through to the parse runs when the parse fails, since the catch path reads its own prefilter", async () => {
+    expect(await check("{not json: bun run build", GLM, CALM)).toBeUndefined()
+    expect(await check("{not json: cd $D && ./cli.ts", GLM, CALM)).toBeUndefined()
+    expect(await check("{not json: gh pr list", GLM, CALM)).toContain("glm rule")
+  })
 })
 
 describe("a GLM session while load5 is over 15", () => {
@@ -649,12 +655,6 @@ describe("a GLM session while load5 is over 15", () => {
   test("input it cannot parse is refused when it reads as an install", async () => {
     expect(await check("{not json: bun install", GLM, 20)).toContain("could not read this call")
     expect(await check("{not json: bun install", GLM, 10)).toBeUndefined()
-  })
-
-  test("a runner the prefilter lets through to the parse runs when the parse fails, since the catch path reads its own prefilter", async () => {
-    expect(await check("{not json: bun run build", GLM, CALM)).toBeUndefined()
-    expect(await check("{not json: cd $D && ./cli.ts", GLM, CALM)).toBeUndefined()
-    expect(await check("{not json: gh pr list", GLM, CALM)).toContain("glm rule")
   })
 })
 
@@ -914,6 +914,12 @@ describe("a GLM session's org tools", () => {
       name: "mcp__github-shared__get_file_contents",
       input: { owner: "qzx", repo: "x" },
     },
+    { $label: "Claude Code's resource list", name: "ListMcpResourcesTool" },
+    {
+      $label: "Claude Code's resource read",
+      name: "ReadMcpResourceTool",
+      input: { server: "linear-shared", uri: "made-up://MADE-1" },
+    },
   ])(
     "an MCP tool of $label is refused on GLM and passes on Claude",
     async ({ name, input: given }) => {
@@ -921,6 +927,7 @@ describe("a GLM session's org tools", () => {
       expect(claude).toBeUndefined()
       expect(glm).toContain(name)
       expect(glm).toContain("glm rule")
+      expect(glm).toContain("report to your lead")
     },
   )
 
@@ -991,28 +998,26 @@ describe("its registration", () => {
       }),
     )
 
-  test("both settings files send it every Bash and MCP call, and no other tool", async () => {
+  test("both settings files send it every Bash call, every MCP tool and Claude Code's two MCP resource tools, and no other tool", async () => {
     for (const { file, matcher } of await matchers()) {
       for (const tool of [
         "Bash",
+        "ListMcpResourcesTool",
+        "ReadMcpResourceTool",
         "mcp__linear-shared__list_issues",
         "mcp__slack-shared__conversations_history",
       ])
         expect({ file, tool, sent: matcher.test(tool) }).toEqual({ file, tool, sent: true })
-      for (const tool of ["Edit", "Write", "WebFetch", "Agent", "xBash", "Bashful"])
+      for (const tool of [
+        "Edit",
+        "Write",
+        "WebFetch",
+        "Agent",
+        "xBash",
+        "Bashful",
+        "ListMcpResourcesToolx",
+      ])
         expect({ file, tool, sent: matcher.test(tool) }).toEqual({ file, tool, sent: false })
     }
-  })
-
-  test("an MCP call it is sent is refused on GLM and runs on Claude", async () => {
-    const raw = JSON.stringify({
-      cwd: REPO,
-      hook_event_name: "PreToolUse",
-      session_id: "s-none",
-      tool_input: {},
-      tool_name: "mcp__linear-shared__list_issues",
-    })
-    expect(await refusal(raw, {}, CALM)).toBeUndefined()
-    expect(await refusal(raw, GLM, CALM)).toContain("glm rule")
   })
 })
