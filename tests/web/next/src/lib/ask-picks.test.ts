@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 
 import {
   type AskPicks,
+  EMPTY_PICKS,
   PICKS_KEY,
   parsePicks,
   putPicks,
@@ -14,14 +15,7 @@ const SIG = JSON.stringify([["Ship when?", ["Staging first", "After the next shi
 const ID = "0b7e5f2a-1c3d-4e5f-8a9b-0c1d2e3f4a5b"
 const OTHER = "1b7e5f2a-1c3d-4e5f-8a9b-0c1d2e3f4a5b"
 
-const entry = (e: Partial<AskPicks>): AskPicks => ({
-  note: "",
-  pick: null,
-  picks: [],
-  sig: "[]",
-  step: 0,
-  ...e,
-})
+const entry = (e: Partial<AskPicks>): AskPicks => ({ ...EMPTY_PICKS, ...e })
 
 describe("parsePicks", () => {
   test("reads a card's single pick, a multi card's picks, the step and the Note back", () => {

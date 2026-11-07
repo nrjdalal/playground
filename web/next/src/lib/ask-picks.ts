@@ -1,4 +1,4 @@
-// What an ask card holds for an answer not yet sent: the option index picked for a single-question ask, one index per question for a multi-question ask, the question in sight, and the Note, each entry stamped with the questions' signature (picksKey) so a set changed under an unmounted card drops the stale picks and step. A list refresh or a shelf move that remounts the card gives them back, as a draft card's words come back under cardDraftKey.
+// What an ask card holds for an answer not yet sent: the option index picked for a single-question ask, one index per question for a multi-question ask, the question in sight, and the Note, each entry stamped with a signature of its questions (picksKey) or, for a single-question ask, of its choice rows (choicesKey), so a set changed under an unmounted card drops the stale pick(s) and step while the Note stands on its own. A list refresh or a shelf move that remounts the card gives them back, as a draft card's words come back under cardDraftKey.
 export type AskPicks = {
   note: string
   pick: number | null
@@ -7,6 +7,9 @@ export type AskPicks = {
   step: number
 }
 export type PicksStore = Record<string, AskPicks>
+
+// A cleared entry: no pick, no picks, no note, so putPicks drops it from the store. The card writes it once answered, settled or archived, and the "" signature never matches a live card's.
+export const EMPTY_PICKS: AskPicks = { note: "", pick: null, picks: [], sig: "[]", step: 0 }
 
 export const PICKS_KEY = "dashboard.inbox.picks.v1"
 
