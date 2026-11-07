@@ -8118,15 +8118,19 @@ async function registryName(sessionId, environment = process.env) {
     } catch {}
   }
 }
-async function rosterRole(name, environment = process.env) {
+async function rosterKind(name, environment = process.env) {
   const path = join5(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
+    return isRosterKind(kind) ? kind : undefined;
   } catch {
-    return "";
+    return;
   }
+}
+async function rosterRole(name, environment = process.env) {
+  const kind = await rosterKind(name, environment);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
 }
 async function sessionRole(environment, sessionId) {
   if (environment.PLAYGROUND_ROLE)
