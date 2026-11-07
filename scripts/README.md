@@ -2,7 +2,7 @@
 
 The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone and `bun run test:skills`.
 AGENTS.md keeps one line for each, and this file holds the text that line stands for.
-It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes.
+It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes, and the rule for an edit script's replacements.
 Read a section before you change its script or its tests, or when it refuses a start you did not expect.
 The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
@@ -215,11 +215,12 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 - A hook PR measures its hooks against `canary` with `bun run hooks:differential` ([packages/scripts/src/hook-differential.ts](../packages/scripts/src/hook-differential.ts)), naming each hook with `--hook <name>` and the base with `--canary <sha>`:
   - `sweep --forms <module>` passes the forms the module exports (`forms: { command, inClass }[]`) from the home, the data folder and a worktree;
   - `replay` passes every Bash call of this machine's transcripts from the last 24 hours (`--hours <n>`), a sub-agent's nested transcripts included, each from its own folder.
-- Each form and call reaches the hook only as data, through its `check()` with `HOME`, `PATH` and a data folder of the run's own (`PLAYGROUND_DATA_DIR`) in its environment, and none is run.
+- Each form and call reaches the hook only as data, through its `check()` with `HOME`, `PATH` and a data folder of the run's own (`PLAYGROUND_DATA_DIR`) in its environment, and none is run; its input names the event, `"hook_event_name": "PreToolUse"`, as Claude Code's does, so a hook that judges only in that branch is reached.
   That folder copies the real data folder's `COPIED` entries (the roster and writing-first's marks, which a `check()` writes) and links every other entry, so a hook's write lands in the copy while each read and each protected path resolves to the real entry; it stays in the temp folder after the run, as the registry `--role session` writes does.
   A hook canary lacks replays against a baseline that allows every call, so each call it refuses counts as newly refused, and its counts line carries `"baseline":"allow-all: canary has no such hook"`.
   With no role a role-gated hook allows every call before it judges one, so its counts read 0: `--role <role>` runs every `check()` under `PLAYGROUND_ROLE=<role>`, and its counts line carries the `role`.
   `--role session`, for a replay alone, judges each call as the session that made it: the role the roster's kind gives the name its transcript's agent-name lines last carry, with that session named in a scratch registry (`CLAUDE_CONFIG_DIR`) and its `session_id` in the input, one call kept per session, folder and command.
+  That registry links the real config folder's `plugins/`, `settings.json` and `skills/`, each where it exists, so a hook that reads the installed skills (writing-first) reads the real ones; the run writes nothing through them, since every hook's `check()` writes only into the data folder and its own temp files.
   A session whose name the roster lacks, or that no agent-name line names, keeps the default, `PLAYGROUND_ROLE` unset, where a hook places it by its name itself, and its calls are counted as `default role`.
   A hook whose `check()` takes the main checkout third (`TAKES_MAIN`: no-main-checkout and no-unslotted-run) gets the head's on both sides, the folder above its git common dir, since canary's tree below is no git checkout and would otherwise read as main on canary's side alone; a test holds `TAKES_MAIN` to the hooks whose `check()` declares that parameter.
   Both sides run with `PLAYGROUND_REPO` set to the head's main checkout, the caller's value put back after, so `mainCheckout()` (`packages/scripts/src/main-checkout.ts`, read by no-desktop-owner-app's main-checkout allowance) gives canary's side the same root as the head's.
@@ -237,3 +238,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A worktree with any modified or untracked file, any changed part of the key, `--fresh`, or a result 24 hours old runs fresh; a replay's key moves with every new transcript line, so a replay mostly runs fresh.
 - Started bare with no stored result to reuse, it queues itself through `run-slot.sh`, as `commit-slot.ts` queues a commit's build, and says so on stderr with the queue's depth; inside a ticket, or where `run-slot.sh` is not executable, it runs as it is.
   Tests: `bun run test:file tests/packages/scripts/src/hook-differential.test.ts`.
+
+## An edit script's replacements
+
+An edit script that writes code or text with JavaScript passes each replacement that may hold `$` through a replacer function, `s.replace(a, () => b)`, or `split(a).join(b)`, since a string replacement reads `$$`, `$&`, `` $` ``, `$'` and `$1` as patterns: `"a".replace("a", "echo $$")` gives `echo $`, and an edit script once turned `$$` into `$` in `run-slot.sh` with no error.
+In the repo's TypeScript, `tests/packages/scripts/src/replace-dollar.test.ts` fails on a literal replacement holding `$$`, `` $` `` or `$'`, or `$&` after a string search, naming the file, the line and the fix.

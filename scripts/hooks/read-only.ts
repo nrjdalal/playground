@@ -145,8 +145,11 @@ const shapeOf = (shapes: Record<string, Shape>, key: string | undefined): Shape 
 function commandReads(cmd: Command): boolean {
   if (cmd.redirects.length > 0 || cmd.words.some((w) => /[*?[{()$]/.test(w.value))) return false
   const words = cmd.words.map((w) => w.value)
-  if (words.length === 0) return true
-  if (words.some(marked)) return false
+  return words.length === 0 || (!words.some(marked) && readsWords(words))
+}
+
+// Whether a command's words, its program first, are one of the read shapes above; the caller rules out redirects, globs and words it cannot read.
+export function readsWords(words: string[]): boolean {
   const [name, ...args] = words
   if (name === "git") {
     const k = args[0] === "-C" ? 2 : 0

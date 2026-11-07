@@ -44,6 +44,7 @@
     "ops:herdr": "bun --no-env-file packages/scripts/src/ops-herdr/cli.ts",
     "ops:machine": "bun packages/scripts/src/ops-machine/cli.ts",
     "ops:outbox": "bun packages/scripts/src/ops-outbox/drain.ts",
+    "ops:restore": "bun packages/scripts/src/ops-restore/cli.ts",
     "ops:session-resume": "bun packages/scripts/src/ops-session-resume/cli.ts",
     "ops:sweep": "bun --no-env-file packages/scripts/src/ops-sweep/cli.ts",
     "ops:tick": "bun packages/scripts/src/ops-tick/cli.ts",

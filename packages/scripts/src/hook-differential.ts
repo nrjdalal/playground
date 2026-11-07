@@ -111,6 +111,7 @@ const allows = (check: Check, call: Call, env: Env, main?: string, repo?: string
       (await check(
         JSON.stringify({
           cwd: call.cwd,
+          hook_event_name: "PreToolUse",
           ...(call.session === undefined ? {} : { session_id: call.session }),
           tool_input: { command: call.command },
           tool_name: "Bash",
@@ -160,10 +161,16 @@ export function scratchData(real: string, base = tmpdir()): string {
   return data
 }
 
+// The config entries a hook reads besides the registry, linked from the real config folder: writing-first's installed skill and plugins
+const CONFIG_LINKS = ["plugins", "settings.json", "skills"]
+
 // The role the roster's kind gives each transcript name, from the real data folder, and a scratch registry naming each named session, for --role session
 export async function sessionRoles(list: Call[], real: Env, base = tmpdir()) {
   const config = mkdtempSync(join(base, "hook-differential-config-"))
   mkdirSync(join(config, "sessions"))
+  const own = real.CLAUDE_CONFIG_DIR || join(real.HOME || homedir(), ".claude")
+  for (const entry of CONFIG_LINKS)
+    if (existsSync(join(own, entry))) symlinkSync(join(own, entry), join(config, entry))
   const roles = new Map<string, string>()
   for (const { name, session } of list) {
     if (!name) continue

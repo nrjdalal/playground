@@ -38,7 +38,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   A long-running job joins an open runner; Ops spawns a runner when none is open, or another one for isolation or load.
   Each job runs as its own background task with its own log and health check, all listed in that runner's roster task.
   Ops closes a runner once it holds no job that is still needed.
-- **Ops jobs** Ops runs as scripts with no session (ops-awake, ops-changelog, ops-dashboard, ops-dm-watch, ops-firefighting-start, ops-flow, ops-herdr, ops-channel-watch, ops-loom-relay, ops-machine, ops-merge-train, ops-report, ops-session-resume, ops-sweep, ops-tick, ops-ticket-card, ops-unstick, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
+- **Ops jobs** Ops runs as scripts with no session (ops-awake, ops-changelog, ops-dashboard, ops-dm-watch, ops-firefighting-start, ops-flow, ops-herdr, ops-channel-watch, ops-loom-relay, ops-machine, ops-merge-train, ops-report, ops-restore, ops-session-resume, ops-sweep, ops-tick, ops-ticket-card, ops-unstick, ops-zai-usage) beat a heartbeat, `~/.playground/ops/<job>.json`,
   named `ops-*.json` so the Dashboard finds a new job by its file alone,
   in the shape `heartbeatSchema` in `api/hono/src/lib/dashboard/ops.ts` reads (`job`, `pid`, `startedAt`, `lastBeatAt`, `lastResult`, `cycleSeconds`), written atomically each beat by a loop that does not wait on the work.
   The Dashboard lists each under Scripts, by its plain name and its `jobs.json` `schedule`: Running while `lastResult` is `ok` and the beat is within three cycles, Waiting while it starts `waiting: ` (a job with nothing to read yet, muted and not broken), Failing on any other result, Down once the beat goes stale, the pid goes or the loop writes `loop exited <code>` or `supervisor exited`.
@@ -205,10 +205,16 @@ Ops runs an update when the owner asks for one:
 ## Restoring the main checkout
 
 Every PreToolUse guard runs from the main checkout and fails closed ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#registered-in-both-settings-files)): with its scripts gone every factory session's Bash is refused, its Edit and Write too, while with only its packages gone the guards still run, since each runs a committed bundle that needs none.
-No session can then repair it, so the restore runs from the owner's own `!` window, whose commands run with no hook:
+No session can then repair it, so ops-restore does (`packages/scripts/src/ops-restore/cli.ts`, `jobs.opsRestore`, off until the owner turns it on, in Settings > Jobs or by approving the Inbox guard decision Ops posts): a launchd job with no hook, run from the Dashboard's checkout, which a wiped main checkout leaves standing.
+Every 5 minutes it reads the guards the factory settings register (the main checkout's while it holds them, else the Dashboard's), and keeps origin's URL in `ops/restore/origin.txt` while the checkout and its own `.git` are whole.
+It acts only once a guard's bundle and source are both gone on two looks in a row, about 5 minutes apart with no gap over 10, while no run slot's holder runs upkeep (`playground update`, `link-skills.sh` or any `bun install`, read by the holder's pid):
 
-1. The owner puts the files back: `! git -C <main checkout> checkout -- .` while its `.git` is in place.
-   With it gone, restore in place, since a clone refuses the folder the delete left `node_modules`, `.env` and `.claude/worktrees` in: `! git -C <main checkout> init`, `! git -C <main checkout> remote add origin <the repo's URL>`, `! git -C <main checkout> fetch origin`, then `! git -C <main checkout> checkout -f -B main origin/main`.
-   **Done when** `! git -C <main checkout> status` reads clean and a factory session's Bash call runs again.
-2. The owner runs `! bun install --cwd <main checkout>`, then `! <main checkout>/scripts/link-skills.sh`, for the hooks and scripts that run from source.
-   **Done when** both exit 0.
+1. It puts the files back: `git -C <main checkout> checkout HEAD -- .` while its `.git` is in place, from `HEAD` so a loss already staged comes back too, first keeping `git status --porcelain` whole in `ops/restore/status-<time>.txt`, whose path each report names, and naming in the report whatever else the checkout held besides the loss, since the main checkout stays clean.
+   With `.git` gone it restores in place, since a clone refuses the folder the delete left `node_modules`, `.env` and `.claude/worktrees` in: `init`, `remote add origin` with the URL `origin.txt` kept, `fetch origin`, `read-tree origin/main` and the same status file, which reads what differed from origin, then `checkout -f -B main origin/main`.
+   Every worktree of the old `.git`, the Dashboard's included, then has lost its link to it, which `git worktree repair` cannot restore against a fresh `.git`, so its report names the loss and Ops reattaches each.
+2. It runs `bun install --cwd <main checkout>` through its own checkout's run-slot, then `<main checkout>/scripts/link-skills.sh`, for the hooks and scripts that run from source.
+3. It checks the guards again and tells ops and the dispatcher what it did.
+   A step that fails is told to them once, naming the step, and the job runs no step again until the guards have come back; a stop that leaves them back (at the install or `link-skills.sh`) is Ops' to finish by hand from a session whose guards start.
+   While the guards stay gone, after a stopped restore or with the job turned off, no factory session's Bash runs: that is a true block, so the session that finds it tells the dispatcher by SendMessage, and the owner's way back is one GUI action, the Dashboard's restore control, which runs steps 1 to 3 from the dashboard's server, where no factory Bash runs (not built yet).
+
+**Done when** ops-restore's report reads that every guard's script is back, or Ops, else the owner's restore control on a true block, has finished a stopped restore's steps.

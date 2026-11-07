@@ -84,6 +84,16 @@ describe("the job registry", () => {
     expect([...plists.keys()]).toEqual(["com.playground.ops-tick"])
   })
 
+  // #1354: a wiped main checkout takes its own scripts with it, so the restore runs from the Dashboard's
+  test("ops-restore's plist runs from the Dashboard's checkout and names the main checkout it restores", () => {
+    const restore = { ...JOBS["ops-restore"]!, enabled: true }
+    const { plists } = renderJobs({ [jobKey("ops-restore")]: restore }, [], fill)
+    const plist = plists.get("com.playground.ops-restore")!
+    expect(plist).toContain("<string>/c/desk/packages/scripts/src/ops-restore/cli.ts</string>")
+    expect(plist).toContain("<string>--main</string><string>/c</string></array>")
+    expect(plist).toContain("<key>WorkingDirectory</key><string>/c/desk</string>")
+  })
+
   test("a value its schema refuses falls back to the default, and a job the registry does not know is kept as it stands", () => {
     const company = { command: "~/x/run.sh", heartbeat: "ops-company", name: "ops-company" }
     const { jobs } = renderJobs(

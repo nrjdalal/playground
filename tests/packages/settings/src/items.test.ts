@@ -67,3 +67,30 @@ test("show --rev of a revision that wrote another item prints this item as that 
     state: "accepted",
   })
 })
+
+// PG-1377: put chmods each executable name, so a name the item does not hold, such as ../x, is refused before it reaches chmodSync
+test("put refuses an executable name the item does not hold", () => {
+  const refusal = {
+    message: "executable names a file the item does not hold",
+    ok: false,
+    status: 400,
+  } as const
+  expect(
+    putItem(
+      scratch,
+      { ...ref, key: "escape" },
+      { ...files("v1"), executable: ["../x"] },
+      OWNER,
+      true,
+    ),
+  ).toEqual(refusal)
+  expect(
+    putItem(
+      scratch,
+      { ...ref, key: "one" },
+      { attachments: [], body: "#!/bin/sh\n", executable: ["run.sh"], files: null, value: null },
+      OWNER,
+      true,
+    ),
+  ).toEqual(refusal)
+})
