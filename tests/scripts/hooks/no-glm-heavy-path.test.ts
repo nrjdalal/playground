@@ -920,6 +920,11 @@ describe("a GLM session's org tools", () => {
       name: "ReadMcpResourceTool",
       input: { server: "linear-shared", uri: "made-up://MADE-1" },
     },
+    {
+      $label: "Claude Code's resource folder read",
+      name: "ReadMcpResourceDirTool",
+      input: { server: "linear-shared", uri: "made-up://MADE" },
+    },
   ])(
     "an MCP tool of $label is refused on GLM and passes on Claude",
     async ({ name, input: given }) => {
@@ -998,11 +1003,12 @@ describe("its registration", () => {
       }),
     )
 
-  test("both settings files send it every Bash call, every MCP tool and Claude Code's two MCP resource tools, and no other tool", async () => {
+  test("both settings files send it every Bash call, every MCP tool and Claude Code's three MCP resource tools, and no other tool", async () => {
     for (const { file, matcher } of await matchers()) {
       for (const tool of [
         "Bash",
         "ListMcpResourcesTool",
+        "ReadMcpResourceDirTool",
         "ReadMcpResourceTool",
         "mcp__linear-shared__list_issues",
         "mcp__slack-shared__conversations_history",
