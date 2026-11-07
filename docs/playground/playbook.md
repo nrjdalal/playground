@@ -78,8 +78,10 @@ Another, ops-loom-relay, passes Claude Code's usage on to the org's Loom as coun
 each person's own.
 Each night at 3:00 am, ops-tick's nightly clean removes what no merge's cleanup reached: worktrees and branches of merged or closed PRs, exited containers of worktrees that are gone, Docker's dangling images and build cache, and turbo cache files over 2 days old.
 It keeps a worktree that another worktree or a scratch folder still links into, and names the first three links.
-A merged or closed PR's worktree goes to the trash whatever it holds.
-It posts an Inbox update when it freed 1 GB or more, and asks the owner, in one delete decision, before it removes any other thing that holds work no merge landed.
+A merged or closed PR's worktree goes to the trash whatever it holds, and one whose merge or close `playground rm` cannot confirm goes there too under the owner's standing approval, each move restorable with `playground rm --restore`.
+An unmerged branch's head is tagged `archive/<branch>` on origin before any delete, so the tag holds it and `git branch <name> archive/<branch>` brings the branch back; one whose tag cannot be made, or whose origin head is not the local head the tag would hold, stays, named in the log.
+Each removal goes in `ops/log/nightly-clean.log` and in the outbox line to ops, which carries it to the dispatcher in its batch.
+It posts an Inbox update when it freed 1 GB or more, and asks the owner, in one delete decision, before it removes a container or unused volume over 1 GB that no rule takes.
 A worker spawns its own reviewer and tester, each briefed from a template it fills in, and the Dashboard nests them under it; the reviewer scores the PR through [code-review-loop](./code-review-loop.md).
 A probe lives for one test and never waits on the owner.
 The dispatcher, the Planner and the two leads never close, except to be started again with their settings after a restore or from a handoff once their guidance changes; they compact their own context in one 400k window (`autoCompactWindow` 400000) and keep their pane and name.
@@ -105,6 +107,7 @@ While it stands, every merge waits, every other session's heavy run waits in the
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
 A priority start (spawn.sh's `--priority`) passes the load gate and a full run-slot queue at the slots gate while a priority file stands, and the memory gate still applies to it.
 It passes focus too on `priority.json` or an org's own `priority-<name>.json`, while a job's own `priority-start.json` never does.
+A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the load gate as well, as a Claude Code update's close and resume do, and the memory gate still applies to it.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
@@ -239,7 +242,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   CI checks that nothing in the repo kills by name, pattern or port; a command a session types is the rule's to hold.
 - No session builds, tests, commits or writes a file in the main checkout, which every installed skill follows: the **main** rule.
   A hook refuses each of those there, naming the fix, while its upkeep (a pull, a fetch, rebuilding the shared packages with env validation off after a pull that changes them, `git reset --keep origin/main` off a stray local commit, relinking the skills) and reads run.
-- Nothing types into another session's pane in the owner's name: sessions and ops alerts reach a session through `SendMessage` (the **voice** rule), and the dashboard types only for his own clicks.
+- Nothing types into another session's pane in the owner's name: sessions and ops alerts reach a session through `SendMessage` (the **voice** rule), and the dashboard types only for his own clicks, but for the idle compact's `/compact` into an idle worker or runner, which the owner approved (ADR 0020).
   A test fails on any other caller of the dashboard's `deliver()` and on any text in the repo that types into a pane, Escape on the usage-limit dialog and a manager's `playground picker` on a permission prompt aside.
 - A page for the owner (a report, a comparison, a mock, a diagram) is a local HTML file in the session's scratchpad, kept with `playground page` and posted as an Inbox card's `html` attachment, so the Inbox's viewer shows it and nothing opens on the owner's screen (the **local page** rule), since a claude.ai artifact publishes under whichever account the session holds.
   The page then stays on the Pages tab of the session's view, of the one it was made for and of the dispatcher's.
