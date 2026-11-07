@@ -447,6 +447,7 @@ const forms = (subject: string, file: string): [string, string][] => [
   ["through run-slot", `${SLOT} git commit -m "${subject}"`],
   ["-F after a git add, which writes no file", `git add bad.txt good.txt && git commit -F ${file}`],
   ["-m from a file read by its own cat", `git commit -m "$(cat ${file})"`],
+  ["-F after a cd", `cd ${REPO} && git commit -F ${file}`],
   [
     "-F - from a heredoc after a command that may write a file",
     `touch x && git commit -F - <<'EOF'\n${subject}\nEOF`,
@@ -482,6 +483,9 @@ describe("a git commit whose message commitlint passes, or one the hook cannot r
       "-m from a file a cp before it may rewrite",
       `cp good.txt bad.txt; git commit -m "$(cat bad.txt)"`,
     ],
+    ["-F after a script a shell runs", "sh gen.sh; git commit -F bad.txt"],
+    ["-F after a script named by a variable", `bash "$S"; git commit -F bad.txt`],
+    ["-F after a script a source reads", "source gen.sh; git commit -F bad.txt"],
   ] as [string, string, string?][])("%s", async (_, command, cwd = REPO) => {
     expect(await commit(command, cwd)).toBeUndefined()
   })
