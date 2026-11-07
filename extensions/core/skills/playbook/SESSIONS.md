@@ -212,9 +212,9 @@ Done when `ListAgents` shows the session busy on the brief and the roster shows 
 ## Write a handoff
 
 A handoff, for a respawn, a parked chore or a priority close, counts as written only once `TZ=UTC ls -l <path>` prints its file, and the report that names it quotes that line.
-A handoff names the session's own transcript path, so the respawned session reads from the transcript the detail the handoff dropped.
+A handoff names the session's own transcript path, which `ls ~/.claude/projects/*/<id>.jsonl` prints, `<id>` the session id in `~/.playground/resume/<name>.sh`, so whoever picks the work up can read there a detail the handoff dropped.
 A hook can refuse the write and leave nothing on disk, so a session whose write a hook refused answers the hook and retries the same write before it reports.
-Done when `TZ=UTC ls -l <path>` prints the file and the report quotes that line.
+Done when `TZ=UTC ls -l <path>` prints the file, `ls` prints the transcript path it names, and the report quotes the `ls -l` line.
 
 ## Rename
 
