@@ -459,6 +459,22 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
     ).toBeUndefined()
   })
 
+  // an update reads done from the moment it is posted, and when the owner marks it Done, so a gate that took open alone asked for a copy of the card on every progress edit (#1486)
+  test("passed: 3 numbered steps that name a progress card, which reads done", async () => {
+    expect(
+      await stop(`${STEPS}\nProgress is in #i42.`, { statuses: { "#i42": "done" } }),
+    ).toBeUndefined()
+  })
+
+  test.each(["archived", "denied", "dismissed"])(
+    "refused: 3 numbered steps whose only card is %s",
+    async (standing) => {
+      expect(await stop(`${STEPS}\nProgress is in #i42.`, { statuses: { "#i42": standing } })).toBe(
+        `${STEPS_REASON} (#i42 is ${standing}, not open or done)`,
+      )
+    },
+  )
+
   test("a lead's steps go to the dispatcher as a draft, so the card is posted once", async () => {
     expect(DRAFT_REASON).toBe(
       "send these steps to the dispatcher as a draft for one Inbox card rather than posting it, so the card is posted once, send each step's progress to the dispatcher as an edit to that draft, then say in chat in one line that the dispatcher has the draft",
@@ -590,12 +606,12 @@ test("run as Claude Code runs it, a report stops with no output", async () => {
 
 describe("the dashboard read's time limits (#1269)", () => {
   // A checkout whose bun run ask writes its pid beside it, then answers each ref after its delay, as the live dashboard's does under load.
-  const stubDashboard = (delays: Record<string, number>, status = "open") => {
+  const stubDashboard = (delays: Record<string, number>, item: object = { status: "open" }) => {
     const dir = mkdtempSync(join(tmpdir(), "no-chat-question-dashboard-"))
     mkdirSync(join(dir, "api", "hono", "src", "bin"), { recursive: true })
     writeFileSync(
       join(dir, "api", "hono", "src", "bin", "dashboard-ask.ts"),
-      `const ref = process.argv[3]\nawait Bun.write(\`\${import.meta.dir}/\${ref.slice(1)}.pid\`, String(process.pid))\nawait Bun.sleep(${JSON.stringify(delays)}[ref] ?? 0)\nconsole.log(JSON.stringify({ status: ${JSON.stringify(status)} }))\n`,
+      `const ref = process.argv[3]\nawait Bun.write(\`\${import.meta.dir}/\${ref.slice(1)}.pid\`, String(process.pid))\nawait Bun.sleep(${JSON.stringify(delays)}[ref] ?? 0)\nconsole.log(JSON.stringify(${JSON.stringify(item)}))\n`,
     )
     return dir
   }
@@ -613,6 +629,27 @@ describe("the dashboard read's time limits (#1269)", () => {
       },
       { itemStatus, sessionName: () => undefined },
     )
+
+  // bun run ask get prints the whole item: an update keeps status done whatever the owner does, so what the owner did is read from its answer (#1486)
+  test.each([
+    ["a posted update", { status: "done" }, "done"],
+    ["an update the owner marked Done", { answer: { dismissedAt: "t" }, status: "done" }, "done"],
+    [
+      "an update the owner dismissed",
+      { answer: { dismissed: true, dismissedAt: "t" }, status: "done" },
+      "dismissed",
+    ],
+    ["an update the owner archived", { answer: { archivedAt: "t" }, status: "done" }, "archived"],
+    [
+      "an open decision the owner archived",
+      { answer: { archivedAt: "t" }, status: "open" },
+      "archived",
+    ],
+  ])("%s reads %p", async (_name, item, standing) => {
+    const dashboard = stubDashboard({}, item)
+    stubs.push(dashboard)
+    expect(await readStatus("#i1", dashboard)).toBe(standing)
+  })
 
   test("an open item bun run ask takes 5s to read, as under a load spike, reads as open", async () => {
     const dashboard = stubDashboard({ "#i1": 5000 })
