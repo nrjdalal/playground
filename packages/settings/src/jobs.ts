@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 // By relative path, as factory.ts imports, so the web's tests import it from outside the package.
+import { CORE } from "./rendered"
 import { defineSettings } from "./settings"
 
 // The ops job registry: one setting per job, `jobs.<camelName>`, whose row holds the fields it changes (its enabled field alone, for a job turned on) and reads over the job's registry entry, so turning a job on, pausing it or moving its schedule is a settings write with a reason, never a PR, and the rest still follows the registry. The runner renders <data>/ops/jobs.json and each launchd job's plist from it at the top of every pass. A fresh install has every job off but the Dashboard's (ops-dashboard) and ops-usage, so the Dashboard shows the account's week with no setting. In a command, cwd or program, {bun}, {checkout} (the install's checkout), {dashboard} (the Dashboard's checkout, on live.branch) and {data} (the data folder) are filled in by the render.
@@ -15,6 +16,8 @@ const jobFields = z.strictObject({
   callsModel: z.boolean(),
   // A job a terminal holds (herdr): its command, run from cwd.
   command: z.string().min(1).optional(),
+  // The job's own settings, which core checks only for being an object; the job reads them from its jobs.json row and checks each field itself.
+  config: z.record(z.string(), z.unknown()).optional(),
   cwd: z.string().min(1).optional(),
   description: z.string().min(1),
   disabledWhy: z.string().optional(),
@@ -229,16 +232,18 @@ const plistOf = (name: string, job: Job, fill: Fill): string => {
   ].join("\n")
 }
 
-// Pure: the registry's values (policy.json's, over each job's default) as jobs.json in the shape every reader parses, and an enabled launchd job's plist by label. A job jobs.json lists that the registry does not know (a company script, until the store holds it) is kept as it stands, less an old needsCmux (withoutNeedsCmux).
+// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, and an enabled launchd job's plist by label. A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands, less an old needsCmux (withoutNeedsCmux); one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it, and kept as it stands when the orgs could not be read (org null).
 export const renderJobs = (
   values: Record<string, unknown>,
   existing: { name?: unknown }[],
   fill: Fill,
+  org: Record<string, OrgJob> | null = {},
 ): { jobs: Record<string, unknown>[]; plists: Map<string, string> } => {
   const plists = new Map<string, string>()
-  const jobs: Record<string, unknown>[] = Object.entries(JOBS).map(([name, fallback]) => {
-    const set = jobSchema.safeParse(values[jobKey(name)])
-    const { command, cwd, enabled, program, ...job } = set.success ? set.data : fallback
+  const row = (
+    name: string,
+    { command, cwd, enabled, program, ...job }: Job & { org?: string },
+  ) => {
     if (enabled && job.launchd && program)
       plists.set(job.launchd, plistOf(name, { ...job, cwd, enabled, program }, fill))
     return {
@@ -249,19 +254,125 @@ export const renderJobs = (
         : {}),
       ...(enabled ? {} : { disabled: true }),
     }
-  })
-  const known = new Set(Object.keys(JOBS))
+  }
+  const jobs: Record<string, unknown>[] = [
+    ...Object.entries(JOBS).map(([name, fallback]) => {
+      const set = jobSchema.safeParse(values[jobKey(name)])
+      return row(name, set.success ? set.data : fallback)
+    }),
+    ...Object.entries(org ?? {}).map(([name, job]) => row(name, job)),
+  ]
+  const known = new Set([...Object.keys(JOBS), ...Object.keys(org ?? {})])
   jobs.push(
-    ...(existing
+    ...existing
       .filter((job) => typeof job.name === "string" && !known.has(job.name))
-      .map(withoutNeedsCmux) as Record<string, unknown>[]),
+      .map((job) => withoutNeedsCmux(job) as Record<string, unknown>)
+      .map((job) => (org && typeof job.org === "string" ? { ...job, disabled: true } : job)),
   )
   return { jobs: jobs.sort((a, b) => String(a.name).localeCompare(String(b.name))), plists }
+}
+
+// A word an org job's command passes its script, and each segment of its paths: plain text, never a shell operator, a quote or a placeholder.
+const PLAIN = /^[\w.,:=@%+/-]+$/
+const OPS = "{data}/ops/"
+
+// Whether a path under ops is in one of the given script folders: <key>/<path>, every segment plain and none . or ..
+const inFolder = (path: string, keys: string[]): boolean => {
+  const [key, ...rest] = path.split("/")
+  return (
+    keys.includes(key!) &&
+    PLAIN.test(path) &&
+    rest.length > 0 &&
+    rest.every((segment) => segment !== "" && segment !== "." && segment !== "..")
+  )
+}
+
+// Where an org's job runs, its cwd, or why it may not run as its row says: it beats under its own name and names no stop group, which ops stops before each start, it runs in a terminal, its command {bun} [--no-env-file] then a script in a folder its org ships, then plain words or {data}, from that folder unless its cwd names one under it.
+const runsFrom = (
+  name: string,
+  job: Job,
+  keys: string[],
+): { cwd: string } | { refused: string } => {
+  const refused = (why: string) => ({ refused: why })
+  if (job.heartbeat !== name) return refused(`its heartbeat must be its own name, ${name}`)
+  if (job.stop)
+    return refused("an org's job names no stop group, which ops stops before each start")
+  if (job.launchd || job.program)
+    return refused(
+      "an org's job runs in a terminal, with a command and no launchd label or program",
+    )
+  const words = (job.command ?? "").split(" ")
+  if (words[0] !== "{bun}") return refused("its command must start with {bun}")
+  const at = words[1] === "--no-env-file" ? 2 : 1
+  const script = words[at] ?? ""
+  if (!script.startsWith(OPS) || !inFolder(script.slice(OPS.length), keys))
+    return refused(`its command must run a script in a folder its org ships, ${OPS}<key>/<file>`)
+  if (!words.slice(at + 1).every((word) => word === "{data}" || PLAIN.test(word)))
+    return refused("its command's arguments must be plain words or {data}")
+  const key = script.slice(OPS.length).split("/")[0]!
+  const cwd = job.cwd ?? `${OPS}${key}`
+  if (
+    cwd !== `${OPS}${key}` &&
+    !(cwd.startsWith(`${OPS}${key}/`) && inFolder(cwd.slice(OPS.length), [key]))
+  )
+    return refused(`its cwd must be ${OPS}${key} or a folder under it`)
+  return { cwd }
+}
+
+// An org's own job, marked with the org that adds it, which its jobs.json row keeps so a later pass can tell it from a row kept by hand.
+export type OrgJob = Job & { org: string }
+
+const REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()])
+
+// One scope's row for a job the registry lacks as that org's job, by its name, or why it is refused.
+const orgJob = (
+  key: string,
+  scope: string,
+  value: unknown,
+  login: string,
+  keys: string[],
+): { job: OrgJob; name: string } | { refused: string } => {
+  if (scope === login || scope === CORE)
+    return { refused: "only an org's scope may add a job the registry lacks" }
+  const name = key.slice("jobs.".length).replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)
+  if (!/^[a-z][a-z0-9-]*$/.test(name) || jobKey(name) !== key)
+    return { refused: "its key must be jobs.<camelName>, the job's name in camel case" }
+  const parsed = jobSchema.safeParse(value)
+  if (!parsed.success)
+    return {
+      refused: parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "row"} ${issue.message}`)
+        .join("; "),
+    }
+  const runs = runsFrom(name, parsed.data, keys)
+  return "refused" in runs ? runs : { job: { ...parsed.data, cwd: runs.cwd, org: scope }, name }
+}
+
+// Pure: each org's own jobs from every scope's settings rows: an org scope's jobs.<camelName> row for a job the registry lacks, by its name, which runs a script from a folder that org ships (scripts[org], each <org>/scripts/<key>/), from that folder unless its cwd names one under it. Each row refused is a line naming its scope, its key and why: a login's or core's row for such a job, a row off the job's schema or out of its folder, and a second org's row for a job the first in scope order adds.
+export const orgJobs = (
+  rows: { key: string; scope: string; value: unknown }[],
+  login: string,
+  scripts: Record<string, string[]>,
+): { jobs: Record<string, OrgJob>; refused: string[] } => {
+  const jobs: Record<string, OrgJob> = {}
+  const refused: string[] = []
+  for (const { key, scope, value } of rows) {
+    if (!key.startsWith("jobs.") || REGISTRY_KEYS.has(key)) continue
+    const read = orgJob(key, scope, value, login, scripts[scope] ?? [])
+    if ("refused" in read) refused.push(`jobs: refused ${scope} ${key}: ${read.refused}`)
+    else if (jobs[read.name])
+      refused.push(
+        `jobs: refused ${scope} ${key}: ${jobs[read.name]!.org} already adds ${read.name}`,
+      )
+    else jobs[read.name] = read.job
+  }
+  return { jobs, refused }
 }
 
 const LISTED_FIELDS = [
   "callsModel",
   "command",
+  "config",
   "cwd",
   "description",
   "disabledWhy",

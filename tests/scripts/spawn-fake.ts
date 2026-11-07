@@ -186,6 +186,7 @@ const VALUED = [
   "--brief",
   "--effort",
   "--model",
+  "--pr",
   "--reports-to",
   "--runtime",
   "--title",
