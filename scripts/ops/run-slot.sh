@@ -1421,7 +1421,7 @@ cheap_sig() {
     for f in "$d"/run-slot*.holder; do l=; read -r l 2>/dev/null < "$f"; SIG="$SIG|$f=$l"; p=${l#* }; p=${p%% *}; case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac; done
   done
 }
-# the load's line, its 1- and 5-minute loads in whole numbers, which a waiter at the head looks again on (two processes, so only the head reads it)
+# the load's line, its 1- and 5-minute loads in whole numbers, which a waiter at the head looks again on (two processes, so only the head's polls read it)
 cheap_load() { local l; l=$(loadavg); set -- $l; LOAD="${2%%.*} ${3%%.*}"; }
 # whether this waiter's ticket is the queue's oldest, the one that names who goes next in run-slot.next
 oldest_is_me() { local a=("$QUEUE"/*); [ -n "$TICKET" ] && [ "${a[0]}" = "$TICKET" ]; }
@@ -1486,8 +1486,9 @@ cheap_idle() {
     [ "$NSIG" = "$NSIG0" ]
   fi
 }
-# marks a look: what it reads from here on counts as seen, and a waiter at the head reads the load, the clock's next turn and the gauges' verdict, which
-# the look's slot counts then take (LANES), so G0 is the verdict the look acted on
+# marks a look before it reads anything, so a change after any of its reads sets off the next look: what it reads from here on counts as seen, and the
+# load, the clock's next turn and the gauges' verdict, which the look's slot counts then take (LANES), so G0 is the verdict the look acted on; every waiter
+# takes them all, since one can come to the head within a look, and a mark taken after the look's reads lost the change between the two (issue 1414)
 look_mark() {
   local d
   : > "$REF" 2>/dev/null
@@ -1495,9 +1496,7 @@ look_mark() {
   SIG0=$SIG
   next_sig
   NSIG0=$NSIG
-  LOOKED=1 LOAD0= DUE= BURST= G0=open
-  unset LANES
-  [ "$LOOKER" = 1 ] || return 0
+  LOOKED=1 DUE= BURST=
   cheap_load
   LOAD0=$LOAD
   d=$(due_at)
@@ -1861,7 +1860,7 @@ held_for() {
   [ "$h" -ge 0 ] || h=0
   echo "$h"
 }
-# lanes_open, once per capacity() count: its slot checks share the first one's verdict, since a reading per slot counted slot 2 shut on a stale reading and slots 3 and 4 open on one that landed between them; a waiter at the head's look takes the verdict look_mark read for every check, and outside a look and a count LANES is unset, so each check reads afresh
+# lanes_open, once per capacity() count: its slot checks share the first one's verdict, since a reading per slot counted slot 2 shut on a stale reading and slots 3 and 4 open on one that landed between them; a waiter's checks take the verdict its last look_mark read until its next look, and outside the wait loop and a count LANES is unset, so each check reads afresh
 lanes_now() {
   case "${LANES-}" in
     open) return 0 ;;
@@ -2182,8 +2181,9 @@ while :; do
     waited=$((waited + 15))
     continue
   fi
-  reread
   look_mark
+  # the script's stamp is read after the mark, so a copy put in place once it is read is no older than the mark, and the next poll finds it (issue 1414)
+  reread
   # HEAD: first in the queue (any slot); S2: first among waiters that can take run-slot-2, so an older copy at the head cannot idle it
   HEAD=1; S2=1; fw= fw2=
   if [ -n "$TICKET" ] && prio_for "$WHO"; then
@@ -2201,10 +2201,9 @@ while :; do
     nx=; read -r nx 2>/dev/null < "$NEXTF"
     [ "$nx" = "${fw:--} ${fw2:--} ${pf:--}" ] || printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null
   fi
-  prev=$LOOKER
+  # a waiter that comes to the head keeps its look's marks, which look_mark took before the look's reads
   LOOKER=0
   { [ -z "$TICKET" ] || [ "$HEAD" = 1 ] || [ "$S2" = 1 ] || oldest_is_me; } && LOOKER=1
-  [ "$LOOKER" = "$prev" ] || look_mark
   if [ "$HEAD" = 0 ] && [ "$S2" = 0 ]; then
     if [ $((waited % 300)) -eq 0 ]; then
       pos=$(ordered_waiters | cut -d' ' -f2 | grep -nxF "${TICKET##*/}" | cut -d: -f1)
