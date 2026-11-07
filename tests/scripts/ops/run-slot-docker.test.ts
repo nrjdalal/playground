@@ -462,6 +462,8 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       // round 3 of #1219: a substitution in single quotes runs nothing, and one whose glob can be no docker or shell reads as before
       "echo '$(/usr/local/bin/doc?er build .)'; touch \"$MARKER\"",
       'echo $(ls /bin/s*.none 2> /dev/null); touch "$MARKER"',
+      // round 6 of #1219: a substitution read to the script's end runs as before when no glob in it can be docker or a shell
+      'x=$(echo "$(echo a)"); ls /bin/s*.none 2> /dev/null; touch "$MARKER"',
     ])
       test(`while a glob that is no program word runs as before: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
@@ -558,6 +560,10 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       ["bash", "-c", "echo $'\\''; case x in $(/usr/local/bin/doc?er build .)) ;; esac"],
       ["bash", "-c", "case x in $(cat <<'E'\n)\nE\n/usr/local/bin/doc?er build .)) ;; esac"],
       ["bash", "-c", "case x in $(cat <<<')'; /usr/local/bin/doc?er build .)) ;; esac"],
+      // review round 6 of #1219: a $( or backquote inside a substitution's double quote does not let its ) end the substitution
+      ["sh", "-c", 'echo "$(echo "$(echo ")")"; /usr/local/bin/doc?er build .)"'],
+      ["sh", "-c", 'echo "$(echo "`echo ")"`"; /usr/local/bin/doc?er build .)"'],
+      ["sh", "-c", 'case x in $(echo "$(echo ")")"; /usr/local/bin/doc?er build .)) ;; esac'],
     ])
       test(`a docker glob in a script run-slot does not open: ${argv.join(" ")}`, async () => {
         const r = await run(argv)
