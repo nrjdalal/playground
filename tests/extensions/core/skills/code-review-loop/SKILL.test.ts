@@ -25,6 +25,8 @@ describe("code-review-loop keeps its reviewer for the merge (#1067)", () => {
     const stand = last.split("**CI stands in**")[1]?.split("\n")[0] ?? ""
     expect(stand).toContain("head sha equal to `<head>`")
     expect(stand).toContain("`HEAD is now at <sha> Merge <head> into <run base>`")
+    expect(stand).toContain("the `Lint and Build` job's id from its check run's `details_url`")
+    expect(stand).toContain("actions/jobs/<job id>/logs")
     expect(stand).toContain("`git -C <clone> diff --name-only <run base> origin/canary`")
     expect(stand).toContain("a repo scanner or a data file one reads")
     expect(stand).toContain(
