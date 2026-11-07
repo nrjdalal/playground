@@ -4,7 +4,8 @@ import { join } from "node:path"
 
 import { SCRIPT, WAITING, stop, machine } from "./run-slot-fake"
 
-setDefaultTimeout(90_000)
+// ten waiters under xtrace and the shims take up to a minute over their first looks on a loaded Mac, before the window opens
+setDefaultTimeout(180_000)
 
 // every external command run-slot.sh calls by name; a shim for each counts its start, so a start the shims miss is a fork that runs bash alone, which the trace's subshell levels count
 const COMMANDS =
@@ -63,17 +64,40 @@ const subshells = (trace: string) => {
   }
   return n
 }
-// the processes the waiters started together each second over `window` seconds, once each has printed its first wait line
-const starts = async (count: string, waiters: Waiter[], waits: RegExp, window: number) => {
+// the processes the waiters started together each second over `window` seconds, once each has printed its first wait line and a whole poll has passed in which none began a look (look_mark) and each is in its sleep, since a waiter whose first look ran before the others had joined looks once more at them: the window counts idle polls alone
+const starts = async (
+  count: string,
+  waiters: Waiter[],
+  waits: RegExp,
+  poll: number,
+  window: number,
+) => {
   for (const w of waiters) while (!waits.test(w.err)) await Bun.sleep(50)
+  for (let quiet = false; !quiet;) {
+    const at = waiters.map((w) => w.err.length)
+    await Bun.sleep((poll + 1) * 1000)
+    quiet = waiters.every(
+      (w, i) =>
+        !/^\++\d+ look_mark$/m.test(w.err.slice(at[i])) &&
+        /^\+0 sleep \S+$/.test(w.err.match(/^\+0 .*$/gm)?.at(-1) ?? ""),
+    )
+  }
   const from = waiters.map((w) => w.err.length)
   const before = readFileSync(count, "utf8").split("\n").length
   await Bun.sleep(window * 1000)
   const execs = readFileSync(count, "utf8").split("\n").length - before
   const forks = waiters.reduce((n, w, i) => n + subshells(w.err.slice(from[i])), 0)
+  const rate = (execs + forks) / window
+  if (rate >= 5)
+    console.error(
+      "looks in the window:",
+      waiters
+        .map((w, i) => (w.err.slice(from[i]).match(/^\++\d+ look_mark$/gm) ?? []).length)
+        .join(","),
+    )
   await Promise.all(waiters.map((w) => stop(w.p)))
   expect(waiters.every((w) => !existsSync(w.marker))).toBe(true)
-  return (execs + forks) / window
+  return rate
 }
 
 // issue 1338, 7 Nov: sixteen waiters started about 60 processes a second between them, which held load5 between 30 and 42 on 15 cores with the CPU half idle, so the slots they waited for stayed shut
@@ -86,7 +110,7 @@ describe("waiters cost close to nothing while they wait", () => {
     const waiters = Array.from({ length: 10 }, (_, i) =>
       waiter(m, path, `worker-${i}`, ["touch"], { RUN_SLOT_POLL: "15" }),
     )
-    expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 30)).toBeLessThan(5)
+    expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 15, 30)).toBeLessThan(5)
   })
 
   test("and so do ten clone waiters behind the load brake", async () => {
@@ -96,6 +120,6 @@ describe("waiters cost close to nothing while they wait", () => {
     const waiters = Array.from({ length: 10 }, (_, i) =>
       waiter(m, path, `worker-${i}`, ["cp", "-R", "node_modules"], { RUN_SLOT_POLL: "5" }),
     )
-    expect(await starts(count, waiters, /^run-slot\.sh: this clone waits /m, 10)).toBeLessThan(5)
+    expect(await starts(count, waiters, /^run-slot\.sh: this clone waits /m, 5, 10)).toBeLessThan(5)
   })
 })
