@@ -177,6 +177,12 @@ describe("a multi-question ask (#1250)", () => {
     expect(picksKey(base)).not.toBe(picksKey([q("Base?", ["staging", "trunk"]), base[1]!]))
   })
 
+  test("shows its words alone, with no On Approve line (#1250)", () => {
+    const html = opened(multi)
+    expect(html).toContain("Pick for each.")
+    expect(html).not.toContain("On Approve")
+  })
+
   test("shows its first question lettered, the recommended one badged in place, with Next and Send in the footer", () => {
     const html = opened(multi)
     expect(html).toContain("Which base?")

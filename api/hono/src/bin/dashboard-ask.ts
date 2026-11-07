@@ -16,9 +16,9 @@ import {
   ackItem,
   editItem,
   getItem,
+  getPickLine,
   itemTag,
   openItems,
-  pickedLine,
   postItem,
   readAnswer,
   resolveItem,
@@ -67,7 +67,7 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 run it before new, and name an open item on the same thing
                                                 rather than posting it again; --from keeps one sender's
        bun run ask get <id|#iN> [--ack]    prints the item, answer included; --ack marks an answer read
-                                                a picked option's letter and label print on stderr
+                                                a picked option's letter and label print on stderr, each question's pick for a multi-question answer
                                                 (and closes a deny, a clear, a discard or a provided secret, which reading carries out)
        bun run ask ack <id|#iN> [--link <https url> [--label "Filed ABC-123"] | --no-link "<why>"]
                                                 closes the answer once carried out; a go (approve, draft, edit, send)
@@ -260,7 +260,7 @@ if (command === "new" || command === "edit") {
   // An open item is printed as it is, so a poll with --ack only marks the answer once there is one; an update takes none, though a dismissed one records when in its answer.
   if (acking && item) item = await readAnswer(db, item)
   console.log(JSON.stringify(item, null, 2))
-  const picked = item && pickedLine(item)
+  const picked = item && getPickLine(item)
   if (picked) console.error(`ask: picked ${picked}`)
 } else if (command === "open") {
   for (const item of await openItems(db, flags?.from))

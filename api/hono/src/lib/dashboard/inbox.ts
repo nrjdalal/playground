@@ -1015,7 +1015,7 @@ export function pickOf(item: InboxItem): { index: number; label: string; letter:
 }
 
 // Pure: the pick line bun run ask get prints on stderr: a multi-question answer's pick for each question (picksOf), joined; else a single approve or deny's one letter and label (pickOf); null when the answer names no pick.
-export function pickedLine(item: InboxItem): string | null {
+export function getPickLine(item: InboxItem): string | null {
   if (
     item.kind === "decision" &&
     item.answer &&
