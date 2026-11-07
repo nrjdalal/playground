@@ -191,7 +191,7 @@ describe("a run through run-slot, a light run, or one outside the worktrees runs
     ["outside the repo", "bun run test", OUTSIDE],
     ["the worktrees folder itself", "bun install", `${MAIN}/.claude/worktrees`],
   ])("%s", async (_name, command, cwd) => {
-    expect(await bash(command, cwd)).toBeUndefined()
+    expect(await commit(command, cwd)).toBeUndefined()
   })
 
   test("a cd the hook cannot follow leaves the command alone", async () => {
@@ -419,6 +419,19 @@ await Bun.write(join(REPO, "bad.txt"), `${BAD}\n`)
 await Bun.write(join(REPO, "good.txt"), `${GOOD}\n`)
 afterAll(() => rmSync(REPO, { force: true, recursive: true }))
 
+// commitlint --edit asks git for the checkout's top, so the lint runs with the session's PATH
+const commit = (command: string, cwd = REPO) =>
+  check(
+    JSON.stringify({
+      cwd,
+      hook_event_name: "PreToolUse",
+      tool_input: { command },
+      tool_name: "Bash",
+    }),
+    { HOME: "/u", PATH: process.env.PATH },
+    MAIN,
+  )
+
 const forms = (subject: string, file: string): [string, string][] => [
   ["-m", `git commit -m "${subject}"`],
   ["--message=", `git commit --message="${subject}"`],
@@ -432,11 +445,16 @@ const forms = (subject: string, file: string): [string, string][] => [
   ["several -m", `git commit -m "${subject}" -m "body line" -m "another line"`],
   ["git -C from another folder", `cd ${OUTSIDE} && git -C ${REPO} commit -m "${subject}"`],
   ["through run-slot", `${SLOT} git commit -m "${subject}"`],
+  ["-F after a git add, which writes no file", `git add bad.txt good.txt && git commit -F ${file}`],
+  [
+    "-F - from a heredoc after a command that may write a file",
+    `touch x && git commit -F - <<'EOF'\n${subject}\nEOF`,
+  ],
 ]
 
 describe("a git commit whose message commitlint refuses is refused before its pre-commit slot wait", () => {
   test.each(forms(BAD, "bad.txt"))("%s", async (_, command) => {
-    const reason = await bash(command, REPO)
+    const reason = await commit(command)
     expect(reason).toContain("no-unslotted-run hook refuses this git commit")
     expect(reason).toContain("subject-case")
   })
@@ -453,7 +471,17 @@ describe("a git commit whose message commitlint passes, or one the hook cannot r
     ["-n, which skips commit-msg too", `git commit -n -m "${BAD}"`],
     ["--edit, whose editor changes the message", `git commit -e -m "${BAD}"`],
     ["a checkout with no commitlint", `git commit -m "${BAD}"`, OUTSIDE],
+    ["a # line commit-msg reads as a comment", `git commit -m "${GOOD}" -m "# ${"x".repeat(120)}"`],
+    ["-F a file a cp before it may rewrite", `cp good.txt m.txt && git commit -F bad.txt`],
+    [
+      "-F a file a program before it may rewrite",
+      `python3 -c "open('bad.txt','w').write('fix: ok')" && git commit -F bad.txt`,
+    ],
+    [
+      "-m from a file a cp before it may rewrite",
+      `cp good.txt bad.txt; git commit -m "$(cat bad.txt)"`,
+    ],
   ] as [string, string, string?][])("%s", async (_, command, cwd = REPO) => {
-    expect(await bash(command, cwd)).toBeUndefined()
+    expect(await commit(command, cwd)).toBeUndefined()
   })
 })
