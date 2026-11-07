@@ -12,7 +12,7 @@ Nothing fires it on its own.
 
 | Leg                     | Runs                        | Finds                                                                                                                                                             |
 | ----------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1, a linked org's terms | when an org scope is linked | no-public-leak's derived list, each org's own name, GitHub orgs and repository, a tracker key keyed or bare                                |
+| 1, a linked org's terms | when an org scope is linked | no-public-leak's derived list, each org's own name, GitHub orgs and repository, a tracker key keyed or bare                                                       |
 | 2, org-shaped values    | always                      | a Slack id, a person's home path or a tracker key written into the tree, and a skill, rule, script, job, settings key or spawn flag that serves one org's process |
 
 The runner, `bun run core-audit`, prints the hits and exits 1 on any, or 2 when an org is linked and its list, policy or login cannot be read; the skill adds the read for one org's process, the report, the fix PR and the audit doc.
