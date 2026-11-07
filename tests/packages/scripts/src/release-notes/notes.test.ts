@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { renderNotes } from "../../../../../packages/scripts/src/release-notes/notes"
+import { check } from "../../../../../scripts/hooks/no-public-leak"
+import { storeWith } from "../../../../scripts/hooks/render-set"
 
 const REPO = "acme/widgets"
 const URL = `https://github.com/${REPO}`
@@ -75,7 +80,7 @@ const COMMITS = [
 describe("renderNotes (PG-1213)", () => {
   const notes = renderNotes({ commits: COMMITS, from: "v0.0.1", repo: REPO, to: "v0.0.2" })
 
-  test("renders ZeroStarter's shape: the compare link, emoji sections in changelogen's order, then each contributor's name and handle", () => {
+  test("renders ZeroStarter's shape: the compare link, emoji sections in changelogen's order, then each contributor's login alone", () => {
     expect(notes).toBe(
       [
         `[compare changes](${URL}/compare/v0.0.1...v0.0.2)`,
@@ -105,8 +110,8 @@ describe("renderNotes (PG-1213)", () => {
         "",
         "### ❤️ Contributors",
         "",
-        "- Pat Example @pat-dev",
-        "- Sam Example @sam-ops",
+        "- @pat-dev",
+        "- @sam-ops",
         "",
       ].join("\n"),
     )
@@ -244,8 +249,9 @@ describe("renderNotes (PG-1213)", () => {
     },
   )
 
-  test("a contributor reads with the author's name before the handle, and the handle alone when no name was read", () => {
-    const notes = renderNotes({
+  // three made-up commits: one author twice with a name, one with none
+  const named = (names?: boolean) =>
+    renderNotes({
       commits: [
         {
           login: "pat-dev",
@@ -270,9 +276,50 @@ describe("renderNotes (PG-1213)", () => {
         },
       ],
       from: "v1",
+      names,
       repo: REPO,
       to: "v2",
     })
-    expect(notes.split("### ❤️ Contributors\n\n")[1]).toBe("- Pat Example @pat-dev\n- @sam-ops\n")
+
+  test("a contributor reads as the login alone by default, so the notes name no person", () => {
+    expect(named().split("### ❤️ Contributors\n\n")[1]).toBe("- @pat-dev\n- @sam-ops\n")
+  })
+
+  test("with names on, a contributor reads with the author's name before the login, and the login alone when no name was read", () => {
+    expect(named(true).split("### ❤️ Contributors\n\n")[1]).toBe(
+      "- Pat Example @pat-dev\n- @sam-ops\n",
+    )
+  })
+
+  test("the public repo's leak guard passes the default notes as a release write's notes file, and refuses them with names on", async () => {
+    const scratch = await mkdtemp(join(tmpdir(), "notes-leak-"))
+    const data = storeWith(
+      join(scratch, "data"),
+      {
+        "no-public-leak.json": JSON.stringify({
+          companies: ["Vantorix"],
+          handles: ["qmarsh"],
+          linearKeys: ["VX"],
+          names: ["Pat Example"],
+          slackIds: ["C0FAKE1234"],
+        }),
+      },
+      { "factory.archiveRepo": "acme/archive", "factory.publicRepo": REPO },
+    )
+    const write = async (names: boolean) => {
+      const file = join(scratch, `notes-${names}.md`)
+      await Bun.write(file, named(names))
+      return check(
+        JSON.stringify({
+          cwd: scratch,
+          hook_event_name: "PreToolUse",
+          tool_input: { command: `gh release create v2 --repo ${REPO} --notes-file ${file}` },
+          tool_name: "Bash",
+        }),
+        { CLAUDE_CONFIG_DIR: scratch, PLAYGROUND_DATA_DIR: data },
+      )
+    }
+    expect(await write(false)).toBeUndefined()
+    expect(await write(true)).toContain("no-public-leak")
   })
 })

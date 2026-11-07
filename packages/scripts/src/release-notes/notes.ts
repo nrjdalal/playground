@@ -65,6 +65,7 @@ export function renderNotes({
 }: {
   commits: NoteCommit[]
   from: string
+  names?: boolean
   repo: string
   to: string
 }): string {
