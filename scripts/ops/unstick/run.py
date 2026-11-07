@@ -12,7 +12,7 @@ it"): a limit dialog with no room goes to the builder and the dispatcher, a prob
 block to the session's manager (alert_to), each through the outbox at first sight and every 10 minutes while it waits, naming the session, the dialog and how long it has waited, unless the session's own session-state hook
 recorded it as stuck or failed (hook_owned), since that hook has told the manager already and ops-session-resume escalates it. During an account move (move.json in its state folder names the
 dispatcher running it and an `until`), the per-session limit alerts wait and that dispatcher gets one summary line every 10 minutes.
-A stall alarm tells the builder (AUT-7; it was dispatcher) when the
+A stall alarm tells the builder (it was dispatcher) when the
 merge queue holds open PRs and no session has taken a turn in 10 minutes. state.json in its state folder (ops/unstick) lists what is blocked now. No model call; one instance (flock).
 `--once` runs one pass in the foreground and prints it.
 """
@@ -23,7 +23,7 @@ CODE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LW = os.path.abspath(os.environ.get("PLAYGROUND_DATA_DIR") or os.path.expanduser("~/.playground"))
 OPS = os.path.join(LW, "ops")
 HERE = os.path.join(OPS, "unstick")
-# read budget (dispatcher, 13 Oct, after the terminal app reached 155% CPU with ~50 sessions): a pass every 120s (ND-644, planner), under the Dashboard's 3-minute
+# read budget (dispatcher, 13 Oct, after the terminal app reached 155% CPU with ~50 sessions): a pass every 120s (planner), under the Dashboard's 3-minute
 # freshness for state.json, reading only the screens of sessions whose transcript has been quiet over QUIET_READ; one still writing is at work
 CYCLE = 120
 QUIET_READ = 60
@@ -420,7 +420,7 @@ def stall(live, state):
     if time.time() - last >= REALERT:
         state["stall"] = time.time()
         msg = f"stall: no factory session has taken a turn in {ago(newest)} while the merge queue holds open PRs ({', '.join('#' + p for p in open_prs[:8])})"
-        notify(msg, to="builder")  # AUT-7: the merge-queue idle alarm is the builder's to clear, not dispatcher's
+        notify(msg, to="builder")  # the merge-queue idle alarm is the builder's to clear, not dispatcher's
         log(msg)
     return f"stall {ago(newest)}"
 
