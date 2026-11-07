@@ -8,7 +8,6 @@ import {
   patterns,
   reposOf,
 } from "../../packages/scripts/src/trace-count/kinds"
-import { factorySettings } from "../../packages/settings/src/factory"
 import { readPolicy } from "../../packages/settings/src/rendered"
 import { guardList } from "./lists"
 import { factoryTerms, type Hit, REPHRASE } from "./no-playground-leak"
@@ -86,7 +85,7 @@ export async function publicDraftHit(
     if (said) return { hit: said }
   }
   if (ITEM_KEY.test(text)) return { hit: TICKET_HIT }
-  const named = [factorySettings.get(read.settings, "factory.repo"), ...repos.public, repos.archive]
+  const named = [...repos.public, repos.archive]
     .filter((repo) => repo !== "")
     .map((repo) => new RegExp(`(?<![\\w.-])${escape(repo)}(?![\\w-])`, "i"))
   if (named.some((re) => re.test(text)) || REPO_LINK.test(text)) return { hit: REPO_HIT }

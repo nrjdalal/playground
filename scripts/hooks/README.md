@@ -593,7 +593,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   The finder refuses on the first hit, in this order: a work figure, a factory term, a kind no-public-leak refuses, a ticket or PR number, a repository.
   A work figure is a count beside PR, pull request, commit or session, one word between them at most (`FIGURE`: digits, a dozen, a hundred, a thousand or a number word from two up, so "one commit reverts it" stays).
   A factory term comes through no-playground-leak's `factoryTerms` (its list, the roster, the skills), and a kind no-public-leak refuses through trace-count's `patterns` and that guard's `SAID`.
-  A ticket or PR number is trace-count's issue ref or a `PG-<n>` key, which no-public-leak lets through, since the public repository speaks of its own issues; a repository is `factory.repo`, `factory.publicRepo` or `factory.archiveRepo` by name, or any `github.com/<owner>/<repo>` link.
+  A ticket or PR number is trace-count's issue ref or a `PG-<n>` key, which no-public-leak lets through, since the public repository speaks of its own issues; a repository is `factory.publicRepo` or `factory.archiveRepo` by name, the keys no-extensions-write already gates, or any `github.com/<owner>/<repo>` link.
   Exit 2 prints the refusal, the kind of text and its fix and never the text, which the CLI prints as its own and posts nothing; exit 0 posts; a list that cannot be read refuses as the guards do ([Guard lists](#guard-lists)), and any other exit, or an exit 2 that prints nothing, refuses too, naming it.
   Its tests are `bun run test:file tests/scripts/hooks/public-draft.test.ts tests/api/hono/src/lib/dashboard/public-draft.test.ts`, and the CLI's own case is in `tests/api/hono/src/bin/dashboard-ask.test.ts`.
 
