@@ -96,7 +96,7 @@ Done when the PR reads `MERGED` and `MERGE` holds its merge commit. A refusal fo
 
 The tag is the last tag's patch plus one (`v0.0.98` is followed by `v0.0.99`); the root `package.json` version is not moved and does not decide it.
 
-The notes take ZeroStarter's shape: the compare link, one emoji section per commit type, then each contributor as `- <name> @<login>`, the name read from the commit's author, and `@<login>` alone when the commit has none. `bun run release:notes <last tag> vX.Y.Z` renders them from GitHub's compare of the two tags (`packages/scripts/src/release-notes/`) and prints them. Write them to a file outside the checkout, and name it by its literal absolute path in `--notes-file`, since the leak guards read a notes file only through a literal path:
+The notes take ZeroStarter's shape: the compare link, one emoji section per commit type, then each contributor as `- @<login>`, the login alone, since the public repo's leak guard refuses a person's name; `renderNotes`' `names` switch, off by default, renders ZeroStarter's `- <name> @<login>` instead. `bun run release:notes <last tag> vX.Y.Z` renders them from GitHub's compare of the two tags (`packages/scripts/src/release-notes/`) and prints them. Write them to a file outside the checkout, and name it by its literal absolute path in `--notes-file`, since the leak guards read a notes file only through a literal path. Run each line below as a Bash call of its own, since the guards read the notes file before a call runs:
 
 ```bash
 gh api -X POST repos/{owner}/{repo}/git/refs -f ref=refs/tags/vX.Y.Z -f sha="$MERGE"
@@ -104,7 +104,7 @@ bun run release:notes vX.Y.W vX.Y.Z > /tmp/notes-vX.Y.Z.md   # vX.Y.W is the las
 gh release create vX.Y.Z --verify-tag --latest --notes-file /tmp/notes-vX.Y.Z.md
 ```
 
-When a guard refuses the notes for a contributor's name, as no-public-leak refuses a person's name on a public repo, cut that line to `- @<login>`; when it refuses the login, delete the line, or the whole Contributors section when none passes; then create the release again.
+When a guard refuses the notes, edit the file in a call of its own, then create the release again in the next: an edit and the create in one call are refused again, since the guard read the file before the edit. Cut a refused contributor line to `- @<login>` and keep the section; delete a line only when the guard refuses its login itself.
 Done when `gh release list -L 1` shows `vX.Y.Z` marked Latest, and its page opens with the compare link.
 
 ## 5. Pull the main checkout
