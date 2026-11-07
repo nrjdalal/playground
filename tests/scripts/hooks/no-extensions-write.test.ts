@@ -984,6 +984,22 @@ describe("a quoted argument is read as a command line only where a program runs 
   })
 
   test.each([
+    ["node -e opening with a regex that tests a string", `node -e '/^a/.test("ab")'`],
+    ["node -pe opening with a regex that tests a string", `node -pe '/^a/.test("ab")'`],
+    ["bun -e opening with a regex that tests a string", `bun -e '/x/.test("x")'`],
+  ])(
+    "%s runs from the home, the data folder and a worktree, as canary reads it",
+    async (_, command) => {
+      for (const cwd of [
+        homedir(),
+        join(homedir(), ".playground"),
+        join(homedir(), "x", ".claude", "worktrees", "y"),
+      ])
+        expect(await at(command, cwd)).toBeUndefined()
+    },
+  )
+
+  test.each([
     ["rm of mktemp's folder", 'T=$(mktemp -d); rm -rf "$T"'],
     ["rm of mktemp's quiet folder", 'T="$(mktemp -dq)"; rm -rf "$T"'],
     ["rm of mktemp's file", 'F=$(mktemp); rm -f "$F"'],
