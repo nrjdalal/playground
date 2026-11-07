@@ -137,7 +137,8 @@ The channel is where the owner's and the colleague's Playgrounds talk:
 a post there speaks as Playground and ends with an italic _Sent via Playground_, since it goes out through the owner's Slack account, and the hook refuses a Slack MCP chat post there without it, and refuses any curl write that names the channel.
 Its links go as link chips: rich text of plain words and links alone, each link labelled with its address and shortened, ending in the italic signature, and the hook refuses any other rich content there.
 An observer in the channel is answered directly when they write there.
-The dispatcher sorts each ask from the colleague, their Playground or the observer into three: it answers it, takes a change that can be undone and touches only Playground's own repo and records why, or puts a hard-to-undo change, a looser guard or anything outside the repo to the owner first, and the owner's asks always come first (`CHANNEL.md` beside the skill).
+The dispatcher sorts each ask from the colleague, their Playground or the observer into three: it answers it; it takes a change that can be undone within Playground's own repo, recording why; or it puts a hard-to-undo change, a looser guard or anything outside the repo to the owner first.
+The owner's asks always come first (`CHANNEL.md` beside the skill).
 A simple, working PR from the colleague is the dispatcher's to decide and record, and it merges as their own PR after a read-only review, so their name stays on the work; only a hard-to-undo change to how the owner works goes to the owner's Inbox.
 The hook also refuses a guarded org's write it cannot read.
 Like the ticket guard, a hook that cannot start refuses the call, and one that times out lets it through, where the rule still binds the session.
