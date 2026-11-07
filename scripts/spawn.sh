@@ -63,7 +63,7 @@ set -euo pipefail
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
 #   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
-#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PR the checker serves, by its URL or its number alone, or its issue's URL while the PR is not yet opened; on an ended roster row it replaces the row's prs and a checker's start there is refused without it, and on a live row it joins them
+#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PR the checker serves, by its URL or its number alone, or its issue's URL while the PR is not yet opened; on an ended roster row it replaces the row's prs, and its pr with the first pull request named (none for an issue alone), and a checker's start there is refused without it; on a live row, or none, it joins them and gives a row with no pr the first pull request named
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
 #   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
@@ -1684,20 +1684,21 @@ fi
 set -- set "$NAME" "kind=$KIND"
 # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
 [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
-# A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check reads, with the first pull request named (none when it names only an issue); on a live row it joins prs, as assign does.
+# A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named (none when it names only an issue); on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
 if [ -n "$PR_ARG" ]; then
+  first_pull=
+  IFS=, read -ra prs_named <<<"$PR_ARG"
+  for one in "${prs_named[@]}"; do
+    if [[ $one =~ ^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*)$ ]]; then
+      first_pull=$one
+      break
+    fi
+  done
   if [ "$(roster_field "$NAME" status)" = ended ]; then
-    first_pull=
-    IFS=, read -ra prs_named <<<"$PR_ARG"
-    for one in "${prs_named[@]}"; do
-      if [[ $one =~ ^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*)$ ]]; then
-        first_pull=$one
-        break
-      fi
-    done
     set -- "$@" "prs=$PR_ARG" "pr=$first_pull"
   else
     set -- "$@" "prs+=$PR_ARG"
+    [ -n "$(roster_field "$NAME" pr)" ] || [ -z "$first_pull" ] || set -- "$@" "pr=$first_pull"
   fi
 fi
 # A second dispatcher started under an <id>-dispatcher name records its slot, which roster.ts who dispatcher 2 reads; a dispatcher's name with -2 holds slot 2 by its name.

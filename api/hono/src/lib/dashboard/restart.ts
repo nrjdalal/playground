@@ -4,7 +4,7 @@ import { join } from "node:path"
 import { checkoutRoot, readsLive } from "@/lib/dashboard/fixture"
 import { unstickPath } from "@/lib/dashboard/unstick"
 
-// A session whose Claude login expired, restarted from the app: spawn.sh closes the pane it opened, then resumes the same conversation on the account the owner just added, or with none on this Mac's own login, so no step needs a terminal. A fixture stack runs nothing: it clears the session's login block, as a fresh start would.
+// A session whose Claude login expired, restarted from the app: spawn.sh closes the pane it opened, then resumes the same conversation on the account the owner just added, or with none on this Mac's own login, a reviewer or tester with --pr naming its PRs since the close ends its row, so no step needs a terminal. A fixture stack runs nothing: it clears the session's login block, as a fresh start would.
 
 export type Run = (argv: string[]) => Promise<{ code: number; stderr: string; stdout: string }>
 

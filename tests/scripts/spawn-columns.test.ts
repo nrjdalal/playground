@@ -283,20 +283,42 @@ describe("under the gates it spawns", () => {
     },
   )
 
-  test("a checker's start on a live row naming a PR adds it to prs, as assign does", async () => {
-    const r = await checkerStart("column", { prs: [PR_A], status: "working" }, ["--pr", PR_B])
+  test.each([
+    ["column", null, [`prs+=${PR_B}`, `pr=${PR_B}`]],
+    ["column", { prs: [PR_A], status: "working" }, [`prs+=${PR_B}`, `pr=${PR_B}`]],
+    ["resume", { prs: [PR_A], status: "working" }, [`prs+=${PR_B}`, `pr=${PR_B}`]],
+    ["column", { pr: PR_A, prs: [PR_A], status: "working" }, [`prs+=${PR_B}`]],
+    ["resume", { pr: PR_A, prs: [PR_A], status: "working" }, [`prs+=${PR_B}`]],
+  ] as [string, object | null, string[]][])(
+    "a checker's %s on a live row, or none, naming PR B adds it to prs, as assign does, and gives a row with no pr PR B as its pr: %p (#1135)",
+    async (mode, row, sets) => {
+      const r = await checkerStart(mode, row, ["--pr", PR_B])
+      expect(r.code).toBe(0)
+      expect(statusAndPrs(r)).toEqual(sets)
+    },
+  )
+
+  test("a checker's column on no row naming only an issue adds it to prs with no pr, since no pull request is named yet (#1135)", async () => {
+    const issue = "https://github.com/acme/factory/issues/5"
+    const r = await checkerStart("column", null, ["--pr", issue])
     expect(r.code).toBe(0)
-    expect(statusAndPrs(r)).toEqual([`prs+=${PR_B}`])
+    expect(statusAndPrs(r)).toEqual([`prs+=${issue}`])
   })
 
-  test("--pr takes the PRs a restart passes, a comma list, whole", async () => {
-    const r = await checkerStart("resume", { prs: [PR_A, PR_B], status: "ended" }, [
-      "--pr",
-      `${PR_A},${PR_B}`,
-    ])
-    expect(r.code).toBe(0)
-    expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${PR_A},${PR_B}`, `pr=${PR_A}`])
-  })
+  test.each([
+    [`${PR_A},${PR_B}`, PR_A],
+    [`${PR_B},${PR_A}`, PR_B],
+  ])(
+    "--pr takes the PRs a restart passes, a comma list, whole, its first pull request as pr: %s (#1135)",
+    async (named, first) => {
+      const r = await checkerStart("resume", { pr: PR_B, prs: [PR_A, PR_B], status: "ended" }, [
+        "--pr",
+        named,
+      ])
+      expect(r.code).toBe(0)
+      expect(statusAndPrs(r)).toEqual(["status=starting", `prs=${named}`, `pr=${first}`])
+    },
+  )
 
   test.each([
     ["a PR's form", ["resume", "reviewer-brave-otter", root, "--pr", "pull/2"], "--pr takes"],
