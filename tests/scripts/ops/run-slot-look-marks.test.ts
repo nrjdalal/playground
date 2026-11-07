@@ -22,16 +22,18 @@ describe("a look's marks are taken before its reads", () => {
     const m = machine({ idle: 30 })
     m.hold("run-slot", 1, "small")
     m.ticket(1, "worker-made", "s2 21 1 small")
-    const waiter = m.start("worker-r", { RUN_SLOT_SIZE: "small" })
-    expect(await waiter.saw(WAITING)).toBe(true)
-    // the look's first python3 is the queue's order (ready_line), after its read of the holders: it holds there until the test says go
+    // the look's first python3 is the queue's order (ready_line), after its read of the holders: once armed it holds there until the test says go; it is on PATH before the waiter starts, since bash keeps the path of a command it has run
+    const armed = join(m.root, "python3.armed")
     const started = join(m.root, "python3.started")
     const gate = join(m.root, "python3.gate")
     writeFileSync(
       join(m.bin, "python3"),
-      `#!/bin/bash\ntouch ${started}\nuntil [ -e ${gate} ]; do sleep 0.05; done\nexec ${Bun.which("python3")} "$@"\n`,
+      `#!/bin/bash\nif [ -e ${armed} ]; then touch ${started}; until [ -e ${gate} ]; do sleep 0.05; done; fi\nexec ${Bun.which("python3")} "$@"\n`,
     )
     chmodSync(join(m.bin, "python3"), 0o755)
+    const waiter = m.start("worker-r", { RUN_SLOT_SIZE: "small" })
+    expect(await waiter.saw(WAITING)).toBe(true)
+    writeFileSync(armed, "")
     // the run's end as free() writes it, its holder line first; its ticket went at its take, so this waiter comes to the head
     rmSync(join(m.ops, "run-slot.holder"))
     rmSync(join(m.ops, "run-slot.waiters", `1-${process.pid}-worker-made`))
