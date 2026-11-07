@@ -84,4 +84,14 @@ describe("DISPATCH.md", () => {
     expect(line).toContain("the command run and its output")
     expect(line).toContain("once nearly let a web build run beside the live dashboard's Postgres")
   })
+
+  test("the pre-build signal is an update, a decision only when the ask removes or reverses the owner's own rule (PG-1350)", async () => {
+    const text = await Bun.file(DISPATCH).text()
+    const line =
+      text.split("\n").find((l) => l.includes("Before a lane builds one of the owner's asks")) ?? ""
+    expect(line).toContain("it posts one Inbox update with two lines")
+    expect(text).toContain(
+      "it posts a decision in place of the update only when the ask removes or reverses the owner's own rule",
+    )
+  })
 })
