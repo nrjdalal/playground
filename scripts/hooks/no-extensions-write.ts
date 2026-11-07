@@ -82,6 +82,8 @@ const READERS = new Set([
 ])
 // find's actions that write, remove or run
 const FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/
+// find's actions that write the file named by the next word, a dash-led one too
+const FIND_WRITES = /^-(?:fls|fprint|fprint0|fprintf)$/
 const GIT_READS = new Set([
   "blame",
   "cat-file",
@@ -114,8 +116,8 @@ const RSYNC_FLAGS = new Set(["backup", "partial"])
 const RSYNC_TEMP = /^-[^-@BefMT]*T/
 // Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
 const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
-// Homebrew's GNU coreutils under their g prefix (gcp, grm), each read as the remover or writer it names
-const GNU_NAMED = /^g(cp|dd|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink)$/
+// Homebrew's GNU coreutils and findutils under their g prefix (gcp, grm, gfind): a coreutils name reads as the remover or writer it names, and gfind and gxargs are examined again as find and xargs, so the tool lookup never yields either
+const GNU_NAMED = /^g(cp|dd|find|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink|xargs)$/
 // A writer's options that take a value rather than name a target, by short letter (`gnu` for a GNU build alone, `bsd` for macOS's alone) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner, strip program, and macOS's destdir, hash, link flags, metalog and tags, mkdir's mode, mv's suffix, touch's adjustment, date, reference file and stamp; cp's, install's, ln's and mv's -t names their target folder, and macOS install's -M its metalog, read apart
 const WRITER_TAKES: Record<
   string,
@@ -843,6 +845,23 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, first, name, xargs } = parsed
+    // findutils' g names are read again as find and xargs, so every check those two take reads them; the words swap in place, keeping the Command steadyAt knows and the program's path
+    const findutils = GNU_NAMED.exec(name)?.[1]
+    if (first && (findutils === "find" || findutils === "xargs")) {
+      const value = first.value.replace(new RegExp(`g${findutils}$`, "i"), findutils)
+      // a g name env -S splits out of its string is no word of the command, and one written so its name is not the word's end (a trailing slash) has none to swap, so either would be examined as itself again
+      if (!cmd.words.includes(first) || value === first.value)
+        return refuse(
+          `${name} written where the hook cannot read it as ${findutils}, inside env -S's string or with more after its name; run it as a word of its own, ${name} or ${findutils}`,
+        )
+      const { words } = cmd
+      cmd.words = words.map((word) => (word === first ? { ...word, value } : word))
+      try {
+        return await examine(cmd, env, visit, false)
+      } finally {
+        cmd.words = words
+      }
+    }
     // every folder the shell may be in, so a write a cd the reader cannot be sure of would land in the root is judged there too
     for (const here of places(env)) {
       const into = cmd.redirects.find(
@@ -1028,7 +1047,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         : tool === "unlink" && !gnu
           ? Number(args[0]?.value === "--")
           : args.findIndex((word) => !option(word))
-    // mv's -t folder and rsync's path values are written to, though their word opens with a dash
+    // mv's -t folder, rsync's path values and the file find's write actions name are written to, though their word opens with a dash
     const values =
       tool === "mv"
         ? writeTargets(tool, args, gnu, posix, env.splits)
@@ -1045,7 +1064,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
               if (cut < word.value.length) return [after(word, cut)]
               return args[k + 1] ? [args[k + 1]] : []
             })
-          : []
+          : tool === "find"
+            ? args.flatMap((word, k) =>
+                FIND_WRITES.test(word.value) && args[k + 1] ? [args[k + 1]] : [],
+              )
+            : []
     const operands = remover
       ? [
           ...args.filter(
