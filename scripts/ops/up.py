@@ -2,8 +2,8 @@
 """ops-up: start every ops job in jobs.json that is not healthy, and leave healthy ones alone.
 
 A job ops starts in a terminal (one whose `runtime` names one, or that names none and has a command and no launchd label) runs as a pane of the Ops
-workspace on the factory herdr server (the binary pin.json names, as spawn.sh reaches it). An old `runtime` of cmux or auto reads
-as herdr.
+workspace on the factory herdr server (the binary pin.json names, as spawn.sh reaches it). A `runtime`, whatever word an older
+install stored, reads as herdr, the one runtime.
 
   up.py                      check every job once; start each unhealthy terminal job as a pane of herdr's Ops workspace
   up.py --restarted <a,b>    a plain pass, once any running pass ends, with those jobs' starts dropped first, so GRACE holds
@@ -91,10 +91,8 @@ def healthy(job):
 
 
 def is_herdr(job):
-    """Whether ops starts the job in a terminal, which is herdr: its runtime names one, an old row's cmux or auto included, or it names none and has a command and no launchd label (a hand-kept jobs.json row the render never parsed)."""
-    if "runtime" not in job:
-        return bool(job.get("command")) and not job.get("launchd")
-    return job["runtime"] in ("auto", "cmux", "herdr")
+    """Whether ops starts the job in a terminal, which is herdr: its runtime names one, whatever word an older install stored, or it names none and has a command and no launchd label (a hand-kept jobs.json row the render never parsed)."""
+    return job.get("runtime") is not None or (bool(job.get("command")) and not job.get("launchd"))
 
 
 def is_dashboard(job):

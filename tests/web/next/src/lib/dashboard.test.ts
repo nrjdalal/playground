@@ -68,8 +68,8 @@ describe("liveState", () => {
     expect(liveState(false, [])).toBe("Reconnecting")
   })
 
-  test("lost while the open socket's last frame is cmux's error; a closed socket is reconnecting whatever it last said", () => {
-    const problem = { code: "CMUX_FAILED", message: "cmux refused the API's socket" }
+  test("lost while the open socket's last frame is the sessions read's error; a closed socket is reconnecting whatever it last said", () => {
+    const problem = { code: "SESSIONS_FAILED", message: "cmux refused the API's socket" }
     expect(liveState(true, [], problem)).toBe("Lost")
     expect(liveState(true, null, problem)).toBe("Lost")
     expect(liveState(false, [], problem)).toBe("Reconnecting")
@@ -1256,7 +1256,7 @@ describe("history", () => {
 })
 
 describe("afterFrame", () => {
-  const failure = { code: "CMUX_FAILED", message: "cmux sessions failed: no answer from cmux" }
+  const failure = { code: "SESSIONS_FAILED", message: "cmux sessions failed: no answer from cmux" }
   const clear = { misses: 0, problem: null }
 
   test("one failed read raises nothing", () => {

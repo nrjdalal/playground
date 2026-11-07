@@ -187,7 +187,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
   GitHub's own close on the `Closes #<n>` merge needs no comment, since the PR's review has already checked each item.
 - ALWAYS: Keep app copy generic, so anyone can run the app: the app speaks to the signed-in owner as you and names no person, and an org-specific value (a GitHub org, a Linear team, a Slack channel, the dispatcher's name, a path) comes from config with a sensible default.
   The skills stay the owner's own.
-- A new worktree can clone a sibling's `node_modules` in place of a full install, through run-slot ([scripts/README.md](./scripts/README.md#a-worktrees-node_modules)).
+- A new worktree takes a full `bun install` through run-slot, 2 to 4 s on the warm cache, and clones a sibling's `node_modules` only on a cold cache ([scripts/README.md](./scripts/README.md#a-worktrees-node_modules)).
   Remove worktrees one at a time, never in parallel, and keep one review worktree across a PR's rounds.
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry: set work aside with a commit, and take a before-shot from a separate worktree on `origin/canary`.
 - Commit before a red-first swap, so the file's edits sit in a commit, and restore it with `git checkout HEAD -- <file>`, which brings back that commit, where `git checkout -- <file>` brings back the index, which holds the swap once it is staged: on 1 Nov a worker's restore after a red-first swap took the file's uncommitted edits with it, and the work was redone.

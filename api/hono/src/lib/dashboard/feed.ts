@@ -45,16 +45,16 @@ export type FeedAnswering = {
   sessionId: string
 }
 
-// Why an answer did not go, or did and could not be confirmed: BUSY (that prompt is being answered already), CMUX_FAILED (the sessions or the session's pane could not be read), DISABLED (permission and plan answers are off), FORBIDDEN (this sign-in may not answer), INTERRUPTED (keys went into the session's pane, yet its prompt still shows or changed partway), INVALID (the answer does not fit the prompt), NOT_FOUND (the session is not live), NOT_PENDING (no such prompt waits on that session, or its pane no longer shows it, so nothing was typed), TERMINAL_ONLY (a permission or a plan, which its manager answers, not the Dashboard), UNCONFIRMED (the keys went, but the pane could not be read to see them land).
+// Why an answer did not go, or did and could not be confirmed: BUSY (that prompt is being answered already), DISABLED (permission and plan answers are off), FORBIDDEN (this sign-in may not answer), INTERRUPTED (keys went into the session's pane, yet its prompt still shows or changed partway), INVALID (the answer does not fit the prompt), NOT_FOUND (the session is not live), NOT_PENDING (no such prompt waits on that session, or its pane no longer shows it, so nothing was typed), SESSIONS_FAILED (the sessions or the session's pane could not be read), TERMINAL_ONLY (a permission or a plan, which its manager answers, not the Dashboard), UNCONFIRMED (the keys went, but the pane could not be read to see them land).
 export const FEED_FAILURES = [
   "BUSY",
-  "CMUX_FAILED",
   "DISABLED",
   "FORBIDDEN",
   "INTERRUPTED",
   "INVALID",
   "NOT_FOUND",
   "NOT_PENDING",
+  "SESSIONS_FAILED",
   "TERMINAL_ONLY",
   "UNCONFIRMED",
 ] as const
@@ -230,7 +230,7 @@ export async function answerFeed(
     try {
       live = await deps.listLive()
     } catch (error) {
-      return refused("CMUX_FAILED", `Could not read the sessions: ${messageOf(error)}`)
+      return refused("SESSIONS_FAILED", `Could not read the sessions: ${messageOf(error)}`)
     }
     const worker = live.workers.find((w) => w.sessionId === sessionId)
     if (!worker) return refused("NOT_FOUND", "That session is not live.")
@@ -291,7 +291,10 @@ async function answerHerdr(
   try {
     screen = await look()
   } catch (error) {
-    return refused("CMUX_FAILED", `herdr could not read ${worker.name}'s pane: ${messageOf(error)}`)
+    return refused(
+      "SESSIONS_FAILED",
+      `herdr could not read ${worker.name}'s pane: ${messageOf(error)}`,
+    )
   }
   const first = asks[0] ? answerKeys(screen, asks[0]) : null
   if (!first?.ok) {
