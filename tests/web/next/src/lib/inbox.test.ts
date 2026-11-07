@@ -2134,7 +2134,7 @@ describe("commentRefused", () => {
 
 // no-chat-question's Stop gate restates the list's rule as listedItem, since a hook loads no web code; both decide every item the same (PG-1486)
 describe("the Stop gate's listed rule", () => {
-  test.each(ITEMS.filter((c) => !c.archived))("$name: listed as the Inbox lists it", ({ item }) => {
+  test.each(ITEMS.filter((c) => !c.hidden))("$name: listed as the Inbox lists it", ({ item }) => {
     const full = {
       createdAt: AFTER,
       delivery: null,

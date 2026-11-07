@@ -251,7 +251,7 @@ export type AskedItem = {
   updatedAt?: string
 }
 
-// Pure: whether the Inbox lists the item, inboxView's listed rule in web/next/src/lib/inbox.ts restated, since the hook reads bun run ask's JSON and loads no web code (a test runs both over the same items); an archived item is out of the list, as the API keeps it out of the items it sends.
+// Pure: whether the Inbox lists the item, inboxView's listed rule in web/next/src/lib/inbox.ts restated, since the hook reads bun run ask's JSON and loads no web code (a test runs both over the same items); an archived item is out of the list, as the API keeps it out of the items it sends, while a card the owner put off with Later still counts, the one card the list hides that the hook counts, since it comes back on its own and a copy would notify the owner of what they put off.
 export function listedItem(item: AskedItem): boolean {
   const answer = item.answer ?? null
   const dismissedAt = answer?.dismissedAt ? answer.dismissedAt : null
@@ -292,7 +292,7 @@ export async function readStatus(
 }
 
 // Pure: what the gate reads an item as (readStatus), or null for one with no status.
-export function standingOf(item: AskedItem): string | null {
+function standingOf(item: AskedItem): string | null {
   if (typeof item.status !== "string") return null
   if (listedItem(item)) return item.status === "open" ? "open" : "listed"
   if (item.answer?.choice === "settled") return "settled"

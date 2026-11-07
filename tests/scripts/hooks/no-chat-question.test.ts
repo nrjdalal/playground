@@ -393,7 +393,7 @@ describe("what passes", () => {
       await stop("Should I merge PR 12 now? Progress is in #i42.", {
         statuses: { "#i42": "listed" },
       }),
-    ).toBe(`${REASON} (#i42 is listed, not open)`)
+    ).toBe(`${REASON} (#i42 is listed, not open or archived while open)`)
     expect(
       await stop(
         `Should I merge PR 12 now?\n1. Rotate the key.\n2. Restart the API.\n3. Check /api/health.\nProgress is in #i42.`,
@@ -401,7 +401,7 @@ describe("what passes", () => {
           statuses: { "#i42": "listed" },
         },
       ),
-    ).toBe(`${REASON} (#i42 is listed, not open)`)
+    ).toBe(`${REASON} (#i42 is listed, not open or archived while open)`)
   })
 
   // a table row answers its own cell's question, so its ? is no ask; a row's other words still are; on 7 Nov two such rows beside a progress card each brought a copy of the card (#1486)
@@ -410,7 +410,7 @@ describe("what passes", () => {
       false,
     )
     expect(asksDecision("Did it still answer then?")).toBe(true)
-    expect(asksDecision("| Step | Who |\n|---|---|\n| Merge now | your call |")).toBe(true)
+    expect(asksDecision("| Step | Who |\n|---|---|\n| Merge now? | your call |")).toBe(true)
   })
 
   test.each([

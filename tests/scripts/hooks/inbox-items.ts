@@ -1,9 +1,9 @@
 import type { AskedItem } from "../../../scripts/hooks/no-chat-question"
 
-// Inbox items as bun run ask get prints them, each with what readStatus reads it as; archived ones stay out of the Inbox's list before inboxView sees it.
+// Inbox items as bun run ask get prints them, each with what readStatus reads it as; a hidden one (archived, or put off with Later) stays out of the Inbox's list before inboxView sees it.
 export const AFTER = "2026-11-06T10:00:00.000Z"
 const BEFORE = "2026-11-01T10:00:00.000Z"
-export const ITEMS: { archived?: true; item: AskedItem; name: string; standing?: string }[] = [
+export const ITEMS: { hidden?: true; item: AskedItem; name: string; standing?: string }[] = [
   {
     item: { answer: null, kind: "update", readAt: null, status: "done", updatedAt: AFTER },
     name: "a posted update, unread",
@@ -53,7 +53,7 @@ export const ITEMS: { archived?: true; item: AskedItem; name: string; standing?:
     standing: "done",
   },
   {
-    archived: true,
+    hidden: true,
     item: {
       answer: { archivedAt: AFTER },
       kind: "update",
@@ -63,6 +63,18 @@ export const ITEMS: { archived?: true; item: AskedItem; name: string; standing?:
     },
     name: "an update the owner archived",
     standing: "archived",
+  },
+  {
+    hidden: true,
+    item: {
+      answer: { snoozedUntil: "2099-01-01T00:00:00.000Z" },
+      kind: "update",
+      readAt: null,
+      status: "done",
+      updatedAt: AFTER,
+    },
+    name: "an update the owner put off with Later",
+    standing: "listed",
   },
   {
     item: { answer: null, kind: "decision", readAt: null, status: "open", updatedAt: AFTER },
@@ -89,6 +101,16 @@ export const ITEMS: { archived?: true; item: AskedItem; name: string; standing?:
       updatedAt: AFTER,
     },
     name: "a reply its poster acked",
+  },
+  {
+    item: {
+      answer: { at: AFTER, choice: "replied", dismissedAt: AFTER },
+      kind: "decision",
+      readAt: AFTER,
+      status: "open",
+      updatedAt: AFTER,
+    },
+    name: "a decision the owner replied to and dismissed",
   },
   {
     item: {
@@ -136,7 +158,7 @@ export const ITEMS: { archived?: true; item: AskedItem; name: string; standing?:
     standing: "settled",
   },
   {
-    archived: true,
+    hidden: true,
     item: {
       answer: { archivedAt: AFTER },
       kind: "decision",
