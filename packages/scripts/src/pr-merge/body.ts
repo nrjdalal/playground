@@ -75,7 +75,18 @@ export function unnamedDocs(body: string, files: string[]): string[] {
   )
 }
 
-// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence naming each changed doc in files (AGENTS.md's Shipping a Playground PR, step 1).
+// Pure: whether a body's Evidence holds a line that opens with A/B:, as a bullet, in bold or as plain text, outside a code fence: the PR's measured comparison, A and B against the bar, or No runtime metric and the check that stands in.
+export function abLine(body: string): boolean {
+  let fenced = false
+  return evidenceOf(body)
+    .split(/\r?\n/)
+    .some((line) => {
+      if (/^\s*(?:```|~~~)/.test(line)) fenced = !fenced
+      return !fenced && /^\s*(?:[-*+]\s+)?(?:\*\*|__)?A\/B(?::(?:\*\*|__)?|(?:\*\*|__):)/.test(line)
+    })
+}
+
+// Pure: why the gate refuses a PR's body, or null when it takes it: the PR template, its TL;DR holding no Outcome label line, its Evidence naming each changed doc in files (AGENTS.md's Shipping a Playground PR, step 1) and holding an A/B line.
 export function bodyRefusal(body: string, files: string[] = []): string | null {
   const label = tldrLabel(body)
   if (label) {
@@ -83,6 +94,9 @@ export function bodyRefusal(body: string, files: string[] = []): string | null {
   }
   if (!templateBody(body)) {
     return "its body needs the PR template: a TL;DR of 2 sentences or more, the pr skill's Summary, Evidence and Merge Danger, then Links (extensions/core/skills/pr/SKILL.md)"
+  }
+  if (!abLine(body)) {
+    return "its body's Evidence holds no A/B line: open one with `A/B:` and give A and B against the bar (`A/B: <metric>, A canary <value>, B branch <value>, n=<N>`), or `A/B: No runtime metric` and the check that stands in"
   }
   const unnamed = unnamedDocs(body, files)
   if (unnamed.length === 0) return null
