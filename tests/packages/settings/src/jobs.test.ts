@@ -335,6 +335,13 @@ describe("an org's own job row (PG-1335)", () => {
     )
   })
 
+  test("a row an older install stored keeps its job: a key the schema does not name is dropped, and any runtime reads as herdr (PG-1439)", () => {
+    const org = one({ ...watch, madeUp: true, runtime: "made-up" })
+    expect(org.refused).toEqual([])
+    expect(org.jobs["ops-watch"]).toMatchObject({ enabled: true, org: "acme", runtime: "herdr" })
+    expect(org.jobs["ops-watch"]).not.toHaveProperty("madeUp")
+  })
+
   test("a login-scope row for a job the registry lacks stays refused", () => {
     const org = one(watch, "tester")
     expect(org.jobs).toEqual({})

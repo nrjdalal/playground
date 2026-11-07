@@ -44,13 +44,13 @@ const readValues = (data: string, scope: string): Record<string, unknown> => {
   }
 }
 
-// Every value set at a scope, core's (in the checkout, where scopeDir finds it) first, each as its key reads a stored value (storedValue), so a write that sends a row back with its change, as Settings > Jobs' toggle and the Inbox's Approve do, sends it as the read takes it; a key no piece defines stays a row, so a write of another key keeps it.
+// Every value set at a scope, core's (in the checkout, where scopeDir finds it) first, each as the read takes it (storedValue, and fromStored for an org's own job row, which no field defines), so a write that sends a row back with its change, as Settings > Jobs' toggle and the Inbox's Approve do, sends it as the read takes it; a key no piece defines stays a row, so a write of another key keeps it.
 export const settingRows = (data: string): Row[] =>
   [CORE, ...scopesIn(data).filter((scope) => scope !== CORE)].flatMap((scope) =>
     Object.entries(readValues(data, scope)).map(([key, value]) => ({
       key,
       scope,
-      value: storedValue(key, value),
+      value: orgJobKey(key) ? fromStored(value) : storedValue(key, value),
     })),
   )
 

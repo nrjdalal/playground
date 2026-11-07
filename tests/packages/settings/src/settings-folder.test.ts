@@ -356,6 +356,25 @@ describe("an org's own job row (PG-1363)", () => {
     },
   )
 
+  test("a row an older install stored is handed out as the render takes it, so a second org's row for its job is still refused (PG-1439)", () => {
+    const data = shipped()
+    const stored = { ...row, madeUp: true, runtime: "made-up" }
+    writeFiles(data, "acme", new Map([["settings.json", JSON.stringify({ [key]: stored })]]), {
+      author: "owner",
+      reason: "a row an older install stored",
+    })
+    writeFiles(data, "aaa", new Map([["scripts/ops-watch/cli.ts", "console.log(2)"]]), {
+      author: "owner",
+      reason: "ship the script",
+    })
+    const held = listSettings(data).rows.find((each) => each.key === key && each.scope === "acme")
+    expect(held!.value).toEqual({ ...row, runtime: "herdr" })
+    const result = set(data, key, "aaa", row, who("run aaa's watch"))
+    expect(result).toMatchObject({ ok: false })
+    expect("message" in result && result.message).toContain("acme already adds ops-watch")
+    expect(file(data, "acme/settings.json")[key]).toEqual(stored)
+  })
+
   test("a second org's row for a job another org adds is refused with the render's reason, so an org earlier in A to Z order cannot take it over", () => {
     const data = shipped()
     writeFiles(data, "aaa", new Map([["scripts/ops-watch/cli.ts", "console.log(2)"]]), {
