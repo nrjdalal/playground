@@ -121,7 +121,7 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     expect(missingGuards(m.main, GUARDS)).toEqual([])
     expect(await git(m.main, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main\n")
     expect(m.sent[0]!.text).toContain("had no .git and was restored in place")
-    expect(m.sent[0]!.text).toContain("git worktree repair")
+    expect(m.sent[0]!.text).toContain("has lost its link to it")
   })
 
   test("with its .git gone and no URL kept, it stops at reading origin's URL and says where it looked", async () => {

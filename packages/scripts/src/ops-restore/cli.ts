@@ -102,7 +102,7 @@ export const restoreBeat =
     }
     const git = (...args: string[]) => ctx.run(["git", "-C", main, ...args], 300_000)
     let held =
-      "had no .git and was restored in place; every worktree of it, the Dashboard's included, needs `git worktree repair` from that worktree"
+      "had no .git and was restored in place; every worktree of the lost .git, the Dashboard's included, has lost its link to it, which a fresh .git cannot repair, so Ops reattaches each"
     if (existsSync(join(main, ".git"))) {
       // what the checkout held before the checkout throws it away, kept whole in a file and named in the report, since the main checkout stays clean and anything but the loss is news
       const lines = (await git("status", "--porcelain")).out.split("\n").filter(Boolean)
