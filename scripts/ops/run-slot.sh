@@ -897,8 +897,9 @@ quick_rule() {
     # a bun test or bun run test:file naming 1 to 3 test files under tests/, nothing else, takes run-slot-quick, with --cwd=<p> anywhere or a bare --cwd after run or test, since bun misreads one before the subcommand (scripts/hooks/README.md's no-false-green; ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites; PG-2158)
     # bun run docs:wrap and format:check never run past seconds (run-slot.runs.log, 20 Oct: max 2s and 9s), so they take run-slot-quick too
     for a in "$@"; do case "$a" in docs:wrap|format:check) echo quick; return ;; esac; done
-    # bun install --ignore-scripts after a node_modules clone only links what the clone holds (retro 2, 31 Oct: 619 min queued in a day)
-    case " $* " in *" install --ignore-scripts "* | *" install "*" --ignore-scripts "*) echo quick; return ;; esac
+    # every bun install takes run-slot-quick, whatever its flags: on the shared warm cache a full one ran 1.9 to 3.3 s on 2.9 to 3.5 s of CPU, its two root scripts included, while it waited 3 to 6 min in the queue (PG-1344, measured; retro 2, 31 Oct: --ignore-scripts alone queued 619 min in a day); only a cold cache holds the slot longer (353 s, measured), once, since every later install reads the cache it filled
+    # install is bun's subcommand when only env, VAR=x, --cwd=<p> or another flag word stands before it: a bare --cwd before it makes bun run package.json's install script instead (no-false-green), as one before test does
+    for a in "$@"; do case "$a" in env|*=*|-*) continue ;; "$first") continue ;; install) echo quick; return ;; *) break ;; esac; done
     local n=0 t="" skip=""
     for a in "$@"; do
       [ -n "$skip" ] && { skip=""; continue; }
