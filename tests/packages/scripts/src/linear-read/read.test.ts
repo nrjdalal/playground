@@ -15,13 +15,13 @@ const ISSUE = {
         createdAt: "2026-10-20T09:00:00.000Z",
         id: "c1",
         parent: null,
-        url: "https://linear.app/example/issue/DUNE-1#comment-c1",
+        url: "https://linear.app/example/issue/MADEDUNE-1#comment-c1",
         user: merritt,
       },
     ],
   },
   description: "Made-up description.",
-  identifier: "DUNE-1",
+  identifier: "MADEDUNE-1",
   project: { id: "proj-1", name: "Listings" },
   state: { name: "Todo", type: "unstarted" },
   title: "Made-up ticket",
@@ -29,7 +29,9 @@ const ISSUE = {
 const PROJECT = {
   description: "Made-up project.",
   id: "proj-1",
-  issues: { nodes: [{ assignee: merritt, identifier: "DUNE-2", title: "Another made-up ticket" }] },
+  issues: {
+    nodes: [{ assignee: merritt, identifier: "MADEDUNE-2", title: "Another made-up ticket" }],
+  },
   lead: merritt,
   name: "Listings",
 }
@@ -48,7 +50,7 @@ beforeAll(() => {
         ? Object.fromEntries(
             Object.entries(variables).map(([name, id]) => [
               `t${name.slice(1)}`,
-              { identifier: id, state: { type: id === "DUNE-1" ? "started" : "completed" } },
+              { identifier: id, state: { type: id === "MADEDUNE-1" ? "started" : "completed" } },
             ]),
           )
         : query.includes("issue(")
@@ -58,7 +60,7 @@ beforeAll(() => {
             : query.includes("projects(")
               ? { projects: { nodes: [{ id: "proj-1", name: "Listings" }] } }
               : query.includes("searchIssues(")
-                ? { searchIssues: { nodes: [{ identifier: "DUNE-3", title: "Covering" }] } }
+                ? { searchIssues: { nodes: [{ identifier: "MADEDUNE-3", title: "Covering" }] } }
                 : query.includes("users(")
                   ? { users: { nodes: [{ ...merritt, active: true }] } }
                   : null
@@ -74,16 +76,16 @@ const gql = () =>
 
 describe("linear-read", () => {
   test("returns a ticket with its comments", async () => {
-    const { issue } = (await read(gql(), "issue", "DUNE-1")) as { issue: typeof ISSUE }
+    const { issue } = (await read(gql(), "issue", "MADEDUNE-1")) as { issue: typeof ISSUE }
     expect(issue.comments.nodes[0]?.user).toEqual(merritt)
     expect(issue.project?.id).toBe("proj-1")
-    expect(calls.at(-1)).toMatchObject({ auth: KEY, variables: { q: "DUNE-1" } })
+    expect(calls.at(-1)).toMatchObject({ auth: KEY, variables: { q: "MADEDUNE-1" } })
   })
 
   test("returns a project with its issues from the last 30 days", async () => {
     const { project } = (await read(gql(), "project", "proj-1")) as { project: typeof PROJECT }
     expect(project.lead).toEqual(merritt)
-    expect(project.issues.nodes.map((issue) => issue.identifier)).toEqual(["DUNE-2"])
+    expect(project.issues.nodes.map((issue) => issue.identifier)).toEqual(["MADEDUNE-2"])
     expect(calls.at(-1)?.query).toContain('"-P30D"')
   })
 
@@ -99,19 +101,19 @@ describe("linear-read", () => {
       projects: { nodes: [{ id: "proj-1", name: "Listings" }] },
     })
     expect(await read(gql(), "search", "parking import")).toEqual({
-      searchIssues: { nodes: [{ identifier: "DUNE-3", title: "Covering" }] },
+      searchIssues: { nodes: [{ identifier: "MADEDUNE-3", title: "Covering" }] },
     })
   })
 
   test("reads many tickets' state types in one query", async () => {
     const before = calls.length
-    expect(await read(gql(), "states", "DUNE-1,DUNE-2")).toEqual({
-      "DUNE-1": "started",
-      "DUNE-2": "completed",
+    expect(await read(gql(), "states", "MADEDUNE-1,MADEDUNE-2")).toEqual({
+      "MADEDUNE-1": "started",
+      "MADEDUNE-2": "completed",
     })
     expect(calls.length - before).toBe(1)
-    expect(calls.at(-1)?.variables).toEqual({ i0: "DUNE-1", i1: "DUNE-2" })
-    await expect(read(gql(), "states", "DUNE-1,} mutation {")).rejects.toThrow(
+    expect(calls.at(-1)?.variables).toEqual({ i0: "MADEDUNE-1", i1: "MADEDUNE-2" })
+    await expect(read(gql(), "states", "MADEDUNE-1,} mutation {")).rejects.toThrow(
       "states takes ticket IDs",
     )
   })

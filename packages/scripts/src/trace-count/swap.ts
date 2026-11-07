@@ -66,35 +66,8 @@ const LAST = [
   "Zellwood",
 ]
 
-// One made-up team per real team, A to Z and none the start of another, so the nth team in A to Z order keeps its place.
-const TEAMS = [
-  "ACME",
-  "BRAVO",
-  "CEDAR",
-  "DUNE",
-  "EMBER",
-  "FJORD",
-  "GLADE",
-  "HAVEN",
-  "IRIS",
-  "JUNO",
-  "KITE",
-  "LUMEN",
-  "MOSS",
-  "NORTH",
-  "OPAL",
-  "PIKE",
-  "QUILL",
-  "RIDGE",
-  "SAGE",
-  "TIDE",
-  "UMBER",
-  "VALE",
-  "WREN",
-  "XENO",
-  "YARROW",
-  "ZINC",
-]
+// One made-up team per real team, A to Z and none the start of another, so the nth team in A to Z order keeps its place; each holds MADE, so core-audit's leg 2 reads it as a placeholder, and keeps to 5 letters, the longest team a branch reader takes.
+const TEAMS = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ"].map((letter) => `MADE${letter}`)
 
 const nth = (roster: string[], i: number) =>
   `${roster[i % roster.length]}${i < roster.length ? "" : Math.floor(i / roster.length) + 1}`

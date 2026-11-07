@@ -15,7 +15,7 @@ const script = join(root, "scripts", "hooks", "no-public-leak.ts")
 const TERMS = {
   companies: ["Vantorix"],
   handles: ["quillco", "qmarsh"],
-  linearKeys: ["VX"],
+  linearKeys: ["MADEVX"],
   names: ["Quilla Marsh"],
   slackIds: ["C0MADE0401"],
 }
@@ -198,7 +198,7 @@ describe("a write to the public repository holding private text is refused", () 
     ["a handle", "thanks @qmarsh", "qmarsh"],
     ["a company term", "built for Vantorix", "Vantorix"],
     ["a Slack id", "settled in C0MADE0401", "C0MADE0401"],
-    ["a Linear key", "fixes VX-42", "VX-42"],
+    ["a Linear key", "fixes MADEVX-42", "MADEVX-42"],
     ["an email address", "mail quilla@example.com", "quilla@example.com"],
     ["an archive link", "see https://github.com/acme/archive/pull/9", "acme/archive"],
   ])("its reason names %s, never the text", async (kind, body, term) => {
@@ -295,7 +295,7 @@ describe("what it lets through", () => {
       await run(bash(`gh pr comment 1 ${UNSET_R} --body "mail quilla@example.com"`), stranger),
     ).toContain("an email address")
     expect(
-      await run(bash(`gh pr comment 1 ${UNSET_R} --body "closes VX-1"`), stranger),
+      await run(bash(`gh pr comment 1 ${UNSET_R} --body "closes MADEVX-1"`), stranger),
     ).toBeUndefined()
     expect(
       await run(bash(`gh pr comment 1 ${UNSET_R} --body "Quilla Marsh"`), stranger),
@@ -407,7 +407,7 @@ describe("as Claude Code runs it", () => {
     const proc = Bun.spawn(["bun", script], {
       env: { ...process.env, ...env(stored), PLAYGROUND_ROLE: "worker" },
       stderr: "pipe",
-      stdin: new Blob([bash(`gh pr comment 1 ${R} --body "closes VX-1"`)]),
+      stdin: new Blob([bash(`gh pr comment 1 ${R} --body "closes MADEVX-1"`)]),
     })
     expect(await proc.exited).toBe(2)
     expect(await new Response(proc.stderr).text()).toContain("no-public-leak hook refused")
