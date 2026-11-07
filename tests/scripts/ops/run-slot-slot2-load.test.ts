@@ -1,8 +1,15 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { readFileSync, writeFileSync } from "node:fs"
+import {
+  copyFileSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, WAITING, machine } from "./run-slot-fake"
+import { SCRIPT, WAITING, machine, stop } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
@@ -48,6 +55,38 @@ describe("slots 2 to 4 with single-slot mode off", () => {
     expect(slots(m)).toBe("1\n")
     m.ticket(Math.floor(Date.now() / 1000 - 301) * 1e9, "worker-old", "s2 22 2 medium")
     expect(slots(m)).toBe("4\n")
+  })
+
+  // review round 2: a reread's new ticket took a new name, so each change of run-slot.sh started the hold's 300 s again
+  test("and slots reads a ticket's first ask from its line, which a reread keeps, before its name", () => {
+    const m = loaded(18, 15, [])
+    const now = Math.floor(Date.now() / 1000)
+    m.ticket(now * 1e9, "worker-reread", `s2 22 2 medium - ${now - 301}`)
+    expect(slots(m)).toBe("4\n")
+  })
+
+  test("and a waiter that runs a new copy of run-slot.sh keeps its first ask in its new ticket", async () => {
+    const m = loaded(18, 15)
+    const copy = join(m.root, "run-slot.sh")
+    copyFileSync(SCRIPT, copy)
+    const run = m.start("worker-m", MEDIUM, copy)
+    expect(await run.saw(WAITING)).toBe(true)
+    const queue = join(m.ops, "run-slot.waiters")
+    const first = readdirSync(queue)
+    const asked = readFileSync(join(queue, first[0]), "utf8").split(" ")[5]
+    copyFileSync(SCRIPT, `${copy}.new`)
+    // copyFileSync keeps the source's mtime on macOS, so the copy takes the moment it lands, as a pull's write does
+    utimesSync(`${copy}.new`, new Date(), new Date())
+    renameSync(`${copy}.new`, copy)
+    expect(await run.saw(/running the new copy/g)).toBe(true)
+    let next = readdirSync(queue)
+    while (next.length === 0 || next[0] === first[0]) {
+      await Bun.sleep(50)
+      next = readdirSync(queue)
+    }
+    const line = readFileSync(join(queue, next[0]), "utf8")
+    await stop(run.p)
+    expect(line.trim().split(" ")[5]).toBe(asked.trim())
   })
 
   test("and a run takes run-slot-2 once load5 is under the cap", async () => {
