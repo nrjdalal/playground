@@ -1,8 +1,11 @@
-// PreToolUse hook: refuses a build, a test run, lefthook, turbo (but for the packages build a pull needs, run with env validation off), a git command that moves HEAD, the index or the files (but for the release skill's step 5 fast-forward and the keep reset off a stray local commit; a worker's hard reset there ran another branch's code under every hook for 3.5 minutes) or a file write (a Bash command's, or a Write, Edit, MultiEdit or NotebookEdit), run-slot.sh's command read as typed bare, in the main checkout, which every installed skill follows and so stays clean (a reviewer's `lefthook run pre-commit` from the Bash tool's default cwd rebuilt packages' dist and wrote .turbo/runs there).
-import { readFileSync, realpathSync } from "node:fs"
+// PreToolUse hook: refuses a build, a test run, lefthook, turbo (but for the packages build a pull needs, run with env validation off), a git command that moves HEAD, the index or the files (but for the release skill's step 5 fast-forward and the keep reset off a stray local commit; a worker's hard reset there ran another branch's code under every hook for 3.5 minutes) or a file write (a Bash command's, or a Write, Edit, MultiEdit or NotebookEdit), run-slot.sh's command read as typed bare, in the main checkout, which every installed skill follows and so stays clean (a reviewer's `lefthook run pre-commit` from the Bash tool's default cwd rebuilt packages' dist and wrote .turbo/runs there). It also refuses a git write in the live Dashboard's checkout to every factory session but its runner and the ops lead, since that checkout serves the owner's Dashboard.
+import { readdirSync, readFileSync, realpathSync } from "node:fs"
 import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from "node:path"
 
-import { fromFactory } from "./role"
+import { dataDirOf } from "../../packages/env/src/data-dir"
+import { liveSettings } from "../../packages/settings/src/live"
+import { readPolicySync } from "../../packages/settings/src/rendered"
+import { fromFactory, registryName, rosterKind, sessionOf, sessionRole } from "./role"
 import {
   codeFed,
   type Command,
@@ -36,6 +39,33 @@ export function mainCheckout(dir: string): string {
     // a directory, or no .git: the checkout is its own
   }
   return dir
+}
+
+// The live Dashboard's checkout: the worktree of the main checkout's repository on the branch live.branch names, read from its .git/worktrees, or undefined when none is on it.
+export function liveCheckout(
+  main: string,
+  environment: Record<string, string | undefined>,
+): string | undefined {
+  const settings = readPolicySync(dataDirOf(environment)).settings ?? {
+    schemaVersion: 1,
+    values: {},
+  }
+  const head = `ref: refs/heads/${liveSettings.get(settings, "live.branch")}`
+  const worktrees = join(main, ".git", "worktrees")
+  let names: string[]
+  try {
+    names = readdirSync(worktrees)
+  } catch {
+    return
+  }
+  for (const name of names) {
+    try {
+      if (readFileSync(join(worktrees, name, "HEAD"), "utf8").trim() !== head) continue
+      return dirname(readFileSync(join(worktrees, name, "gitdir"), "utf8").trim())
+    } catch {
+      // a worktree whose files went with it
+    }
+  }
 }
 
 // A path with its nearest existing folder's links followed, so a write through a link into the checkout (link-skills' ~/.claude/skills) is judged where it lands.
@@ -210,6 +240,29 @@ const APPLY_READS = new Set(["--check", "--numstat", "--stat", "--summary"])
 const STEP_FIVE = /^(?:-q |--quiet )?--ff-only (?:-q |--quiet )?origin\/main$/
 const GIT_FIX =
   "it moves the HEAD, index or files of the main checkout, which every installed skill, hook and ops job runs from. Name your own tree on every git call, git -C <your worktree> ..., after git -C <your worktree> rev-parse --show-toplevel names it; the main checkout moves only by the release skill's step 5, git -C <main checkout> fetch -q origin main && git -C <main checkout> merge --ff-only -q origin/main, a stray local commit on its main goes by git -C <main checkout> reset --keep origin/main while its tree is clean, and a worktree is made under .claude/worktrees/ by git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary."
+
+const LIVE_FIX =
+  "it moves the live Dashboard's checkout, which serves the owner's Dashboard, and only the runner that holds it and the ops lead change it. Ask Ops: its supervisor rolls the checkout onto each canary head, and a change it needs goes through a PR into canary."
+
+// A git call that writes the live Dashboard's checkout: a commit, or any move gitMoves reads, every merge and reset included, since step 5 and the keep reset are the main checkout's own.
+function liveWrite(args: Word[], env: Env): { cwd: string | undefined; what: string } | undefined {
+  const { cwd, rest, sub } = gitCall(args, env)
+  if (sub && (sub === "commit" || sub === "merge" || gitMoves(sub, rest)))
+    return { cwd, what: `git ${sub}` }
+}
+
+// Whether a session writes the live Dashboard's checkout by its role: the runner holding it, or the ops lead, whose name in Claude Code's registry has the roster's ops kind.
+async function liveWriter(
+  raw: string,
+  environment: Record<string, string | undefined>,
+): Promise<boolean> {
+  const session = sessionOf(raw)
+  const role = await sessionRole(environment, session)
+  if (role === "runner") return true
+  if (role !== "lead" || typeof session !== "string") return false
+  const name = await registryName(session, environment)
+  return name !== undefined && (await rosterKind(name, environment)) === "ops"
+}
 
 // The one reset the main checkout takes, back to origin/main from its own main with the tree clean and every commit it drops (origin/main..main) on no remote, so it removes only a stray local commit nobody else holds; --keep refuses to drop uncommitted work too.
 function keepReset(sub: string | undefined, rest: string[], cwd: string | undefined): boolean {
@@ -455,7 +508,7 @@ async function fedScript(
     return run(lex(script.value, here.known), { ...here, vars: new Map() }, visit, true)
 }
 
-function inspect(raw: string, environment: Record<string, string | undefined>, main: string) {
+async function inspect(raw: string, environment: Record<string, string | undefined>, main: string) {
   const { cwd, tool_input: toolInput, tool_name: tool } = JSON.parse(raw) as Record<string, unknown>
   const input = (toolInput ?? {}) as Record<string, unknown>
   const directory = typeof cwd === "string" ? cwd : undefined
@@ -469,11 +522,29 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
       !(path + sep).startsWith(worktrees)
     )
   }
+  // the live checkout is read only for a Bash call, so a file tool's write pays nothing for it
+  let live: string | undefined
+  const inLive = (raw: string | undefined) => {
+    const path = raw === undefined ? undefined : real(resolve(directory ?? "", raw))
+    return (
+      live !== undefined && path !== undefined && (path === live || path.startsWith(live + sep))
+    )
+  }
+  let writer: Promise<boolean> | undefined
+  const liveRefusal = async (
+    move: { cwd: string | undefined; what: string } | undefined,
+    fix: string,
+  ) =>
+    move && !(await (writer ??= liveWriter(raw, environment)))
+      ? refuse(`${move.what} in the live Dashboard's checkout`, fix)
+      : undefined
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined
   if (typeof file === "string") return inMain(file) ? refuse(`a write to ${file}`) : undefined
   if (tool !== "Bash") return
   const { command } = input
   if (typeof command !== "string") return
+  const found = liveCheckout(main, environment)
+  live = found === undefined ? undefined : real(found)
   const known = knownVariables(command, environment, directory)
   const lexed = lex(command, known)
   // the shell each pipeline feeds, by the command whose output it reads, since the walk judges that command in the folder the pipeline runs in and never visits a shell of its own
@@ -503,6 +574,11 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
         return path === undefined || inMain(path)
       })
       if (blindWrite) return refuse(`a write to ${blindWrite.value}`, ANYWHERE_FIX)
+      const blindMove = name === "git" ? liveWrite(args, blind) : undefined
+      if (blindMove && (blindMove.cwd === undefined || inLive(blindMove.cwd))) {
+        const verdict = await liveRefusal(blindMove, ANYWHERE_FIX)
+        if (verdict) return verdict
+      }
     }
     // every folder the shell may be in, so a cd the reader cannot be sure of is judged wherever it may have left the command, by the fail-closed rule above
     for (const here of places(env, directory)) {
@@ -523,6 +599,11 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
       if (script) return script
       const ran = runs(name, args, local, here)
       if (ran && inMain(ran.cwd)) return refuse(ran.what, fixFor(sure, ran.fix))
+      const move = name === "git" ? liveWrite(args, here) : undefined
+      if (move && inLive(move.cwd)) {
+        const verdict = await liveRefusal(move, fixFor(sure, LIVE_FIX))
+        if (verdict) return verdict
+      }
       const wrote = writeTargets(cmd, name, args).find((t) => inMain(pathOf(t, here)))
       if (wrote) return refuse(`a write to ${pathOf(wrote, here)}`, fixFor(sure))
     }

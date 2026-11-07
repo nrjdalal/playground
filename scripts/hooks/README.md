@@ -609,6 +609,12 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   It refuses a commit whose `git rev-parse --show-toplevel` is the factory's main checkout, the one `~/.playground/ops/run-slot.sh` links into (`scripts/link-skills.sh` makes that link), whatever wrapper, shell or cwd made it, since this hook reads a command's text and the step reads where the commit lands.
   A worktree and every other clone, a person's own included, commit as before.
   A ship's pull is a fast-forward and runs no pre-commit, and the step's test is in `tests/lefthook.test.ts`.
+- The same hook keeps the live Dashboard's checkout to the sessions that own it: a git write there (a commit, a merge, a reset and every other git move above, step 5's fast-forward and the keep reset included, since those two are the main checkout's own) is refused to every factory session but the runner that holds it, by `PLAYGROUND_ROLE` `runner`, and the ops lead,
+  a `lead` whose name in Claude Code's registry has the roster's `ops` kind, naming the route: ask Ops.
+  The live checkout is the worktree of the main checkout's repository on the branch `live.branch` names (`liveCheckout`, read from `.git/worktrees`), judged by the same folder reading as the main checkout: the cwd, `git -C`, `--git-dir`, `--work-tree`, run-slot and a shell's script.
+  Reads there (`status`, `log`, `diff`, `fetch`) run for every session, and so does every write outside it.
+  The ops-dashboard supervisor's roll and `playground update`'s pull are shell processes that no Claude Code hook sees, so they move the checkout as before.
+  Its tests are in `bun run test:file tests/scripts/hooks/no-main-checkout.test.ts`.
 
 ## no-manager-subagent
 
