@@ -6078,7 +6078,7 @@ var firefightingSettings = defineSettings({
   },
   "firefighting.start.consultFrom": {
     default: "",
-    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts nothing and tells the dispatcher "consult <id>" once per ticket, so the owner decides; empty never consults.',
+    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts no listed ticket and tells the dispatcher "consult <id>" once per ticket, so the owner decides, while a prepare-only worker still starts; empty never consults.',
     schema: union([literal(""), string2().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM in UTC")])
   },
   "firefighting.start.daysOff": {
@@ -6108,6 +6108,14 @@ var firefightingSettings = defineSettings({
     default: [],
     description: "The ticket keys the job starts for (MADE for MADE-1), each a tracker team's key; empty starts none.",
     schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "a ticket key, upper case"))
+  },
+  "firefighting.start.prepareBrief": {
+    default: "",
+    description: "The standing brief under the data folder that ops-firefighting-start fills for a prepare-only worker, one for a ticket the relay's prepare map holds before the digest lists it, its {TICKET} and {NAME} replaced as for firefighting.start.brief; empty starts none.",
+    schema: union([
+      literal(""),
+      string2().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder")
+    ])
   }
 });
 // packages/settings/src/gates.ts

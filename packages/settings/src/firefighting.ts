@@ -3,7 +3,7 @@ import { z } from "zod"
 // By relative path, as settings.ts imports, since tests outside the package import this file.
 import { defineSettings } from "./settings"
 
-// ops-firefighting-start's knobs: which tickets it starts for, the UTC hours and days it starts in, how fresh the relay's lines must be, the standing brief each firefighting worker starts from, the folder it opens in and the account it logs in as.
+// ops-firefighting-start's knobs: which tickets it starts for, the UTC hours and days it starts in, how fresh the relay's lines must be, the standing brief each firefighting worker starts from and the one a prepare-only worker starts from, the folder it opens in and the account it logs in as.
 export const firefightingSettings = defineSettings({
   "firefighting.start.account": {
     default: "",
@@ -20,7 +20,7 @@ export const firefightingSettings = defineSettings({
   "firefighting.start.consultFrom": {
     default: "",
     description:
-      'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts nothing and tells the dispatcher "consult <id>" once per ticket, so the owner decides; empty never consults.',
+      'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts no listed ticket and tells the dispatcher "consult <id>" once per ticket, so the owner decides, while a prepare-only worker still starts; empty never consults.',
     schema: z.union([z.literal(""), z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM in UTC")]),
   },
   "firefighting.start.daysOff": {
@@ -55,5 +55,14 @@ export const firefightingSettings = defineSettings({
     description:
       "The ticket keys the job starts for (MADE for MADE-1), each a tracker team's key; empty starts none.",
     schema: z.array(z.string().regex(/^[A-Z][A-Z0-9]*$/, "a ticket key, upper case")),
+  },
+  "firefighting.start.prepareBrief": {
+    default: "",
+    description:
+      "The standing brief under the data folder that ops-firefighting-start fills for a prepare-only worker, one for a ticket the relay's prepare map holds before the digest lists it, its {TICKET} and {NAME} replaced as for firefighting.start.brief; empty starts none.",
+    schema: z.union([
+      z.literal(""),
+      z.string().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder"),
+    ]),
   },
 })

@@ -5,9 +5,9 @@ import type { Context } from "../ops-tick/tick"
 import { MAX_MINUTES, standing } from "../playground/focus"
 import { writeAtomic } from "../write-atomic"
 
-// ops-firefighting-start: each beat reads the relay's firefighting.json and starts one --firefighting worker for each open ticket of firefighting.start.prefixes that the tracker's digest lists and no one holds, Urgent, High, Medium, Low and oldest first, at most CAP in progress but for an Urgent, which always starts; its start file keeps spawn.sh's load and slots gates open for those starts while one is open, and focus stands for an Urgent ticket's session alone.
+// ops-firefighting-start: each beat reads the relay's firefighting.json and starts one --firefighting worker for each open ticket of firefighting.start.prefixes that the tracker's digest lists and no one holds, Urgent, High, Medium, Low and oldest first, at most CAP in progress but for an Urgent, which always starts; its start file keeps spawn.sh's load and slots gates open for those starts while one is open, and focus stands for an Urgent ticket's session alone. With firefighting.start.prepareBrief set, a ticket the relay's prepare map holds before the digest lists it starts a prepare-only worker from that brief, which the same session claims once the digest lists it.
 
-// hours is the UTC start window, "HH:MM-HH:MM" (one past midnight wraps), empty for any time; consultFrom the UTC time inside it from which a ticket is the owner's call, told to the dispatcher rather than started; daysOff the UTC dates it starts nothing on.
+// prepareBrief is the standing brief a prepare-only worker starts from, empty to serve no prepare map; hours is the UTC start window, "HH:MM-HH:MM" (one past midnight wraps), empty for any time; consultFrom the UTC time inside it from which a ticket is the owner's call, told to the dispatcher rather than started; daysOff the UTC dates it starts nothing on.
 export type StartConfig = {
   account?: string
   brief: string
@@ -17,6 +17,7 @@ export type StartConfig = {
   hours?: string
   in?: string
   prefixes: string[]
+  prepareBrief?: string
 }
 
 export const CAP = 2
@@ -42,14 +43,15 @@ type Line = {
   urgency?: string
   urgent?: boolean
 }
-type Row = { name?: string; status?: string; ticket?: string; title?: string }
+type Row = { mode?: string; name?: string; status?: string; ticket?: string; title?: string }
 
-// What a beat keeps between passes: when it first watched, the UTC day each roster row was first seen ended (empty for one already ended on the first beat), the session started for each ticket, the name a ticket whose start was refused keeps, the line last told for each, when each closed line was first seen closed, when Linear first read each of those open again (kept for a ticket card to read), and when Linear was last asked.
+// What a beat keeps between passes: when it first watched, the UTC day each roster row was first seen ended (empty for one already ended on the first beat), the session started for each ticket, the prepare-only session of each ticket not yet claimed, the name a ticket whose start was refused keeps, the line last told for each, when each closed line was first seen closed, when Linear first read each of those open again (kept for a ticket card to read), and when Linear was last asked.
 export type State = {
   closedSeen: Record<string, string>
   ended: Record<string, string>
   linearAt?: string
   named: Record<string, string>
+  prepared: Record<string, string>
   reopened: Record<string, string>
   started: Record<string, string>
   told: Record<string, string>
@@ -95,6 +97,7 @@ export async function startPass({
     closedSeen: {},
     ended: {},
     named: {},
+    prepared: {},
     reopened: {},
     started: {},
     told: {},
@@ -107,6 +110,8 @@ export async function startPass({
     await save()
     await ctx.send(to, text)
   }
+  const rosterSet = (session: string, ...pairs: string[]) =>
+    ctx.run([process.execPath, join(ctx.repo, "scripts", "roster.ts"), "set", session, ...pairs])
   const ticket = new RegExp(
     `^(?:${config.prefixes.map((p) => p.replace(/[^A-Za-z0-9]/g, "")).join("|")})-\\d+$`,
   )
@@ -129,6 +134,7 @@ export async function startPass({
     clock?: Record<string, unknown>
     lastTry?: number
     lines?: Record<string, Line>
+    prepare?: Record<string, { at?: unknown }>
   }>(relay)
   // The relay writes lastTry on every pass inside its window, quiet ones included, and nothing outside it, so lines older than freshMinutes are a closed window's or a stopped relay's, and a file that does not parse holds no lines to trust: none starts from them, and a focus already standing is left to the session working its ticket.
   const exists = await Bun.file(relay).exists()
@@ -150,6 +156,48 @@ export async function startPass({
     return
   }
   delete state.told[""]
+  // Only a ticket the tracker's digest lists is a firefighting one: the relay keeps it in the file's clock map, while a line a mention elsewhere named (an integration or port ask) has no entry, so it never starts; a file with no clock map starts nothing.
+  const listed = new Set(Object.keys(ff?.clock ?? {}))
+  // A ticket the relay's prepare map holds is registered but not yet listed: with a prepareBrief set, it starts a prepare-only worker, which makes no tracker write, no chat post and no PR until the digest lists it.
+  const prepare = new Map(
+    config.prepareBrief
+      ? Object.entries(ff?.prepare ?? {}).flatMap(([id, p]) =>
+          ticket.test(id) && !listed.has(id) && typeof p?.at === "string"
+            ? [[id, Date.parse(p.at)] as const]
+            : [],
+        )
+      : [],
+  )
+  // A prepared ticket that leaves the prepare map with no clock entry (closed, never posted in time, or the relay's window ended), or whose line someone else took while it waits there, is no longer ours: its session stops with its branch local, on any fresh beat, outside the window too, and one whose row ended is let go.
+  for (const [id, session] of Object.entries(state.prepared)) {
+    if (listed.has(id)) continue
+    const theirs = ff?.lines?.[id]?.theirs === true
+    if (prepare.has(id) && !theirs) continue
+    delete state.prepared[id]
+    delete state.started[id]
+    await save()
+    if (ENDED.has(rowOf(session)?.status ?? "")) continue
+    const why = theirs ? "someone else took it" : "it left the prepare list with no digest entry"
+    await ctx.send(
+      session,
+      `stop ${id}: ${why}, so it is not ours to take; keep its branch local, push nothing, and end`,
+    )
+    await tell(id, `Stopped ${session}, the prepare-only worker for ${id}: ${why}`)
+  }
+  // The roster's mode is what no-prepare-write reads, so on every fresh beat a live row of a session this job started is set again where its mode and the job's state disagree: mode=prepare while the session is prepare-only, none once it claimed.
+  const preparing = new Set(Object.values(state.prepared))
+  for (const [id, session] of Object.entries(state.started)) {
+    const row = rowOf(session)
+    if (!row || ENDED.has(row.status ?? "")) continue
+    const want = preparing.has(session) ? "prepare" : ""
+    if ((row.mode ?? "") === want) continue
+    const set = await rosterSet(session, `mode=${want}`)
+    if (set.code !== 0)
+      await tell(
+        id,
+        `Could not set mode=${want} on ${session}'s roster row for ${id}: ${lastLine(set.out)}`,
+      )
+  }
   // The owner takes tickets only inside the start window: outside it, or on a day off, nothing starts and the start file goes, while a focus already standing is left to its session; the line names the window, never the beat's time or day, so a closed stretch is told once, and the next close once more.
   if (!inWindow(config, ctx.now)) {
     await tell(
@@ -167,13 +215,16 @@ export async function startPass({
   const matched = config.prefixes.length
     ? all.filter((l): l is Line & { id: string } => typeof l?.id === "string" && ticket.test(l.id))
     : []
-  // Only a ticket the tracker's digest lists is a firefighting one: the relay keeps it in the file's clock map, while a line a mention elsewhere named (an integration or port ask) has no entry, so it never starts; a file with no clock map starts nothing.
-  const listed = new Set(Object.keys(ff?.clock ?? {}))
+  // a ticket in the prepare map is told by its own prepare start, so its line is not skipped here
   for (const line of matched)
-    if (!listed.has(line.id) && line.open === true)
+    if (!listed.has(line.id) && !prepare.has(line.id) && line.open === true)
       await tell(line.id, `Skipped ${line.id}: no digest of the tracker lists it`)
   const lines = matched.filter((l) => listed.has(l.id))
-  const endedToday = (id: string) => rowsFor(id).find((r) => r.name && state.ended[r.name] === day)
+  // a prepare-only worker's end, its row still mode=prepare, holds off no full start once the digest lists the ticket, while a ticket still only in the prepare map starts no second prepare-only worker that day
+  const endedToday = (id: string) =>
+    rowsFor(id).find(
+      (r) => r.name && !(r.mode === "prepare" && listed.has(id)) && state.ended[r.name] === day,
+    )
   // A ticket is held by a live row that carries it or whose title it leads, or by the session this job started for it while that row is not ended, or not yet written.
   const held = (id: string) =>
     rowsFor(id).some((r) => !ENDED.has(r.status ?? "")) ||
@@ -185,7 +236,69 @@ export async function startPass({
   const open = lines.filter(
     (l) => (l.open === true || state.reopened[l.id] !== undefined) && l.theirs !== true,
   )
-  const ids = new Set(open.map((l) => l.id))
+  // an Urgent session this job started that is still live and has claimed holds every lower line, focus file or not, since an Urgent ticket outranks the rest; a prepare-only one holds none until it claims
+  const unclaimed = new Set(Object.values(state.prepared))
+  const liveUrgent = open
+    .filter(isUrgent)
+    .map((l) => state.started[l.id])
+    .find((s) => s !== undefined && !unclaimed.has(s) && !ENDED.has(rowOf(s)?.status ?? ""))
+  // A prepared ticket the digest now lists is claimed by its own prepare-only session, never started again: outside the last stretch the session is told to claim it now and its row's mode drops; in the last stretch the owner is asked first, as for a start; a line someone else took or closed stops the session.
+  for (const [id, session] of Object.entries(state.prepared)) {
+    if (!listed.has(id)) continue
+    const line = matched.find((l) => l.id === id)
+    if (ENDED.has(rowOf(session)?.status ?? "")) {
+      delete state.prepared[id]
+      continue
+    }
+    if (line && !open.some((l) => l.id === id)) {
+      delete state.prepared[id]
+      delete state.started[id]
+      await save()
+      await ctx.send(
+        session,
+        `stop ${id}: ${line.theirs === true ? "someone else took it" : "it closed"} before you claimed it; keep its branch local, push nothing, and end`,
+      )
+      await tell(
+        id,
+        `Stopped ${session}, the prepare-only worker for ${id}: ${line.theirs === true ? "someone else took it" : "it closed"}`,
+      )
+      continue
+    }
+    if (consult) {
+      await tell(
+        id,
+        `consult ${id} (${line?.urgency ?? "no urgency"}): it was listed after ${config.consultFrom}Z, the start window's last stretch, so the owner decides whether to take it; a yes goes to the Builder, who tells ${session}, its prepare-only worker, to claim it`,
+        "dispatcher",
+      )
+      continue
+    }
+    // a High, Medium or Low claim waits while any focus stands or an Urgent session the job started lives, as its start would, its session still prepare-only
+    if (!line || !isUrgent(line)) {
+      const holder = (await standing(data, ctx.now))?.session ?? liveUrgent
+      if (holder && holder !== session) {
+        await tell(
+          id,
+          `Waiting on ${id} (${line?.urgency ?? "no urgency"}): focus stands for ${holder}`,
+        )
+        continue
+      }
+    }
+    delete state.prepared[id]
+    await save()
+    const set = await rosterSet(session, "mode=")
+    await ctx.send(session, `claim ${id} now: the digest lists it, so take it and go on to the PR`)
+    await tell(
+      id,
+      `Claimed ${id}: ${session}, its prepare-only worker, takes it now${set.code === 0 ? "" : `; its roster row keeps mode=prepare: ${lastLine(set.out)}`}`,
+    )
+  }
+  const pending = [...prepare].map(([id, at]): Line & { id: string } => ({
+    ...ff?.lines?.[id],
+    id,
+    open: true,
+    shownAt: at,
+  }))
+  const ids = new Set([...open, ...pending].map((l) => l.id))
   for (const id of Object.keys(state.started)) if (!ids.has(id)) delete state.started[id]
   // a ticket that closed while its start was refused frees its name and its brief
   for (const [id, session] of Object.entries(state.named))
@@ -194,11 +307,16 @@ export async function startPass({
       delete state.named[id]
     }
   for (const key of Object.keys(state.told))
-    if (key && key !== "linear" && !matched.some((l) => key === l.id || key === `${l.id} reopened`))
+    if (
+      key &&
+      key !== "linear" &&
+      !ids.has(key) &&
+      !matched.some((l) => key === l.id || key === `${l.id} reopened`)
+    )
       delete state.told[key]
-  // The start file names every open ticket this job serves, so it stands while one is open and goes once none is.
+  // The start file names every open ticket this job serves, a prepare-only one included, so it stands while one is open and goes once none is.
   const startFile = join(data, START_FILE)
-  if (open.length) {
+  if (ids.size) {
     const had = await readJson<{ ids?: string[]; since?: string }>(startFile)
     const at = ctx.now.toISOString()
     const named = [...ids].sort()
@@ -208,17 +326,12 @@ export async function startPass({
         `${JSON.stringify({ ids: named, since: had?.since ?? at, updatedAt: at })}\n`,
       )
   } else await rm(startFile, { force: true })
-  let inProgress = open.filter((l) => held(l.id)).length
-  const queue = open
+  let inProgress = [...open, ...pending].filter((l) => held(l.id)).length
+  const queue = [...open, ...pending.filter((l) => l.theirs !== true)]
     .filter((l) => l.busy !== true && !held(l.id))
     .sort((a, b) => rankOf(a) - rankOf(b) || (a.shownAt ?? Infinity) - (b.shownAt ?? Infinity))
   // An Urgent start passes this job's own focus, which spawn.sh's start file never does: the focus is lowered for the start and raised again for the session that held it.
   let heldBy: string | undefined
-  // an Urgent session this job started that is still live holds every lower line, focus file or not, since an Urgent ticket outranks the rest
-  const liveUrgent = open
-    .filter(isUrgent)
-    .map((l) => state.started[l.id])
-    .find((s) => s !== undefined && !ENDED.has(rowOf(s)?.status ?? ""))
   // an Urgent that reaches its start in this pass holds every later High, Medium or Low in it, named as the focus raised after the loop will name it: the session of the last such ticket by ID
   let urgentId: string | undefined
   let urgentStarted: string | undefined
@@ -236,8 +349,9 @@ export async function startPass({
       )
       continue
     }
-    // a ticket ended today or held by the cap is no ticket to ask the owner about
-    if (consult) {
+    const prepareOnly = prepare.has(id)
+    // a ticket ended today or held by the cap is no ticket to ask the owner about; a prepare-only start makes no write, so it runs in the last stretch too
+    if (consult && !prepareOnly) {
       await tell(
         id,
         `consult ${id} (${line.urgency ?? "no urgency"}): it came in after ${config.consultFrom}Z, the start window's last stretch, so the owner decides whether to take it; a yes goes to the Builder, who starts it`,
@@ -252,11 +366,12 @@ export async function startPass({
       )
       continue
     }
-    const template = Bun.file(join(data, config.brief))
+    const standingBrief = prepareOnly ? config.prepareBrief! : config.brief
+    const template = Bun.file(join(data, standingBrief))
     if (!(await template.exists())) {
       await tell(
         id,
-        `Not started for ${id}: the standing brief ${config.brief}, which firefighting.start.brief names, is not in ${data}`,
+        `Not started for ${id}: the standing brief ${standingBrief}, which firefighting.start.${prepareOnly ? "prepareBrief" : "brief"} names, is not in ${data}`,
       )
       continue
     }
@@ -279,19 +394,18 @@ export async function startPass({
     state.named[id] = session
     await save()
     const brief = `brief-${session}.md`
-    // a retry under the kept name reuses the brief its first try wrote
-    if (!(await Bun.file(join(data, brief)).exists()))
-      await Bun.write(
-        join(data, brief),
-        (await template.text()).replaceAll("{TICKET}", id).replaceAll("{NAME}", session),
-      )
+    // every try writes the brief from the template it starts from now, so a prepare-only try refused before its ticket was listed leaves no prepare brief for the full start under the same name
+    await Bun.write(
+      join(data, brief),
+      (await template.text()).replaceAll("{TICKET}", id).replaceAll("{NAME}", session),
+    )
     const argv = [
       join(ctx.repo, "scripts", "spawn.sh"),
       "worker",
       session,
       brief,
       "--title",
-      `${id} firefight`,
+      `${id} ${prepareOnly ? "prepare" : "firefight"}`,
       "--in",
       config.in,
       "--size",
@@ -299,7 +413,7 @@ export async function startPass({
       "--firefighting",
       ...(config.account ? ["--account", config.account] : []),
     ]
-    if (isUrgent(line) && (urgentId === undefined || id > urgentId)) {
+    if (!prepareOnly && isUrgent(line) && (urgentId === undefined || id > urgentId)) {
       urgentId = id
       urgentStarted = session
     }
@@ -311,20 +425,18 @@ export async function startPass({
       continue
     }
     state.started[id] = session
+    if (prepareOnly) state.prepared[id] = session
     delete state.named[id]
     inProgress++
     await save()
-    const set = await ctx.run([
-      process.execPath,
-      join(ctx.repo, "scripts", "roster.ts"),
-      "set",
-      session,
-      `ticket=${id}`,
-    ])
-    const unset = set.code === 0 ? "" : `; its roster row lacks ticket=${id}: ${lastLine(set.out)}`
+    const set = await rosterSet(session, `ticket=${id}`, ...(prepareOnly ? ["mode=prepare"] : []))
+    const unset =
+      set.code === 0
+        ? ""
+        : `; its roster row lacks ticket=${id}${prepareOnly ? " mode=prepare" : ""}: ${lastLine(set.out)}`
     await tell(
       id,
-      `Started ${session} for ${id} (${line.urgency ?? "no urgency"}) with --firefighting, from ${config.brief}${unset}`,
+      `Started ${session} for ${id} (${line.urgency ?? "no urgency"}) with --firefighting, ${prepareOnly ? "prepare-only, " : ""}from ${standingBrief}${unset}`,
     )
   }
   await holdFocus(
@@ -335,7 +447,8 @@ export async function startPass({
       .map((l) => l.id)
       .sort(),
     state,
-    (session) => !ENDED.has(rowOf(session)?.status ?? ""),
+    (session) =>
+      !Object.values(state.prepared).includes(session) && !ENDED.has(rowOf(session)?.status ?? ""),
     heldBy,
   )
   state.watchingSince ??= ctx.now.toISOString()
@@ -436,7 +549,7 @@ async function holdFocus(
   const standingFocus = await standing(data, now)
   const ours = standingFocus?.reason.startsWith(REASON) ?? false
   const started = urgent.map((id) => state.started[id]).filter((s): s is string => s !== undefined)
-  // a session whose roster row ended holds no focus, though its ticket stays open
+  // a session whose roster row ended, or a prepare-only one not yet claimed, holds no focus, though its ticket stays open
   const sessions = started.filter(live)
   if (!sessions.length) {
     if (ours) await focus(ctx, ["off"])

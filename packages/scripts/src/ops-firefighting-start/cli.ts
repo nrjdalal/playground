@@ -26,6 +26,7 @@ const config = async (): Promise<StartConfig> => {
     hours: get("firefighting.start.hours"),
     in: get("firefighting.start.in") || undefined,
     prefixes: get("firefighting.start.prefixes"),
+    prepareBrief: get("firefighting.start.prepareBrief") || undefined,
   }
 }
 

@@ -378,7 +378,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   `ext score` on a line where any command clears or sets `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` or `PLAYGROUND_ROLE` (an assignment or `+=` to one, one exported earlier, or env with `-u` or `--unset` naming one, `-i` alone or in a cluster, `--ignore-environment` or `-`), a shell the line runs or pipes into included,
   and `ext score` spelled with quotes or backslashes that shell removes (`s""core`, `'score'`), since a score's author is read from them;
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
-  and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names`, `slack.gatedSends` and `usage.keychainService`.
+  and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `firefighting.start.prepareBrief`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names`, `slack.gatedSends` and `usage.keychainService`.
   A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
   A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
   `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
@@ -644,6 +644,17 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   Its tests are `bun run test:file tests/lefthook.test.ts tests/packages/scripts/src/precommit-light.test.ts`.
 - Both pre-push jobs that read the pushed refs on stdin, `conflict-markers` and `keeps-canary`, run as lefthook scripts, each a one-line `.lefthook/pre-push/<name>.sh` that execs its check, since lefthook 2.2.2 skips every pre-push command and job while the checked-out branch has nothing new against its upstream, a push of another branch included, and runs a script on every push.
   `audit` and `ensure-branches`, which read no pushed ref, stay commands; `tests/lefthook.test.ts` pins both scripts and runs them under the real lefthook with the checked-out branch level.
+
+## no-prepare-write
+
+- A prepare-only worker gets its ticket ready and claims nothing before the tracker's digest lists it, since a ticket not yet posted is not the owner's to take: `scripts/hooks/no-prepare-write.ts` refuses a session whose roster row reads `mode=prepare` (ops-firefighting-start's prepare-only start, [scripts/README.md](../README.md#spawnsh)) every call that would claim or publish its ticket,
+  a Linear MCP tool that writes (every one but `get_`, `list_`, `search_`, `extract_` and `whoami`), a Slack MCP tool that writes (every one but the history, replies, list, unreads, search, files, users and user-group reads), a GitHub MCP tool that writes (every one but `get_`, `list_`, `search_` and a name ending `_read`) and any server's `create_pull_request`,
+  a `gh pr` or `gh issue` call but `view`, `list`, `status`, `diff`, `checks` and `checkout`, a `gh api` call that is not a GET, a `gh api graphql` whose query holds `mutation` or text it cannot read, and `git push` or `git send-pack` to any remote, through a wrapper, `cd` or `-R`.
+  Limits: it reads the shell as the other guards do, so known gaps run: a raw HTTP write with a non-GET method to GitHub's, Linear's or Slack's API and a program name held in a variable, both tracked with their red rows in a follow-up issue, and a gh command outside `pr`, `issue` and `api` that writes (a label, a repository's settings, a workflow run).
+  It finds the session's row by its name in Claude Code's registry, and its reason names the way on: local work alone until the job's `claim <id> now`, which clears the mode, and an end on `stop <id>` with the branch local.
+  Every other session, and a prepare-only worker's reads, pass; a script that writes through its own key (an org's tracker script) is its brief's to hold.
+  It fails open on a call it cannot read or a roster it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
+  Its registration in both settings files lands in a later ship than its script (above), and `firefighting.start.prepareBrief` stays empty until it does; that key is a guard key ([no-extensions-write](#no-extensions-write)), so the owner sets it through a guard decision's Approve in the Inbox, and a session's own write of it is refused.
 
 ## no-prompt-stop
 

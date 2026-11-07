@@ -65,6 +65,7 @@ describe("defineSettings", () => {
       "firefighting.start.hours",
       "firefighting.start.in",
       "firefighting.start.prefixes",
+      "firefighting.start.prepareBrief",
       "fixture.limit",
       "fixture.name",
       "gates.glmLoad5Max",

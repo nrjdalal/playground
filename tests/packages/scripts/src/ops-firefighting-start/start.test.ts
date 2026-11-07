@@ -1290,3 +1290,317 @@ describe("ops-firefighting-start's date and window flows", () => {
     expect(s.asked).toHaveLength(2)
   })
 })
+
+// firefighting.json with a prepare map beside the lines: a registered ticket the digest does not list yet, written a minute before NOW unless `wrote` says.
+const prepareFile = (
+  lines: Record<string, Line>,
+  prepare: Record<string, string>,
+  {
+    listed = Object.keys(lines),
+    wrote = NOW.getTime() - MINUTE,
+  }: { listed?: string[]; wrote?: number } = {},
+) => ({
+  ...JSON.parse(relayFile(lines, wrote, listed)),
+  prepare: Object.fromEntries(Object.entries(prepare).map(([id, at]) => [id, { at }])),
+})
+const PREPARE: StartConfig = { ...CONFIG, prepareBrief: "brief-ff-prepare.md" }
+const REGISTERED = new Date(NOW.getTime() - 2 * MINUTE).toISOString()
+
+describe("prepare-only starts", () => {
+  const prepared = (
+    lines: Record<string, Line> = {},
+    prepare: Record<string, string> = { "MADE-5": REGISTERED },
+    extra: Record<string, unknown> = {},
+    options: Parameters<typeof setup>[2] = {},
+  ) => {
+    const s = setup(lines, { "firefighting.json": prepareFile(lines, prepare), ...extra }, options)
+    writeFileSync(join(s.data, "brief-ff-prepare.md"), "Prepare {TICKET} as {NAME}, locally.\n")
+    const rosterSets = () =>
+      s.runs
+        .filter((argv) => argv.some((a) => a.endsWith("roster.ts")))
+        .map((argv) => argv.slice(-3))
+    const relay = (
+      minutes: number,
+      lines2: Record<string, Line>,
+      prepare2: Record<string, string>,
+      listed?: string[],
+    ) =>
+      writeFileSync(
+        join(s.data, "firefighting.json"),
+        JSON.stringify(
+          prepareFile(lines2, prepare2, { listed, wrote: NOW.getTime() + minutes * MINUTE }),
+        ),
+      )
+    return { ...s, relay, rosterSets }
+  }
+
+  test("P1: a ticket the prepare map holds starts a prepare-only worker from prepareBrief, titled <id> prepare, its row mode=prepare", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    expect(s.titles()).toEqual(["MADE-5 prepare"])
+    expect(await Bun.file(join(s.data, "brief-worker-made-up-1.md")).text()).toBe(
+      "Prepare MADE-5 as worker-made-up-1, locally.\n",
+    )
+    expect(s.rosterSets()).toEqual([["worker-made-up-1", "ticket=MADE-5", "mode=prepare"]])
+    expect(s.sent).toEqual([
+      "Started worker-made-up-1 for MADE-5 (no urgency) with --firefighting, prepare-only, from brief-ff-prepare.md",
+    ])
+    expect([s.state().prepared, s.startFile()?.ids]).toEqual([
+      { "MADE-5": "worker-made-up-1" },
+      ["MADE-5"],
+    ])
+  })
+
+  test("P2: with no prepareBrief the prepare map starts nothing", async () => {
+    const s = prepared()
+    await s.pass()
+    expect([s.spawns(), s.sent, s.startFile()]).toEqual([[], [], undefined])
+  })
+
+  test("P3: once the digest lists it, the same session is told to claim it now and its mode drops, with no second start", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(1, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.titles()).toEqual(["MADE-5 prepare"])
+    expect(s.sentTo.at(-2)).toBe("worker-made-up-1")
+    expect(s.sent.slice(-2)).toEqual([
+      "claim MADE-5 now: the digest lists it, so take it and go on to the PR",
+      "Claimed MADE-5: worker-made-up-1, its prepare-only worker, takes it now",
+    ])
+    expect(s.rosterSets().at(-1)).toEqual(["set", "worker-made-up-1", "mode="])
+    expect([s.state().prepared, s.state().started]).toEqual([{}, { "MADE-5": "worker-made-up-1" }])
+    s.later(1)
+    s.relay(2, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect([s.titles(), s.sent.length]).toEqual([["MADE-5 prepare"], 3])
+  })
+
+  test("P4: a ticket that leaves the prepare map with no clock entry stops its session with its branch local, outside the window too", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(1, {}, {})
+    await s.pass({ ...PREPARE, hours: "04:00-07:00" })
+    expect(s.sentTo.slice(1, 3)).toEqual(["worker-made-up-1", "builder"])
+    expect(s.sent.slice(1, 3)).toEqual([
+      "stop MADE-5: it left the prepare list with no digest entry, so it is not ours to take; keep its branch local, push nothing, and end",
+      "Stopped worker-made-up-1, the prepare-only worker for MADE-5: it left the prepare list with no digest entry",
+    ])
+    expect([s.state().prepared, s.state().started]).toEqual([{}, {}])
+  })
+
+  test("P5: in the last stretch a prepare-only worker still starts, while a listed line consults; a prepared ticket listed then consults too, with no claim", async () => {
+    const config = { ...PREPARE, consultFrom: "07:30", hours: "04:00-12:00" }
+    const s = prepared(line("MADE-1", "Medium", 1))
+    await s.pass(config)
+    expect(s.titles()).toEqual(["MADE-5 prepare"])
+    expect(s.sentTo.filter((to) => to === "dispatcher")).toHaveLength(1)
+    s.later(1)
+    s.relay(1, { ...line("MADE-1", "Medium", 1), ...line("MADE-5", "High", 2) }, {})
+    await s.pass(config)
+    expect(s.sent.at(-1)).toBe(
+      "consult MADE-5 (High): it was listed after 07:30Z, the start window's last stretch, so the owner decides whether to take it; a yes goes to the Builder, who tells worker-made-up-1, its prepare-only worker, to claim it",
+    )
+    expect([s.sent.some((t) => t.startsWith("claim ")), s.state().prepared]).toEqual([
+      false,
+      { "MADE-5": "worker-made-up-1" },
+    ])
+  })
+
+  test("P6: outside the window and on a day off the prepare map starts nothing", async () => {
+    for (const config of [
+      { ...PREPARE, hours: "09:00-12:00" },
+      { ...PREPARE, daysOff: [NOW.toISOString().slice(0, 10)] },
+    ]) {
+      const s = prepared()
+      await s.pass(config)
+      expect(s.spawns()).toEqual([])
+    }
+  })
+
+  test("P7: the cap of 2 in progress holds a prepare-only start, and an ID the digest already lists starts as a claim, never a prepare", async () => {
+    const lines = { ...line("MADE-1", "High", 1), ...line("MADE-2", "High", 2) }
+    const s = prepared(lines, { "MADE-5": REGISTERED, "MADE-2": REGISTERED })
+    await s.pass(PREPARE)
+    expect(s.titles()).toEqual(["MADE-1 firefight", "MADE-2 firefight"])
+    expect(s.sent.at(-1)).toBe(
+      "Waiting on MADE-5 (no urgency): the cap of 2 in progress is reached",
+    )
+  })
+
+  test("P7b: a prepare-map ticket with a relay line that waits on the cap is told its wait once across beats, never skipped as unlisted", async () => {
+    const lines = { ...line("MADE-1", "High", 1), ...line("MADE-2", "High", 2) }
+    const waiting = { ...lines, ...line("MADE-5", "Medium", 3) }
+    const s = prepared(lines, { "MADE-5": REGISTERED })
+    s.relay(0, waiting, { "MADE-5": REGISTERED }, ["MADE-1", "MADE-2"])
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(1, waiting, { "MADE-5": REGISTERED }, ["MADE-1", "MADE-2"])
+    await s.pass(PREPARE)
+    expect(s.titles()).toEqual(["MADE-1 firefight", "MADE-2 firefight"])
+    expect(s.sent.filter((t) => t.includes("MADE-5"))).toEqual([
+      "Waiting on MADE-5 (Medium): the cap of 2 in progress is reached",
+    ])
+  })
+
+  test("P16: a prepared Urgent listed in the last stretch consults and raises no focus, so a lower prepare-only line still starts", async () => {
+    const config = { ...PREPARE, consultFrom: "07:30", hours: "04:00-12:00" }
+    const s = prepared()
+    await s.pass(config)
+    s.later(1)
+    s.relay(1, line("MADE-5", "Urgent", 1), { "MADE-6": REGISTERED })
+    await s.pass(config)
+    expect(s.sent.some((t) => t.startsWith("consult MADE-5 (Urgent)"))).toBe(true)
+    expect([s.titles(), s.focus()]).toEqual([["MADE-5 prepare", "MADE-6 prepare"], []])
+  })
+
+  test("P8: a prepared ticket listed with its line taken by someone else stops its session, with no claim", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(1, line("MADE-5", "Medium", 1, { theirs: true }), {})
+    await s.pass(PREPARE)
+    expect(s.sent.slice(1)).toEqual([
+      "Skipped MADE-5: someone else took it",
+      "stop MADE-5: someone else took it before you claimed it; keep its branch local, push nothing, and end",
+      "Stopped worker-made-up-1, the prepare-only worker for MADE-5: someone else took it",
+    ])
+  })
+
+  // The roster a session's row reads after a pass, which the fake's roster sets never write.
+  const row = (s: { data: string }, fields: Record<string, string>) =>
+    writeFileSync(
+      join(s.data, "roster.json"),
+      JSON.stringify({
+        agents: [{ name: "worker-made-up-1", status: "working", ticket: "MADE-5", ...fields }],
+      }),
+    )
+
+  test("P9: a prepare-only start refused before its ticket is listed leaves no prepare brief, so the full start under the same name takes the full one", async () => {
+    let refuse = true
+    const s = prepared(undefined, undefined, undefined, {
+      spawned: (argv) =>
+        refuse
+          ? { code: 1, out: `spawn.sh refuses ${argv[2]}: the load gate holds it\n` }
+          : { code: 0, out: "" },
+    })
+    await s.pass(PREPARE)
+    refuse = false
+    s.later(1)
+    s.relay(1, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.titles()).toEqual(["MADE-5 prepare", "MADE-5 firefight"])
+    expect(await Bun.file(join(s.data, "brief-worker-made-up-1.md")).text()).toBe(
+      "Work MADE-5 as worker-made-up-1.\n",
+    )
+    expect(s.rosterSets()).toEqual([["set", "worker-made-up-1", "ticket=MADE-5"]])
+  })
+
+  test("P10: a prepare-only worker that stopped and ended holds nothing off: its ticket listed the same day starts a full worker", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(1, {}, {})
+    await s.pass(PREPARE)
+    s.later(1)
+    row(s, { mode: "prepare", status: "ended" })
+    s.relay(2, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.titles()).toEqual(["MADE-5 prepare", "MADE-5 firefight"])
+    expect(s.sent.at(-1)).toBe(
+      "Started worker-made-up-2 for MADE-5 (Medium) with --firefighting, from brief-ff.md",
+    )
+  })
+
+  test("P11: a claim whose mode= did not land is set again on the next fresh beat, and once more on none after it reads clear", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(1, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    row(s, { mode: "prepare" })
+    s.later(1)
+    s.relay(2, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.rosterSets().slice(1)).toEqual([
+      ["set", "worker-made-up-1", "mode="],
+      ["set", "worker-made-up-1", "mode="],
+    ])
+    row(s, {})
+    s.later(1)
+    s.relay(3, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.rosterSets()).toHaveLength(3)
+  })
+
+  test("P12: a prepare-only start whose mode=prepare did not land is set again on the next fresh beat", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    row(s, {})
+    s.later(1)
+    s.relay(1, {}, { "MADE-5": REGISTERED }, [])
+    await s.pass(PREPARE)
+    expect(s.rosterSets()).toEqual([
+      ["worker-made-up-1", "ticket=MADE-5", "mode=prepare"],
+      ["set", "worker-made-up-1", "mode=prepare"],
+    ])
+  })
+
+  test("P14: a prepare-only worker that ends while its ticket stays in the prepare map unlisted starts no second one that day", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    s.later(1)
+    row(s, { mode: "prepare", status: "ended" })
+    s.relay(1, {}, { "MADE-5": REGISTERED }, [])
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(2, {}, { "MADE-5": REGISTERED }, [])
+    await s.pass(PREPARE)
+    expect(s.titles()).toEqual(["MADE-5 prepare"])
+    expect(s.sent.at(-1)).toBe(
+      "Not starting MADE-5 again today: worker-made-up-1, its session, ended today",
+    )
+  })
+
+  test("P15: a High, Medium or Low claim waits while a focus stands, its session still prepare-only, and claims on the beat after the focus goes", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    writeFileSync(
+      join(s.data, "focus.json"),
+      JSON.stringify(focusFile("the owner's demo", 30, "ff-other")),
+    )
+    s.later(1)
+    s.relay(1, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.sent.at(-1)).toBe("Waiting on MADE-5 (Medium): focus stands for ff-other")
+    expect([s.sent.some((t) => t.startsWith("claim ")), s.state().prepared]).toEqual([
+      false,
+      { "MADE-5": "worker-made-up-1" },
+    ])
+    rmSync(join(s.data, "focus.json"))
+    s.later(1)
+    s.relay(2, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.sent.slice(-2)).toEqual([
+      "claim MADE-5 now: the digest lists it, so take it and go on to the PR",
+      "Claimed MADE-5: worker-made-up-1, its prepare-only worker, takes it now",
+    ])
+    expect(s.state().prepared).toEqual({})
+  })
+
+  test("P13: a line someone else took while its ticket waits in the prepare map stops its prepare-only worker", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(1, line("MADE-5", "Medium", 1, { theirs: true }), { "MADE-5": REGISTERED }, [])
+    await s.pass(PREPARE)
+    expect(s.sentTo.slice(1, 3)).toEqual(["worker-made-up-1", "builder"])
+    expect(s.sent.slice(1, 3)).toEqual([
+      "stop MADE-5: someone else took it, so it is not ours to take; keep its branch local, push nothing, and end",
+      "Stopped worker-made-up-1, the prepare-only worker for MADE-5: someone else took it",
+    ])
+    expect([s.state().prepared, s.titles()]).toEqual([{}, ["MADE-5 prepare"]])
+  })
+})
