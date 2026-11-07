@@ -687,6 +687,9 @@ while j < len(raw):
         while end < len(raw) and depth:
             if raw[end] == "\\" and inner != "'":
                 end += 1
+            elif inner == '"' and (raw[end] == "`" or raw.startswith("$(", end)):
+                end = len(raw)
+                break
             elif inner:
                 inner = "" if raw[end] == ("'" if inner == "$" else inner) else inner
             elif c != "`" and raw.startswith("$'", end):
@@ -698,7 +701,7 @@ while j < len(raw):
             else:
                 depth += (raw[end] == "(") - (raw[end] == ")")
             end += 1
-        # a ) its count cannot place (a case pattern's, a heredoc body's, a comment's, one in a ${…}) may end it early, so one holding case, <<, # or ${ reads to the script's end, failing closed
+        # a ) its count cannot place (a case pattern's, a heredoc body's, a comment's, one in a ${…}, one after a $( or backquote inside a double quote in it) may end it early, so one holding case, <<, # or ${, or such a quoted substitution (above), reads to the script's end, failing closed
         if re.search(r"(^|[\s;&|()`])(case(\s|$)|#)|<<|\$\{", raw[j + 1 : end]):
             end = len(raw)
         subs.append(raw[j + 1 : end])
