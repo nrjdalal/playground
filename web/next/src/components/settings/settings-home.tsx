@@ -5,6 +5,7 @@ import { OwnerOnly } from "@/components/dashboard/owner-only"
 import { ReadOnlyLine } from "@/components/dashboard/read-only-line"
 import { Accounts } from "@/components/settings/accounts"
 import { Extensions } from "@/components/settings/extensions"
+import { Jobs } from "@/components/settings/jobs"
 import { MacChecks } from "@/components/settings/mac-checks"
 import { Privacy } from "@/components/settings/privacy"
 import { Remote } from "@/components/settings/remote"
@@ -19,7 +20,7 @@ export function SettingsHome() {
     <>
       <PageHeader
         title="Settings"
-        description="Accounts, templates, extensions, privacy and how the Dashboard runs."
+        description="Accounts, templates, extensions, privacy, jobs and how the Dashboard runs."
       />
       {allowed && config.hosted ? (
         <div className="flex flex-col gap-6">
@@ -33,6 +34,7 @@ export function SettingsHome() {
           <Templates />
           <Extensions />
           <Privacy />
+          <Jobs />
           <Remote />
         </div>
       ) : (
