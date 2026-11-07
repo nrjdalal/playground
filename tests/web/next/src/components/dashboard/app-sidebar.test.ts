@@ -696,9 +696,11 @@ describe("SessionRow's dropdown and group", () => {
         new RegExp(`<span[^>]*>(?=<svg[^>]*><path d="${pathOf(RiSignalCellular3Fill)}")`),
       ),
     )
-    expect(effort.has("md:group-has-[[data-sidebar=menu-action]:hover]/menu-item:invisible")).toBe(
-      true,
-    )
+    expect(
+      effort.has(
+        "md:[@media(hover:hover)]:group-has-[[data-sidebar=menu-action]:hover]/menu-item:invisible",
+      ),
+    ).toBe(true)
     expect(effort.has("md:group-hover/menu-item:invisible")).toBe(false)
     for (const kept of [
       "group-data-[open]/menu-item:invisible",
@@ -707,6 +709,18 @@ describe("SessionRow's dropdown and group", () => {
       "md:group-has-[:focus-visible]/menu-item:invisible",
     ])
       expect(effort.has(kept)).toBe(true)
+  })
+
+  test("the header hands Alpha's plus PLUS_SHOWN, never the toggle's rule", async () => {
+    const source = await Bun.file(join(web, "src/components/dashboard/app-sidebar.tsx")).text()
+    const start = source.indexOf("export function DashboardDispatchers")
+    const group = source.slice(start, source.indexOf("\n}\n", start))
+    const picker = group.slice(
+      group.indexOf("<TemplatePicker"),
+      group.indexOf("/>", group.indexOf("<TemplatePicker")),
+    )
+    expect(picker).toContain("PLUS_SHOWN")
+    expect(picker).not.toContain("TOGGLE_SHOWN")
   })
 
   test("open, it lists each subagent and running process with its state, a finished subagent as Done", () => {

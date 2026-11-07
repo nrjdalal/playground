@@ -791,11 +791,11 @@ const TOGGLE_SHOWN =
   "peer-data-active/menu-button:text-sidebar-accent-foreground md:opacity-0 md:group-hover/menu-item:opacity-100 md:group-has-[:focus-visible]/menu-item:opacity-100 group-data-[open]/menu-item:opacity-100"
 const EFFORT_HIDDEN =
   "max-md:invisible md:group-hover/menu-item:invisible md:group-has-[:focus-visible]/menu-item:invisible group-data-[open]/menu-item:invisible group-has-data-[popup-open]/menu-item:invisible"
-// Alpha's plus, by the toggle's rules but for hover, which counts over its own box alone, the effort's place, so with the pointer elsewhere on the row the effort stays in sight; its box takes the pointer while unseen, at opacity 0.
+// Alpha's plus, by the toggle's rules but for hover, which counts over its own box alone, the effort's place, so with the pointer elsewhere on the row the effort stays in sight; its box takes the pointer while unseen, at opacity 0, and the effort hides on that hover only under a hover-capable pointer, as Tailwind's hover: shows the plus, so a tap leaves no blank place.
 export const PLUS_SHOWN =
   "peer-data-active/menu-button:text-sidebar-accent-foreground md:opacity-0 md:hover:opacity-100 md:group-has-[:focus-visible]/menu-item:opacity-100 group-data-[open]/menu-item:opacity-100"
 const PLUS_EFFORT_HIDDEN =
-  "max-md:invisible md:group-has-[[data-sidebar=menu-action]:hover]/menu-item:invisible md:group-has-[:focus-visible]/menu-item:invisible group-data-[open]/menu-item:invisible group-has-data-[popup-open]/menu-item:invisible"
+  "max-md:invisible md:[@media(hover:hover)]:group-has-[[data-sidebar=menu-action]:hover]/menu-item:invisible md:group-has-[:focus-visible]/menu-item:invisible group-data-[open]/menu-item:invisible group-has-data-[popup-open]/menu-item:invisible"
 
 const MODEL_ICON = "text-muted-foreground flex shrink-0 group-data-[collapsible=icon]:hidden"
 
