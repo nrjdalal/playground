@@ -100,7 +100,7 @@ describe("the slots gate admits a new worker only when run-slot has room for its
       expect(r.code).not.toBe(0)
       expect(placing(r)).toEqual([])
       expect(r.err).toContain("--priority starts only while a priority file stands in")
-      expect(r.err).toContain("priority.json or priority-start.json")
+      expect(r.err).toContain("priority.json, priority-start.json or another priority-<name>.json")
     },
   )
 
