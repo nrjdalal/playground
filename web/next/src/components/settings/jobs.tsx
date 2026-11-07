@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { SetUpSettings } from "@/components/settings/set-up-settings"
 import { Button } from "@/components/ui/button"
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "@/components/ui/empty"
-import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import {
   Item,
   ItemActions,
@@ -156,60 +156,61 @@ function JobConfig({
   const id = `job-config-${job.name}-${job.scope}`
   return (
     <form
-      className="mt-1 flex flex-col gap-2"
       onSubmit={(event) => {
         event.preventDefault()
         void form.handleSubmit()
       }}
     >
-      <form.Field
-        name="text"
-        validators={{
-          onChange: ({ value }) => {
-            const parsed = parseJobConfig(value)
-            return "error" in parsed ? parsed.error : undefined
-          },
-        }}
-      >
-        {(field) => {
-          const error = field.state.meta.errors[0]
-          return (
-            <>
-              <Field data-invalid={Boolean(error)}>
-                <FieldLabel htmlFor={id} className="text-xs">
-                  Config
-                </FieldLabel>
-                <Textarea
-                  aria-invalid={Boolean(error)}
-                  className="font-mono text-xs md:text-xs"
-                  disabled={save.isPending}
-                  id={id}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  spellCheck={false}
-                  value={field.state.value}
-                />
-                {error && <FieldError>{String(error)}</FieldError>}
-                {refused && (
-                  <FieldDescription className="text-destructive text-xs">
-                    The job refused its config: {refused}
-                  </FieldDescription>
-                )}
-              </Field>
-              <div>
-                <Button
-                  disabled={save.isPending || Boolean(error) || field.state.value === shown}
-                  size="sm"
-                  type="submit"
-                  variant="outline"
-                >
-                  Save
-                </Button>
-              </div>
-            </>
-          )
-        }}
-      </form.Field>
+      <FieldGroup className="mt-1 gap-2">
+        <form.Field
+          name="text"
+          validators={{
+            onChange: ({ value }) => {
+              const parsed = parseJobConfig(value)
+              return "error" in parsed ? parsed.error : undefined
+            },
+          }}
+        >
+          {(field) => {
+            const error = field.state.meta.errors[0]
+            return (
+              <>
+                <Field data-invalid={Boolean(error)}>
+                  <FieldLabel htmlFor={id} className="text-xs">
+                    Config
+                  </FieldLabel>
+                  <Textarea
+                    aria-invalid={Boolean(error)}
+                    className="font-mono text-xs md:text-xs"
+                    disabled={save.isPending}
+                    id={id}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    spellCheck={false}
+                    value={field.state.value}
+                  />
+                  {error && <FieldError>{String(error)}</FieldError>}
+                  {refused && (
+                    <FieldDescription className="text-destructive text-xs">
+                      The job refused its config: {refused}
+                    </FieldDescription>
+                  )}
+                </Field>
+                <div>
+                  <Button
+                    disabled={save.isPending || Boolean(error) || field.state.value === shown}
+                    size="sm"
+                    type="submit"
+                    variant="outline"
+                  >
+                    Save
+                  </Button>
+                </div>
+              </>
+            )
+          }}
+        </form.Field>
+      </FieldGroup>
     </form>
   )
 }

@@ -100,6 +100,7 @@ The render takes the row only when it runs in a terminal, stays in its org's own
 
 Any other row is refused: one off that shape, one naming `launchd` or `program`, a second org's row for a job the first adds (scopes in A to Z order), and a row for such a job at your login's scope.
 Each refusal is a `jobs: refused <scope> <key>: <why>` line in `<data>/ops/up.log`, and its job does not run; the rest of the render is written as usual.
+Settings > Jobs lists an org's row in the shape of a job, an object whose heartbeat is its own name, before these checks, so a row they refuse still shows its switch, and its write is refused with the reason.
 The job's `jobs.json` row names its org in `org`, so when its row is later refused or removed, the job stays listed as paused and the runner stops it, until a row of its name renders again.
 A pass that cannot read the orgs at all keeps each org's job as the last `jobs.json` had it, and says so in `up.log`.
 

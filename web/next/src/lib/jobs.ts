@@ -38,7 +38,7 @@ export type JobRow = {
 const nameOf = (key: string) =>
   key.slice(PREFIX.length).replace(/[A-Z0-9]/g, (c) => `-${c.toLowerCase()}`)
 
-// An org's own job's name, as the jobs render names it: its key's camel case in kebab case.
+// An org's own job's name, as the jobs render names it: its key's camel case in kebab case, digits kept as they are, which orgJob's regex takes.
 const orgNameOf = (key: string) =>
   key.slice(PREFIX.length).replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)
 
@@ -132,9 +132,8 @@ export const parseJobConfig = (
   } catch {
     return { error: "This is not JSON" }
   }
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return { error: "A config is a JSON object, {...}" }
-  return { config: value as Record<string, unknown> }
+  if (!isObject(value)) return { error: "A config is a JSON object, {...}" }
+  return { config: value }
 }
 
 export const readJobs = async (scope: string): Promise<JobRow[]> => {
