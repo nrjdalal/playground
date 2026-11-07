@@ -98,6 +98,8 @@ export type Env = {
   oldFrom?: string[]
   process: Record<string, string | undefined>
   vars: Map<string, Text>
+  // Set by a hook that judges a shell the line starts as a program too, so its visit sees the shell's own words and assignments before the walk follows its script; a script file the walk cannot read is otherwise followed as an empty one
+  visitShells?: boolean
 }
 export type Flag = { name: string; value?: Word }
 export type Field = { key: string; text: Text }
@@ -1758,9 +1760,9 @@ async function examineReading(
     }
     if (builtins) verdict = await visit(cmd, parsed, here)
   } else if (SHELLS.has(name))
-    verdict = await nested(cmd, env, () =>
-      shell(name, args, cmd, here, visit, builtins, parsed.xargs),
-    )
+    verdict =
+      (here.visitShells ? await visit(cmd, parsed, here) : undefined) ??
+      (await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs)))
   else if (
     (name === "source" || name === ".") &&
     (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))
