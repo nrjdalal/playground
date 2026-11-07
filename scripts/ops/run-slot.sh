@@ -1278,6 +1278,7 @@ clone_brake() {
 QUEUE="$OPS/run-slot.waiters"
 NEXTF="$OPS/run-slot.next"
 TICKET=""
+CLONE_TICKET=""
 ticket() {
   [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] || return 0
   mkdir -p "$QUEUE"
@@ -1566,6 +1567,7 @@ free() {
   fi
   DOCKER_SLOT=""
   [ -n "$TICKET" ] && rm -f "$TICKET"
+  [ -n "$CLONE_TICKET" ] && rm -f "$CLONE_TICKET"
   [ -e "$REF" ] && rm -f "$REF"
   [ -n "${MEM_TOLD:-}" ] && rm -f "$MEM_TOLD-suite" "$MEM_TOLD-clone" "$MEM_TOLD-idle" "$MEM_TOLD-swap" "$MEM_TOLD-busy"
 }
@@ -2025,7 +2027,7 @@ if [ -n "$KIND" ]; then
     ! { case "$(memstat vm_pressure_level)" in 1|2) true ;; *) false ;; esac && [ "$(memstat level)" -ge 8 ] 2>/dev/null && [ "$(load5)" -lt 30 ] && [ "$(load1)" -lt 30 ]; }
   }
   while clone_held; do reread; sleep "$CLONE_POLL"; done
-  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of the brake, one per core, or at half the cores or more where that line sits lower (under 8 cores; on 4 or fewer the brake less the margin is 0 or less and would hold every clone), and while a big run holds a CPU slot, whatever clone-allow names; an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
+  # a clone waits CLONE_GAP s after the last clone's end, while load5 is within CLONE_MARGIN of the brake, one per core, or at half the cores or more where that line sits lower (under 8 cores; on 4 or fewer the brake less the margin is 0 or less and would hold every clone), and while a big run holds a CPU slot, whatever clone-allow names, but for the Dashboard roll's clone, so a ship reaches the live Dashboard (issue 1314, 7 Nov: a roll waited about 13 minutes behind a worker's test run); an unread load5 holds no clone (only where sysctl and uptime are both refused), while the gap and the big-run hold still stand (6 Nov, 02:45Z: one clone drove fseventsd to 226% CPU, load1 from 29 to 32.5 and load5 to 15.8, which engaged the brake); prints why it waits, nothing when it goes
   clone_spaced() {
     local brake line l s last
     brake=$(clone_brake)
@@ -2033,7 +2035,7 @@ if [ -n "$KIND" ]; then
     [ "$line" -lt $(((brake + 1) / 2)) ] && line=$(((brake + 1) / 2))
     l=$(load5)
     [ -n "$l" ] && [ "$l" -ge "$line" ] && { echo "for load5 under $line, the brake's $brake less $CLONE_MARGIN and never under half of it"; return; }
-    for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
+    [ "$WHO" = ops-dashboard ] || for s in run-slot run-slot-2 run-slot-3 run-slot-4; do
       reclaim "$OPS/$s"
       [ -d "$OPS/$s" ] && [ "$(cut -d' ' -f5 "$OPS/$s.holder" 2>/dev/null)" = big ] && { echo "while a big run holds $s"; return; }
     done
@@ -2073,12 +2075,39 @@ if [ -n "$KIND" ]; then
     # a loop bash dropped mid-expansion (the rule above) set no flag, so the waiter stops rather than run
     [ -n "$LDONE" ] || exit 143
   fi
+  # clone waiters take the lane in the heavy queue's order, class then ask time (issue 1317, 7 Nov: the first mkdir won, and a clone waited 13385 s while five asked after it passed): each leaves run-slot.clone-waiters/<class>-<asked>-<pid>-<who> holding its start time, which a reread's exec keeps, so it keeps its place
+  CLONE_QUEUE="$OPS/run-slot.clone-waiters"
+  # pid $1's start time, from ps, else from the kernel's process table, since Claude Code's sandbox refuses the setuid ps
+  started_at() {
+    local s
+    s=$(LC_ALL=C TZ=UTC ps -o lstart= -p "$1" 2>/dev/null) || s=$(python3 -I "$(dirname "$(realpath "$SELF")")/ptable.py" started "$1" 2>/dev/null | cut -d' ' -f2-)
+    echo $s
+  }
+  # FIRST: the entry of the clone waiter that goes next, by the glob's order (a 1-digit class, then a 10-digit ask time), dropping each one before it whose pid is gone, or every 12th poll, the full reread's beat, whose pid shows another start time, since a waiter can die without its exit (issue 1316) and a read of the start time starts ps (issue 1338)
+  clone_first() {
+    local t n pid st
+    FIRST=
+    for t in "$CLONE_QUEUE"/[0-9]*; do
+      [ -e "$t" ] || continue
+      n=${t##*/} pid=${n#*-*-} pid=${pid%%-*} st=
+      [ "$t" = "$CLONE_TICKET" ] && { FIRST=$n; return; }
+      alive "$pid" && { [ $((polls % 12)) -ne 0 ] || { { read -r st < "$t"; } 2>/dev/null; [ "$(started_at "$pid")" = "$st" ]; }; } && { FIRST=$n; return; }
+      rm -f "$t"
+    done
+  }
+  if [ "$KIND" = clone ]; then
+    mkdir -p "$CLONE_QUEUE"
+    CLONE_TICKET="$CLONE_QUEUE/$CLASS-$ASKED-$$-$WHO"
+    started_at $$ > "$CLONE_QUEUE/.$$" && mv "$CLONE_QUEUE/.$$" "$CLONE_TICKET"
+  fi
   # the clone's spacing is shared, so one waiter works it out about every 15 to 24 s for all of them (issue 1338): run-slot.clone-verdict holds the CPU slots' and
   # the clone lane's holder lines it was worked out under, then its verdict, and a waiter takes one written no earlier than its own last tick under the same lines, so a verdict serves up to 48 s
   CLONE_VERDICT="$OPS/run-slot.clone-verdict"
   clone_holders() { local s l; HL=; for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-clone; do l=; [ -d "$OPS/$s" ] && { read -r l < "$OPS/$s.holder" 2>/dev/null; l="held $l"; }; HL="$HL|$l"; done; }
   clone_verdict() {
     local h v
+    # the Dashboard roll's clone skips the big-run hold, so its verdict is its own
+    [ "$WHO" = ops-dashboard ] && { spaced=$(clone_spaced); return; }
     clone_holders
     if [ -n "$CT0" ] && [ $((SECONDS - CT0)) -lt "$CTICK" ] && [ "$HL" = "$CHL" ]; then spaced=$CSP; return; fi
     h= v=
@@ -2101,6 +2130,10 @@ if [ -n "$KIND" ]; then
     spaced=
     self_changed && reread
     [ "$KIND" = clone ] && clone_verdict
+    if [ "$KIND" = clone ] && [ -z "$spaced" ]; then
+      clone_first
+      [ -n "$FIRST" ] && [ "$FIRST" != "${CLONE_TICKET##*/}" ] && spaced="behind ${FIRST#*-*-*-}, who asked first"
+    fi
     if [ -z "$spaced" ]; then
       if ! [ -d "$OPS/run-slot-$KIND" ]; then
         mkdir "$OPS/run-slot-$KIND" 2>/dev/null && { GOT=1; break; }
@@ -2117,6 +2150,7 @@ if [ -n "$KIND" ]; then
     waited=$((waited + 5))
   done
   [ -n "$GOT" ] || exit 143
+  [ -n "$CLONE_TICKET" ] && rm -f "$CLONE_TICKET" && CLONE_TICKET=""
   SLOT="$OPS/run-slot-$KIND"
   ends=""
   [ "$KIND" = clone ] && ends=$(clone_ends "$@")
