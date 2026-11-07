@@ -21,11 +21,11 @@ import {
   type Context,
   cronMatches,
   cycle,
+  idleCompact,
   leadOf,
   nextDue,
   resultOf,
   runner,
-  idleCompact,
   switchAccount,
   trashPurge,
 } from "../../../../../packages/scripts/src/ops-tick/tick"

@@ -646,7 +646,7 @@ export const trashPurge =
     await appendFile(join(ctx.ops, "log", "trash-purge.log"), `${isoSeconds(ctx.now)} ${line}\n`)
   }
 
-// The idle-compaction trial (ADR 0020): the idle-compact bin sends /compact to each worker or runner of 200k+ tokens 50 to 58 minutes after its last turn, and each line it prints lands in ops/log/idle-compact.log; a failed pass throws, so the beat reads failed. PLAYGROUND_LIVE_READS names the live machine outright, since the main checkout reads it only as a person's own clone, which ops-tick's environment could turn into a refusal, and a stray PLAYGROUND_FIXTURE beside it refuses into the log.
+// The idle-compaction trial (ADR 0020): the idle-compact bin sends /compact to each worker or runner of 200k+ tokens 50 to 58 minutes after its last turn, and each line it prints lands in ops/log/idle-compact.log; a failed pass throws, so the beat reads failed. PLAYGROUND_LIVE_READS names the live machine outright, since the Dashboard checkout reads it by its branch only while git answers, and a stray PLAYGROUND_FIXTURE beside it refuses into the log.
 // The beat runs the bin straight from the Dashboard's checkout, not `bun run idle-compact` from ops-tick's folder: the package.json script's prebuild starts an unslotted turbo build in the main checkout right after a ship, and the bin's env validates only against the Dashboard checkout's own .env, which load-dotenv reads from the --cwd.
 export const idleCompact = async (ctx: Context, checkout = dashboardCheckout(ctx.repo)) => {
   if (checkout === null) throw new Error(`idle-compact: ${NO_CHECKOUT}`)
