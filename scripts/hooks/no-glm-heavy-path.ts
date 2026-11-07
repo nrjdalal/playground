@@ -107,6 +107,12 @@ const COPIERS = new Set(["cp", "ditto", "rsync"])
 const BUSY_RUN = /\b(?:bun|cp|ditto|npm|pip[\d.]*|pipx|pnpm|python[\d.]*|rsync|uv|yarn)\b/i
 // in any case, since macOS's filesystem runs GIT as git
 const GIT_CALL = /\bgit\b[\s\S]*\b(?:commit|push)\b/i
+// Claude Code's own tools that list and read an MCP server's resources, named outside mcp__
+const MCP_RESOURCE_TOOLS = new Set([
+  "ListMcpResourcesTool",
+  "ReadMcpResourceDirTool",
+  "ReadMcpResourceTool",
+])
 // what an org tool's refusal can match, read before the call is parsed
 const ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i
 // a runner or a path, either of which may run an org script, which its folder rule reads once the call parses
@@ -812,7 +818,7 @@ async function inspect(
     tool_input?: { command?: unknown }
     tool_name?: unknown
   }
-  if (typeof tool === "string" && tool.startsWith("mcp__"))
+  if (typeof tool === "string" && (tool.startsWith("mcp__") || MCP_RESOURCE_TOOLS.has(tool)))
     return orgRefusal(
       `this ${tool} call`,
       "an MCP tool reaches an org's or an outside service's data",

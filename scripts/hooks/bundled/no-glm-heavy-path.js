@@ -5779,128 +5779,6 @@ function bodyOf(commands, k) {
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
-var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]/;
-var LEADS = new Set([
-  "!",
-  "-",
-  "builtin",
-  "command",
-  "elif",
-  "exec",
-  "if",
-  "nocorrect",
-  "noglob",
-  "time",
-  "until",
-  "while"
-]);
-function sources(line) {
-  let command = true;
-  for (const [raw] of line.replace(/\\\n/g, "").matchAll(/[;&|(){}\n]|(?:\$'(?:[^'\\]|\\[\s\S])*'?|'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]|[^\s;&|(){}'"\\])+/g)) {
-    const word = raw.replace(/\$'/g, "'").replace(/['"\\]/g, "");
-    if (/^[;&|(){}\n]$/.test(raw) || /^(?:\]\]|do|else|then)$/.test(word))
-      command = true;
-    else if (!command)
-      continue;
-    else if (word === "source" || word === "." || word === "eval")
-      return true;
-    else if (!LEADS.has(word) && !/^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(word))
-      command = false;
-  }
-  return false;
-}
-var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
-var zshSplits = (line) => {
-  if (ZSH_SPLITS.test(line))
-    return true;
-  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
-    const at = command.search(ARRAY_MAKERS);
-    if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at)))
-      return true;
-  }
-  const joined = line.replace(/[\\'"]/g, "");
-  if (sources(line) || sources(joined))
-    return true;
-  const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
-  const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
-  return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
-};
-var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
-var ZSH_ARRAYS = new Set([
-  "aliases",
-  "argv",
-  "builtins",
-  "cdpath",
-  "commands",
-  "comppostfuncs",
-  "compprefuncs",
-  "compstate",
-  "dirstack",
-  "dis_aliases",
-  "dis_builtins",
-  "dis_functions",
-  "dis_functions_source",
-  "dis_galiases",
-  "dis_patchars",
-  "dis_reswords",
-  "dis_saliases",
-  "epochtime",
-  "errnos",
-  "fignore",
-  "fpath",
-  "funcfiletrace",
-  "funcsourcetrace",
-  "funcstack",
-  "functions",
-  "functions_source",
-  "functrace",
-  "galiases",
-  "history",
-  "historywords",
-  "jobdirs",
-  "jobstates",
-  "jobtexts",
-  "keymaps",
-  "killring",
-  "langinfo",
-  "mailpath",
-  "manpath",
-  "match",
-  "mbegin",
-  "mend",
-  "module_path",
-  "modules",
-  "nameddirs",
-  "options",
-  "parameters",
-  "patchars",
-  "path",
-  "pipestatus",
-  "psvar",
-  "region_highlight",
-  "registers",
-  "reply",
-  "reswords",
-  "saliases",
-  "signals",
-  "sysparams",
-  "termcap",
-  "terminfo",
-  "userdirs",
-  "usergroups",
-  "watch",
-  "widgets",
-  "words",
-  "zle_bracketed_paste",
-  "zle_highlight",
-  "zsh_eval_context",
-  "zsh_scheduled_events"
-]);
-var oneWord = (written) => {
-  const plain = ONE_WORD.exec(written);
-  return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "");
-};
 var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
@@ -6004,8 +5882,8 @@ var setVar = (vars, key, value) => {
 };
 var merge = (out, part) => {
   out.value += part.value;
-  if (part.splits && out.splits !== "always")
-    out.splits = part.splits;
+  if (part.splits)
+    out.splits = true;
   if (part.unknown)
     out.unknown ??= part.unknown;
   if (part.variable)
@@ -6447,23 +6325,18 @@ function word(lx) {
     } else if (c === "$" && next === '"')
       lx.i++;
     else if (c === "$" || c === "`") {
-      const from = lx.i;
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
-      const written = src.slice(from, lx.i);
       if (marked(text.value))
-        merge(out, {
-          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
-          value: ""
-        });
+        out.splits = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir3();
       lx.i++;
     } else {
       if (c === UNKNOWN || c === READ)
-        out.splits = "always";
+        out.splits = true;
       out.value += c;
       bare += c;
       lx.i++;
@@ -6499,7 +6372,7 @@ function double(lx) {
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge(out, text);
       if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
-        out.splits = "always";
+        out.splits = true;
     } else {
       out.value += c;
       lx.i++;
@@ -7140,18 +7013,17 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
   const { inline, operand } = shellOperand(args, name);
-  const splits = (script) => SPLITTERS.has(name) || name === "zsh" && (zshSplits(script) || args.some((a) => /^[-+]/.test(a.value) && a.value !== "-c"));
   if (operand && inline) {
     let script = operand.value;
     if (xargs?.replace && script.includes(xargs.replace)) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    return run(lexScript(script, env), { ...subshell(env), splits: splits(script) }, visit, builtins);
+    return run(lexScript(script, env), subshell(env), visit, builtins);
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
-    const verdict = await run(lexScript(text, env), { ...subshell(env), splits: splits(text) }, visit, builtins);
+    const verdict = await run(lexScript(text, env), subshell(env), visit, builtins);
     if (verdict)
       return verdict;
   }
@@ -7481,6 +7353,11 @@ var RUNNER_TAKES = new Set([
 var COPIERS = new Set(["cp", "ditto", "rsync"]);
 var BUSY_RUN = /\b(?:bun|cp|ditto|npm|pip[\d.]*|pipx|pnpm|python[\d.]*|rsync|uv|yarn)\b/i;
 var GIT_CALL = /\bgit\b[\s\S]*\b(?:commit|push)\b/i;
+var MCP_RESOURCE_TOOLS = new Set([
+  "ListMcpResourcesTool",
+  "ReadMcpResourceDirTool",
+  "ReadMcpResourceTool"
+]);
 var ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i;
 var RUNNER_CALL = /\b(?:bash|bun|bunx|deno|node|npm|npx|pnpm|sh|tsx|yarn|zsh)\b|\//i;
 var heavy = (path) => OPUS_PATHS.some((p) => p.endsWith("/") ? path.startsWith(p) : path === p);
@@ -8008,7 +7885,7 @@ async function inspect(raw, environment, load5, limit) {
     tool_input: toolInput,
     tool_name: tool
   } = JSON.parse(raw);
-  if (typeof tool === "string" && tool.startsWith("mcp__"))
+  if (typeof tool === "string" && (tool.startsWith("mcp__") || MCP_RESOURCE_TOOLS.has(tool)))
     return orgRefusal(`this ${tool} call`, "an MCP tool reaches an org's or an outside service's data");
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
