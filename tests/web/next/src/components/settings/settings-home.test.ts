@@ -16,4 +16,9 @@ describe("the Settings page", () => {
   test("holds Privacy after Extensions, above the owner rung's fallback", () => {
     expect(home).toMatch(/<Extensions \/>\s*<Privacy \/>[\s\S]*: \(\s*<OwnerOnly/)
   })
+
+  // PG-1196: Jobs follows Privacy, so the sections a person sets up first stay on top
+  test("lists Jobs after Privacy, above Remote", () => {
+    expect(home).toMatch(/<Privacy \/>\s*<Jobs \/>\s*<Remote \/>/)
+  })
 })

@@ -4,6 +4,7 @@ import {
   type Choices,
   choicesOf,
   CLOCKS_STOPPED_AT,
+  picksOf,
   rowOfAnswer,
 } from "@packages/config/inbox"
 import { useQuery } from "@tanstack/react-query"
@@ -33,10 +34,11 @@ export async function answerItem(
   text?: string,
   note?: string,
   option?: number,
+  options?: number[],
 ) {
   const { data, error } = await unwrap(
     apiClient.v1.inbox[":id"].answer.$post({
-      json: { action, note, option, seen: updatedAt, text },
+      json: { action, note, option, options, seen: updatedAt, text },
       param: { id },
     }),
   )
@@ -868,8 +870,15 @@ export const inboxTarget = (anchor: string, items: readonly InboxItem[]): boolea
 export const decisionChoices = (item: InboxItem): Choices | null =>
   item.kind === "decision" ? choicesOf(item.preview) : null
 
-// Pure: the result line's lead for a pick, the option as the card showed it: a lettered row by its letter and label, a yes or no by its side and its own label, and a bare Approve or Deny where the row says no more.
-function pickedLine(item: InboxItem, answer: { choice: string; option?: number }): string {
+// Pure: the result line's lead for a pick, the option as the card showed it: a multi-question ask by each question's pick, a lettered row by its letter and label, a yes or no by its side and its own label, and a bare Approve or Deny where the row says no more.
+function pickedLine(
+  item: InboxItem,
+  answer: { choice: string; option?: number; options?: number[] },
+): string {
+  if (answer.options && item.kind === "decision") {
+    const picks = picksOf(item.preview, answer.options)
+    if (picks) return picks.map((p) => `${p.letter}. ${p.label}`).join(" · ")
+  }
   const side = answer.choice === "deny" ? "Deny" : "Approve"
   const row = item.kind === "decision" ? rowOfAnswer(item.preview, answer) : null
   if (!row) return side

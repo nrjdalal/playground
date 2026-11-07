@@ -20,7 +20,7 @@ const settle = (values: Record<string, unknown>) =>
   )
 const WATCH = join(import.meta.dir, "../../../../../extensions/slack/skills/slack/scripts/watch.ts")
 process.env.PLAYGROUND_DATA_DIR = data
-const SET = { "slack.dmChannel": "D0FIXTURE", "slack.dmOwner": "U0OWNER" }
+const SET = { "slack.dmChannel": "D0MADE0201", "slack.dmOwner": "U0OWNER" }
 
 const fake = (result = { code: 0, out: "" }) => {
   const ran: string[][] = []

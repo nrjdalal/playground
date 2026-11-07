@@ -1,9 +1,13 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import type { InboxItem } from "../../../../../../api/hono/src/lib/dashboard/inbox"
-import { type Choices, choicesOf } from "../../../../../../packages/config/src/inbox"
+import {
+  type AskQuestion,
+  type Choices,
+  choicesOf,
+} from "../../../../../../packages/config/src/inbox"
 import { DashboardContext } from "../../../../../../web/next/src/components/dashboard/dashboard"
 import {
   AskChoices,
@@ -11,6 +15,7 @@ import {
   Inbox,
   InboxCard,
   NewPill,
+  picksKey,
   ShelfDismiss,
   ShelfLabel,
 } from "../../../../../../web/next/src/components/dashboard/inbox"
@@ -23,6 +28,7 @@ import {
   Questionnaire,
   QuestionnaireItem,
 } from "../../../../../../web/next/src/components/ui/questionnaire"
+import { cardDraftKey, readDrafts, saveDraft } from "../../../../../../web/next/src/lib/drafts"
 import { INBOX_QUERY_KEY, SHELF_LABELS, type Shelf } from "../../../../../../web/next/src/lib/inbox"
 import { tipsOf } from "../../tooltips"
 
@@ -129,6 +135,80 @@ describe("a queued answer's poster", () => {
     } as InboxItem)
     expect(html).toContain("Queued for")
     expect(html).toContain('aria-description="dispatcher"')
+  })
+})
+
+describe("a multi-question ask (#1250)", () => {
+  const multi = {
+    ...decision,
+    id: "id-48",
+    preview: {
+      questions: [
+        {
+          options: [{ description: "a day of soak", label: "staging" }, { label: "main" }],
+          question: "Which base?",
+          recommended: 0,
+        },
+        { options: [{ label: "now" }, { label: "later" }], question: "When?" },
+      ],
+      text: "Pick for each.",
+      type: "ask",
+    },
+    ref: 48,
+    title: "Port it, and when?",
+  } as InboxItem
+
+  test("picksKey changes when an in-place edit grows, shrinks, reorders or rewords the questions, so the card drops stale picks (#1250)", () => {
+    const q = (question: string, labels: string[]): AskQuestion => ({
+      options: labels.map((label, index) => ({
+        go: true,
+        index,
+        label,
+        letter: String.fromCharCode(65 + index),
+      })),
+      question,
+    })
+    const base = [q("Base?", ["staging", "main"]), q("When?", ["now", "later"])]
+    const same = [q("Base?", ["staging", "main"]), q("When?", ["now", "later"])]
+    expect(picksKey(base)).toBe(picksKey(same))
+    expect(picksKey(base)).not.toBe(picksKey([...base, q("Who?", ["ops"])]))
+    expect(picksKey(base)).not.toBe(picksKey([base[0]!]))
+    expect(picksKey(base)).not.toBe(picksKey([base[1]!, base[0]!]))
+    expect(picksKey(base)).not.toBe(picksKey([q("Base?", ["staging", "trunk"]), base[1]!]))
+  })
+
+  test("shows its words alone, with no On Approve line (#1250)", () => {
+    const html = opened(multi)
+    expect(html).toContain("Pick for each.")
+    expect(html).not.toContain("On Approve")
+  })
+
+  test("shows its first question lettered, the recommended one badged in place, with Next and Send in the footer", () => {
+    const html = opened(multi)
+    expect(html).toContain("Which base?")
+    expect(html).toContain("A. staging")
+    expect(html).toContain("Recommended")
+    expect(named(html, "Next")).not.toBe("")
+    expect(named(html, "Send")).not.toBe("")
+  })
+
+  // once answered the stepper is gone and its result reads one pick per question and the note; the header sits outside every QuestionnaireItem, so the result renders as a plain description, not a QuestionnaireDescription, which throws there
+  test("renders its answer as one pick per question and the note once answered", () => {
+    const answered = {
+      ...multi,
+      answer: {
+        at: "2026-10-12T10:05:00.000Z",
+        choice: "approve",
+        note: "Soak it.",
+        options: [0, 1],
+      },
+      status: "approved",
+    } as InboxItem
+    const html = opened(answered)
+    expect(html).toContain("A. staging · B. later")
+    expect(html).toContain("You: ")
+    expect(html).toContain("Soak it.")
+    expect(html).not.toContain("When?")
   })
 })
 
@@ -272,8 +352,10 @@ describe("one action where two overlapped, and Draft where the app has a draft A
   test("a card's answer names the updatedAt it showed, so the API refuses one to words its poster edited since", () => {
     const card = readFileSync(join(web, "src/components/dashboard/inbox.tsx"), "utf8")
     const client = readFileSync(join(web, "src/lib/inbox.ts"), "utf8")
-    expect(card).toContain("answerItem(item, action, text, note.trim() || undefined, option)")
-    expect(client).toContain("json: { action, note, option, seen: updatedAt, text }")
+    expect(card).toContain(
+      "answerItem(item, action, text, note.trim() || undefined, option, options)",
+    )
+    expect(client).toContain("json: { action, note, option, options, seen: updatedAt, text }")
   })
 
   test("an unread update's line ends in a single tick, Mark as read; once read, a muted double tick named Read, folded, its row keeping Dismiss (#882)", () => {
@@ -1825,5 +1907,73 @@ describe("one word a meaning: Later, Archive, Reply and Replying (PG-900)", () =
     for (const old of ['"Snoozed"', '"Archived"', "Mark all done as read", "Dismiss all archived"])
       expect(source).not.toContain(old)
     expect(SHELF_LABELS).toMatchObject({ archived: "Archive", snoozed: "Later" })
+  })
+})
+
+// A draft card's changed words outlive a remount (a list refresh, a shelf move), kept in the composer's draft store under the card's own key, and its sent words never take a kept edit.
+describe("a draft card's changed words", () => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+  const store = new Map<string, string>()
+  beforeAll(() =>
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        removeItem: (key: string) => void store.delete(key),
+        setItem: (key: string, value: string) => void store.set(key, value),
+      } as Storage,
+    }),
+  )
+  afterEach(() => {
+    for (const to of Object.keys(readDrafts())) saveDraft(to, { attachments: [], text: "" })
+  })
+  afterAll(() => {
+    if (real) Object.defineProperty(globalThis, "localStorage", real)
+    else delete (globalThis as { localStorage?: Storage }).localStorage
+  })
+
+  const draft = {
+    ...decision,
+    kind: "draft",
+    preview: {
+      link: "https://app.slack.com/client/T0000000000/D0MADEUP11",
+      text: "hi",
+      to: "Merritt DM",
+    },
+  } as InboxItem
+  const box = (html: string) =>
+    html.match(/<textarea[^>]*aria-label="Message to Merritt DM"[^>]*>([^<]*)<\/textarea>/)?.[1]
+  const keep = (text: string) => saveDraft(cardDraftKey(draft.id), { attachments: [], text })
+
+  test("come back in its box when the card mounts again", () => {
+    keep("hi, the ship moves to Friday")
+    expect(box(opened(draft))).toBe("hi, the ship moves to Friday")
+  })
+
+  test("come back in a card a reply collapsed, once it is opened again", () => {
+    keep("hi, the ship moves to Friday")
+    const replied = {
+      ...draft,
+      answer: { at: "2026-10-12T10:05:00.000Z", choice: "replied" },
+    } as InboxItem
+    expect(box(opened(replied))).toBe("hi, the ship moves to Friday")
+  })
+
+  test("never show on a sent card, which reads the words as they went", () => {
+    keep("hi, the ship moves to Friday")
+    const sent = {
+      ...draft,
+      answer: { at: "2026-10-12T10:05:00.000Z", choice: "send", editedText: "hi there" },
+      status: "sent",
+    } as InboxItem
+    const html = opened(sent, "done")
+    expect(box(html)).toBeUndefined()
+    expect(html).toContain("hi there")
+    expect(html).not.toContain("moves to Friday")
+  })
+
+  test("are another card's alone: a card shows its own words when only another's are kept", () => {
+    saveDraft(cardDraftKey("id-42"), { attachments: [], text: "for another card" })
+    expect(box(opened(draft))).toBe("hi")
   })
 })

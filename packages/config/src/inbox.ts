@@ -42,6 +42,16 @@ export const answerPayloadSchema = z.strictObject({
     })
     .optional(),
   owned: ranSchema.optional(),
+  picks: z
+    .array(
+      z.strictObject({
+        index: z.number().int().min(0).max(5),
+        label: z.string().min(1),
+        letter: z.string().length(1),
+        question: z.string().min(1),
+      }),
+    )
+    .optional(),
   ref: z.string().regex(/^#i\d+$/),
   relay: z.strictObject({ for: z.string().min(1), why: z.literal("poster-ended") }).optional(),
   results: z
@@ -96,6 +106,11 @@ export type ChoicePreview =
       approve?: string
       deny?: string
       options?: { description?: string; label: string }[]
+      questions?: {
+        options: { description?: string; label: string }[]
+        question: string
+        recommended?: number
+      }[]
       type: "ask"
     }
   | { key: string; kind: string; more?: unknown[]; type: "accept" }
@@ -193,6 +208,40 @@ export function rowOfAnswer(
       ? rows.find((r) => !r.go)
       : rows.filter((r) => r.go)[answer.option ?? 0]
   return row ?? null
+}
+
+// A multi-question ask's one question, as the card shows it: its prompt, its options lettered A on, and the index of the one it recommends.
+export type AskQuestion = { options: ChoiceRow[]; question: string; recommended?: number }
+
+// Pure: each question of a multi-question ask, its options lettered as go rows with no no-go row, since one is picked for every question; empty for an ask with no questions or any other preview.
+export function questionsOf(preview: ChoicePreview): AskQuestion[] {
+  if (preview.type !== "ask" || !preview.questions) return []
+  return preview.questions.map((q) => ({
+    options: lettered(q.options.map((option) => ({ ...option, go: true }))),
+    question: q.question,
+    recommended: q.recommended,
+  }))
+}
+
+// Pure: the option the owner picked in each question of a multi-question ask, by its letter and label, for the poster's payload and the result line; null for an ask with no questions, a wrong count of picks, or a pick past a question's options.
+export function picksOf(
+  preview: ChoicePreview,
+  options: number[],
+): { index: number; label: string; letter: string; question: string }[] | null {
+  const questions = questionsOf(preview)
+  if (questions.length === 0 || options.length !== questions.length) return null
+  const picks: { index: number; label: string; letter: string; question: string }[] = []
+  for (const [at, question] of questions.entries()) {
+    const row = question.options[options[at]!]
+    if (!row) return null
+    picks.push({
+      index: row.index,
+      label: row.label,
+      letter: row.letter,
+      question: question.question,
+    })
+  }
+  return picks
 }
 
 // When the Inbox stopped moving cards by the clock, set at this change's last code commit before the live dashboard took it: the old clock had already moved every card answered or read before then to Done, so those keep the list's week, while each one since stays in the Inbox until a verb moves it (inboxView in the web, listItems in the API).
