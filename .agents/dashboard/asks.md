@@ -291,6 +291,8 @@
   `none` or what still depends on the target, and is refused without it,
   the refusal naming the checks; `checked` stays in the stored payload and the owner's card does not show it.
   A draft's is `{to, text, thread?, attachments?}`: `to` a short name ("a teammate's thread", "a teammate's DM").
+  A draft with no `link`, one that carries `noLink` with why, is a public post's, which the owner posts on a social site or a public page, so it keeps to the **public** rule (`extensions/core/rules/public.md`).
+  `bun run ask new` and `edit` refuse such a draft whose `text` holds what that rule keeps out, naming the kind and never the text: `publicDraftRefusal` in `api/hono/src/lib/dashboard/public-draft.ts` runs `scripts/hooks/public-draft.ts` on the `text` as a child (`scripts/hooks/README.md`, The public-draft check), and a draft with a `link` posts as before.
   Its `attachments`, such as an issue's before and after shots, show under its words as an ask's do, and while it is open its card reads `2 files · uploads on Send` under them when its `link` names a Slack conversation (`uploadsOn` in `web/next/src/lib/inbox.ts`).
   On Send, the dashboard shares those files into that link's channel and thread before the words reach the poster (`filesToUpload` in `inbox.ts`, through `playground dm upload <item id>`, messages.md), and the card's result line counts them (`Sent · 2 files shared`); the poster still gets the words alone (`answerPayload`).
   A Linear draft's files, a draft's with no Slack link, and one whose link's thread part does not parse (`slackPlace`) stay on the card; a link that names no thread shares them at its conversation's top level.

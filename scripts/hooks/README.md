@@ -551,6 +551,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   A Slack upload from a path that holds a factory term (the scratchpad folder's name does) is refused, so copy the file first to `/private/tmp/claude-501/<topic>/`, a `<topic>` that names no session and holds no term.
   When it cannot start it refuses and when it times out it lets the call through ([Registered in both settings files](#registered-in-both-settings-files)), and its two lists are read as [Guard lists](#guard-lists) says.
   It shares `scripts/hooks/shell.ts` and `scripts/hooks/github.ts` (the repository resolver) with the other hooks, and its tests are in `bun run test:file tests/scripts/hooks`.
+  Its term pattern also reads a public post's draft for `bun run ask new` and `edit`, through `factoryTerms` ([The public-draft check](#the-public-draft-check)).
 
 ## no-public-leak
 
@@ -565,6 +566,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   That section opens at the exact `### ❤️ Contributors` line and ends at the first line that is neither blank nor a contributor's, so a heading of any shape, a fence or prose closes it.
   The same names on any other line, in the ship's title, or in any other write are refused.
   Its kinds are `packages/scripts/src/trace-count/kinds.ts`, which the trace ratchet counts too, and its list is read as [Guard lists](#guard-lists) says; on a fresh clone with no list, the list-free kinds still refuse.
+  Those kinds and their refusal words (`SAID`) also read a public post's draft for `bun run ask new` and `edit` ([The public-draft check](#the-public-draft-check)).
   Its tests are `bun run test:file tests/scripts/hooks/no-public-leak.test.ts`.
 
 ## The trace ratchet
@@ -581,6 +583,19 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   To watch a refusal end to end on a machine where it exits 2, point `PLAYGROUND_DATA_DIR` at a scratch folder whose `extensions/policy.json` holds made-up settings, `{ "values": { "owner.names": ["<made-up name>"], "factory.archiveRepo": "<made-up owner>/<repo>" } }`, and whose `extensions/hooks/no-public-leak.json` holds a made-up entry under each key the exit-2 message names.
   Append a line holding one of those list values to an ordinary tracked file in your own worktree, such as `GLOSSARY.md`, `git add` it, and run `PLAYGROUND_DATA_DIR=<scratch> bun run trace-count`; done when its refusal names `<file>:<line>: names` (or the list kind you used).
   Probe with a list value, since each list kind's floor in `counts.json` is 0, so its one hit refuses; then restore the file with `git reset -q HEAD <file>` and `git checkout HEAD -- <file>`.
+
+## The public-draft check
+
+- ALWAYS: Write a public post's draft, the draft with no `link`, by the **public** rule (`extensions/core/rules/public.md`).
+  `scripts/hooks/public-draft.ts` is no hook: a draft reaches the Inbox as JSON on `bun run ask`'s stdin, which no PreToolUse guard reads as a write, so `bun run ask new` and `edit` run the check themselves, before the item posts.
+  `publicDraftText` in `api/hono/src/lib/dashboard/public-draft.ts` picks out a draft with no `link`, the public post's, since every draft names its place or says why it has none (`noLink`) and a message to a colleague carries its Slack or Linear `link`; any other item starts no check.
+  `publicDraftRefusal` hands that draft's `text` to the finder as its one argument through `run-argv.ts`'s runner (`bun --no-env-file scripts/hooks/public-draft.ts <text>`), so the leak guards' code stays out of the API's own graph and no new process spawner joins `api/hono/src/lib`.
+  The finder refuses on the first hit, in this order: a work figure, a factory term, a kind no-public-leak refuses, a ticket or PR number, a repository.
+  A work figure is a count beside PR, pull request, commit or session, one word between them at most (`FIGURE`: digits, a dozen, a hundred, a thousand or a number word from two up, so "one commit reverts it" stays).
+  A factory term comes through no-playground-leak's `factoryTerms` (its list, the roster, the skills), and a kind no-public-leak refuses through trace-count's `patterns` and that guard's `SAID`.
+  A ticket or PR number is trace-count's issue ref or a `PG-<n>` key, which no-public-leak lets through, since the public repository speaks of its own issues; a repository is `factory.repo`, `factory.publicRepo` or `factory.archiveRepo` by name, or any `github.com/<owner>/<repo>` link.
+  Exit 2 prints the refusal, the kind of text and its fix and never the text, which the CLI prints as its own and posts nothing; exit 0 posts; a list that cannot be read refuses as the guards do ([Guard lists](#guard-lists)), and any other exit, or an exit 2 that prints nothing, refuses too, naming it.
+  Its tests are `bun run test:file tests/scripts/hooks/public-draft.test.ts tests/api/hono/src/lib/dashboard/public-draft.test.ts`, and the CLI's own case is in `tests/api/hono/src/bin/dashboard-ask.test.ts`.
 
 ## no-linear-ticket
 
