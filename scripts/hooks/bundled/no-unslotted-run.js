@@ -416,7 +416,36 @@ function bodyOf(commands, k) {
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/;
+var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]/;
+var LEADS = new Set([
+  "!",
+  "-",
+  "builtin",
+  "command",
+  "elif",
+  "exec",
+  "if",
+  "nocorrect",
+  "noglob",
+  "time",
+  "until",
+  "while"
+]);
+function sources(line) {
+  let command = true;
+  for (const [raw] of line.replace(/\\\n/g, "").matchAll(/[;&|(){}\n]|(?:\$'(?:[^'\\]|\\[\s\S])*'?|'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]|[^\s;&|(){}'"\\])+/g)) {
+    const word = raw.replace(/\$'/g, "'").replace(/['"\\]/g, "");
+    if (/^[;&|(){}\n]$/.test(raw) || /^(?:\]\]|do|else|then)$/.test(word))
+      command = true;
+    else if (!command)
+      continue;
+    else if (word === "source" || word === "." || word === "eval")
+      return true;
+    else if (!LEADS.has(word) && !/^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(word))
+      command = false;
+  }
+  return false;
+}
 var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
 var zshSplits = (line) => {
   if (ZSH_SPLITS.test(line))
@@ -427,6 +456,8 @@ var zshSplits = (line) => {
       return true;
   }
   const joined = line.replace(/[\\'"]/g, "");
+  if (sources(line) || sources(joined))
+    return true;
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
   const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
   return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
@@ -2531,7 +2562,7 @@ var BINARY = new Set([
 ]);
 var OPENS2 = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES2 = new Set(["done", "esac", "fi", "}"]);
-var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
+var LEADS2 = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
 
 // scripts/hooks/no-main-checkout.ts
 function mainCheckout(dir) {

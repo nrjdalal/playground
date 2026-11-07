@@ -304,6 +304,20 @@ var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
+var LEADS = new Set([
+  "!",
+  "-",
+  "builtin",
+  "command",
+  "elif",
+  "exec",
+  "if",
+  "nocorrect",
+  "noglob",
+  "time",
+  "until",
+  "while"
+]);
 var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
 var ZSH_ARRAYS = new Set([
   "aliases",
