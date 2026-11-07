@@ -364,34 +364,85 @@ test("a session's --discard on an OPEN PR's worktree, or one whose PR state read
   }
 })
 
-test("a worktree a live session holds is refused whatever its PR state: a finished PR's with no --decision, an open or unread one's with an approved decision", async () => {
-  for (const state of ["MERGED", "CLOSED", "OPEN", null] as const) {
+// runRm's exit and each line it printed, with the worktree's PR stubbed as #<number> in that state (none for null), and a live roster row given
+const heldRun = async (
+  deps: RmDeps,
+  words: string[],
+  state: PrState | null,
+  row: Record<string, string>,
+  number = 1,
+) => {
+  writeFileSync(join(deps.data, "roster.json"), JSON.stringify({ agents: [row] }))
+  // PG-1419: the reader gives the PR's number beside its state, so a pass names the PR that freed it
+  const prState = (async () => (state === null ? null : { number, state })) as never
+  const decision = async (): Promise<Decision> => ({
+    kind: "decision",
+    preview: { type: "delete", what: `the worktree ${words[1]}` },
+    status: "approved",
+  })
+  const out: string[] = []
+  const [error, log] = [console.error, console.log]
+  console.error = (line: string) => void out.push(line)
+  console.log = (line: string) => void out.push(line)
+  try {
+    const session = { ...deps, caller: async () => "a session (role worker)", decision, prState }
+    return { code: await runRm(words, session), out }
+  } finally {
+    console.error = error
+    console.log = log
+  }
+}
+
+// PG-1419: a working row that kept a finished PR's branch no longer holds that PR's worktree
+test("a worktree whose PR merged or closed passes a working roster row naming its branch, and says which PR freed it", async () => {
+  for (const state of ["MERGED", "CLOSED"] as const) {
     const { deps, main } = machine()
     const { wt } = dirtyWorktree(main)
-    const holder = { branch: "PG-1-thing", name: "abc123-worker", status: "working" }
-    writeFileSync(join(deps.data, "roster.json"), JSON.stringify({ agents: [holder] }))
-    const { asked, session } = statedSession(deps, state)
-    const finished = state === "MERGED" || state === "CLOSED"
-    const decision = async (): Promise<Decision> => ({
-      kind: "decision",
-      preview: { type: "delete", what: `the worktree ${wt}` },
-      status: "approved",
+    const row = { branch: "PG-1-thing", name: "abc123-worker", status: "working" }
+    const words = ["--worktree", wt, "--discard", "--decision", "#i9"]
+    const { code, out } = await heldRun(deps, words, state, row, 7)
+    expect({ code, said: out[0] }).toEqual({
+      code: 0,
+      said: `playground: ${wt} is freed by #7, which reads ${state}, past abc123-worker's roster row (working)`,
     })
-    const said: string[] = []
-    const error = console.error
-    console.error = (line: string) => void said.push(line)
-    try {
-      const words = ["--worktree", wt, "--discard", ...(finished ? [] : ["--decision", "#i9"])]
-      expect(await runRm(words, { ...session, decision })).toBe(1)
-    } finally {
-      console.error = error
-    }
-    expect(said).toEqual([
-      `playground: ${wt} is held by abc123-worker, which the roster lists as working`,
-    ])
-    expect(asked).toEqual(finished ? [[wt, undefined]] : [])
+    expect(existsSync(wt)).toBe(false)
+  }
+})
+
+test("a working roster row naming the branch still holds a worktree whose PR is open or reads as none (no PR, or GitHub unreadable)", async () => {
+  for (const state of ["OPEN", null] as const) {
+    const { deps, main } = machine()
+    const { wt } = dirtyWorktree(main)
+    const row = { branch: "PG-1-thing", name: "abc123-worker", status: "working" }
+    const words = ["--worktree", wt, "--discard", "--decision", "#i9"]
+    expect(await heldRun(deps, words, state, row)).toEqual({
+      code: 1,
+      out: [`playground: ${wt} is held by abc123-worker, which the roster lists as working`],
+    })
     expect(existsSync(wt)).toBe(true)
   }
+})
+
+test("a review clone at a merged PR's head stays held by a live row that names it by another PR, its next one, which is open", async () => {
+  const { deps, main } = machine()
+  dirtyWorktree(main)
+  const clone = join(main, ".claude", "worktrees", "review-8")
+  git(main, "worktree", "add", "-q", "--detach", clone)
+  const row = { name: "abc123-reviewer", pr: "https://github.com/o/r/pull/8", status: "working" }
+  const words = [
+    "--worktree",
+    clone,
+    "--discard",
+    "--decision",
+    "#i9",
+    "--pr",
+    "https://github.com/o/r/pull/7",
+  ]
+  expect(await heldRun(deps, words, "MERGED", row, 7)).toEqual({
+    code: 1,
+    out: [`playground: ${clone} is held by abc123-reviewer, which the roster lists as working`],
+  })
+  expect(existsSync(clone)).toBe(true)
 })
 
 test("a worktree's PR state counts only when exactly one PR answers, as a branch used twice finds two, that PR is the worktree's own by branch or head, and its head is HEAD or an ancestor of it", () => {
