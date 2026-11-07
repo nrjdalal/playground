@@ -439,7 +439,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
 
   test("a named item that is not open fails closed with why", async () => {
     expect(await stop(`${STEPS}\nTracked in #i40.`, { statuses: { "#i40": "approved" } })).toBe(
-      `${STEPS_REASON} (#i40 is approved, not open)`,
+      `${STEPS_REASON} (#i40 is approved, not open or done)`,
     )
   })
 
@@ -632,20 +632,28 @@ describe("the dashboard read's time limits (#1269)", () => {
 
   // bun run ask get prints the whole item: an update keeps status done whatever the owner does, so what the owner did is read from its answer (#1486)
   test.each([
-    ["a posted update", { status: "done" }, "done"],
-    ["an update the owner marked Done", { answer: { dismissedAt: "t" }, status: "done" }, "done"],
-    [
-      "an update the owner dismissed",
-      { answer: { dismissed: true, dismissedAt: "t" }, status: "done" },
-      "dismissed",
-    ],
-    ["an update the owner archived", { answer: { archivedAt: "t" }, status: "done" }, "archived"],
-    [
-      "an open decision the owner archived",
-      { answer: { archivedAt: "t" }, status: "open" },
-      "archived",
-    ],
-  ])("%s reads %p", async (_name, item, standing) => {
+    { item: { status: "done" }, name: "a posted update", standing: "done" },
+    {
+      item: { answer: { dismissedAt: "t" }, status: "done" },
+      name: "an update the owner marked Done",
+      standing: "done",
+    },
+    {
+      item: { answer: { dismissed: true, dismissedAt: "t" }, status: "done" },
+      name: "an update the owner dismissed",
+      standing: "dismissed",
+    },
+    {
+      item: { answer: { archivedAt: "t" }, status: "done" },
+      name: "an update the owner archived",
+      standing: "archived",
+    },
+    {
+      item: { answer: { archivedAt: "t" }, status: "open" },
+      name: "an open decision the owner archived",
+      standing: "archived",
+    },
+  ])("$name reads $standing", async ({ item, standing }) => {
     const dashboard = stubDashboard({}, item)
     stubs.push(dashboard)
     expect(await readStatus("#i1", dashboard)).toBe(standing)

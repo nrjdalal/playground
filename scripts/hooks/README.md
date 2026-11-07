@@ -191,11 +191,13 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   Its reason reads `send these steps to the dispatcher as a draft for one Inbox card rather than posting it, so the card is posted once, send each step's progress to the dispatcher as an edit to that draft, then say in chat in one line that the dispatcher has the draft`,
   and its steps pass once a sentence outside fenced code and blockquotes says they went there: forwarded, gave, handed, passed or sent, then "dispatcher", then "as a draft" on one line with no `.`, `;`, `!` or `?` between, "went to the dispatcher as a draft", or the reason's own "the dispatcher has the draft".
   A hand-off it denies or puts off (not, never, n't, be, get, gets, to or will before the verb, one word between allowed, so `will be sent` and `I'll get these sent` count as not yet made) and a status line naming a draft PR still read as steps kept.
-  When a decision ask fires too, the ask's reason above leads; an open `#iN` (the gate below) passes the steps for every manager.
+  When a decision ask fires too, the ask's reason above leads; an `#iN` that reads open or done (the gate below) passes the steps for every manager.
   Chat answers his current question, and anything promised to him for later, or a later outcome of something he asked, reaches him as an Inbox update (playbook's **ask** rule: the Inbox carries everything past the current answer, a later update on a past ask included).
-  A reply naming an `#iN` passes once one of the first five items it names reads `open` through `bun run ask get` in the live dashboard's checkout (the worktree on `live.branch`, found with `git worktree list`, killed after 3s).
-  The reads run at once, each killed after 10s (one took 5.9s under load), and the first to read open passes the stop at once and ends every read still running.
-  When no named item reads open, one it cannot read included, the reply fails closed, the reason saying what each item read as.
+  A reply naming an `#iN` passes once one of the first five items it names reads `open` or `done` through `bun run ask get` in the live dashboard's checkout (the worktree on `live.branch`, found with `git worktree list`, killed after 3s).
+  `done` counts since a progress card (an `update`) reads `done` from its post on and after the owner marks it Done, so the session edits that card or names it, and a reply naming it asks for no copy (on 7 Nov a gate that took `open` alone had the dispatcher post one card 5 times).
+  An item the owner archived reads `archived`, and an update the owner dismissed `dismissed`, each from the item's answer, so neither counts, nor does a decision the owner denied.
+  The reads run at once, each killed after 10s (one took 5.9s under load), and the first to read open or done passes the stop at once and ends every read still running.
+  When no named item reads open or done, one it cannot read included, the reply fails closed, the reason saying what each item read as.
   It judges the hook input's `last_assistant_message`, since the transcript can lag the turn's last message (ADR 0001), and fails open on an input it cannot read, as a Stop hook that cannot start or times out does.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
 
