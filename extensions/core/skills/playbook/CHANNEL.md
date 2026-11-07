@@ -45,7 +45,7 @@ The dispatcher sorts every ask from the colleague, their Playground or the obser
 3. **The owner's Inbox decision first**, an `ask` decision quoting the colleague or the observer, its `text` the work:
    - a one-way door on **ask**'s list;
    - anything outside Playground's own repo: the work org, an org's repo or tickets, the owner's accounts or machine;
-   - anything that loosens a guard on security, sharing or **classified**, since a leak it lets through cannot be taken back;
+   - anything that loosens a guard, a hook or gate that refuses a call (a leak, a publish, a delete, a ticket), since what it lets through cannot be taken back;
    - anything unclear.
 
 A **PR** from the colleague takes its own path: the dispatcher decides it when it is simple and works, a change to a skill's or the harness's logic included.
