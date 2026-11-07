@@ -1043,7 +1043,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       script.push(text.value)
     }
     // an inline evaluator's program is read with its regex literals masked (maskRegexes), since a regex is neither a path, a glob nor a redirect; a program on a root-shell line or inside a substitution or subshell, whose output a shell may run, is read as written
-    const program = rootLine || cmd.scope !== 0 ? undefined : evalProgram(parsed)
+    // only where every folder the shell may be in lies outside the root and each folder above it, since from those canary's reading of the program decides, its leading regex read as a path word and its punctuation as globs
+    const away = places(env).every(
+      ({ cwd }) => cwd !== undefined && !above(cwd, true) && !inRoot(cwd),
+    )
+    const program = rootLine || cmd.scope !== 0 || !away ? undefined : evalProgram(parsed)
     const masked =
       program && !program.glob && !marked(program.value)
         ? maskRegexes(program.value, (body) => guarded(body, env))
