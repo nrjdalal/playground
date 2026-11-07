@@ -208,6 +208,26 @@ export const groups: Group[] = [
         "an inline node program dividing a private field named in, around a guarded playground call",
         'node -e \'class A { #in = 1; f() { return this.#in / require("child_process").execSync("playground ext add a b") / 1 } }\'',
       ],
+      [
+        "an inline node program dividing a variable named await, around a guarded playground call",
+        'node -e \'var await = 1; await / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline node program dividing a variable named yield, around a guarded playground call",
+        'node -e \'var yield = 1; yield / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline node program dividing a variable named of, around a guarded playground call",
+        'node -e \'var of = 1; of / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline bun program dividing after a generic's closing bracket, around a guarded playground call",
+        'bun -e \'let a = 1 as unknown as Array<number> / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
+      [
+        "an inline bun program dividing after TypeScript's non-null mark, around a guarded playground call",
+        'bun -e \'let a: number = 1; a! / require("child_process").execSync("playground ext add a b") / 1\'',
+      ],
       // an alias of the shell tag or of spawn
       [
         "an inline bun program whose shell tag, destructured from Bun under its own name, removes a path in the root",

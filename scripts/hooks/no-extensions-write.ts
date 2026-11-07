@@ -460,9 +460,9 @@ function evalProgram({ args, name }: Parsed): Word | undefined {
   }
 }
 
-// a token after which a / opens a regex literal rather than a division: none, opening punctuation, an operator but a postfix ++, -- or non-null !, or a keyword that takes an expression and names no member; a } or ) ends an expression, so a / after one divides
+// the tokens after which a / can only open a regex: none, opening punctuation, a binary or prefix operator (a + or - but one of a postfix ++ or --, a ! but TypeScript's non-null one), an arrow, or a reserved word that takes an expression and names no member; after any other token a / may divide, so the scan masks nothing there
 const REGEX_AFTER =
-  /(?:^|[(,=:[&|?{;*%<>~^]|(?<![\w$)\]]\s*)!|(?<!\+)\+|(?<!-)-|(?<!\.\s*)(?<![\w$#])(?:await|case|delete|do|else|in|instanceof|new|of|return|throw|typeof|void|yield))\s*$/
+  /(?:^|[(,=:[{;?~^%*&|]|=>|(?<![\w$)\]}"'`]\s*)!|(?<!\+)\+|(?<!-)-|(?<!\.\s*)(?<![\w$#])(?:case|delete|do|else|in|instanceof|new|return|throw|typeof|void))\s*$/
 // a program that can turn a regex into text, so its body could reach a pipe or a file as words
 const STRINGIFIES =
   /\.source\b|\btoString\b|\bString\s*\(|\bJSON\s*\.\s*stringify\b|\.concat\s*\(|\.join\s*\(|\$\{/

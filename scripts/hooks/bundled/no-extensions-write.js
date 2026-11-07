@@ -7836,7 +7836,7 @@ function evalProgram({ args, name }) {
       return;
   }
 }
-var REGEX_AFTER = /(?:^|[(,=:[&|?{;*%<>~^]|(?<![\w$)\]]\s*)!|(?<!\+)\+|(?<!-)-|(?<!\.\s*)(?<![\w$#])(?:await|case|delete|do|else|in|instanceof|new|of|return|throw|typeof|void|yield))\s*$/;
+var REGEX_AFTER = /(?:^|[(,=:[{;?~^%*&|]|=>|(?<![\w$)\]}"'`]\s*)!|(?<!\+)\+|(?<!-)-|(?<!\.\s*)(?<![\w$#])(?:case|delete|do|else|in|instanceof|new|return|throw|typeof|void))\s*$/;
 var STRINGIFIES = /\.source\b|\btoString\b|\bString\s*\(|\bJSON\s*\.\s*stringify\b|\.concat\s*\(|\.join\s*\(|\$\{/;
 function maskRegexes(source, guarded) {
   if (STRINGIFIES.test(source))
