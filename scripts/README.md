@@ -236,4 +236,4 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 ## An edit script's replacements
 
 An edit script that writes code or text with JavaScript passes each replacement that may hold `$` through a replacer function, `s.replace(a, () => b)`, or `split(a).join(b)`, since a string replacement reads `$$`, `$&`, `` $` ``, `$'` and `$1` as patterns: `"a".replace("a", "echo $$")` gives `echo $`, and an edit script once turned `$$` into `$` in `run-slot.sh` with no error.
-In the repo's TypeScript, `tests/packages/scripts/src/replace-dollar.test.ts` fails on a literal replacement holding `$$`, `` $` `` or `$'`, or `$&` or `$1` after a string search, naming the file, the line and the fix.
+In the repo's TypeScript, `tests/packages/scripts/src/replace-dollar.test.ts` fails on a literal replacement holding `$$`, `` $` `` or `$'`, or `$&` after a string search, naming the file, the line and the fix.

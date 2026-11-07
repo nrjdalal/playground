@@ -15,12 +15,12 @@ describe("dollarReplacements", () => {
     expect(dollarReplacements(`s.replace(MARK, \`mark-${pid}\`)`)).toEqual([1])
   })
 
-  test("flags $& and $1 after a string search, which has no groups", () => {
+  test("flags $& after a string search, which JS swaps for the match", () => {
     expect(dollarReplacements(`s.replace("a", "[${match}]")`)).toEqual([1])
-    expect(dollarReplacements(`s.replace('a', "${group}")`)).toEqual([1])
   })
 
-  test("leaves a regex's back-references, a named search, a replacer function and split(a).join(b)", () => {
+  test("leaves a string search's $1, a regex's back-references, a named search, a replacer function and split(a).join(b)", () => {
+    expect(dollarReplacements(`s.replace('a', "${group}")`)).toEqual([])
     expect(dollarReplacements(`s.replace(/[.*]/g, "\\\\${match}")`)).toEqual([])
     expect(dollarReplacements(`s.replace(/(a)(b)/, "${group}-")`)).toEqual([])
     expect(dollarReplacements(`s.replace(RE, "${group}")`)).toEqual([])

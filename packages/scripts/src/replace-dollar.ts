@@ -1,10 +1,10 @@
-// A .replace or .replaceAll call whose literal replacement holds a `$` pattern JS reads in place of the text: `$$`, `` $` `` and `$'` in any call, and `$&`, `$1` or `$<name>` after a string search, which has no groups, so its `$&` is only ever a slip. A regex or a named search keeps its back-references.
+// A .replace or .replaceAll call whose literal replacement holds a `$` pattern JS reads in place of the text: `$$`, `` $` `` and `$'` in any call, and `$&` after a string search, which has no groups, so its `$&` is only ever a slip while its `$1` or `$<name>` comes out as written. A regex or a named search keeps its back-references.
 
 export const FIX =
   "a replacement that may hold $ goes through a replacer function, s.replace(a, () => b), or split(a).join(b)"
 
 const ALWAYS = /\$[$`']/
-const AFTER_STRING = /\$(?:&|\d|<)/
+const AFTER_STRING = /\$&/
 
 // The index just past a quoted string or a template starting at i, its `${…}` parts skipped whole.
 const pastQuoted = (s: string, i: number): number => {
