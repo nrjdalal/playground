@@ -12,7 +12,6 @@ import {
   RiChat3Line,
   RiCheckDoubleLine,
   RiCheckLine,
-  RiCloseCircleLine,
   RiCloseLine,
   RiDeleteBinLine,
   RiDraftLine,
@@ -1450,7 +1449,7 @@ export function InboxCard({
           waiting(item)
             ? "it goes to Done, and its poster is told it is set aside"
             : "it goes to Done, marked dismissed",
-          <RiCloseCircleLine />,
+          <RiCloseLine />,
           () => void onAnswer("dismiss"),
         )}
       <Reopen open={open} setOpen={setToggled} />
