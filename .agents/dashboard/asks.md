@@ -426,8 +426,8 @@
   ```
 
 - A `guard` decision asks the owner to set a guard setting, a key a guard reads to allow or deny a call, since no session can write one (`no-extensions-write` refuses it, `scripts/hooks/README.md`): any session posts the card, and only the owner's Approve writes the setting.
-  Its `key` is one of `GUARD_SETTING_KEYS` (`packages/settings/src/guard-keys.ts`, which the hook's `GUARD_KEYS` matches) or a registry job's `jobs.<name>`, `scope` is the owner's login or an org (core changes by a pull request), `value` is what the key's schema takes,
-  checked as it is posted (a job takes `{"enabled": true|false}` alone),
+  Its `key` is one of `GUARD_SETTING_KEYS` (`packages/settings/src/guard-keys.ts`, which the hook's `GUARD_KEYS` matches), a registry job's `jobs.<name>` or an org's own job's `jobs.<camelName>` (a job the registry lacks), `scope` is the owner's login or an org (core changes by a pull request), `value` is what the key's schema takes,
+  checked as it is posted (a registry job takes `{"enabled": true|false}` alone, an org's own job a whole job row, which Approve's write then checks against that org's script folders and refuses at the login's scope),
   or left out to take the setting back to its default, and `why` says why (`guardSchema` in `api/hono/src/lib/dashboard/inbox.ts`);
   Edit is refused.
   The card shows the key, the scope and the value as its JSON, exactly as Approve writes them.

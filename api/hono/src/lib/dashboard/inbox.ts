@@ -24,7 +24,9 @@ import {
   itemKeySchema,
   JOBS,
   jobKey,
+  jobSchema,
   KINDS,
+  orgJobKey,
   readSetting,
   resetSetting,
   SCOPE_NAME,
@@ -364,11 +366,16 @@ export type OwnerApps = { login: string; read: () => string[] | null; run: ExtRu
 // A registry job's setting key, which a guard decision turns on or off by its enabled field alone, so its command, schedule and runtime still come from the registry.
 const JOB_KEYS = Object.keys(JOBS).map(jobKey)
 const jobSwitch = z.strictObject({ enabled: z.boolean() })
+// An org's own job's setting key, jobs.<camelName> for a job the registry lacks, whose whole row a guard decision places; the write checks it against the org's script folders
+const orgJobKeySchema = z
+  .string()
+  .regex(/^jobs\.[a-z][A-Za-z0-9]*$/)
+  .refine(orgJobKey)
 
-// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS) or a registry job's, the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes (a job's enabled field alone), or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
+// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS), a registry job's or an org's own job's (a whole row, which the write checks against that org's script folders), the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes (a job's enabled field alone), or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
 const guardSchema = z
   .strictObject({
-    key: z.union([z.enum(GUARD_SETTING_KEYS), z.enum(JOB_KEYS)]),
+    key: z.union([z.enum(GUARD_SETTING_KEYS), z.enum(JOB_KEYS), orgJobKeySchema]),
     scope: extScopeSchema,
     type: z.literal("guard"),
     value: z.unknown().optional(),
@@ -379,6 +386,16 @@ const guardSchema = z
     if (JOB_KEYS.includes(preview.key) && !jobSwitch.safeParse(preview.value).success) {
       const message = `${preview.key} takes its enabled field alone, {"enabled": true} or {"enabled": false}: its command, schedule and runtime come from the registry`
       ctx.addIssue({ code: "custom", message, path: ["value"] })
+      return
+    }
+    if (orgJobKey(preview.key)) {
+      const parsed = jobSchema.safeParse(preview.value)
+      if (!parsed.success)
+        ctx.addIssue({
+          code: "custom",
+          message: `${preview.key} takes a whole job row: ${z.prettifyError(parsed.error).replaceAll("\n", " ")}`,
+          path: ["value"],
+        })
       return
     }
     const checked = checkSetting(preview.key, preview.value)
