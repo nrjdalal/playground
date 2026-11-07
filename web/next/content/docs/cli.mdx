@@ -192,7 +192,7 @@ When you, an org and Playground each hold a rule of that name, yours is the one 
 `playground settings list`, `get <key>`, `why <key>`, `set <key> <value> --reason "<why>"` and `reset <key> --reason "<why>"` read and change your settings in your extensions folder, with no Dashboard needed.
 Every change needs its reason, and `--scope` sets it for an org (its name) or for you (your GitHub login, the default).
 [Settings and extensions](/docs/extensions#settings) has each command and how a scope wins.
-`playground settings import-jobs <jobs.json>` brings a hand-kept `jobs.json` into settings once, at the switch; [Ops jobs](/docs/jobs) has the rest.
+`playground settings import-jobs <jobs.json>` brings a hand-kept `jobs.json` into settings once, at the switch, and a session's import is refused but for `--dry-run`, which lists what it would write; [Ops jobs](/docs/jobs) has the rest.
 
 ## Use your extensions: `playground ext`
 

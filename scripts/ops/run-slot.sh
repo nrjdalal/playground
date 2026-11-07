@@ -30,7 +30,7 @@ stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
-SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
+SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
   local f="$OPS/$1" line ends now m
@@ -210,8 +210,8 @@ if [ "${1:-}" = size ]; then
   size_of "$2"
   exit
 fi
-# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, focus, load5-cap, single,
-# or the runner host's off or slot-off, for 4 hours unless --for says; a value (load5-cap's cap) goes on the line below. A set with no reason is refused
+# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, focus, idle-min, load5-cap, single,
+# or the runner host's off or slot-off, for 4 hours unless --for says; a value (idle-min's bar, load5-cap's cap) goes on the line below. A set with no reason is refused
 if [ "${1:-}" = set ]; then
   usage='usage: run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]'
   [ $# -ge 3 ] || { echo "$usage" >&2; exit 2; }
@@ -227,8 +227,8 @@ if [ "${1:-}" = set ]; then
   case "$who" in *[!A-Za-z0-9._#-]*|"") echo "run-slot.sh: <who> is a session name (letters, digits, . _ - #)" >&2; exit 2 ;; esac
   case "$name" in
     off|slot-off) path=runner-host/$name ;;
-    3-off|4-off|clone-off|focus|load5-cap|single) path=run-slot.$name ;;
-    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, focus, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
+    3-off|4-off|clone-off|focus|idle-min|load5-cap|single) path=run-slot.$name ;;
+    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, focus, idle-min, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
   esac
   [ -n "$reason" ] || { echo "run-slot.sh: a set takes --reason \"<why>\", so whoever finds the switch on knows why it stands" >&2; exit 2; }
   case "$span" in [0-9]*m) unit=60 ;; [0-9]*h) unit=3600 ;; *) unit= ;; esac
@@ -880,7 +880,7 @@ chain_lane() {
   [ -n "$commits" ] || return
   if chain_safe "$@"; then echo commit; else echo "general $(shown "$CHAIN_BAD")"; fi
 }
-# Quick slots, outside the queue, one holder each: a plain git commit (its pre-commit build, about 17s) takes run-slot-commit (builder, 13 Oct: five commits waited in a fifteen-deep queue; a commit with a longer hook goes through the queue as <who> -- bash -c '...'), and a node_modules clone (cp -cR <sibling>/node_modules <worktree>/) takes run-slot-clone (dispatcher, 13 Oct: three load spikes, 77 and 43 among them, each with fseventsd near 100% while clones ran at once); a git merge or pull takes run-slot-commit too, and a short bun test, docs:wrap or format:check takes run-slot-quick
+# Quick slots, outside the queue, one holder each: a plain git commit (its pre-commit build, about 17s) takes run-slot-commit (builder, 13 Oct: five commits waited in a fifteen-deep queue; a commit with a longer hook goes through the queue as <who> -- bash -c '...'), and a node_modules clone (cp -cR <sibling>/node_modules <worktree>/) takes run-slot-clone (dispatcher, 13 Oct: three load spikes, 77 and 43 among them, each with fseventsd near 100% while clones ran at once); a git merge or pull takes run-slot-commit too, and a bun install or a short bun test, docs:wrap or format:check takes run-slot-quick
 quick_rule() {
   local a first=""
   # a pre-commit step commit-slot.ts hands over (the build or a type check), marked RUN_SLOT_COMMIT_STEP=1 under its commit-<worktree> name, is a plain git commit's own step, so it takes run-slot-commit too (3 Nov: a plain commit's build waited about an hour in the queue)
@@ -898,8 +898,9 @@ quick_rule() {
     # a bun test or bun run test:file naming 1 to 3 test files under tests/, nothing else, takes run-slot-quick, with --cwd=<p> anywhere or a bare --cwd after run or test, since bun misreads one before the subcommand (scripts/hooks/README.md's no-false-green; ops, 20 Oct: with slot-off, a 5-file run that ran 1s waited 52 min behind suites; PG-2158)
     # bun run docs:wrap and format:check never run past seconds (run-slot.runs.log, 20 Oct: max 2s and 9s), so they take run-slot-quick too
     for a in "$@"; do case "$a" in docs:wrap|format:check) echo quick; return ;; esac; done
-    # bun install --ignore-scripts after a node_modules clone only links what the clone holds (retro 2, 31 Oct: 619 min queued in a day)
-    case " $* " in *" install --ignore-scripts "* | *" install "*" --ignore-scripts "*) echo quick; return ;; esac
+    # every bun install takes run-slot-quick, whatever its flags: on the shared warm cache a full one ran 1.9 to 3.3 s on 2.9 to 3.5 s of CPU, its two root scripts included, while it waited 3 to 6 min in the queue (PG-1344, measured; retro 2, 31 Oct: --ignore-scripts alone queued 619 min in a day); only a cold cache holds the slot longer (353 s, measured), once, since every later install reads the cache it filled
+    # install is bun's subcommand when only env, VAR=x, --cwd=<p> or another flag word stands before it: a bare --cwd before it makes bun run package.json's install script instead (no-false-green), as one before test does
+    for a in "$@"; do case "$a" in env|*=*|-*) continue ;; "$first") continue ;; install) echo quick; return ;; *) break ;; esac; done
     local n=0 t="" skip=""
     for a in "$@"; do
       [ -n "$skip" ] && { skip=""; continue; }
@@ -1738,7 +1739,13 @@ slot_open() {
   fi
   return 0
 }
-# whether the gauges open slots 2 to 4: mem_ok passing and the CPU 40% idle or more under load1 45 (5 Nov, 06:19 to 07:45Z: a 50% bar from load1 30
+# the CPU idle share slots 2 to 4 open at under load1 45: 40, or run-slot.idle-min's bar while it stands, a whole number from 0 to 100 on the file's last line as load_line reads its cap (issue 1431: a constant bar left Ops no way to put more of a machine's cores to use short of a code change); any other value keeps 40
+idle_min() {
+  local bar
+  bar=$(switch_on run-slot.idle-min && tail -n 1 "$OPS/run-slot.idle-min" | grep -xE '[0-9]{1,3}'); [ -n "$bar" ] && [ "$bar" -le 100 ] || bar=40
+  echo "$bar"
+}
+# whether the gauges open slots 2 to 4: mem_ok passing and the CPU idle at idle_min's bar or more, 40% unless run-slot.idle-min says, under load1 45 (5 Nov, 06:19 to 07:45Z: a 50% bar from load1 30
 # to 45 left the CPU at a median 48% idle, and 14 of its 30 CPU shuts read 40 to 49% idle) (dispatcher, 3 Nov: the resting sessions held load1 at 14 to 20 on 15 cores while the CPU sat 53 to 67% idle, so the old load1 lines of 12
 # and the cores left one lane open with 24 to 33 runs waiting; retro 36, 4 Nov: at a load1 30 stop the lanes were shut 109 of 120 minutes
 # with the CPU about half idle, and heavy runs waited up to 122 minutes); load1 45 stays a hard stop for the spikes, load1 64 after a burst
@@ -1755,7 +1762,7 @@ lanes_open() {
     -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
     busy) told busy "$BUSY_TOLD" ;;
   esac
-  if [ "${load%.*}" -lt 45 ] 2>/dev/null; then need=40; fi
+  if [ "${load%.*}" -lt 45 ] 2>/dev/null; then need=$(idle_min); fi
   if [ -z "$need" ]; then
     why=load1
   elif [ "$idle" = - ] || [ "$idle" = busy ] || ! [ "${idle%.*}" -ge "$need" ] 2>/dev/null; then

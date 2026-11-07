@@ -133,15 +133,15 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    It labels the session's pane with its name, and that label is where the session is found, so the session's roster entry records no `workspace` or `surface`.
    The Dashboard lists it by name, for any session to read; `herdr pane list` shows the labels only when run in a pane on the playground server, since from a pane on another server herdr's reads reach that server's socket.
    It waits for Claude's REPL with `pane wait-output`, and answers the folder trust and MCP picker for you only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else the session waits at the prompt for the owner, and spawn.sh says so.
-   The start records its runtime in `~/.playground/runtimes/<name>`, and a resume whose pin reads `cmux` opens in herdr and rewrites the pin.
+   Every start and resume records its runtime, herdr, in `~/.playground/runtimes/<name>`, rewriting whatever word an older pin held.
    With no `--runtime`, every start and resume opens in herdr, from any terminal; spawn.sh starts nothing in cmux, so it refuses `--runtime cmux` and a column anchored on a cmux `surface:N`.
    After a herdr server's restart, which brings each pane back as a shell under its label, ops-herdr runs `spawn.sh restore` for that server (LIFECYCLE.md, Ops jobs), which resumes every session whose resume record in `~/.playground/resume` names it on that server (its `# server:` line, the factory's when it has none) and whose roster row is not done, ended, parked or paused,
    each through `spawn.sh resume` and its gate with the `--account` its start was given, the `--model` it started with and an `--effort` other than high,
-   in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, no runtime pin, a runtime other than herdr, or an exec line that does not parse or that it does not run) or `not restored <name>: <reason>`, a gate's refusal included; it is safe to run again, one at a time:
+   in the pane holding its label, printing one line a record: `restored <name>`, `skipped <name>: <reason>` (`live`, the roster row's down status, a record that does not read, or an exec line that does not parse or that it does not run) or `not restored <name>: <reason>`, a gate's refusal included; it is safe to run again, one at a time:
    while another restore holds `resume/.restore.lock` it prints `another restore is running (pid <n>)` and exits 1.
    A readable record on another server gets no line, since that server's own restore reads it.
    A session that never took its first turn has no transcript, so its resume starts it afresh under its own id and name, with the prompt its start recorded in `resume/<name>.prompt`.
-   Done when each line reads `restored`, `skipped <name>: live` or a roster row's down status, or you have acted on it (a full gate: run it again once a session closes; a broken record or a missing pin: resume the session by hand).
+   Done when each line reads `restored`, `skipped <name>: live` or a roster row's down status, or you have acted on it (a full gate: run it again once a session closes; a broken record or a missing backend pin: resume the session by hand).
 
    `--check`, with any mode but restore or close, runs every gate but the live-name one and starts or closes nothing.
 

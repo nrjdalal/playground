@@ -125,8 +125,8 @@ describe("a write is refused before any session read or handler unless it comes 
     expect(cases.length).toBeGreaterThan(0)
   })
 
-  // PG-1196: Settings > Jobs' toggle writes through the settings PUT, and a guard decision's Approve through the Inbox's answer, so each is walked below.
-  test("the job toggle's write and a guard decision's Approve are among them", () => {
+  // PG-1196: Settings > Jobs' toggle, and its config card's Save (#1336), write through the settings PUT, and a guard decision's Approve through the Inbox's answer, so each is walked below.
+  test("the job toggle's write, the config card's edit and a guard decision's Approve are among them", () => {
     const labels = cases.map((c) => c.label)
     expect(labels).toContain("settings.ts PUT /:key")
     expect(labels).toContain("inbox.ts POST /:id/answer")

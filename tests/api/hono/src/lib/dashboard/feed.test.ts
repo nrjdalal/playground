@@ -156,12 +156,12 @@ describe("answerFeed", () => {
     expect(typed).toEqual([])
   })
 
-  test("sessions that cannot be read are CMUX_FAILED, and nothing is typed", async () => {
+  test("sessions that cannot be read are SESSIONS_FAILED, and nothing is typed", async () => {
     const { deps, typed } = fakes([questionItem()])
     deps.listLive = async () => {
       throw new Error("herdr down")
     }
-    expect(await answerFeed(ask(red), deps)).toMatchObject({ code: "CMUX_FAILED" })
+    expect(await answerFeed(ask(red), deps)).toMatchObject({ code: "SESSIONS_FAILED" })
     expect(typed).toEqual([])
   })
 
@@ -350,7 +350,7 @@ describe("answerFeed for a herdr session", () => {
         throw new Error("scrolled")
       },
     }
-    expect(await answerFeed(ask(red), before.deps)).toMatchObject({ code: "CMUX_FAILED" })
+    expect(await answerFeed(ask(red), before.deps)).toMatchObject({ code: "SESSIONS_FAILED" })
     expect(before.typed).toEqual([])
     const after = fakes([questionItem()], [PICKER])
     let reads = 0
