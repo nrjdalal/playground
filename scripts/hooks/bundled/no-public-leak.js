@@ -6165,6 +6165,7 @@ var withoutNeedsCmux = (row) => {
 var jobFields = strictObject({
   callsModel: boolean2(),
   command: string2().min(1).optional(),
+  config: record(string2(), unknown()).optional(),
   cwd: string2().min(1).optional(),
   description: string2().min(1),
   disabledWhy: string2().optional(),
@@ -6293,6 +6294,7 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     schema: jobRowSchema
   }
 ])));
+var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
 // packages/settings/src/models.ts
 var id = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id, such as claude-opus-5-5");
 var modelSettings = defineSettings({

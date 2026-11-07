@@ -274,7 +274,7 @@ describe("code-review-loop's round 1 greps each changed term", () => {
 })
 
 describe("code-review-loop checks its own fixes and a repo scanner's landing (PG-251)", () => {
-  test("step 5 runs the checks a patch's files call for before posting it with the results (R11-1: #61, #186, #212, #246)", async () => {
+  test("step 5 runs the checks a patch's files call for before posting it with the results (R11.1: #61, #186, #212, #246)", async () => {
     const step = (await skill()).match(/^5\. \*\*Hand small fixes over\.\*\*.*$/m)?.[0] ?? ""
     expect(step).toContain(
       "a wording you suggest in a finding included, and run the checks its files call for (`bun run docs:wrap --check` on a wrapped doc, `bun run test:file tests/packages/scripts/src/trace-count/count.test.ts` and `scripts/check-em-dashes.sh` on any doc, the test that pins the wording, `bun run test:file` on the file's mirrored test)",

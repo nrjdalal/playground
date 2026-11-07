@@ -4,7 +4,7 @@ import { parseArgs } from "node:util"
 
 import { endFocus, startFocus } from "../pr-merge/held"
 
-// playground focus: one session gets the Mac for a stretch, while every merge, every other session's heavy run and every new session but its own reviewer and tester and a firefighting start waits, and the Inbox holds what comes in quiet; focus.json in the data folder is the one record each part reads, every part ends at its `until` by itself, and ops-tick's focus-card beat posts the Inbox card once it has.
+// playground focus: one session gets the Mac for a stretch, while every merge, every other session's heavy run and every new session but its own reviewer and tester and a priority start waits, and the Inbox holds what comes in quiet; focus.json in the data folder is the one record each part reads, every part ends at its `until` by itself, and ops-tick's focus-card beat posts the Inbox card once it has.
 
 export const MAX_MINUTES = 180
 const DEFAULT_MINUTES = 120
@@ -183,7 +183,7 @@ export type FocusCard = {
 export async function focusCard(
   data: string,
   now: Date,
-  post: (card: FocusCard) => Promise<void>,
+  post: (card: FocusCard, focus: Focus) => Promise<void>,
 ): Promise<"none" | "posted" | "standing"> {
   const names = (await readdir(data).catch(() => [] as string[])).filter(
     (name) => name === "focus.json" || name.startsWith("focus.json.uncarded-"),
@@ -212,15 +212,22 @@ export async function focusCard(
   return result
 }
 
-const postCard = async (focus: Focus, data: string, post: (card: FocusCard) => Promise<void>) =>
-  post({
-    kind: "update",
-    preview: {
-      outcome: "finding",
-      text: `Focus was for: ${focus.reason}\nMeasured from run-slot.runs.log.\nWhat came into the Inbox while it stood counts again.`,
+const postCard = async (
+  focus: Focus,
+  data: string,
+  post: (card: FocusCard, focus: Focus) => Promise<void>,
+) =>
+  post(
+    {
+      kind: "update",
+      preview: {
+        outcome: "finding",
+        text: `Focus was for: ${focus.reason}\nMeasured from run-slot.runs.log.\nWhat came into the Inbox while it stood counts again.`,
+      },
+      title: `Focus for ${focus.session} ended: ${await summary(data, focus, new Date(focus.until))}`,
     },
-    title: `Focus for ${focus.session} ended: ${await summary(data, focus, new Date(focus.until))}`,
-  })
+    focus,
+  )
 
 const fail = (why: string, code = 2) => {
   console.error(`playground: ${why}`)

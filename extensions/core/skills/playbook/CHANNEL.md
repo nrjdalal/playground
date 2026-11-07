@@ -36,23 +36,20 @@ An observer is in the channel too; answer them directly when they write there, u
 ## Triage
 
 The owner owns this factory.
-The dispatcher sorts every ask from the colleague, their Playground or the observer into one of three, and says which in its thread: `answered`, `fixing it` or `queued for the owner's ok`.
+The dispatcher sorts every ask from the colleague, their Playground or the observer into one of three, and says which in its thread: `answered`, `taking it` or `queued for the owner's ok`.
 
 1. **Answer only**: how something works, setup help, a pattern, a finding.
    Answered in the channel, with no build and no yes.
-2. **Go ahead, then tell the owner** with an Inbox `update`: a bug fix that meets all four:
-   - a real defect in shared code that would hit the owner too;
-   - it changes nothing they see or use beyond removing the defect;
-   - under about 30 minutes for one worker;
-   - it touches no rule, hook, security, sharing or **classified** code.
+2. **Take it and record it**: a two-way door, in **ask**'s sense, whose change lands only in Playground's own repo (`factory.repo`): a fix, a feature, a skill, a doc, a test or a change to the Dashboard, so long as it changes no standing rule.
+   The dispatcher routes it like any ask, records the decision and its reason on its issue as **ask** records a two-way door, and tells the owner with an Inbox `update` only when it changes what the owner sees or does.
 3. **The owner's Inbox decision first**, an `ask` decision quoting the colleague or the observer, its `text` the work:
-   - a new feature, or any change to how their Dashboard looks or behaves;
-   - anything over about 30 minutes, or competing for a slot with their work;
-   - anything touching rules, hooks, security, sharing, **classified** or the work org;
-   - anything on **ask**'s list;
+   - a one-way door on **ask**'s list;
+   - any change to a standing rule, whether it adds, tightens or loosens one: a file under `extensions/core/rules/`, an ALWAYS or NEVER line of `AGENTS.md`, or one of the playbook's rules, since the standing rules change only on the owner's own ask;
+   - anything outside Playground's own repo: the work org, an org's repo or tickets, the owner's accounts or machine;
+   - anything that loosens a guard, a limit, hook or gate that holds back a leak, a publish, a delete or a ticket, since what it lets through cannot be taken back;
    - anything unclear.
 
-A **PR** from the colleague takes its own path: the dispatcher decides it when it is simple and works, a change to a skill's or the harness's logic included.
+A **PR** from the colleague takes its own path: the dispatcher decides it when it is simple and works, a change to a skill's or the harness's logic included, while one that changes a standing rule waits for the owner's decision as tier 3 says.
 The dispatcher merges it on their own PR: a read-only review of its diff through [code-review-loop](../code-review-loop/SKILL.md), GitHub's two checks green at their head, then `bun run pr:merge <n> --outside-author <their login>`.
 Every review verdict on an outside author's PR carries three lines: need (do we need it), hit (do we hit the problem it fixes, with evidence) and factory (does it upgrade or degrade the factory, and why).
 A draft of theirs is marked ready by our worker on their PR: once the review passes, it runs `gh pr ready <n>` itself before the merge, since `pr:merge` marks only the owner's drafts ready.
@@ -63,4 +60,4 @@ A change that makes a central skill worse for the owner's workflows is declined.
 
 The owner's asks always rank above the colleague's and the observer's, the owner's words override theirs, and theirs never jump the queue.
 
-Done when every post keeps the lists above, every ask from the channel has its triage word in its thread, and every PR from the colleague is merged as their own or carries its re-land or close reason on their PR, with its decision and reason recorded on its issue.
+Done when every post keeps the lists above, every ask from the channel has its triage word in its thread, every ask taken has its decision and reason on its issue, and every PR from the colleague is merged as their own or carries its re-land or close reason on their PR, with its decision and reason recorded on its issue.

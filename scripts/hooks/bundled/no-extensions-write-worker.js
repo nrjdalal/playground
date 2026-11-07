@@ -7193,6 +7193,8 @@ function steadyNames(named, commands) {
     const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
     if (!NAME_SETTERS.has(name) && loop === -1)
       continue;
+    if (bareExport(parses[at]))
+      continue;
     const vNames = cmd.words.flatMap((w, k) => k > 0 && /^-[^-\s]*v/.test(w.value) ? [{ ...w, value: w.value.slice(w.value.indexOf("v") + 1) }, cmd.words[k + 1]] : []);
     const names = loop !== -1 ? [cmd.words[loop + 1]] : PRINTS.has(name) ? vNames : cmd.words;
     for (const word of names) {
@@ -7207,7 +7209,10 @@ function steadyNames(named, commands) {
     }
   }
   const set = new Map;
+  const exports = new Map;
   const where = new Map;
+  const open = [];
+  const loops = new Map;
   let chain = 0;
   let depth = 0;
   for (const [at, cmd] of commands.entries()) {
@@ -7230,9 +7235,24 @@ function steadyNames(named, commands) {
     }
     if (depth < 0)
       return () => NONE2;
+    while (open.length > 0 && depth < open.at(-1).depth)
+      open.pop();
+    if (open.length > 0)
+      loops.set(cmd, new Map(open.map((o) => [o.key, o.values])));
+    const head = forList(cmd, named);
+    if (head)
+      open.push({ depth, ...head });
     const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&";
     if (!top || cmd.detached || !always && cmd.follows !== "&&")
       continue;
+    if (bareExport(parses[at])) {
+      for (const w of parses[at].args) {
+        const key = w.value.slice(0, w.value.indexOf("="));
+        if (holdable(key, named, counts))
+          exports.set(key, always ? { at } : { at, chain });
+      }
+      continue;
+    }
     const [first] = cmd.words;
     if (!first || !ASSIGN.test(first.value) || parses[at].name !== "")
       continue;
@@ -7246,14 +7266,45 @@ function steadyNames(named, commands) {
     const here = where.get(cmd);
     if (!here)
       return NONE2;
+    const before = (from) => !!from && from.at < here.at && (from.chain === undefined || from.chain === here.chain);
     return {
-      has: (key) => {
-        const from = set.get(key);
-        return !!from && from.at < here.at && (from.chain === undefined || from.chain === here.chain);
-      }
+      exported: (key) => before(exports.get(key)),
+      has: (key) => before(set.get(key)),
+      loop: (key) => loops.get(cmd)?.get(key)
     };
   };
 }
+var bareExport = ({ args, name }) => name === "export" && args.length > 0 && args.every((w) => !w.quoted && ASSIGN.test(w.value) && PLAIN_NAME.test(w.value.slice(0, w.value.indexOf("="))));
+function forList(cmd, named) {
+  const at = cmd.words.findIndex((w) => w.quoted || !(LEADS2.has(w.value) || w.value === "{"));
+  if (at === -1 || cmd.words[at].quoted || cmd.words[at].value !== "for")
+    return;
+  const [key, word, ...values] = cmd.words.slice(at + 1);
+  if (!key || key.quoted || !PLAIN_NAME.test(key.value) || named.counts.get(key.value) !== 1)
+    return;
+  if (!word || word.quoted || word.value !== "in" || values.length === 0)
+    return;
+  if (values.some((w) => marked(w.value) || /[*?[\]{}]/.test(w.value)))
+    return;
+  return { key: key.value, values: values.map((w) => w.value) };
+}
+function heldReadings(word, env, steady) {
+  if (!word.raw || !marked(word.value))
+    return;
+  const known = heldVars(env, { has: (key) => steady.has(key) || !!steady.exported?.(key) });
+  let sets = [known];
+  for (const key of new Set(word.raw.match(/[A-Za-z_]\w*/g) ?? [])) {
+    const values = steady.loop?.(key);
+    if (!values)
+      continue;
+    sets = sets.flatMap((s) => values.map((v) => ({ ...s, [key]: v })));
+    if (sets.length > LOOP_READINGS)
+      return;
+  }
+  const words = sets.map((s) => relexed(word.raw, s));
+  return words.every(Boolean) ? words : undefined;
+}
+var LOOP_READINGS = 64;
 function heldWord(word, env, steady) {
   return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady)) : undefined;
 }
@@ -7698,6 +7749,88 @@ function awkPrograms(words) {
   }
   return programs.length ? programs : undefined;
 }
+var EVALUATES2 = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"]);
+function evalProgram({ args, name }) {
+  if (name === "agent-browser") {
+    for (let k = 0;k < args.length; k++) {
+      const { value } = args[k];
+      if (value === "eval")
+        return args[k + 1];
+      const option = args[k - 1]?.value ?? "";
+      if (!value.startsWith("-") && !(option.startsWith("--") && !option.includes("=")))
+        return;
+    }
+    return;
+  }
+  if (name !== "bun" && name !== "node")
+    return;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (EVALUATES2.has(value))
+      return args[k + 1];
+    if (/^--(?:eval|print)=/.test(value))
+      return args[k];
+    if (!value.startsWith("-"))
+      return;
+  }
+}
+var REGEX_AFTER = /(?:^|[(,=:[{;?~^%*&|]|=>|(?<![\w$)\]}"'`]\s*)!|(?<!\+)\+|(?<!-)-|(?<!\.\s*)(?<![\w$#])(?:case|delete|do|else|in|instanceof|new|return|throw|typeof|void))\s*$/;
+var STRINGIFIES = /\.source\b|\btoString\b|\bString\s*\(|\bJSON\s*\.\s*stringify\b|\.concat\s*\(|\.join\s*\(|\$\{/;
+function maskRegexes(source, guarded) {
+  if (STRINGIFIES.test(source))
+    return source;
+  let out = "";
+  let k = 0;
+  while (k < source.length) {
+    const c = source[k];
+    const close = (end, from) => {
+      for (let j = from;j < source.length; j++) {
+        if (source[j] === "\\")
+          j++;
+        else if (source.startsWith(end, j))
+          return j + end.length;
+      }
+      return -1;
+    };
+    const end = c === '"' || c === "'" || c === "`" ? close(c, k + 1) : source.startsWith("//", k) ? close(`
+`, k + 2) : source.startsWith("/*", k) ? close("*/", k + 2) : undefined;
+    if (end === -1)
+      return source;
+    if (end !== undefined) {
+      out += source.slice(k, end);
+      k = end;
+      continue;
+    }
+    if (c === "/" && REGEX_AFTER.test(out)) {
+      let j = k + 1;
+      let inClass = false;
+      for (;j < source.length && source[j] !== `
+`; j++) {
+        if (source[j] === "\\")
+          j++;
+        else if (source[j] === "[")
+          inClass = true;
+        else if (source[j] === "]")
+          inClass = false;
+        else if (source[j] === "/" && !inClass)
+          break;
+      }
+      if (source[j] !== "/")
+        return source;
+      let flags = j + 1;
+      while (/[a-z]/.test(source[flags] ?? ""))
+        flags++;
+      const body = source.slice(k + 1, j);
+      const kept = guarded(body.replaceAll("\\/", "/")) || /["'`]/.test(body) || /^\s*(?:\+|\.(?!\s*(?:test|exec)\b))/.test(source.slice(flags));
+      out += kept ? source.slice(k, flags) : "RE";
+      k = flags;
+      continue;
+    }
+    out += c;
+    k++;
+  }
+  return out;
+}
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "")))
     return [];
@@ -7997,6 +8130,7 @@ async function inspect(raw, environment, unknown = false) {
     const near = relative(env);
     return value.includes(needle) || !!near && value.includes(near);
   };
+  const guarded = (body, env) => holds(body, env) || body.includes("~") || needle.split(sep2).filter(Boolean).some((part) => body.toLowerCase().includes(part.toLowerCase()));
   const judged = new Map;
   const names = (word, env, remover, literal = false) => {
     const quotedGlob = literal && !word.glob;
@@ -8064,6 +8198,14 @@ async function inspect(raw, environment, unknown = false) {
       const into = cmd.redirects.find((r) => r.target && writer(r) && (inRoot(pathOf(r.target, here)) || GLOB.test(r.target.value) && !!names(r.target, here, true)));
       if (into?.target)
         return refuse(`a write to ${pathOf(into.target, here)}`);
+      for (const r of cmd.redirects) {
+        if (!r.target || !writer(r) || !marked(r.target.value))
+          continue;
+        const words = heldReadings(r.target, here, steadyAt(cmd)) ?? [];
+        const named = words.map((word) => names(word, here, false)).find(Boolean);
+        if (named)
+          return refuse(`a write to ${named}`);
+      }
     }
     const blind = env.cwdAnywhere ? cmd.redirects.find((r) => r.target && writer(r) && pathOf(r.target, { ...env, cwd: undefined }) === undefined) : undefined;
     if (blind?.target)
@@ -8089,7 +8231,11 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`a root shell whose script (${text.unknown ?? "a value it cannot read"}) the hook cannot read; run its commands as calls of their own, with no root shell`);
       script.push(text.value);
     }
-    for (const raw of reader ? [] : [...script, ...runsOf(parsed, vars, whole, rootLine)]) {
+    const away = places(env).every(({ cwd }) => cwd !== undefined && !above(cwd, true) && !inRoot(cwd));
+    const evaluated = rootLine || cmd.scope !== 0 || !away ? undefined : evalProgram(parsed);
+    const masked = evaluated && !evaluated.glob && !marked(evaluated.value) ? maskRegexes(evaluated.value, (body) => guarded(body, env)) : undefined;
+    const own = (word) => word === evaluated && masked !== undefined ? { ...word, value: masked } : word;
+    for (const raw of reader ? [] : [...script, ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine)]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
       if (seen.has(line))
         continue;
@@ -8148,7 +8294,7 @@ async function inspect(raw, environment, unknown = false) {
           return refuse(`${verb} with a variable on ${named}`);
       }
       const literal = !whole && narrow(cmd, here);
-      for (const word of [first, ...args].map((word) => heldWord(word, here, steady) ?? word)) {
+      for (const word of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word))) {
         const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
