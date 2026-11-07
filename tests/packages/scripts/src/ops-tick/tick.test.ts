@@ -849,7 +849,7 @@ describe("the beats that send no line", () => {
     )
   })
 
-  test("the idle compact runs bun run idle-compact on the live machine every 5 minutes and logs each line it prints", async () => {
+  test("the idle compact runs the idle-compact bin straight on the live machine every 5 minutes and logs each line it prints", async () => {
     expect(beat("idle-compact").cron).toBe("*/5 * * * *")
     const ops = scratch()
     const said = "compacted aaaaaa-worker: 250k tokens, idle 55 min\n"
@@ -860,13 +860,12 @@ describe("the beats that send no line", () => {
         "env",
         "PLAYGROUND_LIVE_READS=1",
         "bun",
-        "run",
-        "--silent",
-        "--cwd",
-        "/repo",
-        "idle-compact",
+        "--no-env-file",
+        "/repo/api/hono/src/bin/idle-compact.ts",
       ],
     ])
+    expect(runs[0]).not.toContain("run")
+    expect(runs[0]).toContain("/repo/api/hono/src/bin/idle-compact.ts")
     expect(sent).toEqual([])
     expect(await Bun.file(join(ops, "log", "idle-compact.log")).text()).toContain(
       "compacted aaaaaa-worker: 250k tokens, idle 55 min",
@@ -879,7 +878,7 @@ describe("the beats that send no line", () => {
     expect(existsSync(join(ops, "log", "idle-compact.log"))).toBe(false)
     const failing = fake(ops, at(20, 10), { "idle-compact": { code: 1, err: "herdr is down\n" } })
     await expect(beat("idle-compact").run(failing.ctx)).rejects.toThrow(
-      "bun run idle-compact: herdr is down",
+      "idle-compact: herdr is down",
     )
   })
 })
