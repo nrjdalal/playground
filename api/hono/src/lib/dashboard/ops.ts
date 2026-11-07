@@ -168,14 +168,15 @@ export function opsRowOf(
   }
   const lastBeatAt = new Date(beat.lastBeatAt).toISOString()
   const refused = (json as { configRefused?: unknown }).configRefused
-  const read = typeof refused === "string" && refused ? { ...row, configRefused: refused } : row
+  const withRefused =
+    typeof refused === "string" && refused ? { ...row, configRefused: refused } : row
   // the heartbeat's cycle is the Down clock, so a schedule saying another pace is named rather than left to drift
   const problem =
     schedule?.every && schedule.every !== beat.cycleSeconds
       ? `Its schedule says every ${schedule.every}s, its heartbeat every ${beat.cycleSeconds}s`
       : null
   const down = (reason: string): OpsRow => ({
-    ...read,
+    ...withRefused,
     lastBeatAt,
     problem,
     reason,
@@ -187,17 +188,17 @@ export function opsRowOf(
     return down(`No beat for over ${STALE_CYCLES * beat.cycleSeconds}s`)
   }
   const waiting = /^waiting: (.+)/.exec(beat.lastResult)?.[1]
-  if (waiting) return { ...read, lastBeatAt, problem, reason: waiting, status: "waiting" }
+  if (waiting) return { ...withRefused, lastBeatAt, problem, reason: waiting, status: "waiting" }
   if (beat.lastResult !== "ok") {
     return {
-      ...read,
+      ...withRefused,
       lastBeatAt,
       problem,
       reason: beat.lastResult || "No result",
       status: "failing",
     }
   }
-  return { ...read, lastBeatAt, problem, reason: null, status: "running" }
+  return { ...withRefused, lastBeatAt, problem, reason: null, status: "running" }
 }
 
 const pidOf = (text: string | null): number | null => {

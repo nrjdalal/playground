@@ -38,32 +38,45 @@ export type JobRow = {
 const nameOf = (key: string) =>
   key.slice(PREFIX.length).replace(/[A-Z0-9]/g, (c) => `-${c.toLowerCase()}`)
 
-// Pure: each job from GET /api/v1/settings, A to Z by name, then scope: what it does, when it runs and whether it is on, and whether a setting sets it rather than its default. A registry job reads as your login does, its writes at your login's scope; an org's own job (a jobs.<camelName> row the registry lacks, at an org's scope, never your login's or core's, as the jobs render reads it) reads its org's row, its writes at that org.
+// An org's own job's name, as the jobs render names it: its key's camel case in kebab case.
+const orgNameOf = (key: string) =>
+  key.slice(PREFIX.length).replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+// Pure: whether an org's row has the shape the jobs render reads as a job: an object under jobs.<camelName> whose heartbeat is its own name. Its script folder is checked by the write, which refuses a row out of it.
+const orgJobShaped = (key: string, value: unknown): value is Record<string, unknown> => {
+  const name = orgNameOf(key)
+  return (
+    isObject(value) &&
+    /^[a-z][a-z0-9-]*$/.test(name) &&
+    `${PREFIX}${name.replace(/-([a-z0-9])/g, (_, c: string) => c.toUpperCase())}` === key &&
+    value.heartbeat === name
+  )
+}
+
+// Pure: each job from GET /api/v1/settings, A to Z by name, then scope: what it does, when it runs and whether it is on, and whether a setting sets it rather than its default. A registry job reads as your login does, its writes at your login's scope; an org's own job (a jobs.<camelName> row the registry lacks, at an org's scope, never your login's or core's, in the shape the jobs render reads) reads its org's row, its writes at that org.
 export const jobRows = (listed: Listed, scope: string): JobRow[] => {
   const registry = new Set(listed.keys.flatMap(({ aliases, key }) => [key, ...(aliases ?? [])]))
-  const orgs = listed.rows
-    .filter(
-      (each) =>
-        each.key.startsWith(PREFIX) &&
-        !registry.has(each.key) &&
-        each.scope !== scope &&
-        each.scope !== "core",
-    )
-    .map(({ key, scope: org, value }) => {
-      const job = value as JobValue
-      return {
-        config: job.config,
-        description: job.description ?? "",
+  const orgs = listed.rows.flatMap(({ key, scope: org, value }) => {
+    const skip = !key.startsWith(PREFIX) || registry.has(key) || org === scope || org === "core"
+    if (skip || !orgJobShaped(key, value)) return []
+    const job = value as JobValue
+    return [
+      {
+        config: isObject(job.config) ? job.config : undefined,
+        description: typeof job.description === "string" ? job.description : "",
         enabled: job.enabled === true,
         key,
-        // as the jobs render names an org's own job: its key's camel case in kebab case
-        name: key.slice(PREFIX.length).replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`),
-        row: value as Record<string, unknown>,
+        name: orgNameOf(key),
+        row: value,
         schedule: job.schedule,
         scope: org,
         set: true,
-      }
-    })
+      },
+    ]
+  })
   const own = listed.keys
     .filter(({ key }) => key.startsWith(PREFIX))
     .map(({ default: fallback, key }) => {

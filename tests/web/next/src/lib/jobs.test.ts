@@ -201,7 +201,7 @@ describe("Settings > Jobs' org jobs (#1336)", () => {
     })
   })
 
-  test("lists no row at your login's scope or core's as an org's job, and no alias of a registry job", () => {
+  test("lists no row at your login's scope or core's as an org's job, no alias of a registry job, and no row off a job's shape", () => {
     const read = listSettings(setUp("org-skip"))
     const rows = jobRows(
       {
@@ -211,6 +211,11 @@ describe("Settings > Jobs' org jobs (#1336)", () => {
           { key: KEY, scope: ME, value: row },
           { key: KEY, scope: "core", value: row },
           { key: "jobs.opsDesk", scope: ORG, value: { enabled: true } },
+          { key: "jobs.opsMadeUpNull", scope: ORG, value: null },
+          { key: "jobs.opsMadeUpList", scope: ORG, value: ["made-up"] },
+          { key: "jobs.opsMadeUpPart", scope: ORG, value: { enabled: true } },
+          { key: "jobs.ops_made_up", scope: ORG, value: { ...row, heartbeat: "ops_made_up" } },
+          { key: "jobs.opsMadeUpOther", scope: ORG, value: row },
         ],
       },
       ME,
