@@ -96,7 +96,7 @@ describe("a ticket's firefighting start on a busy machine (#1150)", () => {
       expect(capacityLog(r!)).toEqual([
         expect.objectContaining({
           readings: expect.objectContaining({
-            firefighting: expect.stringMatching(/\/\.playground\/firefighting-start\.json$/),
+            priority: expect.stringMatching(/\/\.playground\/firefighting-start\.json$/),
             lanes_free: 0,
             waiters: 7,
           }),
@@ -147,7 +147,7 @@ describe("a ticket's firefighting start on a busy machine (#1150)", () => {
     expect(capacityLog(r!)).toEqual([
       expect.objectContaining({
         readings: expect.objectContaining({
-          firefighting: expect.stringMatching(/\/\.playground\/firefighting-stop\.json$/),
+          priority: expect.stringMatching(/\/\.playground\/firefighting-stop\.json$/),
         }),
         verdict: "pass",
       }),

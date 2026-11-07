@@ -34,7 +34,7 @@ describe("the capacity gate refuses and spawns nothing", () => {
       expect(capacityLog(r)).toEqual([
         expect.objectContaining({
           readings: expect.objectContaining({
-            firefighting: expect.stringMatching(/\/\.playground\/firefighting-stop\.json$/),
+            priority: expect.stringMatching(/\/\.playground\/firefighting-stop\.json$/),
           }),
           verdict: "pass",
         }),
@@ -50,6 +50,22 @@ describe("the capacity gate refuses and spawns nothing", () => {
       expect(memory.code).not.toBe(0)
       expect(memory.err).toContain("the memory gate holds it")
     })
+
+    test.each(["priority.json", "priority-start.json"])(
+      "a --priority start passes a load over the cores while %s stands (#1334)",
+      async (file) => {
+        const r = await spawn(
+          ["runner", "runner-x", "b.md", "--size", "small", "--priority"],
+          [],
+          { FAKE_LOAD5: "24.00" },
+          script,
+          undefined,
+          (home) => writeFileSync(join(home, ".playground", file), "{}"),
+        )
+        expect(r.code).toBe(0)
+        expect(capacityLog(r)).toEqual([expect.objectContaining({ verdict: "pass" })])
+      },
+    )
 
     test("a start under the line never reads the CPU", async () => {
       const r = await spawn(["runner", "runner-x", "b.md", "--size", "small"], [])
