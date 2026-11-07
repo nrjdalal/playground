@@ -264,6 +264,48 @@ export async function queueLine(
   await appendFile(join(outbox, `ops-${job}.jsonl`), `${JSON.stringify({ at, job, text, to })}\n`)
 }
 
+// The file a manager's alerts-wait holds its pid in while it waits.
+export const waiterPidPath = (outbox: string, name: string): string =>
+  join(outbox, "alerts-wait", `${name}.pid`)
+
+// A waiter that handed its manager an alert this recently counts as live, since the manager starts it again as it reads the alert.
+const RESTART_MS = 5 * 60_000
+
+// Whether a manager's alerts-wait is waiting now (its pid runs), or handed it an alert in the last 5 minutes.
+export async function waiterLive(outbox: string, name: string, now = new Date()): Promise<boolean> {
+  const pid = Number(
+    await Bun.file(waiterPidPath(outbox, name))
+      .text()
+      .catch(() => ""),
+  )
+  if (Number.isInteger(pid) && pid > 0)
+    try {
+      process.kill(pid, 0)
+      return true
+    } catch {}
+  const cursor = Bun.file(join(outbox, "alerts-wait", name))
+  return (await cursor.exists()) && now.getTime() - cursor.lastModified < RESTART_MS
+}
+
+// Pure: the lines one alert queues. A manager with no live waiter hears it only from the relay, minutes past a built-in prompt's 120s timeout, so Ops, whose own waiter wakes in seconds, is told at once to send it on.
+export function alertLines(
+  to: string,
+  text: string,
+  live: boolean,
+): { text: string; to: string }[] {
+  if (live || to === "ops") return [{ text, to }]
+  return [
+    {
+      text: `${text}\nYour playground alerts-wait is not running, so this alert reached you late: start it again with playground alerts-wait ${to}.`,
+      to,
+    },
+    {
+      text: `${to} has no playground alerts-wait running, so it hears this only from the relay: send it to ${to} by SendMessage now.\n${text}`,
+      to: "ops",
+    },
+  ]
+}
+
 // The hook's alert: the session's manager hears what it waits on, once per stuck or failed record. Returns who was told, or null.
 export async function alertFor(
   input: Record<string, unknown>,
@@ -297,7 +339,9 @@ export async function alertFor(
     task: typeof task === "string" ? task : "",
     ...(record.tool ? { tool: record.tool } : {}),
   })
-  await queueLine(environment, ALERT_JOB, to, text, now)
+  const waiting = await waiterLive(join(dataDir(environment), "ops", "outbox"), to, now)
+  for (const line of alertLines(to, text, waiting))
+    await queueLine(environment, ALERT_JOB, line.to, line.text, now)
   return to
 }
 

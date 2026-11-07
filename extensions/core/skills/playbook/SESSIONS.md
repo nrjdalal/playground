@@ -164,7 +164,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    The brief carries its name and role, who it reports to, the task (for a bundle, its items and its test area, the pages and files it touches, and each `.agents/dashboard/<topic>.md` its item touches, since AGENTS.md holds only their pointers and ALWAYS lines),
    the words the task came from quoted verbatim, the done criterion (the **gate** for a PR; a worker marks its PR ready at 5/5, and the merge path marks a green draft ready itself), "load the playbook skill",
    an ETA with its first reply (**eta**), and that it runs only commands that need no approval: one plain command per call, no `sh -c` or `bash -c` wrapper, no `rm`, no `cd` (absolute paths, `git -C` and `bun run --cwd` instead: inscope's zsh hook runs 1Password's `op` on every `cd` and new shell, prompting the owner's fingerprint)
-   apart from the one at a worker's end (LIFECYCLE.md), which prompts once, the **signal** rule, a literal absolute path for `gh --body-file`, since `no-playground-leak` and `no-release-comment` each refuse a path built from a shell variable,
+   apart from the one at a worker's end (LIFECYCLE.md), which prompts once, the **signal** rule, a literal absolute path for `gh --body-file`, since `no-playground-leak` and `no-release-comment` each refuse a path built from a shell variable, a scratch script written through the Write tool and run as `bun <path>` (new-worker.md says why),
    that a worker starts its fixture stack outside run-slot, only while it takes shots, since a command that never exits would hold a slot until it is stopped (**slots**), that a multi-stack ask (a bisect, an A/B) builds one stack at a time, and the **writing** rule: load writing-for-agents with the Skill tool before writing any agent-facing doc, a handoff included.
    A worker's brief says that any change under `web/next/`, a docs `.mdx` included, gets its tester's drive, posted as a `## TesterBot · PASS at <sha7>` comment.
    A guard's plan and its brief (a hook or a gate that refuses calls) each name its threat model as a closed list of literal forms (for a path guard: an Edit or Write tool call on the path, and a shell write, copy, move or delete that names the path literally),
@@ -299,6 +299,7 @@ playground alerts-wait <your name>
 ```
 
 Run it with Bash `run_in_background`; when it exits it has printed one alert: start it again at once, then act on the alert.
+A waiter started after time down skips the alerts queued over 5 minutes before it began and names how many, since the relay sent each; while none runs, each alert also goes to Ops to send on.
 Done when the task is running; the relay sends the same alert later, so drop that copy.
 
 ## Wait on a signal

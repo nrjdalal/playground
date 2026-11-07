@@ -8,6 +8,7 @@ You are a worker or a runner that the owner started from their terminal with `pl
 
 A worktree that commits, a docs-only one included, still runs `bun install` through run-slot before its first commit: lefthook's hook runs the worktree's own `node_modules/.bin/lefthook`, and the commit stops without it. A review worktree that only reads needs no install.
 A worktree whose commit stages any file but Markdown passes pre-commit's env-keys step by the `dev` skill's Start: one that runs a stack starts its own `.env` from `.env.example` with `BETTER_AUTH_SECRET` set, and one that runs no stack commits under `env NODE_ENV=production SKIP_ENV_VALIDATION=true`.
+A scratch script goes to a file in your scratchpad through the Write tool, then runs as `bun <path>`, so its text is never read as a command: a heredoc's text is part of its Bash call, and one holding `rm` raised Claude Code's built-in prompt, which times out unanswered in 120 s.
 
 CI starts only on a pull request into `canary`, so open your draft PR before you wait on CI, and cite a run by its run id or link when you report it: a pushed branch with no PR has no run. Record your branch at its first push (`bun "${PLAYGROUND_REPO:?}/scripts/roster.ts" set <your name> branch=<branch>`), so ops-sweep tells your lead when it goes 15 minutes with no PR.
 

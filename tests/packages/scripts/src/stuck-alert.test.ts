@@ -4,6 +4,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  alertFor,
+  alertLines,
   alertText,
   callKey,
   callOf,
@@ -12,6 +14,8 @@ import {
   managerFor,
   pendingCalls,
   transcriptOf,
+  waiterLive,
+  waiterPidPath,
 } from "../../../../packages/scripts/src/stuck-alert"
 
 const AGENTS = [
@@ -178,5 +182,101 @@ describe("a session's transcript for its waiting calls", () => {
 
   test("is empty for a session with no transcript", async () => {
     expect(await transcriptOf(config, "00000000-0000-4000-8000-000000000000")).toBe("")
+  })
+})
+
+// A built-in prompt times out in 120s (measured 7 Nov), and the relay took about 5m50s to reach a manager with no waiter, so Ops' waiter carries the alert on.
+describe("an alert to a manager with no alerts-wait running", () => {
+  const outbox = mkdtempSync(join(tmpdir(), "stuck-alert-waiter-"))
+  afterAll(() => rmSync(outbox, { force: true, recursive: true }))
+  const NOW = new Date(Date.UTC(2026, 10, 7, 7, 10, 52))
+
+  test("a live waiter's manager gets the one line, as before", () => {
+    expect(alertLines("m4n7pq-builder", "x is stuck", true)).toEqual([
+      { text: "x is stuck", to: "m4n7pq-builder" },
+    ])
+  })
+
+  test("with none live, the manager's line names the restart and Ops is told to send it on now", () => {
+    const [own, ops] = alertLines("m4n7pq-builder", "x is stuck", false)
+    expect(own).toEqual({
+      text: "x is stuck\nYour playground alerts-wait is not running, so this alert reached you late: start it again with playground alerts-wait m4n7pq-builder.",
+      to: "m4n7pq-builder",
+    })
+    expect(ops).toEqual({
+      text: "m4n7pq-builder has no playground alerts-wait running, so it hears this only from the relay: send it to m4n7pq-builder by SendMessage now.\nx is stuck",
+      to: "ops",
+    })
+  })
+
+  test("Ops' own alert stays one line, since no one else carries it on", () => {
+    expect(alertLines("ops", "r is stuck", false)).toEqual([{ text: "r is stuck", to: "ops" }])
+  })
+
+  test("the hook's alert for a manager with no live waiter reaches Ops in the same second, and one with a waiter does not", async () => {
+    const config = mkdtempSync(join(tmpdir(), "stuck-alert-config-"))
+    const data = mkdtempSync(join(tmpdir(), "stuck-alert-data-"))
+    mkdirSync(join(config, "sessions"))
+    const sessions = [
+      ["k3m9px-worker", "s-worker"],
+      ["m4n7pq-builder", "s-builder"],
+      ["ops", "s-ops"],
+      ["dispatcher", "s-dispatcher"],
+    ]
+    for (const [name, sessionId] of sessions)
+      writeFileSync(
+        join(config, "sessions", `${sessionId}.json`),
+        JSON.stringify({ name, pid: process.pid, sessionId }),
+      )
+    writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: AGENTS }))
+    const env = { CLAUDE_CONFIG_DIR: config, PLAYGROUND_DATA_DIR: data }
+    const outbox = join(data, "ops", "outbox")
+    const lines = async () =>
+      (await Bun.file(join(outbox, "ops-stuck-alert.jsonl")).text())
+        .trim()
+        .split("\n")
+        .map((row) => JSON.parse(row) as { at: string; text: string; to: string })
+    const prompt = async () =>
+      alertFor(
+        { tool_input: { command: "cat > tally.ts <<'EOF'" } },
+        { reason: "permission", sessionId: "s-worker", state: "stuck", tool: "Bash" },
+        env,
+        NOW,
+      )
+    try {
+      expect(await prompt()).toBe("m4n7pq-builder")
+      const [own, ops] = await lines()
+      expect([own!.to, ops!.to]).toEqual(["m4n7pq-builder", "ops"])
+      expect(ops!.at).toBe(own!.at)
+      expect(ops!.text).toContain("k3m9px-worker is stuck on a permission prompt (Bash)")
+      mkdirSync(join(outbox, "alerts-wait"), { recursive: true })
+      writeFileSync(waiterPidPath(outbox, "m4n7pq-builder"), String(process.pid))
+      await prompt()
+      expect((await lines()).map((row) => row.to)).toEqual([
+        "m4n7pq-builder",
+        "ops",
+        "m4n7pq-builder",
+      ])
+    } finally {
+      rmSync(config, { force: true, recursive: true })
+      rmSync(data, { force: true, recursive: true })
+    }
+  })
+
+  test("a waiter is live while its pid runs, or for 5 minutes after it handed over an alert", async () => {
+    expect(await waiterLive(outbox, "planner", NOW)).toBe(false)
+    mkdirSync(join(outbox, "alerts-wait"), { recursive: true })
+    writeFileSync(waiterPidPath(outbox, "planner"), String(process.pid))
+    expect(await waiterLive(outbox, "planner", NOW)).toBe(true)
+    writeFileSync(waiterPidPath(outbox, "planner"), "999999")
+    expect(await waiterLive(outbox, "planner", NOW)).toBe(false)
+    const cursor = join(outbox, "alerts-wait", "planner")
+    writeFileSync(cursor, "100")
+    const handed = new Date(NOW.getTime() - 4 * 60_000)
+    utimesSync(cursor, handed, handed)
+    expect(await waiterLive(outbox, "planner", NOW)).toBe(true)
+    const old = new Date(NOW.getTime() - 6 * 60_000)
+    utimesSync(cursor, old, old)
+    expect(await waiterLive(outbox, "planner", NOW)).toBe(false)
   })
 })

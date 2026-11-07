@@ -1,18 +1,29 @@
-// playground alerts-wait <name>: a manager's background wait on the stuck alerts the session-state hook queues for it, so it wakes within a second or two rather than after the relay's own turn (74s measured on 26 Oct, against the owner's 30s). It reads ops-stuck-alert.jsonl from a byte cursor of its own per name, prints the first new line addressed to the name, and exits; the relay still sends every line, as the backstop.
+// playground alerts-wait <name>: a manager's background wait on the stuck alerts the session-state hook queues for it, so it wakes within a second or two rather than after the relay's own turn (74s measured on 26 Oct, against the owner's 30s). It reads ops-stuck-alert.jsonl from a byte cursor of its own per name, prints the first new line addressed to the name, and exits; the relay still sends every line, as the backstop. It keeps its pid in alerts-wait/<name>.pid while it waits, so stuck-alert can tell a manager with no waiter from one with.
 import { mkdir } from "node:fs/promises"
 import { join } from "node:path"
 
-import { ALERT_JOB } from "../stuck-alert"
+import { ALERT_JOB, waiterPidPath } from "../stuck-alert"
 
-export async function alertsWait(name: string, outbox: string, pollMs = 1000): Promise<string> {
+// An alert queued this long before the wait began is past answering, since a prompt times out in 120s: a waiter started after days down skips its backlog rather than replaying it one run at a time (62 alerts on 7 Nov).
+export const STALE_MS = 5 * 60_000
+
+export async function alertsWait(
+  name: string,
+  outbox: string,
+  pollMs = 1000,
+  began = new Date(),
+): Promise<string> {
   const file = join(outbox, `ops-${ALERT_JOB}.jsonl`)
   const cursorPath = join(outbox, "alerts-wait", name)
+  await mkdir(join(outbox, "alerts-wait"), { recursive: true })
+  await Bun.write(waiterPidPath(outbox, name), String(process.pid))
   const cursor = Bun.file(cursorPath)
   let at = (await cursor.exists())
     ? Number(await cursor.text()) || 0
     : await Bun.file(file)
         .exists()
         .then((exists) => (exists ? Bun.file(file).size : 0))
+  let skipped = 0
   for (;;) {
     const size = Bun.file(file).size
     if (size < at) at = 0
@@ -29,10 +40,17 @@ export async function alertsWait(name: string, outbox: string, pollMs = 1000): P
           continue
         }
         if (entry.to !== name) continue
-        await mkdir(join(outbox, "alerts-wait"), { recursive: true })
+        if (began.getTime() - Date.parse(entry.at ?? "") > STALE_MS) {
+          skipped++
+          continue
+        }
         await Bun.write(cursorPath, String(offset))
-        return `${entry.at ?? ""} ${entry.text ?? ""}`
+        const note = skipped
+          ? `(skipped ${skipped} older alert${skipped === 1 ? "" : "s"}, queued over 5 minutes before this wait began; the relay sent each) `
+          : ""
+        return `${note}${entry.at ?? ""} ${entry.text ?? ""}`
       }
+      if (skipped) await Bun.write(cursorPath, String(offset))
       at = offset
     }
     await Bun.sleep(pollMs)
