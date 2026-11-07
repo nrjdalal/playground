@@ -51,12 +51,12 @@ describe("the secret's sink process (PG-59)", () => {
   test("gets only what vercel needs from the API's environment, never its secrets", () => {
     const env = sinkEnv({
       BETTER_AUTH_SECRET: "made-up-auth",
-      HOME: "/home/made-up",
+      HOME: "/home/someone",
       PATH: "/usr/bin",
       POSTGRES_URL: "postgres://made-up",
       VERCEL_TOKEN: "made-up-token",
     })
-    expect(env).toEqual({ HOME: "/home/made-up", PATH: "/usr/bin", VERCEL_TOKEN: "made-up-token" })
+    expect(env).toEqual({ HOME: "/home/someone", PATH: "/usr/bin", VERCEL_TOKEN: "made-up-token" })
   })
 })
 

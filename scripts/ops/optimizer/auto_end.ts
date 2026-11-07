@@ -75,7 +75,7 @@ export async function endOne(target: Target, why: string, deps: EndDeps): Promis
   const cleaned = deps.cleanup && !idle ? await deps.cleanup(target) : []
   const after = cleaned.length ? `; cleanup: ${cleaned.join("; ")}` : ""
   if (!idle) return [{ text: `Ended ${target.name}: ${why}${after}`, to }]
-  const text = `Ended ${target.name}: ${why}${after}; resume it on the next push: scripts/spawn.sh resume ${target.name} <dir>`
+  const text = `Ended ${target.name}: ${why}${after}; resume it on the next push: scripts/spawn.sh resume ${target.name} <dir> --pr ${target.pr ?? "<PR url>"}`
   return target.worker && target.worker !== to
     ? [
         { text, to },

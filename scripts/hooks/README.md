@@ -378,10 +378,12 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   `ext score` on a line where any command clears or sets `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` or `PLAYGROUND_ROLE` (an assignment or `+=` to one, one exported earlier, or env with `-u` or `--unset` naming one, `-i` alone or in a cluster, `--ignore-environment` or `-`), a shell the line runs or pipes into included,
   and `ext score` spelled with quotes or backslashes that shell removes (`s""core`, `'score'`), since a score's author is read from them;
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
-  and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names`, `slack.gatedSends` and `usage.keychainService`.
+  and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names`, `slack.gatedSends` and `usage.keychainService`, and of every ops job's `jobs.<name>`,
+  and `settings import-jobs` but its `--dry-run`, which writes a `jobs.<name>` for each job its file lists,
+  whose refusal names the Inbox guard decision whose Approve writes it.
   A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
   A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
-  `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
+  `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score` and `reject`, `settings set` of any other key, `settings import-jobs --dry-run` and writes elsewhere in the data folder (handoffs, the roster) run.
   Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note in a session's own call frees it.
   A `settings set` or `reset` of `owner.names` or `factory.archiveRepo` with no `--scope` names Privacy on the Dashboard's Settings page instead, which saves both at your login's scope: the dispatcher asks the owner to save it there.
   An accept's refusal names its own route: the session posts an `accept` decision with `bun run ask new` (`.agents/dashboard/asks.md`), and the owner's Approve has the Dashboard run the accept with no role.
@@ -541,6 +543,9 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   Its reason names the kind and the plain-words fix, never the text.
   It reads every write through no-playground-leak's engine (`inspectAs` with its own `Policy`), so the shapes it reads are that guard's gh, `gh api`, curl and GitHub MCP writes; git commits and pushes, Linear and Slack are outside it.
   Each public repository's own name, which holds its owner's handle, is read past.
+  So is the owner's own line in a ship's notes, as `bun run release:notes` writes it: in a plain `gh release create` or `edit` (one command, with no substitution, chain, pipe or redirect), a line that reads `- <names> @<login>` or `- @<login>` with the login and every name in `owner.names` (`ownerWords` in `notes.ts`, the renderer's own rule), inside the renderer's Contributors section.
+  That section opens at the exact `### ❤️ Contributors` line and ends at the first line that is neither blank nor a contributor's, so a heading of any shape, a fence or prose closes it.
+  The same names on any other line, in the ship's title, or in any other write are refused.
   Its kinds are `packages/scripts/src/trace-count/kinds.ts`, which the trace ratchet counts too, and its list is read as [Guard lists](#guard-lists) says; on a fresh clone with no list, the list-free kinds still refuse.
   Its tests are `bun run test:file tests/scripts/hooks/no-public-leak.test.ts`.
 
@@ -623,6 +628,12 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   It refuses a commit whose `git rev-parse --show-toplevel` is the factory's main checkout, the one `~/.playground/ops/run-slot.sh` links into (`scripts/link-skills.sh` makes that link), whatever wrapper, shell or cwd made it, since this hook reads a command's text and the step reads where the commit lands.
   A worktree and every other clone, a person's own included, commit as before.
   A ship's pull is a fast-forward and runs no pre-commit, and the step's test is in `tests/lefthook.test.ts`.
+- The same hook keeps the live Dashboard's checkout to the sessions that own it: a git write there (a commit, a merge, a reset and every other git move above, step 5's fast-forward and the keep reset included, since those two are the main checkout's own) is refused to every factory session but the runner that holds it, by `PLAYGROUND_ROLE` `runner`, and the ops lead,
+  a `lead` whose name in Claude Code's registry has the roster's `ops` kind, naming the route: ask Ops.
+  The live checkout is the worktree of the main checkout's repository on the branch `live.branch` names (`liveCheckout`, read from `.git/worktrees`), judged by the same folder reading as the main checkout: the cwd, `git -C`, `--git-dir`, `--work-tree`, run-slot and a shell's script.
+  Reads there (`status`, `log`, `diff`, `fetch`) run for every session, and so does every write outside it.
+  The ops-dashboard supervisor's roll and `playground update`'s pull are shell processes that no Claude Code hook sees, so they move the checkout as before.
+  Its tests are in `bun run test:file tests/scripts/hooks/no-main-checkout.test.ts`.
 
 ## no-manager-subagent
 
@@ -727,6 +738,11 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   `--help`, `--version` and `version` pass.
   A bake, and a compose `up`, `create`, `run` or `watch`, which run-slot refuses too since each builds its images at once, is refused with run-slot's own fix (build through run-slot, then `up --no-build`) rather than the run-slot form.
   run-slot then runs one at a time on the machine ([scripts/ops/README.md](../ops/README.md#run-slot)).
+  no-unslotted-run also refuses a `git commit` whose message the checkout's own commitlint (`node_modules/.bin/commitlint`, reading the checkout's config) refuses, from any folder and behind run-slot's `--`, naming commitlint's problem lines, since commit-msg lints the message only after pre-commit's build has waited for its slot (one commit waited 56 minutes, then failed on its subject).
+  It lints the message as commit-msg does, through `commitlint --edit` on a file, so a `#` line reads as a comment, and reads it from `-m` or `--message` (several joined as paragraphs, as git joins them), or the file or stdin (`-`, a heredoc) that `-F` names.
+  A commit with `--no-verify` or `-n`, `--edit`, another commit's message (`-C`, `-c`, `--fixup`, `--squash`), a message the hook cannot read or a checkout with no commitlint passes to commit-msg as before, and so does a lint that runs past 8 s,
+  and so does a message read from a file or a pipe after an earlier command on the line that may have written it (any but `cat`, a builtin such as `cd` or `export`, or `git add`, `diff`, `fetch`, `log`, `show` or `status`, with no redirect; a shell or `source` that runs a script file counts),
+  since the hook reads the file before the line runs.
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
   A commit's pre-commit steps take `run-slot-commit` through `packages/scripts/src/commit-slot.ts`, which hands each to run-slot as `commit-<worktree>` marked `RUN_SLOT_COMMIT_STEP=1`, as `run-slot.sh <who> -- git commit` takes it, and playbook's **slots** rule says which slot each way of committing takes.
   The build runs bare when turbo's dry run finds every build task cached, while a type check takes the slot whenever it would, since the build's cache says nothing of its cost.
