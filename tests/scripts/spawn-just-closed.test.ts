@@ -60,6 +60,28 @@ describe("a resume of a row spawn.sh closed live in the last 15 minutes passes t
     ])
   })
 
+  test("a just-closed resume still meets the memory gate", async () => {
+    const r = await spawn(
+      ["resume", "worker-x", root, id],
+      [],
+      {
+        ...HIGH,
+        FAKE_PRESSURE: "4",
+        ROSTER_JSON: JSON.stringify({
+          agents: [
+            { name: "worker-x", role: "worker", kind: "worker", status: "ended", task: "t" },
+          ],
+        }),
+      },
+      undefined,
+      { name: "worker-x", backend: "claude" },
+      closed("worker-x", 2, "working"),
+    )
+    expect(r.code).not.toBe(0)
+    expect(r.err).toContain("the memory gate holds it: pressure level is 4")
+    expect(placing(r).filter((c) => c[1] === "run")).toEqual([])
+  })
+
   test("a new worker start at the same load is refused by the load gate", async () => {
     const r = await spawn(["worker", "worker-x", "b.md"], [], HIGH)
     expect(r.code).not.toBe(0)
@@ -72,6 +94,7 @@ describe("a resume of a row spawn.sh closed live in the last 15 minutes passes t
     ["parked when it closed", 2, "parked"],
     ["ended when it closed", 2, "ended"],
     ["never closed by spawn.sh", null, ""],
+    ["whose close time lies in the future", -5, "working"],
   ])("a resume of a row %s is refused by the load gate", async (_, minutes, was) => {
     const r = await resume(
       "worker-x",

@@ -379,9 +379,7 @@ if backend == "glm":
         if loads is None:
             refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
         readings["load5"] = loads[1]
-        if just_closed:
-            readings["just_closed"] = just_closed
-        elif readings["load5"] >= gates["glmLoad5Max"]:
+        if readings["load5"] >= gates["glmLoad5Max"]:
             refuse("load", f"load5 is {readings['load5']:.2f} (sysctl vm.loadavg), and a GLM session starts under {fmt(gates['glmLoad5Max'])}")
         readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
         if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
@@ -1393,7 +1391,7 @@ JUST_CLOSED=
 if [ "$MODE" = resume ] && [ -f "$DATA/closes/$NAME" ] && read -r closed_at closed_iso closed_was < "$DATA/closes/$NAME"; then
   case "${closed_was:-none}" in
     none | ended | parked | paused | done) ;;
-    *) if [[ $closed_at =~ ^[0-9]+$ ]] && [ $(($(date -u +%s) - closed_at)) -le 900 ]; then JUST_CLOSED="its $closed_was row closed at $closed_iso"; fi ;;
+    *) if [[ $closed_at =~ ^[0-9]+$ ]] && age=$(($(date -u +%s) - closed_at)) && [ "$age" -ge 0 ] && [ "$age" -le 900 ]; then JUST_CLOSED="its $closed_was row closed at $closed_iso"; fi ;;
   esac
 fi
 # While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --priority start on any priority file but a job's start file (below).
