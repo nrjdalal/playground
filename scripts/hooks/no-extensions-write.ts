@@ -460,13 +460,13 @@ function evalProgram({ args, name }: Parsed): Word | undefined {
   }
 }
 
-// a token after which a / opens a regex literal rather than a division: none, an operator or opening punctuation, or a keyword that takes an expression
+// a token after which a / opens a regex literal rather than a division: none, opening punctuation, an operator but a postfix ++, -- or non-null !, or a keyword that takes an expression and names no member; a } or ) ends an expression, so a / after one divides
 const REGEX_AFTER =
-  /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\b(?:await|case|delete|do|else|in|instanceof|new|of|return|throw|typeof|void|yield))\s*$/
+  /(?:^|[(,=:[&|?{;*%<>~^]|(?<![\w$)\]]\s*)!|(?<!\+)\+|(?<!-)-|(?<!\.\s*)(?<![\w$#])(?:await|case|delete|do|else|in|instanceof|new|of|return|throw|typeof|void|yield))\s*$/
 // a program that can turn a regex into text, so its body could reach a pipe or a file as words
 const STRINGIFIES =
   /\.source\b|\btoString\b|\bString\s*\(|\bJSON\s*\.\s*stringify\b|\.concat\s*\(|\.join\s*\(|\$\{/
-// A JavaScript program with each regex literal outside its strings, templates and comments masked to a word that is neither a path, a glob nor a redirect, or the program unchanged when it can turn a regex into text or the scan cannot close a literal; a regex that guarded() finds a guarded word in, or one a + or a member other than test or exec follows, keeps its text
+// A JavaScript program with each regex literal outside its strings, templates and comments masked to a word that is neither a path, a glob nor a redirect, or the program unchanged when it can turn a regex into text or the scan cannot close a literal; a regex that guarded() finds a guarded word in, one holding a quote (a division read as a regex would hide the string it runs), or one a + or a member other than test or exec follows, keeps its text
 function maskRegexes(source: string, guarded: (body: string) => boolean): string {
   if (STRINGIFIES.test(source)) return source
   let out = ""
@@ -509,6 +509,7 @@ function maskRegexes(source: string, guarded: (body: string) => boolean): string
       const body = source.slice(k + 1, j)
       const kept =
         guarded(body.replaceAll("\\/", "/")) ||
+        /["'`]/.test(body) ||
         /^\s*(?:\+|\.(?!\s*(?:test|exec)\b))/.test(source.slice(flags))
       out += kept ? source.slice(k, flags) : "RE"
       k = flags

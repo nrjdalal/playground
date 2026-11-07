@@ -7723,7 +7723,7 @@ function evalProgram({ args, name }) {
       return;
   }
 }
-var REGEX_AFTER = /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\b(?:await|case|delete|do|else|in|instanceof|new|of|return|throw|typeof|void|yield))\s*$/;
+var REGEX_AFTER = /(?:^|[(,=:[&|?{;*%<>~^]|(?<![\w$)\]]\s*)!|(?<!\+)\+|(?<!-)-|(?<!\.\s*)(?<![\w$#])(?:await|case|delete|do|else|in|instanceof|new|of|return|throw|typeof|void|yield))\s*$/;
 var STRINGIFIES = /\.source\b|\btoString\b|\bString\s*\(|\bJSON\s*\.\s*stringify\b|\.concat\s*\(|\.join\s*\(|\$\{/;
 function maskRegexes(source, guarded) {
   if (STRINGIFIES.test(source))
@@ -7770,7 +7770,7 @@ function maskRegexes(source, guarded) {
       while (/[a-z]/.test(source[flags] ?? ""))
         flags++;
       const body = source.slice(k + 1, j);
-      const kept = guarded(body.replaceAll("\\/", "/")) || /^\s*(?:\+|\.(?!\s*(?:test|exec)\b))/.test(source.slice(flags));
+      const kept = guarded(body.replaceAll("\\/", "/")) || /["'`]/.test(body) || /^\s*(?:\+|\.(?!\s*(?:test|exec)\b))/.test(source.slice(flags));
       out += kept ? source.slice(k, flags) : "RE";
       k = flags;
       continue;
