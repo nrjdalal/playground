@@ -57,9 +57,11 @@ function line(
   return `- ${scope ? `**${scope}:** ` : ""}${breaking ? "⚠️  " : ""}${text} (${refs})`
 }
 
+// names: each contributor as ZeroStarter writes one, `- <name> @<login>`; off, the login alone, since the public repo's leak guard refuses a person's name.
 export function renderNotes({
   commits,
   from,
+  names = false,
   repo,
   to,
 }: {
@@ -92,7 +94,9 @@ export function renderNotes({
     .filter((title) => groups.has(title))
     .map((title) => `### ${title}\n\n${groups.get(title)!.join("\n")}`)
   if (breakingLines.length) sections.push(`#### ⚠️ Breaking Changes\n\n${breakingLines.join("\n")}`)
-  const contributors = [...authors].map(([login, name]) => `- ${name ? `${name} ` : ""}@${login}`)
+  const contributors = [...authors].map(
+    ([login, name]) => `- ${names && name ? `${name} ` : ""}@${login}`,
+  )
   if (contributors.length) sections.push(`### ❤️ Contributors\n\n${contributors.join("\n")}`)
   return (
     [`[compare changes](https://github.com/${repo}/compare/${from}...${to})`, ...sections].join(
