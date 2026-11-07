@@ -1441,8 +1441,8 @@ due_at() {
     e=$((e + m))
     [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e
   done
-  # the load5 wait's ceiling for run-slot-2 (slot2_load_held)
-  e=$((ASKED + LOAD_WAIT))
+  # the load5 hold's ceiling for slots 2 to 4 (load5_held)
+  oldest_asked; e=$((OLDEST + LOAD_WAIT))
   [ "$e" -gt "$now" ] && { [ -z "$d" ] || [ "$e" -lt "$d" ]; } && d=$e
   for f in $SWITCHES; do
     [ -e "$OPS/$f" ] || continue
@@ -1715,8 +1715,18 @@ load_line() {
   cap=$(switch_on run-slot.load5-cap && tail -n 1 "$OPS/run-slot.load5-cap" | grep -xE '[0-9]{1,3}'); [ -n "$cap" ] || cap=22; [ "$cap" -le 22 ] || cap=22
   echo "$cap"
 }
-# whether load5 holds run-slot-2 shut to this run: at or over load_line's cap, until the run has waited LOAD_WAIT s since it asked (issue 1403, 7 Nov 11:07Z: two checker suites in run-slot and run-slot-2 took load5 to 17.96 on their own)
-slot2_load_held() { [ $(($(date +%s) - ASKED)) -lt "$LOAD_WAIT" ] && [ "$(load5)" -ge "$(load_line)" ]; }
+# sets OLDEST to the second the queue's oldest ticket asked at, its name's leading nanosecond, else now, so the wait loop, first_waiter, room, slots and can-take time the load5 hold from one waiter
+oldest_asked() {
+  local t
+  for t in "$QUEUE"/[0-9]*; do
+    [ -e "$t" ] || break
+    t=${t##*/} OLDEST=${t:0:10}
+    return
+  done
+  OLDEST=$(date +%s)
+}
+# whether load5 holds slots 2 to 4 shut: at or over load_line's cap, until the queue's oldest waiter has waited LOAD_WAIT s (issue 1403, 7 Nov 11:07Z: two checker suites in run-slot and run-slot-2 took load5 to 17.96 on their own)
+load5_held() { [ "$(load5)" -ge "$(load_line)" ] && oldest_asked && [ $(($(date +%s) - OLDEST)) -lt "$LOAD_WAIT" ]; }
 # whether the load rules open slot $1 to this run now
 slot_open() {
   local s=$1
@@ -1727,7 +1737,7 @@ slot_open() {
   # pressure 1 with 43% free), pressure normal and swap-ins under SWAPINS_MAX (mem_ok), and the 5-minute load under 22 as a backstop
   if [ "$s" != run-slot ] && switch_on run-slot.single && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ]; then
     if [ "$s" = run-slot-2 ] && [ "$(load5)" -lt "$(load_line)" ] && mem_ok; then :; else return 1; fi
-  elif [ "$s" = run-slot-2 ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && { ! lanes_now || slot2_load_held; }; then
+  elif [ "$s" != run-slot ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && { load5_held || { [ "$s" = run-slot-2 ] && ! lanes_now; }; }; then
     return 1
   fi
   # a third slot, approved by dispatcher (8 Oct), opens only while lanes_open does; a holder that took it finishes either way
@@ -2160,9 +2170,6 @@ if [ -n "$CAN_TAKE" ]; then
   if [ -n "$CAN_TICKET" ]; then
     rank="" UNITS="" SIZE=""
     read -r _ rank UNITS SIZE _ 2>/dev/null < "$QUEUE/$CAN_TICKET"
-    # its name leads with the nanosecond it asked at, so slot2_load_held reads that waiter's wait
-    ASKED=${CAN_TICKET%%-*} ASKED=${ASKED:0:10}
-    case "$ASKED" in '' | *[!0-9]*) ASKED=$(date +%s) ;; esac
     case "$rank" in [0-2][1-3]) CLASS=${rank%?} ;; *) CLASS=2 ;; esac
     case "$UNITS" in 1 | 2 | 3) ;; *) UNITS=2 SIZE=medium ;; esac
   fi
