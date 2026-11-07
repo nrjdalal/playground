@@ -90,6 +90,12 @@ const fakeRedis = (howOf: (n: number, payload: string) => How) => {
   return { sends, server, stop: () => server.stop(true) }
 }
 
+// A publish answers once Redis takes it, so its fan-out can reach the subscriber a moment later: wait up to 1 s for done, then 50 ms more so a doubled delivery has its chance to show.
+const settled = async (done: () => boolean): Promise<void> => {
+  for (let wait = 0; wait < 100 && !done(); wait++) await Bun.sleep(10)
+  await Bun.sleep(50)
+}
+
 describe("the yard channel's publish", () => {
   test("a first publish on a closed connection still fans out, on a fresh pair", async () => {
     let delivered = ""
@@ -104,6 +110,7 @@ describe("the yard channel's publish", () => {
       })
       want = true
       await channel.publish("frame-1")
+      await settled(() => delivered !== "")
       want = false
       expect(delivered).toBe("frame-1")
     } finally {
@@ -185,10 +192,6 @@ describe("the yard channel's publish", () => {
     try {
       let want = false
       const channel = redisChannel({
-        name: "yard",
-        onMessage: (raw) => got.push(String(raw)),
-        url: `redis://127.0.0.1:${redis.server.port}`,
-        wanted: () => want,
         id: (raw) => {
           try {
             return (JSON.parse(raw) as { id?: string }).id
@@ -196,13 +199,17 @@ describe("the yard channel's publish", () => {
             return undefined
           }
         },
+        name: "yard",
+        onMessage: (raw) => got.push(String(raw)),
+        url: `redis://127.0.0.1:${redis.server.port}`,
+        wanted: () => want,
       })
       want = true
       const frame = JSON.stringify({ id: "m-1", text: "hi" })
       await channel.publish(frame)
-      // A sender that hears "failed" re-sends the same message (#1494): the copy this instance already delivered drops.
-      await channel.publish(frame)
+      await settled(() => got.length > 0)
       want = false
+      expect(redis.sends).toEqual([frame, frame])
       expect(got).toEqual([frame])
     } finally {
       redis.stop()
@@ -224,6 +231,28 @@ describe("the yard channel's publish", () => {
       await channel.publish(frame)
       want = false
       expect(redis.sends).toEqual([frame, frame])
+    } finally {
+      redis.stop()
+    }
+  })
+
+  test("two publishes at once on a closed connection both fan out, the second retry keeping the first's fresh pair", async () => {
+    const got: string[] = []
+    const redis = fakeRedis((n) => (n === 2 ? "close" : "ok"))
+    try {
+      let want = false
+      const channel = redisChannel({
+        name: "yard",
+        onMessage: (raw) => got.push(String(raw)),
+        url: `redis://127.0.0.1:${redis.server.port}`,
+        wanted: () => want,
+      })
+      want = true
+      const results = await Promise.allSettled([channel.publish("a"), channel.publish("b")])
+      await settled(() => got.length >= 2)
+      want = false
+      expect(results.map((one) => one.status)).toEqual(["fulfilled", "fulfilled"])
+      expect(got.toSorted()).toEqual(["a", "b"])
     } finally {
       redis.stop()
     }

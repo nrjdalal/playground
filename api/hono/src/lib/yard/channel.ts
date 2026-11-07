@@ -23,9 +23,9 @@ export function redisChannel({
   url,
   wanted,
 }: {
-  name: string
   // The id a raw delivers by, or undefined for one that never dedupes: a raw whose id this instance delivered already is dropped, so a publish whose first try landed and then reported a closed connection delivers its message once.
   id?: (raw: string) => string | undefined
+  name: string
   onMessage: (raw: string) => void
   url: string
   wanted: () => boolean
@@ -107,9 +107,7 @@ export function redisChannel({
     // Publishes one message to every instance's listener, this one's included, failing after 2 s; a first try whose connection the host closed retries once on a fresh pair inside the same cap, re-sending the same bytes, since the first try may still have landed (each message id delivers once).
     async publish(data: string): Promise<void> {
       const deadline = Date.now() + FAN_OUT_MS
-      const attempt = async (fresh: boolean): Promise<void> => {
-        if (fresh) pair?.drop()
-        const { drop, sender } = connect()
+      const attempt = async ({ drop, sender }: Pair): Promise<void> => {
         const sent = sender.then((client) => client.publish(name, data))
         await new Promise<void>((resolve, reject) => {
           const cap = setTimeout(() => {
@@ -128,11 +126,14 @@ export function redisChannel({
           )
         })
       }
+      const first = connect()
       try {
-        await attempt(false)
+        await attempt(first)
       } catch (error) {
         if (!closed(error) || deadline - Date.now() <= 0) throw error
-        await attempt(true)
+        // Drop only the pair this try used: a concurrent publish may have built the fresh one already.
+        first.drop()
+        await attempt(connect())
       }
     },
   }
