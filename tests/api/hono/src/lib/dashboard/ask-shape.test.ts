@@ -104,9 +104,9 @@ describe("shapeHints: unlinked refs (#1020)", () => {
       kind: "unlinked",
       refs: ["#1000", "PR 1001"],
     })
-    expect(unlinked("CEDAR-2779 and BRAVO-1322 are done; BRAVO-1322 again.")).toEqual({
+    expect(unlinked("MADECEDAR-2779 and MADEBRAVO-1322 are done; MADEBRAVO-1322 again.")).toEqual({
       kind: "unlinked",
-      refs: ["CEDAR-2779", "BRAVO-1322"],
+      refs: ["MADECEDAR-2779", "MADEBRAVO-1322"],
     })
     expect(unlinked("Landed at d05240d6.")).toEqual({ kind: "unlinked", refs: ["d05240d6"] })
     expect(
@@ -116,11 +116,13 @@ describe("shapeHints: unlinked refs (#1020)", () => {
 
   test("stays quiet on a ref linked in its line, inside a code block, or an Inbox ref", () => {
     expect(unlinked("Merged [#1000](https://github.com/acme/app/pull/1000).")).toBeUndefined()
-    expect(unlinked("CEDAR-2779 is at https://linear.app/acme/issue/CEDAR-2779")).toBeUndefined()
+    expect(
+      unlinked("MADECEDAR-2779 is at https://linear.app/acme/issue/MADECEDAR-2779"),
+    ).toBeUndefined()
     expect(
       unlinked("[`d05240d6`](https://github.com/acme/app/commit/d05240d6) landed."),
     ).toBeUndefined()
-    expect(unlinked("```\nmerged #1000 at d05240d6 for BRAVO-1322\n```")).toBeUndefined()
+    expect(unlinked("```\nmerged #1000 at d05240d6 for MADEBRAVO-1322\n```")).toBeUndefined()
     expect(unlinked("Answered on #i369 and #i41.")).toBeUndefined()
   })
 
