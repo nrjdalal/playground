@@ -1,11 +1,10 @@
 // playground alerts-wait <name>: a manager's background wait on the stuck alerts the session-state hook queues for it, so it wakes within a second or two rather than after the relay's own turn (74s measured on 26 Oct, against the owner's 30s). It reads ops-stuck-alert.jsonl from a byte cursor of its own per name, prints the first new line addressed to the name, and exits; the relay still sends every line, as the backstop. It keeps its pid in alerts-wait/<name>.pid while it waits, so stuck-alert can tell a manager with no waiter from one with.
-import { mkdir } from "node:fs/promises"
+import { mkdir, unlink } from "node:fs/promises"
 import { join } from "node:path"
 
-import { ALERT_JOB, waiterPidPath } from "../stuck-alert"
+import { ALERT_JOB, WAITER_GRACE_MS, waiterPidPath } from "../stuck-alert"
 
-// An alert queued this long before the wait began is past answering, since a prompt times out in 120s: a waiter started after days down skips its backlog rather than replaying it one run at a time (62 alerts on 7 Nov).
-export const STALE_MS = 5 * 60_000
+// An alert queued WAITER_GRACE_MS before the wait began is past answering, since a prompt times out in 120s: a waiter started after days down skips its backlog rather than replaying it one run at a time (62 alerts on 7 Nov).
 
 export async function alertsWait(
   name: string,
@@ -40,13 +39,14 @@ export async function alertsWait(
           continue
         }
         if (entry.to !== name) continue
-        if (began.getTime() - Date.parse(entry.at ?? "") > STALE_MS) {
+        if (began.getTime() - Date.parse(entry.at ?? "") > WAITER_GRACE_MS) {
           skipped++
           continue
         }
         await Bun.write(cursorPath, String(offset))
+        await unlink(waiterPidPath(outbox, name)).catch(() => {})
         const note = skipped
-          ? `(skipped ${skipped} older alert${skipped === 1 ? "" : "s"}, queued over 5 minutes before this wait began; the relay sent each) `
+          ? `(skipped ${skipped} older alert${skipped === 1 ? "" : "s"}, queued over ${WAITER_GRACE_MS / 60_000} minutes before this wait began; the relay sent each) `
           : ""
         return `${note}${entry.at ?? ""} ${entry.text ?? ""}`
       }

@@ -192,13 +192,13 @@ describe("an alert to a manager with no alerts-wait running", () => {
   const NOW = new Date(Date.UTC(2026, 10, 7, 7, 10, 52))
 
   test("a live waiter's manager gets the one line, as before", () => {
-    expect(alertLines("m4n7pq-builder", "x is stuck", true)).toEqual([
+    expect(alertLines("m4n7pq-builder", "x is stuck", true, true)).toEqual([
       { text: "x is stuck", to: "m4n7pq-builder" },
     ])
   })
 
   test("with none live, the manager's line names the restart and Ops is told to send it on now", () => {
-    const [own, ops] = alertLines("m4n7pq-builder", "x is stuck", false)
+    const [own, ops] = alertLines("m4n7pq-builder", "x is stuck", false, true)
     expect(own).toEqual({
       text: "x is stuck\nYour playground alerts-wait is not running, so this alert reached you late: start it again with playground alerts-wait m4n7pq-builder.",
       to: "m4n7pq-builder",
@@ -209,8 +209,21 @@ describe("an alert to a manager with no alerts-wait running", () => {
     })
   })
 
-  test("Ops' own alert stays one line, since no one else carries it on", () => {
-    expect(alertLines("ops", "r is stuck", false)).toEqual([{ text: "r is stuck", to: "ops" }])
+  test("with Ops' waiter down too, Ops' copy names Ops' own restart", () => {
+    const [, ops] = alertLines("m4n7pq-builder", "x is stuck", false, false)
+    expect(ops!.text).toEndWith(
+      "x is stuck\nYour playground alerts-wait is not running, so this alert reached you late: start it again with playground alerts-wait ops.",
+    )
+  })
+
+  test("Ops' own alert stays one line, since no one else carries it on, and names its restart while its waiter is down", () => {
+    expect(alertLines("ops", "r is stuck", true, true)).toEqual([{ text: "r is stuck", to: "ops" }])
+    expect(alertLines("ops", "r is stuck", false, false)).toEqual([
+      {
+        text: "r is stuck\nYour playground alerts-wait is not running, so this alert reached you late: start it again with playground alerts-wait ops.",
+        to: "ops",
+      },
+    ])
   })
 
   test("the hook's alert for a manager with no live waiter reaches Ops in the same second, and one with a waiter does not", async () => {
@@ -222,13 +235,18 @@ describe("an alert to a manager with no alerts-wait running", () => {
       ["m4n7pq-builder", "s-builder"],
       ["ops", "s-ops"],
       ["dispatcher", "s-dispatcher"],
+      ["z9x8c7-orchestrator", "s-orchestrator"],
     ]
     for (const [name, sessionId] of sessions)
       writeFileSync(
         join(config, "sessions", `${sessionId}.json`),
         JSON.stringify({ name, pid: process.pid, sessionId }),
       )
-    writeFileSync(join(data, "roster.json"), JSON.stringify({ agents: AGENTS }))
+    const agents = [
+      ...AGENTS,
+      { kind: "orchestrator", name: "z9x8c7-orchestrator", reportsTo: "k3m9px-worker" },
+    ]
+    writeFileSync(join(data, "roster.json"), JSON.stringify({ agents }))
     const env = { CLAUDE_CONFIG_DIR: config, PLAYGROUND_DATA_DIR: data }
     const outbox = join(data, "ops", "outbox")
     const lines = async () =>
@@ -249,6 +267,7 @@ describe("an alert to a manager with no alerts-wait running", () => {
       expect([own!.to, ops!.to]).toEqual(["m4n7pq-builder", "ops"])
       expect(ops!.at).toBe(own!.at)
       expect(ops!.text).toContain("k3m9px-worker is stuck on a permission prompt (Bash)")
+      expect(ops!.text).toEndWith("start it again with playground alerts-wait ops.")
       mkdirSync(join(outbox, "alerts-wait"), { recursive: true })
       writeFileSync(waiterPidPath(outbox, "m4n7pq-builder"), String(process.pid))
       await prompt()
@@ -257,6 +276,19 @@ describe("an alert to a manager with no alerts-wait running", () => {
         "ops",
         "m4n7pq-builder",
       ])
+      // a session that reports to a worker: the worker keeps no waiter, so it gets its one line and Ops no copy
+      expect(
+        await alertFor(
+          {},
+          { reason: "failed", sessionId: "s-orchestrator", state: "failed" },
+          env,
+          NOW,
+        ),
+      ).toBe("k3m9px-worker")
+      const last = (await lines()).at(-1)!
+      expect(last.to).toBe("k3m9px-worker")
+      expect(last.text).not.toContain("alerts-wait")
+      expect((await lines()).map((row) => row.to)).toHaveLength(4)
     } finally {
       rmSync(config, { force: true, recursive: true })
       rmSync(data, { force: true, recursive: true })

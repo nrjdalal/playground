@@ -268,8 +268,8 @@ export async function queueLine(
 export const waiterPidPath = (outbox: string, name: string): string =>
   join(outbox, "alerts-wait", `${name}.pid`)
 
-// A waiter that handed its manager an alert this recently counts as live, since the manager starts it again as it reads the alert.
-const RESTART_MS = 5 * 60_000
+// A waiter that handed its manager an alert this recently counts as live, since the manager starts it again as it reads the alert; a waiter skips an alert queued this long before it began, since a prompt times out in 120s.
+export const WAITER_GRACE_MS = 5 * 60_000
 
 // Whether a manager's alerts-wait is waiting now (its pid runs), or handed it an alert in the last 5 minutes.
 export async function waiterLive(outbox: string, name: string, now = new Date()): Promise<boolean> {
@@ -284,23 +284,26 @@ export async function waiterLive(outbox: string, name: string, now = new Date())
       return true
     } catch {}
   const cursor = Bun.file(join(outbox, "alerts-wait", name))
-  return (await cursor.exists()) && now.getTime() - cursor.lastModified < RESTART_MS
+  return (await cursor.exists()) && now.getTime() - cursor.lastModified < WAITER_GRACE_MS
 }
 
-// Pure: the lines one alert queues. A manager with no live waiter hears it only from the relay, minutes past a built-in prompt's 120s timeout, so Ops, whose own waiter wakes in seconds, is told at once to send it on.
+// Pure: the restart hint a manager whose waiter is not live reads under its alert.
+const restartHint = (name: string): string =>
+  `\nYour playground alerts-wait is not running, so this alert reached you late: start it again with playground alerts-wait ${name}.`
+
+// Pure: the lines one alert queues. A manager with no live waiter hears it only from the relay, minutes past a built-in prompt's 120s timeout, so Ops is told at once to send it on; that copy is fast only while Ops' own waiter runs, so Ops reads the same hint while its waiter is not live.
 export function alertLines(
   to: string,
   text: string,
   live: boolean,
+  opsLive: boolean,
 ): { text: string; to: string }[] {
-  if (live || to === "ops") return [{ text, to }]
+  if (live) return [{ text, to }]
+  if (to === "ops") return [{ text: `${text}${restartHint(to)}`, to }]
   return [
+    { text: `${text}${restartHint(to)}`, to },
     {
-      text: `${text}\nYour playground alerts-wait is not running, so this alert reached you late: start it again with playground alerts-wait ${to}.`,
-      to,
-    },
-    {
-      text: `${to} has no playground alerts-wait running, so it hears this only from the relay: send it to ${to} by SendMessage now.\n${text}`,
+      text: `${to} has no playground alerts-wait running, so it hears this only from the relay: send it to ${to} by SendMessage now.\n${text}${opsLive ? "" : restartHint("ops")}`,
       to: "ops",
     },
   ]
@@ -339,8 +342,13 @@ export async function alertFor(
     task: typeof task === "string" ? task : "",
     ...(record.tool ? { tool: record.tool } : {}),
   })
-  const waiting = await waiterLive(join(dataDir(environment), "ops", "outbox"), to, now)
-  for (const line of alertLines(to, text, waiting))
+  // only a manager keeps a waiter (playbook SESSIONS.md), so a worker a probe reports to gets its one line
+  const outbox = join(dataDir(environment), "ops", "outbox")
+  const toKind = placedKindOf(to, agents.find((entry) => entry?.name === to)?.kind)
+  const waiting =
+    !toKind || ROSTER_ROLE_OF_KIND[toKind] !== "manager" || (await waiterLive(outbox, to, now))
+  const opsLive = waiting || (await waiterLive(outbox, "ops", now))
+  for (const line of alertLines(to, text, waiting, opsLive))
     await queueLine(environment, ALERT_JOB, line.to, line.text, now)
   return to
 }

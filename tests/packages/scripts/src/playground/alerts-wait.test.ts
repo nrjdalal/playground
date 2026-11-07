@@ -35,6 +35,7 @@ describe("playground alerts-wait (PG-2184)", () => {
     expect(await Bun.file(waiterPidPath(outbox, "planner")).text()).toBe(String(process.pid))
     await Bun.write(join(outbox, "ops-stuck-alert.jsonl"), line("planner", "p is stuck"))
     expect(await waiting).toBe("2026-10-26T05:40:00Z p is stuck")
+    expect(await Bun.file(waiterPidPath(outbox, "planner")).exists()).toBe(false)
   })
 
   test("a waiter started after days down skips the alerts queued over 5 minutes before it began, and says how many", async () => {
