@@ -29,6 +29,7 @@ describe("a shell script's read of a file silences its own error", () => {
       'l=; read -r _ l _ < "$f" 2>/dev/null; case "$l" in',
       'mark=$(wc -l < "$RUNS" 2>/dev/null | tr -d " ")',
       "read -r l < $f 2> /dev/null",
+      `said=$(tr -s '\\n' ' ' <"$said_file" 2>/dev/null || true)`,
     ])
       expect(lateReads(line)).toEqual([1])
     for (const line of [
