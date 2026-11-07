@@ -29,7 +29,7 @@ import {
 } from "@/lib/jobs"
 import { useOps, whenWords } from "@/lib/ops"
 
-// Settings > Jobs: each ops job Playground ships, what it does, when it runs and whether it is on, and a switch that turns it on or off at your login's scope, its enabled field alone, and for a job with a config that config with the job's last refusal of it and an edit that saves it at once. Before the settings are set up it shows Set up settings, as Privacy does.
+// Settings > Jobs: each ops job Playground ships and each org's own job, what it does, when it runs and whether it is on, and a switch that turns it on or off at its scope (your login's, or an org's for its own job), its enabled field alone, and for a job with a config that config with the job's last refusal of it and an edit that saves it at once. Before the settings are set up it shows Set up settings, as Privacy does.
 export function Jobs() {
   const login = useQuery({ queryKey: ACCOUNTS_QUERY_KEY, queryFn: readAccounts })
   const scope = login.data?.scope
@@ -67,7 +67,7 @@ function JobList({ jobs, scope }: { jobs: JobRow[]; scope: string }) {
   const ops = useOps(true)
   const refusedOf = (job: JobRow) => ops.data?.find((row) => row.job === job.name)?.configRefused
   const toggle = useMutation({
-    mutationFn: ({ job, on }: { job: JobRow; on: boolean }) => saveJobToggle(job, on, scope),
+    mutationFn: ({ job, on }: { job: JobRow; on: boolean }) => saveJobToggle(job, on),
     onError: (error) => toast.add({ title: error.message, type: "error" }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: JOBS_QUERY_KEY }),
     onSuccess: (_, { job, on }) =>
@@ -81,14 +81,24 @@ function JobList({ jobs, scope }: { jobs: JobRow[]; scope: string }) {
       </p>
       <ItemGroup className="gap-2">
         {jobs.map((job) => (
-          <Item key={job.key} role="listitem" size="sm" variant="outline" className="items-start">
+          <Item
+            key={`${job.key} ${job.scope}`}
+            role="listitem"
+            size="sm"
+            variant="outline"
+            className="items-start"
+          >
             <ItemContent className="min-w-0 gap-1.5 py-1 text-xs">
               <ItemTitle className="font-mono">{job.name}</ItemTitle>
               <ItemDescription className="text-xs">{job.description}</ItemDescription>
               <p className="text-muted-foreground text-2xs">
                 {[
                   job.schedule ? (whenWords(job.schedule) ?? "") : "",
-                  job.set ? "set in your settings" : "default",
+                  !job.set
+                    ? "default"
+                    : job.scope === scope
+                      ? "set in your settings"
+                      : `set in ${job.scope}'s settings`,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
@@ -99,7 +109,6 @@ function JobList({ jobs, scope }: { jobs: JobRow[]; scope: string }) {
                   config={job.config}
                   job={job}
                   refused={refusedOf(job)}
-                  scope={scope}
                 />
               )}
             </ItemContent>
@@ -119,22 +128,20 @@ function JobList({ jobs, scope }: { jobs: JobRow[]; scope: string }) {
   )
 }
 
-// A job's config card: its config as JSON in a box you edit, the job's last refusal of it from its heartbeat, and Save, which writes the object at your login's scope at once, since the click is already yours.
+// A job's config card: its config as JSON in a box you edit, the job's last refusal of it from its heartbeat, and Save, which writes the object at the job's scope at once, since the click is already yours.
 function JobConfig({
   config,
   job,
   refused,
-  scope,
 }: {
   config: Record<string, unknown>
   job: JobRow
   refused: string | undefined
-  scope: string
 }) {
   const queryClient = useQueryClient()
   const shown = JSON.stringify(config, null, 2)
   const save = useMutation({
-    mutationFn: (next: Record<string, unknown>) => saveJobConfig(job, next, scope),
+    mutationFn: (next: Record<string, unknown>) => saveJobConfig(job, next),
     onError: (error) => toast.add({ title: error.message, type: "error" }),
     onSettled: () => queryClient.invalidateQueries({ queryKey: JOBS_QUERY_KEY }),
     onSuccess: () => toast.add({ title: `${job.name}'s config saved`, type: "success" }),
@@ -146,7 +153,7 @@ function JobConfig({
       if ("config" in parsed) await save.mutateAsync(parsed.config)
     },
   })
-  const id = `job-config-${job.name}`
+  const id = `job-config-${job.name}-${job.scope}`
   return (
     <form
       className="mt-1"

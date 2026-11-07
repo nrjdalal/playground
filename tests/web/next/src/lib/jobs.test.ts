@@ -56,6 +56,7 @@ describe("Settings > Jobs (PG-1196)", () => {
       name: "ops-sweep",
       row: undefined,
       schedule: JOBS["ops-sweep"]!.schedule,
+      scope: ME,
       set: false,
     })
     expect(rows.find((row) => row.name === "ops-dashboard")).toMatchObject({
@@ -68,7 +69,7 @@ describe("Settings > Jobs (PG-1196)", () => {
     const data = setUp("toggle")
     const key = jobKey("ops-ticket-card")
     const card = jobRows(listSettings(data), ME).find((row) => row.key === key)!
-    const write = jobToggleWrite(card, true, ME)
+    const write = jobToggleWrite(card, true)
     expect(write).toEqual({
       json: {
         by: "Settings",
@@ -95,7 +96,7 @@ describe("Settings > Jobs (PG-1196)", () => {
       setSetting(data, { key, scope: ME, value: { enabled: true, pausedFor: "made-up" } }, WHO).ok,
     ).toBe(true)
     const row = jobRows(listSettings(data), ME).find((each) => each.key === key)!
-    const write = jobToggleWrite(row, false, ME)
+    const write = jobToggleWrite(row, false)
     expect(write.json).toMatchObject({
       reason: "Turned ops-sweep off in Settings > Jobs",
       value: { enabled: false, pausedFor: "made-up" },
@@ -128,7 +129,7 @@ describe("Settings > Jobs' config edit (#1336)", () => {
     expect(setSetting(data, { key, scope: ME, value: row }, WHO).ok).toBe(true)
     const job = jobRows(listSettings(data), ME).find((each) => each.key === key)!
     const config = { hours: "09-18", made: ["up"] }
-    const write = jobConfigWrite(job, config, ME)
+    const write = jobConfigWrite(job, config)
     expect(write).toEqual({
       json: {
         by: "Settings",
@@ -149,5 +150,71 @@ describe("Settings > Jobs' config edit (#1336)", () => {
     expect(parseJobConfig("{hours")).toEqual({ error: "This is not JSON" })
     for (const text of ["[]", "null", "7", '"made-up"'])
       expect(parseJobConfig(text)).toEqual({ error: "A config is a JSON object, {...}" })
+  })
+})
+
+// #1336: an org's own job, a jobs.<camelName> row the registry lacks at an org's scope, is listed beside the registry's, and its switch and config edit write its whole row back at that org.
+describe("Settings > Jobs' org jobs (#1336)", () => {
+  const ORG = "made-up-org"
+  const KEY = "jobs.opsMadeUpWatch"
+  const row = {
+    callsModel: false,
+    command: "{bun} --no-env-file {data}/ops/ops-made-up-watch/cli.ts",
+    config: { prefixes: ["X"] },
+    description: "Watches a made-up org's queue.",
+    enabled: false,
+    heartbeat: "ops-made-up-watch",
+    schedule: { every: 60 },
+  }
+  const listed = (data: string) => {
+    const read = listSettings(data)
+    return { ...read, rows: [...read.rows, { key: KEY, scope: ORG, value: row }] }
+  }
+
+  test("lists an org's own job by its name, A to Z among the registry's, read from its org's row", () => {
+    const rows = jobRows(listed(setUp("org-list")), ME)
+    expect(rows.map((each) => each.name)).toEqual(
+      [...Object.keys(JOBS), "ops-made-up-watch"].toSorted((a, b) => a.localeCompare(b)),
+    )
+    expect(rows.find((each) => each.key === KEY)).toEqual({
+      config: row.config,
+      description: row.description,
+      enabled: false,
+      key: KEY,
+      name: "ops-made-up-watch",
+      row,
+      schedule: row.schedule,
+      scope: ORG,
+      set: true,
+    })
+  })
+
+  test("its switch and its config edit write its whole row back at its org, the one field changed", () => {
+    const job = jobRows(listed(setUp("org-write")), ME).find((each) => each.key === KEY)!
+    expect(jobToggleWrite(job, true).json).toMatchObject({
+      scope: ORG,
+      value: { ...row, enabled: true },
+    })
+    expect(jobConfigWrite(job, { prefixes: ["Y"] }).json).toMatchObject({
+      scope: ORG,
+      value: { ...row, config: { prefixes: ["Y"] } },
+    })
+  })
+
+  test("lists no row at your login's scope or core's as an org's job, and no alias of a registry job", () => {
+    const read = listSettings(setUp("org-skip"))
+    const rows = jobRows(
+      {
+        ...read,
+        rows: [
+          ...read.rows,
+          { key: KEY, scope: ME, value: row },
+          { key: KEY, scope: "core", value: row },
+          { key: "jobs.opsDesk", scope: ORG, value: { enabled: true } },
+        ],
+      },
+      ME,
+    )
+    expect(rows.map((each) => each.name)).toEqual(Object.keys(JOBS))
   })
 })

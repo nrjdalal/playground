@@ -435,7 +435,9 @@
   The card shows the key, the scope and the value as its JSON, exactly as Approve writes them.
   Approve takes `seen`, the `updatedAt` of the card the owner read, so an Approve with no `seen`, or one read before the poster's `bun run ask edit`, is refused and writes nothing.
   It is claimed as an accept's is, then writes the setting at its scope in the stack's own extensions, a fixture stack's own, through `setSetting` (or `resetSetting` for no value) in `@packages/settings`, its commit's reason `the owner approved it in the Inbox (#iN)`;
-  a job's `enabled` or `config` goes over the row its scope holds, never the registry's fields, so a registry job keeps the registry's command and schedule (`settingsFor`'s merge, `.agents/dashboard/dashboard.md`'s Jobs), an org's own job's merged row is checked as a whole row is, and refused with `<key> has no row at <scope> to change` while its scope holds none, an org's own job's whole row replaces the row its scope holds, and a value its scope already holds writes nothing and reads `<key> at <scope> is already <value>, so nothing changed`.
+  a job's `enabled` or `config` goes over the row its scope holds, never the registry's fields, so a registry job keeps the registry's command and schedule (`settingsFor`'s merge, `.agents/dashboard/dashboard.md`'s Jobs),
+  an org's own job's merged row is checked as a whole row is, and refused with `<key> has no row at <scope> to change` while its scope holds none,
+  an org's own job's whole row replaces the row its scope holds, and a value its scope already holds writes nothing and reads `<key> at <scope> is already <value>, so nothing changed`.
   The answer keeps `set: {exitCode, line}`, and the card reads `Guard setting: <line>` green or `Guard setting failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`, and after a failed one tells its lead.
 
   ```bash

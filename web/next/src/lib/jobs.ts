@@ -7,7 +7,7 @@ export const JOBS_QUERY_KEY = ["settings", "jobs"] as const
 const PREFIX = "jobs."
 
 type Listed = {
-  keys: { default: unknown; key: string }[]
+  keys: { aliases?: string[]; default: unknown; key: string }[]
   rows: { key: string; scope: string; value: unknown }[]
   values: Record<string, unknown>
 }
@@ -26,9 +26,11 @@ export type JobRow = {
   enabled: boolean
   key: string
   name: string
-  // the row your login's scope holds for the job, which a toggle keeps all but its enabled field of
+  // the row the job's scope holds, which a toggle keeps all but its enabled field of
   row: Record<string, unknown> | undefined
   schedule: Schedule | undefined
+  // the scope the job's writes go to: your login's for a registry job, its org's for an org's own job
+  scope: string
   set: boolean
 }
 
@@ -36,9 +38,33 @@ export type JobRow = {
 const nameOf = (key: string) =>
   key.slice(PREFIX.length).replace(/[A-Z0-9]/g, (c) => `-${c.toLowerCase()}`)
 
-// Pure: each registry job from GET /api/v1/settings, A to Z by name: what it does, when it runs and whether it is on, as your login reads it, and whether a setting sets it rather than its default.
-export const jobRows = (listed: Listed, scope: string): JobRow[] =>
-  listed.keys
+// Pure: each job from GET /api/v1/settings, A to Z by name, then scope: what it does, when it runs and whether it is on, and whether a setting sets it rather than its default. A registry job reads as your login does, its writes at your login's scope; an org's own job (a jobs.<camelName> row the registry lacks, at an org's scope, never your login's or core's, as the jobs render reads it) reads its org's row, its writes at that org.
+export const jobRows = (listed: Listed, scope: string): JobRow[] => {
+  const registry = new Set(listed.keys.flatMap(({ aliases, key }) => [key, ...(aliases ?? [])]))
+  const orgs = listed.rows
+    .filter(
+      (each) =>
+        each.key.startsWith(PREFIX) &&
+        !registry.has(each.key) &&
+        each.scope !== scope &&
+        each.scope !== "core",
+    )
+    .map(({ key, scope: org, value }) => {
+      const job = value as JobValue
+      return {
+        config: job.config,
+        description: job.description ?? "",
+        enabled: job.enabled === true,
+        key,
+        // as the jobs render names an org's own job: its key's camel case in kebab case
+        name: key.slice(PREFIX.length).replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`),
+        row: value as Record<string, unknown>,
+        schedule: job.schedule,
+        scope: org,
+        set: true,
+      }
+    })
+  const own = listed.keys
     .filter(({ key }) => key.startsWith(PREFIX))
     .map(({ default: fallback, key }) => {
       const set = key in listed.values
@@ -52,28 +78,32 @@ export const jobRows = (listed: Listed, scope: string): JobRow[] =>
         name: nameOf(key),
         row: row as Record<string, unknown> | undefined,
         schedule: job.schedule,
+        scope,
         set,
       }
     })
-    .sort((a, b) => a.name.localeCompare(b.name))
+  return [...own, ...orgs].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.scope.localeCompare(b.scope),
+  )
+}
 
-// Pure: what PUT /api/v1/settings/:key takes to turn a job on or off at your login's scope: its enabled field over the row your scope holds, never the registry's fields, so the rest still follow the registry.
-export const jobToggleWrite = (job: JobRow, enabled: boolean, scope: string) => ({
+// Pure: what PUT /api/v1/settings/:key takes to turn a job on or off at its scope: its enabled field over the row its scope holds, never the registry's fields, so the rest still follow the registry, and an org's own job's whole row is written back with it.
+export const jobToggleWrite = (job: JobRow, enabled: boolean) => ({
   json: {
     by: "Settings",
     reason: `Turned ${job.name} ${enabled ? "on" : "off"} in Settings > Jobs`,
-    scope,
+    scope: job.scope,
     value: { ...job.row, enabled },
   },
   param: { key: job.key },
 })
 
-// Pure: what PUT /api/v1/settings/:key takes for the owner's own edit of a job's config at your login's scope: the new object over the row your scope holds, so its enabled field and the rest stay, written at once with no Inbox Approve, since the click is already the owner's.
-export const jobConfigWrite = (job: JobRow, config: Record<string, unknown>, scope: string) => ({
+// Pure: what PUT /api/v1/settings/:key takes for the owner's own edit of a job's config at its scope: the new object over the row its scope holds, so its enabled field and the rest stay, written at once with no Inbox Approve, since the click is already the owner's.
+export const jobConfigWrite = (job: JobRow, config: Record<string, unknown>) => ({
   json: {
     by: "Settings",
     reason: `Set ${job.name}'s config in Settings > Jobs`,
-    scope,
+    scope: job.scope,
     value: { ...job.row, config } as Record<string, unknown>,
   },
   param: { key: job.key },
@@ -100,20 +130,12 @@ export const readJobs = async (scope: string): Promise<JobRow[]> => {
   return jobRows(data, scope)
 }
 
-export const saveJobToggle = async (job: JobRow, enabled: boolean, scope: string) => {
-  const { error } = await unwrap(
-    apiClient.v1.settings[":key"].$put(jobToggleWrite(job, enabled, scope)),
-  )
+export const saveJobToggle = async (job: JobRow, enabled: boolean) => {
+  const { error } = await unwrap(apiClient.v1.settings[":key"].$put(jobToggleWrite(job, enabled)))
   if (error) throw new Error(error.message)
 }
 
-export const saveJobConfig = async (
-  job: JobRow,
-  config: Record<string, unknown>,
-  scope: string,
-) => {
-  const { error } = await unwrap(
-    apiClient.v1.settings[":key"].$put(jobConfigWrite(job, config, scope)),
-  )
+export const saveJobConfig = async (job: JobRow, config: Record<string, unknown>) => {
+  const { error } = await unwrap(apiClient.v1.settings[":key"].$put(jobConfigWrite(job, config)))
   if (error) throw new Error(error.message)
 }
