@@ -1,8 +1,8 @@
-// PreToolUse hook, acting for a factory session (role.ts) that runs on GLM alone: refuses a git commit whose staged files, or a git push whose commits the remote does not hold, touch a path that is Opus work (GLM was handed UI work three times, against "truly tiny" mechanical work only), and while load5 is over glm.readOnlyLoad5 (15 by default) any install, node_modules clone, commit or push (a GLM worker pushed twice at load5 20 to 30), and, by the glm rule, a headless Claude run and every org tool. It fails closed on a commit or push whose file list it cannot read and on an org tool whose repository or policy it cannot read, and passes every other call.
+// PreToolUse hook, acting for a factory session (role.ts) that runs on GLM alone: refuses a git commit whose staged files, or a git push whose commits the remote does not hold, touch a path that is Opus work (GLM was handed UI work three times, against "truly tiny" mechanical work only), and while load5 is over glm.readOnlyLoad5 (15 by default) any install, node_modules clone, commit or push (a GLM worker pushed twice at load5 20 to 30), and, by the glm rule, a headless Claude run, every org tool, a read of a guarded org's checkout and a database client aimed off this machine. It fails closed on a commit or push whose file list it cannot read, on an org tool whose repository or policy it cannot read, on a database client whose host it cannot read, and on a call it cannot parse inside a guarded checkout, and passes every other call.
 
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs"
 import { loadavg } from "node:os"
-import { dirname, isAbsolute, join, resolve } from "node:path"
+import { basename, dirname, isAbsolute, join, resolve } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { guardedOrgs } from "../../packages/settings/src/ext"
@@ -388,7 +388,7 @@ const guardedOf = async (environment: Environment): Promise<Orgs> => {
 const LEAD =
   "Stop, report to your lead with this call, and the lead moves the task to a Claude worker."
 const orgRefusal = (what: string, why: string, fix = LEAD) =>
-  `no-glm-heavy-path hook refuses ${what}: ${why}, and this session runs on GLM, which the glm rule (playground rules glm) keeps off every org's tracker, chat, docs and repos and off a headless Claude run. ${fix}`
+  `no-glm-heavy-path hook refuses ${what}: ${why}, and this session runs on GLM, which the glm rule (playground rules glm) keeps off every org's tracker, chat, docs, repos, checkouts and databases, and off a headless Claude run. ${fix}`
 const PLACE_FIX = `Name the repository literally (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api) in a call of its own, or report to your lead.`
 // An org service's hosts, each with what it is to the org
 const ORG_HOSTS: [RegExp, string][] = [
@@ -697,12 +697,24 @@ function gitOrg(
 
 // Each folder the hook has walked, with the guarded org's repository whose checkout holds it, or none, so a call reads each checkout's remotes once
 type Roots = Map<string, Repo | undefined>
-// The guarded org's repository whose checkout holds a path: the nearest folder at or above it holding .git, whose remotes git reads; none for a path in no checkout, a checkout whose remotes git cannot read, or one no guarded org owns
+// A path's real form: itself where it exists, its target where it is a link that dangles, else its nearest real ancestor with the rest kept, so a link placed outside a checkout reads as the file it names
+const realOf = (path: string, depth = 0): string => {
+  try {
+    return realpathSync(path)
+  } catch {}
+  if (depth > 40) return path
+  try {
+    return realOf(resolve(dirname(path), readlinkSync(path)), depth + 1)
+  } catch {}
+  const parent = dirname(path)
+  return parent === path ? path : join(realOf(parent, depth + 1), basename(path))
+}
+// The guarded org's repository whose checkout holds a path: the nearest folder at or above its real form holding .git, whose remotes git reads; none for a path in no checkout, a checkout whose remotes git cannot read, or one no guarded org owns
 function checkoutOf(path: string | undefined, orgs: string[], roots: Roots): Repo | undefined {
   if (!path) return
   const walked: string[] = []
   let found: Repo | undefined
-  for (let at = resolve(path); ; at = dirname(at)) {
+  for (let at = realOf(resolve(path)); ; at = dirname(at)) {
     if (roots.has(at)) {
       found = roots.get(at)
       break
@@ -724,34 +736,194 @@ const checkoutRefusal = (what: string, repo: Repo) =>
   )
 // The read tools, each with the input that names what it reads; a Grep or a Glob with no path reads the session's folder
 const READ_TOOLS: Record<string, string> = { Glob: "path", Grep: "path", Read: "file_path" }
-// the shell's commands that read no file, which run in or beside an org's checkout
+// the shell's commands that read no file, which run inside an org's checkout and open only an argument with a slash or a tilde, since their plain words are text
 const READS_NOTHING = new Set(["date", "echo", "printf", "pwd", "true"])
+const PATH_LIKE = /[/~]/
+const GLOB_CHARS = /[*?[]/
+// a redirect that names a file: an input, a read-write or an output, not a duplicated descriptor, a heredoc or a here-string
+const namesFile = (r: Command["redirects"][number]): boolean =>
+  r.target !== undefined &&
+  !r.body &&
+  (r.op === "<" || r.op === "<>" || (r.op.startsWith(">") && !r.op.startsWith(">&")))
+// Each alternative a word's braces spell ({a,b}), the innermost first, at most 64
+function braces(value: string, depth = 0): string[] {
+  const m = /\{([^{}]*,[^{}]*)\}/.exec(value)
+  if (!m || depth > 8) return [value]
+  const out: string[] = []
+  for (const part of m[1].split(","))
+    out.push(
+      ...braces(value.slice(0, m.index) + part + value.slice(m.index + m[0].length), depth + 1),
+    )
+  return out.slice(0, 64)
+}
+// A glob segment as a regular expression: * and ? within one segment, a [...] class kept, the rest literal
+function globRegex(segment: string): RegExp {
+  let re = "^"
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i]
+    if (c === "*") re += "[^/]*"
+    else if (c === "?") re += "[^/]"
+    else if (c === "[") {
+      const end = segment.indexOf("]", i + 2)
+      if (end < 0) re += "\\["
+      else {
+        re += `[${segment
+          .slice(i + 1, end)
+          .replace(/^!/, "^")
+          .replace(/\\/g, "\\\\")}]`
+        i = end
+      }
+    } else re += c.replace(/[.+^${}()|\\]/g, "\\$&")
+  }
+  return new RegExp(`${re}$`)
+}
+// A glob's matches on disk, segment by segment from the call's folder: a literal segment is kept whether or not it exists, a glob segment takes each entry it matches (a hidden one only when the segment opens with the dot), a ** reads as a * here (the folders below it are the recursive read the residual-risk line names), at most 200 paths
+function globbed(value: string, cwd: string | undefined): string[] {
+  const out: string[] = []
+  for (const pattern of braces(value)) {
+    const root = isAbsolute(pattern) ? "/" : cwd
+    if (!root) continue
+    let candidates = [root]
+    for (const segment of pattern.split("/").filter((part) => part !== "")) {
+      if (!GLOB_CHARS.test(segment)) {
+        candidates = candidates.map((at) => join(at, segment))
+        continue
+      }
+      const re = globRegex(segment.replaceAll("**", "*"))
+      const hidden = segment.startsWith(".")
+      const next: string[] = []
+      for (const at of candidates) {
+        let entries: string[]
+        try {
+          entries = readdirSync(at)
+        } catch {
+          continue
+        }
+        for (const entry of entries)
+          if ((hidden || !entry.startsWith(".")) && re.test(entry)) next.push(join(at, entry))
+        if (next.length >= 200) break
+      }
+      candidates = next.slice(0, 200)
+      if (candidates.length === 0) break
+    }
+    out.push(...candidates)
+  }
+  return out
+}
+// The paths a command opens: its folder, each argument, each file a redirect names, each file a substitution in a word reads ($(< f), $(cat f)) and each match of a glob or a brace, a word the hook cannot read giving none; a command that reads nothing gives no folder and only a path-like argument
+function opened(cmd: Command, parsed: Parsed, env: Env): (string | undefined)[] {
+  const { args, name } = parsed
+  const plain = READS_NOTHING.has(name)
+  const places: (string | undefined)[] = plain ? [] : [env.cwd]
+  const open = (w: Word, argument: boolean) => {
+    for (const read of w.reads ?? [])
+      if (!read.unknown && !marked(read.value)) places.push(pathOf(read, env))
+    if (unreadValue(w) || (plain && argument && !PATH_LIKE.test(w.value))) return
+    places.push(pathOf(w, env))
+    if (w.glob) places.push(...globbed(w.value, env.cwd))
+  }
+  for (const a of args) open(a, true)
+  for (const r of cmd.redirects) if (namesFile(r)) open(r.target as Word, false)
+  return places
+}
 
-// The database clients, those that read PGHOST, and a database URL's host
+// The database clients the glm rule reads: psql, pgbench, pgcli and every pg_ program read PGHOST, PGHOSTADDR and PGSERVICE; mycli, mysql and mysqldump read MYSQL_HOST; mongo and mongosh take a positional host; redis-cli takes -h
 const DB_CLIENTS = new Set([
   "mongo",
   "mongosh",
+  "mycli",
   "mysql",
   "mysqldump",
-  "pg_dump",
-  "pg_dumpall",
-  "pg_restore",
+  "pgbench",
+  "pgcli",
   "psql",
   "redis-cli",
 ])
+const dbClient = (name: string) => DB_CLIENTS.has(name) || /^pg_\w+$/.test(name)
+const pgClient = (name: string) =>
+  name === "pgbench" || name === "pgcli" || name === "psql" || name.startsWith("pg_")
+const mysqlClient = (name: string) => name === "mycli" || name === "mysql" || name === "mysqldump"
+const mongoClient = (name: string) => name === "mongo" || name === "mongosh"
+// mongo's and mongosh's flags that take no value, so the word after one is a positional
+const MONGO_FLAGS = new Set([
+  "--json",
+  "--nodb",
+  "--norc",
+  "--quiet",
+  "--retryWrites",
+  "--shell",
+  "--ssl",
+  "--tls",
+  "--verbose",
+])
+// the container runners a client runs inside, by exec or run, with -e for the client's environment
+const CONTAINER_RUNNERS = new Set(["docker", "nerdctl", "podman"])
+// A database URL: its host list (each host[:port], a socket percent-encoded) and its query, whose host, hostaddr and service parameters libpq reads
 const DB_URL =
-  /\b(?:mariadb|mongodb(?:\+srv)?|mysql|postgres(?:ql)?|rediss?):\/\/(?:[^@\s/]*@)?(\[[^\]]*\]|[^:/?#\s,]*)/gi
-const CONNINFO_HOST = /(?:^|\s)host=(\S+)/
+  /\b(?:mariadb|mongodb(?:\+srv)?|mysql|postgres(?:ql)?|rediss?):\/\/(?:[^@\s/?#]*@)?([^/?#\s]*)[^?#\s]*(?:\?([^#\s]*))?/gi
+// libpq's conninfo keywords that name where it connects, each as many times as written
+const CONNINFO = /(?:^|\s)(host|hostaddr|service)=('[^']*'|"[^"]*"|\S+)/g
+// A host as written, without its quotes, brackets, port or percent-encoding (a socket's folder)
+const hostOf = (raw: string): string => {
+  let host = raw.replace(/^['"]|['"]$/g, "")
+  try {
+    host = decodeURIComponent(host)
+  } catch {}
+  const bracket = /^\[([^\]]*)\](?::\d*)?$/.exec(host)
+  if (bracket) return bracket[1]
+  const parts = host.split(":")
+  return parts.length === 2 ? parts[0] : host
+}
 // a host on this machine: loopback, a socket's folder, or none, which a client reads as its local socket
 const onThisMachine = (host: string) =>
-  host === "" || host.startsWith("/") || /^(?:localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$/i.test(host)
+  host === "" || host.startsWith("/") || /^(?:localhost|127(?:\.\d{1,3}){3}|::1)$/i.test(host)
 const DB_FIX =
   "Name a database on this machine literally (127.0.0.1, or the worktree's own container), in a call of its own, or report to your lead."
-// A database call the glm rule keeps a GLM session off: a client, or any command but a pure one, given a database URL, a conninfo, a host option or PGHOST naming a host off this machine; a client given a value the hook cannot read fails closed
+// The database client a container runner runs by exec or run (docker compose's too), with the environment its -e and --env give it, or none
+function containedClient(parsed: Parsed): Parsed | undefined {
+  const { args, local } = parsed
+  const words = args.map((a) => (unreadValue(a) ? "" : a.value))
+  const start = words[0] === "compose" ? 2 : 1
+  if (words[start - 1] !== "exec" && words[start - 1] !== "run") return
+  const at = words.findIndex((w, i) => i >= start && dbClient(w))
+  if (at < 0) return
+  const given = new Map(local)
+  for (let i = start; i < at; i++) {
+    const w = words[i]
+    const pair =
+      w === "-e" || w === "--env"
+        ? args[++i]
+        : w.startsWith("--env=")
+          ? { ...args[i], value: args[i].value.slice(6) }
+          : /^-e./.test(w)
+            ? { ...args[i], value: args[i].value.slice(2) }
+            : undefined
+    const eq = pair?.value.indexOf("=") ?? -1
+    if (pair && eq > 0)
+      given.set(pair.value.slice(0, eq), { ...pair, value: pair.value.slice(eq + 1) })
+  }
+  return { ...parsed, args: args.slice(at + 1), local: given, name: words[at] }
+}
+// A database call the glm rule keeps a GLM session off: a client, or any command but a pure one, given a database URL, a conninfo, a host option, a positional host or a host variable naming a host off this machine, every host it names read; a client given a value the hook cannot read, a service name included, fails closed
 function dbCall(parsed: Parsed, env: Env): string | undefined {
+  const inner = CONTAINER_RUNNERS.has(parsed.name) ? containedClient(parsed) : undefined
+  if (inner) return dbCall(inner, env)
   const { args, local, name } = parsed
-  const client = DB_CLIENTS.has(name)
+  const client = dbClient(name)
   const hosts: (string | undefined)[] = []
+  // each host a value names, a comma-separated list read whole; a service name is one the hook cannot place
+  const named = (value: string, service = false) => {
+    if (service) hosts.push(undefined)
+    else for (const host of value.split(",")) hosts.push(hostOf(host))
+  }
+  const queried = (query: string) => {
+    for (const pair of query.split("&")) {
+      const eq = pair.indexOf("=")
+      const key = eq < 0 ? pair : pair.slice(0, eq)
+      if (key === "host" || key === "hostaddr") named(pair.slice(eq + 1))
+      else if (key === "service") named("", true)
+    }
+  }
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (unreadValue(a)) {
@@ -759,22 +931,43 @@ function dbCall(parsed: Parsed, env: Env): string | undefined {
       continue
     }
     const v = a.value
-    for (const m of v.matchAll(DB_URL)) hosts.push(m[1])
+    for (const m of v.matchAll(DB_URL)) {
+      named(m[1])
+      if (m[2]) queried(m[2])
+    }
     if (!client) continue
-    const conninfo = CONNINFO_HOST.exec(v)
-    if (conninfo) hosts.push(conninfo[1])
-    if (v === "-h" || v === "--host") {
+    for (const m of v.matchAll(CONNINFO)) named(m[2], m[1] === "service")
+    const mongo = mongoClient(name)
+    if (v === "--host" || (v === "-h" && !mongo)) {
       const next = args[++i]
-      hosts.push(next && !unreadValue(next) ? next.value : undefined)
-    } else if (v.startsWith("--host=")) hosts.push(v.slice(7))
-    else if (/^-h[^-]/.test(v)) hosts.push(v.slice(2))
+      if (next && !unreadValue(next)) named(next.value)
+      else hosts.push(undefined)
+    } else if (v.startsWith("--host=")) named(v.slice(7))
+    else if (/^-h[^-]/.test(v) && !mongo) named(v.slice(2))
+    else if (
+      mongo &&
+      !v.startsWith("-") &&
+      !v.includes("://") &&
+      !/\.[cm]?[jt]s$/.test(v) &&
+      /^[A-Za-z0-9][A-Za-z0-9.-]*[:/]/.test(v) &&
+      (i === 0 || !args[i - 1].value.startsWith("-") || MONGO_FLAGS.has(args[i - 1].value))
+    )
+      named(v.split(/[:/]/)[0])
   }
-  if (name === "psql" || name.startsWith("pg_")) {
+  // the host variables the client's family reads, the command's own assignments first, then the line's, then the session's
+  const keys = pgClient(name)
+    ? ["PGHOST", "PGHOSTADDR", "PGSERVICE"]
+    : mysqlClient(name)
+      ? ["MYSQL_HOST"]
+      : []
+  for (const key of keys) {
     const set =
-      local.get("PGHOST") ??
-      env.vars.get("PGHOST") ??
-      (env.process.PGHOST ? { value: env.process.PGHOST as string } : undefined)
-    if (set) hosts.push(unreadValue(set as Word) ? undefined : set.value)
+      local.get(key) ??
+      env.vars.get(key) ??
+      (env.process[key] ? { value: env.process[key] as string } : undefined)
+    if (!set) continue
+    if (unreadValue(set as Word) || key === "PGSERVICE") hosts.push(undefined)
+    else named(set.value)
   }
   const at = hosts.findIndex((h) => h === undefined || !onThisMachine(h))
   if (at < 0) return
@@ -852,11 +1045,8 @@ const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots): Visit 
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, name } = parsed
-    if (Array.isArray(orgs) && !READS_NOTHING.has(name))
-      for (const place of [
-        env.cwd,
-        ...args.map((a) => (unreadValue(a) ? undefined : pathOf(a, env))),
-      ]) {
+    if (Array.isArray(orgs) && orgs.length > 0)
+      for (const place of opened(cmd, parsed, env)) {
         const repo = checkoutOf(place, orgs, roots)
         if (repo) return checkoutRefusal(`this ${name} call`, repo)
       }
@@ -936,10 +1126,12 @@ async function inspect(
     const path =
       typeof given !== "string" || given === ""
         ? directory
-        : isAbsolute(given)
-          ? given
-          : directory && resolve(directory, given)
-    const repo = checkoutOf(path, orgs, new Map())
+        : given.startsWith("~/") && environment.HOME
+          ? join(environment.HOME, given.slice(2))
+          : isAbsolute(given)
+            ? given
+            : directory && resolve(directory, given)
+    const repo = orgs.length > 0 ? checkoutOf(path, orgs, new Map()) : undefined
     return repo ? checkoutRefusal(`this ${tool} call`, repo) : undefined
   }
   if (tool !== "Bash" || typeof toolInput?.command !== "string") return
@@ -954,6 +1146,7 @@ async function inspect(
     cwd: directory,
     files: new Map(),
     known: knownVariables(command, environment, directory),
+    old: { dir: directory },
     process: environment,
     vars: new Map(),
   }
