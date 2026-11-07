@@ -120,7 +120,7 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     await beat(m.ctx(T0))
     await beat(m.ctx(later(300_000)))
     expect(missingGuards(m.main, GUARDS)).toEqual([])
-    expect(m.runs.some((r) => r.endsWith("checkout -- ."))).toBe(true)
+    expect(m.runs.some((r) => r.endsWith("checkout HEAD -- ."))).toBe(true)
     expect(m.runs.some((r) => r.includes("run-slot.sh ops-restore -- bun install --cwd"))).toBe(
       true,
     )
@@ -134,6 +134,29 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     expect(kept).toHaveLength(1)
     expect(m.sent[0]!.text).toContain(`git status in ${join(m.ops, "restore", kept[0]!)}`)
     expect(existsSync(join(m.ops, "restore", "state.json"))).toBe(false)
+  })
+
+  test("a loss already staged in the index is put back from HEAD and counted as deleted", async () => {
+    const m = await machine()
+    await git(m.main, "rm", "-rq", "scripts")
+    const beat = restoreBeat({ guards: GUARDS, main: m.main, upkeep: noUpkeep })
+    await beat(m.ctx(T0))
+    await beat(m.ctx(later(300_000)))
+    expect(missingGuards(m.main, GUARDS)).toEqual([])
+    expect(m.sent[0]!.text).toContain("had 2 files deleted and nothing else")
+  })
+
+  test("a git status that fails stops the restore before anything is thrown away", async () => {
+    const m = await machine({
+      "status --porcelain": { code: 128, out: "fatal: index file corrupt\n" },
+    })
+    m.wipe()
+    const beat = restoreBeat({ guards: GUARDS, main: m.main, upkeep: noUpkeep })
+    await beat(m.ctx(T0))
+    await beat(m.ctx(later(300_000)))
+    expect(m.sent[0]!.text).toContain("stopped at git status: fatal: index file corrupt")
+    expect(m.runs.some((r) => r.includes("checkout"))).toBe(false)
+    expect(missingGuards(m.main, GUARDS)).toEqual(GUARDS)
   })
 
   test("with its .git gone too, which breaks the Dashboard's worktree, it restores in place from the URL a healthy look kept, keeping what differed from origin", async () => {
@@ -204,7 +227,7 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     const m = await machine()
     m.wipe()
     const old = new Date(T0.getTime() - DAY).toISOString()
-    await seed(m.ops, { failed: "git checkout -- .", last: old, since: old })
+    await seed(m.ops, { failed: "git checkout HEAD -- .", last: old, since: old })
     const beat = restoreBeat({ guards: GUARDS, main: m.main, upkeep: noUpkeep })
     await beat(m.ctx(T0))
     await beat(m.ctx(later(300_000)))
@@ -252,7 +275,7 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     const m = await machine({
       "ps -o command= -p 4242": {
         code: 0,
-        out: "bun /x/packages/scripts/src/playground/update.ts\n",
+        out: "/bin/bash /x/scripts/ops/run-slot.sh ops -- bun /x/packages/scripts/src/playground/update.ts\n",
       },
     })
     expect(await upkeepHeld(m.ctx(T0))).toBe(false)
@@ -275,7 +298,7 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
 
   test("a failed step is told once and not tried again until the guards are back", async () => {
     const m = await machine({
-      "checkout -- .": { code: 1, out: "error: unable to unlink old 'x'\n" },
+      "checkout HEAD -- .": { code: 1, out: "error: unable to unlink old 'x'\n" },
     })
     m.wipe()
     const beat = restoreBeat({ guards: GUARDS, main: m.main, upkeep: noUpkeep })
@@ -283,7 +306,7 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     await beat(m.ctx(later(300_000)))
     expect(m.sent).toHaveLength(2)
     expect(m.sent[0]!.text).toContain(
-      "stopped at git checkout -- .: error: unable to unlink old 'x'",
+      "stopped at git checkout HEAD -- .: error: unable to unlink old 'x'",
     )
     expect(m.sent[0]!.text).toContain(
       `Its git status before it began is in ${join(m.ops, "restore", "status-")}`,

@@ -109,16 +109,19 @@ export const restoreBeat =
     const git = (...args: string[]) => ctx.run(["git", "-C", main, ...args], 300_000)
     // what the checkout held before a checkout throws it away, kept whole in a file and named in the report, since the main checkout stays clean and anything but the loss is news
     const keep = async (lines: string[]) => {
-      const other = lines.filter((line) => line[1] !== "D")
+      const other = lines.filter((line) => line[0] !== "D" && line[1] !== "D")
       statusFile = join(dir, `status-${now}.txt`)
       await writeAtomic(statusFile, `${lines.join("\n")}\n`)
       return `${lines.length - other.length} files deleted and ${other.length ? `also held ${other.slice(0, 5).join("; ")}${other.length > 5 ? ` and ${other.length - 5} more` : ""}` : "nothing else"} (git status in ${statusFile})`
     }
     let held = ""
     if (existsSync(join(main, ".git"))) {
-      held = `had ${await keep((await git("status", "--porcelain")).out.split("\n").filter(Boolean))}`
-      const back = await git("checkout", "--", ".")
-      if (back.code !== 0) return fail("git checkout -- .", back.out)
+      const status = await git("status", "--porcelain")
+      if (status.code !== 0) return fail("git status", status.out)
+      held = `had ${await keep(status.out.split("\n").filter(Boolean))}`
+      // from HEAD, since a loss already staged (a `git rm`, or a `git add -A` after a wipe) is gone from the index too
+      const back = await git("checkout", "HEAD", "--", ".")
+      if (back.code !== 0) return fail("git checkout HEAD -- .", back.out)
     } else {
       const url = (
         await Bun.file(originPath(ctx.ops))
@@ -136,9 +139,9 @@ export const restoreBeat =
         if (step.code !== 0) return fail(`git ${args.join(" ")}`, step.out)
       }
       // read against origin/main's tree, a file the same as origin's reads `A  `, so only a change, a loss or a stray file is kept
-      const lines = (await git("status", "--porcelain")).out
-        .split("\n")
-        .filter((line) => line && !line.startsWith("A  "))
+      const status = await git("status", "--porcelain")
+      if (status.code !== 0) return fail("git status", status.out)
+      const lines = status.out.split("\n").filter((line) => line && !line.startsWith("A  "))
       held = `had no .git and was restored in place; against origin/main it had ${await keep(lines)}; every worktree of the lost .git, the Dashboard's included, has lost its link to it, which a fresh .git cannot repair, so Ops reattaches each`
       const back = await git("checkout", "-f", "-B", "main", "origin/main")
       if (back.code !== 0) return fail("git checkout -f -B main origin/main", back.out)
