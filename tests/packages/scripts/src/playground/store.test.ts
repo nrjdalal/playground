@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -549,6 +557,88 @@ describe("playground ext", () => {
     expect(
       JSON.parse(readFileSync(join(at, "extensions", "hooks", `${first}.json`), "utf8")),
     ).toEqual(["made-up"])
+  })
+
+  // PG-1377: put stored every file 644, so a skill's script run directly failed with a permission error once accepted
+  test("put keeps a file's executable bit, as a proposal and once accepted, so the script runs directly (PG-1377)", async () => {
+    const at = folder("modes")
+    const script = join(scratch, "hello.sh")
+    writeFileSync(script, "#!/bin/sh\necho made-up hello\n")
+    chmodSync(script, 0o755)
+    const skill = join(scratch, "greeter")
+    mkdirSync(join(skill, "scripts"), { recursive: true })
+    writeFileSync(
+      join(skill, "SKILL.md"),
+      "---\nname: greeter\ndescription: d\n---\nRun scripts/greet.sh.\n",
+    )
+    writeFileSync(join(skill, "scripts", "greet.sh"), "#!/bin/sh\necho made-up greet\n")
+    chmodSync(join(skill, "scripts", "greet.sh"), 0o755)
+    const modes = () =>
+      git(at, "tester", ["ls-files", "-s"])
+        .split("\n")
+        .map((line) => line.replace(/ [0-9a-f]{40} 0\t/, " "))
+    const put = async (kind: string, key: string, path: string) =>
+      JSON.parse((await ext(at, ["put", "tester", kind, key, path, "--reason", "r"])).out) as {
+        rev: string
+      }
+    const one = await put("script", "hello", script)
+    const two = await put("skill", "greeter", skill)
+    expect(modes()).toEqual([
+      "100755 proposed/scripts/hello",
+      "100644 proposed/skills/greeter/SKILL.md",
+      "100755 proposed/skills/greeter/scripts/greet.sh",
+    ])
+    for (const [kind, key, rev] of [
+      ["script", "hello", one.rev],
+      ["skill", "greeter", two.rev],
+    ] as const)
+      expect((await ext(at, ["accept", "tester", kind, key, rev, "--reason", "r"])).code).toBe(0)
+    expect(modes()).toEqual([
+      "100755 scripts/hello",
+      "100644 skills/greeter/SKILL.md",
+      "100755 skills/greeter/scripts/greet.sh",
+    ])
+    for (const [path, said] of [
+      ["scripts/hello", "made-up hello"],
+      ["skills/greeter/scripts/greet.sh", "made-up greet"],
+    ]) {
+      const ran = Bun.spawnSync([join(scopeDir(at, "tester"), path)])
+      expect(ran.exitCode).toBe(0)
+      expect(ran.stdout.toString().trim()).toBe(said)
+    }
+  })
+
+  test("check-modes lists each stored file that starts with #! but lost its executable bit, and changes nothing (PG-1377)", async () => {
+    const at = folder("check-modes")
+    writeFiles(
+      at,
+      "tester",
+      new Map([
+        ["scripts/old", "#!/bin/sh\necho old\n"],
+        ["skills/s/SKILL.md", "Run run.py with python3.\n"],
+        ["skills/s/run.py", "print(1)\n"],
+        ["attachments/0a1b.sh", "#!/bin/sh\necho attached\n"],
+        ["docs/shebang.md", "#! a doc that starts like a script\n"],
+      ]),
+      { author: "owner", reason: "seeded" },
+    )
+    const kept = join(scratch, "kept.sh")
+    writeFileSync(kept, "#!/bin/sh\necho kept\n")
+    chmodSync(kept, 0o755)
+    await ext(at, ["put", "tester", "script", "kept", kept, "--reason", "r"])
+    const head = git(at, "tester", ["rev-parse", "HEAD"])
+    const r = await ext(at, ["check-modes"])
+    expect(r.code).toBe(0)
+    expect(r.out.split("\n")).toEqual([
+      "tester scripts/old",
+      "put each again from a copy that has its executable bit: playground ext put <scope> <kind> <key> <path> --reason <why>",
+    ])
+    expect(git(at, "tester", ["rev-parse", "HEAD"])).toBe(head)
+    const none = await ext(folder("check-modes-none"), ["check-modes"])
+    expect(none).toMatchObject({
+      code: 0,
+      out: "every stored file that starts with #! keeps its executable bit",
+    })
   })
 
   test("a command it does not have is a usage error", async () => {

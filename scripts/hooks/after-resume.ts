@@ -1,6 +1,7 @@
 // SessionStart hook, matcher "resume": after any restart that resumes a factory session, it tells the session to re-arm what the restart ended and re-send what went unanswered (playbook's **context** rule), since an account switch restarts every session, and a watch, a loop or a round request it held is otherwise lost.
 
-import { fromFactory } from "./role"
+import { WAITER } from "./after-compact"
+import { fromFactory, MANAGER_ROLES, sessionOf, sessionRole } from "./role"
 
 // The transcript's tail it reads: a transcript runs to many megabytes, and its last entries sit at the end.
 export const TAIL = 256 * 1024
@@ -38,8 +39,13 @@ export async function check(
     if (!(await fromFactory(raw, environment))) return undefined
     const input = JSON.parse(raw) as { transcript_path?: unknown }
     const stopped = await lastEntry(input.transcript_path, now).catch(() => undefined)
+    const manager = MANAGER_ROLES.has(await sessionRole(environment, sessionOf(raw)))
+    const text = rearm(stopped, now)
     return JSON.stringify({
-      hookSpecificOutput: { additionalContext: rearm(stopped, now), hookEventName: "SessionStart" },
+      hookSpecificOutput: {
+        additionalContext: manager ? `${text} ${WAITER}` : text,
+        hookEventName: "SessionStart",
+      },
     })
   } catch {
     return undefined
