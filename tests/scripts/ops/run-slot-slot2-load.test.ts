@@ -7,10 +7,10 @@ import { WAITING, machine } from "./run-slot-fake"
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
 
-// A machine with run-slot held by a big run and slots 3 and 4 off, so a medium run can take only run-slot-2, at load1 2 and the load5 given, with run-slot.load5-cap's cap when one is given
+// A machine with run-slot held by a small run, which leaves room for a medium one, and slots 3 and 4 off, so a medium run can take only run-slot-2, at load1 2 and the load5 given, with run-slot.load5-cap's cap when one is given
 const loaded = (load5: number, cap?: number) => {
   const m = machine({ load1: 2, load5, off: ["run-slot.3-off", "run-slot.4-off"] })
-  m.hold("run-slot", 3, "big")
+  m.hold("run-slot", 1, "small")
   if (cap !== undefined) writeFileSync(join(m.ops, "run-slot.load5-cap"), `${cap}\n`)
   // moves the fake load5 from one figure to another in sysctl and uptime, as a load that falls
   const setLoad5 = (from: number, to: number) => {
