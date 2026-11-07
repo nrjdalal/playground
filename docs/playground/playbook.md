@@ -137,8 +137,10 @@ The channel is where the owner's and the colleague's Playgrounds talk:
 a post there speaks as Playground and ends with an italic _Sent via Playground_, since it goes out through the owner's Slack account, and the hook refuses a Slack MCP chat post there without it, and refuses any curl write that names the channel.
 Its links go as link chips: rich text of plain words and links alone, each link labelled with its address and shortened, ending in the italic signature, and the hook refuses any other rich content there.
 An observer in the channel is answered directly when they write there.
-The dispatcher sorts each ask from the colleague, their Playground or the observer into three: it answers it, fixes a small shared bug and tells the owner after, or puts it to the owner first, and the owner's asks always come first (`CHANNEL.md` beside the skill).
-A simple, working PR from the colleague is the dispatcher's to decide and record, and it merges as their own PR after a read-only review, so their name stays on the work; only a hard-to-undo change to how the owner works goes to the owner's Inbox.
+The dispatcher sorts each ask from the colleague, their Playground or the observer into three: it answers it; it takes a change that can be undone within Playground's own repo and changes no standing rule, recording why; or it puts a hard-to-undo change, any change to a standing rule, a looser guard or anything outside the repo to the owner first.
+The standing rules change only on the owner's own ask, so a colleague's ask that adds, tightens or loosens one always waits for the owner.
+The owner's asks always come first (`CHANNEL.md` beside the skill).
+A simple, working PR from the colleague that changes no standing rule is the dispatcher's to decide and record, and it merges as their own PR after a read-only review, so their name stays on the work; only a hard-to-undo change to how the owner works goes to the owner's Inbox.
 The hook also refuses a guarded org's write it cannot read.
 Like the ticket guard, a hook that cannot start refuses the call, and one that times out lets it through, where the rule still binds the session.
 
@@ -167,6 +169,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   GLM's unused credits lapse at each reset (`~/.playground/zai-usage.json`, the Usage app), so the lead pulls the next eligible item forward while GLM has room before the reset.
   A GLM session's commit or push that touches the app's pages, the factory's hooks, spawn.sh, the merge and verify scripts, the commit hooks or the CI workflows is refused by the `no-glm-heavy-path` hook, naming the files, so that work goes to a Claude worker.
   While the Mac's 5-minute load is over 15, the same hook also refuses a GLM session's installs, node_modules clones, commits and pushes, so it waits for the load to fall.
+  The same hook refuses a GLM session's headless Claude run and its calls to an org's tracker, chat, docs and repos, and every MCP tool or resource read, so that work goes to a Claude worker.
   A session resumed with `--brief <file>` starts by reading that brief; without one, its first prompt has it act on the after-resume hook's instruction, so it re-arms its background tasks and re-sends its unanswered messages.
   A resumed session restarts any dev stack it served and re-arms its watches, CronList before CronCreate, since the resume kept its crons and dropped its background tasks.
   The factory no longer moves sessions to GLM at 98% usage (retired on Inbox #i827): the account rotation moves it between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).

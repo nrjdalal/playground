@@ -953,6 +953,53 @@ describe("a quoted argument is read as a command line only where a program runs 
   })
 
   test.each([
+    [
+      "bun -e holding a regex with a lookbehind",
+      `bun -e 'const r = /(?<=x)y/; console.log(r.test("xy"))'`,
+    ],
+    [
+      "node -e holding a regex with a lookbehind",
+      `node -e 'const r = /(?<=a)b/; console.log(r.test("ab"))'`,
+    ],
+    [
+      "agent-browser eval holding an anchored regex of a tag",
+      `agent-browser eval 'const ok = /^<div>/.test(document.body.innerHTML); ok'`,
+    ],
+    ["node -pe holding a regex with a lookbehind", `node -pe '/(?<=a)b/.test("ab")'`],
+    [
+      "agent-browser eval after a valued option holding an anchored regex of a tag",
+      `agent-browser --session x eval 'const ok = /^<div>/.test(document.body.innerHTML); ok'`,
+    ],
+    ["node -e opening with a regex with a lookbehind", `node -e '/(?<=a)b/.test("ab")'`],
+    [
+      "bun -e holding a regex with a lookbehind, piped into a reader",
+      `bun -e 'const r = /(?<=a)b/; console.log(r.test("ab"))' | head -1`,
+    ],
+    [
+      "awk reading a file into a variable with getline",
+      `awk 'BEGIN { while ((getline line < "notes.md") > 0) n++; print n }'`,
+    ],
+  ])("%s runs from a worktree", async (_, command) => {
+    expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
+  })
+
+  test.each([
+    ["node -e opening with a regex that tests a string", `node -e '/^a/.test("ab")'`],
+    ["node -pe opening with a regex that tests a string", `node -pe '/^a/.test("ab")'`],
+    ["bun -e opening with a regex that tests a string", `bun -e '/x/.test("x")'`],
+  ])(
+    "%s runs from the home, the data folder and a worktree, as canary reads it",
+    async (_, command) => {
+      for (const cwd of [
+        homedir(),
+        join(homedir(), ".playground"),
+        join(homedir(), "x", ".claude", "worktrees", "y"),
+      ])
+        expect(await at(command, cwd)).toBeUndefined()
+    },
+  )
+
+  test.each([
     ["rm of mktemp's folder", 'T=$(mktemp -d); rm -rf "$T"'],
     ["rm of mktemp's quiet folder", 'T="$(mktemp -dq)"; rm -rf "$T"'],
     ["rm of mktemp's file", 'F=$(mktemp); rm -f "$F"'],
@@ -1900,19 +1947,11 @@ describe("a write the hook can place outside the root runs, after a cd it cannot
   })
 })
 
-describe("an unquoted value stays one word where the shell does not split it (PG-1133)", () => {
+describe("a quoted or held value stays one word in every shell (PG-1133, PG-1268)", () => {
   test.each([
-    ["ln of one variable at zsh's top level", "ln -s $X"],
-    ["GNU ln of one variable at zsh's top level", "gln -s $X"],
-    ["dd with a variable after if= at zsh's top level", "dd if=$X"],
-    ["mkdir with a mode from a variable at zsh's top level", "mkdir -m $X /tmp/x"],
     ["ln of one quoted variable in bash -c", `bash -c 'ln -s "$X"'`],
-    ["ln of one variable in zsh -c", `zsh -c 'ln -s $X'`],
     ["ln of a quoted command substitution", `ln -s "$(cat /tmp/f)" /tmp/l`],
     ["cp of a command substitution to a literal last path", "cp $(cat /tmp/f) /tmp/x"],
-    ["dd with an arithmetic block size", "dd if=/dev/zero of=/tmp/y bs=$((4 * 1024)) count=1"],
-    ["ln of a variable after an npx -y", "npx -y cowsay hi; ln -s $X"],
-    ["ln of a variable after a find -type", "find . -type f -name a; ln -s $X"],
     ["ln of a quoted default", `ln -s "\${X:-/tmp/d}"`],
     ["dd with a quoted variable after if=", `dd if="$X"`],
     ["ln of a quoted positional parameter", `ln -s "$1"`],

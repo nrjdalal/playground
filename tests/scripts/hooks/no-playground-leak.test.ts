@@ -253,7 +253,7 @@ describe(`a Acme write holding a ${OLD.dispatcher} term is refused`, () => {
     [
       "the backend's model",
       "mcp__linear-shared__save_comment",
-      { body: "Ran on GLM-5.3 today", issueId: "ACME-1" },
+      { body: "Ran on GLM 5.3 today", issueId: "ACME-1" },
     ],
   ])("%s", async (_, tool, input) => {
     const reason = await mcp(tool, input)
@@ -1417,7 +1417,7 @@ describe("an org whose extension gates its Slack sends", () => {
         'curl -G -d channel=C0MADE0101 -d limit=100 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/conversations.history',
         'curl -G -d channel=C0MADE0101 -d ts=1.2 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/conversations.replies',
         'curl -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/auth.test',
-        'curl -G -d query=CEDAR-1 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/search.messages',
+        'curl -G -d query=MADECEDAR-1 -H "Authorization: Bearer $SLACK_TOKEN" https://slack.com/api/search.messages',
       ])
         expect([read, await asCurl(read, env)]).toEqual([read, undefined])
     expect(await asCurl(post, await gated(GATE))).toContain("the acme extension's post.ts")
@@ -1460,14 +1460,14 @@ describe("an org whose extension gates its Slack sends", () => {
     expect(
       await mcp(
         "mcp__slack-acme__chat_post_message",
-        { channel: "D0MADE0501", text: "CEDAR-1 \u00B7 triaging" },
+        { channel: "D0MADE0501", text: "MADECEDAR-1 \u00B7 triaging" },
         env,
       ),
     ).toBeUndefined()
     expect(
       await mcp(
         "mcp__slack-acme__chat_update",
-        { channel: "D0MADE0501", text: "CEDAR-1 \u00B7 done", ts: "1.2" },
+        { channel: "D0MADE0501", text: "MADECEDAR-1 \u00B7 done", ts: "1.2" },
         env,
       ),
     ).toBeUndefined()

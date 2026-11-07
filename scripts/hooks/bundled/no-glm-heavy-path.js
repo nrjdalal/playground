@@ -2,8 +2,9 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-glm-heavy-path.ts
+import { readFileSync as readFileSync2 } from "fs";
 import { loadavg } from "os";
-import { join as join5, resolve as resolve3 } from "path";
+import { dirname as dirname2, join as join5, resolve as resolve3 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -53,53 +54,12 @@ import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
 var dataDir = (env = process.env) => dataDirOf(env);
 
-// packages/settings/src/rendered.ts
-import { existsSync, readFileSync } from "fs";
-import { join as join2 } from "path";
-import { fileURLToPath } from "url";
-var CORE = "core";
-var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
-var extensionsDir = (data) => join2(data, "extensions");
-var fixFor = (file) => {
-  const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
-  if (list && !existsSync(join2(coreDir(), "lists", `${list}.json`)))
-    return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`;
-  return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher asks the owner to set up settings, then fill in and save Privacy on the Dashboard's Settings page, which writes it";
-};
-var readRenderedSync = (data, file) => {
-  const dir = extensionsDir(data);
-  if (!existsSync(dir))
-    return {};
-  const parts = file.split("/");
-  if (parts.some((part) => part === "" || part === "." || part === ".."))
-    return { refusal: `${file} is not a path inside the extensions (${dir})` };
-  const path = parts[0] === CORE ? join2(coreDir(), ...parts.slice(1)) : join2(dir, file);
-  return existsSync(path) ? { path } : { refusal: `the extensions root (${dir}) holds no ${file}: ${fixFor(file)}` };
-};
-var readPolicy = async (data, org) => readPolicySync(data, org);
-var readPolicySync = (data, org) => {
-  const read = readRenderedSync(data, "policy.json");
-  if (read.refusal)
-    return { refusal: read.refusal };
-  if (!read.path)
-    return { settings: { schemaVersion: 1, values: {} } };
-  let policy;
-  try {
-    policy = JSON.parse(readFileSync(read.path, "utf8"));
-  } catch {
-    return {
-      refusal: `the extensions' policy.json does not parse (${read.path}): ${fixFor("policy.json")}`
-    };
-  }
-  return {
-    settings: {
-      schemaVersion: 1,
-      values: { ...policy.values, ...org ? policy.orgs?.[org.toLowerCase()] : undefined }
-    }
-  };
-};
-
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
+function getEnumValues(entries) {
+  const numericValues = Object.values(entries).filter((v) => typeof v === "number");
+  const values = Object.entries(entries).filter(([k, _]) => numericValues.indexOf(+k) === -1).map(([_, v]) => v);
+  return values;
+}
 function joinValues(array, separator = "|") {
   return array.map((val) => stringifyPrimitive(val)).join(separator);
 }
@@ -178,6 +138,7 @@ function shallowClone(o) {
     return new Set(o);
   return o;
 }
+var propertyKeyTypes = /* @__PURE__ */ new Set(["string", "number", "symbol"]);
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -2114,6 +2075,29 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
     return payload;
   };
 });
+var $ZodEnum = /* @__PURE__ */ $constructor("$ZodEnum", (inst, def) => {
+  $ZodType.init(inst, def);
+  const values = getEnumValues(def.entries);
+  const valuesSet = new Set(values);
+  inst._zod.values = valuesSet;
+  defineLazyInternal(inst, "pattern", (zod) => {
+    const patternValues = getEnumValues(zod.def.entries).filter((k) => propertyKeyTypes.has(typeof k));
+    return new RegExp(patternValues.length ? `^(${patternValues.map((o) => escapeRegex(o.toString())).join("|")})$` : "^[^\\s\\S]$");
+  });
+  inst._zod.parse = (payload, _ctx) => {
+    const input = payload.value;
+    if (valuesSet.has(input)) {
+      return payload;
+    }
+    payload.issues.push({
+      code: "invalid_value",
+      values,
+      input,
+      inst
+    });
+    return payload;
+  };
+});
 var $ZodTransform = /* @__PURE__ */ $constructor("$ZodTransform", (inst, def) => {
   $ZodType.init(inst, def);
   inst._zod.optin = "optional";
@@ -3934,6 +3918,19 @@ var numberProcessor = (schema, ctx, _json, params) => {
       json.allOf = [...json.allOf ?? [], ...rest.map((m) => ({ multipleOf: m }))];
   }
 };
+var enumProcessor = (schema, _ctx, json, _params) => {
+  const def = schema._zod.def;
+  const values = getEnumValues(def.entries);
+  if (values.length === 0) {
+    json.not = {};
+    return;
+  }
+  if (values.every((v) => typeof v === "number"))
+    json.type = "number";
+  if (values.every((v) => typeof v === "string"))
+    json.type = "string";
+  json.enum = values;
+};
 var customProcessor = (schema, ctx, json, params) => {
   handleUnrepresentable(schema, ctx, json, params, "Custom types cannot be represented in JSON Schema");
 };
@@ -4814,6 +4811,52 @@ function record(keyType, valueType, params) {
     ...normalizeParams(params)
   });
 }
+var ZodEnum = /* @__PURE__ */ $constructor("ZodEnum", (inst, def) => {
+  $ZodEnum.init(inst, def);
+  ZodType.init(inst, def);
+  inst._zod.processJSONSchema = (ctx, json, params) => enumProcessor(inst, ctx, json, params);
+  inst.enum = def.entries;
+  inst.options = [...inst._zod.values];
+  const keys = new Set(Object.keys(def.entries));
+  inst.extract = (values, params) => {
+    const newEntries = {};
+    for (const value of values) {
+      if (keys.has(value)) {
+        newEntries[value] = def.entries[value];
+      } else
+        throw new Error(`Key ${value} not found in enum`);
+    }
+    return new ZodEnum({
+      ...def,
+      checks: [],
+      ...normalizeParams(params),
+      entries: newEntries
+    });
+  };
+  inst.exclude = (values, params) => {
+    const newEntries = { ...def.entries };
+    for (const value of values) {
+      if (keys.has(value)) {
+        delete newEntries[value];
+      } else
+        throw new Error(`Key ${value} not found in enum`);
+    }
+    return new ZodEnum({
+      ...def,
+      checks: [],
+      ...normalizeParams(params),
+      entries: newEntries
+    });
+  };
+});
+function _enum(values, params) {
+  const entries = Array.isArray(values) ? Object.fromEntries(values.map((v) => [v, v])) : values;
+  return new ZodEnum({
+    type: "enum",
+    entries,
+    ...normalizeParams(params)
+  });
+}
 var ZodTransform = /* @__PURE__ */ $constructor("ZodTransform", (inst, def) => {
   _ensureDefaultMemoizer();
   $ZodTransform.init(inst, def);
@@ -4985,6 +5028,52 @@ function refine(fn, _params = {}) {
 function superRefine(fn, params) {
   return _superRefine(fn, params);
 }
+// packages/settings/src/rendered.ts
+import { existsSync, readFileSync } from "fs";
+import { join as join2 } from "path";
+import { fileURLToPath } from "url";
+var CORE = "core";
+var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
+var extensionsDir = (data) => join2(data, "extensions");
+var fixFor = (file) => {
+  const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
+  if (list && !existsSync(join2(coreDir(), "lists", `${list}.json`)))
+    return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`;
+  return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher asks the owner to set up settings, then fill in and save Privacy on the Dashboard's Settings page, which writes it";
+};
+var readRenderedSync = (data, file) => {
+  const dir = extensionsDir(data);
+  if (!existsSync(dir))
+    return {};
+  const parts = file.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === ".."))
+    return { refusal: `${file} is not a path inside the extensions (${dir})` };
+  const path = parts[0] === CORE ? join2(coreDir(), ...parts.slice(1)) : join2(dir, file);
+  return existsSync(path) ? { path } : { refusal: `the extensions root (${dir}) holds no ${file}: ${fixFor(file)}` };
+};
+var readPolicy = async (data, org) => readPolicySync(data, org);
+var readPolicySync = (data, org) => {
+  const read = readRenderedSync(data, "policy.json");
+  if (read.refusal)
+    return { refusal: read.refusal };
+  if (!read.path)
+    return { settings: { schemaVersion: 1, values: {} } };
+  let policy;
+  try {
+    policy = JSON.parse(readFileSync(read.path, "utf8"));
+  } catch {
+    return {
+      refusal: `the extensions' policy.json does not parse (${read.path}): ${fixFor("policy.json")}`
+    };
+  }
+  return {
+    settings: {
+      schemaVersion: 1,
+      values: { ...policy.values, ...org ? policy.orgs?.[org.toLowerCase()] : undefined }
+    }
+  };
+};
+
 // packages/settings/src/settings.ts
 var KINDS = ["doc", "learning", "list", "rule", "script", "skill", "template"];
 var REVIEWED_KINDS = KINDS.filter((kind) => kind !== "list");
@@ -5014,6 +5103,35 @@ var defineSettings = (defined) => {
 var extLinkSchema = string2().regex(/^(?:\*|[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38})$/, "a link is a GitHub org, lowercase, or * for every repo");
 var extOrderSchema = array(extScopeSchema).refine((names) => new Set(names).size === names.length, "an extension is in the order once");
 var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
+
+// packages/settings/src/ext.ts
+var BUNDLED_EXTENSIONS = ["slack"];
+var extSettings = defineSettings({
+  "ext.bundled": {
+    default: [],
+    description: "The extensions Playground ships under extensions/ that you have turned on, each read as a scope after your installed extensions and before core; one not named here loads no skill.",
+    schema: array(_enum(BUNDLED_EXTENSIONS)).refine((names) => new Set(names).size === names.length, "a bundled extension is on once")
+  },
+  "ext.links": {
+    default: {},
+    description: "Each extension to the GitHub orgs whose repos read it, lowercase, or * for every repo; your login's is read by every repo, and an extension it does not name by none.",
+    schema: extLinksSchema
+  },
+  "ext.order": {
+    default: [],
+    description: "The extensions in priority order, first wins when two hold the same name; your login's comes first unless named here, and core always comes last.",
+    schema: extOrderSchema
+  },
+  "ext.repos": {
+    default: {},
+    description: "The private GitHub repository each extension syncs with, as name to owner/name; one it does not name syncs with <login>/playground-<name>.",
+    schema: record(extScopeSchema, string2().regex(/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/, "a repository as owner/name"))
+  }
+});
+var guardedOrgs = (values) => {
+  const links = extLinksSchema.parse(values["ext.links"] ?? {});
+  return [...new Set(Object.values(links).flat())].filter((link) => link !== "*").sort();
+};
 
 // packages/settings/src/rules.ts
 var percent = number2().int().min(1).max(100);
@@ -5076,6 +5194,41 @@ var ruleSettings = defineSettings({
     schema: number2().int().positive()
   }
 });
+
+// scripts/hooks/github.ts
+function repoOf(text) {
+  if (text.unknown || text.reads?.length)
+    return;
+  const parts = text.value.trim().replace(/^[a-z][a-z\d+.-]*:\/\//i, "").split("/").filter(Boolean);
+  const [owner, repo] = parts.length === 2 ? parts : parts.slice(1, 3);
+  return owner && repo ? { owner, repo: repo.replace(/\.git$/, "") } : undefined;
+}
+function implicitRepos(env, local) {
+  const fromEnv = local.get("GH_REPO") ?? env.vars.get("GH_REPO") ?? (env.process.GH_REPO ? { value: env.process.GH_REPO } : undefined);
+  const candidates = fromEnv && fromEnv.value !== "" ? [repoOf(fromEnv)] : [];
+  return [...candidates, ...remotes(env.cwd)];
+}
+function remoteRepo(url) {
+  const path = /^(?:[a-z][a-z\d+.-]*:\/\/)?(?:[^@/]+@)?[^/:]+[:/](.+)$/i.exec(url.trim());
+  const parts = path?.[1].split("/").filter(Boolean) ?? [];
+  if (parts.length < 2)
+    return;
+  return { owner: parts[parts.length - 2], repo: parts[parts.length - 1].replace(/\.git$/, "") };
+}
+function remotes(cwd) {
+  if (!cwd)
+    return [];
+  const git = Bun.spawnSync(["git", "-C", cwd, "config", "--get-regexp", "^remote\\..*\\.url$"], {
+    stderr: "ignore"
+  });
+  if (git.exitCode !== 0)
+    return [];
+  return git.stdout.toString().split(`
+`).flatMap((line) => {
+    const repo = remoteRepo(line.slice(line.indexOf(" ") + 1));
+    return repo ? [repo] : [];
+  });
+}
 
 // scripts/hooks/role.ts
 import { homedir as homedir2 } from "os";
@@ -5626,128 +5779,6 @@ function bodyOf(commands, k) {
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
-var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]/;
-var LEADS = new Set([
-  "!",
-  "-",
-  "builtin",
-  "command",
-  "elif",
-  "exec",
-  "if",
-  "nocorrect",
-  "noglob",
-  "time",
-  "until",
-  "while"
-]);
-function sources(line) {
-  let command = true;
-  for (const [raw] of line.replace(/\\\n/g, "").matchAll(/[;&|(){}\n]|(?:\$'(?:[^'\\]|\\[\s\S])*'?|'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]|[^\s;&|(){}'"\\])+/g)) {
-    const word = raw.replace(/\$'/g, "'").replace(/['"\\]/g, "");
-    if (/^[;&|(){}\n]$/.test(raw) || /^(?:\]\]|do|else|then)$/.test(word))
-      command = true;
-    else if (!command)
-      continue;
-    else if (word === "source" || word === "." || word === "eval")
-      return true;
-    else if (!LEADS.has(word) && !/^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(word))
-      command = false;
-  }
-  return false;
-}
-var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
-var zshSplits = (line) => {
-  if (ZSH_SPLITS.test(line))
-    return true;
-  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
-    const at = command.search(ARRAY_MAKERS);
-    if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at)))
-      return true;
-  }
-  const joined = line.replace(/[\\'"]/g, "");
-  if (sources(line) || sources(joined))
-    return true;
-  const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
-  const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
-  return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
-};
-var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
-var ZSH_ARRAYS = new Set([
-  "aliases",
-  "argv",
-  "builtins",
-  "cdpath",
-  "commands",
-  "comppostfuncs",
-  "compprefuncs",
-  "compstate",
-  "dirstack",
-  "dis_aliases",
-  "dis_builtins",
-  "dis_functions",
-  "dis_functions_source",
-  "dis_galiases",
-  "dis_patchars",
-  "dis_reswords",
-  "dis_saliases",
-  "epochtime",
-  "errnos",
-  "fignore",
-  "fpath",
-  "funcfiletrace",
-  "funcsourcetrace",
-  "funcstack",
-  "functions",
-  "functions_source",
-  "functrace",
-  "galiases",
-  "history",
-  "historywords",
-  "jobdirs",
-  "jobstates",
-  "jobtexts",
-  "keymaps",
-  "killring",
-  "langinfo",
-  "mailpath",
-  "manpath",
-  "match",
-  "mbegin",
-  "mend",
-  "module_path",
-  "modules",
-  "nameddirs",
-  "options",
-  "parameters",
-  "patchars",
-  "path",
-  "pipestatus",
-  "psvar",
-  "region_highlight",
-  "registers",
-  "reply",
-  "reswords",
-  "saliases",
-  "signals",
-  "sysparams",
-  "termcap",
-  "terminfo",
-  "userdirs",
-  "usergroups",
-  "watch",
-  "widgets",
-  "words",
-  "zle_bracketed_paste",
-  "zle_highlight",
-  "zsh_eval_context",
-  "zsh_scheduled_events"
-]);
-var oneWord = (written) => {
-  const plain = ONE_WORD.exec(written);
-  return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "");
-};
 var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
@@ -5851,8 +5882,8 @@ var setVar = (vars, key, value) => {
 };
 var merge = (out, part) => {
   out.value += part.value;
-  if (part.splits && out.splits !== "always")
-    out.splits = part.splits;
+  if (part.splits)
+    out.splits = true;
   if (part.unknown)
     out.unknown ??= part.unknown;
   if (part.variable)
@@ -6294,23 +6325,18 @@ function word(lx) {
     } else if (c === "$" && next === '"')
       lx.i++;
     else if (c === "$" || c === "`") {
-      const from = lx.i;
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
-      const written = src.slice(from, lx.i);
       if (marked(text.value))
-        merge(out, {
-          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
-          value: ""
-        });
+        out.splits = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir3();
       lx.i++;
     } else {
       if (c === UNKNOWN || c === READ)
-        out.splits = "always";
+        out.splits = true;
       out.value += c;
       bare += c;
       lx.i++;
@@ -6346,7 +6372,7 @@ function double(lx) {
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge(out, text);
       if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
-        out.splits = "always";
+        out.splits = true;
     } else {
       out.value += c;
       lx.i++;
@@ -6987,18 +7013,17 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
   const { inline, operand } = shellOperand(args, name);
-  const splits = (script) => SPLITTERS.has(name) || name === "zsh" && (zshSplits(script) || args.some((a) => /^[-+]/.test(a.value) && a.value !== "-c"));
   if (operand && inline) {
     let script = operand.value;
     if (xargs?.replace && script.includes(xargs.replace)) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    return run(lexScript(script, env), { ...subshell(env), splits: splits(script) }, visit, builtins);
+    return run(lexScript(script, env), subshell(env), visit, builtins);
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
-    const verdict = await run(lexScript(text, env), { ...subshell(env), splits: splits(text) }, visit, builtins);
+    const verdict = await run(lexScript(text, env), subshell(env), visit, builtins);
     if (verdict)
       return verdict;
   }
@@ -7257,6 +7282,10 @@ function knownVariables(command, environment, cwd) {
   return known;
 }
 
+// scripts/hooks/no-headless-login.ts
+var headless = ({ args }) => args.some((a) => a.value === "--print" || /^-[A-Za-z]*p[A-Za-z]*$/.test(a.value));
+if (false) {}
+
 // scripts/hooks/no-glm-heavy-path.ts
 var OPUS_PATHS = [
   ".github/workflows/",
@@ -7324,6 +7353,13 @@ var RUNNER_TAKES = new Set([
 var COPIERS = new Set(["cp", "ditto", "rsync"]);
 var BUSY_RUN = /\b(?:bun|cp|ditto|npm|pip[\d.]*|pipx|pnpm|python[\d.]*|rsync|uv|yarn)\b/i;
 var GIT_CALL = /\bgit\b[\s\S]*\b(?:commit|push)\b/i;
+var MCP_RESOURCE_TOOLS = new Set([
+  "ListMcpResourcesTool",
+  "ReadMcpResourceDirTool",
+  "ReadMcpResourceTool"
+]);
+var ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i;
+var RUNNER_CALL = /\b(?:bash|bun|bunx|deno|node|npm|npx|pnpm|sh|tsx|yarn|zsh)\b|\//i;
 var heavy = (path) => OPUS_PATHS.some((p) => p.endsWith("/") ? path.startsWith(p) : path === p);
 async function onGlm(raw, environment = process.env) {
   if (/(?:^|\/\/|\.)api\.z\.ai(?:[:/]|$)/.test(environment.ANTHROPIC_BASE_URL ?? ""))
@@ -7532,7 +7568,262 @@ function forcedPaths(rest, dir) {
     return [":(top)"];
   return named.map((w) => resolve3(dir, w.value));
 }
-var visitor = (load5, limit) => {
+var guardedOf = async (environment) => {
+  try {
+    const read = await readPolicy(dataDir(environment));
+    return read.refusal !== undefined ? { refusal: read.refusal } : guardedOrgs(read.settings.values);
+  } catch (error) {
+    return { refusal: String(error) };
+  }
+};
+var LEAD = "Stop, report to your lead with this call, and the lead moves the task to a Claude worker.";
+var orgRefusal = (what, why, fix = LEAD) => `no-glm-heavy-path hook refuses ${what}: ${why}, and this session runs on GLM, which the glm rule (playground rules glm) keeps off every org's tracker, chat, docs and repos and off a headless Claude run. ${fix}`;
+var PLACE_FIX = `Name the repository literally (--repo <owner>/<name>, or repos/<owner>/<name>/... for gh api) in a call of its own, or report to your lead.`;
+var ORG_HOSTS = [
+  [/(?:^|[/@.])(linear\.app)(?=[:/?#]|$)/i, "tracker"],
+  [/(?:^|[/@.])(notion\.(?:com|site|so))(?=[:/?#]|$)/i, "docs"],
+  [/(?:^|[/@.])(slack\.com)(?=[:/?#]|$)/i, "chat"]
+];
+var FETCHERS = new Set(["curl", "http", "https", "wget", "xh"]);
+var GH_API_TAKES = new Set([
+  "--cache",
+  "-F",
+  "-f",
+  "--field",
+  "-H",
+  "--header",
+  "--hostname",
+  "--input",
+  "-p",
+  "--preview",
+  "-q",
+  "--jq",
+  "--raw-field",
+  "-t",
+  "--template",
+  "-X",
+  "--method"
+]);
+var ORG_SCRIPT_DIRS = [
+  [
+    /(?<!\/tests)\/packages\/scripts\/src\/linear-[\w-]+(?:\/|$)/,
+    "a Linear script, which reads or writes an org's tracker"
+  ],
+  [
+    /(?<!\/tests)\/packages\/scripts\/src\/dm(?:\/|$)/,
+    "the DM sender, which posts to the owner's chat"
+  ]
+];
+var RUNNERS = new Set([
+  "bash",
+  "bun",
+  "bunx",
+  "deno",
+  "node",
+  "npm",
+  "npx",
+  "pnpm",
+  "sh",
+  "tsx",
+  "yarn",
+  "zsh"
+]);
+var RUNNER_DIR = /^(?:--cwd|--dir|--prefix|-C)(?:=|$)/;
+var scriptDir = (path) => path === undefined ? undefined : ORG_SCRIPT_DIRS.find(([at]) => at.test(path))?.[1];
+function packageScripts(dir) {
+  const found = new Map;
+  for (let at = dir;; at = dirname2(at)) {
+    try {
+      const { scripts } = JSON.parse(readFileSync2(join5(at, "package.json"), "utf8"));
+      for (const [name, command] of Object.entries(scripts ?? {}))
+        if (!found.has(name) && typeof command === "string")
+          found.set(name, { at, command });
+    } catch {}
+    if (dirname2(at) === at)
+      return found;
+  }
+}
+var FOLDER_FIX = "Name the folder literally, in a call of its own, or report to your lead.";
+function orgScript(parsed, env) {
+  const { args, first, name } = parsed;
+  if (first?.value.includes("/")) {
+    const program = pathOf(first, env);
+    if (!program)
+      return {
+        fix: FOLDER_FIX,
+        why: "the hook cannot tell which script it runs, since a value or folder it cannot read names its program"
+      };
+    const own = scriptDir(program);
+    if (own)
+      return { why: `it runs ${own}` };
+  }
+  if (name === "playground" && args.find((a) => !a.value.startsWith("-"))?.value === "dm")
+    return { why: `it runs ${ORG_SCRIPT_DIRS[1][1]}` };
+  if (!RUNNERS.has(name))
+    return;
+  let at = env.cwd;
+  for (let i = 0;i < args.length; i++) {
+    const flag = RUNNER_DIR.exec(args[i].value);
+    if (!flag)
+      continue;
+    const value = flag[0].endsWith("=") ? { ...args[i], value: args[i].value.slice(flag[0].length) } : args[++i];
+    at = value ? pathOf(value, { ...env, cwd: at }) : undefined;
+  }
+  if (!at)
+    return {
+      fix: FOLDER_FIX,
+      why: "the hook cannot tell which script it runs, since it runs in a folder a value it cannot read names"
+    };
+  const scripts = packageScripts(at);
+  for (const a of args) {
+    if (a.value.startsWith("-") || unreadValue(a))
+      continue;
+    const script = scripts.get(a.value);
+    const hit = scriptDir(pathOf(a, { ...env, cwd: at })) ?? script?.command.split(/\s+/).map((word) => scriptDir(resolve3(script.at, word))).find(Boolean);
+    if (hit)
+      return { why: `it runs ${hit}` };
+  }
+}
+var CLAUDE_PACKAGE = /^@anthropic-ai\/claude-code(?:@\S*)?$/;
+var URL_FILE = /^(?:-[A-Za-z]*K|--config(?:=|$))/;
+var WGET_URL_FILE = /^(?:-[A-Za-z]*i|--input-file(?:=|$))/;
+var ACCOUNT_WIDE = new Set(["org", "status"]);
+var PLAIN_ENDPOINTS = new Set(["markdown", "rate_limit", "user"]);
+var GH_PLACEHOLDERS = /^repos\/\{owner\}\/\{repo\}(?:\/|$)/;
+var GITHUB_URL = /(?:github\.com|githubusercontent\.com)[/:](?:(?:repos|orgs|users)\/)?([\w.-]+)(?:\/([\w.-]+))?/i;
+var REST_PATH = /^\/?(?:repos|orgs|users)\/([\w.-]+)(?:\/([\w.-]+))?/i;
+var SCOPED = /^(?:--owner|--repo|-R)(?:=|$)|(?:^|\s)(?:org|owner|repo|user):\S/;
+var isGuarded = (orgs, owner) => orgs.some((org) => org.toLowerCase() === owner.toLowerCase());
+var label = (owner, repo) => repo ? `${owner}/${repo.replace(/\.git$/, "")}` : owner;
+var namedOrg = (orgs, text) => orgs.find((org) => new RegExp(`(?:^|[^a-z\\d])${org.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:$|[^a-z\\d])`, "i").test(text));
+var urlOrg = (orgs, value, rest = false) => {
+  const m = GITHUB_URL.exec(value) ?? (rest ? REST_PATH.exec(value) : null);
+  return m && isGuarded(orgs, m[1]) ? label(m[1], m[2]) : undefined;
+};
+var unreadValue = (w) => w.unknown !== undefined || Boolean(w.reads?.length) || marked(w.value);
+var GRAPHQL_FIX = `Use a REST endpoint under repos/<owner>/<name>/ (gh api repos/<owner>/<name>/..., gh pr, gh issue), and reply to a review thread by REST, or report to your lead.`;
+function ghOrg(parsed, env, orgs) {
+  const { args } = parsed;
+  const words = args.filter((a) => !a.value.startsWith("-") && !unreadValue(a)).map((a) => a.value);
+  const head = args.slice(0, words[0] === "api" ? 1 : 2).filter((a) => !a.value.startsWith("-") && !unreadValue(a));
+  const what = `this gh ${head.map((a) => a.value).join(" ")} call`;
+  let placed = false;
+  for (let i = 0;i < args.length; i++) {
+    const v = args[i].value;
+    const flag = v === "-R" || v === "--repo";
+    const repo = flag ? args[++i] : v.startsWith("--repo=") ? { ...args[i], value: v.slice(7) } : undefined;
+    if (!repo && !flag)
+      continue;
+    if (!repo || unreadValue(repo))
+      return orgRefusal(what, "the hook cannot tell which repository it reaches, since a value it cannot read names it", PLACE_FIX);
+    const named = repoOf(repo);
+    if (named && isGuarded(orgs, named.owner))
+      return orgRefusal(what, `it reaches ${label(named.owner, named.repo)}, a guarded org's repository`);
+    placed = true;
+  }
+  if (ACCOUNT_WIDE.has(words[0] ?? ""))
+    return orgRefusal(what, "its reach is the whole account, every org it can read included");
+  const api = words[0] === "api";
+  const endpoint = api ? parseFlags(args.slice(1), GH_API_TAKES).positionals[0] : undefined;
+  if (endpoint && unreadValue(endpoint))
+    return orgRefusal(what, "the hook cannot tell which repository it reaches, since a value it cannot read names its endpoint", PLACE_FIX);
+  const path = endpoint?.value.replace(/^https?:\/\/api\.github\.com\//i, "").replace(/^\//, "").replace(/[?#].*$/, "");
+  if (path === "graphql")
+    return orgRefusal(what, "a GraphQL query can walk from any repository to every org the account can read", GRAPHQL_FIX);
+  if (path !== undefined && !REST_PATH.test(path) && !GH_PLACEHOLDERS.test(path) && !path.startsWith("search/") && !PLAIN_ENDPOINTS.has(path))
+    return orgRefusal(what, `its endpoint ${path} reaches across the account, every org it can read included`, PLACE_FIX);
+  for (const a of args) {
+    const hit = urlOrg(orgs, a.value, a === endpoint);
+    if (hit)
+      return orgRefusal(what, `it reaches ${hit}, ${hit.includes("/") ? "a guarded org's repository" : "a guarded org"}`);
+    if (GITHUB_URL.test(a.value) || a === endpoint && REST_PATH.test(a.value))
+      placed = true;
+  }
+  const org = namedOrg(orgs, args.map((a) => a.value).join(" "));
+  if (org)
+    return orgRefusal(what, `it names ${org}, a guarded org`);
+  if (placed)
+    return;
+  const search = words[0] === "search" || api && /^\/?search\//.test(endpoint?.value ?? "");
+  if (search && !args.some((a) => SCOPED.test(a.value)))
+    return orgRefusal(what, "a search with no owner or repository reaches every org the account can read", `Scope it with --repo <owner>/<name> or --owner <owner>, or report to your lead.`);
+  if (search)
+    return;
+  const implicit = implicitRepos(env, parsed.local);
+  if (implicit.some((r) => r === undefined) || !env.cwd && implicit.length === 0)
+    return orgRefusal(what, "the hook cannot tell which repository it reaches, since it names none and runs where the hook cannot read GH_REPO or the checkout", PLACE_FIX);
+  const fallback = implicit.find((r) => r && isGuarded(orgs, r.owner));
+  return fallback ? orgRefusal(what, `it falls back to ${label(fallback.owner, fallback.repo)}, a guarded org's repository`) : undefined;
+}
+function gitPlaces(parsed, env, dir) {
+  const places = [dir];
+  const at = (w) => unreadValue(w) ? undefined : pathOf(w, { ...env, cwd: dir });
+  const { args, local } = parsed;
+  for (let i = 0;i < args.length; i++) {
+    const v = args[i].value;
+    const joined = /^--(?:git-dir|work-tree)=/.exec(v);
+    if (joined)
+      places.push(at({ ...args[i], value: v.slice(joined[0].length) }));
+    else if (v === "--git-dir" || v === "--work-tree")
+      places.push(args[i + 1] ? at(args[++i]) : undefined);
+    else if (GIT_TAKES.has(v))
+      i++;
+    else if (!v.startsWith("-"))
+      break;
+  }
+  for (const key of ["GIT_DIR", "GIT_WORK_TREE"]) {
+    const set = local.get(key) ?? env.vars.get(key) ?? (env.process[key] ? { value: env.process[key] } : undefined);
+    if (set && set.value !== "")
+      places.push(at(set));
+  }
+  return places;
+}
+function gitOrg(parsed, env, dir, sub, orgs) {
+  const { args } = parsed;
+  const what = sub ? `this git ${sub} call` : "this git call";
+  for (const a of args) {
+    const hit = urlOrg(orgs, a.value);
+    if (hit)
+      return orgRefusal(what, `it reaches ${hit}, a guarded org's repository`);
+  }
+  const places = gitPlaces(parsed, env, dir);
+  if (places.includes(undefined))
+    return orgRefusal(what, "the hook cannot tell which repository it reads, since a value it cannot read names it", "Name the checkout by its literal path, in a call of its own, or report to your lead.");
+  const remote = places.flatMap((place) => remotes(place)).find((r) => isGuarded(orgs, r.owner));
+  return remote ? orgRefusal(what, `it runs in a checkout of ${label(remote.owner, remote.repo)}, a guarded org's repository`) : undefined;
+}
+function orgCall(parsed, env, dir, sub, orgs) {
+  const { args, name } = parsed;
+  const runs = args.findIndex((a) => CLAUDE_PACKAGE.test(a.value.replace(/^--package=/, "")));
+  if (name === "claude" && headless(parsed) || runs >= 0 && headless({ ...parsed, args: args.slice(runs + 1) }))
+    return orgRefusal("this headless Claude run", "a GLM session starts no Claude run of its own, which would reach what it may not");
+  if (FETCHERS.has(name))
+    for (const a of args)
+      for (const [host, kind] of ORG_HOSTS) {
+        const m = host.exec(a.value);
+        if (m)
+          return orgRefusal(`this ${name} call`, `it reaches ${m[1]}, an org's ${kind}`);
+      }
+  if (FETCHERS.has(name) && args.some((a) => (name === "wget" ? WGET_URL_FILE : URL_FILE).test(a.value)))
+    return orgRefusal(`this ${name} call`, "it reads its URL from a file the hook cannot read", "Give the URL literally, in a call of its own, or report to your lead.");
+  const script = orgScript(parsed, env);
+  if (script)
+    return orgRefusal(`this ${name} call`, script.why, script.fix);
+  if (name !== "gh" && name !== "git" && !FETCHERS.has(name))
+    return;
+  if (!Array.isArray(orgs))
+    return orgRefusal(`this ${name} call`, `the hook cannot read which orgs ext.links guards (${orgs.refusal})`, `Fix the policy, or report to your lead.`);
+  if (name === "gh")
+    return ghOrg(parsed, env, orgs);
+  if (name === "git")
+    return gitOrg(parsed, env, dir, sub, orgs);
+  for (const a of args) {
+    const hit = urlOrg(orgs, a.value);
+    if (hit)
+      return orgRefusal(`this ${name} call`, `it reaches ${hit}, a guarded org's repository`);
+  }
+}
+var visitor = (load5, limit, orgs) => {
   const busy = load5 > limit;
   let earlier = "none";
   const forced = [];
@@ -7564,6 +7855,9 @@ var visitor = (load5, limit) => {
         break;
     }
     const sub = isGit ? args[k]?.value : undefined;
+    const org = orgCall(parsed, env, dir, sub, orgs);
+    if (org)
+      return org;
     if (isGit && !writes(cmd) && BRANCH_READS.has(args.slice(k).map((a) => a.value).join(" "))) {
       branchReads = [...reads, dir];
       return;
@@ -7591,10 +7885,13 @@ async function inspect(raw, environment, load5, limit) {
     tool_input: toolInput,
     tool_name: tool
   } = JSON.parse(raw);
+  if (typeof tool === "string" && (tool.startsWith("mcp__") || MCP_RESOURCE_TOOLS.has(tool)))
+    return orgRefusal(`this ${tool} call`, "an MCP tool reaches an org's or an outside service's data");
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;
   const command = toolInput.command;
-  if (!mayRefuse(command.replace(/["'\\]/g, ""), load5, limit))
+  const text = command.replace(/["'\\]/g, "");
+  if (!mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text))
     return;
   const directory = typeof cwd === "string" ? cwd : undefined;
   const env = {
@@ -7604,9 +7901,9 @@ async function inspect(raw, environment, load5, limit) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visitor(load5, limit));
+  return run(lex(command, env.known), env, visitor(load5, limit, await guardedOf(environment)));
 }
-var mayRefuse = (text, load5, limit) => GIT_CALL.test(text) || load5 > limit && BUSY_RUN.test(text);
+var mayRefuse = (text, load5, limit) => GIT_CALL.test(text) || ORG_CALL.test(text) || load5 > limit && BUSY_RUN.test(text);
 async function check(raw, environment = process.env, load5 = currentLoad5()) {
   const limit = await loadLimit(environment);
   try {
@@ -7614,7 +7911,7 @@ async function check(raw, environment = process.env, load5 = currentLoad5()) {
   } catch (error) {
     if (!mayRefuse(raw, load5, limit))
       return;
-    return `no-glm-heavy-path hook could not read this call (${error}), which reads as a git commit or push, or an install or clone on a busy machine, from a GLM session, so it refuses it. Run it as one plain command, or report to your lead.`;
+    return `no-glm-heavy-path hook could not read this call (${error}), which reads as a git commit or push, an org tool, or an install or clone on a busy machine, from a GLM session, so it refuses it, as the glm rule (playground rules glm) asks of an org tool it cannot read. Run it as one plain command, or report to your lead.`;
   }
 }
 async function refusal(raw, environment = process.env, load5 = currentLoad5()) {

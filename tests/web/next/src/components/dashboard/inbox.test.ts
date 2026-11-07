@@ -7,10 +7,12 @@ import {
   type AskQuestion,
   type Choices,
   choicesOf,
+  questionsOf,
 } from "../../../../../../packages/config/src/inbox"
 import { DashboardContext } from "../../../../../../web/next/src/components/dashboard/dashboard"
 import {
   AskChoices,
+  choicesKey,
   FOLDS_OPEN,
   Inbox,
   InboxCard,
@@ -28,6 +30,7 @@ import {
   Questionnaire,
   QuestionnaireItem,
 } from "../../../../../../web/next/src/components/ui/questionnaire"
+import { EMPTY_PICKS, readPicks, savePicks } from "../../../../../../web/next/src/lib/ask-picks"
 import { cardDraftKey, readDrafts, saveDraft } from "../../../../../../web/next/src/lib/drafts"
 import { INBOX_QUERY_KEY, SHELF_LABELS, type Shelf } from "../../../../../../web/next/src/lib/inbox"
 import { tipsOf } from "../../tooltips"
@@ -416,7 +419,7 @@ describe("one action where two overlapped, and Draft where the app has a draft A
   })
 
   test("a Linear comment offers no Draft, since Linear's API creates none", () => {
-    const html = render(false, draft("https://linear.app/acme/issue/DUNE-1/x"))
+    const html = render(false, draft("https://linear.app/acme/issue/MADEDUNE-1/x"))
     expect(named(html, "Send")).not.toBe("")
     expect(named(html, "Draft")).toBe("")
   })
@@ -1975,5 +1978,132 @@ describe("a draft card's changed words", () => {
   test("are another card's alone: a card shows its own words when only another's are kept", () => {
     saveDraft(cardDraftKey("id-42"), { attachments: [], text: "for another card" })
     expect(box(opened(draft))).toBe("hi")
+  })
+})
+
+// A remount is a fresh static render that reads the picks store (no effects run), as a draft card's words come back under cardDraftKey. The store is seeded, then the card rendered, so each case proves what a list refresh or a shelf move gives back.
+describe("an ask card's answer in progress (PG-1345)", () => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+  const store = new Map<string, string>()
+  beforeAll(() =>
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        removeItem: (key: string) => void store.delete(key),
+        setItem: (key: string, value: string) => void store.set(key, value),
+      } as Storage,
+    }),
+  )
+  afterEach(() => {
+    for (const id of Object.keys(readPicks())) savePicks(id, EMPTY_PICKS)
+  })
+  afterAll(() => {
+    if (real) Object.defineProperty(globalThis, "localStorage", real)
+    else delete (globalThis as { localStorage?: Storage }).localStorage
+  })
+
+  const single = (labels: string[]) =>
+    ({
+      ...decision,
+      id: "id-70",
+      preview: { options: labels.map((label) => ({ label })), text: "Pick a base.", type: "ask" },
+      ref: 70,
+      title: "Which base?",
+    }) as InboxItem
+  const multiItem = {
+    ...decision,
+    id: "id-71",
+    preview: {
+      questions: [
+        { options: [{ label: "staging" }, { label: "main" }], question: "Which base?" },
+        { options: [{ label: "now" }, { label: "later" }], question: "When?" },
+      ],
+      text: "Pick for each.",
+      type: "ask",
+    },
+    ref: 71,
+    title: "Port it, and when?",
+  } as InboxItem
+  const singleSig = (labels: string[]) =>
+    choicesKey(choicesOf({ options: labels.map((label) => ({ label })), type: "ask" }))
+  const multiSig = picksKey(
+    questionsOf({
+      questions: [
+        { options: [{ label: "staging" }, { label: "main" }], question: "Which base?" },
+        { options: [{ label: "now" }, { label: "later" }], question: "When?" },
+      ],
+      type: "ask",
+    }),
+  )
+  // the value of every choice input the remount rendered checked, each `${letter}: ${label}` as AskChoices and QuestionChoices stamp it; the primitive carries value and data-checked on the input, not the choice root
+  const picked = (html: string) =>
+    [...html.matchAll(/<[^>]*data-slot="questionnaire-choice-input"[^>]*>/g)]
+      .map((m) => m[0])
+      .filter((tag) => /data-checked(?:=""|[\s>])/.test(tag))
+      .map((tag) => tag.match(/value="([^"]*)"/)?.[1] ?? "")
+  const note = (html: string) =>
+    html.match(/<textarea[^>]*aria-label="Comment"[^>]*>([^<]*)<\/textarea>/)?.[1]
+
+  test("a single ask gives back its pick and Note on remount", () => {
+    savePicks("id-70", {
+      ...EMPTY_PICKS,
+      note: "Soak it.",
+      pick: 1,
+      sig: singleSig(["staging", "main"]),
+    })
+    const html = opened(single(["staging", "main"]))
+    expect(picked(html)).toEqual(["B: main"])
+    expect(note(html)).toBe("Soak it.")
+  })
+
+  test("a fresh single ask keeps none", () => {
+    const html = opened(single(["staging", "main"]))
+    expect(picked(html)).toEqual([])
+    expect(note(html)).toBe("")
+  })
+
+  test("a multi ask gives back each pick and the question in sight", () => {
+    savePicks("id-71", { ...EMPTY_PICKS, picks: [0, 1], sig: multiSig, step: 1 })
+    const html = opened(multiItem)
+    expect(picked(html)).toEqual(expect.arrayContaining(["A: staging", "B: later"]))
+    // step 1 restored, not reset to 0: the second question is the active one, the first is held hidden
+    const active = html.match(/<fieldset[^>]*data-active[^>]*>([\s\S]*?)<\/fieldset>/)?.[1] ?? ""
+    expect(active).toContain("When?")
+    expect(active).not.toContain("Which base?")
+  })
+
+  test("a single ask drops a pick whose options changed under the unmounted card, keeping the Note", () => {
+    savePicks("id-70", {
+      ...EMPTY_PICKS,
+      note: "Soak it.",
+      pick: 1,
+      sig: singleSig(["staging", "main"]),
+    })
+    const html = opened(single(["revert", "delete", "wait"]))
+    expect(picked(html)).toEqual([])
+    expect(note(html)).toBe("Soak it.")
+  })
+
+  test("an answered card renders its result, not a kept answer's choices", () => {
+    savePicks("id-70", {
+      ...EMPTY_PICKS,
+      note: "Soak it.",
+      pick: 1,
+      sig: singleSig(["staging", "main"]),
+    })
+    const answered = {
+      ...single(["staging", "main"]),
+      answer: { at: "2026-10-12T10:05:00.000Z", choice: "approve", option: 0 },
+      status: "approved",
+    } as InboxItem
+    expect(picked(opened(answered, "done"))).toEqual([])
+  })
+
+  test("another card's entry leaves this card untouched", () => {
+    savePicks("id-99", { ...EMPTY_PICKS, note: "other", pick: 0, sig: singleSig(["a", "b"]) })
+    const html = opened(single(["staging", "main"]))
+    expect(picked(html)).toEqual([])
+    expect(note(html)).toBe("")
   })
 })

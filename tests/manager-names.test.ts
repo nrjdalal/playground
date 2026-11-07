@@ -35,7 +35,7 @@ const HISTORY = [
   `${OLD.ops} measured 17 Oct`,
   `run-slot-commit (${OLD.builder},`,
   `on 7 Oct (${OLD.builder})`,
-  `(ND-644, ${OLD.planner})`,
+  `(MADEND-644, ${OLD.planner})`,
   `14 Oct: ${OLD.planner} sat on`,
   `pruned on 7 Oct (${OLD.ops})`,
   `(12 Oct, ${OLD.builder} killed`,
@@ -112,7 +112,7 @@ test("the check reads prose and leaves code, quotes, paths and dated attribution
   ).toEqual([])
   expect(oldNamesIn(`relayed by ${OLD.builder}, 13 Oct 04:35Z: two memberships`)).toEqual([])
   expect(oldNamesIn(`the ${OLD.ops}-checks-3 slot and playground-factory`)).toEqual([])
-  expect(oldNamesIn(`a pass every 120s (ND-644, ${OLD.planner}), under`)).toEqual([])
+  expect(oldNamesIn(`a pass every 120s (MADEND-644, ${OLD.planner}), under`)).toEqual([])
   expect(
     oldNamesIn(
       `\`\`\`\`md\n\`\`\`\n${OLD.builder} ──runs──▶ job\n\`\`\`\n\`\`\`\`\ntell ${OLD.builder}`,

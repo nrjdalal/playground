@@ -38,7 +38,6 @@ import {
   type Visit,
   withDeadline,
   type Word,
-  zshSplits,
 } from "./shell"
 import {
   held,
@@ -239,19 +238,9 @@ const after = (word: Word, cut: number): Word => ({
   value: word.value.slice(cut),
 })
 
-// Whether the shell may split a word into several: always for a substitution or a pasted value, and for a parameter where the shell splits one (`Word.splits` in shell.ts)
-const splitIn = (word: Word, splitting = false): boolean =>
-  word.splits === "always" || (word.splits === "sh" && splitting)
-
 // The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install, ln and mv (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch; and every word the shell may split (`Word.splits`), since one of its words may land as a target
-function writeTargets(
-  name: string,
-  args: Word[],
-  gnu: boolean,
-  posix = false,
-  splitting = false,
-): Word[] {
-  const splits = args.filter((word) => splitIn(word, splitting))
+function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): Word[] {
+  const splits = args.filter((word) => word.splits)
   if (name === "dd")
     return [
       ...new Set([
@@ -445,6 +434,89 @@ function awkPrograms(words: Word[]): Word[] | undefined {
     else return programs.length ? programs : [words[k]]
   }
   return programs.length ? programs : undefined
+}
+
+const EVALUATES = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"])
+// An inline evaluator's program word, JavaScript the shell never reads as a line: bun's or node's -e, --eval, -p or --print value (-pe and -ep included) among the options before any script, or agent-browser's eval script; undefined for any other call
+function evalProgram({ args, name }: Parsed): Word | undefined {
+  // agent-browser's eval after its options, a --name option's value (`--session foo`) included
+  if (name === "agent-browser") {
+    for (let k = 0; k < args.length; k++) {
+      const { value } = args[k]
+      if (value === "eval") return args[k + 1]
+      const option = args[k - 1]?.value ?? ""
+      if (!value.startsWith("-") && !(option.startsWith("--") && !option.includes("="))) return
+    }
+    return
+  }
+  if (name !== "bun" && name !== "node") return
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (EVALUATES.has(value)) return args[k + 1]
+    if (/^--(?:eval|print)=/.test(value)) return args[k]
+    if (!value.startsWith("-")) return
+  }
+}
+
+// the tokens after which a / can only open a regex: none, opening punctuation, a binary or prefix operator (a + or - but one of a postfix ++ or --, a ! but TypeScript's non-null one), an arrow, or a reserved word that takes an expression and names no member; after any other token a / may divide, so the scan masks nothing there
+const REGEX_AFTER =
+  /(?:^|[(,=:[{;?~^%*&|]|=>|(?<![\w$)\]}"'`]\s*)!|(?<!\+)\+|(?<!-)-|(?<!\.\s*)(?<![\w$#])(?:case|delete|do|else|in|instanceof|new|return|throw|typeof|void))\s*$/
+// a program that can turn a regex into text, so its body could reach a pipe or a file as words
+const STRINGIFIES =
+  /\.source\b|\btoString\b|\bString\s*\(|\bJSON\s*\.\s*stringify\b|\.concat\s*\(|\.join\s*\(|\$\{/
+// A JavaScript program with each regex literal outside its strings, templates and comments masked to a word that is neither a path, a glob nor a redirect, or the program unchanged when it can turn a regex into text or the scan cannot close a literal; a regex that guarded() finds a guarded word in, one holding a quote (a division read as a regex would hide the string it runs), or one a + or a member other than test or exec follows, keeps its text
+function maskRegexes(source: string, guarded: (body: string) => boolean): string {
+  if (STRINGIFIES.test(source)) return source
+  let out = ""
+  let k = 0
+  while (k < source.length) {
+    const c = source[k]
+    const close = (end: string, from: number) => {
+      for (let j = from; j < source.length; j++) {
+        if (source[j] === "\\") j++
+        else if (source.startsWith(end, j)) return j + end.length
+      }
+      return -1
+    }
+    const end =
+      c === '"' || c === "'" || c === "`"
+        ? close(c, k + 1)
+        : source.startsWith("//", k)
+          ? close("\n", k + 2)
+          : source.startsWith("/*", k)
+            ? close("*/", k + 2)
+            : undefined
+    if (end === -1) return source
+    if (end !== undefined) {
+      out += source.slice(k, end)
+      k = end
+      continue
+    }
+    if (c === "/" && REGEX_AFTER.test(out)) {
+      let j = k + 1
+      let inClass = false
+      for (; j < source.length && source[j] !== "\n"; j++) {
+        if (source[j] === "\\") j++
+        else if (source[j] === "[") inClass = true
+        else if (source[j] === "]") inClass = false
+        else if (source[j] === "/" && !inClass) break
+      }
+      if (source[j] !== "/") return source
+      let flags = j + 1
+      while (/[a-z]/.test(source[flags] ?? "")) flags++
+      const body = source.slice(k + 1, j)
+      const kept =
+        guarded(body.replaceAll("\\/", "/")) ||
+        /["'`]/.test(body) ||
+        /^\s*(?:\+|\.(?!\s*(?:test|exec)\b))/.test(source.slice(flags))
+      out += kept ? source.slice(k, flags) : "RE"
+      k = flags
+      continue
+    }
+    out += c
+    k++
+  }
+  return out
 }
 
 // The lines an awk program runs, read whatever the line: each string literal of a program that can run a command or write a file
@@ -806,6 +878,14 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const near = relative(env)
     return value.includes(needle) || (!!near && value.includes(near))
   }
+  // a regex body that names the root, a folder of its path or the home, which a program could print as a path
+  const guarded = (body: string, env: Env) =>
+    holds(body, env) ||
+    body.includes("~") ||
+    needle
+      .split(sep)
+      .filter(Boolean)
+      .some((part) => body.toLowerCase().includes(part.toLowerCase()))
   // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
   const judged = new Map<string, string | undefined>()
   // literal: a closed-list reader's word on a line read call by call, whose quoted glob character is text the reader never expands
@@ -951,18 +1031,25 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         )
       script.push(text.value)
     }
-    for (const raw of reader ? [] : [...script, ...runsOf(parsed, vars, whole, rootLine)]) {
+    // an inline evaluator's program is read with its regex literals masked (maskRegexes), since a regex is neither a path, a glob nor a redirect, but as written on a root-shell line or inside a substitution or subshell, whose output a shell may run, and wherever the shell may be in the root or a folder above it, where canary's reading decides
+    const away = places(env).every(
+      ({ cwd }) => cwd !== undefined && !above(cwd, true) && !inRoot(cwd),
+    )
+    const evaluated = rootLine || cmd.scope !== 0 || !away ? undefined : evalProgram(parsed)
+    const masked =
+      evaluated && !evaluated.glob && !marked(evaluated.value)
+        ? maskRegexes(evaluated.value, (body) => guarded(body, env))
+        : undefined
+    const own = (word: Word): Word =>
+      word === evaluated && masked !== undefined ? { ...word, value: masked } : word
+    for (const raw of reader
+      ? []
+      : [...script, ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine)]) {
       const line =
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
-      // a runner the hook cannot name may hand the line to sh, which splits its parameters
-      const verdict = await run(
-        lex(line, env.known),
-        { ...env, splits: true, vars: new Map() },
-        visit,
-        true,
-      )
+      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
     }
     // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
@@ -1000,11 +1087,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         return refuse(`git on a clone in ${root}`)
       // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
       const unheld = (
-        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, here.splits) : []
+        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : []
       ).find((word) => !held(word, here, steady))
       if (unheld)
         return refuse(
-          splitIn(unheld, here.splits)
+          unheld.splits
             ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally`
             : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
         )
@@ -1044,7 +1131,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         if (named) return refuse(`${verb} with a variable on ${named}`)
       }
       const literal = !whole && narrow(cmd, here)
-      for (const word of [first, ...args].map((word) => heldWord(word, here, steady) ?? word)) {
+      for (const word of [first, ...args].map(
+        (word) => heldWord(own(word), here, steady) ?? own(word),
+      )) {
         // a quiet commit's message and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
         const text = (quiet && /\s/.test(word.value)) || (filters.has(word) && !word.glob)
         if (text && !texts(word).some((t) => holds(t.value, here))) continue
@@ -1082,7 +1171,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // mv's -t folder, rsync's path values and the file find's write actions name are written to, though their word opens with a dash
     const values =
       tool === "mv"
-        ? writeTargets(tool, args, gnu, posix, env.splits)
+        ? writeTargets(tool, args, gnu, posix)
         : tool === "rsync"
           ? args.flatMap((word, k) => {
               const long = /^--([^=]+)=?/.exec(word.value)
@@ -1109,7 +1198,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           ...values,
         ]
       : WRITERS.has(tool)
-        ? writeTargets(tool, args, gnu, posix, env.splits)
+        ? writeTargets(tool, args, gnu, posix)
         : []
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
     if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
@@ -1129,7 +1218,6 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
     process: environment,
-    splits: zshSplits(command),
     vars: new Map(),
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
