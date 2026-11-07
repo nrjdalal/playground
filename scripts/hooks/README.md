@@ -724,6 +724,11 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   `--help`, `--version` and `version` pass.
   A bake, and a compose `up`, `create`, `run` or `watch`, which run-slot refuses too since each builds its images at once, is refused with run-slot's own fix (build through run-slot, then `up --no-build`) rather than the run-slot form.
   run-slot then runs one at a time on the machine ([scripts/ops/README.md](../ops/README.md#run-slot)).
+  no-unslotted-run also refuses a `git commit` whose message the checkout's own commitlint (`node_modules/.bin/commitlint`, reading the checkout's config) refuses, from any folder and behind run-slot's `--`, naming commitlint's problem lines, since commit-msg lints the message only after pre-commit's build has waited for its slot (one commit waited 56 minutes, then failed on its subject).
+  It lints the message as commit-msg does, through `commitlint --edit` on a file, so a `#` line reads as a comment, and reads it from `-m` or `--message` (several joined as paragraphs, as git joins them), or the file or stdin (`-`, a heredoc) that `-F` names.
+  A commit with `--no-verify` or `-n`, `--edit`, another commit's message (`-C`, `-c`, `--fixup`, `--squash`), a message the hook cannot read or a checkout with no commitlint passes to commit-msg as before, and so does a lint that runs past 8 s,
+  and so does a message read from a file or a pipe after an earlier command on the line that may have written it (any but `cat`, a builtin such as `cd` or `export`, or `git add`, `diff`, `fetch`, `log`, `show` or `status`, with no redirect; a shell or `source` that runs a script file counts),
+  since the hook reads the file before the line runs.
   The main checkout is no-main-checkout's. It fails open on a call it cannot read, and its tests are in `bun run test:file tests/scripts/hooks`.
   A commit's pre-commit steps take `run-slot-commit` through `packages/scripts/src/commit-slot.ts`, which hands each to run-slot as `commit-<worktree>` marked `RUN_SLOT_COMMIT_STEP=1`, as `run-slot.sh <who> -- git commit` takes it, and playbook's **slots** rule says which slot each way of committing takes.
   The build runs bare when turbo's dry run finds every build task cached, while a type check takes the slot whenever it would, since the build's cache says nothing of its cost.
