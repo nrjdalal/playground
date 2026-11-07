@@ -108,15 +108,6 @@ export const JOBS: Record<string, Job> = {
       "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
     schedule: { every: 86400 },
   }),
-  "ops-firefighting-start": terminal(
-    "ops-firefighting-start",
-    `${bunJob("ops-firefighting-start")} --data {data}`,
-    {
-      description:
-        "Starts a firefighting worker for each open ticket no session holds, Urgent first, and holds focus for an Urgent one's.",
-      schedule: { every: 60 },
-    },
-  ),
   "ops-flow": launchd("ops-flow", {
     description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",
     schedule: { every: 60 },
