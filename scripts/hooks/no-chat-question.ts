@@ -297,7 +297,8 @@ export function standingOf(item: AskedItem): string | null {
   if (listedItem(item)) return item.status === "open" ? "open" : "listed"
   if (item.answer?.choice === "settled") return "settled"
   if (item.answer?.dismissed === true) return "dismissed"
-  if (item.answer?.archivedAt && !item.answer.dismissedAt) return "archived"
+  if (item.answer?.archivedAt && !item.answer.dismissedAt)
+    return item.status === "open" ? "archived while open" : "archived"
   return item.status
 }
 
@@ -330,8 +331,8 @@ async function managerRole(
   return manager(roleOfName(name))
 }
 
-// An ask of the owner waits on an open item alone; steps also take any card the Inbox lists, a progress card (an update) the owner has not sent to Done, dismissed or seen resolved.
-const ASK_COUNTS = ["open"]
+// An ask of the owner waits on an open item alone, one the owner archived included, as it waited before the listed rule, so the session is never sent to post a copy of a decision it already posted; steps take any card the Inbox lists, a progress card (an update) the owner has not sent to Done, dismissed or seen resolved, and no archived card, which the Inbox no longer lists.
+const ASK_COUNTS = ["open", "archived while open"]
 const STEPS_COUNTS = ["open", "listed"]
 
 // Fails closed: the stop passes only when some #iN the reply names reads a status `counted` holds; the reason says what each one read as.

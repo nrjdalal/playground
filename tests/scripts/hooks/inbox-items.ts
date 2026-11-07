@@ -145,6 +145,6 @@ export const ITEMS: { archived?: true; item: AskedItem; name: string; standing?:
       updatedAt: AFTER,
     },
     name: "an open decision the owner archived",
-    standing: "archived",
+    standing: "archived while open",
   },
 ]

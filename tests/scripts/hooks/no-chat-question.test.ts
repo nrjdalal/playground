@@ -442,6 +442,15 @@ describe("what passes", () => {
     ).toBeUndefined()
   })
 
+  // an open decision the owner archived still waits on the owner, so an ask naming it passes, as it did before the listed rule (#1486)
+  test("a decision asked again beside an open decision the owner archived passes", async () => {
+    expect(
+      await stop("It's in the inbox as #i41: ship canary 3f9a2c1 tonight?", {
+        statuses: { "#i41": "archived while open" },
+      }),
+    ).toBeUndefined()
+  })
+
   test("a reply naming a closed item and an open one", async () => {
     expect(
       await stop("#i40 is done. The next call is #i41: should it wait?", {
@@ -523,7 +532,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
     ).toBeUndefined()
   })
 
-  test.each(["archived", "denied", "dismissed", "done", "settled"])(
+  test.each(["archived", "archived while open", "denied", "dismissed", "done", "settled"])(
     "refused: 3 numbered steps whose only card is %s",
     async (standing) => {
       expect(await stop(`${STEPS}\nProgress is in #i42.`, { statuses: { "#i42": standing } })).toBe(
