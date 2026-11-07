@@ -28,7 +28,7 @@ const judgeable = (input: Record<string, unknown>): boolean =>
 
 // no-raw-spawn refuses a key into a herdr pane from any session, the dispatcher included, so a close and a resume is the route left.
 const herdrRoute = (name: string): string =>
-  `close the session with spawn.sh close ${name}, then run the spawn.sh resume line ~/.playground/resume/${name}.sh holds with --brief <a file under ~/.playground of the reason and the simpler shape> added, so it resumes under its name by its session id and the prompted call never runs`
+  `close the session with spawn.sh close ${name}, then run the spawn.sh resume line ~/.playground/resume/${name}.sh holds with --brief <a file under ~/.playground of the reason and the simpler shape> added, and a reviewer's or tester's --pr <the PRs its roster row lists>, so it resumes under its name by its session id and the prompted call never runs`
 
 // Pure: how a dialog matches the call, with whitespace and box borders dropped, since the pane wraps a long one: "strong" when the command is the whole text between its dashed rules, "weak" when the command or URL sits whole in a dialog with no such box or the file's name sits in it, else null.
 function matchOf(dialog: string[], input: Record<string, unknown>): "strong" | "weak" | null {

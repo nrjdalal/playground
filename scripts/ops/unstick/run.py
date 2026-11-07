@@ -249,7 +249,7 @@ def limit_alert(name, line, transcript=None):
     does not slow down at a limit, a probe's to its spawner. The script takes no option on the dialog: a key other than Escape is not its to press (**voice**)."""
     target = most_room(session_account(name))
     move = f"Most room: {target[0]} (week {target[1]:g}%)" if target else "No account in usage.json's accounts has room"
-    msg = f"{name} is at its usage limit and is not continuing: {line}. {move}; decide its next step now (another account through spawn.sh resume --account)."
+    msg = f"{name} is at its usage limit and is not continuing: {line}. {move}; decide its next step now (another account through spawn.sh close, then spawn.sh resume --account, a reviewer or tester adding --pr with the PRs its roster row lists, read before the close)."
     for to in limit_targets(name, transcript):
         notify(msg, to=to)
 
