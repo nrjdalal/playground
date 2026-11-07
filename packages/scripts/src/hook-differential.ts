@@ -164,11 +164,11 @@ export function scratchData(real: string, base = tmpdir()): string {
 // The config entries a hook reads besides the registry, linked from the real config folder: writing-first's installed skill and plugins
 const CONFIG_LINKS = ["plugins", "settings.json", "skills"]
 
-// The role the roster's kind gives each transcript name, from the real data folder, and a scratch registry naming each named session, for --role session, with CONFIG_LINKS linked to the real config folder's
+// The role the roster's kind gives each transcript name, from the real data folder, and a scratch registry naming each named session, for --role session
 export async function sessionRoles(list: Call[], real: Env, base = tmpdir()) {
   const config = mkdtempSync(join(base, "hook-differential-config-"))
   mkdirSync(join(config, "sessions"))
-  const own = real.CLAUDE_CONFIG_DIR || join(real.HOME ?? homedir(), ".claude")
+  const own = real.CLAUDE_CONFIG_DIR || join(real.HOME || homedir(), ".claude")
   for (const entry of CONFIG_LINKS)
     if (existsSync(join(own, entry))) symlinkSync(join(own, entry), join(config, entry))
   const roles = new Map<string, string>()
