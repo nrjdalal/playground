@@ -489,7 +489,12 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   `gh repo list` with no owner lists the account's own repositories and runs.
   A `git` call is refused when a word is a guarded org's GitHub URL, or when a folder git reads its repository from has a guarded org's remote: its own (`-C` included), a `--git-dir` or `--work-tree`, and `GIT_DIR` or `GIT_WORK_TREE`, one the hook cannot read refused too.
   A fetcher naming a guarded org's URL is refused, and a policy the hook cannot read refuses every `gh`, `git` and fetcher call with the fix.
-  Out of its reach, as residual risk: a URL held in a variable, a program named through one (`G="git -C <dir>"; $G log`), a program that fetches by itself (`bun -e`, Python's urllib), an org script found through a `PATH` the call sets or run through a link the call makes, and a `Read` of an org's checkout and an org's database, each tracked as its own follow-up issue.
+  It refuses a read of a guarded org's checkout: a `Read` of a file in one, a `Grep` or `Glob` of a path in one (the session's folder when the call gives none), and a shell call whose folder or any argument lies in one, `cd` included.
+  A checkout is the nearest folder at or above the path holding `.git`, read once a call through `git config` for its remotes; a path in no checkout, or in one whose remotes git cannot read, runs, since only an owner the policy guards refuses.
+  It refuses a database client (`psql`, `pg_dump`, `pg_dumpall`, `pg_restore`, `mysql`, `mysqldump`, `mongo`, `mongosh`, `redis-cli`) aimed off this machine by `-h`, `--host`, a conninfo `host=`, a database URL or `PGHOST`, and any command but a pure one given such a URL.
+  This machine is loopback, a socket's folder or no host, since the factory's own databases are loopback containers and settings name no org's database host; a client given a value the hook cannot read is refused, failing closed.
+  Both settings files register the hook on `^Bash$` alone, so the read tools' check acts once a matcher takes `Read`, `Grep` and `Glob`, in a ship after the one that carries this script (the ship rule above).
+  Out of its reach, as residual risk: a URL held in a variable, a program named through one (`G="git -C <dir>"; $G log`), a program that fetches by itself (`bun -e`, Python's urllib), and an org script found through a `PATH` the call sets or run through a link the call makes, each tracked as its own follow-up issue.
 
 ## no-headless-login
 

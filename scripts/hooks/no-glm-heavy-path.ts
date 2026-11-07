@@ -1,14 +1,14 @@
 // PreToolUse hook, acting for a factory session (role.ts) that runs on GLM alone: refuses a git commit whose staged files, or a git push whose commits the remote does not hold, touch a path that is Opus work (GLM was handed UI work three times, against "truly tiny" mechanical work only), and while load5 is over glm.readOnlyLoad5 (15 by default) any install, node_modules clone, commit or push (a GLM worker pushed twice at load5 20 to 30), and, by the glm rule, a headless Claude run and every org tool. It fails closed on a commit or push whose file list it cannot read and on an org tool whose repository or policy it cannot read, and passes every other call.
 
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { loadavg } from "node:os"
-import { dirname, join, resolve } from "node:path"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { guardedOrgs } from "../../packages/settings/src/ext"
 import { readPolicy } from "../../packages/settings/src/rendered"
 import { ruleSettings } from "../../packages/settings/src/rules"
-import { implicitRepos, remotes, repoOf } from "./github"
+import { implicitRepos, type Repo, remotes, repoOf } from "./github"
 import { headless } from "./no-headless-login"
 import { fromFactory, registryName, sessionOf } from "./role"
 import {
@@ -109,8 +109,9 @@ const BUSY_RUN = /\b(?:bun|cp|ditto|npm|pip[\d.]*|pipx|pnpm|python[\d.]*|rsync|u
 const GIT_CALL = /\bgit\b[\s\S]*\b(?:commit|push)\b/i
 // what an org tool's refusal can match, read before the call is parsed
 const ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i
-// a runner or a path, either of which may run an org script, which its folder rule reads once the call parses
-const RUNNER_CALL = /\b(?:bash|bun|bunx|deno|node|npm|npx|pnpm|sh|tsx|yarn|zsh)\b|\//i
+// a runner, a path, a cd or a database client, any of which may run an org script, read an org's checkout or reach a database, which their rules read once the call parses
+const RUNNER_CALL =
+  /\b(?:bash|bun|bunx|cd|deno|mongo|mongosh|mysql|mysqldump|node|npm|npx|pg_\w+|pnpm|psql|pushd|redis-cli|sh|tsx|yarn|zsh)\b|\//i
 
 export const heavy = (path: string): boolean =>
   OPUS_PATHS.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p))
@@ -688,6 +689,102 @@ function gitOrg(
     : undefined
 }
 
+// Each folder the hook has walked, with the guarded org's repository whose checkout holds it, or none, so a call reads each checkout's remotes once
+type Roots = Map<string, Repo | undefined>
+// The guarded org's repository whose checkout holds a path: the nearest folder at or above it holding .git, whose remotes git reads; none for a path in no checkout, a checkout whose remotes git cannot read, or one no guarded org owns
+function checkoutOf(path: string | undefined, orgs: string[], roots: Roots): Repo | undefined {
+  if (!path) return
+  const walked: string[] = []
+  let found: Repo | undefined
+  for (let at = resolve(path); ; at = dirname(at)) {
+    if (roots.has(at)) {
+      found = roots.get(at)
+      break
+    }
+    walked.push(at)
+    if (existsSync(join(at, ".git"))) {
+      found = remotes(at).find((r) => isGuarded(orgs, r.owner))
+      break
+    }
+    if (dirname(at) === at) break
+  }
+  for (const at of walked) roots.set(at, found)
+  return found
+}
+const checkoutRefusal = (what: string, repo: Repo) =>
+  orgRefusal(
+    what,
+    `it reads the checkout of ${label(repo.owner, repo.repo)}, a guarded org's repository`,
+  )
+// The read tools, each with the input that names what it reads; a Grep or a Glob with no path reads the session's folder
+const READ_TOOLS: Record<string, string> = { Glob: "path", Grep: "path", Read: "file_path" }
+// the shell's commands that read no file, which run in or beside an org's checkout
+const READS_NOTHING = new Set(["date", "echo", "printf", "pwd", "true"])
+
+// The database clients, those that read PGHOST, and a database URL's host
+const DB_CLIENTS = new Set([
+  "mongo",
+  "mongosh",
+  "mysql",
+  "mysqldump",
+  "pg_dump",
+  "pg_dumpall",
+  "pg_restore",
+  "psql",
+  "redis-cli",
+])
+const DB_URL =
+  /\b(?:mariadb|mongodb(?:\+srv)?|mysql|postgres(?:ql)?|rediss?):\/\/(?:[^@\s/]*@)?(\[[^\]]*\]|[^:/?#\s,]*)/gi
+const CONNINFO_HOST = /(?:^|\s)host=(\S+)/
+// a host on this machine: loopback, a socket's folder, or none, which a client reads as its local socket
+const onThisMachine = (host: string) =>
+  host === "" || host.startsWith("/") || /^(?:localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$/i.test(host)
+const DB_FIX =
+  "Name a database on this machine literally (127.0.0.1, or the worktree's own container), in a call of its own, or report to your lead."
+// A database call the glm rule keeps a GLM session off: a client, or any command but a pure one, given a database URL, a conninfo, a host option or PGHOST naming a host off this machine; a client given a value the hook cannot read fails closed
+function dbCall(parsed: Parsed, env: Env): string | undefined {
+  const { args, local, name } = parsed
+  const client = DB_CLIENTS.has(name)
+  const hosts: (string | undefined)[] = []
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]
+    if (unreadValue(a)) {
+      if (client) hosts.push(undefined)
+      continue
+    }
+    const v = a.value
+    for (const m of v.matchAll(DB_URL)) hosts.push(m[1])
+    if (!client) continue
+    const conninfo = CONNINFO_HOST.exec(v)
+    if (conninfo) hosts.push(conninfo[1])
+    if (v === "-h" || v === "--host") {
+      const next = args[++i]
+      hosts.push(next && !unreadValue(next) ? next.value : undefined)
+    } else if (v.startsWith("--host=")) hosts.push(v.slice(7))
+    else if (/^-h[^-]/.test(v)) hosts.push(v.slice(2))
+  }
+  if (name === "psql" || name.startsWith("pg_")) {
+    const set =
+      local.get("PGHOST") ??
+      env.vars.get("PGHOST") ??
+      (env.process.PGHOST ? { value: env.process.PGHOST as string } : undefined)
+    if (set) hosts.push(unreadValue(set as Word) ? undefined : set.value)
+  }
+  const at = hosts.findIndex((h) => h === undefined || !onThisMachine(h))
+  if (at < 0) return
+  const host = hosts[at]
+  return host === undefined
+    ? orgRefusal(
+        `this ${name} call`,
+        "the hook cannot tell which database it reaches, since a value it cannot read names it",
+        DB_FIX,
+      )
+    : orgRefusal(
+        `this ${name} call`,
+        `it reaches ${host}, a database off this machine, which may be an org's`,
+      )
+}
+
 // The org tools the glm rule keeps a GLM session off: a headless Claude run, a fetch of an org service's host, a Linear script, and gh or git on a guarded org's repository.
 function orgCall(
   parsed: Parsed,
@@ -739,7 +836,7 @@ function orgCall(
 }
 
 // A visitor for one call, tracking what ran before each command: cd, export and assignments are not visited, so they never chain.
-const visitor = (load5: number, limit: number, orgs: Orgs): Visit => {
+const visitor = (load5: number, limit: number, orgs: Orgs, roots: Roots): Visit => {
   const busy = load5 > limit
   let earlier: "none" | "staging" | "other" = "none"
   const forced: string[] = []
@@ -749,6 +846,14 @@ const visitor = (load5: number, limit: number, orgs: Orgs): Visit => {
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, name } = parsed
+    if (Array.isArray(orgs) && !READS_NOTHING.has(name))
+      for (const place of [
+        env.cwd,
+        ...args.map((a) => (unreadValue(a) ? undefined : pathOf(a, env))),
+      ]) {
+        const repo = checkoutOf(place, orgs, roots)
+        if (repo) return checkoutRefusal(`this ${name} call`, repo)
+      }
     const reads = branchReads
     branchReads = []
     const busyRun = busy ? installOrClone(name, args) : undefined
@@ -767,7 +872,7 @@ const visitor = (load5: number, limit: number, orgs: Orgs): Visit => {
       else if (!v.startsWith("-")) break
     }
     const sub = isGit ? args[k]?.value : undefined
-    const org = orgCall(parsed, env, dir, sub, orgs)
+    const org = orgCall(parsed, env, dir, sub, orgs) ?? dbCall(parsed, env)
     if (org) return org
     if (
       isGit &&
@@ -809,7 +914,7 @@ async function inspect(
     tool_name: tool,
   } = JSON.parse(raw) as {
     cwd?: unknown
-    tool_input?: { command?: unknown }
+    tool_input?: Record<string, unknown>
     tool_name?: unknown
   }
   if (typeof tool === "string" && tool.startsWith("mcp__"))
@@ -817,11 +922,28 @@ async function inspect(
       `this ${tool} call`,
       "an MCP tool reaches an org's or an outside service's data",
     )
+  const directory = typeof cwd === "string" ? cwd : undefined
+  if (typeof tool === "string" && tool in READ_TOOLS) {
+    const orgs = await guardedOf(environment)
+    if (!Array.isArray(orgs)) return
+    const given = toolInput?.[READ_TOOLS[tool]]
+    const path =
+      typeof given !== "string" || given === ""
+        ? directory
+        : isAbsolute(given)
+          ? given
+          : directory && resolve(directory, given)
+    const repo = checkoutOf(path, orgs, new Map())
+    return repo ? checkoutRefusal(`this ${tool} call`, repo) : undefined
+  }
   if (tool !== "Bash" || typeof toolInput?.command !== "string") return
   const command = toolInput.command
+  const orgs = await guardedOf(environment)
+  const roots: Roots = new Map()
+  // a call in a guarded org's checkout is parsed whatever it names, so each command's folder rule reads it
+  const home = Array.isArray(orgs) && checkoutOf(directory, orgs, roots) !== undefined
   const text = command.replace(/["'\\]/g, "")
-  if (!mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text)) return
-  const directory = typeof cwd === "string" ? cwd : undefined
+  if (!home && !mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text)) return
   const env: Env = {
     cwd: directory,
     files: new Map(),
@@ -829,7 +951,7 @@ async function inspect(
     process: environment,
     vars: new Map(),
   }
-  return run(lex(command, env.known), env, visitor(load5, limit, await guardedOf(environment)))
+  return run(lex(command, env.known), env, visitor(load5, limit, orgs, roots))
 }
 
 // Whether a call may be one the hook refuses: a git commit or push, an org tool, or on a busy machine an install or clone.
