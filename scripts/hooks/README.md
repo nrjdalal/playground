@@ -31,7 +31,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 - A hook's script lands on `main` in one ship and its registration in a later one, since every wrapper runs its script from the main checkout, which follows `main`, and a factory session on `canary` loses the hook's tool the moment `canary` registers a script `main` lacks.
   `bun run test:skills`'s hooks-on-main step (`packages/scripts/src/hooks-on-main.ts`, CI's `test` check) holds every tracked `*.json` file and `SKILL.md` frontmatter outside `tests/` that runs a hook script to it: it fails naming each wrapper none of whose scripts (both of a bundle-then-source wrapper's) `origin/main` holds, and fails when `origin/main` does not read, after fetching it.
 - A PreToolUse guard fails closed, since Claude Code blocks a call only on exit 2: its wrapper turns any other exit but 0 (a crash, a damaged bundle, Bun missing) into exit 2, its refusal naming the hook, the code and `bun install` in the checkout,
-  and under `PLAYGROUND_ROLE` a missing script or an unresolved checkout refuses too, naming the restore route (playbook's LIFECYCLE.md, Restoring the main checkout); with no role it runs nothing and exits 0, as above.
+  and under `PLAYGROUND_ROLE` a missing script or an unresolved checkout refuses too, naming the restore route (ops-restore puts the checkout back, else Ops by playbook's LIFECYCLE.md, Restoring the main checkout); with no role it runs nothing and exits 0, as above.
   A timeout still lets the call run, since Claude Code treats a hook timeout as a non-blocking error.
   Every other wrapper (SessionStart, Stop, PostToolUse and the rest) stays open on a crash, since a Stop hook at exit 2 keeps its session going and a crashing one would loop it.
   `tests/scripts/hooks-abs-path.test.ts` holds both shapes and runs them over stub guards.
@@ -451,7 +451,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 
 ## no-glm-heavy-path
 
-- A factory session on GLM keeps off the Opus paths: `scripts/hooks/no-glm-heavy-path.ts`, registered beside no-stash, refuses a `git commit` whose files (the staged ones, plus every tracked change under `-a` or `--all` and each path it names) or a `git push` whose commits the remote lacks (`git log <sources> --not --remotes=<remote>`, every remote when it names none,
+- A factory session on GLM keeps off the Opus paths: `scripts/hooks/no-glm-heavy-path.ts` refuses a `git commit` whose files (the staged ones, plus every tracked change under `-a` or `--all` and each path it names) or a `git push` whose commits the remote lacks (`git log <sources> --not --remotes=<remote>`, every remote when it names none,
   a URL or one not fetched yet) touch a path in its `OPUS_PATHS` (`.github/workflows/`, `lefthook.yml`, the `pr-merge` and `verify` scripts, `scripts/hooks/`, `scripts/spawn.sh`, `web/next/`), naming the files and the fix: report to your lead, who moves the change to a Claude worker.
   Concluding a merge, a file counts when it differs from HEAD and from every commit `MERGE_HEAD` lists, or when one of those sides changed it since its merge base and the result does not take that side's copy;
   a push reads each merge commit's own changes (`--diff-merges=dense-combined`) and, for each parent after the first, the files that parent changed that the merge does not take, so a `merge -s ours` counts too.
@@ -477,7 +477,8 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   It is also a runner's word (bun, bunx, deno, node, npm, npx, pnpm, tsx, yarn or a shell) that resolves into either folder from where the runner runs (its `--cwd`, `--dir`, `--prefix` or `-C`, and the shell's `cd`), or names a package script whose command does, from the `package.json` there or in a folder above.
   A runner given one of their files is refused whatever it does with it, a formatter or linter included, and a runner in a folder a value the hook cannot read names (`--cwd $D`, `cd $D`), or a program path it cannot place (`cd $D && ./cli.ts`, `$P/cli.ts`), is refused whatever it runs, failing closed as git's rule does.
   A read, test, staging or commit of their files runs, and so does a run of their tests' mirror under `tests/`.
-  It refuses every MCP tool, since each MCP server here is an org's or an outside service's connector; both settings files register the hook on `^Bash$` alone, so that check acts once a matcher takes `mcp__` tools.
+  It refuses every MCP tool and Claude Code's `ListMcpResourcesTool`, `ReadMcpResourceDirTool` and `ReadMcpResourceTool`, which list and read an MCP server's resources, since each MCP server here is an org's or an outside service's connector.
+  Both settings files register the hook on `^(Bash|ListMcpResourcesTool|ReadMcpResourceDirTool|ReadMcpResourceTool|mcp__.+)$`, so each of those calls reaches it.
   A `gh` call is refused when a word names a guarded org (one `ext.links` links, `guardedOrgs`, as [no-playground-leak](#no-playground-leak) reads them): by `-R` or `--repo`, a GitHub URL (`raw.githubusercontent.com` and `codeload.github.com` included), a `repos/`, `orgs/` or `users/` endpoint, or as a whole word anywhere, a GraphQL query's included.
   It is also refused when a value the hook cannot read names its repository or `gh api` endpoint (a `-R` xargs fills included), when a search names no owner or repository (`--owner`, `--repo`, or an `org:`, `owner:`, `repo:` or `user:` qualifier), and when it names no repository and falls back to a guarded org's (`GH_REPO`, the checkout's remotes).
   A gh call whose reach is the whole account is refused too: `gh status`, `gh org list`, and a `gh api` endpoint outside `repos/`, `orgs/`, `users/` and `search/` but for `markdown`, `user` and `rate_limit`, read past a leading `https://api.github.com/`; gh's `repos/{owner}/{repo}/` placeholders read as the checkout's own repository, as the fallback above.
@@ -485,6 +486,8 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   `gh repo list` with no owner lists the account's own repositories and runs.
   A `git` call is refused when a word is a guarded org's GitHub URL, or when a folder git reads its repository from has a guarded org's remote: its own (`-C` included), a `--git-dir` or `--work-tree`, and `GIT_DIR` or `GIT_WORK_TREE`, one the hook cannot read refused too.
   A fetcher naming a guarded org's URL is refused, and a policy the hook cannot read refuses every `gh`, `git` and fetcher call with the fix.
+  Its prefilter (`mayRefuse`, with `RUNNER_CALL` for the runners and paths the folder rules read) and its catch path stay apart: a call the parse cannot read is refused only when it reads as a call the hook refuses, so widening what reaches the parse is tested against what the catch path refuses (`a runner the prefilter lets through to the parse runs when the parse fails` in its test).
+  A replay of its verdicts tells a GLM session's calls apart by each transcript entry's `message.model` (`glm-5.3`, `glm-5.3-flash`), not the session's name, and reads every GLM transcript on disk, since a day's window can hold none.
   Out of its reach, as residual risk: a URL held in a variable, a program named through one (`G="git -C <dir>"; $G log`), a program that fetches by itself (`bun -e`, Python's urllib), an org script found through a `PATH` the call sets or run through a link the call makes, and a `Read` of an org's checkout and an org's database, each tracked as its own follow-up issue.
 
 ## no-headless-login
@@ -682,6 +685,31 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 - Both pre-push jobs that read the pushed refs on stdin, `conflict-markers` and `keeps-canary`, run as lefthook scripts, each a one-line `.lefthook/pre-push/<name>.sh` that execs its check, since lefthook 2.2.2 skips every pre-push command and job while the checked-out branch has nothing new against its upstream, a push of another branch included, and runs a script on every push.
   `audit` and `ensure-branches`, which read no pushed ref, stay commands; `tests/lefthook.test.ts` pins both scripts and runs them under the real lefthook with the checked-out branch level.
 
+## no-outside-pr-code
+
+- A reviewer or tester reads an outside author's PR and leaves its code unrun, since its tests, scripts and installs would run that author's code on this machine.
+  `scripts/hooks/no-outside-pr-code.ts` puts a session role.ts places as a `reviewer` or `tester` in read mode, its sub-agents included (they carry its session id, `PLAYGROUND_ROLE` and hooks), while its roster row serves an outside PR or names none.
+  It finds the row by the session's registry name, the same read role.ts makes, and takes its PRs from the row's `pr` and the pull URLs in its `prs`.
+  A PR is outside when its author is not the repo's owner on a repo a user owns, read once with `gh api repos/<repo>/pulls/<n>` and kept in the data folder (`hook-outside-pr/`); a PR it cannot read counts as outside, that failure is kept for an hour, and the reason names the PR and its kept file, whose removal makes the next call read it again.
+  An org repo's PRs are its colleagues', so a checker of those, or of the owner's own PRs, runs them as before.
+  A row with no PR, or only an issue's URL, is read mode too, and its reason names the one-line fix its worker or lead runs, `bun scripts/roster.ts set <name> pr=<pull url>`, since `spawn.sh` writes a checker's `pr` only when started with `--pr`.
+  In read mode a Bash or Monitor line passes only when every command on it is on the allowlist, so a command the hook cannot read is refused.
+  The allowlist is the script's constants, each with its why beside it (`UTILITIES`, `GIT_READS`, `GH`, `INTERPRETERS`, `PLAYGROUND_READS`), plus `read-only.ts`'s `readsWords` and `sed` printing a range or making one substitution that writes no file.
+  `gh` passes with no `--`, since gh's clone hands git every option after it, and never as a checkout: `gh pr checkout` or `gh pr co` wherever the verb sits among gh's flags, and `gh issue develop`.
+  git passes only where it would find a repository with a work tree: the first folder up from where it runs, its symlinks followed as git follows them, that holds `.git`, or `HEAD`, `objects` and `refs`, decides, since a PR can ship the second as plain files whose config names programs a read runs (`diff.external`).
+  git takes one `-C` and no other option before its subcommand (`-c`, `--git-dir`, `--work-tree`), and no `GIT_DIR` or `GIT_WORK_TREE`, set on the call or exported, so the folder the hook walks is the one git uses.
+  git takes no option that starts a program or writes a file (`GIT_RUN_NAMES`), by its full name or any start of it, since git takes an unambiguous start (`--open=` for `--open-files-in-pager`).
+  It holds git's literal moves, each with `-q` allowed: `clone <github url> <dir>`, `worktree add [--detach] <path> <rev>` and `worktree list`, and `checkout` or `switch --detach <rev>` where neither the folder nor one above it up to its work tree's root holds `node_modules` for a git hook's lefthook to load.
+  `fetch` takes a remote's name or a GitHub URL, never a path, which names a repository the PR can ship, and only options that name no program or source (`FETCH_OPTIONS`, `--depth=<n>`), and `remote` takes no verb but `get-url` and `show`.
+  It holds a skill's script under the data folder's `orgs/*/skills/` or the main checkout's `extensions/*/skills/` (code-review-loop's `state.py`), run by its path or by node, python or python3, judged where the path resolves, so a `..` climb out of those folders is refused; bun is left out, since it reads the folder's `bunfig.toml` first.
+  It holds a shell's `-c` script, whose commands are judged one by one, and a shell running such a skill script; `shell.ts`'s `visitShells` shows the hook each shell a line starts, since the walk follows a script file it cannot read as an empty one.
+  It holds the factory's own run-slot, `<data folder>/ops/run-slot.sh`, whose command after `--` is judged in its place, and the `playground` command's read verbs (`PLAYGROUND_READS`) in a folder with no `bunfig.toml`, since it runs under bun and `playground add` starts a session no read mode holds.
+  A program named by a path, a variable set on a command, and a bare assignment, a loop or a `read` that sets a variable the session exports (`PATH`) are refused, since each can run a file the PR holds.
+  Its reason names the reads (the Read, Grep and Glob tools, `gh pr diff`, `git diff` and `git show <rev>`) and asks the verdict to say the code was read, not run, scored on the PR's own GitHub checks.
+  A checker in read mode cannot run the PR's tests, by design, so CI is its test signal.
+  Its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts`.
+  Its registration in both settings files lands in a later ship than its script, as [Registered in both settings files](#registered-in-both-settings-files) says.
+
 ## no-prompt-stop
 
 - A factory session never waits on a permission prompt no one answers: `scripts/hooks/no-prompt-stop.ts`, registered beside no-stash, refuses the Bash shapes Claude Code stops on, with a reason the session acts on:
@@ -823,6 +851,10 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 - A factory session holds to playbook's **writing** rule through `scripts/hooks/writing-first.ts`, registered with one command in `.claude/settings.json` and `scripts/factory-settings.json`, so a session loading both runs it once.
   It acts only for a session `fromFactory` in `scripts/hooks/role.ts` places in the factory, so the owner's own sessions write as before.
   It refuses a Write, Edit or MultiEdit to an agent-facing doc until the session has loaded writing-for-agents, its reason naming the fix (it has not loaded the skill since its last compaction): load it with the Skill tool, then retry.
+  Its `check()` gives a Bash call's direct write the same refusal, read through the shared shell reader: a redirect's, `tee`'s, `cp`'s, `mv`'s or an in-place `sed`'s or `perl`'s target (no-main-checkout's `writeTargets`), `install`'s last operand and the file a `cp`, `mv` or `install` lands as in a folder it is given (the hook's own), and each path an inline interpreter script names,
+  in its `-c` or `-e` program (attached, in a flag cluster or as `--eval=`), deno's `eval`, the heredoc or here-string it reads as its script, or its arguments.
+  It leaves alone a git command that updates the files, `bun run format`, a script or module run by name, a target it cannot place and a walk past its 8s deadline, and it does not read `awk`'s or `dd`'s output or an interpreter that `uv run` starts; an inline script that only reads a doc it names is refused all the same.
+  The PreToolUse matcher gains Bash in a later PR, after the ship that carries this reader, so until then only a test reaches it.
   Agent-facing means, in a checkout holding `extensions/core/skills/playbook/SKILL.md` (so every worktree matches and another repository's checkout does not), anything under `skills/`,
   ZeroStarter's skills under `skills/zerostarter/`, which `.agents/skills/` links to and which a path reaches with its links resolved (one whose `source` names a tool, not a repository, is vendored and left out), `.agents/dashboard/`, `.agents/*.md` (not `.agents/adr/`),
   the root `AGENTS.md` and `CLAUDE.md`, `scripts/README.md` and `scripts/hooks/README.md`, and `docs/`; and anywhere, a handoff under the data folder's `handoffs/`.
