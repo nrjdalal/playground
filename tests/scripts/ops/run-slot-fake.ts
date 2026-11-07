@@ -686,3 +686,22 @@ export const starts = async (
   expect(waiters.every((w) => !existsSync(w.marker))).toBe(true)
   return rate
 }
+
+type Machine = ReturnType<typeof machine>
+// a run through run-slot that ends with `rc` once the test writes its gate file
+export const gated = (m: Machine, who: string, rc: number) => {
+  const gate = join(m.root, `gate-${Math.random()}`)
+  const p = runSlot(
+    [
+      "bash",
+      SCRIPT,
+      who,
+      "--",
+      "bash",
+      "-c",
+      `until [ -e "${gate}" ]; do sleep 0.1; done; exit ${rc}`,
+    ],
+    { cwd: m.root, env: m.env(), stderr: "ignore", ops: m.ops },
+  )
+  return { open: () => writeFileSync(gate, ""), p }
+}
