@@ -29,7 +29,7 @@ const OTHER = [
 const LEAKS = [
   s("prompt", "secret prompt text"),
   s("summary", "secret summary text"),
-  s("cwd", "/Users/secret/repo"),
+  s("cwd", "/Users/someone/repo"),
   s("tool_name", "secret-tool"),
   s("session.id", "secret-session"),
   s("host.name", "secret-host"),
@@ -245,7 +245,7 @@ describe("transcriptSums", () => {
     ...row,
     accountEmail: "other@example.com",
     countingVersion: 2,
-    cwd: "/Users/secret/repo",
+    cwd: "/Users/someone/repo",
     machineId: "secret-machine",
     prompt: "secret prompt text",
     seatDir: ".claude-secret",

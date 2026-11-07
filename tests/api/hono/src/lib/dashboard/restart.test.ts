@@ -11,7 +11,7 @@ const scratch = mkdtempSync(join(tmpdir(), "restart-"))
 afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
 const SESSION = {
-  cwd: "/Users/made-up/playground/.claude/worktrees/leads",
+  cwd: "/Users/someone/playground/.claude/worktrees/leads",
   name: "dispatcher",
   sessionId: "0f000000-0000-4000-8000-000000000001",
 }

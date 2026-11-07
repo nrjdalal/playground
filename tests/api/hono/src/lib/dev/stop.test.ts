@@ -37,7 +37,7 @@ import {
 } from "../../../../../../api/hono/src/lib/dev/stop"
 import { MARKER } from "../../../../../../packages/safe-delete/src"
 
-const ROOT = "/Users/a/dispatcher/.claude/worktrees/a"
+const ROOT = "/Users/me/dispatcher/.claude/worktrees/a"
 const STARTED = "Tue Oct  6 02:30:00 2026"
 
 describe("the record", () => {
@@ -172,10 +172,10 @@ describe("unstoppable", () => {
       ],
       [{ ...launcher, pgid: 5000 }, 777, false, "pid 4123 left process group 4100"],
       [
-        { ...launcher, cwd: "/Users/a/other" },
+        { ...launcher, cwd: "/Users/me/other" },
         777,
         false,
-        `pid 4123 runs in /Users/a/other, not ${ROOT}`,
+        `pid 4123 runs in /Users/me/other, not ${ROOT}`,
       ],
       [launcher, 4100, false, "process group 4100 is this command's own"],
     ]
