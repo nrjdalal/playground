@@ -10339,16 +10339,30 @@ var SAID = {
     fix: "Leave the id out, and say what the conversation settled."
   }
 };
-function finder(list, repos) {
+var SHIP = /^\s*gh release (?:create|edit)\b[^`$();&|<>\n]*$/;
+function ownLinesPast(text, owner) {
+  const own = new Set(owner.map((word) => word.toLowerCase()));
+  let contributors = false;
+  return text.split(`
+`).map((line) => {
+    if (/^#{1,6}\s/.test(line))
+      contributors = /\bContributors\s*$/.test(line);
+    const m = contributors ? /^- ((?:\S+ )+)@([\w-]+)\s*$/.exec(line) : null;
+    const mine = m !== null && own.has(m[2].toLowerCase()) && m[1].trim().split(" ").every((word) => own.has(word.toLowerCase()));
+    return mine ? "" : line;
+  }).join(`
+`);
+}
+function finder(list, repos, ship) {
   const kinds = patterns(list, repos).filter(([kind]) => SAID[kind]);
   return (text) => {
-    const said = readPast(text, repos);
+    const said = readPast(ship ? ownLinesPast(text, repos.owner) : text, repos);
     const found = kinds.find(([, re]) => said.search(re) !== -1);
     return found && SAID[found[0]];
   };
 }
-var policy2 = (list, repos) => ({
-  find: finder(list, repos),
+var policy2 = (list, repos, ship) => ({
+  find: finder(list, repos, ship),
   git: false,
   guard: "no-public-leak",
   guarded: (repo) => repos.public.includes(`${repo.owner}/${repo.repo}`.toLowerCase()),
@@ -10357,6 +10371,14 @@ var policy2 = (list, repos) => ({
   what: "private text",
   why: `Everything written to ${repos.public.join(" or ")} is public once the repository is, and stays cached after, so it names no person, company or private record.`
 });
+var shipWrite = (raw) => {
+  try {
+    const { tool_input: input, tool_name: tool } = JSON.parse(raw);
+    return tool === "Bash" && typeof input?.command === "string" && SHIP.test(input.command);
+  } catch {
+    return false;
+  }
+};
 async function check(raw, environment = process.env) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
@@ -10364,7 +10386,7 @@ async function check(raw, environment = process.env) {
   const read = await readPolicy(dataDir(environment));
   if (read.refusal !== undefined)
     return refusedList(raw, `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`);
-  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings)), raw, environment);
+  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw)), raw, environment);
 }
 if (import.meta.main) {
   const raw = await Bun.stdin.text();

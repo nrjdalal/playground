@@ -57,17 +57,16 @@ function line(
   return `- ${scope ? `**${scope}:** ` : ""}${breaking ? "⚠️  " : ""}${text} (${refs})`
 }
 
-// names: each contributor as ZeroStarter writes one, `- <name> @<login>`; off, the login alone, since the public repo's leak guard refuses a person's name.
+// owner: owner.names, the owner's first name and handles. A contributor whose login it lists reads as `- <name> @<login>`, the name being the author name's words it lists, and every other contributor as the login alone, since the public repo's leak guard passes the owner's own names on that line alone.
 export function renderNotes({
   commits,
   from,
-  names = false,
+  owner = [],
   repo,
   to,
 }: {
   commits: NoteCommit[]
   from: string
-  names?: boolean
   owner?: string[]
   repo: string
   to: string
@@ -95,9 +94,13 @@ export function renderNotes({
     .filter((title) => groups.has(title))
     .map((title) => `### ${title}\n\n${groups.get(title)!.join("\n")}`)
   if (breakingLines.length) sections.push(`#### ⚠️ Breaking Changes\n\n${breakingLines.join("\n")}`)
-  const contributors = [...authors].map(
-    ([login, name]) => `- ${names && name ? `${name} ` : ""}@${login}`,
-  )
+  const own = new Set(owner.map((word) => word.toLowerCase()))
+  const contributors = [...authors].map(([login, name]) => {
+    const words = own.has(login.toLowerCase())
+      ? (name ?? "").split(/\s+/).filter((word) => own.has(word.toLowerCase()))
+      : []
+    return `- ${words.length ? `${words.join(" ")} ` : ""}@${login}`
+  })
   if (contributors.length) sections.push(`### ❤️ Contributors\n\n${contributors.join("\n")}`)
   return (
     [`[compare changes](https://github.com/${repo}/compare/${from}...${to})`, ...sections].join(

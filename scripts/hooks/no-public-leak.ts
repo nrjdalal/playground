@@ -38,17 +38,40 @@ const SAID: Partial<Record<Kind, Hit>> = {
   },
 }
 
-function finder(list: PublicList, repos: Repos): (text: string) => Hit | undefined {
+// A plain ship notes write, one `gh release create` or `edit` with no substitution, chain, pipe or redirect, the one call whose notes may name the owner.
+const SHIP = /^\s*gh release (?:create|edit)\b[^`$();&|<>\n]*$/
+// The notes with the owner's own Contributors line read past: under a Contributors heading, `- <names> @<login>` whose login and every name owner.names lists, so the same names anywhere else are still refused.
+function ownLinesPast(text: string, owner: string[]): string {
+  const own = new Set(owner.map((word) => word.toLowerCase()))
+  let contributors = false
+  return text
+    .split("\n")
+    .map((line) => {
+      if (/^#{1,6}\s/.test(line)) contributors = /\bContributors\s*$/.test(line)
+      const m = contributors ? /^- ((?:\S+ )+)@([\w-]+)\s*$/.exec(line) : null
+      const mine =
+        m !== null &&
+        own.has(m[2].toLowerCase()) &&
+        m[1]
+          .trim()
+          .split(" ")
+          .every((word) => own.has(word.toLowerCase()))
+      return mine ? "" : line
+    })
+    .join("\n")
+}
+
+function finder(list: PublicList, repos: Repos, ship: boolean): (text: string) => Hit | undefined {
   const kinds = patterns(list, repos).filter(([kind]) => SAID[kind])
   return (text) => {
-    const said = readPast(text, repos)
+    const said = readPast(ship ? ownLinesPast(text, repos.owner) : text, repos)
     const found = kinds.find(([, re]) => said.search(re) !== -1)
     return found && SAID[found[0]]
   }
 }
 
-const policy = (list: PublicList, repos: Repos): Policy => ({
-  find: finder(list, repos),
+const policy = (list: PublicList, repos: Repos, ship: boolean): Policy => ({
+  find: finder(list, repos, ship),
   git: false,
   guard: "no-public-leak",
   guarded: (repo) => repos.public.includes(`${repo.owner}/${repo.repo}`.toLowerCase()),
@@ -57,6 +80,18 @@ const policy = (list: PublicList, repos: Repos): Policy => ({
   what: "private text",
   why: `Everything written to ${repos.public.join(" or ")} is public once the repository is, and stays cached after, so it names no person, company or private record.`,
 })
+
+const shipWrite = (raw: string): boolean => {
+  try {
+    const { tool_input: input, tool_name: tool } = JSON.parse(raw) as {
+      tool_input?: { command?: unknown }
+      tool_name?: unknown
+    }
+    return tool === "Bash" && typeof input?.command === "string" && SHIP.test(input.command)
+  } catch {
+    return false
+  }
+}
 
 // Fails closed on its list, which only the store holds (lists.ts), and on a store it cannot read for the repositories (factory.publicRepo and factory.archiveRepo), and, as no-playground-leak, only on a call that may write.
 export async function check(
@@ -81,7 +116,11 @@ export async function check(
       raw,
       `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`,
     )
-  return inspectAs(policy(loaded.list ?? EMPTY_LIST, reposOf(read.settings)), raw, environment)
+  return inspectAs(
+    policy(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw)),
+    raw,
+    environment,
+  )
 }
 
 if (import.meta.main) {
