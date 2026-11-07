@@ -5,19 +5,30 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join, relative, resolve } from "node:path"
 
 import {
   calls,
   canaryTree,
   cwdsOf,
+  keyOf,
+  linesOf,
+  parse,
   replay,
+  resultPath,
+  ROOT_READS,
   routed,
+  store,
+  stored,
   sweep,
+  TAKES_MAIN,
   type Check,
 } from "../../../../packages/scripts/src/hook-differential"
 
@@ -151,6 +162,19 @@ describe("routed", () => {
   })
 })
 
+describe("linesOf", () => {
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i}`)
+
+  test("20 changed lines print whole, and the 21st is cut to one line naming it, unless --all", () => {
+    expect(linesOf("x", lines(20), false)).toEqual(lines(20).map((l) => `x: ${l}`))
+    expect(linesOf("x", lines(21), false)).toEqual([
+      ...lines(20).map((l) => `x: ${l}`),
+      "x: 1 more changed lines not shown (--all prints them)",
+    ])
+    expect(linesOf("x", lines(21), true)).toEqual(lines(21).map((l) => `x: ${l}`))
+  })
+})
+
 describe("sweep and replay", () => {
   // a hook that records every input it is given and allows a command only when it holds ALLOW
   const recorder =
@@ -225,5 +249,388 @@ describe("sweep and replay", () => {
     ])
     const { counts } = await replay(() => "refused", recorder([]), list, "/h")
     expect(counts).toEqual({ calls: 2, "newly allowed": 2, "newly refused": 0, same: 0 })
+  })
+})
+
+// A hook whose check() takes the main checkout reads it from its own folder when none is given, and canary's unpacked tree is no git checkout, so the differential hands both sides the head's (PG-996)
+describe("a hook that takes the main checkout", () => {
+  // refuses a command that names its main checkout; with none given, main is the folder it would read from its own tree
+  const guard =
+    (fallback: string): Check =>
+    (raw, _env, main = fallback) =>
+      JSON.parse(raw).tool_input.command.includes(`${main}/`) ? "refused" : undefined
+  const canary = guard("/tmp/hook-differential/abc")
+  const head = guard("/main")
+  const forms = [{ command: "echo x > /main/f", inClass: false }]
+
+  test("reads the head's main checkout on both sides, so a sweep and a replay count the same verdict as the same", async () => {
+    const { changed, counts } = await sweep(canary, head, forms, "/h", "/main")
+    expect(counts).toMatchObject({
+      cases: 3,
+      "newly allowed": { inClass: 0, outClass: 0 },
+      "newly refused": { inClass: 0, outClass: 0 },
+      same: 3,
+    })
+    expect(changed).toEqual([])
+    const call = { command: "echo x > /main/f", cwd: "/h" }
+    expect((await replay(canary, head, [call], "/h", "/main")).counts).toMatchObject({
+      "newly refused": 0,
+      same: 1,
+    })
+  })
+
+  test("TAKES_MAIN names every hook whose check() takes the main checkout, and only those", async () => {
+    const hooks = join(import.meta.dir, "../../../../scripts/hooks")
+    const taking: string[] = []
+    for await (const file of new Bun.Glob("*.ts").scan(hooks)) {
+      const signature =
+        /export (?:async )?function check\(([\s\S]*?)\)\s*:\s*(?:Promise|string)/.exec(
+          await Bun.file(join(hooks, file)).text(),
+        )?.[1]
+      if (signature?.includes("main: string = mainCheckout("))
+        taking.push(file.replace(/\.ts$/, ""))
+    }
+    expect(taking.length).toBeGreaterThan(0)
+    expect([...TAKES_MAIN].sort()).toEqual(taking.sort())
+  })
+})
+
+describe("a hook that reads beside its own copy", () => {
+  // finds its checkout as packages/scripts/src/main-checkout.ts does: PLAYGROUND_REPO, else the folder above its own folder's git common dir, else its own folder
+  const STUB = `import { dirname } from "node:path"
+export const check = (raw) => {
+  const git = Bun.spawnSync(["git", "-C", import.meta.dir, "rev-parse", "--path-format=absolute", "--git-common-dir"])
+  const root = process.env.PLAYGROUND_REPO || (git.exitCode === 0 ? dirname(git.stdout.toString().trim()) : import.meta.dir)
+  return JSON.parse(raw).tool_input.command.includes(root + "/") ? "refused" : undefined
+}
+`
+  const copy = async (at: string) => {
+    mkdirSync(join(at, "scripts", "hooks"), { recursive: true })
+    writeFileSync(join(at, "scripts", "hooks", "stub.ts"), STUB)
+    return (await import(join(at, "scripts", "hooks", "stub.ts"))).check as Check
+  }
+
+  test("reads the head's main checkout through PLAYGROUND_REPO on both sides, and the caller's value comes back after", async () => {
+    const headRoot = realpathSync(mkdtempSync(join(DIR, "own-head-")))
+    expect(Bun.spawnSync(["git", "init", "-q", headRoot]).exitCode).toBe(0)
+    const head = await copy(headRoot)
+    const canary = await copy(realpathSync(mkdtempSync(join(DIR, "own-canary-"))))
+    const command = `echo x > ${headRoot}/f`
+    const was = process.env.PLAYGROUND_REPO
+    try {
+      delete process.env.PLAYGROUND_REPO
+      const swept = await sweep(
+        canary,
+        head,
+        [{ command, inClass: false }],
+        "/h",
+        undefined,
+        headRoot,
+      )
+      expect(swept.counts).toMatchObject({ "newly refused": { inClass: 0, outClass: 0 }, same: 3 })
+      expect(swept.changed).toEqual([])
+      expect(process.env.PLAYGROUND_REPO).toBeUndefined()
+      process.env.PLAYGROUND_REPO = "/elsewhere"
+      const replayed = await replay(
+        canary,
+        head,
+        [{ command, cwd: "/h" }],
+        "/h",
+        undefined,
+        headRoot,
+      )
+      expect(replayed.counts).toMatchObject({ "newly refused": 0, same: 1 })
+      expect(process.env.PLAYGROUND_REPO).toBe("/elsewhere")
+    } finally {
+      if (was === undefined) delete process.env.PLAYGROUND_REPO
+      else process.env.PLAYGROUND_REPO = was
+    }
+  })
+
+  test("ROOT_READS names every file in the hooks' import graph that reads a path from its own folder, and only those", () => {
+    const repo = join(import.meta.dir, "../../../..")
+    const SPEC =
+      /(?:^|\n)\s*(?:import|export)\b[^"'`]*?from\s*["']([^"']+)["']|(?:^|\n)\s*import\s*["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/g
+    const OWN = /import\.meta\.(?:dir|dirname|filename|path|url)\b/
+    const file = (base: string) =>
+      [base, `${base}.ts`, join(base, "index.ts")].find(
+        (c) => existsSync(c) && statSync(c).isFile(),
+      )
+    // a relative path from the importer, `@packages/<name>[/<sub>]` by its package's bun export else `src/<sub>`, and a package's own `@/<path>` under its `src`
+    const target = (importer: string, spec: string): string | undefined => {
+      if (spec.startsWith(".")) return file(resolve(dirname(importer), spec))
+      const pkg = /^@packages\/([^/]+)(?:\/(.+))?$/.exec(spec)
+      if (pkg) {
+        const at = join(repo, "packages", pkg[1]!)
+        const json = JSON.parse(readFileSync(join(at, "package.json"), "utf8")) as {
+          exports?: Record<string, { bun?: string } | string>
+        }
+        const entry = json.exports?.[pkg[2] ? `./${pkg[2]}` : "."]
+        const bun = typeof entry === "object" ? entry.bun : undefined
+        return (bun && file(join(at, bun))) || file(join(at, "src", pkg[2] ?? "index"))
+      }
+      const own = /^@\/(.+)$/.exec(spec)
+      const home = /^(.*\/packages\/[^/]+)\//.exec(importer)?.[1]
+      return own && home ? file(join(home, "src", own[1]!)) : undefined
+    }
+    const seen = new Set<string>()
+    const visit = (path: string) => {
+      if (seen.has(path)) return
+      seen.add(path)
+      for (const m of readFileSync(path, "utf8").matchAll(SPEC)) {
+        const found = target(path, (m[1] ?? m[2] ?? m[3])!)
+        if (found) visit(found)
+      }
+    }
+    const hooks = join(repo, "scripts", "hooks")
+    for (const file of new Bun.Glob("*.ts").scanSync(hooks)) visit(join(hooks, file))
+    const reading = [...seen]
+      .filter((p) => OWN.test(readFileSync(p, "utf8")))
+      .map((p) => relative(repo, p))
+    expect(reading.length).toBeGreaterThan(0)
+    expect(Object.keys(ROOT_READS).sort()).toEqual(reading.sort())
+    for (const why of Object.values(ROOT_READS)) expect(why.length).toBeGreaterThan(0)
+  })
+})
+
+describe("a stored result", () => {
+  const git = (cwd: string, ...args: string[]) =>
+    Bun.spawnSync(
+      ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...args],
+      { cwd, stderr: "pipe", stdout: "pipe" },
+    )
+      .stdout.toString()
+      .trim()
+
+  // a repo whose one hook allows a command holding ALLOW, and a forms module outside it
+  const repo = (name: string) => {
+    const root = join(DIR, name)
+    mkdirSync(join(root, "scripts", "hooks"), { recursive: true })
+    writeFileSync(join(root, "package.json"), `{"name":"t","private":true}\n`)
+    writeFileSync(
+      join(root, "scripts", "hooks", "x.ts"),
+      `export const check = (raw: string) => (raw.includes("ALLOW") ? undefined : "refused")\n`,
+    )
+    git(root, "init", "-q")
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "init")
+    const forms = join(DIR, `${name}-forms.ts`)
+    writeFileSync(forms, `export const forms = [{ command: "ls ALLOW", inClass: true }]\n`)
+    return {
+      forms,
+      root,
+      sha: git(root, "rev-parse", "HEAD"),
+      tree: git(root, "rev-parse", "HEAD^{tree}"),
+    }
+  }
+
+  const args = (forms: string, ...more: string[]) => [
+    "sweep",
+    "--forms",
+    forms,
+    "--canary",
+    "HEAD",
+    "--hook",
+    "x",
+    ...more,
+  ]
+
+  const run = (at: string, root: string, argv: string[], env: Record<string, string> = {}) => {
+    const {
+      CLAUDE_CONFIG_DIR: _c,
+      PLAYGROUND_DATA_DIR: _d,
+      RUN_SLOT_NICE: _r,
+      ...rest
+    } = process.env
+    return Bun.spawnSync(["bun", SCRIPT, ...argv], {
+      cwd: root,
+      env: { ...rest, HOME: at, TMPDIR: DIR, ...env },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+  }
+
+  const keyAt = (root: string, argv: string[], canary: string, at = DIR) =>
+    keyOf({ canary, options: parse(argv)!, projects: join(at, "projects"), root })?.key
+
+  test("a second run at the same key prints the first run's counts under its reused: line and starts no run-slot job", () => {
+    const at = home("reused")
+    const { forms, root, sha, tree } = repo("reused-repo")
+    const first = run(at, root, args(forms), { RUN_SLOT_NICE: "10" })
+    expect(first.exitCode).toBe(0)
+    const counts = first.stdout.toString()
+    expect(counts).toContain(`"hook":"x","cases":3`)
+    const second = run(at, root, args(forms))
+    const [line, ...rest] = second.stdout.toString().split("\n")
+    const key = keyOf({
+      canary: sha,
+      options: parse(args(forms))!,
+      projects: join(at, ".claude", "projects"),
+      root,
+    })!.key
+    expect(line).toMatch(
+      new RegExp(
+        `^reused: ${key} from \\d{4}-\\d\\d-\\d\\dT[\\d:.]+Z, head ${tree}, canary ${sha}$`,
+      ),
+    )
+    expect(rest.join("\n")).toBe(counts)
+    expect(existsSync(join(at, "tickets"))).toBe(false)
+  })
+
+  test("a one-byte worktree change, a new canary sha, another forms blob and a newer transcript each move the key", () => {
+    const { forms, root, sha } = repo("moved-repo")
+    const original = keyAt(root, args(forms), sha)!
+    expect(keyAt(root, args(forms), sha)).toBe(original)
+    expect(keyAt(root, args(forms), "another")).not.toBe(original)
+    const hook = join(root, "scripts", "hooks", "x.ts")
+    writeFileSync(hook, `${readFileSync(hook, "utf8")} `)
+    expect(keyAt(root, args(forms), sha)).toBeUndefined()
+    git(root, "commit", "-qam", "one byte")
+    const committed = keyAt(root, args(forms), sha)!
+    expect(committed).not.toBe(original)
+    writeFileSync(forms, `export const forms = [{ command: "ls ALLOW ", inClass: true }]\n`)
+    expect(keyAt(root, args(forms), sha)).not.toBe(committed)
+    const replayArgs = ["replay", "--canary", "HEAD", "--hook", "x"]
+    const at = join(DIR, "moved")
+    mkdirSync(join(at, "projects", "p"), { recursive: true })
+    const transcript = join(at, "projects", "p", "s.jsonl")
+    writeFileSync(transcript, "")
+    utimesSync(transcript, 1_000, 1_000)
+    const replayKey = keyAt(root, replayArgs, sha, at)
+    expect(replayKey).toBeString()
+    utimesSync(transcript, 2_000, 2_000)
+    expect(keyAt(root, replayArgs, sha, at)).not.toBe(replayKey)
+  })
+
+  test.each([
+    ["--fresh", ["--fresh"], new Date().toISOString()],
+    ["a result over 24 h old", [], "2000-01-01T00:00:00.000Z"],
+  ])("%s runs fresh through a run-slot ticket", async (_, more, iso) => {
+    const at = home(`fresh-${more.length}`)
+    const { forms, root, sha } = repo(`fresh-${more.length}-repo`)
+    const key = keyOf({
+      canary: sha,
+      options: parse(args(forms))!,
+      projects: join(at, ".claude", "projects"),
+      root,
+    })!
+    await store(join(at, ".playground"), key, { changed: [], counts: ["stored"] })
+    const path = resultPath(join(at, ".playground"), key.key)
+    writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, "utf8")), at: iso }))
+    const second = run(at, root, args(forms, ...more))
+    expect(second.stdout.toString()).not.toContain("reused:")
+    expect(readFileSync(join(at, "tickets"), "utf8")).toContain(`-- bun ${SCRIPT} sweep`)
+  })
+
+  // a repo whose hook x refused every form at canary (HEAD~1) and allows every form at its head, with a forms module of n made-up forms, so each form changes once from each of its three places
+  const flipped = (name: string, n: number) => {
+    const { root } = repo(name)
+    writeFileSync(join(root, "scripts", "hooks", "x.ts"), `export const check = () => "refused"\n`)
+    git(root, "commit", "-qam", "canary refuses all")
+    writeFileSync(join(root, "scripts", "hooks", "x.ts"), `export const check = () => undefined\n`)
+    git(root, "commit", "-qam", "head allows all")
+    const forms = join(DIR, `${name}-forms.ts`)
+    const list = Array.from({ length: n }, (_, i) => ({
+      command: `ls made-up-${i}`,
+      inClass: false,
+    }))
+    writeFileSync(forms, `export const forms = ${JSON.stringify(list)}\n`)
+    const argv = (...more: string[]) => [
+      "sweep",
+      "--forms",
+      forms,
+      "--canary",
+      "HEAD~1",
+      "--hook",
+      "x",
+      ...more,
+    ]
+    return { argv, forms, root, sha: git(root, "rev-parse", "HEAD~1") }
+  }
+
+  const changedOf = (stderr: string) => stderr.split("\n").filter((l) => l.startsWith("x: "))
+
+  test("past 20 changed lines a hook prints one line naming how many more it cut, and --all prints and stores every one", async () => {
+    const at = home("cut")
+    const { argv, root, sha } = flipped("cut-repo", 9)
+    const cut = run(at, root, argv(), { RUN_SLOT_NICE: "10" })
+    expect(cut.exitCode).toBe(0)
+    expect(changedOf(cut.stderr.toString())).toHaveLength(21)
+    expect(changedOf(cut.stderr.toString()).at(-1)).toBe(
+      "x: 7 more changed lines not shown (--all prints them)",
+    )
+    const all = run(at, root, argv("--all"), { RUN_SLOT_NICE: "10" })
+    expect(all.exitCode).toBe(0)
+    expect(all.stdout.toString()).not.toContain("reused:")
+    const lines = changedOf(all.stderr.toString())
+    expect([lines.length, lines.some((l) => l.includes("more changed lines"))]).toEqual([27, false])
+    const key = keyOf({
+      canary: sha,
+      options: parse(argv("--all"))!,
+      projects: join(at, ".claude", "projects"),
+      root,
+    })!
+    expect((await stored(join(at, ".playground"), key.key))?.changed).toEqual(lines)
+  })
+
+  test("a hook with 20 or fewer changed lines prints them all and no line about a cut", () => {
+    const at = home("uncut")
+    const { argv, root } = flipped("uncut-repo", 6)
+    const lines = changedOf(run(at, root, argv(), { RUN_SLOT_NICE: "10" }).stderr.toString())
+    expect([lines.length, lines.some((l) => l.includes("more changed lines"))]).toEqual([18, false])
+  })
+
+  test("--all moves the key, so a cut result is never reused for it", () => {
+    const { argv, root, sha } = flipped("all-key-repo", 1)
+    expect(keyAt(root, argv("--all"), sha)).not.toBe(keyAt(root, argv(), sha))
+  })
+
+  test("a result is read back while it is under a day old", async () => {
+    const data = join(DIR, "data")
+    await store(
+      data,
+      { canary: "c", head: "h", input: "i", key: "k" },
+      { changed: [], counts: ["a"] },
+    )
+    const at = Date.parse((await stored(data, "k"))!.at)
+    expect((await stored(data, "k", at + 23 * 3600_000))?.counts).toEqual(["a"])
+    expect(await stored(data, "k", at + 24 * 3600_000)).toBeUndefined()
+  })
+
+  test("a run after a committed one-byte change runs fresh through a run-slot ticket", () => {
+    const at = home("committed")
+    const { forms, root } = repo("committed-repo")
+    expect(run(at, root, args(forms), { RUN_SLOT_NICE: "10" }).exitCode).toBe(0)
+    const hook = join(root, "scripts", "hooks", "x.ts")
+    writeFileSync(hook, `${readFileSync(hook, "utf8")} `)
+    git(root, "commit", "-qam", "one byte")
+    expect(run(at, root, args(forms)).stdout.toString()).not.toContain("reused:")
+    expect(readFileSync(join(at, "tickets"), "utf8")).toContain(`-- bun ${SCRIPT} sweep`)
+  })
+
+  test("a run whose worktree changes while it runs stores nothing, so the next run at the clean head runs fresh", () => {
+    const at = home("moved-mid-run")
+    const { forms, root } = repo("moved-mid-run-repo")
+    const hook = join(root, "scripts", "hooks", "x.ts")
+    // canary's hook, imported mid-run, stands in for an edit made while the run is in flight
+    writeFileSync(
+      hook,
+      `import { writeFileSync } from "node:fs"\nif (process.env.RACE_TARGET) writeFileSync(process.env.RACE_TARGET, "export const check = () => undefined\\n")\nexport const check = () => "refused"\n`,
+    )
+    git(root, "commit", "-qam", "canary")
+    writeFileSync(
+      hook,
+      `export const check = (raw: string) => (raw.includes("ALLOW") ? undefined : "refused")\n`,
+    )
+    git(root, "commit", "-qam", "head")
+    const sweepAt = (...more: string[]) =>
+      args(forms, ...more).map((a) => (a === "HEAD" ? "HEAD~1" : a))
+    const first = run(at, root, sweepAt(), { RACE_TARGET: hook, RUN_SLOT_NICE: "10" })
+    expect(first.exitCode).toBe(0)
+    expect(git(root, "status", "--porcelain")).not.toBe("")
+    git(root, "checkout", "--", ".")
+    expect(existsSync(join(at, ".playground", "hook-differential", "results"))).toBe(false)
+    expect(run(at, root, sweepAt()).stdout.toString()).not.toContain("reused:")
+    expect(readFileSync(join(at, "tickets"), "utf8")).toContain(`-- bun ${SCRIPT} sweep`)
   })
 })

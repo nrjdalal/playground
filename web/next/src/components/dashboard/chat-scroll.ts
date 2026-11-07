@@ -120,10 +120,10 @@ export function paceOf({
   }
 }
 
-// A row of the stream as the glide sees it, in the content's own pixels: where it starts, how tall it is, its words, and whether the glide rests when it reaches the top (a person's message, a peer's, a card; a turn rests at its words instead, through spansOf).
+// A row of the stream as the glide sees it, in the content's own pixels: where it starts, how tall it is, its words, and whether the glide rests when it reaches the top (a person's message or a card; a turn rests at its words instead, through spansOf, and a peer's message, folded to a tool row, never).
 export type RowSpan = { height: number; key: string; rests: boolean; top: number; words: number }
 
-// The rows the glide reads from their places and facts: a row that rests as a whole (his message, a peer's, a card) rests at its top, and a turn at the top of each of its reply's words (rests, its text steps' tops), never at a tool row.
+// The rows the glide reads from their places and facts: a row that rests as a whole (his message, a card) rests at its top, and a turn at the top of each of its reply's words (rests, its text steps' tops), never at a tool row.
 export const spansOf = (
   places: { height: number; id: string; rests: number[]; top: number }[],
   facts: ReadonlyMap<string, { rests: boolean; words: number }>,

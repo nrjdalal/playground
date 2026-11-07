@@ -20,6 +20,20 @@ describe("VERIFY.md", () => {
     expect(line).toContain("100 of its 143 files")
   })
 
+  test("probes a guard PR's check() from a scratch script under --no-install, taking node_modules only when the hook fails to load (PG-1194)", async () => {
+    const line =
+      (await Bun.file(VERIFY).text())
+        .split("\n")
+        .find((l) => l.startsWith("- **Run the numbers.**")) ?? ""
+    expect(line).toContain("For a guard PR (`scripts/hooks/`), probe its `check()` at once")
+    expect(line).toContain("run with `bun --no-env-file --no-install <script>`")
+    expect(line).toContain("auto-install would fetch whatever a bare import names from npm")
+    expect(line).toContain(
+      "A hook that fails to load under `--no-install` takes `node_modules` through run-slot's clone",
+    )
+    expect(line).toContain("To prove any other suspected logic bug, write a scratch test")
+  })
+
   test("tells each sub-agent to make its scratch folder first and to write every probe output to an absolute path inside it (#415's out.txt in the main checkout)", async () => {
     const line =
       (await Bun.file(VERIFY).text())

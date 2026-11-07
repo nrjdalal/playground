@@ -24,7 +24,7 @@ type Environment = Record<string, string | undefined>
 
 const GUARD = "no-desktop-owner-app"
 const TOOL = /^agent-desktop(?:@.*)?$/
-const MENTION = /agent-desktop/
+const MENTION = /agent-desktop/i
 const LAUNCHERS = new Set([
   "bun",
   "bunx",
@@ -44,6 +44,9 @@ const BUN_DATA_SCRIPTS = new Map([
   ["thread", "api/hono/src/bin/dashboard-thread.ts"],
 ])
 
+// The script's line runs the prebuild before its entry, with a fixed target, so bun run's appended arguments reach the entry alone; prebuild.ts is a main checkout file no session writes too.
+const PREBUILD = "bun --no-env-file packages/scripts/src/verify/prebuild.ts api"
+
 const realOf = (path: string): string => {
   try {
     return realpathSync(path)
@@ -52,7 +55,7 @@ const realOf = (path: string): string => {
   }
 }
 
-// Whether the call runs script from the main checkout, where its entry point is a file no session writes (no-main-checkout keeps a session out of that tree). The main checkout is mainCheckout() (see packages/scripts/src/main-checkout.ts), resolved from the hook's own location rather than the call's cwd, so a made folder that git-inits itself and plants scripts/spawn.sh cannot pass as it. The allowance holds only when the effective cwd is itself that path (realOf(cwd) === realOf(mainCheckout()), so bun run reads the same package.json this gate checks, not a nearer one under a made folder), its package.json maps script to the entry, and the entry file is present. Every other cwd, a linked worktree, a made folder under .claude/worktrees with its own package.json, an unknown cwd (no cwd, or a cd to a variable or a substitution), keeps the verdict.
+// Whether the call runs script from the main checkout, where its entry point is a file no session writes (no-main-checkout keeps a session out of that tree). The main checkout is mainCheckout() (see packages/scripts/src/main-checkout.ts), resolved from the hook's own location rather than the call's cwd, so a made folder that git-inits itself and plants scripts/spawn.sh cannot pass as it. The allowance holds only when the effective cwd is itself that path (realOf(cwd) === realOf(mainCheckout()), so bun run reads the same package.json this gate checks, not a nearer one under a made folder), its package.json maps script to the prebuild, then the entry, and the entry file is present. Every other cwd, a linked worktree, a made folder under .claude/worktrees with its own package.json, an unknown cwd (no cwd, or a cd to a variable or a substitution), keeps the verdict.
 async function mapsDataScript(cwd: string | undefined, script: string): Promise<boolean> {
   const entry = BUN_DATA_SCRIPTS.get(script)
   if (entry === undefined || cwd === undefined) return false
@@ -61,7 +64,7 @@ async function mapsDataScript(cwd: string | undefined, script: string): Promise<
   if (!(await pkg.exists())) return false
   try {
     const { scripts } = JSON.parse(await pkg.text()) as { scripts?: Record<string, string> }
-    if (scripts?.[script] !== `bun ${entry}`) return false
+    if (scripts?.[script] !== `${PREBUILD} && bun ${entry}`) return false
   } catch {
     return false
   }
@@ -116,7 +119,7 @@ const headed = () =>
   `${GUARD} hook refused this agent-desktop call: it carries --headed, whose physical input moves the owner's own pointer and focus. --headed is the owner's alone, so ${OWNER}.`
 
 const listed = (app: string) =>
-  `${GUARD} hook refused this agent-desktop call: it targets ${app}, an app on the desktop-owner-apps guard list of the owner's own apps. Leave it alone; when the task needs it, ${OWNER}; or, to take ${app} off the list in the owner's login extension, tell your lead, and the dispatcher hands the owner the ! command that does it.`
+  `${GUARD} hook refused this agent-desktop call: it targets ${app}, an app on the desktop-owner-apps guard list of the owner's own apps. Leave it alone; when the task needs it, ${OWNER}; or, to take ${app} off the list in the owner's login extension, tell your lead, who posts an apps decision with bun run ask new (.agents/dashboard/asks.md), whose Approve takes it off.`
 
 const unread = (what: string) =>
   `${GUARD} hook refused this agent-desktop call: it cannot read ${what} before the command runs, so it cannot tell whether the call carries --headed or targets an app on the desktop-owner-apps list. Write the agent-desktop command's every word literally as a command of its own, or ${OWNER}.`
@@ -127,7 +130,7 @@ const front = (sub: string) =>
 const SCRIPT_IN_CALL =
   "a script file in a call that names agent-desktop, since the call may change it"
 
-// A list refusal's reason alone, without the fix it names, since only the owner's own ! command changes the list.
+// A list refusal's reason alone, without the fix it names, since only the owner's act changes the list.
 const reasonOf = (refusal: string) =>
   refusal.split(/: tell your lead, and the dispatcher hands the owner|\. Restore the file/)[0]
 
@@ -236,7 +239,7 @@ async function runsTool(line: string): Promise<boolean> {
 // Prose: a quoted string with no quote, backslash, $, brace or newline, where each agent-desktop follows a plain word (not a flag, launcher or wrapper) and the string, read as a shell line, runs no agent-desktop.
 async function prose(text: string): Promise<boolean> {
   if (/['"`\\${}\n\r]/.test(text)) return false
-  for (const match of text.matchAll(/agent-desktop/g)) {
+  for (const match of text.matchAll(/agent-desktop/gi)) {
     const before = text.slice(0, match.index)
     const word = before.trimEnd().split(/\s+/).pop() ?? ""
     if (!/\s$/.test(before) || !/[\p{L}\p{N},:.]$/u.test(word) || word.startsWith("-")) return false
@@ -268,7 +271,7 @@ function lister(environment: Environment) {
     (loaded ??= guardList(GUARD, "desktop-owner-apps", isStrings, [], environment).then((l) =>
       l.refusal
         ? {
-            refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's own ! command: tell your lead, and the dispatcher hands the owner the command, then run the call again.`,
+            refusal: `${reasonOf(l.refusal)}. The list changes only by the owner's act: tell your lead, and the dispatcher hands the owner the command that restores the list, then run the call again.`,
           }
         : { apps: new Set((l.list ?? []).map(appName)) },
     ))

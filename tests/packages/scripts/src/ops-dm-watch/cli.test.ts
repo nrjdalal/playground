@@ -8,25 +8,21 @@ import type { Context } from "../../../../../packages/scripts/src/ops-tick/tick"
 
 const [watchBeat, updateBeat] = BEATS as [(typeof BEATS)[0], (typeof BEATS)[0]]
 
-// A data folder whose extensions hold vault in acme's, with the Slack settings given, read as the job reads this machine's.
+// A data folder with the bundled slack extension turned on and the Slack settings given, read as the job reads this machine's.
 const data = mkdtempSync(join(tmpdir(), "dm-watch-cli-"))
 afterAll(() => rmSync(data, { force: true, recursive: true }))
-mkdirSync(join(data, "extensions", "acme", "skills", "vault"), { recursive: true })
-writeFileSync(join(data, "extensions", "acme", "skills", "vault", "SKILL.md"), "# vault\n")
+mkdirSync(join(data, "extensions"))
 writeFileSync(join(data, "extensions", "login"), "someone\n")
 const settle = (values: Record<string, unknown>) =>
   writeFileSync(
     join(data, "extensions", "policy.json"),
-    JSON.stringify({
-      orgs: {},
-      schemaVersion: 1,
-      values: { "ext.links": { acme: ["*"] }, "ext.order": ["acme"], ...values },
-    }),
+    JSON.stringify({ orgs: {}, schemaVersion: 1, values: { "ext.bundled": ["slack"], ...values } }),
   )
+const WATCH = join(import.meta.dir, "../../../../../extensions/slack/skills/slack/scripts/watch.ts")
 process.env.PLAYGROUND_DATA_DIR = data
 const SET = { "slack.dmChannel": "D0FIXTURE", "slack.dmOwner": "U0OWNER" }
 
-const fake = (result = { code: 0, out: "" }, op = { code: 0, out: "" }) => {
+const fake = (result = { code: 0, out: "" }) => {
   const ran: string[][] = []
   const sent: { text: string; to: string }[] = []
   const ctx: Context = {
@@ -35,7 +31,7 @@ const fake = (result = { code: 0, out: "" }, op = { code: 0, out: "" }) => {
     repo: "",
     run: async (argv) => {
       ran.push(argv)
-      return argv[0] === "op" ? op : result
+      return result
     },
     send: async (to, text) => {
       sent.push({ text, to })
@@ -57,12 +53,11 @@ describe("the DM watch job", () => {
     }
   })
 
-  test("in Slack mode the watch runs watch.ts with the token from vault alone, and the update beat nudges the dispatcher", async () => {
+  test("in Slack mode the watch runs the slack skill's watch.ts with no token in its argv, and the update beat nudges the dispatcher", async () => {
     settle({ ...SET, "slack.mode": true })
     const { ctx, ran, sent } = fake()
     await watchBeat.run(ctx)
-    expect(ran[0]!.at(-1)).toEndWith("packages/scripts/src/ops-dm-watch/watch.ts")
-    expect(ran[0]!).toContain("SLACK_TOKEN=local.slack.channel_token")
+    expect(ran).toEqual([[process.execPath, WATCH]])
     await updateBeat.run(ctx)
     expect(sent).toEqual([
       {
@@ -85,21 +80,16 @@ describe("the DM watch job", () => {
     expect(failing.sent).toHaveLength(2)
   })
 
-  test("vault's 1Password error names an empty op account list as the job's context, and a listed account leaves vault's words", async () => {
-    settle({ ...SET, "slack.mode": true })
-    const locked = {
-      code: 1,
-      out: 'vault: the note "Vault" in the Employee vault could not be read: is 1Password unlocked and op signed in?\n',
-    }
-    const none = fake(locked, {
-      code: 1,
-      out: "No accounts configured for use with 1Password CLI.",
-    })
-    await watchBeat.run(none.ctx).catch(() => {})
-    expect(none.sent[0]!.text).toContain("op has no 1Password account in this job's context")
-    await watchBeat.run(fake().ctx)
-    const listed = fake(locked, { code: 0, out: "URL  EMAIL  USER ID\nmy.1password.com  a  b\n" })
-    await watchBeat.run(listed.ctx).catch(() => {})
-    expect(listed.sent[0]!.text).toContain("is 1Password unlocked")
+  test("with the slack extension off, ops is told Slack is not set up here, and nothing runs", async () => {
+    settle({ ...SET, "ext.bundled": [], "slack.mode": true })
+    const { ctx, ran, sent } = fake()
+    await expect(watchBeat.run(ctx)).rejects.toThrow("exit 2: Slack is not set up here")
+    expect(ran).toEqual([])
+    expect(sent).toEqual([
+      {
+        text: "DM watch failed (exit 2): Slack is not set up here: reach the owner through the Inbox with bun run ask new (an update)",
+        to: "ops",
+      },
+    ])
   })
 })

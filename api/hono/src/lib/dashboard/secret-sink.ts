@@ -1,7 +1,8 @@
 import { tmpdir } from "node:os"
 
 import { readsLive } from "@/lib/dashboard/fixture"
-import type { SinkRun } from "@/lib/dashboard/inbox"
+import type { KeychainRead, KeychainSave, SinkRun } from "@/lib/dashboard/inbox"
+import { keychainItem, type Run } from "@/lib/keychain"
 
 // A sink that waits on a prompt is stopped after this long, so a Submit never hangs.
 const SINK_TIMEOUT_MS = 60_000
@@ -60,6 +61,19 @@ export async function spawnSink(
   return proc.signalCode ? null : proc.exitCode
 }
 
-// Only a stack that reads the live machine runs the sink (fixture.ts's dashboardSource), as only it opens cmux: a fixture or test stack runs nothing and reads exit 0, so no test reaches a real Vercel project.
+// Only a stack that reads the live machine runs the sink (fixture.ts's dashboardSource), as only it reads the machine's own sessions: a fixture or test stack runs nothing and reads exit 0, so no test reaches a real Vercel project.
 export const runSink: SinkRun = (argv, value) =>
   readsLive() ? spawnSink(argv, value) : Promise.resolve(0)
+
+// A keychain sink's writer, on the same terms: only a stack that reads the live machine writes this Mac's Keychain, and any other saves nothing.
+export const saveToKeychain: KeychainSave = (item, value) =>
+  readsLive() ? keychainItem(item).write(value) : Promise.resolve()
+
+// The value a fixture or test stack's reveal shows, made up, so no shot or test holds a real one.
+export const FIXTURE_REVEAL = "made-up-value-from-the-fixture"
+
+// A reveal card's reader, on the same terms: only a stack that reads the live machine runs `security`, and any other shows FIXTURE_REVEAL; run is a test's stand-in for `security`.
+export const readFromKeychain =
+  (run?: Run): KeychainRead =>
+  (item) =>
+    readsLive() ? keychainItem(item, { run }).read() : Promise.resolve(FIXTURE_REVEAL)

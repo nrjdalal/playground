@@ -5,6 +5,8 @@ import {
   RiArrowLeftSLine,
   RiArrowRightSLine,
   RiCloseLine,
+  RiDownloadLine,
+  RiErrorWarningLine,
   RiExternalLinkLine,
   RiFileLine,
 } from "@remixicon/react"
@@ -19,7 +21,10 @@ import {
 } from "react"
 
 import { type ViewerItem, VIEWERS } from "@/components/dashboard/viewer/registry"
-import { useAttachmentUrl } from "@/components/dashboard/viewer/use-attachment-url"
+import {
+  attachmentDownloadUrl,
+  useAttachment,
+} from "@/components/dashboard/viewer/use-attachment-url"
 import { OFF_FOCUSABLE } from "@/components/hint"
 import { Button } from "@/components/ui/button"
 import { Carousel, type CarouselApi, CarouselContent, CarouselItem } from "@/components/ui/carousel"
@@ -31,6 +36,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
+import { saveFrom } from "@/lib/download"
 import { BAR_ITEM, FLOATING_BAR } from "@/lib/floating-bar"
 
 const KIND_LABELS: Record<InboxAttachmentKind, string> = {
@@ -96,7 +102,7 @@ function Slide({
   onEdge: (direction: -1 | 1) => void
 }) {
   const viewer = VIEWERS[item.kind]
-  const url = useAttachmentUrl(item.id, near && Boolean(viewer))
+  const { missing, url } = useAttachment(item.id, near && Boolean(viewer))
   const Icon = viewer?.icon ?? RiFileLine
   return (
     <CarouselItem
@@ -107,11 +113,17 @@ function Slide({
       {viewer && url ? (
         <viewer.View active={active} item={item} onEdge={onEdge} url={url} />
       ) : (
-        <Icon className="text-muted-foreground size-8" />
+        <span className="text-muted-foreground flex flex-col items-center gap-2 text-xs">
+          <Icon className="size-8" />
+          {missing ? <Missing /> : null}
+        </span>
       )}
     </CarouselItem>
   )
 }
+
+// What a file the API answered 404 for shows in its place
+export const Missing = () => <span className="text-muted-foreground text-xs">Missing</span>
 
 const CAROUSEL_ITEM = '[data-slot="carousel-item"]'
 
@@ -148,7 +160,7 @@ export const OPENS_IN_TAB: readonly InboxAttachmentKind[] = ["image", "pdf"]
 // The shown file on a tab of its own, at full size, off until its file has arrived; a kind OPENS_IN_TAB leaves out has no button at all. No tooltips in the bar: each square's icon says it.
 export function OpenInNewTab({ item }: { item: ViewerItem }) {
   const opens = OPENS_IN_TAB.includes(item.kind)
-  const url = useAttachmentUrl(item.id, opens && Boolean(VIEWERS[item.kind]))
+  const { url } = useAttachment(item.id, opens && Boolean(VIEWERS[item.kind]))
   // a kind that never opens in a tab keeps the square's room, so the bar holds one width
   if (!opens) return <span aria-hidden className="size-8 shrink-0" />
   return url ? (
@@ -175,7 +187,52 @@ export function OpenInNewTab({ item }: { item: ViewerItem }) {
   )
 }
 
-// The Inbox's viewer: full screen over the page on a see-through stage, the stock Dialog overlay's dim and blur, in Slider mode, one file filling the screen at a time, as slides, the file filling it edge to edge, fitted to whichever side runs out first, and one floating bar, the aside's own (FLOATING_BAR), that rises only while the pointer is near the bottom edge or a key has focus in it. The arrows, a swipe or the ‹ › buttons move it (a jump where motion is reduced), Esc or X closes it, and focus stays inside, the stock Dialog's. The bar holds ‹, where it stands ("2 / 6") and ›, the file's name, Open in new tab and X. index is the slide shown, which the viewer reports as it moves.
+// Saves a file, or both sides of a before/after pair one after the other, through the Inbox's route in its download mode, under the name the API builds from its item's title.
+export async function saveItem(item: ViewerItem): Promise<void> {
+  for (const file of item.pair ? [item.pair.before, item.pair.after] : [item])
+    await saveFrom(attachmentDownloadUrl(file.id))
+}
+
+// Saves the shown file, or both sides of a before/after pair, under its item's title, as the API names it; off while it saves, and a failed save shows a warning in its place and says so in its name, so another press tries again. label names it where several sit together, a tile's naming its file.
+export function Download({
+  className = SQUARE,
+  item,
+  label = "Download",
+}: {
+  className?: string
+  item: ViewerItem
+  label?: string
+}) {
+  const [state, setState] = useState<"failed" | "idle" | "saving">("idle")
+  const save = async () => {
+    setState("saving")
+    try {
+      await saveItem(item)
+      setState("idle")
+    } catch {
+      setState("failed")
+    }
+  }
+  return (
+    <Button
+      aria-label={state === "failed" ? `${label} failed, try again` : label}
+      className={cn(className, state === "saving" && OFF_FOCUSABLE.className)}
+      disabled={state === "saving"}
+      focusableWhenDisabled={OFF_FOCUSABLE.focusableWhenDisabled}
+      onClick={save}
+      size="icon-sm"
+      variant="ghost"
+    >
+      {state === "failed" ? (
+        <RiErrorWarningLine className="text-destructive" />
+      ) : (
+        <RiDownloadLine />
+      )}
+    </Button>
+  )
+}
+
+// The Inbox's viewer: full screen over the page on a see-through stage, the stock Dialog overlay's dim and blur, in Slider mode, one file filling the screen at a time, as slides, the file filling it edge to edge, fitted to whichever side runs out first, and one floating bar, the aside's own (FLOATING_BAR), that rises only while the pointer is near the bottom edge or a key has focus in it. The arrows, a swipe or the ‹ › buttons move it (a jump where motion is reduced), Esc or X closes it, and focus stays inside, the stock Dialog's. The bar holds ‹, where it stands ("2 / 6") and ›, the file's name, Open in new tab, Download and X. index is the slide shown, which the viewer reports as it moves.
 export function Viewer({
   index,
   items,
@@ -350,6 +407,7 @@ export function Viewer({
             <Separator className="mx-1 h-5" orientation="vertical" />
             <DialogTitle className={BAR_NAME}>{item.name}</DialogTitle>
             <OpenInNewTab item={item} />
+            <Download item={item} />
             <DialogClose
               render={
                 <Button aria-label="Close" className={SQUARE} size="icon-sm" variant="ghost" />

@@ -2,20 +2,44 @@ import type { AppType, ErrorCode } from "@api/hono"
 import { hc } from "hono/client"
 
 import { config } from "@/lib/config"
+import { relayedBase } from "@/lib/relay"
+import { signedFetch } from "@/lib/relay-write"
+import { readBrowserSigner } from "@/lib/remote-key"
 
 type Client = ReturnType<typeof hc<AppType>>
 
 const hcWithType = (...args: Parameters<typeof hc>): Client => hc<AppType>(...args)
 
-const url = config.api.internalUrl ? config.api.internalUrl : config.api.url
+const base = config.api.internalUrl ? config.api.internalUrl : config.api.url
 
-const honoClient = hcWithType(url, {
+// The signed-in owner's login on the hosted Yard, read once, which every write from Yard carries signed.
+let me: Promise<string> | null = null
+const myLogin = (): Promise<string> =>
+  (me ??= fetch(`${base}/api/v1/yard/me`, { credentials: "include" })
+    .then(async (response) => {
+      const body = (await response.json().catch(() => null)) as { data?: { login?: string } } | null
+      if (!response.ok || !body?.data?.login) throw new Error("Your Yard login could not be read")
+      return body.data.login
+    })
+    .catch((error: unknown) => {
+      me = null
+      throw error
+    }))
+
+const honoClient = hcWithType(relayedBase(base, config.hosted), {
+  // on the hosted build each write goes to the owner's Mac signed by this browser's paired key
+  fetch: config.hosted
+    ? signedFetch({ base, login: myLogin, signer: readBrowserSigner })
+    : undefined,
   init: {
     credentials: "include",
   },
 })
 
 export const apiClient = honoClient.api
+
+// The API's own routes on either build, never through the relay: the session read.
+export const ownApiClient = hcWithType(base, { init: { credentials: "include" } }).api
 
 // Standard error shape, matching the jsonError envelope in api/hono/src/lib/error.ts; extras like the validation `issues` array are preserved. `code` is the API's ErrorCode union plus the transport codes unwrap itself produces.
 export type ApiError = {

@@ -12,7 +12,6 @@ import {
   DISPATCHERS,
   composeWorkers,
   dispatcherSlots,
-  feedBySession,
   feedItemOf,
   herdrFeed,
   isLiveRecord,
@@ -22,13 +21,11 @@ import {
   liveRecords,
   type LiveProof,
   nameOf,
-  questionsBySession,
+  readDispatcherSlots,
   roleOf,
   rosterFacts,
   rosterRoleOf,
   secondaryOf,
-  sessionOfWorkstream,
-  surfacesOf,
 } from "../../../../../../api/hono/src/lib/dashboard/workers"
 import { setSessionNames } from "../../../../../../packages/config/src/kinds"
 import { inFixture, onLiveDashboard } from "../../../../../dashboard-fixture"
@@ -46,10 +43,8 @@ import {
 // workers.ts sets the names its data folder holds when it loads; the cases name the managers' old names, as a machine past the switch does.
 setSessionNames(SEEDED_NAMES)
 
-const b64 = (s: string) => Buffer.from(s).toString("base64")
-
 // A raw session list with every record taken at its word, as listLive hands it on when it has no registry to read.
-const fromCmux = (
+const fromRecords = (
   sessions: unknown,
   ...rest: Parameters<typeof composeWorkers> extends [unknown, ...infer R] ? R : never
 ) => composeWorkers(liveRecords(sessions, null), ...rest)
@@ -77,19 +72,6 @@ const workspaces = {
   ],
 }
 
-const question = (sessionId: string) => ({
-  kind: "question",
-  request_id: "R1",
-  workstream_id: `cmux-feed-v1:${b64("claude")}:${b64(sessionId)}`,
-  questions: [
-    {
-      prompt: "Lunch?",
-      multi_select: false,
-      options: [{ label: "Dal makhani" }, { label: "Rajma chawal" }],
-    },
-  ],
-})
-
 describe("nameOf", () => {
   test("reads -n, --name and --name=", () => {
     expect(nameOf(["claude", "-n", "pride"])).toBe("pride")
@@ -97,21 +79,6 @@ describe("nameOf", () => {
     expect(nameOf(["claude", "--name=wrath"])).toBe("wrath")
     expect(nameOf(["claude"])).toBe("")
     expect(nameOf(undefined)).toBe("")
-  })
-})
-
-describe("sessionOfWorkstream", () => {
-  test("decodes the asking session from a Feed item's workstream id", () => {
-    expect(sessionOfWorkstream(`cmux-feed-v1:${b64("claude")}:${b64("abc-123")}`)).toBe("abc-123")
-  })
-})
-
-describe("questionsBySession", () => {
-  test("keeps only pickers, keyed by the asking session, with labels in picker order", () => {
-    const feed = { items: [question("s-greed"), { kind: "toolUse", workstream_id: "x" }] }
-    expect(questionsBySession(feed).get("s-greed")).toEqual([
-      { multiSelect: false, options: ["Dal makhani", "Rajma chawal"], prompt: "Lunch?" },
-    ])
   })
 })
 
@@ -190,7 +157,7 @@ describe("lightOf", () => {
     expect(lightOf("needsInput", [])).toBe("needs-you")
     expect(lightOf("running", [])).toBe("working")
     expect(lightOf("idle", [])).toBe("idle")
-    const permission = feedItemOf(permissionItem("s-1"))
+    const permission = feedItemOf(permissionItem())
     expect(lightOf("running", [], permission ? [permission] : [])).toBe("needs-you")
   })
 })
@@ -228,6 +195,51 @@ describe("DISPATCHERS", () => {
     ).toBe(1)
     expect(dispatcherSlots([OLD.dispatcher], new Set([`${OLD.dispatcher}-2`]))).toBe(1)
   })
+
+  // A second dispatcher the roster marks done or ended counts no row, while a parked or working one still does (#850).
+  test.each([
+    ["ended", 1],
+    ["done", 1],
+    ["parked", 2],
+    ["working", 2],
+  ])(
+    "a roster whose second dispatcher reads %s counts %i dispatcher rows",
+    async (status, rows) => {
+      const dir = mkdtempSync(join(tmpdir(), "dispatcher-slots-"))
+      // a live-reads process, whose data folder is PLAYGROUND_DATA_DIR, reading the roster alone (no opt-in to Claude's registry)
+      const set: Record<string, string> = {
+        CLAUDE_CONFIG_DIR: join(dir, "config"),
+        PLAYGROUND_ALL_SESSIONS: "",
+        PLAYGROUND_DATA_DIR: join(dir, "data"),
+        PLAYGROUND_LIVE_READS: "1",
+      }
+      const saved = Object.keys(set).map((key) => [key, process.env[key]] as const)
+      Object.assign(process.env, set)
+      mkdirSync(set.PLAYGROUND_DATA_DIR!, { recursive: true })
+      const agent = (name: string, status: string) => ({
+        name,
+        role: "manager",
+        status,
+        task: "Dispatch",
+      })
+      writeFileSync(
+        join(set.PLAYGROUND_DATA_DIR!, "roster.json"),
+        JSON.stringify({
+          agents: [agent(DISPATCHER, "working"), agent(DISPATCHER_SECONDARY, status)],
+          updatedAt: "2026-11-04T14:00:00Z",
+        }),
+      )
+      try {
+        expect(await readDispatcherSlots()).toBe(rows)
+      } finally {
+        for (const [key, value] of saved) {
+          if (value === undefined) delete process.env[key]
+          else process.env[key] = value
+        }
+        rmSync(dir, { force: true, recursive: true })
+      }
+    },
+  )
 
   test("both names take the dispatcher role, whatever the roster calls them", () => {
     for (const name of DISPATCHERS) {
@@ -380,38 +392,6 @@ describe("rosterRoleOf", () => {
   })
 })
 
-describe("surfacesOf", () => {
-  test("each terminal surface by the UUID a session record names, with its ref and title; malformed ones are left out", () => {
-    const tree = {
-      windows: [
-        {
-          workspaces: [
-            {
-              panes: [
-                {
-                  surfaces: [
-                    { id: "U1", ref: "surface:1", title: OLD.dispatcher },
-                    { id: "U2", ref: "surface:2" },
-                    { ref: "surface:3", title: "no uuid" },
-                    { id: "U4", ref: "pane:4", title: "wrong ref" },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    }
-    expect(surfacesOf(tree)).toEqual(
-      new Map([
-        ["U1", { ref: "surface:1", title: OLD.dispatcher }],
-        ["U2", { ref: "surface:2", title: null }],
-      ]),
-    )
-    expect(surfacesOf(null)).toEqual(new Map())
-  })
-})
-
 describe("composeWorkers", () => {
   test("the two dispatchers both keep the role, the primary first on the board", () => {
     const second = session({
@@ -426,13 +406,7 @@ describe("composeWorkers", () => {
       started_at: "2026-10-06T09:00:00.000Z",
       surface_id: "SURF-2",
     })
-    const { workers } = fromCmux(
-      { sessions: [second, first] },
-      workspaces,
-      { items: [] },
-      new Map(),
-      new Map(),
-    )
+    const { workers } = fromRecords({ sessions: [second, first] }, workspaces, new Map(), new Map())
     expect(workers.filter((w) => w.role === "dispatcher").map((w) => w.sessionId)).toEqual([
       "s-opus",
       "s-glm",
@@ -452,7 +426,7 @@ describe("composeWorkers", () => {
         surface_id: `SURF-${i + 1}`,
       }),
     )
-    const { workers } = fromCmux({ sessions }, workspaces, { items: [] }, new Map(), new Map())
+    const { workers } = fromRecords({ sessions }, workspaces, new Map(), new Map())
     const roles = Object.fromEntries(workers.map((w) => [w.sessionId, w.role]))
     expect(roles).toEqual({
       "s-glm-new": "other",
@@ -474,13 +448,7 @@ describe("composeWorkers", () => {
       started_at: "2026-10-06T10:00:00.000Z",
       surface_id: "SURF-2",
     })
-    const { workers } = fromCmux(
-      { sessions: [newer, older] },
-      workspaces,
-      { items: [] },
-      new Map(),
-      new Map(),
-    )
+    const { workers } = fromRecords({ sessions: [newer, older] }, workspaces, new Map(), new Map())
     const named = workers.filter((w) => w.name === DISPATCHER)
     expect(named).toHaveLength(2)
     expect(named.find((w) => w.role === "dispatcher")?.sessionId).toBe("s-old")
@@ -500,10 +468,9 @@ describe("composeWorkers", () => {
       started_at: "2026-10-06T09:00:00.000Z",
       surface_id: "SURF-2",
     })
-    const { workers } = fromCmux(
+    const { workers } = fromRecords(
       { sessions: [later, earlier] },
       workspaces,
-      { items: [] },
       new Map(),
       new Map(),
     )
@@ -525,13 +492,7 @@ describe("composeWorkers", () => {
       started_at: "2026-10-06T09:00:00.000Z",
       surface_id: "SURF-2",
     })
-    const { workers } = fromCmux(
-      { sessions: [garbage, real] },
-      workspaces,
-      { items: [] },
-      new Map(),
-      new Map(),
-    )
+    const { workers } = fromRecords({ sessions: [garbage, real] }, workspaces, new Map(), new Map())
     const named = workers.filter((w) => w.name === DISPATCHER)
     expect(named.find((w) => w.role === "dispatcher")?.sessionId).toBe("s-real")
   })
@@ -549,10 +510,9 @@ describe("composeWorkers", () => {
       started_at: "2026-10-06T09:00:00.000Z",
       surface_id: "SURF-2",
     })
-    const { workers } = fromCmux(
+    const { workers } = fromRecords(
       { sessions: [demoted, keeper] },
       workspaces,
-      { items: [] },
       new Map(),
       new Map(),
     )
@@ -576,61 +536,13 @@ describe("composeWorkers", () => {
       ["s-old", "Run the dashboard"],
       ["s-new", "Look at the dashboard"],
     ])
-    const { workers } = fromCmux({ sessions: [demoted, keeper] }, workspaces, { items: [] }, tasks)
+    const { workers } = fromRecords({ sessions: [demoted, keeper] }, workspaces, tasks)
     const bySession = new Map(workers.map((w) => [w.sessionId, w]))
     expect(bySession.get("s-new")).toMatchObject({ role: "other", task: "Look at the dashboard" })
     expect(bySession.get("s-old")).toMatchObject({ role: "dispatcher", task: null })
   })
 
-  test("two sessions sharing a workspace are named from their own surfaces' titles, and carry their surface refs", () => {
-    const tree = {
-      windows: [
-        {
-          workspaces: [
-            {
-              panes: [
-                {
-                  surfaces: [
-                    { id: "SURF-1", ref: "surface:1", title: "gluttony" },
-                    { id: "SURF-2", ref: "surface:2", title: "envy" },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    }
-    const sessions = {
-      sessions: [
-        session({ launch_arguments: ["/bin/claude"] }),
-        session({
-          session_id: "s-envy",
-          surface_id: "SURF-2",
-          launch_arguments: ["/bin/claude"],
-        }),
-      ],
-    }
-    const live = fromCmux(
-      sessions,
-      workspaces,
-      { items: [] },
-      new Map(),
-      new Map(),
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      tree,
-    )
-    expect(live.workers.map((w) => [w.name, w.surface]).sort()).toEqual([
-      ["envy", "surface:2"],
-      ["gluttony", "surface:1"],
-    ])
-    expect(live.workers[0]?.workspace).toEqual({ ref: "workspace:40", title: "greed" })
-  })
-
-  test("a probe at a picker reads idle, keeping its Feed item for its own chat; the dispatcher at one still needs you", () => {
+  test("a probe at a picker reads idle; the dispatcher at one still needs you", () => {
     const probe = session({
       agent_lifecycle: "needsInput",
       launch_arguments: ["/bin/claude", "-n", "probe-history"],
@@ -644,15 +556,9 @@ describe("composeWorkers", () => {
       surface_id: "SURF-D",
       workspace_id: "W5",
     })
-    const { workers } = fromCmux(
-      { sessions: [probe, dispatcher] },
-      workspaces,
-      { items: [questionItem("s-probe"), questionItem("s-boss")] },
-      new Map(),
-    )
+    const { workers } = fromRecords({ sessions: [probe, dispatcher] }, workspaces, new Map())
     const by = new Map(workers.map((w) => [w.sessionId, w]))
     expect(by.get("s-probe")).toMatchObject({ light: "idle", role: "other" })
-    expect(by.get("s-probe")?.feed).toHaveLength(1)
     expect(by.get("s-boss")).toMatchObject({ light: "needs-you", role: "dispatcher" })
   })
 
@@ -664,27 +570,21 @@ describe("composeWorkers", () => {
         session({ session_id: "codex", agent: "codex" }),
       ],
     }
-    const { workers } = fromCmux(sessions, workspaces, { items: [] }, new Map())
+    const { workers } = fromRecords(sessions, workspaces, new Map())
     expect(workers.map((w) => w.sessionId)).toEqual(["s-greed"])
   })
 
-  test("a row carries its name, workspace, light, task and picker, and maps its transcript and surface", () => {
+  test("a row carries its name, workspace, light and task, and maps its transcript and surface", () => {
     const sessions = { sessions: [session({})] }
-    const live = fromCmux(
-      sessions,
-      workspaces,
-      { items: [question("s-greed")] },
-      new Map([["s-greed", "Pick lunch"]]),
-    )
+    const live = fromRecords(sessions, workspaces, new Map([["s-greed", "Pick lunch"]]))
     expect(live.workers[0]).toMatchObject({
-      light: "needs-you",
+      light: "working",
       name: "greed",
       role: "other",
       task: "Pick lunch",
       title: null,
       workspace: { ref: "workspace:40", title: "greed" },
     })
-    expect(live.workers[0]?.questions).toHaveLength(1)
     expect(live.transcripts.get("s-greed")).toBe("/t/s-greed.jsonl")
     expect(live.surfaces.get("s-greed")).toBe("SURF-1")
   })
@@ -702,10 +602,9 @@ describe("composeWorkers", () => {
         }),
       ],
     }
-    const { workers } = fromCmux(
+    const { workers } = fromRecords(
       sessions,
       workspaces,
-      { items: [] },
       new Map([[`s-${OLD.dispatcher}`, "I don't want this 80/20 rule"]]),
     )
     expect(workers.map((w) => [w.name, w.role, w.task])).toEqual([
@@ -725,10 +624,9 @@ describe("composeWorkers", () => {
         }),
       ],
     }
-    const { workers } = fromCmux(
+    const { workers } = fromRecords(
       sessions,
       workspaces,
-      { items: [] },
       new Map([["s-runner-pride", "Keep the dashboard on the newest canary"]]),
     )
     expect(workers.map((w) => [w.name, w.role, w.task])).toEqual([
@@ -759,7 +657,7 @@ describe("composeWorkers", () => {
       ["s-greed", "worker-greed"],
       ["s-dashboard", "runner-pride"],
     ])
-    const { workers } = fromCmux(sessions, titled, { items: [] }, new Map(), live)
+    const { workers } = fromRecords(sessions, titled, new Map(), live)
     expect(workers.map((w) => [w.name, w.role])).toEqual([
       ["runner-pride", "runner"],
       ["worker-greed", "worker"],
@@ -779,13 +677,7 @@ describe("composeWorkers", () => {
     const titled = {
       workspaces: [{ id: "W50", ref: "workspace:50", custom_title: "runner-pride" }],
     }
-    const { workers } = fromCmux(
-      sessions,
-      titled,
-      { items: [] },
-      new Map(),
-      new Map([["s-dashboard", null]]),
-    )
+    const { workers } = fromRecords(sessions, titled, new Map(), new Map([["s-dashboard", null]]))
     expect(workers.map((w) => w.name)).toEqual(["dashboard-runner"])
   })
 
@@ -807,7 +699,7 @@ describe("composeWorkers", () => {
       ],
     }
     const live = new Map([[`s-${OLD.dispatcher}`, DISPATCHER]])
-    const { workers } = fromCmux(sessions, workspaces, { items: [] }, new Map(), live)
+    const { workers } = fromRecords(sessions, workspaces, new Map(), live)
     expect(workers.map((w) => [w.name, w.role])).toEqual([
       [DISPATCHER, "dispatcher"],
       ["session repo", "other"],
@@ -833,7 +725,7 @@ describe("composeWorkers", () => {
         }),
       ],
     }
-    const { workers } = fromCmux(sessions, workspaces, { items: [] }, new Map())
+    const { workers } = fromRecords(sessions, workspaces, new Map())
     expect(workers.map((w) => [w.name, w.role])).toEqual([[DISPATCHER, "dispatcher"]])
   })
 
@@ -853,7 +745,7 @@ describe("composeWorkers", () => {
       ],
     }
     const shared = { workspaces: [{ id: "W1", ref: "workspace:40", custom_title: "runner-sloth" }] }
-    const { workers } = fromCmux(sessions, shared, { items: [] }, new Map())
+    const { workers } = fromRecords(sessions, shared, new Map())
     expect(workers.map((w) => [w.name, w.role])).toEqual([
       ["worker-envy", "worker"],
       ["worker-lust", "worker"],
@@ -877,7 +769,7 @@ describe("composeWorkers", () => {
       ],
     }
     const shared = { workspaces: [{ id: "W1", ref: "workspace:50", custom_title: "runner-pride" }] }
-    const { workers } = fromCmux(sessions, shared, { items: [] }, new Map())
+    const { workers } = fromRecords(sessions, shared, new Map())
     expect(workers.map((w) => [w.name, w.role])).toEqual([
       ["dashboard-runner", "other"],
       ["session acme-app", "other"],
@@ -902,7 +794,7 @@ describe("composeWorkers", () => {
       ],
     }
     const shared = { workspaces: [{ id: "W1", ref: "workspace:50", custom_title: "runner-pride" }] }
-    const { workers } = fromCmux(sessions, shared, { items: [] }, new Map())
+    const { workers } = fromRecords(sessions, shared, new Map())
     expect(workers.map((w) => [w.name, w.role, isProbe(w.name)])).toEqual([
       [`session ${OLD.dispatcher}`, "other", false],
       ["session probe-foo", "other", false],
@@ -921,14 +813,7 @@ describe("composeWorkers", () => {
       roles: new Map(),
       titles: new Map([["worker-greed", `Message ${OLD.dispatcher} from the dashboard`]]),
     }
-    const { workers } = fromCmux(
-      sessions,
-      { workspaces: [] },
-      { items: [] },
-      new Map(),
-      new Map(),
-      roster,
-    )
+    const { workers } = fromRecords(sessions, { workspaces: [] }, new Map(), new Map(), roster)
     expect(workers.map((w) => [w.name, w.title, w.eta])).toEqual([
       ["worker-greed", `Message ${OLD.dispatcher} from the dashboard`, "2026-10-06T12:20:00Z"],
     ])
@@ -940,10 +825,9 @@ describe("composeWorkers", () => {
       roles: new Map([["worker-greed", { role: "worker" as const }]]),
       titles: new Map(),
     }
-    const { workers } = fromCmux(
+    const { workers } = fromRecords(
       { sessions: [session({})] },
       { workspaces: [] },
-      { items: [] },
       new Map(),
       new Map(),
       roster,
@@ -955,10 +839,9 @@ describe("composeWorkers", () => {
     const sessions = {
       sessions: [session({}), session({ session_id: "s-envy", surface_id: "SURF-2" })],
     }
-    const { workers } = fromCmux(
+    const { workers } = fromRecords(
       sessions,
       { workspaces: [] },
-      { items: [] },
       new Map(),
       new Map(),
       undefined,
@@ -976,10 +859,9 @@ describe("composeWorkers", () => {
     const sessions = {
       sessions: [session({ launch_arguments: ["/bin/claude", "-n", "worker-sloth"] })],
     }
-    const { workers } = fromCmux(
+    const { workers } = fromRecords(
       sessions,
       { workspaces: [] },
-      { items: [] },
       new Map(),
       new Map([["s-greed", "  "]]),
     )
@@ -990,7 +872,7 @@ describe("composeWorkers", () => {
     const sessions = {
       sessions: [session({ launch_arguments: ["/bin/claude", "-n", " runner-pride "] })],
     }
-    const { workers } = fromCmux(sessions, { workspaces: [] }, { items: [] }, new Map())
+    const { workers } = fromRecords(sessions, { workspaces: [] }, new Map())
     expect(workers.map((w) => [w.name, w.role])).toEqual([["runner-pride", "runner"]])
   })
 
@@ -1023,7 +905,7 @@ describe("composeWorkers", () => {
       titles: new Map(),
     }
     const tasks = new Map([["s-kid", "Run the review queue"]])
-    const { workers } = fromCmux(sessions, workspaces, { items: [] }, tasks, new Map(), roster)
+    const { workers } = fromRecords(sessions, workspaces, tasks, new Map(), roster)
     expect(workers.map((w) => w.role)).toEqual([
       "dispatcher",
       "manager",
@@ -1059,7 +941,7 @@ describe("composeWorkers", () => {
         session({ session_id: "d", launch_arguments: ["c", "-n", "greed"] }),
       ],
     }
-    const { workers } = fromCmux(sessions, workspaces, { items: [] }, new Map())
+    const { workers } = fromRecords(sessions, workspaces, new Map())
     expect(workers.map((w) => w.name)).toEqual(["wrath", "envy", "greed", "sloth"])
   })
 
@@ -1077,12 +959,12 @@ describe("composeWorkers", () => {
         }),
       ],
     }
-    const { workers } = fromCmux(sessions, workspaces, { items: [] }, new Map())
+    const { workers } = fromRecords(sessions, workspaces, new Map())
     expect(workers.map((w) => w.sessionId).sort()).toEqual(["lone", "s-greed"])
   })
 
   test("garbage in yields no rows rather than a throw", () => {
-    expect(fromCmux(null, "x", 3, new Map()).workers).toEqual([])
+    expect(fromRecords(null, "x", new Map()).workers).toEqual([])
   })
 })
 
@@ -1136,12 +1018,75 @@ describe("rosterFacts", () => {
   test("no roster gives no ETAs, roles or titles", () => {
     const facts = rosterFacts(null)
     expect(facts.etas.size + facts.roles.size + facts.titles.size).toBe(0)
+    expect(facts.assistant).toBeUndefined()
+  })
+
+  // #780: the Assistant has a chat of its own, found by the roster's assistant kind whatever its name
+  test("names the session in the assistant seat, the newest live entry of that kind, and none while every one has ended", () => {
+    const assistant = (name: string, status: string) => ({
+      ...agent(name, "manager"),
+      kind: "assistant" as const,
+      status,
+    })
+    const seat = (agents: ReturnType<typeof agent>[]) =>
+      rosterFacts({ updatedAt: "2026-11-03T21:00:00Z", agents }, false).assistant
+    expect(seat([assistant("q2w8rt-assistant", "working")])).toBe("q2w8rt-assistant")
+    expect(seat([assistant("old-assistant", "ended"), assistant("errands", "working")])).toBe(
+      "errands",
+    )
+    expect(seat([assistant("errands", "ended"), agent("builder", "manager")])).toBeUndefined()
+  })
+
+  // A test stack that points PLAYGROUND_DISPATCHER at a throwaway probe keeps the real assistant out of its composer's reach, as it keeps the real second dispatcher
+  test("names no assistant on a stack whose dispatcher is redirected to a probe", () => {
+    const roster = {
+      updatedAt: "2026-11-03T21:00:00Z",
+      agents: [{ ...agent("errands", "manager"), kind: "assistant" as const }],
+    }
+    expect(rosterFacts(roster, true).assistant).toBeUndefined()
+  })
+
+  test("marks the live session in the assistant seat, and no other, so the web gives it a chat", () => {
+    const sessions = {
+      sessions: [
+        session({
+          session_id: "s-a",
+          launch_arguments: ["/bin/claude", "-n", "errands"],
+          workspace_id: "W1",
+          surface_id: "A",
+        }),
+        session({
+          session_id: "s-b",
+          launch_arguments: ["/bin/claude", "-n", "builder"],
+          workspace_id: "W2",
+          surface_id: "B",
+        }),
+      ],
+    }
+    const workspaces = {
+      workspaces: [
+        { id: "W1", ref: "workspace:1", title: "errands" },
+        { id: "W2", ref: "workspace:2", title: "builder" },
+      ],
+    }
+    const roster = {
+      assistant: "errands",
+      etas: new Map(),
+      roles: new Map([["errands", { kind: "assistant" as const, role: "manager" as const }]]),
+      titles: new Map(),
+    }
+    const { workers } = fromRecords(sessions, workspaces, new Map(), new Map(), roster)
+    expect(workers.find((w) => w.name === "errands")).toMatchObject({
+      assistant: true,
+      role: "manager",
+    })
+    expect(workers.find((w) => w.name === "builder")?.assistant).toBeUndefined()
   })
 })
 
 describe("feed items", () => {
   test("a picker keeps each question's header, options and descriptions", () => {
-    expect(feedItemOf(questionItem("s-1"))).toEqual({
+    expect(feedItemOf(questionItem())).toEqual({
       at: "2026-10-05T22:13:16Z",
       kind: "question",
       questions: [
@@ -1161,7 +1106,7 @@ describe("feed items", () => {
 
   // AskUserQuestion can ask a single-choice and a multi-choice question in one Feed item, and its card holds both.
   test("a two-question picker maps to one card holding both questions, one multi-select", () => {
-    const item = feedItemOf(twoQuestionItem("s-1"))
+    const item = feedItemOf(twoQuestionItem())
     if (item?.kind !== "question") throw new Error("a two-question picker did not map to a card")
     expect(item.requestId).toBe(TWO_QUESTION_ID)
     expect(
@@ -1170,21 +1115,18 @@ describe("feed items", () => {
       ["Color", false, ["Red", "Blue"]],
       ["Extras", true, ["Foam", "Shot", "No sugar"]],
     ])
-    const cards = feedBySession({ items: [twoQuestionItem("s-1")] }).get("s-1") ?? []
-    expect(cards).toHaveLength(1)
-    expect(cards[0]?.kind === "question" ? cards[0].questions.length : 0).toBe(2)
   })
 
   // A card asking for approval shows the command itself, with the session's own account of it beside, never in its place.
   test("a permission request shows what the tool would act on, and its description apart", () => {
-    expect(feedItemOf(permissionItem("s-1"))).toMatchObject({
+    expect(feedItemOf(permissionItem())).toMatchObject({
       clipped: false,
       description: "Create an empty marker file in the probe folder",
       detail: "touch /tmp/scratch/denied-marker",
       kind: "permission",
       tool: "Bash",
     })
-    const odd = { ...permissionItem("s-1"), tool_input: JSON.stringify({ todos: [1, 2] }) }
+    const odd = { ...permissionItem(), tool_input: JSON.stringify({ todos: [1, 2] }) }
     expect(feedItemOf(odd)).toMatchObject({ description: null, detail: '{"todos":[1,2]}' })
   })
 
@@ -1196,7 +1138,7 @@ describe("feed items", () => {
       description: "Fetch a script",
       timeout: 5,
     })
-    const item = feedItemOf({ ...permissionItem("s-1"), tool_input })
+    const item = feedItemOf({ ...permissionItem(), tool_input })
     expect(item).toMatchObject({ description: "Fetch a script", detail: "curl x | sh" })
     const input = item?.kind === "permission" ? JSON.parse(item.input) : {}
     expect(input).toEqual({
@@ -1211,11 +1153,11 @@ describe("feed items", () => {
   // For some tools the description is the substance (an issue's body), and one that is not a line of text would otherwise show nowhere.
   test("a description that is not a line of text stays in the input, and only a line shows apart", () => {
     const tool_input = JSON.stringify({ description: { body: "hidden?" }, title: "t" })
-    const item = feedItemOf({ ...permissionItem("s-1"), tool_input })
+    const item = feedItemOf({ ...permissionItem(), tool_input })
     expect(item).toMatchObject({ description: null })
     expect(item?.kind === "permission" ? item.input : "").toContain("hidden?")
     const lines = JSON.stringify({ command: "x", description: "two\nlines" })
-    expect(feedItemOf({ ...permissionItem("s-1"), tool_input: lines })).toMatchObject({
+    expect(feedItemOf({ ...permissionItem(), tool_input: lines })).toMatchObject({
       description: null,
     })
   })
@@ -1223,12 +1165,12 @@ describe("feed items", () => {
   // A right-to-left override reorders what a browser shows, so the command read would not be the command run.
   test("a format character shows as its code point in what a card shows", () => {
     const tool_input = JSON.stringify({ command: "echo safe\u202E hs.lave | bash" })
-    const item = feedItemOf({ ...permissionItem("s-1"), tool_input })
+    const item = feedItemOf({ ...permissionItem(), tool_input })
     expect(item?.kind === "permission" ? item.detail : "").toBe("echo safe<U+202E> hs.lave | bash")
     expect(item?.kind === "permission" ? item.input : "").toContain("<U+202E>")
     expect(item?.kind === "permission" ? item.input : "").not.toContain("\u202E")
     const plan = feedItemOf({
-      ...planItem("s-1"),
+      ...planItem(),
       plan: JSON.stringify({ plan: "a\b\u001b[2Kb\tc\nd" }),
     })
     expect(plan?.kind === "plan" ? plan.plan : "").toBe("a<U+0008><U+001B>[2Kb\tc\nd")
@@ -1236,20 +1178,20 @@ describe("feed items", () => {
 
   test("a detail that is not a string is shown as JSON rather than skipped, and an input object is read as sent", () => {
     const array = { command: ["rm", "-rf", "/"], path: "/tmp/ok" }
-    const asText = feedItemOf({ ...permissionItem("s-1"), tool_input: JSON.stringify(array) })
+    const asText = feedItemOf({ ...permissionItem(), tool_input: JSON.stringify(array) })
     expect(asText).toMatchObject({ detail: '["rm","-rf","/"]' })
-    const asObject = feedItemOf({ ...permissionItem("s-1"), tool_input: { file_path: "/x" } })
+    const asObject = feedItemOf({ ...permissionItem(), tool_input: { file_path: "/x" } })
     expect(asObject).toMatchObject({ detail: "/x" })
   })
 
   test("a long input says it was cut short, and a tool name that is not one is dropped", () => {
     const tool_input = JSON.stringify({ command: "x".repeat(3000), content: "y".repeat(7000) })
-    const item = feedItemOf({ ...permissionItem("s-1"), tool_input, tool_name: "Bash; rm" })
+    const item = feedItemOf({ ...permissionItem(), tool_input, tool_name: "Bash; rm" })
     expect(item).toMatchObject({ clipped: true, tool: "", whole: false })
   })
 
   test("an option with no label, or a label already offered, is not offered", () => {
-    const blank = questionItem("s-1")
+    const blank = questionItem()
     const q = {
       ...blank.questions[0]!,
       options: [{ description: "", id: "opt0", label: "" }, blank.questions[0]!.options[1]!],
@@ -1269,40 +1211,26 @@ describe("feed items", () => {
   })
 
   test("a plan is its text, unwrapped from the Feed's JSON or an object, and says when it was cut short", () => {
-    expect(feedItemOf(planItem("s-1"))).toMatchObject({
+    expect(feedItemOf(planItem())).toMatchObject({
       clipped: false,
       kind: "plan",
       plan: "# Plan: create the plan-marker file\n\n## Step\n1. touch plan-marker\n",
     })
-    expect(feedItemOf({ ...planItem("s-1"), plan: { plan: "an object" } })).toMatchObject({
+    expect(feedItemOf({ ...planItem(), plan: { plan: "an object" } })).toMatchObject({
       plan: "an object",
     })
-    const long = { ...planItem("s-1"), plan: JSON.stringify({ plan: "z".repeat(9000) }) }
+    const long = { ...planItem(), plan: JSON.stringify({ plan: "z".repeat(9000) }) }
     expect(feedItemOf(long)).toMatchObject({ clipped: true })
   })
 
   test("telemetry, answered items and items with no request id are not pending", () => {
     expect(feedItemOf({ kind: "toolUse", request_id: "x" })).toBeNull()
-    expect(feedItemOf({ ...questionItem("s-1"), status: "resolved" })).toBeNull()
-    expect(feedItemOf({ ...questionItem("s-1"), request_id: "" })).toBeNull()
-  })
-
-  test("each session's items, oldest first, and a worker carries its own", () => {
-    const feed = { items: [planItem("s-1"), questionItem("s-1"), permissionItem("s-2")] }
-    const bySession = feedBySession(feed)
-    expect(bySession.get("s-1")?.map((i) => i.kind)).toEqual(["question", "plan"])
-    expect(bySession.get("s-2")?.map((i) => i.kind)).toEqual(["permission"])
-    const { workers } = fromCmux(
-      { sessions: [session({ session_id: "s-1" })] },
-      { workspaces: [] },
-      feed,
-      new Map(),
-    )
-    expect(workers[0]?.feed.map((i) => i.kind)).toEqual(["question", "plan"])
+    expect(feedItemOf({ ...questionItem(), status: "resolved" })).toBeNull()
+    expect(feedItemOf({ ...questionItem(), request_id: "" })).toBeNull()
   })
 })
 
-// A record cmux kept after its session ended: its stored pid now belongs to whatever macOS started next (ManagedSettingsAgent), so cmux still says the pid exists and the session waits on input. No registry file names it.
+// A record kept after its session ended: its stored pid now belongs to whatever macOS started next (ManagedSettingsAgent), so the record still says the pid exists and the session waits on input. No registry file names it.
 const reused = session({
   agent_lifecycle: "needsInput",
   launch_arguments: ["/bin/claude", "-n", "greed"],
@@ -1357,19 +1285,19 @@ describe("isLiveRecord", () => {
     }
   })
 
-  test("a registry file caught mid-rewrite leaves cmux's word standing for its pid alone", () => {
+  test("a registry file caught mid-rewrite leaves the record's word standing for its pid alone", () => {
     const registry = new Map([[95475, null]])
     expect(isLiveRecord(running, proof({ registry }))).toBe(true)
     expect(isLiveRecord(reused, proof({ registry }))).toBe(false)
   })
 
-  test("a session under another Claude config keeps its registry there, so cmux's word stands", () => {
+  test("a session under another Claude config keeps its registry there, so the record's word stands", () => {
     const elsewhere = { ...reused, transcript_path: "/other/projects/p/s-ended.jsonl" }
     expect(isLiveRecord(elsewhere, proof())).toBe(true)
     expect(isLiveRecord({ ...reused, transcript_path: "" }, proof())).toBe(false)
   })
 
-  test("cmux's own word still has to hold: a pid it saw end, or another agent, is never live", () => {
+  test("the record's own word still has to hold: a pid it saw end, or another agent, is never live", () => {
     expect(isLiveRecord({ ...running, stored_pid_exists: false }, proof())).toBe(false)
     expect(isLiveRecord({ ...running, agent: "codex" }, proof())).toBe(false)
     const registry = new Map([[95475, { procStart: STARTED, sessionId: "" }]])
@@ -1383,8 +1311,6 @@ describe("isLiveRecord", () => {
 })
 
 describe("an ended session whose pid was reused", () => {
-  const feed = { items: [question("s-ended")] }
-
   test("shows no row, light, picker or needs-you, while the live session beside it stays", () => {
     const live = composeWorkers(
       liveRecords({ sessions: [reused, running] }, proof()),
@@ -1394,7 +1320,6 @@ describe("an ended session whose pid was reused", () => {
           { id: "W-GONE", ref: "workspace:9", custom_title: "greed" },
         ],
       },
-      feed,
       new Map(),
     )
     expect(live.workers.map((w) => w.sessionId)).toEqual(["s-greed"])
@@ -1405,34 +1330,29 @@ describe("an ended session whose pid was reused", () => {
   })
 
   test("before the registry check it would have read as a session waiting on you", () => {
-    const trusted = fromCmux({ sessions: [reused] }, workspaces, feed, new Map())
+    const trusted = fromRecords({ sessions: [reused] }, workspaces, new Map())
     expect(trusted.workers.map((w) => w.light)).toEqual(["needs-you"])
   })
 })
 
 describe("a picker he already answered", () => {
-  // cmux stamped the picker 22:13:16Z; the session went needsInput as it went up.
+  // The session went needsInput as its picker went up, at 22:13:16.4Z.
   const waiting = session({
     agent_lifecycle: "needsInput",
     session_id: "s-greed",
     updated_at: "2026-10-05T22:13:16.400Z",
   })
-  const board = (
-    pickers: Pickers,
-    items: unknown[] = [questionItem("s-greed")],
-    record = waiting,
-  ) =>
-    fromCmux(
+  const board = (pickers: Pickers, record = waiting) =>
+    fromRecords(
       { sessions: [record] },
       workspaces,
-      { items },
       new Map(),
       new Map(),
       undefined,
       new Map([["s-greed", { ...NO_FACTS, pickers }]]),
     ).workers[0]
 
-  test("leaves the Feed and the red once the transcript holds the answer, while cmux still shows it", () => {
+  test("leaves the red once the transcript holds the answer, while the record still reads needsInput", () => {
     const worker = board({ answeredAt: "2026-10-05T22:13:20.100Z", interrupted: false, open: [] })
     expect(worker).toMatchObject({
       feed: [],
@@ -1449,40 +1369,9 @@ describe("a picker he already answered", () => {
       open: ["toolu_second"],
     })
     expect(worker?.light).toBe("needs-you")
-    expect(worker?.feed.map((item) => item.requestId)).toEqual([QUESTION_ID])
   })
 
-  test("with a second picker open, keeps only the newest: the answered one's card goes, the red stays", () => {
-    const second = {
-      ...questionItem("s-greed"),
-      created_at: "2026-10-05T22:13:25Z",
-      request_id: "SECOND",
-    }
-    const worker = board(
-      { answeredAt: "2026-10-05T22:13:20.100Z", interrupted: false, open: ["toolu_second"] },
-      [questionItem("s-greed"), second],
-    )
-    expect(worker?.light).toBe("needs-you")
-    expect(worker?.lifecycle).toBe("needsInput")
-    expect(worker?.feed.map((item) => item.requestId)).toEqual(["SECOND"])
-  })
-
-  test("keeps a picker the Feed shows before the transcript holds it, though an earlier answer landed that second", () => {
-    const worker = board({ answeredAt: "2026-10-05T22:13:16.900Z", interrupted: false, open: [] })
-    expect(worker?.light).toBe("needs-you")
-    expect(worker?.feed).toHaveLength(1)
-  })
-
-  test("keeps a permission prompt, which may be a subagent's", () => {
-    const worker = board({ answeredAt: "2026-10-05T22:13:20.100Z", interrupted: false, open: [] }, [
-      questionItem("s-greed"),
-      { ...permissionItem("s-greed"), created_at: "2026-10-05T22:13:16Z" },
-    ])
-    expect(worker?.light).toBe("needs-you")
-    expect(worker?.feed.map((item) => item.kind)).toEqual(["permission"])
-  })
-
-  test("keeps needsInput that cmux set after the answer, such as a permission prompt", () => {
+  test("keeps needsInput the record took after the answer, such as a permission prompt", () => {
     const later = session({
       agent_lifecycle: "needsInput",
       session_id: "s-greed",
@@ -1490,7 +1379,6 @@ describe("a picker he already answered", () => {
     })
     const worker = board(
       { answeredAt: "2026-10-05T22:13:20.100Z", interrupted: false, open: [] },
-      [],
       later,
     )
     expect(worker).toMatchObject({ lifecycle: "needsInput", light: "needs-you" })
@@ -1506,7 +1394,7 @@ describe("a picker he already answered", () => {
     expect(board({ ...pickers, interrupted: false })?.lifecycle).toBe("running")
   })
 
-  test("a transcript with no answer leaves cmux's word", () => {
+  test("a transcript with no answer leaves the record's word", () => {
     expect(board(NO_FACTS.pickers)?.light).toBe("needs-you")
   })
 })

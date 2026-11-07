@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs"
 import { tmpdir } from "node:os"
@@ -32,7 +33,7 @@ notified = []
 run.notify = lambda text, to="dispatcher": notified.append([to, text])
 paths = [run.CODE, run.LW, run.OPS, run.HERE]
 out = paths if call["fn"] == "paths" else getattr(run, call["fn"])(*call["args"])
-print(json.dumps({"notified": notified, "result": out} if call.get("notified") else out))
+print(json.dumps({"notified": notified, "result": out} if call.get("notified") else {"result": out, "state": call["args"][0]} if call.get("state") else out))
 `
 
 const dirs: string[] = []
@@ -47,11 +48,11 @@ const scratch = (): string => {
   return dir
 }
 
-// Every run swaps notify for a recorder, so no test sends a line; `notified` returns what it would have sent beside the result.
+// Every run swaps notify for a recorder, so no test sends a line; `notified` returns what it would have sent beside the result, and `state` the first argument as the call left it.
 const drive = async (
   env: Record<string, string>,
   config: string,
-  body: { args: unknown[]; fn: string; notified?: true },
+  body: { args: unknown[]; fn: string; notified?: true; state?: true },
 ): Promise<unknown> => {
   const proc = Bun.spawn([...PYTHON, "-I", "-c", DRIVER, RUN_PY], {
     env: {
@@ -590,6 +591,41 @@ describe("the slot-stuck alert", () => {
 
   test("stays quiet while the waiter's units are not free", async () => {
     expect(await queue(true)).toBeNull()
+  })
+
+  // issue 1216: can-take read the session's size, so a pinned big head read as a medium paged while its own 3 units could not fit
+  test("stays quiet while the head's own units are not free, whatever the session's size", async () => {
+    const config = scratch()
+    const ops = join(config, "playground", "ops")
+    const bin = join(config, "bin")
+    mkdirSync(join(ops, "run-slot.waiters"), { recursive: true })
+    mkdirSync(bin)
+    writeFileSync(
+      join(bin, "sysctl"),
+      `#!/bin/bash\ncase "$2" in vm.loadavg) echo "{ 2.00 2.00 2.00 }" ;; esac\n`,
+    )
+    chmodSync(join(bin, "sysctl"), 0o755)
+    for (const off of ["run-slot.3-off", "run-slot.4-off"]) writeFileSync(join(ops, off), "")
+    mkdirSync(join(ops, "run-slot-2"))
+    writeFileSync(
+      join(ops, "run-slot-2.holder"),
+      `worker-s ${process.pid} 2026-10-18T19:00:00Z 1 small\n`,
+    )
+    const head = join(ops, "run-slot.waiters", `1-${process.pid}-worker-big`)
+    writeFileSync(head, "s2 23 3 big\n")
+    const pinned = Date.now() / 1000 - 1300
+    utimesSync(head, pinned, pinned)
+    const now = Date.now() / 1000
+    const state = { slot_free: { since: now - 200, ticket: `1${process.pid}` } }
+    expect(
+      await callWith(
+        { PATH: `${bin}:${process.env.PATH}`, RUN_SLOT_SIZE: "medium" },
+        config,
+        "slot_stuck",
+        state,
+        now,
+      ),
+    ).toBeNull()
   })
 
   // 31 Oct: both alerts named a big session's ticket, the oldest, which ranks behind a newer medium one by design
@@ -1154,6 +1190,48 @@ describe("ops-unstick's slot alerts", () => {
     expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toHaveLength(1)
   })
 
+  // precommit:light's tree as ps shows it: bun run, the script, then trace-count's test:file, its sandbox and bun test
+  const precommitLight = [
+    "  999451      1 bun run precommit:light /x/msg.txt",
+    "  999452 999451 bun packages/scripts/src/precommit-light.ts /x/msg.txt",
+    "  999453 999452 bun run test:file tests/packages/scripts/src/trace-count/count.test.ts",
+    "  999454 999453 bun packages/scripts/src/test-sandbox.ts tests/packages/scripts/src/trace-count/count.test.ts",
+    "  999455 999454 bun test tests/packages/scripts/src/trace-count/count.test.ts",
+  ]
+  // the same tree with bun test straight under the script, the form before trace-count ran through test:file
+  const precommitLightBare = [
+    ...precommitLight.slice(0, 2),
+    precommitLight[4]!.replace("999454", "999452"),
+  ]
+
+  for (const [form, rows] of [
+    ["bun run test:file", precommitLight],
+    ["bun test tests", precommitLightBare],
+  ] as const)
+    test(`precommit:light's ${form}, which runs outside the slots by rule, is no job and raises no outside-slot`, async () => {
+      const jobs = await call(scratch(), "heavy_jobs", rows)
+      expect(jobs).toEqual([])
+      expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([])
+    })
+
+  for (const [form, row, pid] of [
+    ["bun run test:file", precommitLight[2]!.replace("999452", "     1"), "999453"],
+    ["bun test tests", precommitLight[4]!.replace("999454", "     1"), "999455"],
+  ] as const)
+    test(`a bare ${form} with no precommit:light above it and no holder still raises outside-slot`, async () => {
+      const jobs = await call(scratch(), "heavy_jobs", [row])
+      expect(jobs).toEqual([{ inside: false, kind: "suite", pid, where: "?" }])
+      expect(await call(scratch(), "slot_alerts", jobs, 2, at)).toEqual([
+        {
+          at,
+          kind: "outside-slot",
+          line: `a suite runs outside the run slots (pid ${pid}); use run-slot.sh`,
+          name: "?",
+          since: at,
+        },
+      ])
+    })
+
   test("the slots read are run-slot.sh's own, each model slot by its name", async () => {
     const script = readFileSync(
       join(import.meta.dir, "../../../../scripts/ops/run-slot.sh"),
@@ -1178,7 +1256,7 @@ describe("ops-unstick's slot alerts", () => {
       join(import.meta.dir, "../../../../scripts/ops/run-slot.sh"),
       "utf8",
     )
-    const cpu = script.match(/^held_units\(\) \{\n[^\n]*\n\s*for s in ([^;]+);/m)?.[1]?.split(" ")
+    const cpu = script.match(/^holders\(\) \{\n[^\n]*\n\s*for s in ([^;]+);/m)?.[1]?.split(" ")
     expect(cpu?.length).toBeGreaterThan(0)
     const config = scratch()
     const ops = join(config, "playground", "ops")
@@ -1209,8 +1287,8 @@ describe("ops-unstick's slot alerts", () => {
     expect(new Set(alerts.map((a) => a.kind))).toEqual(new Set(["slot-idle"]))
   })
 
-  // run-slot's holder on run-slot-3 with the given ps rows under it, its saved baseline at cpu seconds, idle since `ago` seconds
-  const idleCheck = async (rows: string[], cpu: number, ago: number) => {
+  // run-slot's holder on run-slot-3 with the given ps rows under it, its saved baseline at cpu seconds over the pids it saw, idle since `ago` seconds; the alerts' kinds and the entry the check saved
+  const idleRun = async (rows: string[], cpu: number, ago: number, pids?: string[]) => {
     const config = scratch()
     const ops = join(config, "playground", "ops")
     const bin = join(config, "bin")
@@ -1224,16 +1302,18 @@ describe("ops-unstick's slot alerts", () => {
     chmodSync(join(bin, "ps"), 0o755)
     const now = Date.now() / 1000
     const key = `run-slot-3:${process.pid}`
-    const state = { slot_idle: { [key]: { cpu, since: now - ago, told: true } } }
-    const alerts = (await callWith(
-      { PATH: `${bin}:${process.env.PATH}` },
-      config,
-      "slot_idle_alerts",
-      state,
-      now,
-    )) as { kind: string }[]
-    return alerts.map((a) => a.kind)
+    const state = {
+      slot_idle: { [key]: { cpu, since: now - ago, told: true, ...(pids && { pids }) } },
+    }
+    const after = (await drive({ PATH: `${bin}:${process.env.PATH}` }, config, {
+      args: [state, now],
+      fn: "slot_idle_alerts",
+      state: true,
+    })) as { result: { kind: string }[]; state: { slot_idle: Record<string, { pids?: string[] }> } }
+    return { kinds: after.result.map((a) => a.kind), saved: after.state.slot_idle[key] }
   }
+  const idleCheck = async (rows: string[], cpu: number, ago: number, pids?: string[]) =>
+    (await idleRun(rows, cpu, ago, pids)).kinds
 
   test("a batch whose earlier step exited is measured from its new total, so its busy next step raises no slot-idle", async () => {
     expect(await idleCheck([`  999471 ${process.pid} 5:00.00 bun test`], 600, 1000)).toEqual([])
@@ -1246,6 +1326,34 @@ describe("ops-unstick's slot alerts", () => {
     ]
     expect(await idleCheck(rows, 600, 1000)).toEqual([])
     expect(await idleCheck(rows, 0.04, 1000)).toEqual([])
+  })
+
+  test("a tree holding a pid the last check did not see restarts its wait, so a step started since raises no slot-idle (#1043)", async () => {
+    const rows = [
+      `  999478 ${process.pid} 0:00.00 bash -c batch`,
+      "  999479 999478 0:00.50 bun test",
+    ]
+    expect(await idleCheck(rows, 0, 1000, ["999478"])).toEqual([])
+  })
+
+  test("a tree of the pids the last check saw, at flat CPU past SLOT_IDLE, still raises slot-idle, its times summed in hundredths (#1043)", async () => {
+    const rows = [
+      `  999478 ${process.pid} 0:00.04 bash -c batch`,
+      "  999479 999478 0:00.30 bun test",
+    ]
+    expect(await idleCheck(rows, 0.34, 1000, ["999478", "999479"])).toEqual(["slot-idle"])
+  })
+
+  test("a check with no reset saves the tree's pids, so an entry saved with none takes them and an exited pid drops out (#1061's nit)", async () => {
+    const rows = [
+      `  999480 ${process.pid} 0:00.00 bash -c batch`,
+      "  999481 999480 0:00.00 sleep 900",
+    ]
+    expect((await idleRun(rows, 0, 100)).saved?.pids).toEqual(["999480", "999481"])
+    expect((await idleRun(rows, 0, 100, ["999480", "999481", "999482"])).saved?.pids).toEqual([
+      "999480",
+      "999481",
+    ])
   })
 
   test("a bun install process at near 0% CPU waits SLOT_IDLE_INSTALL, then still raises slot-idle, and a wrapper naming one in its argv waits SLOT_IDLE", async () => {
@@ -1424,6 +1532,128 @@ describe("the herdr servers", () => {
     const text = readFileSync(RUN_PY, "utf8")
     expect(/^HERDR_SESSIONS = .* or "([^"]+)"\)\.split/m.exec(text)?.[1]).toBe(
       HERDR_SESSIONS.join(","),
+    )
+  })
+})
+
+// Retro 31: one account's week ran out at night and ops-unstick re-sent each stopped session's limit alert every 10 minutes, 1,664 lines by morning.
+describe("a usage-limit block over a night", () => {
+  // run.py's cycle every 120 seconds for 8 hours on a made-up clock, its herdr, screens and side checks stubbed, one session at its limit throughout
+  const REPLAY = `
+import importlib.util, json, sys, time
+spec = importlib.util.spec_from_file_location("run", sys.argv[1])
+run = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(run)
+clock = [1_800_000_000.0]
+run.time.time = lambda: clock[0]
+run.time.sleep = lambda s: None
+sent = []
+run.notify = lambda text, to="dispatcher": sent.append([to, text])
+run.log = lambda line: None
+run.alert_to = lambda name, transcript: "lead"
+session = {"session_id": "s-1", "surface_id": "w1:p1", "workspace_id": "w1", "transcript_path": ""}
+run.herdr_sessions = lambda: [session]
+run.name_of = lambda s: "worker-a"
+run.roster_kinds = lambda: {}
+run.kind_of = lambda name, kinds=None: "worker"
+run.is_lead = lambda name, kinds: False
+run.manager_kind_of_name = lambda name: None
+run.named_kind = lambda name: None
+run.quiet_for = lambda path, now_t: 3600
+run.screen = lambda s: ["You've hit your weekly limit"]
+run.read_block = lambda lines, s: (sys.argv[2], "You've hit your weekly limit", None)
+run.session_account = lambda name: "acct-spent"
+run.moving = lambda now_t=None: None
+for fn in ("stall",):
+    setattr(run, fn, lambda *a, **k: None)
+for fn in ("shutdown_alert", "api_stop_alerts", "slot_idle_alerts", "docker_check", "memory_files", "heavy_jobs", "slot_alerts"):
+    setattr(run, fn, lambda *a, **k: [])
+run.heavy_cap = lambda: 1
+run.slot_stuck = lambda *a, **k: None
+import os
+os.makedirs(run.HERE, exist_ok=True)
+state = {"blocks": {}}
+for _ in range(8 * 3600 // 120 + 1):
+    run.cycle(state)
+    clock[0] += 120
+print(json.dumps(sent))
+`
+  const replay = async (accounts: object, kind = "usage-limit"): Promise<[string, string][]> => {
+    const config = scratch()
+    writeFileSync(
+      join(config, "playground", "usage.json"),
+      JSON.stringify({ account: "acct-spent", accounts, writtenAt: "2027-01-15T08:00:00Z" }),
+    )
+    const proc = Bun.spawn([...PYTHON, "-I", "-c", REPLAY, RUN_PY, kind], {
+      env: {
+        CLAUDE_CONFIG_DIR: config,
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+        PLAYGROUND_DATA_DIR: join(config, "playground"),
+        TZ: "UTC",
+        UV_CACHE_DIR: process.env.UV_CACHE_DIR,
+        UV_PYTHON_INSTALL_DIR: process.env.UV_PYTHON_INSTALL_DIR,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    })
+    const [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
+    if (code !== 0) throw new Error(`replay exited ${code}: ${err}`)
+    return JSON.parse(out)
+  }
+
+  test("alerts each recipient once, then one summary an hour, and the alert names the account with the most room", async () => {
+    const sent = await replay({
+      "acct-half": { week: 60 },
+      "acct-roomy": { week: 20 },
+      "acct-spent": { week: 100 },
+    })
+    for (const to of ["builder", "dispatcher"]) {
+      const lines = sent.filter(([who]) => who === to).map(([, text]) => text)
+      const alerts = lines.filter((text) => text.includes("is at its usage limit"))
+      const summaries = lines.filter((text) => text.includes("blocked on the usage limit"))
+      expect(alerts, to).toHaveLength(1)
+      expect(summaries, to).toHaveLength(8)
+      expect(lines, to).toHaveLength(9)
+      expect(alerts[0]).toContain("Most room: acct-roomy (week 20%)")
+      expect(summaries[0]).toBe(
+        "1 session blocked on the usage limit. Nothing blocked for another reason. On the limit: worker-a",
+      )
+    }
+  })
+
+  test("says so when no account has room", async () => {
+    const sent = await replay({
+      "acct-also": { week: 100 },
+      "acct-spent": { week: 100 },
+    })
+    expect(sent.find(([, text]) => text.includes("is at its usage limit"))?.[1]).toContain(
+      "No account in usage.json's accounts has room",
+    )
+  })
+  test("names a week past its reset as 0 and never the session's own account", async () => {
+    const most = async (accounts: object) =>
+      (await replay(accounts)).find(([, text]) => text.includes("is at its usage limit"))?.[1]
+    expect(await most({ "acct-roomy": { week: 20 }, "acct-spent": { week: 5 } })).toContain(
+      "Most room: acct-roomy (week 20%)",
+    )
+    expect(
+      await most({
+        "acct-reset": { week: 100, weekReset: 1_700_000_000 },
+        "acct-roomy": { week: 20 },
+        "acct-spent": { week: 100 },
+      }),
+    ).toContain("Most room: acct-reset (week 0%)")
+  })
+
+  test("any other block still alerts every 10 minutes", async () => {
+    const sent = await replay({ "acct-roomy": { week: 20 } }, "picker")
+    expect(sent.filter(([, text]) => text.includes("is blocked on a picker prompt"))).toHaveLength(
+      49,
     )
   })
 })

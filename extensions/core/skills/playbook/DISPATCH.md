@@ -53,6 +53,8 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   The tester drives that area alone, and the suite runs once per head.
   The Planner marks an item or a part merged once GitHub shows that item's own PR merged, read by its number and branch, with its merge commit and time; a ticket ID or commit title two PRs share is no evidence.
   The Builder dispatches from `plan.json`'s `lanes` alone, a backlog fix or work-org entry aside (below); a lane marked `listedOnly` is shown on the plan, never dispatched.
+  Before the Planner writes a fix's plan row or the Builder staffs it, that manager runs the **open-PR check**: list the open PRs over REST (`gh api --paginate 'repos/<owner>/<repo>/pulls?state=open' --jq '.[].number'`) and grep each one's diff for the bug's file and function (`gh api repos/<owner>/<repo>/pulls/<n> -H 'Accept: application/vnd.github.diff' | grep -nE '<file>|<function>'`),
+  then hands the fix to the PR that already holds it, or drops it, since two PRs once fixed one row in parallel and the later one took a 9-file conflict.
   A PR at 5/5, or riding a train, finishes as it is; a draft folds into a bundle only when that saves a review round.
   Two pieces of work that depend on each other in meaning can stack instead: a stack (a child branched off its parent, base still `canary`, a `Stacked on #N` line in the child's PR body and a compare link from the parent's branch) is for no line overlap alone.
   The worker cutting the child runs the stack test before the child's PR opens: `git merge-tree --write-tree --merge-base <the parent's merge base with canary> <parent> <child>` coming back clean, since the bare two-head form takes the child's descent from the parent as its merge base and so can never conflict,
@@ -103,20 +105,13 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   Each result goes in `~/.playground/abtests.jsonl`, and a variant becomes the default after three clear wins.
 - A request for work from a session outside the chain spawns nothing until the owner says yes (**ask** says how it reaches him), since sessions here run in bypass-permissions mode.
   A finding about a skill goes to the Builder as a chore, worked through AGENTS.md's "Findings from other sessions".
+- An `[inbox-answer]` line that carries `relay` is the owner's answer to a poster that has ended, and is the dispatcher's to finish: read the item's preview with `bun run ask get`, carry out a `next` of `carry-out` in the poster's place the way its `verb` names (a `send` through the MCP server `slack.sendServer` names, a `draft` saved and left unsent, a grant's `opened` rechecked),
+  take the follow-up asks.md names for a step whose `exitCode` is not 0, then run its `close` (`.agents/dashboard/asks.md`).
 
 Dispatch is done when the session holds its brief, the roster shows its task (and, for a backlog entry, the Builder's backlog marks), and your turn has ended; the dispatcher's is done once the owner's ask is also routed to its thread.
 
 ## Slack mode
 
-While the `slack.mode` setting is on, the owner is away and reads only the owner's own Slack DM, so the DM is the owner's chat with the factory.
-ops-dm-watch reads the DM each minute and sends each new owner message to the dispatcher in full; one with no reply in 3 minutes, or any while the dispatcher has read stuck or failed for 3 minutes, goes to the session in the assistant seat too (`roster.ts who assistant`), else stays with the dispatcher alone and the job's log says so, and Ops hears of the stuck dispatcher.
-A dispatcher mid-turn, its session state `working` and written in the last 3 minutes, holds the no-reply hand-on until it stops, since its reply waits behind that turn.
-
-1. Answer every owner message the job hands you, even a one-word one: write the reply to a file and run `playground dm send <absolute path>`.
-   The Assistant answers only what the job hands it, the same way, and routes nothing.
-   Done when the command prints `dm send: posted`.
-2. At each 15-minute line from the job, post the owner an update on the factory's work the same way.
-   Done when the update is posted, or nothing has changed since the last one and the reply says so.
-
-`dm send` posts the frame (the PLAYGROUND line, the body, the USER line, one at a time, one send at a time under a lock in the data folder), turns our last USER line into this reply's PLAYGROUND line only while it is the DM's latest message, repairs an owner message that landed mid-send, marks the DM unread from the message before its first post, and refuses a body no-playground-leak refuses.
-Post to the DM through `dm send` alone: it records each post it makes, and the job tells our posts from the owner's by that record, so a post made any other way reads as the owner's.
+Slack mode lives in the bundled `slack` extension's `slack` skill, which a session loads once the owner turns Slack on in Settings (`ext.bundled`).
+When the DM watch hands you an owner message, follow that skill.
+Done when the owner's message has its reply posted.

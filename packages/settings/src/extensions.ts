@@ -2,7 +2,7 @@ import { statSync } from "node:fs"
 import { join } from "node:path"
 
 // By relative path, so a test outside the package type-checks it, where @/ is not its src.
-import { extSettings } from "./ext"
+import { BUNDLED_EXTENSIONS, extSettings } from "./ext"
 import { scopesIn } from "./folder"
 import { listItems } from "./items"
 import { CORE, loginOf, scopeDir } from "./rendered"
@@ -22,6 +22,7 @@ const extOf = (data: string) => {
   const links = extSettings.get(settings, "ext.links")
   const order = extSettings.get(settings, "ext.order")
   return {
+    bundled: extSettings.get(settings, "ext.bundled"),
     links,
     // the links a name has, the login's * always
     linksOf: (name: string) => (name === login ? ["*"] : (links[name] ?? [])),
@@ -173,4 +174,30 @@ export const removeExtension = (data: string, name: string, who: Who): Result<{ 
     if (!done.ok) return done
   }
   return { dir: scopeDir(data, name), ok: true } as const
+}
+
+// Each extension this checkout ships under extensions/, in BUNDLED_EXTENSIONS' order, with whether ext.bundled turns it on.
+export const listBundled = (data: string) => {
+  const on = extOf(data).bundled
+  return BUNDLED_EXTENSIONS.map((name) => ({ name, on: on.includes(name) }))
+}
+
+// A bundled extension turned on or off in ext.bundled at the login's scope, the names kept in BUNDLED_EXTENSIONS' order.
+export const setBundled = (data: string, name: string, on: boolean, who: Who): Result<Written> => {
+  const bundled = BUNDLED_EXTENSIONS.find((each) => each === name)
+  if (!bundled)
+    return {
+      message: `no bundled extension ${name}: Playground ships ${BUNDLED_EXTENSIONS.join(", ")}`,
+      ok: false,
+      status: 404,
+    } as const
+  const before = extOf(data).bundled
+  if (before.includes(bundled) === on)
+    return {
+      message: `${name} is already ${on ? "on" : "off"}`,
+      ok: false,
+      status: 409,
+    } as const
+  const after = BUNDLED_EXTENSIONS.filter((each) => (each === bundled ? on : before.includes(each)))
+  return write(data, "ext.bundled", after, who)
 }

@@ -54,7 +54,8 @@ describe("bare dispatcher", () => {
     const repo = join(root, "repo")
     const src = join(repo, "packages", "scripts", "src")
     cpSync(dirname(CLI), join(src, "playground"), { recursive: true })
-    cpSync(join(dirname(CLI), "..", "portless-ca.ts"), join(src, "portless-ca.ts"))
+    for (const file of ["portless-ca.ts", "swap-bundles.ts"])
+      cpSync(join(dirname(CLI), "..", file), join(src, file))
     for (const file of ["live-dashboard.ts", "proxy.ts"])
       cpSync(
         join(dirname(CLI), "../../../../api/hono/src/lib/dev", file),
@@ -351,7 +352,7 @@ describe("a fresh machine", () => {
     ).toMatchObject({ "factory.repo": "made-up-me/copy" })
   })
 
-  test("a policy.json that does not parse refuses in one line, and the settings set it names writes it again", () => {
+  test("a policy.json that does not parse refuses in one line naming Settings, and a setting's write writes it again", () => {
     const data = fresh("broken")
     writeFileSync(join(data, "extensions", "policy.json"), "{")
     const refused = run(data, ["version"])
@@ -359,7 +360,8 @@ describe("a fresh machine", () => {
     const said = refused.stderr.toString().trim()
     expect(said.split("\n")).toHaveLength(1)
     expect(said).toStartWith("playground: the extensions' policy.json does not parse (")
-    expect(said).toContain("a setting with ! playground settings set")
+    expect(said).toContain("save Privacy on the Dashboard's Settings page")
+    expect(said).not.toContain("terminal")
     const set = run(data, ["settings", "set", "factory.repo", "made-up-me/copy", "--reason", "fix"])
     expect(set.exitCode, set.stderr.toString()).toBe(0)
     expect(

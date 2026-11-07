@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -12,7 +12,6 @@ type Check = import("../../../../../../api/hono/src/lib/onboard/checks").Check
 const ORDER = [
   "bun",
   "claude",
-  "cmux",
   "docker",
   "Database",
   "gh",
@@ -49,19 +48,7 @@ const machine = (
   return { ran, reader }
 }
 
-const TOOLS = [
-  "brew",
-  "bun",
-  "claude",
-  "cmux",
-  "docker",
-  "gh",
-  "git",
-  "herdr",
-  "node",
-  "python3",
-  "uv",
-]
+const TOOLS = ["brew", "bun", "claude", "docker", "gh", "git", "herdr", "node", "python3", "uv"]
 
 const ANSWERS = {
   "bun --version": { stdout: "1.3.2\n" },
@@ -104,9 +91,7 @@ describe("onboardChecks on a machine it reads", () => {
       COMMANDS.caTrusted(CA),
       COMMANDS.dockerInfo(),
       COMMANDS.ghLogin(),
-      ...TOOLS.filter((t) => t !== "brew" && t !== "cmux").map((tool) =>
-        COMMANDS.version(tool as never),
-      ),
+      ...TOOLS.filter((t) => t !== "brew").map((tool) => COMMANDS.version(tool as never)),
     ].map((argv) => argv.join(" "))
     for (const argv of ran) expect(allowed).toContain(argv.join(" "))
   })
@@ -128,10 +113,10 @@ describe("onboardChecks on a machine it reads", () => {
     expect(onPath.herdr).toMatchObject({ detail: "0.4.2", status: "ok" })
   })
 
-  test("reads cmux from PATH alone and never runs it, since cmux runs only through cmux.ts", async () => {
-    const { ran, reader } = everything()
+  test("shows no cmux row and never runs cmux, even with cmux on PATH, since sessions run in herdr", async () => {
+    const { ran, reader } = machine([...TOOLS, "cmux"], ANSWERS, [CA])
     const checks = await onboardChecks({ ...signedUp, database: "ok", reader })
-    expect(byName(checks).cmux).toMatchObject({ detail: "installed", status: "ok" })
+    expect(byName(checks).cmux).toBeUndefined()
     expect(ran.some((argv) => argv[0] === "cmux")).toBe(false)
   })
 
@@ -144,7 +129,6 @@ describe("onboardChecks on a machine it reads", () => {
     expect(actions).toEqual({
       bun: null,
       claude: "claude",
-      cmux: null,
       Database: null,
       docker: "docker",
       gh: "gh-login",
@@ -264,17 +248,21 @@ describe("the rows the app cannot fix itself", () => {
 
   test("portless's proxy is looked for on the port its state folder saved, by the dev launcher's own rule", async () => {
     const dir = mkdtempSync(join(tmpdir(), "portless-state-"))
-    const ca = join(dir, "ca.pem")
-    const at = async (ports: number[], extra = {}) =>
+    const fallback = join(dir, "fallback")
+    mkdirSync(fallback)
+    const at = async (ports: number[], extra = {}, state = dir) =>
       byName(
         await onboardChecks({
           ...signedUp,
           database: "ok",
-          env: { HOME, PORTLESS_STATE_DIR: dir, ...extra },
+          env: { HOME, PORTLESS_STATE_DIR: state, ...extra },
           reader: machine(
             TOOLS,
-            { ...ANSWERS, [`security verify-cert -c ${ca} -L -p ssl`]: {} },
-            [ca],
+            {
+              ...ANSWERS,
+              [`security verify-cert -c ${join(state, "ca.pem")} -L -p ssl`]: {},
+            },
+            [join(state, "ca.pem")],
             { ports },
           ).reader,
         }),
@@ -285,10 +273,49 @@ describe("the rows the app cannot fix itself", () => {
       writeFileSync(join(dir, "proxy.port"), "444\n")
       expect(await at([443])).toBe("not running")
       expect(await at([444])).toBe("ready")
+      writeFileSync(join(fallback, "proxy.port"), "1355\n")
+      expect(await at([], {}, fallback)).toBe("not running")
+      expect(await at([1355], {}, fallback)).toBe("not on 443")
+      expect(await at([1355, 443], {}, fallback)).toBe("set up")
+      // a 1355 proxy in a folder of the owner's own is no fallback, so no button offers the install that would stop it
       writeFileSync(join(dir, "proxy.port"), "1355\n")
-      expect(await at([])).toBe("ready")
+      expect(await at([1355])).toBe("ready")
+      writeFileSync(join(dir, "proxy.port"), "8443\n")
+      expect(await at([8443])).toBe("ready")
     } finally {
       rmSync(dir, { force: true, recursive: true })
+    }
+  })
+
+  // #810: a stack whose proxy was down runs it on 1355, and Settings offers to set up 443, whose service install trusts the CA too, so it comes before the trust fix
+  test("a proxy on 1355 offers the proxy fix, before the trust fix, naming its port", async () => {
+    const root = mkdtempSync(join(tmpdir(), "portless-state-"))
+    const dir = join(root, "fallback")
+    mkdirSync(dir)
+    writeFileSync(join(dir, "proxy.port"), "1355\n")
+    const ca = join(dir, "ca.pem")
+    try {
+      const row = byName(
+        await onboardChecks({
+          ...signedUp,
+          database: "ok",
+          env: { HOME, PORTLESS_STATE_DIR: dir },
+          reader: machine(
+            TOOLS,
+            { ...ANSWERS, [`security verify-cert -c ${ca} -L -p ssl`]: { code: 1 } },
+            [ca],
+            { ports: [1355] },
+          ).reader,
+        }),
+      ).portless
+      expect(row).toMatchObject({
+        action: { id: "proxy", label: "Set up the web address" },
+        detail: "not on 443",
+        status: "optional",
+      })
+      expect(row!.note).toContain("runs on port 1355 for now")
+    } finally {
+      rmSync(root, { force: true, recursive: true })
     }
   })
 

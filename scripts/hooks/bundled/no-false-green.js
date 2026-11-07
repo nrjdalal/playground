@@ -27,12 +27,7 @@ var DESK_ENV = new Set([
   "SDK_PERMISSION_MODE",
   "SDK_PROBE_DIR"
 ]);
-var RENAMED_ENV = {
-  PLAYGROUND_CMUX_SESSIONS: "PLAYGROUND_ALL_SESSIONS"
-};
 var renamedEnv = (name) => {
-  if (Object.hasOwn(RENAMED_ENV, name))
-    return RENAMED_ENV[name];
   if (!name.startsWith("DESK_"))
     return;
   const rest = name.slice("DESK_".length);
@@ -59,6 +54,7 @@ var ROSTER_KINDS = [
   "dispatcher",
   "ops",
   "optimizer",
+  "orchestrator",
   "planner",
   "probe",
   "researcher",
@@ -74,6 +70,7 @@ var FACTORY_ROLE_OF_KIND = {
   dispatcher: "dispatcher",
   ops: "lead",
   optimizer: "lead",
+  orchestrator: "lead",
   planner: "lead",
   probe: "probe",
   researcher: "worker",
@@ -249,6 +246,7 @@ var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
   builtin: ["", ""],
+  busybox: ["", ""],
   caffeinate: ["-d -i -m -s -u", "-t -w"],
   command: ["-p -V -v", ""],
   doas: ["-L -n -s", "-a -C -u"],
@@ -298,8 +296,88 @@ var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
+var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
+var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
 var COUNTED = new Set(["repeat", "timeout"]);
-var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
+var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
+var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
+var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
+var ZSH_ARRAYS = new Set([
+  "aliases",
+  "argv",
+  "builtins",
+  "cdpath",
+  "commands",
+  "comppostfuncs",
+  "compprefuncs",
+  "compstate",
+  "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
+  "fignore",
+  "fpath",
+  "funcfiletrace",
+  "funcsourcetrace",
+  "funcstack",
+  "functions",
+  "functions_source",
+  "functrace",
+  "galiases",
+  "history",
+  "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "killring",
+  "langinfo",
+  "mailpath",
+  "manpath",
+  "match",
+  "mbegin",
+  "mend",
+  "module_path",
+  "modules",
+  "nameddirs",
+  "options",
+  "parameters",
+  "patchars",
+  "path",
+  "pipestatus",
+  "psvar",
+  "region_highlight",
+  "registers",
+  "reply",
+  "reswords",
+  "saliases",
+  "signals",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
+  "watch",
+  "widgets",
+  "words",
+  "zle_bracketed_paste",
+  "zle_highlight",
+  "zsh_eval_context",
+  "zsh_scheduled_events"
+]);
+var oneWord = (written) => {
+  const plain = ONE_WORD.exec(written);
+  return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "");
+};
+var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
+var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
 var GIT_TAKES = new Set([
@@ -393,6 +471,8 @@ var unknown = (why) => ({ unknown: why, value: UNKNOWN });
 var setLog = new WeakMap;
 var merge = (out, part) => {
   out.value += part.value;
+  if (part.splits && out.splits !== "always")
+    out.splits = part.splits;
   if (part.unknown)
     out.unknown ??= part.unknown;
   if (part.variable)
@@ -405,7 +485,43 @@ var slice = (word, from) => {
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
-var program = (value) => basename(value.replace(/^=/, ""));
+var SHELL_OWN = new Set([
+  ".",
+  "alias",
+  "cd",
+  "declare",
+  "eval",
+  "export",
+  "hash",
+  "let",
+  "local",
+  "popd",
+  "pushd",
+  "read",
+  "readonly",
+  "set",
+  "shift",
+  "source",
+  "trap",
+  "type",
+  "typeset",
+  "unalias",
+  "unset"
+]);
+var G_WRAPPERS = new Map([
+  ["genv", "env"],
+  ["gnice", "nice"],
+  ["gnohup", "nohup"],
+  ["gstdbuf", "stdbuf"],
+  ["gtimeout", "timeout"]
+]);
+var program = (value) => {
+  const base = basename(value.replace(/^=/, ""));
+  const lower = base.toLowerCase();
+  if (SHELL_OWN.has(lower) && value !== lower)
+    return value;
+  return G_WRAPPERS.get(lower) ?? lower;
+};
 var UV_TAKES = new Set([
   "--cache-dir",
   "--config-file",
@@ -445,7 +561,71 @@ function decode(raw) {
 function lex(src, known = {}) {
   const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
+  calledAgain(lx.commands, src);
+  braced(lx.commands);
   return { commands: lx.commands, scopes: lx.scopes };
+}
+var BRACED = new Set([
+  "elif",
+  "else",
+  "for",
+  "foreach",
+  "if",
+  "repeat",
+  "select",
+  "until",
+  "while"
+]);
+function braced(commands) {
+  for (const [k, c] of commands.entries()) {
+    const head = c.words[0];
+    if (!head || head.quoted || !BRACED.has(head.value))
+      continue;
+    const at = c.words.findIndex((w, i) => i > 0 && !w.quoted && w.value === "{");
+    if (at < 0 || markers(c.words).length > at)
+      continue;
+    if (commands.slice(k + 1).some((d) => d.words.some((w) => !w.quoted && w.value === "}")))
+      c.opaque = true;
+  }
+}
+function calledAgain(commands, src) {
+  for (const [k, open] of commands.entries()) {
+    const [first, second] = open.words;
+    if (!open.held || !first || first.quoted)
+      continue;
+    const before = commands[k - 1]?.words;
+    const word = first.value === "function" ? second : open.group && before?.length === 1 ? before[0] : undefined;
+    if (!word)
+      continue;
+    let end = k;
+    for (let balance = 0;end < commands.length; end++) {
+      const reserved = markers(commands[end].words);
+      balance += reserved.filter((w) => OPENS.has(w)).length - reserved.filter((w) => CLOSES.has(w)).length;
+      if (balance <= 0)
+        break;
+    }
+    const body = commands.slice(k, end + 1);
+    const name = word.value.replace(/\(\)$/, "");
+    if (word.quoted || !/^[\w.:-]+$/.test(name)) {
+      for (const c of body)
+        c.repeated = true;
+      continue;
+    }
+    const outside = commands.filter((_, at) => at < k - 1 || at > end).map(callee);
+    const calls = outside.filter((w) => w?.value === name);
+    const others = outside.some((w) => w !== undefined && (w.unknown !== undefined || !w.quoted && (w.value === "eval" || w.value === "source" || w.value === ".")));
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const files = commands.flatMap((c) => c.redirects).filter((r) => r.target?.value === name).length;
+    const mentions = (src.match(new RegExp(`(?<![\\w.:-])${escaped}(?![\\w.:-])`, "g"))?.length ?? 0) - files;
+    const call = commands.find((c, at) => (at < k - 1 || at > end) && callee(c)?.value === name);
+    const once = mentions === 2 && calls.length === 1 && !others && !call?.repeated && !call?.kept;
+    if (!once)
+      for (const c of body)
+        c.repeated = true;
+  }
+}
+function callee(cmd) {
+  return cmd.words.find((w) => w.quoted || !(ASSIGN.test(w.value) || MARKERS.has(w.value) || BUILTIN.has(w.value) || w.value.startsWith("-")));
 }
 function nest(lx, inherit) {
   list(lx, lx.scopes.push(lx.scope) - 1, true, inherit);
@@ -468,6 +648,8 @@ function walk(lx, scope, nested, inherit) {
   let depth = 0;
   let loops = 0;
   let after = "";
+  const bodies = [];
+  const heads = [];
   const end = (op) => {
     const done = cmd;
     const pipe = op === "|" || op === "|&";
@@ -493,10 +675,36 @@ function walk(lx, scope, nested, inherit) {
       if (after === "&&")
         done.chained = true;
       done.chain = lx.token;
-      if (reserved.some((w) => HELD.has(w)))
+      const last = lx.commands[lx.commands.length - 1]?.words;
+      const compound = !!done.group && last?.length === 1 && OPENS.has(reserved[0] ?? "") && !HELD.has(reserved[0] ?? "");
+      if (reserved.some((w) => HELD.has(w)) || compound)
         done.held = true;
-      if (loops > 0 || loop)
+      if (done.held || bodies.includes(true))
+        done.kept = true;
+      for (const [at, w] of reserved.entries()) {
+        if (OPENS.has(w))
+          bodies.push(HELD.has(w) || compound && at === 0);
+        else if (CLOSES.has(w))
+          bodies.pop();
+      }
+      const each = done.words[0]?.quoted ? undefined : done.words[0]?.value;
+      const outer = heads.length === 0 && loops === 0;
+      let head = heads.length > 0;
+      for (const w of reserved) {
+        if (w === "while" || w === "until" || w === "for" || w === "select")
+          heads.push(w === "while" || w === "until");
+        else if (w === "do")
+          heads.pop();
+        head ||= heads.length > 0;
+      }
+      if (each === "foreach")
+        heads.push(false);
+      else if (each === "end" && heads.length > 0 && !loop)
+        heads.pop();
+      if (loops > 0 || loop || head || each === "foreach")
         done.repeated = true;
+      if (outer && !loop && reserved.some((w) => w === "while" || w === "until"))
+        done.atLeastOnce = true;
       depth = Math.max(0, depth + opened - closed);
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
       if (depth === 0 && FREES.has(op))
@@ -667,14 +875,23 @@ function word(lx) {
     } else if (c === "$" && next === '"')
       lx.i++;
     else if (c === "$" || c === "`") {
+      const from = lx.i;
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
-    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
+      const written = src.slice(from, lx.i);
+      if (marked(text.value))
+        merge(out, {
+          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
+          value: ""
+        });
+    } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir3();
       lx.i++;
     } else {
+      if (c === UNKNOWN || c === READ)
+        out.splits = "always";
       out.value += c;
       bare += c;
       lx.i++;
@@ -684,11 +901,16 @@ function word(lx) {
     out.unknown ??= "a brace expansion";
   if (GLOB_CHARS.test(bare))
     out.glob = true;
+  out.source = src.slice(start, lx.i);
   if (marked(out.value))
-    out.raw = src.slice(start, lx.i);
+    out.raw = out.source;
+  if (src[start] === "~" && TILDE.test(out.value))
+    out.tilde = true;
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
+var TILDE = /^~[-+](?=\/|$|\u0000)/;
+var ends = (c = "") => c === "" || c === "/" || BREAK.has(c);
 function double(lx) {
   const { src } = lx;
   const out = { value: "" };
@@ -700,11 +922,13 @@ function double(lx) {
 `)
         out.value += '$`"\\'.includes(next) ? next : c + next;
       lx.i += 2;
-    } else if (c === "$")
-      merge(out, dollar(lx));
-    else if (c === "`")
-      merge(out, backtick(lx));
-    else {
+    } else if (c === "$" || c === "`") {
+      const from = lx.i;
+      const text = c === "$" ? dollar(lx) : backtick(lx);
+      merge(out, text);
+      if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
+        out.splits = "always";
+    } else {
       out.value += c;
       lx.i++;
     }
@@ -745,8 +969,10 @@ function dollar(lx) {
     lx.i = end;
     return variable(name);
   }
-  if (/[A-Za-z_]/.test(next)) {
-    const from = ++lx.i;
+  const flagged = /[=~^]/.test(next) && /[A-Za-z_]/.test(src[lx.i + 2] ?? "");
+  if (flagged || /[A-Za-z_]/.test(next)) {
+    lx.i += flagged ? 2 : 1;
+    const from = lx.i;
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
     return variable(src.slice(from, lx.i));
@@ -914,6 +1140,8 @@ function unwrap(state, inside, budget) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+      } else if (wrapper === "env" && v === "-") {
+        take();
       } else if (v === "--") {
         take();
         while (ASSIGN.test(peek()?.value ?? ""))

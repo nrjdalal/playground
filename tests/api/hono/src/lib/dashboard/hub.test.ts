@@ -5,6 +5,7 @@ import { join } from "node:path"
 
 import { attachmentsDir } from "../../../../../../api/hono/src/lib/dashboard/attachments"
 import {
+  boardReader,
   DashboardHub,
   movesTheBoard,
   type DashboardFrame,
@@ -20,36 +21,14 @@ import { getSessionNames } from "../../../../../../packages/config/src/kinds"
 // The cases hold real timers, and a loaded machine can take a case past bun's 5s default, which equals until's own deadline; 20s leaves the deadline the only clock that decides.
 setDefaultTimeout(20_000)
 
-const event = (name: string, payload: Record<string, unknown> = {}) =>
-  JSON.stringify({ type: "event", category: name.split(".")[0], name, payload })
-
 describe("movesTheBoard", () => {
-  test("a plain tool call, as a hook or as Feed telemetry, does not move the board", () => {
-    expect(movesTheBoard(event("agent.hook.PreToolUse", { tool_name: "Bash" }))).toBe(false)
-    expect(movesTheBoard(event("agent.hook.PostToolUse", { tool_name: "Read" }))).toBe(false)
-    expect(
-      movesTheBoard(
-        event("feed.item.received", { hook_event_name: "PreToolUse", tool_name: "Bash" }),
-      ),
-    ).toBe(false)
-  })
-
-  test("a picker, a prompt, a stop or a notification does", () => {
-    expect(
-      movesTheBoard(
-        event("feed.item.received", {
-          hook_event_name: "PreToolUse",
-          tool_name: "AskUserQuestion",
-        }),
-      ),
-    ).toBe(true)
-    expect(movesTheBoard(event("agent.hook.UserPromptSubmit"))).toBe(true)
-    expect(movesTheBoard(event("agent.hook.Stop"))).toBe(true)
-    expect(movesTheBoard(event("agent.hook.Notification"))).toBe(true)
-  })
-
-  test("a message sent with SendMessage does, so its sender moves up as soon as it reports", () => {
-    expect(movesTheBoard(event("agent.hook.PostToolUse", { tool_name: "SendMessage" }))).toBe(true)
+  test("every herdr event does", () => {
+    for (const name of [
+      "herdr.pane.created",
+      "herdr.pane.exited",
+      "herdr.pane.agent_status_changed",
+    ])
+      expect(movesTheBoard(JSON.stringify({ name, type: "event" }))).toBe(true)
   })
 
   test("a (re)connect ack does; heartbeats and junk do not", () => {
@@ -670,5 +649,59 @@ describe("DashboardHub", () => {
     again()
     third()
     expect(hub.snapshot).toBeNull()
+  })
+})
+
+describe("boardReader, the board for a reader with no socket", () => {
+  const frame = {
+    code: "X",
+    dispatcher: "d",
+    dispatchers: [],
+    message: "m",
+    names: {},
+    type: "error",
+  } as unknown as DashboardFrame
+  const entries = { entries: [], sessionId: "s", type: "entries" } as unknown as DashboardFrame
+
+  // A hub that hands a listener a frame now (a board already watching) or later (one it refreshes for this read), and counts its subscribes and who still listens.
+  const fake = (now: DashboardFrame | null) => {
+    const listeners = new Set<(frame: DashboardFrame) => void>()
+    let subscribes = 0
+    return {
+      listeners,
+      subscribes: () => subscribes,
+      subscribe(listener: (frame: DashboardFrame) => void) {
+        subscribes++
+        listeners.add(listener)
+        if (now) listener(now)
+        return () => void listeners.delete(listener)
+      },
+    }
+  }
+
+  test("answers the frame a watching board already holds", async () => {
+    expect(await boardReader(fake(frame), { timeoutMs: 1000 })()).toBe(frame)
+  })
+
+  test("waits for a refresh's board frame, past an entries frame, and gives null when none comes in time", async () => {
+    const hub = fake(null)
+    const waiting = boardReader(hub, { timeoutMs: 1000 })()
+    for (const listener of hub.listeners) listener(entries)
+    for (const listener of hub.listeners) listener(frame)
+    expect(await waiting).toBe(frame)
+    expect(await boardReader(fake(null), { timeoutMs: 10 })()).toBeNull()
+  })
+
+  // each read every 5 s subscribed and left, so the hub started herdr's feed and a full refresh for every read
+  test("holds one subscription across reads, and lets it go once reads stop", async () => {
+    const hub = fake(frame)
+    const read = boardReader(hub, { holdMs: 50, timeoutMs: 1000 })
+    await read()
+    await read()
+    expect(hub.subscribes()).toBe(1)
+    await Bun.sleep(80)
+    expect(hub.listeners.size).toBe(0)
+    await read()
+    expect(hub.subscribes()).toBe(2)
   })
 })

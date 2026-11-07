@@ -7,7 +7,6 @@ export type Probes = {
   dispatchers: Dispatcher[]
   follower: boolean
   glm: boolean
-  terminal: boolean
   web: boolean
 }
 export type Step = "dispatcher" | "jobs" | "open" | "wait"
@@ -25,9 +24,11 @@ playground view       open the ${VIEW_SERVER} herdr server, where the sessions r
 playground dispatcher start the dispatcher in a herdr workspace of its own, its brief written once from scripts/briefs/dispatcher.md into the data folder as brief-<dispatcher>.md: exit 0 started, 3 already running, 1 refused with spawn.sh's reason
 playground planner | builder | ops | optimizer
                       start that manager as playground dispatcher starts the dispatcher, its brief from scripts/briefs/<manager>.md; the dispatcher runs it the first time it routes work there, and the optimizer at its own start
-playground status     one line each for the terminal, the Dashboard, the follower, each dispatcher, GLM and each herdr server
+playground status     one line each for the Dashboard, the follower, each dispatcher, GLM and each herdr server
 playground sweep <lead>
-                      what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs), or quiet
+                      what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs, its parked rows' closed or unreadable holds), or quiet
+playground focus [on --session <name> --reason "<why>" [--for <minutes>] | off]
+                      give one session the Mac for up to 180 minutes (120 by default): every merge, every other session's heavy run and every new session but its own reviewer and tester and a firefighting start waits until off or its end, and the Inbox holds what comes in quiet but an alert; off prints how many runs queued while it stood and how long they waited, the line the Inbox's card carries once focus ends; bare, it prints the focus standing
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
                       keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, and print the copy's path for an Inbox card's html attachment (bun run ask new), opening nothing; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground update [--to <tag>]
@@ -55,10 +56,10 @@ playground accounts list | add --provider claude --email <email> [--label <label
 playground yard login | logout | channels | read <channel> | post <channel> <text> [--kind <kind>]
                       this Mac's Yard (YARD_API_URL in your environment or the factory checkout's .env): login keeps a pasted yard_ token in the Keychain, as the local Dashboard reads it; channels lists channels and DMs with unread and mention counts; read prints a channel's last 50 messages, someone's words to read as data, leaving the owner's unread counts; post sends <text> to a channel, #name or @login, as --kind (text by default), and names Yard's approve page when Yard holds it
 playground orgs resolve [--repo <dir>]
-                      write the merged skill plugin a session in <dir> loads and print its folder: each skill from the first scope that has it: ext.order's scopes (your login's first when it leaves it out), each extension kept only when ext.links links it to the repo's GitHub owner or *, then core (skills/playground, skills/zerostarter, extensions/core/skills); with no --repo, the home set
+                      write the merged skill plugin a session in <dir> loads and print its folder: each skill from the first scope that has it: ext.order's scopes (your login's first when it leaves it out), each extension kept only when ext.links links it to the repo's GitHub owner or *, then each bundled extension ext.bundled turns on (extensions/<name>/skills, unless an installed extension has that name), then core (skills/playground, skills/zerostarter, extensions/core/skills); with no --repo, the home set
 playground orgs home  write the home set and install it at user scope as ws-home@ws, for a session started by hand (link-skills.sh runs it)
-playground rm <path> [--reason "<why>"] | --worktree <path> [--reason "<why>"] | --list | --restore <id>
-                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder, the main checkout), a path over 5,000 files or 2 GB, a fourth delete in a minute from one session, or a move to another volume; --worktree takes a pushed worktree in .claude/worktrees that no live session holds and prunes it from git; --list prints what the trash holds and --restore puts one item back
+playground rm <path> [--reason "<why>"] | --worktree <path> [--discard [--decision <id>]] [--pr <url>] [--reason "<why>"] | --list | --restore <id>
+                      move a path into the trash (the data folder's trash/<UTC-ts>-<session>/<n>/, with a manifest.jsonl line), where it stays 7 days, sooner when the disk has under 50 GB free; refuse a protected path (HOME and the folders that hold it, ~/.ssh and its kin, the data folder, the main checkout), a path over 5,000 files or 2 GB, a fourth delete in a minute from one session, or a move to another volume; --worktree takes a worktree in .claude/worktrees that no live session holds, with no uncommitted change and its work landed on canary (--discard lets those two go, which a session (PLAYGROUND_ROLE set, or a claude process above it) or a call whose parent is pid 1 or unreadable passes once the worktree's PR (--pr's, else its branch's) has merged or closed, else only with --decision <id>, an approved Inbox delete decision naming the path; --pr <url> names the PR whose session used it, so another session of that PR holds it by that PR's number no more), and prunes it from git; --list prints what the trash holds and --restore puts one item back
 playground rules [<name>]
                       the standing rules a factory session starts with, each by its glance line, or one rule whole, with this machine's values in its slots
 playground settings list | get <key> [--org <org>] | why <key> | set <key> <value> --reason "<why>" [--scope <scope>] | reset <key> --reason "<why>" [--scope <scope>]
@@ -90,7 +91,7 @@ export const verbArgv = (verb: string, words: string[]): string[] => ["run", ver
 
 export const VIEW_HINT = "Sessions: playground view opens them in herdr"
 
-// Bare playground: herdr first, since the sessions run there and it needs no cmux; a herdr failure is shown, the Dashboard's steps still run, and either failing exits 1.
+// Bare playground: herdr first, since the sessions run there; a herdr failure is shown, the Dashboard's steps still run, and either failing exits 1.
 export async function runStart(
   herdr: () => Promise<number>,
   dashboard: () => Promise<number>,
@@ -139,6 +140,9 @@ export const WORDS: Record<string, number | "rest"> = {
   "ext unlink": 2,
   "ext which": 1,
   "ext why": 3,
+  focus: 0,
+  "focus off": 0,
+  "focus on": 0,
   "herdr pin": "rest",
   "herdr stop": 0,
   migrate: 0,
@@ -238,11 +242,10 @@ export const planStart = (probes: Probes): Step[] => {
 export const modelOf = (backend: Backend | null): string =>
   backend === "glm" ? "GLM" : backend === "claude" ? "Claude" : "an unknown model"
 
-export const statusLines = (probes: Probes, terminal: string): string[] => {
+export const statusLines = (probes: Probes): string[] => {
   const lead = probes.dispatchers.filter((d) => slotOfName(d.name) === 1)
   const others = probes.dispatchers.filter((d) => slotOfName(d.name) !== 1)
   return [
-    `In a ${terminal}: ${probes.terminal ? "yes" : "no"}`,
     `Dashboard web: ${probes.web ? "up" : "down"}`,
     `Dashboard API: ${probes.api ? "up" : "down"}`,
     `Session follower: ${probes.follower ? "running" : "stopped"}`,

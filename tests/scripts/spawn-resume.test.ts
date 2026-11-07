@@ -15,6 +15,7 @@ import { dirname, join } from "node:path"
 
 import {
   bin,
+  capacityLog,
   execLine,
   herdrPin,
   launchAfterRm,
@@ -334,7 +335,7 @@ describe("a resume keeps a session out of the main checkout and out of a removed
     })
     expect(r.out).toContain("restored worker-a\n")
     expect(r.out).toContain(
-      `not restored: spawn.sh refuses worker-x: ${tree} is not a folder, and its branch is pg-9-x`,
+      `not restored worker-x: ${tree} is not a folder, and its branch is pg-9-x`,
     )
     expect(r.code).toBe(1)
   })
@@ -379,7 +380,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       listed,
     )
-    expect(r.out).toBe("restored worker-a\nskipped worker-d: live\n")
+    expect(r.out).toBe(
+      "restored worker-a\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nskipped worker-d: live\n",
+    )
     expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "run")).toEqual([
       ["pane", "run", "w5:p1", `exec bash '${lw(r.home, "launch", "worker-a.sh")}'`],
@@ -408,7 +411,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       listed,
     )
-    expect(r.out).toBe("skipped worker-d: live\n")
+    expect(r.out).toBe(
+      "skipped worker-a: its roster row reads done\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nskipped worker-d: live\n",
+    )
     expect(r.code).toBe(0)
     expect(placing(r).filter((c) => c[1] === "run")).toEqual([])
   })
@@ -427,7 +432,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       listed,
     )
     expect(r.out).toContain("restored worker-a")
-    expect(r.out).not.toContain("worker-b")
+    expect(r.out).toContain("skipped worker-b: its roster row reads ended\n")
   })
 
   test("a resume that fails is named and the run exits 1", async () => {
@@ -439,9 +444,7 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       listed,
     )
-    expect(r.out).toContain(
-      "not restored: spawn.sh refuses worker-a: herdr opened no session for worker-a",
-    )
+    expect(r.out).toContain("not restored worker-a: herdr opened no session for worker-a")
     expect(r.code).toBe(1)
   })
 
@@ -460,7 +463,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
         )
       },
     )
-    expect(r.out).toBe("restored worker-d\n")
+    expect(r.out).toBe(
+      "skipped worker-a: its exec line is not a resume restore runs\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\nrestored worker-d\n",
+    )
   })
 
   const onProbes = (home: string) => {
@@ -480,7 +485,9 @@ describe("restore resumes the herdr sessions its resume files list", () => {
       undefined,
       onProbes,
     )
-    expect(factory.out).toBe("restored worker-a\n")
+    expect(factory.out).toBe(
+      "restored worker-a\nskipped worker-b: its roster row reads ended\nskipped worker-c: it runs in cmux, not herdr\n",
+    )
     const probes = await spawn(
       ["restore"],
       [],
@@ -773,6 +780,79 @@ describe("a resume with no id finds its session by name in its folder (#1201)", 
       ranIn(join(home, ".claude"), root, "worker-x"),
     )
     expect(r.code).toBe(0)
+  })
+
+  // The name check reads every transcript in the folder's project (4.1 GB in the main checkout's on 6 Nov), so a resume the gate refuses must not pay for it: a lead retrying a refused resume would feed the load the gate waits on.
+  const scans = (r: { home: string }) => {
+    const log = join(r.home, "grep.calls")
+    return existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean) : []
+  }
+  const ranHere = (home: string) => ranIn(join(home, ".claude"), root, "worker-x")
+  // each verdict the gate logged, none when it never ran
+  const verdicts = (r: { home: string }) =>
+    existsSync(join(r.home, ".playground", "ops", "capacity.jsonl"))
+      ? capacityLog(r).map((row) => row.verdict)
+      : []
+
+  test.each([
+    ["load", { FAKE_LOAD1: "40.00", FAKE_LOAD5: "40.00" }, "max(load1, load5) is 40.00"],
+    ["memory", { FAKE_PRESSURE: "4" }, "pressure level is 4"],
+    ["usage", { USAGE_JSON: "{ nope" }, "usage.json (does not read)"],
+  ])("a resume the %s gate refuses reads no transcript of the folder", async (gate, env, said) => {
+    const r = await spawn(
+      ["resume", "worker-x", root],
+      [],
+      { ...NONE, ...env },
+      undefined,
+      claude,
+      ranHere,
+    )
+    expect(r.code).toBe(1)
+    expect(r.err).toContain(said)
+    expect(capacityLog(r)).toEqual([expect.objectContaining({ gate, verdict: "refused" })])
+    expect(scans(r)).toEqual([])
+    expect(r.cmux).toBeUndefined()
+  })
+
+  test("a resume past the gate reads the folder's transcripts once, and --check still refuses a folder it never ran in", async () => {
+    const passed = await spawn(["resume", "worker-x", root], [], NONE, undefined, claude, ranHere)
+    expect(passed.code).toBe(0)
+    expect(scans(passed)).toEqual([expect.stringContaining(`/projects/${projectOf(root)}/`)])
+    const checked = await spawn(
+      ["resume", "worker-x", root, "--check"],
+      [],
+      NONE,
+      undefined,
+      claude,
+    )
+    expect(checked.code).toBe(1)
+    expect(checked.err).toContain(`no session named worker-x ran in ${root}`)
+    expect(checked.out).not.toContain("can start")
+    expect(scans(checked)).toHaveLength(1)
+  })
+
+  // The load gate counts each pass row as a start, so a resume the name check refuses must log none, or each retry of it would add a start that never happened.
+  test("a resume the name check refuses past the gate logs no pass row, and one that goes ahead logs one", async () => {
+    const refused = await spawn(["resume", "worker-x", root], [], NONE, undefined, claude)
+    expect(refused.code).toBe(1)
+    expect(refused.err).toContain(`no session named worker-x ran in ${root}`)
+    expect(verdicts(refused)).toEqual(["check"])
+    const passed = await spawn(["resume", "worker-x", root], [], NONE, undefined, claude, ranHere)
+    expect(passed.code).toBe(0)
+    expect(verdicts(passed).filter((v) => v === "pass")).toHaveLength(1)
+  })
+
+  test("a live session holding the name refuses before the folder's transcripts are read, with the live session's exit 3", async () => {
+    const r = await spawn(
+      ["resume", "worker-x", root],
+      [{ name: "worker-x", pid: 5002 }],
+      NONE,
+      undefined,
+      claude,
+    )
+    expect(r.code).toBe(3)
+    expect(r.err).toContain("a live session already holds the name worker-x (pid 5002)")
+    expect(scans(r)).toEqual([])
   })
 })
 

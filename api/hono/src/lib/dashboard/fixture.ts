@@ -21,6 +21,7 @@ import { z } from "zod"
 // Relative, not @/: paths.ts imports this file, and the web's tests type-check it under web/next's own @/ paths.
 import shipped from "../../fixtures/dashboard.json" with { type: "json" }
 import { livePair } from "../dev/live-dashboard"
+import { startOf } from "../dev/stop"
 import { FIX_IDS } from "../onboard/fix-ids"
 import { discard, trashRoots } from "../trash"
 
@@ -45,6 +46,9 @@ export const DASHBOARD_RULES: Record<DashboardRule, string> = {
 
 // PLAYGROUND_FIXTURE=shipped names the fixture that ships in api/hono/src/fixtures/dashboard.json.
 export const SHIPPED_FIXTURE = "shipped"
+
+// The shipped fixture's own file, whose mtime tells a copy written from it that it changed.
+const SHIPPED_PATH = join(import.meta.dir, "../../fixtures/dashboard.json")
 
 const yes = (value: string | undefined): boolean => /^(1|true)$/i.test(value?.trim() ?? "")
 
@@ -354,6 +358,9 @@ export function settle(value: unknown, shiftMs: number, config: string, key = ""
 
 const STAMP = "stamp.json"
 
+// The launcher's pid and start in the copy it wrote, so a CLI in the same checkout leaves a running stack's copy alone.
+const LAUNCHER = "launcher.json"
+
 const writeEntry = (path: string, content: unknown): void => {
   mkdirSync(dirname(path), { mode: 0o700, recursive: true })
   if (path.endsWith(".jsonl") && Array.isArray(content)) {
@@ -372,6 +379,38 @@ const writeEntry = (path: string, content: unknown): void => {
     writeFileSync(path, typeof content === "string" ? content : JSON.stringify(content, null, 2), {
       mode: 0o600,
     })
+  }
+}
+
+// Marks dir's copy as the running launcher's own, by its pid and start, which a reused pid never matches; the launcher passes the start it already read.
+export function markLaunched(dir: string, pid = process.pid, started = startOf(pid)): void {
+  writeEntry(join(dir, LAUNCHER), { pid, started })
+}
+
+// Each launcher record this process has matched by ps, so a later read asks only whether its pid still runs, and a follower that reads the fixture on every call spawns no ps for it; a pid reused after the match reads as the launcher, so this process keeps the copy until it restarts.
+const matched = new Set<string>()
+
+// Whether dir's copy belongs to a launcher that still runs; start reads a pid's start, ps by default.
+export const launcherRuns = (dir: string, start = startOf): boolean => {
+  try {
+    const { pid, started } = JSON.parse(readFileSync(join(dir, LAUNCHER), "utf8"))
+    if (!Number.isInteger(pid) || typeof started !== "string") return false
+    if (matched.has(`${pid} ${started}`)) return running(pid)
+    if (start(pid) !== started) return false
+    matched.add(`${pid} ${started}`)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Signal 0 delivers nothing: it only asks whether the pid exists (EPERM means it does, under another user).
+const running = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM"
   }
 }
 
@@ -472,14 +511,19 @@ export function ensureFixture(source: DashboardSource = currentSource()): string
     )
   }
   const dir = fixtureDir()
-  if (existsSync(join(dir, STAMP))) return dir
+  const stamp = join(dir, STAMP)
+  const launched = yes(process.env.PLAYGROUND_FIXTURE_LAUNCHED)
+  // A copy is written again only when its source file changed after the copy was stamped, read from disk so the edit reaches it; a stack's copy is its launcher's, kept with its own writes while that launcher runs, read from inside the stack or beside it.
+  const from = source.file ?? SHIPPED_PATH
+  const newer = (): boolean => existsSync(from) && statSync(from).mtimeMs > statSync(stamp).mtimeMs
+  if (existsSync(stamp) && (launched || !newer() || launcherRuns(dir))) return dir
   // The launcher wrote this stack's fixture and drops it as the stack stops, so a process that outlives the stop (the API until its group is killed) finds it gone and writes nothing back.
-  if (yes(process.env.PLAYGROUND_FIXTURE_LAUNCHED)) {
+  if (launched) {
     throw new Error(
       `the stack's fixture at ${dir} went when it stopped; start it again with bun run dev`,
     )
   }
-  const loaded = loadFixture(source.file)
+  const loaded = loadFixture(existsSync(stamp) ? from : source.file)
   if (!loaded.ok) throw new Error(loaded.error)
   writeFixture(loaded.fixture, dir, trashRoots())
   return dir

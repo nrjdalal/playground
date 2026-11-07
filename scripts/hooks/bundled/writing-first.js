@@ -32,12 +32,7 @@ var DESK_ENV = new Set([
   "SDK_PERMISSION_MODE",
   "SDK_PROBE_DIR"
 ]);
-var RENAMED_ENV = {
-  PLAYGROUND_CMUX_SESSIONS: "PLAYGROUND_ALL_SESSIONS"
-};
 var renamedEnv = (name) => {
-  if (Object.hasOwn(RENAMED_ENV, name))
-    return RENAMED_ENV[name];
   if (!name.startsWith("DESK_"))
     return;
   const rest = name.slice("DESK_".length);
@@ -80,6 +75,7 @@ var ROSTER_KINDS = [
   "dispatcher",
   "ops",
   "optimizer",
+  "orchestrator",
   "planner",
   "probe",
   "researcher",
@@ -95,6 +91,7 @@ var FACTORY_ROLE_OF_KIND = {
   dispatcher: "dispatcher",
   ops: "lead",
   optimizer: "lead",
+  orchestrator: "lead",
   planner: "lead",
   probe: "probe",
   researcher: "worker",

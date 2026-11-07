@@ -69,6 +69,7 @@ const textBox = (value = "", start = value.length, end = start) => {
       inputs.push(event)
       return true
     },
+    readOnly: false,
     selectionEnd: end,
     selectionStart: start,
     setRangeText(text: string, from: number, to: number) {
@@ -157,6 +158,17 @@ describe("insertPaste", () => {
     expect(insertPaste(none, browserInsert(box))).toBe("left")
     expect(none.defaultPrevented).toBe(false)
     expect(box.value).toBe("")
+    expect(inputs).toEqual([])
+  })
+
+  // a box read-only while its answer is on its way keeps what it holds, as the browser's own paste does, so a paste then is not shown and cleared with the answer
+  test("leaves a paste into a read-only box to the browser, inserting nothing", () => {
+    const { box, inputs } = textBox("kept")
+    box.readOnly = true
+    const event = pasteOf(box, " DICTATED")
+    expect(insertPaste(event, browserInsert(box))).toBe("left")
+    expect(event.defaultPrevented).toBe(false)
+    expect(box.value).toBe("kept")
     expect(inputs).toEqual([])
   })
 })

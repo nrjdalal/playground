@@ -3,8 +3,19 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-import { type Env, GIT_TAKES, lex, places, run, withDeadline } from "../../../scripts/hooks/shell"
+import {
+  type Env,
+  GIT_TAKES,
+  lex,
+  places,
+  run,
+  stdinShell,
+  type StdinKind,
+  withDeadline,
+  zshSplits,
+} from "../../../scripts/hooks/shell"
 import { type Paths, REFUSED_FORMS } from "./fixtures/refused-forms"
+import { overBaseline } from "./pace"
 
 const HOOKS = join(import.meta.dir, "..", "..", "..", "scripts", "hooks")
 
@@ -193,5 +204,59 @@ describe("places() holds the folder Env.cwd names, unless the reader passed its 
     const { misses, reads } = await read(lines)
     expect(misses).toEqual([])
     expect(reads).toBeGreaterThan(lines.length)
+  })
+})
+
+describe("stdinShell reads a privilege wrapper's root shell", () => {
+  test.each<[string, string, "root" | undefined]>([
+    ["a program in a variable behind a quoted bare wrapper", `'sudo' "$X"`, "root"],
+    ["a second wrapper's shell option behind a plain first wrapper", "doas sudo -i", "root"],
+    ["a quoted shell option", "sudo '-s'", "root"],
+    ["the shell long option given its command", "sudo --shell ls", undefined],
+  ])("%s", (_, line, kind) => {
+    expect(stdinShell(lex(line).commands[0])).toBe(kind)
+  })
+})
+
+describe("stdinShell reads env's split string as the words it runs", () => {
+  test.each<[string, string, StdinKind | undefined]>([
+    ["sudo's shell in a split string", "env -S 'sudo -s'", "root"],
+    ["sudo's shell in a long split-string option", "env --split-string='sudo -s'", "root"],
+    ["a shell given no script in a split string", "env -S 'sh'", "shell"],
+    ["a harmless command in a split string", "env -S 'sudo ls'", undefined],
+    ["a quoted env's split string", "'env' -S 'sudo -s'", "root"],
+    ["a second env's split string behind nice", "env nice env -S 'sudo -s'", "root"],
+    ["an abbreviated split-string option", "env --split='sudo -s'", "root"],
+    ["a split string after an abbreviated unset", "env nice env --u X -S 'sudo -s'", "root"],
+    ["a split string after argv0's value", "env -a name -S 'sudo -s'", "root"],
+    ["a split string after a lone dash, env's -i", "'env' - -S 'sudo -s'", "root"],
+  ])("%s", (_, line, kind) => {
+    expect(stdinShell(lex(line).commands[0])).toBe(kind)
+  })
+})
+
+describe("stdinShell reads su with no command of its own as a root shell", () => {
+  test.each<[string, string, StdinKind | undefined]>([
+    ["su alone", "su", "root"],
+    ["su with a user", "su root", "root"],
+    ["su with its shell option", "su -s /bin/sh root", "root"],
+    ["busybox's su applet with its shell option", "busybox su -s /bin/sh", "root"],
+    ["su behind sudo", "sudo su", "root"],
+    ["su given a command of its own", "su -c ls", undefined],
+    ["su with a user given a command of its own", "su root -c 'ls -la'", undefined],
+  ])("%s", (_, line, kind) => {
+    expect(stdinShell(lex(line).commands[0])).toBe(kind)
+  })
+})
+
+describe("zshSplits reads a long line in linear time (PG-1222)", () => {
+  test.each([
+    ["read words", "read ".repeat(40_000)],
+    ["declaring builtins", "declare ".repeat(25_000)],
+    ["expansions", Array.from({ length: 25_000 }, (_, i) => `$v${i}`).join(" ")],
+    ["newlines", "\n".repeat(200_000)],
+    ["newlines each followed by a space", "\n ".repeat(100_000)],
+  ])("200 KB of %s", async (_, line) => {
+    expect(await overBaseline(async (c) => zshSplits(c), line)).toBeLessThan(50)
   })
 })

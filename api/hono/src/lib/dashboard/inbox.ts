@@ -1,16 +1,40 @@
 import { readFileSync } from "node:fs"
-import { join } from "node:path"
+import { extname, join } from "node:path"
 
+import { withOwn } from "@packages/config/accounts"
+import {
+  ANSWER_LEAD,
+  type AnswerPayload,
+  answerPayloadSchema,
+  choicesOf,
+  CLOCKS_STOPPED_AT,
+  MAX_OPTIONS,
+  rowOfAnswer,
+} from "@packages/config/inbox"
 import type { ActivityActor, Database } from "@packages/db"
 import { inboxItem, thread } from "@packages/db"
 import { dataDir } from "@packages/env/data-dir"
-import { extensionsDir, itemKeySchema, KINDS, SCOPE_NAME, slackSettings } from "@packages/settings"
+import {
+  checkSetting,
+  extensionsDir,
+  extScopeSchema,
+  GUARD_SETTING_KEYS,
+  itemKeySchema,
+  KINDS,
+  readSetting,
+  resetSetting,
+  SCOPE_NAME,
+  setSetting,
+  slackSettings,
+} from "@packages/settings"
 import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
 import { z } from "zod"
 
+import { fileNameOf } from "../download"
+import { KEYCHAIN_ITEM_NAMES, keychainSpec, PLAYGROUND_SERVICE } from "../keychain-items"
 import { ID_PATTERN } from "./attachments"
 
-// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only an accept decision's accept. Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
+// Playground's Inbox: what the factory posts for the owner, one row of inbox_item each, through the bun run ask CLI alone. A decision previews exactly what Approve does, a draft is a Slack message or Linear comment to send, and an update is an outcome to read. The dashboard records his answer and types it into the posting session through deliver(); the dashboard itself never sends a message, merges or files anything, sharing only a Slack send's files (filesToUpload) and running only the step an accept's, an apps change's, a grant's, a guard setting's or an own account change's Approve names (stepOf). Nothing here imports the API's env or an @/ path, so the CLI runs from any shell and the web reads its types.
 
 const LIMITS = { line: 200, name: 120, prs: 50, text: 4000 }
 
@@ -135,8 +159,7 @@ const argName = z
 
 const SECRET_ENVIRONMENTS = ["development", "preview", "production"] as const
 
-// Where a secret ask's value goes, the allowlist in code: Vercel alone, `vercel env add` once an environment for one project.
-export const secretSinkSchema = z.strictObject({
+const vercelSinkSchema = z.strictObject({
   environments: z
     .array(z.enum(SECRET_ENVIRONMENTS))
     .min(1)
@@ -146,10 +169,24 @@ export const secretSinkSchema = z.strictObject({
   type: z.literal("vercel"),
 })
 
+// A Keychain item a card names: a typed one by name (slack, yard), or any of Playground's own by its full service (keychainSpec), always as this Mac's signed-in user.
+const playgroundService = z.string().regex(PLAYGROUND_SERVICE, "Must be a playground- service")
+const keychainItemField = z.union([z.enum(KEYCHAIN_ITEM_NAMES), playgroundService])
+
+// Where a secret ask's value goes, the allowlist in code: Vercel, `vercel env add` once an environment for one project, or keychain, one of this Mac's Keychain items keychainItemField allows.
+export const secretSinkSchema = z.discriminatedUnion("type", [
+  vercelSinkSchema,
+  z.strictObject({ item: keychainItemField, type: z.literal("keychain") }),
+])
+
 export type SecretSink = z.infer<typeof secretSinkSchema>
 
-// Pure: the one command a sink runs for an environment; the value goes on its stdin alone, so it is never in an argv a process list shows.
-export const sinkArgv = (key: string, sink: SecretSink, environment: string): string[] => [
+// Pure: the one command a Vercel sink runs for an environment; the value goes on its stdin alone, so it is never in an argv a process list shows.
+export const sinkArgv = (
+  key: string,
+  sink: z.infer<typeof vercelSinkSchema>,
+  environment: string,
+): string[] => [
   "vercel",
   "env",
   "add",
@@ -164,19 +201,66 @@ export const sinkArgv = (key: string, sink: SecretSink, environment: string): st
 ]
 
 // An extension proposal the owner accepts from the Inbox in place of a terminal: its scope, kind and key, and the rev he reads, which the accept holds to, so a proposal written after he read it is refused. Each word is one the store takes, none can start as a flag, and no session supplies the argv.
-const acceptSchema = z.strictObject({
+const proposalSchema = z.strictObject({
   key: z.string().max(LIMITS.name).pipe(itemKeySchema),
   kind: z.enum(KINDS),
   rev: z.string().regex(/^[0-9a-f]{7,40}$/, "Must be a commit SHA"),
   scope: z.string().max(LIMITS.name).regex(SCOPE_NAME, "Must be a login, an org or core"),
+})
+
+export type InboxProposal = z.infer<typeof proposalSchema>
+
+// An accept decision: its own proposal first, then more, the ones accepted after it in the order they land, so one card holds a set the owner reads as one change.
+const acceptSchema = z.strictObject({
+  key: proposalSchema.shape.key,
+  kind: proposalSchema.shape.kind,
+  more: z.array(proposalSchema).min(1).max(20).optional(),
+  rev: proposalSchema.shape.rev,
+  scope: proposalSchema.shape.scope,
   type: z.literal("accept"),
   why: words,
 })
 
 export type InboxAccept = z.infer<typeof acceptSchema>
 
-// Pure: the one command Approve runs for an accept, as `playground ext <args>`: the preview's words, and a reason naming the item.
-export const acceptArgs = (preview: InboxAccept, ref: number): string[] => [
+// Pure: an accept's proposals in the order Approve accepts them, a single accept's one alone.
+export const proposalsOf = (preview: InboxAccept): InboxProposal[] => [
+  { key: preview.key, kind: preview.kind, rev: preview.rev, scope: preview.scope },
+  ...(preview.more ?? []),
+]
+
+// Accepts each proposal in order through `playground ext accept`, stopping at the first that fails: a list of one gives the CLI's own result, a longer one a line naming those accepted, the one that failed with its reason and those not tried.
+async function acceptAll(accept: ExtRun, preview: InboxAccept, ref: number): Promise<RunResult> {
+  const proposals = proposalsOf(preview)
+  if (proposals.length === 1) return runResult(await accept(acceptArgs(proposals[0]!, ref)))
+  const name = (proposal: InboxProposal) => `${proposal.kind} ${proposal.key} in ${proposal.scope}`
+  const accepted: string[] = []
+  for (const [at, proposal] of proposals.entries()) {
+    const ran = await accept(acceptArgs(proposal, ref))
+      .then(runResult)
+      .catch((error: unknown) =>
+        runResult({
+          code: 1,
+          err: error instanceof Error ? error.message : String(error),
+          out: "",
+        }),
+      )
+    if (ran.exitCode !== 0) {
+      const rest = proposals.slice(at + 1).map(name)
+      const done = accepted.length ? `accepted ${accepted.join(", ")}; ` : ""
+      const untried = rest.length ? `; not tried: ${rest.join(", ")}` : ""
+      return {
+        exitCode: ran.exitCode,
+        line: `${done}${name(proposal)} failed: ${ran.line}${untried}`,
+      }
+    }
+    accepted.push(name(proposal))
+  }
+  return { exitCode: 0, line: `accepted ${accepted.join(", ")}` }
+}
+
+// Pure: the one command Approve runs for a proposal, as `playground ext <args>`: the preview's words, and a reason naming the item.
+export const acceptArgs = (preview: InboxProposal, ref: number): string[] => [
   "accept",
   preview.scope,
   preview.kind,
@@ -186,19 +270,163 @@ export const acceptArgs = (preview: InboxAccept, ref: number): string[] => [
   `the owner approved it in the Inbox (${itemTag(ref)})`,
 ]
 
-// Runs `playground ext <args>` with no role and returns its exit code and output: store/extensions.ts's runCli is the real one, which the router passes, and a test passes its own. It restates that file's Cli, since the web reads this file's types and that file's imports reach the API's own.
-export type ExtRun = (args: string[]) => Promise<{ code: number; err: string; out: string }>
+// Runs `playground ext <args>` with no role, stdin on its input when given, and returns its exit code and output: store/extensions.ts's runCli is the real one, which the router passes, and a test passes its own. It restates that file's Cli, since the web reads this file's types and that file's imports reach the API's own.
+export type ExtRun = (
+  args: string[],
+  stdin?: string,
+) => Promise<{ code: number; err: string; out: string }>
+
+// The System Settings pane for each permission agent-desktop needs, by the name a grant decision gives it.
+export const GRANT_PANES = {
+  accessibility: "Privacy_Accessibility",
+  "screen-recording": "Privacy_ScreenCapture",
+} as const
+
+// A macOS permission agent-desktop needs, which the owner grants in System Settings: Approve opens its pane on this Mac, and the poster rechecks the grant itself, since macOS grants the app that launches agent-desktop, which only the poster's own run reads.
+const grantSchema = z.strictObject({
+  permission: z.enum(Object.keys(GRANT_PANES) as [keyof typeof GRANT_PANES]),
+  type: z.literal("grant"),
+  why: words,
+})
+
+export type InboxGrant = z.infer<typeof grantSchema>
+
+// Pure: the one command a grant's Approve runs: macOS's open, at the pane the preview names.
+export const grantArgv = (preview: InboxGrant): string[] => [
+  "/usr/bin/open",
+  `x-apple.systempreferences:com.apple.preference.security?${GRANT_PANES[preview.permission]}`,
+]
+
+// Runs an argv with no shell and returns its exit code and output; run-argv.ts holds the real one, and a test passes its own.
+export type ArgvRun = (argv: string[]) => Promise<{ code: number; err: string; out: string }>
+
+// The guard list that holds the owner's own apps, which no-desktop-owner-app keeps agent-desktop away from.
+export const OWNER_APPS = "desktop-owner-apps"
+
+// An app's name as the owner's list holds it: a letter or digit of any script first, then letters, digits, spaces and . _ & ' ( ) + -, so none starts as a flag or names a path.
+const APP_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._&'()+-]*$/u
+
+// A change to the owner's own apps, which the owner approves from the Inbox in place of a terminal: the app to add or remove, and why.
+const appsSchema = z.strictObject({
+  app: z.string().trim().min(1).max(LIMITS.name).regex(APP_NAME, "Must be an app's name"),
+  change: z.enum(["add", "remove"]),
+  type: z.literal("apps"),
+  why: words,
+})
+
+export type InboxApps = z.infer<typeof appsSchema>
+
+// Pure: the one command an apps change's Approve runs, as `playground ext <args>` with the new list on its stdin: a put of the login's own list, with a reason naming the item.
+export const appsArgs = (login: string, ref: number): string[] => [
+  "put",
+  login,
+  "list",
+  OWNER_APPS,
+  "-",
+  "--reason",
+  `the owner approved it in the Inbox (${itemTag(ref)})`,
+]
+
+// Pure: an app's name as the hook's appName matches it (no-desktop-owner-app.ts): its last path part, without .app, edge spaces or case.
+const appKey = (name: string): string =>
+  (name.split("/").filter(Boolean).pop() ?? "")
+    .replace(/\.app$/i, "")
+    .trim()
+    .toLowerCase()
+
+// One apps change at a time in this process: each reads the whole list and puts it back with no base rev, so a second Approve waits and reads the list the first wrote.
+let appsQueue: Promise<unknown> = Promise.resolve()
+const oneAppsChange = <T>(change: () => Promise<T>): Promise<T> => {
+  const next = appsQueue.then(change, change)
+  appsQueue = next.catch(() => undefined)
+  return next
+}
+
+// Pure: the owner's own list after the change, or the result when there is nothing to write: an app already on it, or one to remove that it does not hold.
+export const appsChange = (list: string[], preview: InboxApps): { list: string[] } | RunResult => {
+  const held = list.some((name) => appKey(name) === appKey(preview.app))
+  if (preview.change === "add")
+    return held
+      ? { exitCode: 0, line: `${preview.app} is on your apps already` }
+      : { list: [...list, preview.app] }
+  return held
+    ? { list: list.filter((name) => appKey(name) !== appKey(preview.app)) }
+    : { exitCode: 1, line: `${preview.app} is not on your own apps list, so nothing changed` }
+}
+
+// The owner's own apps list and the CLI that writes it: the login's scope, its list as accepted (empty when it has none, null when it is not a list of names), and `playground ext`. store/extensions.ts's ownerApps is the real one.
+export type OwnerApps = { login: string; read: () => string[] | null; run: ExtRun }
+
+// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS), the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes, or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
+const guardSchema = z
+  .strictObject({
+    key: z.enum(GUARD_SETTING_KEYS),
+    scope: extScopeSchema,
+    type: z.literal("guard"),
+    value: z.unknown().optional(),
+    why: words,
+  })
+  .superRefine((preview, ctx) => {
+    if (preview.value === undefined) return
+    const checked = checkSetting(preview.key, preview.value)
+    if (!checked.ok) ctx.addIssue({ code: "custom", message: checked.message, path: ["value"] })
+  })
+
+export type InboxGuard = z.infer<typeof guardSchema>
+
+// One Claude account's own flag, set or cleared from the Inbox in place of Settings > Accounts' switch: key is the row's email in usage.accounts at scope, own the flag Approve leaves it with. Only that row changes; a key that names no Claude row there is refused as it is posted (ownRefused).
+const ownSchema = z.strictObject({
+  key: z.email().max(LIMITS.name),
+  own: z.boolean(),
+  scope: extScopeSchema,
+  type: z.literal("own"),
+  why: words,
+})
+
+export type InboxOwn = z.infer<typeof ownSchema>
+
+const ACCOUNTS = "usage.accounts"
+
+// usage.accounts as it is stored at one scope: undefined when that scope sets none.
+const accountsAt = (data: string, scope: string): unknown =>
+  readSetting(data, ACCOUNTS)?.rows.find((row) => row.scope === scope)?.value
+
+// Pure: the Claude row with this email in a stored usage.accounts value, or undefined.
+const claudeRow = (value: unknown, key: string): Record<string, unknown> | undefined =>
+  Array.isArray(value)
+    ? (value as Record<string, unknown>[]).find(
+        (row) => (row.provider ?? "claude") === "claude" && row.email === key,
+      )
+    : undefined
 
 // Runs a sink's argv with the value on its stdin and returns its exit code: null once stopped by a signal (its time limit's included), 127 when it could not start. secret-sink.ts holds the real one; a test passes its own.
 export type SinkRun = (argv: string[], stdin: string) => Promise<number | null>
 
-// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept the dashboard runs itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask may label each side in ELI5 / ASD-STE100, one line; the card then shows its text as the quoted block above the two labelled options. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere.
+// Saves the value as one allowlisted Keychain item, throwing on a refusal; secret-sink.ts holds the real one, and a test passes its own.
+export type KeychainSave = (item: string, value: string) => Promise<void>
+
+// Reads one allowlisted Keychain item's value, null when it holds none of its shape; secret-sink.ts holds the real one, and a test passes its own.
+export type KeychainRead = (item: string) => Promise<string | null>
+
+const OPTIONS_MESSAGE = `An ask offers 1 to ${MAX_OPTIONS} options, each with a label: one for a yes or no, two or more for lettered choices`
+
+// What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change, a grant's System Settings pane, a guard setting or an own account change, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in ELI5 / ASD-STE100, one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere. A reveal shows the owner a Keychain item's value on the owner's click instead, kept nowhere either.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     approve: oneLine(LIMITS.line).optional(),
     attachments,
     checked: oneLine(LIMITS.line).optional(),
     deny: oneLine(LIMITS.line).optional(),
+    options: z
+      .array(
+        z.strictObject({
+          description: oneLine(LIMITS.line).optional(),
+          label: oneLine(LIMITS.line),
+        }),
+      )
+      .min(1, OPTIONS_MESSAGE)
+      .max(MAX_OPTIONS, OPTIONS_MESSAGE)
+      .optional(),
     text: words,
     type: z.literal("ask"),
   }),
@@ -213,7 +441,16 @@ export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
     ...place,
     prs: z
-      .array(z.strictObject({ number: z.number().int().positive(), title: oneLine(LIMITS.line) }))
+      .array(
+        z.strictObject({
+          number: z.number().int().positive(),
+          title: oneLine(LIMITS.line),
+          url: z
+            .url({ protocol: /^https$/ })
+            .max(2000)
+            .optional(),
+        }),
+      )
       .min(1)
       .max(LIMITS.prs),
     sha: z.string().regex(/^[0-9a-f]{7,40}$/, "Must be a commit SHA"),
@@ -237,7 +474,13 @@ export const previewSchema = z.discriminatedUnion("type", [
     sink: secretSinkSchema,
     type: z.literal("secret"),
   }),
+  // shows a Keychain item's value on the owner's click, in that one response alone (revealSecret); it names the item by its full service, so the card shows which one
+  z.strictObject({ service: playgroundService, type: z.literal("reveal"), why: words }),
   acceptSchema,
+  appsSchema,
+  grantSchema,
+  guardSchema,
+  ownSchema,
 ])
 
 const link = z
@@ -289,12 +532,22 @@ export const inboxInputSchema = z
   )
   .refine((input) => {
     if (input.kind !== "decision" || input.preview.type !== "ask") return true
-    const { approve, checked, deny, text } = input.preview
+    const { approve, checked, deny, options = [], text } = input.preview
+    const said = options.flatMap((option) => [option.label, option.description])
     return (
       checked !== undefined ||
-      !TAKES_DOWN.test([input.title, text, approve, deny].join("\n").replace(PASSING_MENTION, ""))
+      !TAKES_DOWN.test(
+        [input.title, text, approve, deny, ...said].join("\n").replace(PASSING_MENTION, ""),
+      )
     )
   }, TAKES_DOWN_MESSAGE)
+  .refine(
+    (input) =>
+      input.kind !== "decision" ||
+      input.preview.type !== "ask" ||
+      !(input.preview.approve && input.preview.options),
+    "An ask labels its go row in options or in approve, not both",
+  )
   .superRefine((input, ctx) => {
     const text =
       input.kind === "draft"
@@ -339,38 +592,46 @@ export type InboxStatus =
 
 export const ACTIONS = [
   "approve",
+  "archive",
   "clear",
   "deny",
   "discard",
+  "dismiss",
   "draft",
   "edit",
   "send",
   "unarchive",
 ] as const
 export type InboxAction = (typeof ACTIONS)[number]
-// What an answer holds: every action but Move to Inbox, which undoes a set-aside and leaves no answer.
-export type InboxChoice = Exclude<InboxAction, "unarchive">
+// What an answer holds: every action but Archive and Move back, which answer nothing, and Dismiss, which a waiting item records as clear.
+export type InboxChoice = Exclude<InboxAction, "archive" | "dismiss" | "unarchive">
 
-// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted: what the accept an accept decision's Approve ran gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
+// ackedAt: when its poster closed it through bun run ask, so the sweep stops chasing it; accepted, listed, opened, owned and set: what the dashboard ran on an accept's, an apps change's, a grant's, an own card's and a guard setting's Approve gave; dismissedAt: when he dismissed the answered item or its poster closed it, which moves it to Done at once; noLink: why a go closed with no link; uploaded: how many files a Slack send shared into its channel and thread, so a retry shares none twice.
 export type InboxAnswer = {
-  accepted?: AcceptResult
+  accepted?: RunResult
   ackedAt?: string
   at: string
   choice: InboxChoice
+  dismissed?: true
   dismissedAt?: string
   editedText?: string
   link?: string
   linkLabel?: string
+  listed?: RunResult
   noLink?: string
   note?: string
+  opened?: RunResult
+  option?: number
+  owned?: RunResult
+  set?: RunResult
   uploaded?: number
 }
 
-// What an accept's run gave: its exit code and the line it printed, the result or why it was refused.
-export type AcceptResult = { exitCode: number; line: string }
+// What a run the dashboard carried out on Approve gave: its exit code and the line it printed, the result or why it was refused.
+export type RunResult = { exitCode: number; line: string }
 
-// Pure: an accept's run as a result: its exit code, and its first line, the CLI's error when it failed, cut to a line.
-export const acceptResult = (ran: { code: number; err: string; out: string }): AcceptResult => {
+// Pure: a run as a result: its exit code, and its first line, its error when it failed, cut to a line.
+export const runResult = (ran: { code: number; err: string; out: string }): RunResult => {
   const line = ((ran.code === 0 ? ran.out : ran.err || ran.out).split("\n")[0] ?? "").trim()
   return {
     exitCode: ran.code,
@@ -397,20 +658,22 @@ export type InboxSettled = {
   at: string
   by: string
   choice: "settled"
+  dismissed?: true
   dismissedAt?: string
   link?: string
   linkLabel?: string
   note?: string
 }
 
-// An update takes no answer, so its answer holds only when he dismissed it.
-export type InboxDismissed = { dismissedAt: string }
+// An update takes no answer, so its answer holds only when he sent it to Done, with dismissed when that was his Dismiss rather than his Done.
+export type InboxDismissed = { dismissed?: true; dismissedAt: string }
 
 // A reply he sent in chat naming the item (`re #iN`): when, and his words after the tag, so the card says what is being done; its poster's close adds where that landed, and his Dismiss when he cleared it.
 export type InboxReplied = {
   ackedAt?: string
   at: string
   choice: "replied"
+  dismissed?: true
   dismissedAt?: string
   link?: string
   linkLabel?: string
@@ -431,23 +694,35 @@ export const saidOf = (text: string): string | undefined => {
 }
 
 // The poster cleared its own alert update (`bun run ask resolve`), which had resolved itself: read, so nothing was left for him to dismiss.
-export type InboxResolved = { at: string; by: string; choice: "resolved"; note?: string }
+export type InboxResolved = {
+  at: string
+  by: string
+  choice: "resolved"
+  dismissed?: true
+  dismissedAt?: string
+  note?: string
+}
 
 // A secret ask he answered with its value, which went to its sink and is kept nowhere: when, and each environment's exit status (null: stopped by a signal), written once the sink has run; its poster's read closes it.
 export type InboxProvided = {
   ackedAt?: string
   at: string
   choice: "provided"
+  dismissed?: true
   dismissedAt?: string
   link?: string
   linkLabel?: string
   results?: SinkResult[]
 }
 
-export type SinkResult = { environment: string; exitCode: number | null }
+// line: what the card shows in place of the exit status, "saved" or a refusal's first line, never the value
+export type SinkResult = { environment: string; exitCode: number | null; line?: string }
 
-// An open decision or draft he pushed out of his list until a time (Schedule); it asks again once the time passes.
+// An open decision or draft, or an update, he pushed out of his list until a time (Schedule); it asks again once the time passes.
 export type InboxScheduled = { snoozedUntil: string }
+
+// An open decision or draft, or an update, he archived: out of his list and its count, unanswered, its poster told nothing and still waiting, until he moves it back, puts it off until a time or dismisses it.
+export type InboxArchived = { archivedAt: string }
 
 // How the answer reached its poster, or the dispatcher when the poster had ended: typed into a session (to: the session that took it, absent on a row from before it was recorded), or read through bun run ask. queued: Claude Code holds it until the session is free (deliver.ts's QUEUED), under the delivery's id, which the dashboard reads again until it reads delivered, or failed as LOST.
 export type InboxDelivery =
@@ -470,25 +745,44 @@ type Common = {
 }
 
 type Answered = {
-  answer: InboxAnswer | InboxProvided | InboxReplied | InboxScheduled | InboxSettled | null
+  answer:
+    | InboxAnswer
+    | InboxArchived
+    | InboxProvided
+    | InboxReplied
+    | InboxScheduled
+    | InboxSettled
+    | null
 }
 
 export type InboxItem =
   | (Common & Answered & { kind: "decision"; preview: InboxPreview })
   | (Common & Answered & { kind: "draft"; preview: InboxDraft })
   | (Common & {
-      answer: InboxDismissed | InboxResolved | null
+      answer: InboxArchived | InboxDismissed | InboxResolved | InboxScheduled | null
       kind: "update"
       preview: InboxUpdate
     })
 
-// The list the dashboard shows, in the order it shows it, and the count on its Inbox tab; snoozed: the open items put away until a time still ahead, kept out of items, which every reader takes as awake, for the Inbox's Snoozed shelf alone.
-export type InboxList = { items: InboxItem[]; count: number; snoozed: InboxItem[] }
+// The list the dashboard shows, in the order it shows it, and the count on its Inbox tab; snoozed: the open items and updates put away until a time still ahead, and archived: those he archived, each kept out of items, which every reader takes as awake, for the Inbox's Later and Archive shelves alone; quiet: the ids of the items in the list that came in while focus stands, which the count, the Inbox square and the tab's dot leave out until it ends.
+export type InboxList = {
+  items: InboxItem[]
+  archived: InboxItem[]
+  count: number
+  quiet: string[]
+  snoozed: InboxItem[]
+}
 
 // What the dashboard posts for an item: the action, the words that go with Edit or with a draft changed before Send or Draft, and seen, the updatedAt of the card he answered, so an answer never lands on words its poster edited after he read them.
 export const answerInputSchema = z.strictObject({
   action: z.enum(ACTIONS),
   note: z.string().trim().max(LIMITS.text).optional(),
+  option: z
+    .number()
+    .int()
+    .min(0)
+    .max(MAX_OPTIONS - 1)
+    .optional(),
   seen: z.iso.datetime().optional(),
   text: z.string().trim().max(LIMITS.text).optional(),
 })
@@ -523,7 +817,7 @@ export const itemTag = (ref: number): string => `#i${ref}`
 
 const REF_RE = /^#?i(\d{1,9})$/
 
-// A chat reply names the item it is about (`re #iN`), typed by a picked Chat about it or his own words; the web's TYPED holds the same pattern, and a test holds the two equal.
+// A reply names the item it is about (`re #iN`), typed by the card's Reply or in his chat; the web's TYPED holds the same pattern, and a test holds the two equal.
 export const REPLY_RE = /\bre #i(\d{1,9})\b/i
 
 // An item's fields, kept apart by kind, so a preview reads as its own kind's.
@@ -546,16 +840,46 @@ export function checkAnswer(
 
 function answerOf(
   item: Shape<"kind" | "preview" | "status">,
-  { action, text }: AnswerInput,
+  { action, option, text }: AnswerInput,
 ): { answer: Omit<InboxAnswer, "at">; status: InboxStatus } | { message: string } {
   if (item.kind === "update") return { message: "An update is read, not answered" }
   if (item.status !== "open") return { message: "This item is already answered" }
+  if (option !== undefined && !(item.kind === "decision" && action === "approve")) {
+    return { message: "Only a decision's go picks an option" }
+  }
+  // Dismiss on what still waits sets it aside as the old `clear` did, its poster told so, and sends it to Done; a secret ask takes it too, since no value travels
+  if (action === "dismiss") return { answer: { choice: "clear" }, status: "cleared" }
   if (item.kind === "decision") {
     if (item.preview.type === "secret") {
       return { message: "A secret ask takes its value through its Submit alone" }
     }
+    // a lettered decision's go names which of its go rows the owner picked, and takes no Edit, which names none; a yes or no has one
+    const go = choicesOf(item.preview)?.rows.filter((row) => row.go).length ?? 1
+    if (
+      (action === "approve" && (option !== undefined || go > 1)) ||
+      (action === "edit" && go > 1)
+    ) {
+      return action === "approve" && option !== undefined && option < go
+        ? { answer: { choice: action, option }, status: "approved" }
+        : {
+            message:
+              go > 1
+                ? `Pick one of its ${go} options, 0 to ${go - 1}`
+                : "A yes or no has one option, 0",
+          }
+    }
     if (item.preview.type === "accept" && action === "edit") {
       return { message: "An accept is approved or denied as its proposal reads" }
+    }
+    if (
+      (item.preview.type === "apps" ||
+        item.preview.type === "grant" ||
+        item.preview.type === "guard" ||
+        item.preview.type === "own" ||
+        item.preview.type === "reveal") &&
+      action === "edit"
+    ) {
+      return { message: "This decision is approved or denied as it reads" }
     }
     // Clear: neither a yes nor a no; he has set the talk aside and will pick it up later, while whatever is already moving keeps moving
     if (action === "clear") return { answer: { choice: action }, status: "cleared" }
@@ -584,98 +908,198 @@ function answerOf(
   return { message: "A draft is sent, saved as a draft, discarded or cleared" }
 }
 
-// Pure: what is typed into the posting session for its answer, opening with the item's tag and id so `bun run ask get` finds it.
-export function deliveryText(
-  item: Pick<InboxItem, "id" | "ref" | "title">,
-  answer: Omit<InboxAnswer, "at">,
-): string {
-  const words = answerWords(item, answer)
-  return answer.note ? `${words}\nThe owner's note: ${answer.note}` : words
+// The option the owner picked, as the card lettered and labelled it (rowOfAnswer, which the result line reads too).
+function optionOf(item: InboxItem, answer: { choice: string; option?: number }) {
+  const row = item.kind === "decision" ? rowOfAnswer(item.preview, answer) : null
+  return row ? { index: row.index, label: row.label, letter: row.letter } : undefined
 }
 
-function answerWords(
-  item: Pick<InboxItem, "id" | "ref" | "title">,
-  answer: Omit<InboxAnswer, "at">,
-): string {
-  const head = `Inbox ${itemTag(item.ref)} (${item.id}) "${item.title}":`
-  const edited = answer.editedText
-  const accepted = answer.accepted
-  if (answer.choice === "approve" && accepted) {
-    const close = `bun run ask ack ${itemTag(item.ref)} --no-link`
-    return accepted.exitCode === 0
-      ? `${head} Approved, and the dashboard ran the accept: ${accepted.line}. Nothing is left to carry out: close it with ${close} "accepted in the extensions store".`
-      : `${head} Approved, but the accept the dashboard ran failed (exit ${accepted.exitCode}): ${accepted.line}. Nothing was accepted: read the proposal again, post a new accept decision for its current rev if it still stands, and close this one with ${close} and why.`
+// Pure: the option an approved or denied decision's answer picked, as its letter and label, for bun run ask get; null for any other item or answer.
+export function pickOf(item: InboxItem): { index: number; label: string; letter: string } | null {
+  if (item.kind !== "decision" || !item.answer || !("choice" in item.answer)) return null
+  const { choice } = item.answer
+  if (choice !== "approve" && choice !== "deny") return null
+  return optionOf(item, item.answer) ?? null
+}
+
+// Pure: what an answer tells its poster, as data: the verb, whether to carry it out, the next step and the exact command that closes the item; the owner's comment in his words, a changed draft's text, a step's or a secret sink's results, never a secret's value; an update takes no answer.
+export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvided): AnswerPayload {
+  if (item.kind === "update") throw new Error("An update takes no answer")
+  const tag = itemTag(item.ref)
+  const ack = `bun run ask ack ${tag} --link <https url>`
+  const ackOrWhy = `${ack}, or --no-link "<why>" when it leaves no page`
+  const read = `bun run ask get ${tag} --ack`
+  const head = {
+    at: answer.at,
+    id: item.id,
+    kind: item.kind,
+    ref: tag,
+    title: item.title,
+    ...(item.kind === "decision" && { type: item.preview.type }),
+    v: 1 as const,
   }
+  if (answer.choice === "provided") {
+    return {
+      ...head,
+      close: read,
+      go: true,
+      next: "close",
+      results: answer.results ?? [],
+      verb: "submit",
+    }
+  }
+  const comment = answer.note ? { comment: answer.note } : {}
+  const text = answer.editedText ? { text: answer.editedText } : {}
   switch (answer.choice) {
     case "approve":
-      return `${head} Approved. Carry it out.`
-    case "deny":
-      return `${head} Denied. Do not carry it out.`
     case "edit":
-      return `${head} Approved with changes. Carry it out with these: ${edited}`
+      // a step the dashboard ran on Approve leaves only its close, and a grant's recheck once its pane opened (asks.md)
+      if (answer.accepted || answer.listed || answer.opened || answer.owned || answer.set) {
+        const ran = answer.accepted
+          ? { accepted: answer.accepted }
+          : answer.listed
+            ? { listed: answer.listed }
+            : answer.owned
+              ? { owned: answer.owned }
+              : answer.set
+                ? { set: answer.set }
+                : { opened: answer.opened! }
+        return {
+          ...head,
+          ...comment,
+          ...ran,
+          close: `bun run ask ack ${tag} --no-link "<why>"`,
+          go: true,
+          next: answer.opened?.exitCode === 0 ? "carry-out" : "nothing",
+          option: optionOf(item, answer),
+          verb: "pick",
+        }
+      }
+      return {
+        ...head,
+        ...comment,
+        ...text,
+        close: "link" in item.preview ? ack : ackOrWhy,
+        go: true,
+        next: "carry-out",
+        option: optionOf(item, answer),
+        verb: "pick",
+      }
+    case "deny":
+      return {
+        ...head,
+        ...comment,
+        close: read,
+        go: false,
+        next: "close",
+        option: optionOf(item, answer),
+        verb: "pick",
+      }
     case "clear":
-      return `${head} Cleared for now: the owner will talk more about it later. Whatever is already in motion stays in motion; hold only the new step this item asks for, and leave it to him to pick the talk up again.`
+      return { ...head, ...comment, close: read, go: false, next: "close", verb: "set-aside" }
     case "discard":
-      return `${head} Discarded. Do not send it.`
+      return { ...head, ...comment, close: read, go: false, next: "close", verb: "discard" }
     case "send":
-      return edited ? `${head} Send it with changes, as: ${edited}` : `${head} Send it as written.`
+      return { ...head, ...comment, ...text, close: ack, go: true, next: "carry-out", verb: "send" }
     case "draft": {
       const converter = slack("slack.linkConverter")
-      const how = `with slack_send_message_draft, then bun run ask ack it with the channel_link that returns, ${converter ? `rewritten to the app form by piping it to ${converter}` : "in its app form"} (ack refuses the archives form), or with --no-link and why when Slack refuses (draft_already_exists: that conversation holds a draft already). Do not send it.`
-      return edited
-        ? `${head} Save it as a Slack draft ${how} Save it with changes, as: ${edited}`
-        : `${head} Save it as a Slack draft as written, ${how}`
+      return {
+        ...head,
+        ...comment,
+        ...text,
+        close: ackOrWhy,
+        go: true,
+        ...(converter && { linkConverter: converter }),
+        next: "carry-out",
+        verb: "draft",
+      }
     }
   }
 }
 
-// Pure: what the dispatcher is typed when the poster has ended, so the item's kind and exact words travel with the answer. A go is carried out in the poster's place; a deny, a clear or a discard has nothing to carry out, only an item to close.
-export function relayText(item: InboxItem, answer: Omit<InboxAnswer, "at">): string {
-  const lead = isGo(answer.choice)
-    ? `${item.from} has ended, so you carry this out in its place: a sent Slack message goes out through ${slack("slack.sendServer") || "your Slack tool"} (never the claude.ai connector), a Slack draft is saved with slack_send_message_draft as below, and you bun run ask ack the item with where it landed (bun run ask get shows its link).`
-    : closeLead(item)
-  return relayWith(item, lead, deliveryText(item, answer))
+// Pure: what the owner's Dismiss on an answered card, or Done or Dismiss on an update, tells its poster: drop it. A card its poster has not closed names how to close it (a go with why it has no link, a reply by its ack, anything else by reading it), and an update, which the owner closed, takes no more edits.
+export function closedPayload(
+  item: InboxItem,
+  verb: "dismiss" | "done",
+  at: string,
+): AnswerPayload {
+  const tag = itemTag(item.ref)
+  const head = {
+    at,
+    go: false,
+    id: item.id,
+    kind: item.kind,
+    ref: tag,
+    title: item.title,
+    ...(item.kind === "decision" && { type: item.preview.type }),
+    v: 1 as const,
+    verb,
+  }
+  const answer = item.answer
+  if (
+    item.kind === "update" ||
+    !answer ||
+    !("choice" in answer) ||
+    ("ackedAt" in answer && answer.ackedAt)
+  ) {
+    return { ...head, next: "nothing" }
+  }
+  const close = isGo(answer.choice)
+    ? `bun run ask ack ${tag} --no-link "<why>"`
+    : answer.choice === "replied"
+      ? `bun run ask ack ${tag}`
+      : `bun run ask get ${tag} --ack`
+  return { ...head, close, next: "close" }
 }
 
-const closeLead = (item: InboxItem): string =>
-  `${item.from} has ended, so nothing is carried out: close the item with bun run ask get ${itemTag(item.ref)} --ack.`
-
-function relayWith(item: InboxItem, lead: string, text: string): string {
-  const words = "text" in item.preview ? item.preview.text : JSON.stringify(item.preview)
-  return `${lead} ${text}\nKind: ${item.kind}\nPreview text:\n${words}`
+// Tells a poster the owner closed its card (closedPayload), recording how that went as an answer's delivery is; an update's poster that has ended is told nothing, since nothing waits on it, and a card its poster already closed or the owner already sent to Done types nothing again.
+async function tellClosed(
+  db: Database,
+  item: InboxItem,
+  verb: "dismiss" | "done",
+  before: InboxItem,
+  telling?: Telling,
+): Promise<InboxItem> {
+  if (!telling) return item
+  const answer = before.answer
+  if (answer && "ackedAt" in answer && answer.ackedAt) return item
+  if (before.kind === "update" && answer && "dismissedAt" in answer && answer.dismissedAt)
+    return item
+  if (
+    answer &&
+    "choice" in answer &&
+    (answer.choice === "resolved" || answer.choice === "settled")
+  ) {
+    return item
+  }
+  const payload = closedPayload(item, verb, telling.now.toISOString())
+  return send(
+    db,
+    item,
+    {
+      relay: answerLine({ ...payload, relay: { for: item.from, why: "poster-ended" } }),
+      text: answerLine(payload),
+    },
+    { ...telling, dispatcher: item.kind === "update" ? undefined : telling.dispatcher },
+  )
 }
 
-// Pure: an exit status in words: its code, or stopped by a signal.
-const exitWords = (code: number | null): string =>
-  code === null ? "stopped by a signal" : `exit ${code}`
+type Telling = Omit<Sending, "upload">
 
-// Pure: what is typed into the poster of a secret ask he answered: when, and each environment's exit status; the value never, since only the sink was handed it.
-function providedText(
-  item: Pick<InboxItem, "id" | "ref" | "title">,
-  answer: Pick<InboxProvided, "at" | "results">,
-): string {
-  const results = (answer.results ?? [])
-    .map((result) => `${result.environment}: ${exitWords(result.exitCode)}`)
-    .join("; ")
-  return `Inbox ${itemTag(item.ref)} (${item.id}) "${item.title}": Provided at ${answer.at}. ${results || "No sink ran"}. Close it with bun run ask get ${itemTag(item.ref)} --ack.`
-}
+// Pure: the one line typed into a session for an answer: ANSWER_LEAD, then the payload as JSON, whose escaped line ends keep it one line.
+export const answerLine = (payload: AnswerPayload): string =>
+  `${ANSWER_LEAD} ${JSON.stringify(answerPayloadSchema.parse(payload))}`
 
-// Pure: the words for the poster and, once it has ended, for the dispatcher, for any answer that is typed.
+// Pure: the line for the poster and, once it has ended, the same line for the dispatcher with relay set, which reads the item's preview with bun run ask get.
 const textsOf = (
   item: InboxItem,
-  answer: Omit<InboxAnswer, "at"> | InboxProvided,
+  answer: InboxAnswer | InboxProvided,
 ): { relay: string; text: string } => {
-  if (answer.choice === "provided") {
-    const text = providedText(item, answer)
-    return { relay: relayWith(item, closeLead(item), text), text }
+  const payload = answerPayload(item, answer)
+  return {
+    relay: answerLine({ ...payload, relay: { for: item.from, why: "poster-ended" } }),
+    text: answerLine(payload),
   }
-  // an accept the dashboard ran is carried out already, so the dispatcher closes it in an ended poster's place
-  if (answer.accepted) {
-    const text = deliveryText(item, answer)
-    const lead = `${item.from} has ended, and the dashboard already ran this accept, so nothing is carried out: close the item with bun run ask ack ${itemTag(item.ref)} --no-link and why, as below.`
-    return { relay: relayWith(item, lead, text), text }
-  }
-  return { relay: relayText(item, answer), text: deliveryText(item, answer) }
 }
 
 // Pure: an answer that did not reach its poster, which asks him to retry it or dismiss it.
@@ -750,14 +1174,22 @@ export function filesToUpload(
   return place && { files: preview.attachments, place }
 }
 
-// Pure: when an open item is scheduled to ask again, while that time is still ahead; null once it is awake, and on anything not scheduled.
+// Pure: when an open item or an update is scheduled to ask again, while that time is still ahead; null once it is awake, and on anything not scheduled.
 export const snoozedUntil = (item: InboxItem, now: Date): string | null => {
-  if (item.status !== "open" || !item.answer || !("snoozedUntil" in item.answer)) return null
+  if (item.kind !== "update" && item.status !== "open") return null
+  if (!item.answer || !("snoozedUntil" in item.answer)) return null
   return new Date(item.answer.snoozedUntil) > now ? item.answer.snoozedUntil : null
 }
 
-// Pure: whether an item asks of him now rather than at a scheduled later time.
-export const awake = (item: InboxItem, now: Date): boolean => snoozedUntil(item, now) === null
+// Pure: when he archived an item he has not dismissed since; null on anything not archived.
+export const archivedAt = (item: InboxItem): string | null =>
+  item.answer && "archivedAt" in item.answer && !("dismissedAt" in item.answer)
+    ? item.answer.archivedAt
+    : null
+
+// Pure: whether an item asks of him now rather than at a scheduled later time, or once he moves it back from Archive.
+export const awake = (item: InboxItem, now: Date): boolean =>
+  snoozedUntil(item, now) === null && archivedAt(item) === null
 
 // Pure: the item's choice once its answer holds one; null before that, a Schedule put-away included, which is awake or asleep by its time alone.
 const choiceOf = (item: InboxItem): string | null =>
@@ -767,15 +1199,25 @@ const NEEDS_YOU = (item: InboxItem, now: Date): boolean =>
   awake(item, now) &&
   ((item.status === "open" && item.kind !== "update" && choiceOf(item) !== "replied") ||
     deliveryFailed(item))
-const UNREAD = (item: InboxItem): boolean => item.kind === "update" && item.readAt === null
+const UNREAD = (item: InboxItem, now: Date): boolean =>
+  item.kind === "update" && item.readAt === null && awake(item, now)
 
 // Pure: the count on the Inbox tab, the open decisions and drafts and the answers that did not reach their poster, plus the unread updates; a scheduled item counts once its time arrives.
 export const inboxCount = (items: InboxItem[], now = new Date()): number =>
-  items.filter((item) => NEEDS_YOU(item, now) || UNREAD(item)).length
+  items.filter((item) => NEEDS_YOU(item, now) || UNREAD(item, now)).length
+
+// Pure: the ids of the items that came in since focus began, while it stands, which the Inbox holds quiet; an alert update stays loud, since the 5% battery alert or a failed ship cannot wait for focus to end.
+export const quietIds = (items: InboxItem[], focus: { since: string } | null): string[] =>
+  focus === null
+    ? []
+    : items
+        .filter((item) => Date.parse(item.createdAt) >= Date.parse(focus.since))
+        .filter((item) => item.kind !== "update" || item.preview.outcome !== "alert")
+        .map((item) => item.id)
 
 // Pure: the list in priority order: what needs him, then unread updates, then everything else, each newest first by when it was posted (#i545); a scheduled item sleeps in with the rest until its time.
 export function inboxOrder(items: InboxItem[], now = new Date()): InboxItem[] {
-  const rank = (item: InboxItem) => (NEEDS_YOU(item, now) ? 0 : UNREAD(item) ? 1 : 2)
+  const rank = (item: InboxItem) => (NEEDS_YOU(item, now) ? 0 : UNREAD(item, now) ? 1 : 2)
   return [...items].sort((a, b) => rank(a) - rank(b) || b.ref - a.ref || a.id.localeCompare(b.id))
 }
 
@@ -786,6 +1228,7 @@ const toItem = (row: Row): InboxItem =>
     answer:
       (row.answer as
         | InboxAnswer
+        | InboxArchived
         | InboxDismissed
         | InboxProvided
         | InboxReplied
@@ -811,16 +1254,20 @@ const toItem = (row: Row): InboxItem =>
 export const KEEP_MS = 7 * 24 * 60 * 60 * 1000
 const MAX_SHOWN = 200
 
-// threadId files the item under a thread (bun run ask new --thread), refused when no thread has it.
+// threadId files the item under a thread (bun run ask new --thread), refused when no thread has it. now stamps createdAt and updatedAt, from the clock every later write stamps with.
 export async function postItem(
   db: Database,
   input: unknown,
   threadId?: string,
+  now = new Date(),
+  settingsData?: string,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const parsed = inboxInputSchema.safeParse(input)
   if (!parsed.success) {
     return { code: "VALIDATION_ERROR", message: zodMessage(parsed.error), ok: false }
   }
+  const unowned = ownRefused(parsed.data, settingsData)
+  if (unowned) return unowned
   if (threadId !== undefined) {
     const [found] = await db.select({ id: thread.id }).from(thread).where(eq(thread.id, threadId))
     if (!found) return { code: "NOT_FOUND", message: `no thread ${threadId}`, ok: false }
@@ -829,24 +1276,53 @@ export async function postItem(
     .insert(inboxItem)
     .values({
       ...parsed.data,
+      createdAt: now,
       status: parsed.data.kind === "update" ? "done" : "open",
       threadId,
+      updatedAt: now,
     })
     .returning()
   return { item: toItem(row as Row), ok: true }
 }
 
-// The poster replaces its own open item's title and preview in place (`bun run ask edit`), checked as postItem checks a new one, so one card carries a progress to its end; an item put away with Snooze edits as an open one. Another session's item, a change of kind, an answered or closed item, one he replied to in chat and an update dismissed or resolved are refused.
+// An own card refused as it is posted or edited, so the card never offers an Approve that cannot write: no data folder to read, or no Claude row of usage.accounts at its scope with its email (a GLM row's label is never one).
+const ownRefused = (
+  input: z.infer<typeof inboxInputSchema>,
+  data?: string,
+): Refused | undefined => {
+  if (input.kind !== "decision" || input.preview.type !== "own") return
+  const { key, scope } = input.preview
+  const message = !data
+    ? "This dashboard cannot read usage.accounts, so an own card is refused"
+    : claudeRow(accountsAt(data, scope), key)
+      ? undefined
+      : `${key} is no Claude account in ${ACCOUNTS} at ${scope}`
+  return message ? { code: "VALIDATION_ERROR", message, ok: false } : undefined
+}
+
+// Pure: an item its poster can no longer edit: done or dismissed by the owner, settled, resolved, or closed by its poster's ack.
+const closed = (item: InboxItem): boolean => {
+  const answer = item.answer
+  if (answer === null) return false
+  if ("dismissedAt" in answer && answer.dismissedAt) return true
+  if ("ackedAt" in answer && answer.ackedAt) return true
+  return "choice" in answer && (answer.choice === "resolved" || answer.choice === "settled")
+}
+
+// The poster replaces its own item's title and preview in place (`bun run ask edit`), checked as postItem checks a new one, so one card carries a progress to its end: an update until the owner presses Done or Dismiss or its poster resolves it, and an ask until it closes, answered, archived, put away with Later or replied to alike, an edit to one he replied to taking the reply off so it waits on him again. Another session's item, a change of kind and a closed item are refused.
 export async function editItem(
   db: Database,
   key: string,
   input: unknown,
   now = new Date(),
+  settingsData?: string,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const parsed = inboxInputSchema.safeParse(input)
   if (!parsed.success) {
     return { code: "VALIDATION_ERROR", message: zodMessage(parsed.error), ok: false }
   }
+  const unowned = ownRefused(parsed.data, settingsData)
+  if (unowned) return unowned
   const item = await getItem(db, key)
   if (!item) return NOT_FOUND
   if (parsed.data.from !== item.from) {
@@ -855,23 +1331,22 @@ export async function editItem(
   if (parsed.data.kind !== item.kind) {
     return { code: "VALIDATION_ERROR", message: `This item is a ${item.kind}`, ok: false }
   }
-  const editable =
-    item.status === (item.kind === "update" ? "done" : "open") &&
-    (item.answer === null ||
-      ("snoozedUntil" in item.answer && Object.keys(item.answer).length === 1))
-  if (!editable) {
+  if (closed(item)) {
     return {
       code: "CONFLICT",
-      message: "This item is already answered, closed or replied to in chat",
+      message: "This item is closed: done, dismissed, settled, resolved or closed by its poster",
       ok: false,
     }
   }
   const [row] = await db
     .update(inboxItem)
     .set({
+      // an edit answers his reply, so the card waits on him again
+      ...(choiceOf(item) === "replied" && { answer: null }),
       preview: parsed.data.preview,
       title: parsed.data.title,
-      updatedAt: now,
+      // past the stamp he read, even inside its millisecond, so an answer whose seen names the old words is refused (answerItem)
+      updatedAt: sql`greatest(${now.toISOString()}::timestamptz, ${inboxItem.updatedAt} + interval '1 millisecond')`,
       version: sql`${inboxItem.version} + 1`,
     })
     .where(and(eq(inboxItem.id, item.id), eq(inboxItem.version, item.version)))
@@ -892,25 +1367,66 @@ export async function getItem(db: Database, key: string): Promise<InboxItem | nu
   return row ? toItem(row) : null
 }
 
-// Everything still waiting, and whatever else moved in the last week.
-export async function listItems(db: Database, now = new Date()): Promise<InboxList> {
+// The name a kept file downloads under: the title of the newest item that carries it, with the file's own name after it when the item carries several, then the stored file's extension; "attachment" in place of the title when no item carries it.
+export async function attachmentDownloadName(db: Database, id: string): Promise<string> {
+  const [row] = await db
+    .select({ preview: inboxItem.preview, title: inboxItem.title })
+    .from(inboxItem)
+    .where(sql`${inboxItem.preview} -> 'attachments' @> ${JSON.stringify([{ id }])}::text::jsonb`)
+    .orderBy(desc(inboxItem.updatedAt))
+    .limit(1)
+  const files = (row?.preview as { attachments?: InboxAttachment[] } | undefined)?.attachments ?? []
+  const own = files.length > 1 ? files.find((file) => file.id === id)?.name : undefined
+  const title = own ? `${row?.title}, ${own.replace(/\.[^.]*$/, "")}` : (row?.title ?? "attachment")
+  return fileNameOf(title, extname(id).slice(1))
+}
+
+// Everything still waiting on him or on a verb, and whatever else moved in the last week; focus, the one standing now (focus.ts), holds what came in since it began quiet.
+export async function listItems(
+  db: Database,
+  now = new Date(),
+  focus: { since: string } | null = null,
+): Promise<InboxList> {
   const since = new Date(now.getTime() - KEEP_MS)
-  // a scheduled item is out of the list and the count until its time
-  const awakeSql = sql`(${inboxItem.answer} ->> 'snoozedUntil' is null or (${inboxItem.answer} ->> 'snoozedUntil')::timestamptz <= ${now.toISOString()}::timestamptz)`
+  // a scheduled item is out of the list and the count until its time, and an archived one until he moves it back or dismisses it
+  const awakeSql = sql`((${inboxItem.answer} ->> 'snoozedUntil' is null or (${inboxItem.answer} ->> 'snoozedUntil')::timestamptz <= ${now.toISOString()}::timestamptz) and (${inboxItem.answer} ->> 'archivedAt' is null or ${inboxItem.answer} ->> 'dismissedAt' is not null))`
   const needsYou = or(
     and(
       eq(inboxItem.status, "open"),
       sql`${inboxItem.kind} <> 'update'`,
-      // a chat reply took it off his hands: it waits on its poster closing it
+      // a reply took it off his hands: it waits on its poster closing it
       sql`coalesce(${inboxItem.answer} ->> 'choice', '') <> 'replied'`,
       awakeSql,
     ),
     // coalesced, since a null here would make the rest's not (...) null too and drop every row with no delivery
     sql`coalesce(${inboxItem.delivery} ->> 'status', '') = 'failed' and ${inboxItem.answer} ->> 'dismissedAt' is null`,
   )
-  // what needs him is never capped, so a pile of unread updates cannot push a decision out of the list or the count; the snoozed and every set-aside (cleared) item not dismissed, however old, come too, for the Inbox's shelves
-  const [open, rest, shelved] = await Promise.all([
+  const stopped = CLOCKS_STOPPED_AT
+  // since the clocks stopped, a card moves by a verb alone: one answered that its poster has not closed (a go it carries out, a comment it reads) and an update he read and has not sent to Done or dismissed, awake, stay at any age, where one from before keeps the week
+  const pending = and(
+    sql`not (${needsYou})`,
+    sql`${inboxItem.status} <> 'cleared'`,
+    or(
+      and(
+        sql`${inboxItem.kind} <> 'update'`,
+        sql`(${inboxItem.answer} ->> 'at')::timestamptz >= ${stopped}::timestamptz`,
+        sql`${inboxItem.answer} ->> 'choice' <> 'settled'`,
+        sql`${inboxItem.answer} ->> 'ackedAt' is null`,
+        sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
+      ),
+      and(
+        eq(inboxItem.kind, "update"),
+        sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
+        sql`${inboxItem.answer} ->> 'choice' is null`,
+        awakeSql,
+        sql`${inboxItem.readAt} >= ${stopped}::timestamptz`,
+      ),
+    ),
+  )
+  // what needs him and what waits on a verb are never capped, so a pile of unread updates cannot push a decision or a card in hand out of the list or the count; what is put away with Later, the archived and every set-aside (cleared) item not dismissed, however old, come too, for the Inbox's shelves
+  const [open, waiting, rest, shelved] = await Promise.all([
     db.select().from(inboxItem).where(needsYou),
+    db.select().from(inboxItem).where(pending),
     db
       .select()
       .from(inboxItem)
@@ -928,7 +1444,7 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
       .from(inboxItem)
       .where(
         or(
-          and(eq(inboxItem.status, "open"), sql`not ${awakeSql}`),
+          and(or(eq(inboxItem.status, "open"), eq(inboxItem.kind, "update")), sql`not ${awakeSql}`),
           // a set-aside item he dismissed has gone to Done, which keeps a week as every settled item does
           and(eq(inboxItem.status, "cleared"), sql`${inboxItem.answer} ->> 'dismissedAt' is null`),
         ),
@@ -936,11 +1452,17 @@ export async function listItems(db: Database, now = new Date()): Promise<InboxLi
       .orderBy(desc(inboxItem.ref))
       .limit(MAX_SHOWN),
   ])
-  const seen = new Set([...open, ...rest].map((row) => row.id))
+  const seen = new Set([...open, ...waiting].map((row) => row.id))
+  const recent = rest.filter((row) => !seen.has(row.id))
+  for (const row of recent) seen.add(row.id)
   const cleared = shelved.filter((row) => row.status === "cleared" && !seen.has(row.id))
-  const items = inboxOrder([...open, ...rest, ...cleared].map(toItem), now)
-  const snoozed = shelved.filter((row) => row.status === "open").map(toItem)
-  return { items, count: inboxCount(items, now), snoozed }
+  const items = inboxOrder([...open, ...waiting, ...recent, ...cleared].map(toItem), now)
+  const asleep = shelved.filter((row) => row.status !== "cleared").map(toItem)
+  const archived = asleep.filter((item) => archivedAt(item) !== null)
+  const snoozed = asleep.filter((item) => archivedAt(item) === null)
+  const quiet = quietIds(items, focus)
+  const loud = items.filter((item) => !quiet.includes(item.id))
+  return { items, archived, count: inboxCount(loud, now), quiet, snoozed }
 }
 
 const NOT_FOUND: Refused = { code: "NOT_FOUND", message: "No inbox item with that id", ok: false }
@@ -953,17 +1475,25 @@ export async function answerItem(
   {
     accept,
     actor,
+    apps,
     deliver,
     dispatcher,
+    grant,
     now = new Date(),
+    reveal,
+    settingsData,
     upload,
     wait,
   }: {
     accept?: ExtRun
     actor: ActivityActor
+    apps?: OwnerApps
     deliver?: Deliver
     dispatcher?: string
+    grant?: ArgvRun
     now?: Date
+    reveal?: KeychainRead
+    settingsData?: string
   } & Pick<Sending, "upload" | "wait">,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
@@ -975,7 +1505,25 @@ export async function answerItem(
       ok: false,
     }
   }
+  // a guard setting or an own flag is written as the card he read shows it, so its Approve names that reading
+  if (
+    input.action === "approve" &&
+    input.seen === undefined &&
+    current.kind === "decision" &&
+    (current.preview.type === "guard" || current.preview.type === "own")
+  ) {
+    return {
+      code: "VALIDATION_ERROR",
+      message: "A guard setting or an own card is approved from the card that shows it, with seen",
+      ok: false,
+    }
+  }
+  if (await holdsRevealed(current, [input.note, input.text], reveal)) return REVEALED
+  if (input.action === "archive") return archive(db, current, now)
   if (input.action === "unarchive") return unarchive(db, current, now)
+  if (input.action === "dismiss" && !waits(current)) {
+    return dismissAnswered(db, current, now, deliver && { actor, deliver, dispatcher, now, wait })
+  }
   const checked = checkAnswer(current, input)
   if ("message" in checked) {
     // an answered decision or draft conflicts with this answer; an update never takes one
@@ -983,15 +1531,24 @@ export async function answerItem(
       current.kind !== "update" && current.status !== "open" ? "CONFLICT" : "VALIDATION_ERROR"
     return { code, message: checked.message, ok: false }
   }
-  const answer: InboxAnswer = { ...checked.answer, at: now.toISOString() }
-  // an accept's Approve runs the accept, so one with nothing to run it is refused before it is recorded
-  const accepting =
-    current.kind === "decision" && current.preview.type === "accept" && answer.choice === "approve"
-      ? current.preview
+  const at = now.toISOString()
+  const answer: InboxAnswer =
+    input.action === "dismiss"
+      ? { ...checked.answer, at, dismissed: true, dismissedAt: at }
+      : { ...checked.answer, at }
+  // an accept's, an apps change's, a grant's, a guard setting's or an own account change's Approve runs its step, so one with nothing to run it is refused before it is recorded
+  const step =
+    current.kind === "decision" && answer.choice === "approve"
+      ? stepOf(current.preview, current.ref, {
+          accept,
+          actor: "id" in actor ? actor.id : actor.label,
+          apps,
+          grant,
+          settingsData,
+        })
       : undefined
-  if (accepting && !accept) {
-    return { code: "VALIDATION_ERROR", message: "This dashboard cannot run an accept", ok: false }
-  }
+  if (step && "refusal" in step)
+    return { code: "VALIDATION_ERROR", message: step.refusal, ok: false }
   const [row] = await db
     .update(inboxItem)
     .set({
@@ -1013,20 +1570,22 @@ export async function answerItem(
   if (!row) return { code: "CONFLICT", message: "This item is already answered", ok: false }
   let answered = toItem(row)
   let given: Omit<InboxAnswer, "at"> = checked.answer
-  // run once, after the claim above, so a double click or a second tab accepts once
-  if (accepting && accept) {
-    const ran = await accept(acceptArgs(accepting, current.ref)).catch((error: unknown) => ({
-      code: 1,
-      err: error instanceof Error ? error.message : String(error),
-      out: "",
+  // run once, after the claim above, so a double click or a second tab runs it once
+  if (step) {
+    const result = await step.run().catch((error: unknown) => ({
+      exitCode: 1,
+      line: runResult({
+        code: 1,
+        err: error instanceof Error ? error.message : String(error),
+        out: "",
+      }).line,
     }))
-    const accepted = acceptResult(ran)
-    given = { ...given, accepted }
+    given = { ...given, [step.key]: result }
     // merged key by key, so a poster's read that landed while it ran keeps its close
     const [recorded] = await db
       .update(inboxItem)
       .set({
-        answer: sql`${inboxItem.answer} || jsonb_build_object('accepted', (${JSON.stringify(accepted)}::text)::jsonb)`,
+        answer: sql`${inboxItem.answer} || (${JSON.stringify({ [step.key]: result })}::text)::jsonb`,
         version: sql`${inboxItem.version} + 1`,
       })
       .where(eq(inboxItem.id, id))
@@ -1035,7 +1594,7 @@ export async function answerItem(
   }
   if (!deliver) return { item: answered, ok: true }
   return {
-    item: await send(db, answered, textsOf(answered, given), {
+    item: await send(db, answered, textsOf(answered, { ...given, at: answer.at }), {
       actor,
       deliver,
       dispatcher,
@@ -1047,18 +1606,200 @@ export async function answerItem(
   }
 }
 
-// Move to Inbox: an archived item goes back to open with no answer, so it can be answered again; nothing is typed into its poster, since nothing was decided.
+// Pure: whether an item still waits on his answer: an open decision or draft he has not replied to, archived or put off included.
+const waits = (item: InboxItem): boolean =>
+  item.kind !== "update" && item.status === "open" && choiceOf(item) !== "replied"
+
+// the change a write is made against, so a double click or a second tab cannot write it twice
+const unchanged = (current: InboxItem) =>
+  and(
+    eq(inboxItem.id, current.id),
+    eq(inboxItem.status, current.status),
+    eq(inboxItem.version, current.version),
+  )
+
+const CHANGED: Refused = {
+  code: "CONFLICT",
+  message: "This item changed since you read it",
+  ok: false,
+}
+
+// Archive: what still waits on him, or an update in his list, leaves the list and its count, unanswered, and its poster is told nothing, so it keeps waiting; Move back, Later or Dismiss takes it off the Archive shelf.
+async function archive(
+  db: Database,
+  current: InboxItem,
+  now: Date,
+): Promise<{ item: InboxItem; ok: true } | Refused> {
+  const dismissed = current.answer !== null && "dismissedAt" in current.answer
+  if ((!waits(current) && current.kind !== "update") || dismissed || archivedAt(current)) {
+    return {
+      code: "CONFLICT",
+      message: "Only an item that waits on you, or an update in your list, is archived",
+      ok: false,
+    }
+  }
+  const [row] = await db
+    .update(inboxItem)
+    .set({
+      answer: sql`(coalesce(${inboxItem.answer}, '{}'::jsonb) - 'snoozedUntil') || jsonb_build_object('archivedAt', ${now.toISOString()}::text)`,
+      updatedAt: now,
+      version: sql`${inboxItem.version} + 1`,
+    })
+    .where(unchanged(current))
+    .returning()
+  return row ? { item: toItem(row), ok: true } : CHANGED
+}
+
+// The step an Approve runs, by the decision's kind, and the answer key its result is kept under: an accept's `ext accept`, an apps change's write of the owner's list, a grant's System Settings pane, a guard setting's write at its scope, an own account change's write of usage.accounts; undefined for a decision whose poster carries it out, and a refusal when this dashboard has nothing to run it with.
+function stepOf(
+  preview: InboxPreview,
+  ref: number,
+  {
+    accept,
+    actor,
+    apps,
+    grant,
+    settingsData,
+  }: {
+    accept?: ExtRun
+    actor: string
+    apps?: OwnerApps
+    grant?: ArgvRun
+    settingsData?: string
+  },
+):
+  | { key: "accepted" | "listed" | "opened" | "owned" | "set"; run: () => Promise<RunResult> }
+  | { refusal: string }
+  | undefined {
+  if (preview.type === "accept") {
+    if (!accept) return { refusal: "This dashboard cannot run an accept" }
+    return { key: "accepted", run: () => acceptAll(accept, preview, ref) }
+  }
+  if (preview.type === "apps") {
+    if (!apps)
+      return { refusal: "This dashboard cannot change your apps: its extensions have no login" }
+    return {
+      key: "listed",
+      run: () =>
+        oneAppsChange(async () => {
+          const list = apps.read()
+          if (!list)
+            return {
+              exitCode: 1,
+              line: `your ${OWNER_APPS} list is not a list of names, so nothing changed`,
+            }
+          const changed = appsChange(list, preview)
+          if (!("list" in changed)) return changed
+          const ran = runResult(
+            await apps.run(appsArgs(apps.login, ref), JSON.stringify(changed.list)),
+          )
+          if (ran.exitCode !== 0) return ran
+          const verb = preview.change === "add" ? "added" : "removed"
+          return {
+            exitCode: 0,
+            line: `${verb} ${preview.app}; your apps are ${changed.list.join(", ") || "none"}`,
+          }
+        }),
+    }
+  }
+  if (preview.type === "grant") {
+    if (!grant) return { refusal: "This dashboard opens no System Settings: it shows test data" }
+    return {
+      key: "opened",
+      run: async () => {
+        const ran = runResult(await grant(grantArgv(preview)))
+        const pane = preview.permission === "accessibility" ? "Accessibility" : "Screen Recording"
+        return ran.exitCode === 0
+          ? { exitCode: 0, line: `opened System Settings at Privacy & Security > ${pane}` }
+          : ran
+      },
+    }
+  }
+  if (preview.type === "guard") {
+    if (!settingsData) return { refusal: "This dashboard cannot write a guard setting" }
+    return { key: "set", run: async () => guardWrite(settingsData, preview, ref, actor) }
+  }
+  if (preview.type === "own") {
+    if (!settingsData) return { refusal: "This dashboard cannot write usage.accounts" }
+    return { key: "owned", run: async () => ownWrite(settingsData, preview, ref, actor) }
+  }
+  return undefined
+}
+
+// Writes an own card's flag on its one row of usage.accounts at its scope as the owner's act, the list read whole and every other row put back as it was; a value that is not a list, or a row gone since the post, writes nothing.
+function ownWrite(data: string, preview: InboxOwn, ref: number, actor: string): RunResult {
+  const { key, own, scope } = preview
+  const value = accountsAt(data, scope)
+  if (!Array.isArray(value))
+    return { exitCode: 1, line: `${ACCOUNTS} at ${scope} is not a list, so nothing changed` }
+  const row = claudeRow(value, key)
+  if (!row)
+    return {
+      exitCode: 1,
+      line: `${key} is no longer in ${ACCOUNTS} at ${scope}, so nothing changed`,
+    }
+  if ((row.own === true) === own)
+    return { exitCode: 0, line: `${key} ${own ? "is" : "is not"} your own account already` }
+  const who = {
+    actor,
+    author: "owner",
+    inboxRef: ref,
+    reason: `the owner approved it in the Inbox (${itemTag(ref)})`,
+  }
+  const set = setSetting(data, { key: ACCOUNTS, scope, value: withOwn(value, key, own) }, who)
+  return set.ok
+    ? {
+        exitCode: 0,
+        line: `${key} ${own ? "is now" : "is no longer"} your own account at ${scope}`,
+      }
+    : { exitCode: 1, line: set.message }
+}
+
+// Writes a guard decision's setting into the data folder's extensions as the owner's act, the item named in its commit: its value at its scope, or no value there, which takes the key back to its default.
+function guardWrite(data: string, preview: InboxGuard, ref: number, actor: string): RunResult {
+  const who = {
+    actor,
+    author: "owner",
+    inboxRef: ref,
+    reason: `the owner approved it in the Inbox (${itemTag(ref)})`,
+  }
+  const { key, scope, value } = preview
+  if (value === undefined) {
+    const reset = resetSetting(data, { key, scope }, who)
+    return reset.ok
+      ? { exitCode: 0, line: `took ${key} at ${scope} back to its default` }
+      : { exitCode: 1, line: reset.message }
+  }
+  const set = setSetting(data, { key, scope, value }, who)
+  return set.ok
+    ? { exitCode: 0, line: `set ${key} at ${scope} to ${JSON.stringify(set.value)}` }
+    : { exitCode: 1, line: set.message }
+}
+
+// Move back: an archived item returns to the list as it was; a set-aside one (the old `clear`, or a Dismiss while it waited) goes back to open with no answer, so it can be answered again. Nothing is typed into its poster, since nothing was decided.
 async function unarchive(
   db: Database,
   current: InboxItem,
   now: Date,
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
-  // the Archived shelf's own rule: cleared and not yet dismissed to Done
-  if (
-    current.status !== "cleared" ||
-    (current.answer && "dismissedAt" in current.answer && current.answer.dismissedAt)
-  ) {
-    return { code: "CONFLICT", message: "Only an archived item moves back to the Inbox", ok: false }
+  if (archivedAt(current)) {
+    const [row] = await db
+      .update(inboxItem)
+      .set({
+        answer: sql`nullif(${inboxItem.answer} - 'archivedAt', '{}'::jsonb)`,
+        updatedAt: now,
+        version: sql`${inboxItem.version} + 1`,
+      })
+      .where(unchanged(current))
+      .returning()
+    return row ? { item: toItem(row), ok: true } : CHANGED
+  }
+  if (current.status !== "cleared") {
+    return {
+      code: "CONFLICT",
+      message: "Only an archived or set-aside item moves back",
+      ok: false,
+    }
   }
   const [row] = await db
     .update(inboxItem)
@@ -1069,17 +1810,33 @@ async function unarchive(
       updatedAt: now,
       version: sql`${inboxItem.version} + 1`,
     })
-    .where(
-      and(
-        eq(inboxItem.id, current.id),
-        eq(inboxItem.status, "cleared"),
-        sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
-        eq(inboxItem.version, current.version),
-      ),
-    )
+    .where(unchanged(current))
     .returning()
-  if (!row) return { code: "CONFLICT", message: "This item changed since you read it", ok: false }
-  return { item: toItem(row), ok: true }
+  return row ? { item: toItem(row), ok: true } : CHANGED
+}
+
+// Dismiss on what no longer waits on him (an answered item, a reply, an update, or one on Done he has not dismissed): it goes to Done marked dismissed, keeping when it first went there, and an update is read.
+async function dismissAnswered(
+  db: Database,
+  current: InboxItem,
+  now: Date,
+  telling?: Telling,
+): Promise<{ item: InboxItem; ok: true } | Refused> {
+  if (current.answer && "dismissed" in current.answer && current.answer.dismissed) {
+    return { code: "CONFLICT", message: "This item is already dismissed", ok: false }
+  }
+  const [row] = await db
+    .update(inboxItem)
+    .set({
+      answer: sql`(coalesce(${inboxItem.answer}, '{}'::jsonb) - 'archivedAt' - 'snoozedUntil') || jsonb_build_object('dismissed', true, 'dismissedAt', coalesce(${inboxItem.answer} ->> 'dismissedAt', ${now.toISOString()}::text))`,
+      readAt: sql`coalesce(${inboxItem.readAt}, ${now})`,
+      updatedAt: now,
+      version: sql`${inboxItem.version} + 1`,
+    })
+    .where(unchanged(current))
+    .returning()
+  if (!row) return CHANGED
+  return { item: await tellClosed(db, toItem(row), "dismiss", current, telling), ok: true }
 }
 
 // How often a queued answer is read again: deliver() types nothing for it, and reads it delivered once its transcript shows it, or lost QUEUED_MS on.
@@ -1281,9 +2038,17 @@ export async function provideSecret(
     actor,
     deliver,
     dispatcher,
+    keychain,
     now = new Date(),
     run,
-  }: { actor: ActivityActor; deliver?: Deliver; dispatcher?: string; now?: Date; run: SinkRun },
+  }: {
+    actor: ActivityActor
+    deliver?: Deliver
+    dispatcher?: string
+    keychain?: KeychainSave
+    now?: Date
+    run: SinkRun
+  },
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
@@ -1291,6 +2056,10 @@ export async function provideSecret(
     return { code: "VALIDATION_ERROR", message: "Only a secret ask takes a value", ok: false }
   }
   const { key, sink } = current.preview
+  // a paste off the item's shape is refused before the claim, so the card stays open for the right one
+  const spec = sink.type === "keychain" ? keychainSpec(sink.item) : null
+  if (spec && !spec.valid.test(value))
+    return { code: "VALIDATION_ERROR", message: spec.invalid, ok: false }
   if (seen !== undefined && seen !== current.updatedAt) {
     return {
       code: "CONFLICT",
@@ -1319,9 +2088,11 @@ export async function provideSecret(
     .returning()
   if (!claimed) return { code: "CONFLICT", message: "This item is already answered", ok: false }
   const results: SinkResult[] = []
-  for (const environment of sink.environments) {
-    results.push({ environment, exitCode: await run(sinkArgv(key, sink, environment), value) })
-  }
+  if (sink.type === "keychain") results.push(await saveKeychain(sink.item, value, keychain))
+  else
+    for (const environment of sink.environments) {
+      results.push({ environment, exitCode: await run(sinkArgv(key, sink, environment), value) })
+    }
   const answer: InboxProvided = { at, choice: "provided", results }
   // merged key by key, so a poster's read that landed while the sink ran keeps its close
   const [row] = await db
@@ -1338,6 +2109,68 @@ export async function provideSecret(
     item: await send(db, item, textsOf(item, answer), { actor, deliver, dispatcher, now }),
     ok: true,
   }
+}
+
+// A keychain sink's one result: saved, or the writer's first line, which names the refusal and never the value.
+async function saveKeychain(
+  item: string,
+  value: string,
+  keychain: KeychainSave | undefined,
+): Promise<SinkResult> {
+  if (!keychain)
+    return { environment: "Keychain", exitCode: 1, line: "no Keychain writer on this stack" }
+  try {
+    await keychain(item, value)
+    return { environment: "Keychain", exitCode: 0, line: "saved" }
+  } catch (error) {
+    const line = (error instanceof Error ? error.message : "the save failed").split("\n")[0] ?? ""
+    return { environment: "Keychain", exitCode: 1, line: line.split(value).join("…") }
+  }
+}
+
+// Reads a reveal card's Keychain item for the owner's Show or Copy, and only while the card is open and not archived, so an old card is no standing read handle. It writes nothing: the value is in no row, delivery, log or refusal, only in what it returns.
+export async function revealSecret(
+  db: Database,
+  id: string,
+  read: KeychainRead,
+): Promise<{ ok: true; value: string } | Refused> {
+  const item = await getItem(db, id)
+  if (!item || item.id !== id) return NOT_FOUND
+  if (item.kind !== "decision" || item.preview.type !== "reveal") {
+    return { code: "VALIDATION_ERROR", message: "Only a reveal card shows a value", ok: false }
+  }
+  if (item.status !== "open" || archivedAt(item) !== null) {
+    return { code: "CONFLICT", message: "This card is closed, so it shows nothing", ok: false }
+  }
+  const value = await read(item.preview.service)
+  if (value === null) {
+    return { code: "NOT_FOUND", message: "That Keychain item holds no value", ok: false }
+  }
+  return { ok: true, value }
+}
+
+const REVEALED: Refused = {
+  code: "VALIDATION_ERROR",
+  message: "That is the card's value: it stays out of a comment",
+  ok: false,
+}
+
+// A playground- item may hold a value as short as 1 character (keychainSpec), which a substring match would find in most comments, so a shorter value is no match.
+const REVEAL_MATCH_MIN = 8
+
+// Whether his words hold a reveal card's value, read again from the Keychain, so a Copy pasted into the card's own comment never reaches its poster; false on any other card, with no words, with no reader or for a value shorter than REVEAL_MATCH_MIN.
+async function holdsRevealed(
+  item: InboxItem,
+  words: (string | undefined)[],
+  read: KeychainRead | undefined,
+): Promise<boolean> {
+  if (!read || item.kind !== "decision" || item.preview.type !== "reveal") return false
+  const said = words.filter((word): word is string => Boolean(word?.trim()))
+  if (said.length === 0) return false
+  const value = await read(item.preview.service)
+  return (
+    value !== null && value.length >= REVEAL_MATCH_MIN && said.some((word) => word.includes(value))
+  )
 }
 
 // Keeps how many files a send shared in its answer, 0 on a stack that shares none, so a Retry after the words failed to type shares none twice.
@@ -1367,7 +2200,7 @@ async function recordDelivery(
   return row ? toItem(row) : getItem(db, id)
 }
 
-// Pushes an open decision or draft out of his list until a time, recorded in its answer's snoozedUntil, which answering or a chat reply replaces at once; the poster waits as before. A chat reply its poster has not closed is replaced in turn, since he puts away an item he opened again from its card.
+// Later: pushes an open decision or draft, or an update in his list, out of it until a time, recorded in its answer's snoozedUntil, which answering or a reply replaces at once; the poster waits as before, and an archived one leaves the Archive shelf for it. A reply its poster has not closed is replaced in turn, since he puts away an item he opened again from its card.
 export async function scheduleItem(
   db: Database,
   id: string,
@@ -1376,16 +2209,19 @@ export async function scheduleItem(
 ): Promise<{ item: InboxItem; ok: true } | Refused> {
   const current = await getItem(db, id)
   if (!current || current.id !== id) return NOT_FOUND
-  if (current.kind === "update" || current.status !== "open") {
+  const answer = current.answer
+  if (
+    (current.kind !== "update" && current.status !== "open") ||
+    (answer !== null && "dismissedAt" in answer)
+  ) {
     return {
       code: "CONFLICT",
-      message: "Only an open decision or draft can be scheduled",
+      message: "Only an open decision or draft, or an update in your list, can be scheduled",
       ok: false,
     }
   }
-  const answer = current.answer
-  const replied = answer !== null && "choice" in answer
-  if (replied && (answer.choice !== "replied" || answer.ackedAt)) {
+  const replied = current.kind !== "update" && answer !== null && "choice" in answer
+  if (replied && (answer.choice !== "replied" || ("ackedAt" in answer && answer.ackedAt))) {
     return { code: "CONFLICT", message: "This item already has your answer", ok: false }
   }
   if (new Date(at).getTime() <= now.getTime()) {
@@ -1396,23 +2232,17 @@ export async function scheduleItem(
     .set({
       answer: replied
         ? { snoozedUntil: at }
-        : sql`coalesce(${inboxItem.answer}, '{}'::jsonb) || jsonb_build_object('snoozedUntil', ${at}::text)`,
+        : sql`(coalesce(${inboxItem.answer}, '{}'::jsonb) - 'archivedAt') || jsonb_build_object('snoozedUntil', ${at}::text)`,
       updatedAt: now,
       version: sql`${inboxItem.version} + 1`,
     })
-    .where(
-      and(
-        eq(inboxItem.id, id),
-        eq(inboxItem.status, "open"),
-        eq(inboxItem.version, current.version),
-      ),
-    )
+    .where(unchanged(current))
     .returning()
   if (!row) return { code: "CONFLICT", message: "This item is already answered", ok: false }
   return { item: toItem(row), ok: true }
 }
 
-// A chat reply he sent naming the item (`re #iN`, recorded by routers/dashboard.ts once the message is out): the time and his words (saidOf). Nothing else changes: the item waits on its poster closing it, which the sweep keeps chasing.
+// A reply he sent naming the item (`re #iN`, recorded once it is out, by routers/dashboard.ts for a chat message and by replyItem for a card's Reply): the time and his words (saidOf). Nothing else changes: the item waits on its poster closing it, which the sweep keeps chasing.
 export async function recordReply(
   db: Database,
   ref: number,
@@ -1438,6 +2268,50 @@ export async function recordReply(
     )
     .returning()
   return row ? toItem(row) : null
+}
+
+// What a card's Reply posts: his comment alone.
+export const replyInputSchema = z.strictObject({ text: words })
+
+export type ReplyInput = z.input<typeof replyInputSchema>
+
+// Reply on a card: his comment alone, typed as `re #iN: <words>` into its poster, or into the dispatcher once the poster has ended, and kept as a reply is (recordReply) on an open decision or draft with no answer yet, so it waits on its poster's edit or close; any other card keeps its answer and delivery as they were. One that reached no session is refused with why, recording nothing.
+export async function replyItem(
+  db: Database,
+  id: string,
+  input: ReplyInput,
+  {
+    actor,
+    deliver,
+    dispatcher,
+    now = new Date(),
+    reveal,
+  }: Omit<Telling, "now" | "wait"> & { now?: Date; reveal?: KeychainRead },
+): Promise<
+  { item: InboxItem; ok: true } | Refused | { code: "UNDELIVERED"; message: string; ok: false }
+> {
+  const parsed = replyInputSchema.safeParse(input)
+  if (!parsed.success) {
+    return { code: "VALIDATION_ERROR", message: zodMessage(parsed.error), ok: false }
+  }
+  const current = await getItem(db, id)
+  if (!current || current.id !== id) return NOT_FOUND
+  if (await holdsRevealed(current, [parsed.data.text], reveal)) return REVEALED
+  const text = `re ${itemTag(current.ref)}: ${parsed.data.text}`
+  const one = (to: string) => ({ actor, id: crypto.randomUUID(), text, to })
+  let delivery = await attempt(deliver, one(current.from), now)
+  if (dispatcher && current.from !== dispatcher && posterGone(delivery)) {
+    delivery = await attempt(deliver, one(dispatcher), now)
+  }
+  if (delivery.status === "failed") {
+    return {
+      code: "UNDELIVERED",
+      message: `Your comment did not send: ${delivery.reason}`,
+      ok: false,
+    }
+  }
+  const recorded = await recordReply(db, current.ref, now, text)
+  return { item: recorded ?? current, ok: true }
 }
 
 // The poster closes its answer (`bun run ask ack`): a go with where it landed (`link`) or why there is none (`noLink`), anything else as it is; its delivery is done by the CLI.
@@ -1525,7 +2399,7 @@ async function recordAck(
   return linked ?? acked ?? item
 }
 
-// The ack's stamp, the first close's time, and with it why a go has no link, in one write; a closed answer moves to Done at once, as his Dismiss moves it, keeping an earlier Dismiss's time, but for one he set aside, which stays on the Archived shelf until he dismisses it.
+// The ack's stamp, the first close's time, and with it why a go has no link, in one write; a closed answer moves to Done at once, as his Dismiss moves it, keeping an earlier Dismiss's time, but for one he set aside, which stays on the Archive shelf until he dismisses it.
 async function stamp(db: Database, id: string, now: Date, noLink?: string): Promise<void> {
   const at = sql`${now.toISOString()}::text`
   const dismissal = sql`case when ${inboxItem.answer} ->> 'choice' = 'clear' then '{}'::jsonb else jsonb_build_object('dismissedAt', coalesce(${inboxItem.answer} ->> 'dismissedAt', ${at})) end`
@@ -1566,7 +2440,7 @@ export async function staleItems(
   return rows.map(toItem)
 }
 
-// Every item still open (a decision or draft not yet answered, a snoozed one and one answered in chat included, until it moves to Done), oldest first, one sender's alone when from is given: what a session reads before it posts, so it names an open item on the same thing rather than posting it twice (`bun run ask open`).
+// Every item still open (a decision or draft not yet answered, one put away with Later and one answered in chat included, until it moves to Done), oldest first, one sender's alone when from is given: what a session reads before it posts, so it names an open item on the same thing rather than posting it twice (`bun run ask open`).
 export async function openItems(db: Database, from?: string): Promise<InboxItem[]> {
   const rows = await db
     .select()
@@ -1582,13 +2456,24 @@ export async function openItems(db: Database, from?: string): Promise<InboxItem[
   return rows.map(toItem)
 }
 
-// Moves the answered decisions and drafts, those he replied to in chat included, and the updates named to Done at once, recording when inside their answer, so no column is added, and marks an update read, keeping when it was read; an open decision or draft asks something of him and is left.
-export async function dismissItems(db: Database, ids: string[], now = new Date()): Promise<number> {
+// Done: moves the answered decisions and drafts, those he replied to included, and the updates named to Done at once, recording when inside their answer, so no column is added, waking any he put off or archived, and marks an update read, keeping when it was read; an open decision or draft asks something of him and is left.
+export async function dismissItems(
+  db: Database,
+  ids: string[],
+  now = new Date(),
+  telling?: Omit<Telling, "now">,
+): Promise<number> {
   if (ids.length === 0) return 0
+  const before = new Map(
+    (await db.select().from(inboxItem).where(inArray(inboxItem.id, ids))).map((row) => [
+      row.id,
+      toItem(row),
+    ]),
+  )
   const rows = await db
     .update(inboxItem)
     .set({
-      answer: sql`coalesce(${inboxItem.answer}, '{}'::jsonb) || jsonb_build_object('dismissedAt', ${now.toISOString()}::text)`,
+      answer: sql`(coalesce(${inboxItem.answer}, '{}'::jsonb) - 'archivedAt' - 'snoozedUntil') || jsonb_build_object('dismissedAt', ${now.toISOString()}::text)`,
       readAt: sql`coalesce(${inboxItem.readAt}, ${now})`,
       updatedAt: now,
       version: sql`${inboxItem.version} + 1`,
@@ -1604,7 +2489,15 @@ export async function dismissItems(db: Database, ids: string[], now = new Date()
         inArray(inboxItem.id, ids),
       ),
     )
-    .returning({ id: inboxItem.id })
+    .returning()
+  // Done tells an update's poster done, so it posts a new card rather than editing this one; an answered card's poster hears nothing
+  for (const row of rows) {
+    const item = toItem(row)
+    const was = before.get(row.id)
+    if (telling && was && item.kind === "update") {
+      await tellClosed(db, item, "done", was, { ...telling, now })
+    }
+  }
   return rows.length
 }
 
@@ -1666,7 +2559,7 @@ async function recordLink(
   return row ? toItem(row) : null
 }
 
-// The poster closes its own open decision or draft (`bun run ask settle`), when it was decided another way: it reads Answered by the poster, with the note, and goes to Done at once, as a closed answer does. One the owner has answered is refused, as is a chat reply its poster has acked (a settle would replace its answer) and an update, which asks nothing.
+// The poster closes its own open decision or draft (`bun run ask settle`), when it was decided another way: it reads Decided by the poster, with the note, and goes to Done at once, as a closed answer does. One the owner has answered is refused, as is a reply its poster has acked (a settle would replace its answer) and an update, which asks nothing.
 export async function settleItem(
   db: Database,
   key: string,

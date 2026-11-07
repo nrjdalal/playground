@@ -7,7 +7,7 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
 ## Workflow
 
 - ALWAYS: Do every change in its own git worktree, never on the primary checked-out branch.
-  Create it under `.claude/worktrees/` (repo-root relative, one directory per worktree; never `/tmp`, home, or a sibling of the repo), and fork its branch from the latest `canary`: fetch first, then branch from `origin/canary` (`git fetch origin canary && git worktree add .claude/worktrees/<name> -b <branch> origin/canary`, then `bun install` in it, which its git hooks need,
+  Create it under `.claude/worktrees/` (repo-root relative, one directory per worktree; never `/tmp`, home, or a sibling of the repo), and fork its branch from the latest `canary`: fetch first, then branch from `origin/canary` (`git fetch origin canary && git worktree add --no-track .claude/worktrees/<name> -b <branch> origin/canary`, then `bun install` in it, which its git hooks need,
   through `~/.playground/ops/run-slot.sh <your name> --` in a factory session), so the change builds on current main, and set up its `.env`, or none, by the `dev` skill's Start.
 - ALWAYS: Settle a new or altered database schema before generating or applying a migration: work goes ahead on its own, but a breaking change goes through the owner first.
   Show the shape and name the choices that are costly to reverse; a shape is cheap to argue about and expensive to change once rows exist, and the live dashboard's database already holds real ones.
@@ -39,7 +39,7 @@ Start each task with the `codebase-map` skill to orient, then load the task skil
 - ALWAYS: Use `@/` for imports, if applicable.
   An API file the web's tests import is the exception: it imports relatively (`api/hono/src/plugins/changelog/image-id.ts`), since `@/` resolves to `web/next/src` there.
 - ALWAYS: Put every test under the repo-root `tests/` directory, mirroring the path of the file it covers (`api/hono/src/lib/dashboard/account.ts` is tested by `tests/api/hono/src/lib/dashboard/account.test.ts`).
-  One `bun run test` runs the suite and `bun run test:file <paths>` runs some of it, skipping the build; a package never carries its own `test/` directory or `test` script.
+  One `bun run test` runs the suite and `bun run test:file <paths>` runs some of it, building only what its files import; a package never carries its own `test/` directory or `test` script.
   Read [.agents/testing.md](./.agents/testing.md) before you write or run a test: the sandbox, the parallel pass and `SERIAL`, its traps.
 - ALWAYS: Put a new build or tooling script in `packages/scripts/src/`, and declare the dependencies it imports on that package.
   It is a real workspace package, so `turbo prune` carries it into the Docker build without an extra COPY.
@@ -115,7 +115,7 @@ On a worktree's stack the dashboard then shows the fixture's made-up sessions un
 
 ZeroStarter's skills live in `skills/zerostarter`, which `.agents/skills` (the path ZeroStarter's CLI syncs through), `.claude/skills` and `.github/skills` link to, so every agent tool reads the same files.
 A ZeroStarter sync also overlays `lefthook.yml` with the starter's and drops the docs this repo adds to the docs-wrap job's glob, so after one, restore each until `tests/lefthook.test.ts` passes, then run `bun node_modules/.bin/lefthook install`, since the sync's own install rewrote the shared `.git/hooks` outside run-slot.
-Its publish-step files (`auto-release.yml`, `changelog.config.json`, `release-version.ts`, `changelog-manager.ts`, the `changelogen` catalog entry) stay out, since they commit and tag on `canary`.
+Its publish-step files (`auto-release.yml`, `changelog.config.json`, `release-version.ts`, `changelog-manager.ts`, the `changelogen` catalog entry) stay out, since they commit and tag on `canary`; a ship's GitHub release notes still take their shape, rendered at the ship by `bun run release:notes` with no commit (the `release` skill's step 4).
 In `skills/zerostarter/.sync.json`, each skill that takes the update keeps the entry the sync wrote, so `skills-manager.ts --outdated` reads it as synced rather than edited here.
 Each is a `SKILL.md` with a `description` trigger and a literal procedure; only the description is scanned until a skill matches.
 Start with `codebase-map` to orient, then load the task skill that fits.
@@ -213,7 +213,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 - ALWAYS: Send every link in a Slack post as a link chip in its full shape; `no-bare-slack-link` refuses a factory session's post holding a URL no chip carries, and its reason gives the chip ([scripts/hooks/README.md](./scripts/hooks/README.md)).
 - ALWAYS: Feed a row of `tests/scripts/hooks/fixtures/refused-forms/` to a guard only as `check()` input, whatever HOME or folder is set, since each row is a command that does what it says and can name a path outside HOME; `tests/scripts/hooks/fixtures-are-data.test.ts` holds the fixture's importers to it.
 - A factory session starts another only through `scripts/spawn.sh`, whose capacity gate, backends, models, runtimes, resume and restore are in [scripts/README.md](./scripts/README.md#spawnsh): read it before you change spawn.sh or when it refuses a start you did not expect;
-  `no-raw-spawn` refuses a cmux call that opens a claude session, and every herdr call but a read or one to a scratch world of the session's own.
+  `no-raw-spawn` refuses every cmux call but its help or version, and every herdr call but a read or one to a scratch world of the session's own.
 - The herdr servers belong to one ops job, `bun run ops:herdr`, on the binary and config its `pin.json` names ([scripts/README.md](./scripts/README.md#the-herdr-servers)), read before you change that job or herdr's pinned binary or config.
 - The factory's hooks: read a hook's section of [scripts/hooks/README.md](./scripts/hooks/README.md) before you change it, its tests or its registration, and when it refuses a call you did not expect, since the README holds each one in full and its reason names the fix.
   Five have their own lines above (`no-bare-slack-link`, `no-linear-ticket`, `no-playground-leak`, `no-raw-spawn`, `no-release-comment`);
@@ -224,7 +224,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
 
 Playground's sessions run as a factory: the dispatcher manages, the Builder leads the workers (`<id>-worker`), Ops leads the runners (`<id>-runner`) and the ops jobs, and a probe (`<id>-probe`) lives for one test.
 
-- ALWAYS: Load [playbook](./extensions/core/skills/playbook/SKILL.md) when you are one of those sessions, or before you spawn, brief, rename or end a cmux session.
+- ALWAYS: Load [playbook](./extensions/core/skills/playbook/SKILL.md) when you are one of those sessions, or before you spawn, brief, rename or end a session.
   Its roles, chain, lifecycle, sweep and standing rules bind every session in the factory.
 - ALWAYS: Signal only processes you started; never select pids by name or pattern.
   A pattern matches the live dashboard and every worker's stack.
@@ -245,22 +245,21 @@ When a dashboard rule's meaning changes, its ALWAYS line here changes with it.
   - ALWAYS: Serve first run's setup with none of the app's database or auth code loaded: with `POSTGRES_URL` empty, `api/hono/src/main.ts` serves `firstRun()`'s setup routes, `GET /api/v1/onboard/checks`, the first run's fix routes and a `setup: true` `GET /api/health` alone until Start a local container finishes, whose database is pglaunch's as is.
   - ALWAYS: A person's stack reads their own machine, while factory, test and `PLAYGROUND_FIXTURE` stacks read the fixture, the live dashboard's checkout reads the live machine and a hosted build reads none, as `dashboardSource()` in `api/hono/src/lib/dashboard/fixture.ts` decides.
   - ALWAYS: Keep it on loopback: the API, `next dev` and the live dashboard's built next server bind 127.0.0.1, and the dashboard is never deployed.
-    The hosted build is the one exception (stack.md's hosted rule): under `PLAYGROUND_HOSTED=1` it deploys, mounting only sign-in, health and Yard's routes (`api/hono/src/hosted.ts`).
+    The hosted build is the one exception (stack.md's hosted rule): it deploys, mounting only sign-in, health and Yard's routes.
   - ALWAYS: Keep the hosted build to its allowlist: `api/hono/src/index.ts` imports `hosted.ts` under `PLAYGROUND_HOSTED=1` and `local.ts` otherwise, and fails closed: `hosted.ts` without the flag, and a local build on Vercel, refuse to start.
+  - ALWAYS: Carry only the GETs on `RELAY_GETS` and the POSTs on `RELAY_WRITES` that the paired key signs (`api/hono/src/lib/relay/protocol.ts`) through the relay.
   - ALWAYS: Stop `bun run dev` before running `bun run build`, `bun run check-types` or `bun run test`, or committing, in the same worktree.
   - ALWAYS: Keep the dashboard on the owner rung: every route and the WebSocket pass `requireConsoleRole("owner")`, but first run's setup routes, which serve before any user exists.
     Under `PLAYGROUND_HOSTED=1` Yard's routes take the `member` rung or the one their route names (stack.md's hosted rule).
   - ALWAYS: Keep the `claude_*` tables (`packages/db/src/schema/claude.ts`: each stored session's transcript, line by line, Playground's own alone unless the stack opts in) in the dashboard's local Postgres on 127.0.0.1, never a shared database.
   - ALWAYS: Read an organisation's own values from `packages/config/src/org.ts`, and every file the dashboard keeps outside the database from its data folder, `dataDir()`.
-- Cmux: read `.agents/dashboard/cmux.md` before you change a cmux or herdr call, how a session counts as live, how often the board refreshes or the System panel's commands.
-  cmux is deprecated: it takes no new work, only a fix for a break, and herdr is the terminal.
-  - ALWAYS: Route every cmux call through `api/hono/src/lib/dashboard/cmux.ts`, which takes only the reads in `READ_COMMANDS`, one session's own writes and `reply()`'s answer to one pending Feed prompt.
+- Herdr: read `.agents/dashboard/herdr.md` before you change a herdr call, how a session counts as live, how often the board refreshes or the System panel's commands.
   - ALWAYS: Route every herdr call through `api/hono/src/lib/dashboard/herdr.ts`, the terminal the dashboard reads every session from.
   - ALWAYS: Count a session record as live only through `liveRecords()`, which `listLive` applies to herdr's records before any read.
   - ALWAYS: Run the System panel's commands only through `api/hono/src/lib/system/probe.ts`, whose `COMMANDS` holds each one's fixed argv.
 - Messages: read `.agents/dashboard/messages.md` before you change how a message, a file or an answer reaches a session, the composer, the session the dashboard hosts on the Agent SDK, how a transcript renders, or the outbox and the stream's scroll.
   - ALWAYS: Send anything to a session through `deliver()` in `api/hono/src/lib/dashboard/deliver.ts`, and only for the owner's own clicks, since its text reads as the owner's.
-  - ALWAYS: Send a herdr session (cmux.md) the message as one `agent.prompt` through `prompt()` in herdr.ts, from `deliver()` alone.
+  - ALWAYS: Send a herdr session (herdr.md) the message as one `agent.prompt` through `prompt()` in herdr.ts, from `deliver()` alone.
   - ALWAYS: Reach the session the dashboard hosts on the Claude Agent SDK only through `api/hono/src/lib/dashboard/sdk.ts`.
   - ALWAYS: Keep a message's files in the owner-only attachments folder, never in a database.
   - ALWAYS: Render text from a session's transcript through `TranscriptMarkdown`, or give your own Streamdown its `TRANSCRIPT_COMPONENTS` and `transcriptUrlTransform`.
@@ -292,7 +291,7 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
    The Changelog (`api/hono/src/plugins/changelog/sources.ts`) reads a body's `Outcome:` line, else the TL;DR's first bullet or a prose TL;DR's first sentence.
    Before the review's round 1, settle in your own pass what a round should never spend its turn on (most late findings were docs, skill, body and wording ones): run doc-sync over the change, give each touched doc and skill a writing-for-agents read (a completion criterion on every step, positive phrasing, reference disclosed into sibling files, one meaning in one place),
    and fill the template above; the reviewer still judges everything.
-   When the diff adds a member to an enumerated kind (a status, a type, a choice, a button), grep the repo for the wording of every list that names that kind's members (`git grep -n "Archive, Snooze"`) and update each hit: one such grep once found what six review rounds had found piece by piece.
+   When the diff adds a member to an enumerated kind (a status, a type, a choice, a button), grep the repo for the wording of every list that names that kind's members (`git grep -n "Later, Archive"`) and update each hit: one such grep once found what six review rounds had found piece by piece.
    As part of that doc-sync pass, run the changed-term grep for each term whose meaning the diff changes (a behaviour, a rule, what a command does): `git grep -l <term>` over the agent-facing and web docs, then update every hit still describing the old meaning, since one PR took 7 rounds, each finding one more doc that did.
    After you merge `canary` into the branch, run that grep for what the incoming commits changed: list each term whose meaning they changed (`git log -p HEAD^1..HEAD^2` while the merge commit is `HEAD`), grep the PR's own changed docs for each,
    and fix every line still describing the old meaning in a commit after the merge before you ask for the next round, since one PR spent two docs-only rounds, about 24 minutes, on lines a merged change had made stale; done when no line of the PR's docs describes a meaning those commits changed.

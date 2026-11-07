@@ -179,7 +179,7 @@ describe("the composer's sources", () => {
     const composer = await read("dashboard/composer.tsx")
     expect(composer).toContain("const words = submittable(value.text)")
     // judged on what the send would carry, so a lone backslash sends nothing
-    expect(composer).toContain("text: withReply(words, picked, skills)")
+    expect(composer).toContain("text: words,")
     // the refusal judges the words as the typing will hold them, trimmed, so x\ \ is refused, not typed as x\
     expect(composer).toContain("comparable(words).endsWith")
   })
@@ -213,6 +213,17 @@ describe("the composer's sources", () => {
     expect(composer).not.toContain("RiChatThread")
   })
 
+  // the arrow once sat at the badge's 12px and the close at Remix's own 24px in a bare button
+  test("the reply chip shows the badge's arrow and no close, since the words that name the item are what he edits to drop it", async () => {
+    const chip =
+      (await read("dashboard/composer.tsx")).match(
+        /<Badge variant="secondary"[\s\S]*?<\/Badge>/,
+      )?.[0] ?? ""
+    expect(chip).toContain("<RiReplyLine aria-hidden />")
+    expect(chip).not.toContain("InputGroupButton")
+    expect(chip).not.toContain("<button")
+  })
+
   test("its icons are Remix: no lucide icon", async () => {
     for (const path of ["dashboard/composer.tsx", "dashboard/mode-picker.tsx"]) {
       expect(await read(path)).not.toContain("lucide")
@@ -220,7 +231,7 @@ describe("the composer's sources", () => {
   })
 })
 
-// Two boxes share a page once the aside holds Playground's chat beside a session's own, so each takes its own id, and an Inbox card's Chat about it finds Playground's by the bare one.
+// Two boxes share a page once the aside holds Playground's chat beside a session's own, so each takes its own id, Playground's the bare one.
 describe("composerId", () => {
   const dispatcher = { name: "dispatcher", role: "dispatcher" as const }
   test("Playground's own box keeps the bare id", () => {

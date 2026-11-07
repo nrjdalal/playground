@@ -22,8 +22,10 @@ dispatcher's sessions run on it, and the stored login's only when none of them r
 usage.json's `rotation` is login-flip.json's: `pool`, each account login-flip.py switches between (its TARGETS), whether its plan ends, when, and the day of the month a renewing one renews.
 usage.json keeps the shape the dashboard reads (rate_limits.{five_hour,seven_day}.{used_percentage,resets_at}, writtenAt), plus account
 and source. No model call but that probe. One instance (flock).
+Each cycle also runs packages/scripts/src/statusline-cost/cli.ts, which writes the status line's two retail $ figures, so the status line's own
+ccusage refresh never fires; a failed or timed-out run leaves the last figures as they are and shows in the beat's detail.
 """
-import datetime, fcntl, json, os, subprocess, sys, time, urllib.request
+import datetime, fcntl, json, os, shutil, subprocess, sys, time, urllib.request
 
 HERE = os.path.expanduser("~/.playground/ops/usage")  # the state folder by name, so a run by its repo path still reads the live state
 OPS = os.path.dirname(HERE)
@@ -36,7 +38,7 @@ API = os.environ.get("PLAYGROUND_USAGE_API") or "https://api.anthropic.com/api/o
 PROBE_URL = os.environ.get("PLAYGROUND_PROBE_URL") or "https://api.anthropic.com/v1/messages"  # the new-user gate points it at a closed loopback port, so its made-up token never leaves the Mac
 STARTED = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 sys.path.insert(0, OPS)
-from beat import beat, setting  # noqa: E402
+from beat import beat, checkout, setting  # noqa: E402
 
 PROBE_MODEL, SERVICE = setting("models.probe"), setting("usage.keychainService")
 
@@ -219,8 +221,20 @@ def added_reading(stored, flip, added):
     return None
 
 
+def statusline_cost(cli=None, timeout=120):
+    """Runs the status line's $ reader once; None when it wrote its figures, else the problem. The CLI writes each file whole by a rename, so a failure leaves the last ones."""
+    cli = cli or os.path.join(checkout(), "packages", "scripts", "src", "statusline-cost", "cli.ts")
+    bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
+    try:
+        r = subprocess.run([bun, "--no-env-file", cli, "--state", os.path.join(OPS, "statusline-cost.json")], capture_output=True, text=True, errors="replace", timeout=timeout, cwd="/")
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return f"statusline cost: {type(e).__name__}"
+    return None if r.returncode == 0 else f"statusline cost: exit {r.returncode}: {r.stderr.strip()[-120:]}"
+
+
 while True:
     problems, stored, data, no_login = [], None, None, False
+    cost_problem = statusline_cost()
     # The factory's accounts, usage.accounts read each cycle so a change lands with no restart: the Dashboard's Add a Claude account writes them, and marks and alerts count these alone.
     try:
         FACTORY = [a["email"] for a in setting("usage.accounts") if a.get("provider", "claude") == "claude"]
@@ -278,5 +292,8 @@ while True:
         result = ("error: " + "; ".join(problems))[:120]
     if data and problems:
         detail += " (" + "; ".join(problems)[:200] + ")"
+    # the status line's figures are not usage.json's, so a failed run shows in the detail and leaves the job's result alone
+    if cost_problem:
+        detail += f" ({cost_problem})"
     beat("ops-usage", os.getpid(), STARTED, CYCLE, result, {"detail": detail})
     time.sleep(CYCLE)

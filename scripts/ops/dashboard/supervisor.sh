@@ -21,6 +21,8 @@ DEVLOG="$S/dev.log"
 INGLOG="$DATA/dashboard-ingest.log"
 OPS=$(dirname "$D")
 BAD="$S/bad-builds"
+# prebuild's clone, install and build queue in run-slot as ops-dashboard when the data folder holds it (a fork or a machine with no ops runs them bare), each checked every PREBUILD_POLL s; one queued PREBUILD_SLOW s logs once that it still waits, and keeps waiting
+RS=$DATA/ops/run-slot.sh RUNS=$DATA/ops/run-slot.runs.log PREBUILD_SLOW=1200 PREBUILD_POLL=5
 # 12 Oct (the owner saw "Network request failed" errors on the API grow frequent; five rolls 16:21-16:59Z each restarted the API):
 # every roll, an upstream move included, waits ROLL_GAP after the last and for OWNER_IDLE with no owner action (a dashboard message or an Inbox
 # answer), batching what lands meanwhile, or ROLL_GAP alone when the owner's idle cannot be read while the dashboard's Postgres runs (roll_due); a file named roll-now in its state folder (ops/dashboard) rolls at once, for a fix to live breakage
@@ -40,7 +42,7 @@ trash_build() { [ -e "$1" ] || return 0; bun --no-env-file "$D/../../../packages
 set_aside() { [ -e "$1" ] || return 0; local aside; aside="$1.aside-$(date +%s)"; mv "$1" "$aside" || return 1; trash_build "$aside" "$2" || :; }
 result() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >> "$RESULTS"; say "RESULT $*"; }
 
-# The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; NODE_ENV and SKIP_ENV_VALIDATION_SERVER let it build before first run writes its .env, whose values the stack reads at its start; a failure prints its last error line; $1 is the tree it builds, the checkout by default, or prebuild's staging worktree
+# The head's production build, kept in $S/builds/<sha> outside the checkout: made by bun run build when it is missing, or when it was built for other URLs, since next bakes NEXT_PUBLIC_APP_URL and NEXT_PUBLIC_API_URL into its client and auth bakes HONO_APP_URL's host; NODE_ENV and SKIP_ENV_VALIDATION_SERVER let it build before first run writes its .env, whose values the stack reads at its start; a failure prints its last error line; $1 is the tree it builds, the checkout by default, or prebuild's staging worktree, whose build ($2 set) goes through slot_step
 build_head() {
   local src=${1:-.} sha dir was started out
   sha=$(git -C "$src" rev-parse HEAD); dir=$S/builds/$sha
@@ -51,7 +53,8 @@ build_head() {
     say "rebuilding ${sha:0:7}: its build was for ${was:-no URLs}, the Dashboard is now on $WEB $API"
   fi
   say "building ${sha:0:7} for $WEB $API"; started=$(date +%s)
-  if ! out=$(cd "$src" && HONO_APP_URL=$API HONO_TRUSTED_ORIGINS=$WEB NEXT_PUBLIC_API_URL=$API NEXT_PUBLIC_APP_URL=$WEB NODE_ENV=production SKIP_ENV_VALIDATION_SERVER=true bun run build 2>&1); then
+  local via=(); [ -z "${2:-}" ] || via=(slot_step build .)
+  if ! out=$(cd "$src" && HONO_APP_URL=$API HONO_TRUSTED_ORIGINS=$WEB NEXT_PUBLIC_API_URL=$API NEXT_PUBLIC_APP_URL=$WEB NODE_ENV=production SKIP_ENV_VALIDATION_SERVER=true "${via[@]}" bun run build 2>&1); then
     echo "$out" >> "$LOG"
     echo "$out" | grep -E 'error|Error|ERR' | tail -1 | cut -c1-200; return 1
   fi
@@ -65,10 +68,44 @@ build_head() {
   set_aside "$dir" "rebuilt for the Dashboard's URLs" || { echo "moving $dir aside failed"; return 1; }; mv "$dir.tmp" "$dir"
   say "built ${sha:0:7} in $(( $(date +%s) - started ))s, $(du -sh "$dir" | cut -f1)"
 }
-# Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop; a target that migrates, whose commit cannot be had here, or whose staging worktree or install fails, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; the staging worktree goes either way
+# One prebuild step, $1 its name, run in folder $2: through run-slot as ops-dashboard when $RS is executable, else bare. It logs how long the step queued, and once, past PREBUILD_SLOW s, that it still queues.
+# It waits as the supervisor's background child, checked every PREBUILD_POLL s, so a stack that goes down meanwhile stops the step by its pid and the loop restarts the stack that same tick, never after the queue's wait.
+# A skip goes to $S/prebuild-skip as its reason: that stop, or an exit run-slot made itself (2, a refusal, or 143, a stopped wait) before its runs.log holds a start line for this pid; the step returns its exit either way
+slot_step() {
+  local name=$1 dir=$2 p rc mark t0 line said= down=; shift 2
+  [ -x "$RS" ] || { (cd "$dir" && "$@"); return; }
+  mark=$(wc -l < "$RUNS" 2>/dev/null | tr -d ' '); t0=$(date +%s)
+  (cd "$dir" && exec "$RS" ops-dashboard -- "$@") & p=$!
+  echo "$p" > "$S/prebuild.pid"
+  step_started() { tail -n +"$((${mark:-0} + 1))" "$RUNS" 2>/dev/null | awk -v p="$p" '$2 == "start" && $4 == p' | tail -1; }
+  while kill -0 "$p" 2>/dev/null; do
+    sleep "$PREBUILD_POLL" & wait $!
+    if [ -z "$down" ] && ! { alive dashboard-dev && alive dashboard-web; }; then kill -TERM "$p" 2>/dev/null; down=1; fi
+    [ -z "$said" ] && [ $(($(date +%s) - t0)) -ge "$PREBUILD_SLOW" ] && [ -z "$(step_started)" ] && { say "prebuild $name still queued after $(($(date +%s) - t0))s; it keeps waiting"; said=1; }
+  done
+  wait "$p"; rc=$?
+  rm -f "$S/prebuild.pid"
+  line=$(step_started)
+  [ -z "$line" ] || say "prebuild $name queued $(echo "$line" | sed -n 's/.* waited=\([0-9]*\)s.*/\1/p')s"
+  if [ -n "$down" ]; then
+    echo "the stack went down during prebuild's $name, so the supervisor stopped it" > "$S/prebuild-skip"
+  elif [ -z "$line" ]; then
+    case "$rc" in 2 | 143) echo "run-slot exited $rc before prebuild's $name ran" > "$S/prebuild-skip" ;; esac
+  fi
+  return "$rc"
+}
+# A roll whose prebuild step was skipped (Ops' ruling of 6 Nov): nothing stops, one supervisor.log line names the reason, the next tick tries again, and the same target skipped 3 rolls in a row tells ops once
+skip_roll() {
+  local why; why=$(cat "$S/prebuild-skip")
+  [ "$(head -1 "$S/skips" 2>/dev/null)" = "$1" ] || : > "$S/skips"
+  echo "$1" >> "$S/skips"
+  say "roll to ${1:0:7} skipped: $why; trying again at the next tick"
+  [ "$(wc -l < "$S/skips" | tr -d ' ')" -ne 3 ] || "$OPS/notify.sh" dashboard "dashboard roll to ${1:0:7} skipped 3 times: $why"
+}
+# Before a roll stops anything: build the target ($1, the roll tagged $2) into $S/builds/<sha> from a detached staging worktree while the old stack serves, so build_head finds it kept after the stop; a target that migrates, whose commit cannot be had here, or whose staging worktree or install fails, builds after the stop as before; a build that fails lists the target in bad-builds and returns 1 with nothing stopped; a step slot_step marks skipped skips the roll (skip_roll) and returns 1 with nothing stopped and no bad-builds entry; the staging worktree goes either way
 prebuild() {
   local target=$1 tag=$2 stage=$S/staging built rc=0
-  prebuilt=
+  prebuilt=; rm -f "$S/prebuild-skip"
   drop_stage() { git worktree remove --force "$stage" >> "$LOG" 2>&1 || rm -rf "$stage"; git worktree prune; }
   "$D/net-git.sh" fetch -q origin >> "$LOG" 2>&1
   git cat-file -e "$target^{commit}" 2>/dev/null || { say "no commit ${target:0:7} here yet; building after the stop"; return 0; }
@@ -76,14 +113,16 @@ prebuild() {
   rm -rf "$stage"; git worktree prune
   git worktree add -q --detach "$stage" "$target" >> "$LOG" 2>&1 || { say "the staging worktree for ${target:0:7} failed; building after the stop"; drop_stage; return 0; }
   # node_modules as an APFS clone of the checkout's, then an install for what the move changed and each workspace's own links; .env as the checkout's, which bun run build loads
-  if ! { { [ ! -d node_modules ] || cp -cR node_modules "$stage/"; } && (cd "$stage" && unset NODE_ENV SKIP_ENV_VALIDATION && bun install --frozen-lockfile --ignore-scripts); } >> "$LOG" 2>&1; then
+  if ! { { [ ! -d node_modules ] || slot_step clone . cp -cR node_modules "$stage/"; } && (unset NODE_ENV SKIP_ENV_VALIDATION && slot_step install "$stage" bun install --frozen-lockfile --ignore-scripts); } >> "$LOG" 2>&1; then
+    [ ! -s "$S/prebuild-skip" ] || { skip_roll "$target"; drop_stage; return 1; }
     say "the staging worktree's install for ${target:0:7} failed; building after the stop"
     drop_stage; return 0
   fi
   [ ! -f .env ] || cp .env "$stage/.env"
   say "building ${target:0:7} before the stop, from $stage"
-  built=$(build_head "$stage") || rc=1
+  built=$(build_head "$stage" slot) || rc=1
   drop_stage
+  [ ! -s "$S/prebuild-skip" ] || { skip_roll "$target"; return 1; }
   [ $rc -eq 0 ] && { prebuilt=1; return 0; }
   echo "$target" >> "$BAD"
   result "$tag ${target:0:7} FAIL build before the stop: ${built:-no error line; see supervisor.log}; still serving $(git rev-parse --short HEAD)"
@@ -161,7 +200,7 @@ stop_all() {
   "$D/procs.sh" stop dashboard-dev >> "$LOG" 2>&1
   [ "${1:-}" = keep-web ] || stop_web
 }
-# the dashboard's URLs as portless names them for this checkout, read at every check, since portless's proxy can move (http on 1355 to https on 443)
+# the dashboard's URLs as portless names them for this checkout, read at every check, since portless's proxy can move (from 1355 to 443)
 dashboard_urls() { WEB=$(bunx portless get playground) && API=$(bunx portless get api.playground); }
 # Up to 90 tries, a second apart, for the dashboard's health to answer, its URLs read afresh each try: before portless's proxy runs, portless get names its default port
 # The branch the dashboard rolls to, read once at start, and its head on origin, read each time
@@ -176,8 +215,8 @@ setup_pending() { [ -z "${POSTGRES_URL:-}" ] && ! grep -qE "^POSTGRES_URL=[\"']?
 # an importer holds the follower's lock: a follower an earlier supervisor left running counts, so this one's "another importer holds the lock" exit is no outage; the status read gets HELD_WAIT seconds, then is stopped by its own process group (set -m gives it one), so a wedged docker child under it goes too, and exits 2, holder unknown, so a wedged Docker or database never freezes the loop
 follower_held() { local p i; bun api/hono/src/bin/dashboard-ingest.ts status > /dev/null 2>&1 & p=$!; for i in $(seq 1 "${HELD_WAIT:-20}"); do kill -0 "$p" 2>/dev/null || { wait "$p" && return 0 || return 1; }; sleep 1; done; kill -- -"$p" 2>/dev/null; wait "$p" 2>/dev/null; return 2; }
 
-# The bare aliases (playground.localhost, api.playground.localhost) hold the ports of the live stack's own routes in portless's route file, read by alias.ts and never written: its exit is 0 when they do, 1 when one points elsewhere, 2 for a missing file or route
-read_aliases() { bun --no-env-file "$D/alias.ts" "${PORTLESS_STATE_DIR:-$HOME/.portless}/routes.json" "$WEB" "$API" 2>&1; }
+# The bare aliases (playground.localhost, api.playground.localhost) hold the ports of the live stack's own routes in portless's route file, in the folder portlessDir() names, read by alias.ts and never written: its exit is 0 when they do, 1 when one points elsewhere, 2 for a missing file or route
+read_aliases() { bun --no-env-file "$D/alias.ts" "$WEB" "$API" 2>&1; }
 # A mismatch is read again after ALIAS_CONFIRM seconds (6), past the launcher's 2 s alias sync, which an alias waits on after a restart (live.md); one that holds, a missing file or a missing route is one ALIAS FAIL result (run.sh's notify_new alerts it), written again only when it changes, and ALIAS PASS once it is right, so the heartbeat reads ok again
 check_aliases() { local out rc=0; dashboard_urls || return 0; out=$(read_aliases) || rc=$?; if [ $rc -eq 1 ]; then sleep "${ALIAS_CONFIRM:-6}" & wait $!; rc=0; out=$(read_aliases) || rc=$?; fi; if [ $rc -eq 0 ]; then [ -z "${alias_said:-}" ] || result "ALIAS PASS $out"; alias_said=; return 0; fi; [ "$out" = "${alias_said:-}" ] || result "ALIAS FAIL $out"; alias_said=$out; return 1; }
 # Dev up and checked: health answers, verify passes against HEAD, approvals stay off. Prints one summary.
@@ -202,7 +241,7 @@ dev_reason() {
 
 check_dev() {
   wait_dashboard
-  # the launcher's own dev: notes (cmux's refusal names an ERROR) pass over to the line that stopped the stack, a refusal kept
+  # the launcher's own dev: notes pass over to the line that stopped the stack, a refusal kept
   if ! alive dashboard-dev; then echo "dev=DOWN ($(dev_reason < "$DEVLOG" | cut -c1-140))"; return 1; fi
   sleep 3; "$D/procs.sh" record dashboard-dev >> "$LOG" 2>&1
   local version v ok=0
@@ -318,7 +357,7 @@ finish_roll() {
     "$OPS/notify.sh" dashboard "roll to $(git rev-parse --short HEAD) failed after a migration; not falling back"
   else
     # bad-builds first: a supervisor the fallback reloads into keeps off the target at its start; a refusal dev_reason names is no bad build, but the head's own, its settings refusal (its env schema asks for what .env lacks), counts in refused, its third joining bad-builds
-    # every other refusal is the machine's or the checkout's (cmux, the database, another stack, portless's proxy, whose `portless service install` needs the owner's sudo), so a retry each ROLL_GAP is all the supervisor can do, and a refusal no one listed stays out of bad-builds
+    # every other refusal is the machine's or the checkout's (the database, another stack, portless's proxy, whose `portless service install` needs the owner's sudo), so a retry each ROLL_GAP is all the supervisor can do, and a refusal no one listed stays out of bad-builds
     local refusal="" n note="not the head's, no bad build"
     [ "$pulled" -ne 0 ] || refusal=$(dev_reason < "$DEVLOG" 2>/dev/null | sed -n 's/^dev: refusing to start: //p')
     if [ -z "$refusal" ]; then
@@ -367,7 +406,9 @@ boot() {
   roll_up START
 }
 
-trap 'say "supervisor stopping"; stop_all; exit 0' TERM INT HUP
+# the clone's prebuild step, a job of this shell, is stopped by its pid, so run-slot ends its own command; the install and the build run in a subshell, which this trap waits out (bash defers it), while run.sh's group stop reaches the build's
+trap 'say "supervisor stopping"; [ ! -s "$S/prebuild.pid" ] || kill -TERM "$(cat "$S/prebuild.pid")" 2>/dev/null; stop_all; exit 0' TERM INT HUP
+rm -f "$S/prebuild.pid"
 
 say "supervisor armed at $(git rev-parse --short HEAD)"
 boot

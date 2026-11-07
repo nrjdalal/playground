@@ -30,10 +30,12 @@ const preview: Preview = {
   topic: "sidebar",
 }
 
+const onOpen = () => {}
+
 describe("the Pages tab", () => {
   const now = Date.parse(page.at) + 20 * 60_000
   const html = renderToStaticMarkup(
-    createElement(PageList, { apiUrl: "https://api.test", now, pages: [preview] }),
+    createElement(PageList, { apiUrl: "https://api.test", now, onOpen, pages: [preview] }),
   )
 
   test("lists the fixture's page with its title, its maker, whom it was made for and when", () => {
@@ -43,9 +45,10 @@ describe("the Pages tab", () => {
     expect(html).toContain("20 min. ago")
   })
 
-  test("opens the page in a new tab through the Previews route", () => {
-    expect(html).toContain('href="https://api.test/api/v1/apps/previews/sidebar-mock.html"')
-    expect(html).toContain('target="_blank"')
+  test("opens the page from a button of its row, not a link to a browser tab", () => {
+    expect(html).toMatch(/<button[^>]*data-page-open=""[^>]*>Fixture: sidebar spacing/)
+    expect(html).not.toContain('target="_blank"')
+    expect(html).not.toContain('href="https://api.test/api/v1/apps/previews/sidebar-mock.html"')
   })
 })
 
@@ -54,7 +57,7 @@ describe("one row a page, its older versions in a dropdown", () => {
     ...preview,
     modifiedAt: at,
     name,
-    page: { ...page, at, title: "Plat 2668 report" },
+    page: { ...page, at, title: "Made 2668 report" },
   })
   const pages = [
     version("dune-2668-3.html", "2026-10-26T10:00:00.000Z"),
@@ -78,22 +81,26 @@ describe("one row a page, its older versions in a dropdown", () => {
     ])
   })
 
-  test("a row keeps its hover, its link's focus ring and its time's tooltip over the link's overlay", () => {
+  test("a row keeps its hover, its open button's focus ring and its time's tooltip over the button's overlay", () => {
     const html = renderToStaticMarkup(
-      createElement(PageList, { apiUrl: "https://api.test", now: Date.now(), pages: [preview] }),
+      createElement(PageList, {
+        apiUrl: "https://api.test",
+        now: Date.now(),
+        onOpen,
+        pages: [preview],
+      }),
     )
     expect(html).toContain("hover:bg-muted")
-    expect(html).toContain("has-[a:focus-visible]:ring-[3px]")
+    expect(html).toContain("has-[[data-page-open]:focus-visible]:ring-[3px]")
     expect(html).toMatch(/<span class="relative z-10"><time/)
   })
 
   test("a page with versions is one row that opens its newest, with an N versions dropdown; one with none reads as before", () => {
     const html = renderToStaticMarkup(
-      createElement(PageList, { apiUrl: "https://api.test", now: Date.now(), pages }),
+      createElement(PageList, { apiUrl: "https://api.test", now: Date.now(), onOpen, pages }),
     )
     expect(html.match(/data-slot="item"/g)).toHaveLength(2)
-    expect(html).toContain('href="https://api.test/api/v1/apps/previews/dune-2668-8.html"')
-    expect(html).not.toContain('href="https://api.test/api/v1/apps/previews/dune-2668-3.html"')
+    expect(html).toContain(">Made 2668 report</button>")
     expect(html).toContain("3 versions")
     expect(html.match(/versions<svg/g) ?? []).toHaveLength(1)
   })
@@ -104,12 +111,13 @@ describe("one row a page, its older versions in a dropdown", () => {
         apiUrl: "https://api.test",
         now: Date.now(),
         onDelete: () => {},
+        onOpen,
         pages,
       }),
     )
     expect(html.match(/aria-label="Delete [^"]+"/g)).toHaveLength(2)
     const without = renderToStaticMarkup(
-      createElement(PageList, { apiUrl: "https://api.test", now: Date.now(), pages }),
+      createElement(PageList, { apiUrl: "https://api.test", now: Date.now(), onOpen, pages }),
     )
     expect(without).not.toContain('aria-label="Delete')
   })
@@ -125,6 +133,9 @@ describe("one row a page, its older versions in a dropdown", () => {
     )
     expect(deleteDescription("lookup.html", 0)).toBe(
       "lookup.html and its caption leave the previews folder for good.",
+    )
+    expect(deleteDescription("lookup.html", 0, true)).toBe(
+      "lookup.html and its caption and PDF leave the previews folder for good.",
     )
   })
 })

@@ -74,10 +74,17 @@ describe("a web image build on the Mac is refused while the live dashboard's Pos
     ["compose build with no service", "docker compose build"],
     ["compose build --no-cache", "docker compose build --no-cache"],
     ["compose build web", "docker compose build web"],
+    ["docker in capitals", "DOCKER compose build web"],
     ["web among the services", "docker compose build --no-cache api web"],
+    [
+      "compose build past a project option, which names no service",
+      "docker compose build --profile p",
+    ],
+    ["compose build past -f, which names no service", "docker compose build -f a.yml"],
     ["compose options before build", "docker compose -f docker-compose.yml -p x build web"],
     ["compose up --build", "docker compose up --build"],
     ["compose up, which builds a missing image", "docker compose up"],
+    ["portless's compose up through bunx (#1083)", "bunx portless compose up -d"],
     ["compose up -d web", "docker compose up -d web"],
     ["compose create", "docker compose create"],
     ["compose run web", "docker compose run --rm -e X=1 web sh"],
@@ -109,6 +116,7 @@ describe("a web image build on the Mac is refused while the live dashboard's Pos
 describe("every other build runs, and asks Docker nothing", () => {
   test.each([
     ["the api image alone", "docker compose build --no-cache api"],
+    ["the api image alone past a project option", "docker compose build --progress plain api"],
     ["the api Dockerfile", "docker build -f api/hono/Dockerfile ."],
     ["a build sent to the box", "bash ~/.playground/ops/runner-host/ci.sh web HEAD"],
     ["a build over ssh", "ssh root@203.0.113.7 docker compose build web"],

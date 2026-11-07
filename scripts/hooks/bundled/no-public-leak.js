@@ -27,12 +27,7 @@ var DESK_ENV = new Set([
   "SDK_PERMISSION_MODE",
   "SDK_PROBE_DIR"
 ]);
-var RENAMED_ENV = {
-  PLAYGROUND_CMUX_SESSIONS: "PLAYGROUND_ALL_SESSIONS"
-};
 var renamedEnv = (name) => {
-  if (Object.hasOwn(RENAMED_ENV, name))
-    return RENAMED_ENV[name];
   if (!name.startsWith("DESK_"))
     return;
   const rest = name.slice("DESK_".length);
@@ -5306,6 +5301,9 @@ var ZodEmail = /* @__PURE__ */ $constructor("ZodEmail", (inst, def) => {
   $ZodEmail.init(inst, def);
   ZodStringFormat.init(inst, def);
 });
+function email2(params) {
+  return _email(ZodEmail, params);
+}
 var ZodGUID = /* @__PURE__ */ $constructor("ZodGUID", (inst, def) => {
   $ZodGUID.init(inst, def);
   ZodStringFormat.init(inst, def);
@@ -5554,6 +5552,14 @@ var ZodObject = /* @__PURE__ */ $constructor("ZodObject", (inst, def) => {
     return required(ZodNonOptional, this, args[0]);
   }
 });
+function object(shape, params) {
+  const def = {
+    type: "object",
+    shape: shape ?? {},
+    ...normalizeParams(params)
+  };
+  return new ZodObject(def);
+}
 function strictObject(shape, params) {
   return new ZodObject({
     type: "object",
@@ -5872,7 +5878,7 @@ var fixFor = (file) => {
   const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
   if (list && !existsSync(join2(coreDir(), "lists", `${list}.json`)))
     return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`;
-  return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher hands the owner ! playground ext init, then a setting with ! playground settings set, to type in the dispatcher's terminal window, which writes it";
+  return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher asks the owner to set up settings, then fill in and save Privacy on the Dashboard's Settings page, which writes it";
 };
 var readRendered = async (data, file) => readRenderedSync(data, file);
 var readRenderedSync = (data, file) => {
@@ -5939,10 +5945,10 @@ var extOrderSchema = array(extScopeSchema).refine((names) => new Set(names).size
 var extLinksSchema = record(extScopeSchema, array(extLinkSchema));
 
 // packages/settings/src/accounts.ts
-var email2 = string2().email();
+var email3 = string2().email();
 var label = string2().regex(/^[a-z0-9][a-z0-9._-]*$/, "a label of lowercase letters, digits, dots, dashes and underscores");
 var claudeAccount = strictObject({
-  email: email2,
+  email: email3,
   ends: string2().datetime({ offset: true }).nullable().optional(),
   endsFirst: boolean2().optional(),
   label: label.optional(),
@@ -5956,6 +5962,7 @@ var glmAccount = strictObject({ label, provider: literal("glm") });
 var account = union([claudeAccount, glmAccount]);
 var providerOf = (row) => row.provider === "glm" ? "glm" : "claude";
 var accountKey = (row) => (providerOf(row) === "glm" ? row.label : row.email) ?? "";
+var accountsOf = (rows, provider) => rows.filter((row) => providerOf(row) === provider);
 var accountSettings = defineSettings({
   "models.probe": {
     default: "claude-haiku-4-5",
@@ -5975,7 +5982,7 @@ var accountSettings = defineSettings({
   "usage.switchAccount": {
     default: "",
     description: "The account whose full week the ops tick tells the dispatchers and leads about, so the factory moves off it; empty for none.",
-    schema: union([email2, literal("")])
+    schema: union([email3, literal("")])
   }
 });
 // packages/settings/src/channel.ts
@@ -5999,7 +6006,13 @@ var contentFields = {
   value: union([array(unknown()), record(string2(), unknown())]).nullable()
 };
 // packages/settings/src/ext.ts
+var BUNDLED_EXTENSIONS = ["slack"];
 var extSettings = defineSettings({
+  "ext.bundled": {
+    default: [],
+    description: "The extensions Playground ships under extensions/ that you have turned on, each read as a scope after your installed extensions and before core; one not named here loads no skill.",
+    schema: array(_enum(BUNDLED_EXTENSIONS)).refine((names) => new Set(names).size === names.length, "a bundled extension is on once")
+  },
   "ext.links": {
     default: {},
     description: "Each extension to the GitHub orgs whose repos read it, lowercase, or * for every repo; your login's is read by every repo, and an extension it does not name by none.",
@@ -6049,6 +6062,52 @@ var factorySettings = defineSettings({
     default: "",
     description: "The repository the factory's pull requests land in, the checkout's origin when unset: pr:merge needs GitGuardian's check there, Checks reads its PRs, and the roster links a bare PR number into it.",
     schema: repo
+  }
+});
+// packages/settings/src/firefighting.ts
+var firefightingSettings = defineSettings({
+  "firefighting.start.account": {
+    default: "",
+    description: "The Claude account a firefighting worker logs in as (spawn.sh's --account), an email whose token the Keychain keeps; empty starts it on spawn.sh's own pick.",
+    schema: union([literal(""), email2()])
+  },
+  "firefighting.start.brief": {
+    default: "brief-ff-ticket-template.md",
+    description: "The standing brief under the data folder that ops-firefighting-start fills for each ticket, its {TICKET} and {NAME} replaced by the ticket's ID and the new worker's name.",
+    schema: string2().regex(/^[A-Za-z0-9._-]+\.md$/, "a brief's file name under the data folder")
+  },
+  "firefighting.start.consultFrom": {
+    default: "",
+    description: 'The UTC time, HH:MM inside firefighting.start.hours, from which ops-firefighting-start starts nothing and tells the dispatcher "consult <id>" once per ticket, so the owner decides; empty never consults.',
+    schema: union([literal(""), string2().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "HH:MM in UTC")])
+  },
+  "firefighting.start.daysOff": {
+    default: [],
+    description: "The UTC dates (YYYY-MM-DD) ops-firefighting-start starts nothing on, as a day off; empty starts on every day.",
+    schema: array(string2().regex(/^\d{4}-\d{2}-\d{2}$/, "a YYYY-MM-DD date"))
+  },
+  "firefighting.start.freshMinutes": {
+    default: 10,
+    description: "How many minutes old firefighting.json's lines may be (its lastTry, else its file time) for a start; older ones are a closed window's or a stopped relay's, so the job starts nothing and tells the Builder once.",
+    schema: number2().int().min(1).max(120)
+  },
+  "firefighting.start.hours": {
+    default: "",
+    description: "The UTC window ops-firefighting-start starts in, HH:MM-HH:MM (one past midnight wraps); outside it the job starts nothing and tells the Builder once; empty starts at any time.",
+    schema: union([
+      literal(""),
+      string2().regex(/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/, "HH:MM-HH:MM in UTC")
+    ])
+  },
+  "firefighting.start.in": {
+    default: "",
+    description: "The folder a firefighting worker opens in (spawn.sh's --in), an absolute path; empty starts none, and the job tells the Builder this key is unset.",
+    schema: union([literal(""), string2().regex(/^\/.+/, "an absolute path")])
+  },
+  "firefighting.start.prefixes": {
+    default: [],
+    description: "The ticket keys the job starts for (MADE for MADE-1), each a tracker team's key; empty starts none.",
+    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "a ticket key, upper case"))
   }
 });
 // packages/settings/src/gates.ts
@@ -6157,6 +6216,10 @@ var JOBS = {
     description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
     schedule: { every: 86400 }
   }),
+  "ops-firefighting-start": terminal("ops-firefighting-start", `${bunJob("ops-firefighting-start")} --data {data}`, {
+    description: "Starts a firefighting worker for each open ticket no session holds, Urgent first, and holds focus for an Urgent one's.",
+    schedule: { every: 60 }
+  }),
   "ops-flow": launchd("ops-flow", {
     description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",
     schedule: { every: 60 }
@@ -6184,6 +6247,10 @@ var JOBS = {
   }),
   "ops-tick": launchd("ops-tick", {
     description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
+    schedule: { every: 60 }
+  }),
+  "ops-ticket-card": terminal("ops-ticket-card", bunJob("ops-ticket-card"), {
+    description: "Keeps one Inbox card of the day's watched tickets, edited in place on every change.",
     schedule: { every: 60 }
   }),
   "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
@@ -6334,6 +6401,39 @@ var ruleSettings = defineSettings({
 // packages/settings/src/sessions.ts
 var name = string2().regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "a session name, lowercase words joined by hyphens");
 var manager = _enum(["builder", "dispatcher", "ops", "planner"]);
+var TEMPLATE_KINDS = [
+  "assistant",
+  "builder",
+  "dispatcher",
+  "ops",
+  "optimizer",
+  "orchestrator",
+  "planner"
+];
+var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+var BRIEF_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+var sessionTemplate = strictObject({
+  account: string2().email().optional(),
+  backend: _enum(["claude", "glm"]),
+  brief: string2().regex(BRIEF_NAME, "a brief is a file name, with no /").refine((brief) => !brief.includes(".."), "a brief is a file name, with no .."),
+  effort: _enum(EFFORTS).optional(),
+  id: name,
+  kind: _enum(TEMPLATE_KINDS),
+  label: string2().min(1).max(40),
+  model: string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id").optional()
+}).refine((t) => t.backend === "claude" || t.account === undefined && t.effort === undefined && t.model === undefined, {
+  message: "a GLM template runs on models.glm and its first GLM row, so it takes no account, effort or model"
+});
+var sessionTemplates = array(sessionTemplate).refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "each id is listed once");
+var unknownAccounts = (templates, accounts) => {
+  const known = new Set(accountsOf(accounts, "claude").map(accountKey));
+  return templates.flatMap((template, at) => template.account && !known.has(template.account) ? [
+    {
+      message: `${template.account} is not in usage.accounts: add it in Settings > Accounts`,
+      path: [at, "account"]
+    }
+  ] : []);
+};
 var sessionSettings = defineSettings({
   "sessions.aliases": {
     default: {},
@@ -6344,9 +6444,49 @@ var sessionSettings = defineSettings({
     default: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" },
     description: "The session name each manager kind starts under; the second dispatcher takes the dispatcher's with -2.",
     schema: strictObject({ builder: name, dispatcher: name, ops: name, planner: name })
+  },
+  "sessions.templates": {
+    against: (templates, read) => unknownAccounts(templates, read("usage.accounts")),
+    default: [
+      {
+        backend: "claude",
+        brief: "assistant.md",
+        id: "assistant",
+        kind: "assistant",
+        label: "Assistant"
+      },
+      {
+        backend: "claude",
+        brief: "orchestrator.md",
+        id: "orchestrator",
+        kind: "orchestrator",
+        label: "Orchestrator"
+      },
+      {
+        backend: "claude",
+        brief: "dispatcher-2.md",
+        id: "second-dispatcher-claude",
+        kind: "dispatcher",
+        label: "Second dispatcher on Claude"
+      },
+      {
+        backend: "glm",
+        brief: "dispatcher-2.md",
+        id: "second-dispatcher-glm",
+        kind: "dispatcher",
+        label: "Second dispatcher on GLM"
+      }
+    ],
+    description: "The templates the sidebar's plus starts a dispatcher or an orchestrator from, A to Z by label: each one's kind, backend, model, effort, account (a Claude row of usage.accounts) and brief. A dispatcher template starts the second dispatcher; any other kind starts a new <id>-<kind> lead reporting to the dispatcher.",
+    schema: sessionTemplates
   }
 });
 // packages/settings/src/slack.ts
+var gatedSendsSchema = strictObject({
+  path: string2().min(1),
+  selfDm: string2().regex(/^D[A-Z0-9]+$/, "a Slack DM id"),
+  servers: array(string2().min(1)).min(1)
+});
 var slackSettings = defineSettings({
   "slack.dmChannel": {
     default: "",
@@ -6357,6 +6497,11 @@ var slackSettings = defineSettings({
     default: "",
     description: "The owner's Slack member id: the DM watch hands on only this member's messages, and dm send posts as this member; neither runs until it is set.",
     schema: string2().regex(/^(?:[UW][A-Z0-9]+)?$/, "a Slack member id")
+  },
+  "slack.gatedSends": {
+    default: "",
+    description: "An org's Slack gate, set in that org's extension: the MCP servers its workspace posts through, its self-DM and the send path every other post takes, as {path, selfDm, servers}; no-playground-leak then refuses every Slack MCP write on those servers but a post to the self-DM, and any curl to a Slack URL but an /api/ read. None when empty.",
+    schema: union([literal(""), gatedSendsSchema])
   },
   "slack.linkConverter": {
     default: "",
@@ -6385,6 +6530,66 @@ var slotSettings = defineSettings({
     default: [],
     description: "The ops folders of other factories on this machine, each an absolute path: run-slot counts each live holder of their run slots against this factory's load units, and spawn.sh's load gate counts their starts beside its own, both reading only.",
     schema: array(string2().regex(/^\/.+/, "an absolute path"))
+  }
+});
+// packages/settings/src/ticket-card.ts
+var file = string2();
+var hhmm = string2().regex(/^(?:[01]\d|2[0-4]):[0-5]\d$/, "a UTC time, HH:MM");
+var ticketCardSettings = defineSettings({
+  "ticketCard.approvals": {
+    default: 2,
+    description: "The approvals a ticket's pull request waits for, which the card counts toward.",
+    schema: number2().int().positive()
+  },
+  "ticketCard.deployedStates": {
+    default: [],
+    description: "The tracker states, by name, that mark a ticket deployed, its last step; a line closed on any other state reads closed, and with none set every closed line does.",
+    schema: array(string2().min(1))
+  },
+  "ticketCard.diaryDir": {
+    default: "diary",
+    description: "The folder, absolute or in the data folder, where the card's job appends each step it first sees to that day's <YYYY-MM-DD>-steps.md.",
+    schema: string2().min(1)
+  },
+  "ticketCard.linesFile": {
+    default: "",
+    description: "The file of the day's watched tickets the card reads, a JSON object whose lines record holds each ticket's line and whose clock record names the tickets the card shows; none until set, so the job keeps no card.",
+    schema: file
+  },
+  "ticketCard.linkBase": {
+    default: "",
+    description: "The URL a ticket's id is appended to for its link on the card; none until set, so the card links pull requests alone.",
+    schema: union([literal(""), string2().url()])
+  },
+  "ticketCard.prefixes": {
+    default: [],
+    description: "The ticket id prefixes the card shows; none means every prefix.",
+    schema: array(string2().regex(/^[A-Z][A-Z0-9]*$/, "an uppercase ticket prefix"))
+  },
+  "ticketCard.reopenedFile": {
+    default: "",
+    description: "The file whose reopened record maps a ticket's id to when it was seen reopened, which the card marks; none until set.",
+    schema: file
+  },
+  "ticketCard.skipsFile": {
+    default: "",
+    description: "The sent record whose <kind>-skip:<ticket>:<area> keys mark a ticket skipped for an area, which the card shows so; none until set.",
+    schema: file
+  },
+  "ticketCard.title": {
+    default: "Tickets today",
+    description: "The card's title.",
+    schema: string2().min(1)
+  },
+  "ticketCard.verdictsFile": {
+    default: "",
+    description: "The file mapping a ticket's id to its triage verdict, { at, kind }, which the card shows as its cause found; none until set.",
+    schema: file
+  },
+  "ticketCard.window": {
+    default: { days: [0, 1, 2, 3, 4, 5, 6], end: "24:00", start: "00:00" },
+    description: "The UTC hours on the weekdays (0 is Sunday) the card's job writes in; outside them it writes nothing.",
+    schema: object({ days: array(number2().int().min(0).max(6)), end: hhmm, start: hhmm })
   }
 });
 // packages/scripts/src/trace-count/kinds.ts
@@ -6608,6 +6813,7 @@ var GROUPING = new Set(["}", "done", "esac", "fi"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
 var WRAPPERS = new Map(Object.entries({
   builtin: ["", ""],
+  busybox: ["", ""],
   caffeinate: ["-d -i -m -s -u", "-t -w"],
   command: ["-p -V -v", ""],
   doas: ["-L -n -s", "-a -C -u"],
@@ -6658,29 +6864,98 @@ var ROOT_SHELLS = new Map([
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
 function stdinShell(cmd) {
+  cmd = spreadSplit(cmd);
   const parsed = parse3(cmd);
   const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading));
   if (parsed.capped) {
     const names = cmd.words.map((w) => program(w.value));
-    if (names.some((n) => ROOT_SHELLS.has(n)))
+    if (names.some((n) => ROOT_SHELLS.has(n) || n === "su"))
       kinds.push("root");
     else if (names.some((n) => SHELLS.has(n)))
       kinds.push("shell");
   }
-  return kinds.includes("root") ? "root" : kinds.find(Boolean);
+  return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean);
+}
+function spreadSplit(cmd) {
+  if (!cmd.words.some((w) => program(w.value) === "env"))
+    return cmd;
+  const options = WRAPPERS.get("env");
+  const out = [];
+  const rest = [...cmd.words].reverse();
+  let inEnvOptions = false;
+  let spreadOne = false;
+  for (let w = rest.pop();w; w = rest.pop()) {
+    const v = w.value;
+    const long = inEnvOptions ? envLong(v) : undefined;
+    const split = long?.name === "split-string" ? long.value ?? "" : long || !inEnvOptions ? undefined : SPLIT.exec(v)?.[1];
+    if (split !== undefined) {
+      const text = (split || rest.pop()?.value || "").replace(/\$\{[^}]*\}/g, UNKNOWN).replace(/\\[_fnrtv]/g, " ").replace(/['"\\]/g, "");
+      const words = text.split(/\s+/).filter(Boolean);
+      for (let j = words.length - 1;j >= 0; j--)
+        rest.push({ quoted: false, value: words[j] });
+      spreadOne = true;
+      continue;
+    }
+    if (inEnvOptions && v === "-") {
+      out.push({ ...w, value: "-i" });
+      continue;
+    }
+    out.push(w);
+    if (program(v) === "env")
+      inEnvOptions = true;
+    else if (!inEnvOptions || ASSIGN.test(v))
+      continue;
+    else if (!v.startsWith("-") || v === "--")
+      inEnvOptions = false;
+    else if (long ? ENV_LONG_VALUES.has(long.name) && long.value === undefined : ENV_SHORT_VALUE.test(v) || optionValue(v, options) === "next") {
+      const value = rest.pop();
+      if (value)
+        out.push(value);
+    }
+  }
+  return spreadOne ? { ...cmd, words: out } : cmd;
+}
+var ENV_LONG = [
+  "argv0",
+  "block-signal",
+  "chdir",
+  "debug",
+  "default-signal",
+  "help",
+  "ignore-environment",
+  "ignore-signal",
+  "list-signal-handling",
+  "null",
+  "split-string",
+  "unset",
+  "version"
+];
+var ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"]);
+var ENV_SHORT_VALUE = /^-[0iv]*[aCu]$/;
+function envLong(v) {
+  const m = /^--([a-z0-9-]+)(?:=([\s\S]*))?$/.exec(v);
+  if (!m)
+    return;
+  const hits = ENV_LONG.filter((o) => o.startsWith(m[1]));
+  const name = hits.includes(m[1]) ? m[1] : hits.length === 1 ? hits[0] : undefined;
+  return name ? { name, value: m[2] } : undefined;
 }
 function stdinShellOf(cmd, { args, first, name, xargs }) {
+  const fed = !!cmd.stdin || !!xargs;
   if (first && !marked(first.value)) {
-    if (name === "." || name === "source")
-      return args[0]?.value === "/dev/stdin" ? "shell" : undefined;
+    if (name === "." || name === "source" || name === "eval")
+      return fed || name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "") ? "shell" : undefined;
+    const family = familyOf(name);
+    if (family)
+      return fed && interpreted(family, args, xargs) ? "code" : undefined;
+    if (name === "su")
+      return suCommand(args) ? undefined : "root";
     if (!SHELLS.has(name))
       return;
+    if (fed)
+      return "shell";
     const { inline, operand } = shellOperand(args, name);
-    if (xargs && (!operand || xargs.replace !== undefined && operand.value.includes(xargs.replace)))
-      return "shell";
-    if (inline && operand && cmd.stdin && marked(operand.value))
-      return "shell";
-    return inline || operand ? undefined : "shell";
+    return inline || operand && !STDIN_PATHS.has(operand.value) ? undefined : "shell";
   }
   let at = 0;
   for (let w = cmd.words[at];w && !w.quoted; w = cmd.words[at]) {
@@ -6693,28 +6968,241 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
   }
   const end = first ? cmd.words.indexOf(first) : -1;
   const before = cmd.words.slice(at, end === -1 ? undefined : end);
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
-  if (k === -1)
-    return;
-  const wrapper = program(before[k].value);
+  const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)));
+  const wrappers = [];
+  for (const w of before) {
+    if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value)))
+      return "root";
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value.toLowerCase()))
+      wrappers.push(program(w.value));
+  }
+  if (first && wrappers.length)
+    return "root";
+  return fed && first ? "shell" : undefined;
+}
+var SU_PLAIN = new Set(["-", "-f", "-l", "-m"]);
+var suCommand = (args) => {
+  for (const [at, word] of args.entries()) {
+    const { value } = word;
+    if (word.unknown !== undefined || word.glob || marked(value))
+      return false;
+    if (value === "-c" || value === "--command")
+      return at + 1 < args.length;
+    if (value.startsWith("--command="))
+      return true;
+    if (value.startsWith("-") && !SU_PLAIN.has(value))
+      return false;
+  }
+  return false;
+};
+function startsRootShell(wrapper, value) {
+  if (marked(value))
+    return true;
   const shells = ROOT_SHELLS.get(wrapper);
   const { flags, values } = WRAPPERS.get(wrapper);
-  const clustered = (value) => {
-    let shell = false;
-    for (const c of value.slice(1)) {
-      if (values.has(`-${c}`))
-        return shell;
-      if (!flags.has(`-${c}`))
-        return false;
-      shell ||= shells.has(`-${c}`);
+  if (value.startsWith("--")) {
+    const named = [...flags, ...values].filter((o) => o.startsWith(value));
+    return shells.has(named.length === 1 ? named[0] : value);
+  }
+  if (!/^-[A-Za-z]/.test(value))
+    return false;
+  let shell = false;
+  for (const c of value.slice(1)) {
+    if (values.has(`-${c}`))
+      return shell;
+    if (!flags.has(`-${c}`))
+      return false;
+    shell ||= shells.has(`-${c}`);
+  }
+  return shell;
+}
+var FAMILIES = {
+  bun: { takes: ["--cwd", "--env-file", "--preload", "--tsconfig-override"], values: "r" },
+  deno: { takes: ["--config", "--import-map"], values: "c" },
+  lua: { takes: [], values: "l" },
+  node: {
+    takes: [
+      "--conditions",
+      "--env-file",
+      "--experimental-loader",
+      "--import",
+      "--input-type",
+      "--inspect-port",
+      "--loader",
+      "--max-old-space-size",
+      "--require",
+      "--stack-size",
+      "--title"
+    ],
+    values: "Cr"
+  },
+  osascript: { takes: [], values: "ls" },
+  perl: { takes: [], values: "I" },
+  php: { own: "f", takes: [], values: "cdf" },
+  python: { own: "m", takes: ["--check-hash-based-pycs"], values: "WXm" },
+  ruby: { takes: [], values: "CEIr" }
+};
+var FAMILY = /^(bun|deno|lua|luajit|node|nodejs|osascript|perl|php|python|ruby)[\d.]*$/;
+var familyOf = (name) => {
+  const base = FAMILY.exec(name)?.[1];
+  return base ? FAMILIES[base === "nodejs" ? "node" : base === "luajit" ? "lua" : base] : undefined;
+};
+function interpreted(family, args, xargs) {
+  const filled = (word) => marked(word.value) || !!xargs?.replace && word.value.includes(xargs.replace);
+  const own = (word) => !!word && !filled(word) && !STDIN_PATHS.has(word.value);
+  const runner = family === FAMILIES.bun || family === FAMILIES.deno;
+  const script = (word) => own(word) && (!runner || /\.[cm]?[jt]sx?$/.test(word?.value ?? ""));
+  let sub = false;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (value === "--")
+      return !script(args[k + 1]);
+    if (value.startsWith("--")) {
+      if (!family.takes.includes(value.split("=")[0]))
+        return true;
+      if (!value.includes("="))
+        k++;
+      continue;
     }
-    return shell;
+    if (value.startsWith("-") && value !== "-") {
+      const [letter, attached] = [value[1], value.slice(2)];
+      if (!family.values.includes(letter))
+        return true;
+      if (letter === family.own)
+        return !own(attached ? { ...args[k], value: attached } : args[k + 1]);
+      if (!attached)
+        k++;
+      continue;
+    }
+    if (runner && !sub && value === "run") {
+      sub = true;
+      continue;
+    }
+    return !script(args[k]);
+  }
+  return true;
+}
+function codeFed(commands) {
+  const fed = new Map;
+  const add = (cmd, kind) => {
+    if (!kind || !cmd.stdin)
+      return;
+    const known = fed.get(cmd.stdin);
+    if (known?.kind !== "code")
+      fed.set(cmd.stdin, { consumer: cmd, kind });
   };
-  const starts = ({ quoted, value }) => marked(value) || !quoted && (shells.has(value) || /^-[A-Za-z]/.test(value) && clustered(value));
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined;
+  for (const [k, cmd] of commands.entries()) {
+    if (!cmd.stdin)
+      continue;
+    add(cmd, stdinShell(cmd));
+    let depth = 0;
+    for (let j = k;j < commands.length; j++) {
+      const body = commands[j];
+      for (const m of markers(body.words))
+        depth += OPENS.has(m) ? 1 : CLOSES.has(m) ? -1 : 0;
+      if (j > k)
+        add(cmd, stdinShell({ ...body, stdin: cmd.stdin }));
+      if (depth <= 0)
+        break;
+    }
+  }
+  return fed;
 }
 var COUNTED = new Set(["repeat", "timeout"]);
-var SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"]);
+var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
+var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
+var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/;
+var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
+var zshSplits = (line) => {
+  if (ZSH_SPLITS.test(line))
+    return true;
+  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
+    const at = command.search(ARRAY_MAKERS);
+    if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at)))
+      return true;
+  }
+  const joined = line.replace(/[\\'"]/g, "");
+  const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
+  const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
+  return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
+};
+var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
+var ZSH_ARRAYS = new Set([
+  "aliases",
+  "argv",
+  "builtins",
+  "cdpath",
+  "commands",
+  "comppostfuncs",
+  "compprefuncs",
+  "compstate",
+  "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
+  "fignore",
+  "fpath",
+  "funcfiletrace",
+  "funcsourcetrace",
+  "funcstack",
+  "functions",
+  "functions_source",
+  "functrace",
+  "galiases",
+  "history",
+  "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "killring",
+  "langinfo",
+  "mailpath",
+  "manpath",
+  "match",
+  "mbegin",
+  "mend",
+  "module_path",
+  "modules",
+  "nameddirs",
+  "options",
+  "parameters",
+  "patchars",
+  "path",
+  "pipestatus",
+  "psvar",
+  "region_highlight",
+  "registers",
+  "reply",
+  "reswords",
+  "saliases",
+  "signals",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
+  "watch",
+  "widgets",
+  "words",
+  "zle_bracketed_paste",
+  "zle_highlight",
+  "zsh_eval_context",
+  "zsh_scheduled_events"
+]);
+var oneWord = (written) => {
+  const plain = ONE_WORD.exec(written);
+  return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "");
+};
+var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
+var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
 var PRINTERS = new Set(["echo", "printf"]);
 var GIT_TAKES = new Set([
@@ -6816,6 +7304,8 @@ var setVar = (vars, key, value) => {
 };
 var merge2 = (out, part) => {
   out.value += part.value;
+  if (part.splits && out.splits !== "always")
+    out.splits = part.splits;
   if (part.unknown)
     out.unknown ??= part.unknown;
   if (part.variable)
@@ -6838,7 +7328,43 @@ var slice = (word, from) => {
 };
 var visible = (value) => value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ");
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
-var program = (value) => basename(value.replace(/^=/, ""));
+var SHELL_OWN = new Set([
+  ".",
+  "alias",
+  "cd",
+  "declare",
+  "eval",
+  "export",
+  "hash",
+  "let",
+  "local",
+  "popd",
+  "pushd",
+  "read",
+  "readonly",
+  "set",
+  "shift",
+  "source",
+  "trap",
+  "type",
+  "typeset",
+  "unalias",
+  "unset"
+]);
+var G_WRAPPERS = new Map([
+  ["genv", "env"],
+  ["gnice", "nice"],
+  ["gnohup", "nohup"],
+  ["gstdbuf", "stdbuf"],
+  ["gtimeout", "timeout"]
+]);
+var program = (value) => {
+  const base = basename(value.replace(/^=/, ""));
+  const lower = base.toLowerCase();
+  if (SHELL_OWN.has(lower) && value !== lower)
+    return value;
+  return G_WRAPPERS.get(lower) ?? lower;
+};
 var UV_TAKES = new Set([
   "--cache-dir",
   "--config-file",
@@ -6870,7 +7396,71 @@ function decode2(raw) {
 function lex(src, known = {}) {
   const lx = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() };
   list(lx, 0, false);
+  calledAgain(lx.commands, src);
+  braced(lx.commands);
   return { commands: lx.commands, scopes: lx.scopes };
+}
+var BRACED = new Set([
+  "elif",
+  "else",
+  "for",
+  "foreach",
+  "if",
+  "repeat",
+  "select",
+  "until",
+  "while"
+]);
+function braced(commands) {
+  for (const [k, c] of commands.entries()) {
+    const head = c.words[0];
+    if (!head || head.quoted || !BRACED.has(head.value))
+      continue;
+    const at = c.words.findIndex((w, i) => i > 0 && !w.quoted && w.value === "{");
+    if (at < 0 || markers(c.words).length > at)
+      continue;
+    if (commands.slice(k + 1).some((d) => d.words.some((w) => !w.quoted && w.value === "}")))
+      c.opaque = true;
+  }
+}
+function calledAgain(commands, src) {
+  for (const [k, open] of commands.entries()) {
+    const [first, second] = open.words;
+    if (!open.held || !first || first.quoted)
+      continue;
+    const before = commands[k - 1]?.words;
+    const word = first.value === "function" ? second : open.group && before?.length === 1 ? before[0] : undefined;
+    if (!word)
+      continue;
+    let end = k;
+    for (let balance = 0;end < commands.length; end++) {
+      const reserved = markers(commands[end].words);
+      balance += reserved.filter((w) => OPENS.has(w)).length - reserved.filter((w) => CLOSES.has(w)).length;
+      if (balance <= 0)
+        break;
+    }
+    const body = commands.slice(k, end + 1);
+    const name = word.value.replace(/\(\)$/, "");
+    if (word.quoted || !/^[\w.:-]+$/.test(name)) {
+      for (const c of body)
+        c.repeated = true;
+      continue;
+    }
+    const outside = commands.filter((_, at) => at < k - 1 || at > end).map(callee);
+    const calls = outside.filter((w) => w?.value === name);
+    const others = outside.some((w) => w !== undefined && (w.unknown !== undefined || !w.quoted && (w.value === "eval" || w.value === "source" || w.value === ".")));
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const files = commands.flatMap((c) => c.redirects).filter((r) => r.target?.value === name).length;
+    const mentions = (src.match(new RegExp(`(?<![\\w.:-])${escaped}(?![\\w.:-])`, "g"))?.length ?? 0) - files;
+    const call = commands.find((c, at) => (at < k - 1 || at > end) && callee(c)?.value === name);
+    const once = mentions === 2 && calls.length === 1 && !others && !call?.repeated && !call?.kept;
+    if (!once)
+      for (const c of body)
+        c.repeated = true;
+  }
+}
+function callee(cmd) {
+  return cmd.words.find((w) => w.quoted || !(ASSIGN.test(w.value) || MARKERS.has(w.value) || BUILTIN.has(w.value) || w.value.startsWith("-")));
 }
 function nest(lx, inherit) {
   list(lx, lx.scopes.push(lx.scope) - 1, true, inherit);
@@ -6893,6 +7483,8 @@ function walk(lx, scope, nested, inherit) {
   let depth = 0;
   let loops = 0;
   let after = "";
+  const bodies = [];
+  const heads = [];
   const end = (op) => {
     const done = cmd;
     const pipe = op === "|" || op === "|&";
@@ -6918,10 +7510,36 @@ function walk(lx, scope, nested, inherit) {
       if (after === "&&")
         done.chained = true;
       done.chain = lx.token;
-      if (reserved.some((w) => HELD.has(w)))
+      const last = lx.commands[lx.commands.length - 1]?.words;
+      const compound = !!done.group && last?.length === 1 && OPENS.has(reserved[0] ?? "") && !HELD.has(reserved[0] ?? "");
+      if (reserved.some((w) => HELD.has(w)) || compound)
         done.held = true;
-      if (loops > 0 || loop)
+      if (done.held || bodies.includes(true))
+        done.kept = true;
+      for (const [at, w] of reserved.entries()) {
+        if (OPENS.has(w))
+          bodies.push(HELD.has(w) || compound && at === 0);
+        else if (CLOSES.has(w))
+          bodies.pop();
+      }
+      const each = done.words[0]?.quoted ? undefined : done.words[0]?.value;
+      const outer = heads.length === 0 && loops === 0;
+      let head = heads.length > 0;
+      for (const w of reserved) {
+        if (w === "while" || w === "until" || w === "for" || w === "select")
+          heads.push(w === "while" || w === "until");
+        else if (w === "do")
+          heads.pop();
+        head ||= heads.length > 0;
+      }
+      if (each === "foreach")
+        heads.push(false);
+      else if (each === "end" && heads.length > 0 && !loop)
+        heads.pop();
+      if (loops > 0 || loop || head || each === "foreach")
         done.repeated = true;
+      if (outer && !loop && reserved.some((w) => w === "while" || w === "until"))
+        done.atLeastOnce = true;
       depth = Math.max(0, depth + opened - closed);
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0));
       if (depth === 0 && FREES.has(op))
@@ -7092,14 +7710,23 @@ function word(lx) {
     } else if (c === "$" && next === '"')
       lx.i++;
     else if (c === "$" || c === "`") {
+      const from = lx.i;
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge2(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
-    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
+      const written = src.slice(from, lx.i);
+      if (marked(text.value))
+        merge2(out, {
+          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
+          value: ""
+        });
+    } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir2();
       lx.i++;
     } else {
+      if (c === UNKNOWN || c === READ)
+        out.splits = "always";
       out.value += c;
       bare += c;
       lx.i++;
@@ -7109,11 +7736,16 @@ function word(lx) {
     out.unknown ??= "a brace expansion";
   if (GLOB_CHARS.test(bare))
     out.glob = true;
+  out.source = src.slice(start, lx.i);
   if (marked(out.value))
-    out.raw = src.slice(start, lx.i);
+    out.raw = out.source;
+  if (src[start] === "~" && TILDE.test(out.value))
+    out.tilde = true;
   return out;
 }
 var GLOB_CHARS = /[*?[{(]/;
+var TILDE = /^~[-+](?=\/|$|\u0000)/;
+var ends = (c = "") => c === "" || c === "/" || BREAK.has(c);
 function double(lx) {
   const { src } = lx;
   const out = { value: "" };
@@ -7125,11 +7757,13 @@ function double(lx) {
 `)
         out.value += '$`"\\'.includes(next) ? next : c + next;
       lx.i += 2;
-    } else if (c === "$")
-      merge2(out, dollar(lx));
-    else if (c === "`")
-      merge2(out, backtick(lx));
-    else {
+    } else if (c === "$" || c === "`") {
+      const from = lx.i;
+      const text = c === "$" ? dollar(lx) : backtick(lx);
+      merge2(out, text);
+      if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
+        out.splits = "always";
+    } else {
       out.value += c;
       lx.i++;
     }
@@ -7170,8 +7804,10 @@ function dollar(lx) {
     lx.i = end;
     return variable(name);
   }
-  if (/[A-Za-z_]/.test(next)) {
-    const from = ++lx.i;
+  const flagged = /[=~^]/.test(next) && /[A-Za-z_]/.test(src[lx.i + 2] ?? "");
+  if (flagged || /[A-Za-z_]/.test(next)) {
+    lx.i += flagged ? 2 : 1;
+    const from = lx.i;
     while (/\w/.test(src[lx.i] ?? ""))
       lx.i++;
     return variable(src.slice(from, lx.i));
@@ -7340,6 +7976,8 @@ function unwrap(state, inside, budget) {
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? "";
         take();
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}";
+      } else if (wrapper === "env" && v === "-") {
+        take();
       } else if (v === "--") {
         take();
         while (ASSIGN.test(peek()?.value ?? ""))
@@ -7400,9 +8038,10 @@ async function runAll(lexed, env, visit, builtins) {
     envs.set(scope, child);
     return child;
   };
-  for (const cmd of lexed.commands)
-    if (cmd.stdin && stdinShell(cmd))
-      cmd.stdin.feedsShell = true;
+  for (const [producer, { consumer, kind }] of codeFed(lexed.commands)) {
+    producer.feedsShell = true;
+    consumer.runsStdin = kind !== "code";
+  }
   for (const cmd of lexed.commands) {
     const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins);
     if (verdict)
@@ -7413,8 +8052,14 @@ var subshell = (env) => ({ ...env, vars: new Map(env.vars) });
 async function examine(cmd, env, visit, builtins) {
   tick();
   unchain(cmd, env);
+  if (cmd.opaque) {
+    env.cwdAnywhere = true;
+    env.cwdSure = undefined;
+    env.cwdUnread = true;
+  }
   const [primary, ...others] = readings(parse3(cmd));
-  const before = others.length > 0 ? apart(env) : env;
+  const expanded = expandTilde(cmd, primary.name, env);
+  const before = others.length > 0 || expanded.length > 0 ? apart(env) : env;
   const verdict = await examineReading(cmd, primary, env, visit, builtins);
   if (verdict)
     return verdict;
@@ -7423,6 +8068,70 @@ async function examine(cmd, env, visit, builtins) {
     if (verdict)
       return verdict;
   }
+  for (const variant of expanded) {
+    const verdict = await examineExpanded(cmd, variant, before, visit, builtins);
+    if (verdict)
+      return verdict;
+  }
+  if (!cmd.runsStdin || stdinScript(primary))
+    return;
+  const script = await stdinOf(cmd, env);
+  return nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins));
+}
+function stdinScript({ args, name }) {
+  if (name === "." || name === "source")
+    return STDIN_PATHS.has(args[0]?.value ?? "");
+  if (!SHELLS.has(name))
+    return false;
+  const { inline, operand } = shellOperand(args, name);
+  return !operand || !inline && STDIN_PATHS.has(operand.value);
+}
+var BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line";
+function expandTilde(cmd, name, env) {
+  if (!env.old)
+    return [];
+  const opens = (w) => !!w?.tilde && TILDE.test(w.value);
+  const moves = name === "cd" || name === "popd" || name === "pushd";
+  const words = moves ? [] : cmd.words.filter(opens);
+  const targets = cmd.redirects.filter((r) => opens(r.target));
+  if (words.length === 0 && targets.length === 0)
+    return [];
+  const left = leftFolder(env);
+  const lefts = cmd.kept ? [...left === undefined ? [] : [left], undefined] : [left];
+  return lefts.map((dir) => {
+    const expand = (w) => {
+      if (!opens(w))
+        return w;
+      const rest = w.value.slice(2);
+      if (w.value[1] === "+")
+        return { ...w, tilde: undefined, value: `.${rest}` };
+      return dir === undefined ? { ...w, tilde: undefined, unknown: BLIND, value: UNKNOWN + rest } : { ...w, tilde: undefined, value: dir + rest };
+    };
+    return {
+      ...cmd,
+      redirects: cmd.redirects.map((r) => opens(r.target) ? { ...r, target: expand(r.target) } : r),
+      words: moves ? cmd.words : cmd.words.map(expand)
+    };
+  });
+}
+async function examineExpanded(cmd, expanded, before, visit, builtins) {
+  const { redirects, words } = cmd;
+  cmd.redirects = expanded.redirects;
+  cmd.words = expanded.words;
+  try {
+    for (const parsed of readings(parse3(cmd))) {
+      const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins);
+      if (verdict)
+        return verdict;
+    }
+  } finally {
+    cmd.redirects = redirects;
+    cmd.words = words;
+  }
+}
+function leftFolder(env) {
+  const left = env.oldFrom ?? (env.old?.dir === undefined ? [] : [env.old.dir]);
+  return left.length === 1 ? left[0] : undefined;
 }
 var apart = (env) => ({
   ...env,
@@ -7445,7 +8154,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   let verdict;
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name);
   if (followed && builtins && cmd.redirects.length > 0) {
-    const bare = { ...cmd, words: [] };
+    const bare = { ...cmd, bareOf: cmd, words: [] };
     verdict = await visit(bare, parse3(bare), here);
     if (verdict)
       return verdict;
@@ -7453,7 +8162,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   if (name === "") {
     for (const [key, value] of local)
       setVar(env.vars, key, value);
-    if (builtins || cmd.feedsShell)
+    if (builtins || cmd.feedsShell || rootFed(cmd))
       verdict = await visit(cmd, parsed, here);
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -7468,15 +8177,26 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
     verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
-  else if ((name === "source" || name === ".") && (args[0]?.procs || args[0]?.value === "/dev/stdin")) {
+  else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
     const script = await scriptOf(args[0], cmd, here);
-    verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(lexScript(known(script), env), here, visit, builtins));
+    verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
   } else if (name === "eval") {
-    verdict = await nested(cmd, env, () => run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins));
+    verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record2(cmd, name, args, here);
   return verdict;
+}
+function again(lexed, cmd, parsed) {
+  if (!manyTimes(cmd, parsed))
+    return lexed;
+  const more = onceOrMore(cmd, parsed);
+  for (const c of lexed.commands) {
+    if (more && !c.repeated)
+      c.atLeastOnce = true;
+    c.repeated = true;
+  }
+  return lexed;
 }
 async function nested(cmd, env, body) {
   const chain = env.cwdChain;
@@ -7493,11 +8213,12 @@ async function nested(cmd, env, body) {
 }
 var BUILTIN = new Set(["builtin", "command"]);
 var sureToRun = (cmd, parsed) => !cmd.detached && !cmd.unsure && !cmd.repeated && (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed));
+var onceOrMore = (cmd, parsed) => !!cmd.atLeastOnce && !cmd.chained && !cmd.detached && !cmd.kept && !cmd.unsure && (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed));
 var throughBuiltin = (cmd, { first }) => {
   if (!first)
     return false;
   const before = cmd.words.slice(0, cmd.words.indexOf(first));
-  return before.some((w) => !w.quoted && BUILTIN.has(program(w.value))) && before.every((w) => !w.quoted && (BUILTIN.has(program(w.value)) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
+  return before.some((w) => !w.quoted && BUILTIN.has(w.value)) && before.every((w) => !w.quoted && (BUILTIN.has(w.value) || w.value.startsWith("-") || MARKERS.has(w.value) || ASSIGN.test(w.value)));
 };
 var manyTimes = (cmd, { first }) => !!cmd.repeated || cmd.words.slice(0, first ? cmd.words.indexOf(first) : 0).some((w) => !w.quoted && COUNTED.has(program(w.value)));
 var startFolders = (env) => [
@@ -7513,13 +8234,14 @@ function ancestors(path) {
       return out;
   }
 }
+var tildeSign = (name, dir, env) => (name === "cd" || name === "pushd") && env.old && dir?.tilde && !dir.unknown && !dir.reads?.length ? dir.value[1] : undefined;
 async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
     return homedir2();
   const typed = dir.value === "-" ? undefined : await folder2(pathOf(dir, env));
-  const tilde = !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
-  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd);
+  const sign = typed ? undefined : tildeSign(name, dir, env);
+  const base = sign && (sign === "-" ? env.old?.dir : env.cwd);
   return base ? await folder2(base + dir.value.slice(2)) : typed;
 }
 async function folder2(path) {
@@ -7538,7 +8260,10 @@ function cdTargets(name, cmd, parsed, env, from) {
   const paths = new Set;
   const many = manyTimes(cmd, parsed);
   let unread = dirs.length > 1;
-  for (const word of dirs.length > 1 ? dirs : [dir]) {
+  for (const typed of dirs.length > 1 ? dirs : [dir]) {
+    const word = env.hold?.(typed, cmd, env) ?? typed;
+    if (word !== typed)
+      unread = true;
     for (const base of from.length > 0 ? from : [undefined]) {
       tick();
       const path = pathOf(word, { ...env, cwd: base });
@@ -7555,19 +8280,19 @@ function cdTargets(name, cmd, parsed, env, from) {
   }
   return { back: dirs.length > 1, paths: [...paths], unread };
 }
-function pushdTilde(move, name, parsed, env, from, back) {
+function tildeMove(move, name, parsed, env, from, back) {
   const dir = parsed.args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
-  const tilde = name === "pushd" && env.old && dir && !dir.quoted && !dir.unknown && !dir.reads?.length ? /^~([-+])(?=\/|$)/.exec(dir.value) : null;
-  if (!tilde || !dir)
+  const sign = tildeSign(name, dir, env);
+  if (!sign || !dir)
     return move;
-  const bases = tilde[1] === "-" ? back : from;
+  const bases = sign === "-" ? back : from;
   const paths = [
     ...move.paths,
     ...bases.map((base) => base + dir.value.slice(2)),
     ...env.cwd === undefined ? [] : [env.cwd]
   ];
   return {
-    back: move.back || tilde[1] === "-",
+    back: move.back || sign === "-",
     paths: [...new Set(paths)],
     unread: move.unread || bases.length === 0
   };
@@ -7577,10 +8302,12 @@ async function chdirTo(name, cmd, parsed, env) {
   env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(name, parsed.args, env);
   if (env.old)
     env.old = name === "popd" ? {} : { dir: env.cwd === undefined ? undefined : left };
+  if (env.old)
+    env.oldFrom = [];
   const from = startFolders(env);
   const back = [...new Set([...env.cwdBack ?? [], ...from])];
   const bases = [...new Set([...from, ...env.cwdHeld ?? []])];
-  const move = name === "popd" ? { back: true, paths: [], unread: true } : pushdTilde(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back);
+  const move = name === "popd" ? { back: true, paths: [], unread: true } : tildeMove(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back);
   const { paths, unread } = move;
   const named = [left, env.cwd].filter((dir) => dir !== undefined);
   env.cwdBack = keep([...new Set([...back, ...paths, ...named])], env);
@@ -7594,6 +8321,8 @@ async function chdirTo(name, cmd, parsed, env) {
     env.cwdSure = paths[0];
     env.cwdMaybe = [];
     env.cwdUnread = false;
+    if (env.old)
+      env.oldFrom = bases;
     if (chained) {
       env.cwdChain = keep([...new Set([...env.cwdChain ?? [], ...from])], env);
       env.cwdChainToken = cmd.chain;
@@ -7601,7 +8330,8 @@ async function chdirTo(name, cmd, parsed, env) {
     return;
   }
   env.cwdSure = undefined;
-  env.cwdMaybe = keep([...new Set([...move.back ? back : from, ...paths])], env);
+  const behind = onceOrMore(cmd, parsed) && !unread && !move.back && paths.length > 0 && (chained || (await Promise.all(paths.map(isFolder))).every(Boolean));
+  env.cwdMaybe = keep([...new Set([...move.back ? back : behind ? [] : from, ...paths])], env);
   env.cwdUnread = env.cwdUnread || unread || from.length === 0 && paths.length === 0;
 }
 var negated = (cmd) => markers(cmd.words).filter((word) => word === "!").length % 2 === 1;
@@ -7610,6 +8340,8 @@ function unchain(cmd, env) {
     return;
   env.cwdMaybe = keep([...new Set([...env.cwdMaybe ?? [], ...env.cwdSure ? [env.cwdSure] : [], ...env.cwdChain])], env);
   env.cwdSure = undefined;
+  if (env.old)
+    env.oldFrom = [];
   env.cwdChain = [];
   env.cwdChainToken = undefined;
 }
@@ -7650,24 +8382,23 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
   const { inline, operand } = shellOperand(args, name);
+  const splits = (script) => SPLITTERS.has(name) || name === "zsh" && (zshSplits(script) || args.some((a) => /^[-+]/.test(a.value) && a.value !== "-c"));
   if (operand && inline) {
     let script = operand.value;
     if (xargs?.replace && script.includes(xargs.replace)) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    const verdict = await run(lexScript(script, env), subshell(env), visit, builtins);
-    if (verdict || !cmd.stdin || !marked(operand.value))
-      return verdict;
-    return run(lexScript(known(await stdinOf(cmd, env)), env), subshell(env), visit, builtins);
+    return run(lexScript(script, env), { ...subshell(env), splits: splits(script) }, visit, builtins);
   }
   const script = await scriptOf(operand, cmd, env);
-  return run(lexScript(known(script), env), subshell(env), visit, builtins);
+  const text = known(script);
+  return run(lexScript(text, env), { ...subshell(env), splits: splits(text) }, visit, builtins);
 }
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const script = !operand || operand.value === "/dev/stdin" ? await stdinOf(cmd, env) : operand.procs ? await outputs(operand.procs, env) : unknown2("a script file");
+  const script = !operand || STDIN_PATHS.has(operand.value) ? await stdinOf(cmd, env) : operand.procs ? await outputs(operand.procs, env) : unknown2("a script file");
   if (deadline !== undefined && script.unknown === LARGE)
     throw new RangeError(LARGE);
   return script;
@@ -7764,8 +8495,10 @@ async function stdinOf(cmd, env) {
   tick();
   return held(await stdinText(cmd, env));
 }
+var feedsStdin = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
+var rootFed = (cmd) => cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root";
 async function stdinText(cmd, env) {
-  const input = cmd.redirects.findLast((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&");
+  const input = cmd.redirects.findLast(feedsStdin);
   if (input?.target?.procs)
     return outputs(input.target.procs, env);
   if (input?.op === "<" || input?.op === "<>")
@@ -8128,6 +8861,7 @@ var ROSTER_KINDS = [
   "dispatcher",
   "ops",
   "optimizer",
+  "orchestrator",
   "planner",
   "probe",
   "researcher",
@@ -8143,6 +8877,7 @@ var FACTORY_ROLE_OF_KIND = {
   dispatcher: "dispatcher",
   ops: "lead",
   optimizer: "lead",
+  orchestrator: "lead",
   planner: "lead",
   probe: "probe",
   researcher: "worker",
@@ -8901,13 +9636,15 @@ function conversation(route) {
     return true;
   return segments[0] === "pulls" && !segments.some((s) => s === "merge" || s === "update-branch");
 }
+var hostOf = (url) => /^[a-z][a-z\d+.-]*:\/\/(?:[^/?#@]*@)?([^/?#:]+)/i.exec(url)?.[1]?.toLowerCase().replace(/\.+$/, "");
+var slackHost = (host) => host === "slack.com" || !!host?.endsWith(".slack.com");
 function hostTarget(url) {
-  const host = /^[a-z][a-z\d+.-]*:\/\/([^/?#:]+)/i.exec(url)?.[1]?.toLowerCase();
+  const host = hostOf(url);
   if (!host || !policy.hosts)
     return;
   if (host === "linear.app" || host.endsWith(".linear.app"))
     return { label: "Linear", where: "guarded" };
-  if (host === "slack.com" || host.endsWith(".slack.com"))
+  if (slackHost(host))
     return { label: "Slack", where: "guarded" };
 }
 async function curl(args, cmd, env, xargs) {
@@ -8943,6 +9680,11 @@ async function curl(args, cmd, env, xargs) {
   const target = targets.find((t) => t.where === "guarded") ?? targets.find((t) => t.where === "unknown");
   if (!target)
     return;
+  if (targets.some((t) => t.label === "Slack")) {
+    const gated = gatedCurl(urls);
+    if (gated)
+      return gated;
+  }
   const data = await curlData(flags, cmd, env);
   const get = flags.some((f) => f.name === "-G" || f.name === "--get");
   const writes = data.length > 0 && !get || urls.some((u) => /\/api\/chat\./i.test(u.value));
@@ -9261,6 +10003,50 @@ async function push(rest, env, checkout, takes = PUSH_TAKES) {
   }
   return judge("git push", target, texts, env);
 }
+var GATED_READS = new Set(["usergroups_me", "users_conversations"]);
+function gatedPost(tool, server, name, input) {
+  const read = name.replace(/^slack_/, "");
+  if (READ_TOOL.test(read) || GATED_READS.has(read))
+    return;
+  const connector = name === CONNECTOR_TOOL;
+  const posting = CHAT_TOOL.test(name) || connector;
+  const what = tool.replace(/^mcp__/, "");
+  for (const gate of policy.gates ?? []) {
+    if ("broken" in gate) {
+      if (/slack/i.test(server))
+        return brokenGate(what, gate);
+      continue;
+    }
+    if (!gate.servers.includes(server))
+      continue;
+    const keys = connector ? CONNECTOR_KEYS : POST_KEYS;
+    const alone = posting && input !== undefined && input[keys.channel] === gate.selfDm && !Object.keys(input).some((k) => k !== keys.channel && OTHER_DESTINATION.test(k));
+    if (!alone)
+      return `no-playground-leak hook refused ${what}: the ${gate.org} extension gates its Slack sends on ${server}, so every write there goes through ${gate.path}; only a post whose one destination is its self-DM (${gate.selfDm}) passes here. Send it through that path.`;
+  }
+}
+var brokenGate = (what, gate) => `no-playground-leak hook refused ${what}: the ${gate.org} extension's slack.gatedSends does not read (${gate.broken}), so the hook cannot tell which Slack writes its gate covers. Tell your lead: it is set in that extension's settings as {"path": "<its send path>", "selfDm": "D\u2026", "servers": ["<MCP server>"]}, or "" for no gate; then run the call again.`;
+var SLACK_READ_METHOD = /^(?:auth\.test|search\.[a-z]+|(?:[a-z]+\.)+(?:history|info|list|replies|unreads|get[A-Za-z]*|lookup[A-Za-z]*))$/;
+function gatedCurl(urls) {
+  const gates = policy.gates ?? [];
+  if (!gates.length)
+    return;
+  const writes = urls.some((u) => {
+    const value = visible(u.value);
+    const url = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `http://${value}`;
+    if (!slackHost(hostOf(url)))
+      return false;
+    const method = /^[a-z][a-z\d+.-]*:\/\/[^/?#]*\/api\/([^/?#]+)(?:[?#]|$)/i.exec(url)?.[1];
+    return !method || !SLACK_READ_METHOD.test(method);
+  });
+  if (!writes)
+    return;
+  const broken = gates.find((g) => ("broken" in g));
+  if (broken && "broken" in broken)
+    return brokenGate("curl", broken);
+  const paths = gates.flatMap((g) => ("path" in g) ? [`${g.org}'s ${g.path}`] : []);
+  return `no-playground-leak hook refused curl to Slack's API: an org gates its Slack sends (slack.gatedSends), so a Slack write goes through ${paths.join(" or ")}, and curl passes only a read method on /api/. Send it through that path.`;
+}
 function strings(node) {
   if (typeof node === "string")
     return [node];
@@ -9272,6 +10058,9 @@ function strings(node) {
 }
 function mcp(tool, input) {
   const [, server = "", name = ""] = MCP_TOOL.exec(tool) ?? [];
+  const gated = gatedPost(tool, server, name, input);
+  if (gated)
+    return gated;
   const surface = /linear/i.test(server) ? "Linear" : /slack/i.test(server) ? "Slack" : /github/i.test(server) ? "GitHub" : undefined;
   if (!surface || READ_TOOL.test(name) || surface !== "GitHub" && !policy.hosts)
     return;

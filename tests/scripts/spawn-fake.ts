@@ -34,7 +34,7 @@ afterAll(() => rmSync(scratch, { force: true, recursive: true }))
 
 export const LSTART = "Tue Oct 13 04:43:59 2026"
 
-// Fake cmux (a move's reads and closes), ps, sysctl, uptime and bun on PATH, each logging what it was asked; bun fakes spawn.sh's roster write alone.
+// Fake cmux (which spawn.sh never calls), ps, sysctl, uptime and bun on PATH, each logging what it was asked; bun fakes spawn.sh's roster write alone.
 export const bin = join(scratch, "bin")
 const sharedOrgs = join(scratch, "orgs")
 mkdirSync(sharedOrgs, { recursive: true })
@@ -43,34 +43,13 @@ export const fake = (name: string, body: string) => {
   writeFileSync(join(bin, name), `#!/bin/bash\n${body}\n`)
   chmodSync(join(bin, name), 0o755)
 }
-fake(
-  "cmux",
-  `printf '%s\\n' "$@" > "$HOME/cmux.args"
-printf '%s\\037' "$@" >> "$HOME/cmux.calls"; echo >> "$HOME/cmux.calls"
-case "$1" in
-  sessions) cat "$HOME/cmux.sessions" 2>/dev/null || echo '{"sessions":[]}' ;;
-  close-surface)
-    [ -z "$FAKE_CLOSE_FAIL" ] || { echo "ERROR: Socket closed" >&2; exit 1; }
-    [ -z "$FAKE_CLOSE_LAST" ] || { echo "ERROR: Cannot close the last surface" >&2; exit 1; }
-    : > "$HOME/cmux.closed" ;;
-  workspace)
-    [ "$2" = close ] || exit 1
-    [ -z "$FAKE_CLOSE_FAIL" ] || { echo "ERROR: Socket closed" >&2; exit 1; }
-    [ -z "$FAKE_WS_CLOSE_FAIL" ] || { echo "ERROR: Workspace busy" >&2; exit 1; }
-    : > "$HOME/cmux.closed" ;;
-esac`,
-)
+fake("cmux", `printf '%s\\n' "$@" > "$HOME/cmux.args"`)
 fake(
   "ps",
   `[ -n "$FAKE_PS_BROKEN" ] && exit 1
 while [ $# -gt 0 ]; do [ "$1" = -p ] && pids=$2; shift; done
 for pid in \${pids//,/ }; do
   case " $FAKE_DEAD " in *" $pid "*) continue ;; esac
-  if [ -e "$HOME/cmux.closed" ] && [ "$pid" = "$FAKE_EXITS_ON_CLOSE" ]; then
-    n=$(cat "$HOME/ps.after" 2>/dev/null || echo 0)
-    echo $((n + 1)) > "$HOME/ps.after"
-    [ "$n" -lt "\${FAKE_EXIT_AFTER:-0}" ] || continue
-  fi
   printf '%5s %s\\n' "$pid" "$FAKE_LSTART"
 done
 exit 0`,
@@ -119,11 +98,10 @@ case "$2" in
   *) exit 1 ;;
 esac`,
 )
-// The CPU read, top -l 2 -n 0: each call logged to top.calls, idle at FAKE_CPU_IDLE (0 by default, so the load alone decides as before).
+// The CPU read, top -l 2 -n 0, which run-slot's gauges take and spawn.sh does not: each call logged to top.calls, idle at FAKE_CPU_IDLE (0 by default).
 fake(
   "top",
   `echo "$*" >> "$HOME/top.calls"
-[ -n "$FAKE_TOP_BROKEN" ] && exit 1
 echo "CPU usage: 30.00% user, 20.00% sys, 50.00% idle"
 echo "CPU usage: 60.00% user, 40.00% sys, \${FAKE_CPU_IDLE:-0.00}% idle"`,
 )
@@ -141,6 +119,12 @@ echo "Mach Virtual Memory Statistics: (page size of 16384 bytes)"
 echo "    free  pageins  pageout  swapins swapouts"
 echo "    8023  346118K   502178  9966113 12153731"
 echo "    7698      542        0  \${FAKE_SWAPINS:-0}        0"`,
+)
+// grep as it is, but a resume's name check over a folder's transcripts, its one call naming customTitle, is logged to grep.calls first, so a case sees whether that read ran.
+fake(
+  "grep",
+  `case "$*" in *customTitle*) printf '%s\\n' "$*" >> "$HOME/grep.calls" ;; esac
+exec /usr/bin/grep "$@"`,
 )
 
 export let homes = 0
@@ -530,3 +514,26 @@ export const execLine = (r: { home: string }, name: string) =>
     .split("\n")
     .find((l) => l.startsWith("exec "))
     ?.replace(/^exec \S+\/scripts\/spawn\.sh /, "exec spawn.sh ")
+
+const LANES = ["run-slot", "run-slot-2", "run-slot-3", "run-slot-4"]
+
+// run-slot's state in the case's own home (spawn-fake's mkdtemp scratch): `held` lanes held by this live test process with `units` load units each, and `waiters` live tickets in its queue.
+export const slots =
+  (held: number, waiters: number, units = 2) =>
+  (home: string): void => {
+    const ops = join(home, ".playground", "ops")
+    for (const lane of LANES.slice(0, held)) {
+      mkdirSync(join(ops, lane), { recursive: true })
+      writeFileSync(
+        join(ops, `${lane}.holder`),
+        `worker-held ${process.pid} 2026-11-02T18:00:00Z ${units} medium\n`,
+      )
+    }
+    const queue = join(ops, "run-slot.waiters")
+    mkdirSync(queue, { recursive: true })
+    for (let i = 0; i < waiters; i++)
+      writeFileSync(
+        join(queue, `${1_000_000 + i}-${process.pid}-worker-wait${i}`),
+        "s2 22 2 medium\n",
+      )
+  }

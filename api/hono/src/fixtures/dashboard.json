@@ -24,14 +24,6 @@
       },
       {
         "action": null,
-        "detail": "0.61.0",
-        "name": "cmux",
-        "need": "the terminal sessions run in",
-        "note": null,
-        "status": "ok"
-      },
-      {
-        "action": null,
         "detail": "28.3.1",
         "name": "docker",
         "need": "the database",
@@ -129,14 +121,6 @@
         "status": "ok"
       },
       {
-        "action": null,
-        "detail": "0.61.0",
-        "name": "cmux",
-        "need": "the terminal sessions run in",
-        "note": null,
-        "status": "ok"
-      },
-      {
         "action": {
           "id": "docker",
           "label": "Install Docker"
@@ -191,11 +175,11 @@
         "status": "ok"
       },
       {
-        "action": { "id": "trust", "label": "Trust the certificate" },
-        "detail": "not trusted",
+        "action": { "id": "proxy", "label": "Set up the web address" },
+        "detail": "not on 443",
         "name": "portless",
         "need": "the Dashboard's https address",
-        "note": "Your Mac does not trust the local web proxy's certificate yet. Trust it here; your Mac may ask for your password in its own window.",
+        "note": "The Dashboard's web address runs on port 1355 for now. Set it up here, and it drops the port number; your Mac asks for your password in its own window.",
         "status": "optional"
       },
       {
@@ -1302,6 +1286,70 @@
       "startedAt": 1767254820000,
       "status": "idle"
     },
+    "sessions/900053.json": {
+      "cwd": "/fixture/playground",
+      "kind": "interactive",
+      "messagingSocketPath": "/fixture/sockets/assistant.sock",
+      "name": "assistant",
+      "pid": 900053,
+      "procStart": "Thu Jan  1 08:00:00 2026",
+      "sessionId": "11111111-1111-4111-8111-000000000021",
+      "startedAt": 1767254880000,
+      "status": "idle"
+    },
+    "projects/-fixture-playground/11111111-1111-4111-8111-000000000021.jsonl": [
+      {
+        "agentName": "assistant",
+        "sessionId": "11111111-1111-4111-8111-000000000021",
+        "type": "agent-name"
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000021",
+        "timestamp": "2026-01-01T08:08:00.000Z",
+        "type": "user",
+        "uuid": "22222222-2222-4222-8222-0000000000a0",
+        "version": "2.1.0",
+        "message": {
+          "content": "Fixture: keep the tracker and run my errands.",
+          "role": "user"
+        },
+        "origin": {
+          "kind": "human"
+        }
+      },
+      {
+        "cwd": "/fixture/playground",
+        "entrypoint": "cli",
+        "sessionId": "11111111-1111-4111-8111-000000000021",
+        "timestamp": "2026-01-01T11:45:00.000Z",
+        "type": "assistant",
+        "uuid": "22222222-2222-4222-8222-0000000000a1",
+        "version": "2.1.0",
+        "message": {
+          "content": [
+            {
+              "text": "On it. The tracker is current, and nothing waits on you today.",
+              "type": "text"
+            }
+          ],
+          "model": "claude-opus-5-5",
+          "role": "assistant",
+          "id": "msg_fixture_assistant_1",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 4000
+            },
+            "cache_creation_input_tokens": 4000,
+            "cache_read_input_tokens": 80000,
+            "input_tokens": 12,
+            "output_tokens": 120
+          }
+        }
+      }
+    ],
     "projects/-fixture-playground--claude-worktrees-sidebar-spacing/11111111-1111-4111-8111-000000000004.jsonl": [
       {
         "agentName": "worker-greed",
@@ -3203,6 +3251,9 @@
       }
     ],
     "playground/previews/sidebar-mock.html": "<!doctype html><title>Sidebar spacing</title><style>body{margin:0;padding:32px;font:14px system-ui;background:#fafafa;color:#18181b;display:grid;gap:24px;grid-template-columns:1fr 1fr}@media (prefers-color-scheme:dark){body{background:#18181b;color:#fafafa}}section{border:1px solid #a1a1aa;border-radius:8px;padding:16px}h2{font-size:14px;margin:0 0 12px}p{margin:0;padding:6px 0}.tight p{padding:2px 0}</style><section><h2>Option A: 6px rows</h2><p>Builder</p><p>Planner</p><p>Ops</p></section><section class=\"tight\"><h2>Option B: 2px rows</h2><p>Builder</p><p>Planner</p><p>Ops</p></section>",
+    "playground/previews/sidebar-mock.pdf": {
+      "$base64": "JVBERi0xLjQKMSAwIG9iajw8L1R5cGUvQ2F0YWxvZy9QYWdlcyAyIDAgUj4+ZW5kb2JqCjIgMCBvYmo8PC9UeXBlL1BhZ2VzL0tpZHNbMyAwIFJdL0NvdW50IDE+PmVuZG9iagozIDAgb2JqPDwvVHlwZS9QYWdlL1BhcmVudCAyIDAgUi9NZWRpYUJveFswIDAgMzAwIDE0NF0vQ29udGVudHMgNCAwIFIvUmVzb3VyY2VzPDwvRm9udDw8L0YxIDUgMCBSPj4+Pj4+ZW5kb2JqCjQgMCBvYmo8PC9MZW5ndGggNDQ+PnN0cmVhbQpCVCAvRjEgMTggVGYgNDAgNzAgVGQgKEZpeHR1cmUgUERGKSBUaiBFVAplbmRzdHJlYW0gZW5kb2JqCjUgMCBvYmo8PC9UeXBlL0ZvbnQvU3VidHlwZS9UeXBlMS9CYXNlRm9udC9IZWx2ZXRpY2E+PmVuZG9iagp0cmFpbGVyPDwvUm9vdCAxIDAgUj4+CiUlRU9GCg=="
+    },
     "playground/previews/sidebar-mock.txt": "Fixture: sidebar spacing, two options side by side",
     "playground/previews/spinner-dark-1.png": {
       "$base64": "iVBORw0KGgoAAAANSUhEUgAAAUAAAAC0CAIAAABqhmJGAAADHUlEQVR42u3cy20CQRBFUcJAcjDsyD8eViYBW8PQn3o1B90109X0Uc/C8u1+/5EU2s0WSABLAlgSwBLAkgCWBLAkgCWAJQEsCWAJYEkASwJYEsASwJIAlgSwJIAlgCUBLAlgCWBJAEsCWBLAEsCSAJYEsCSAJYAlASwJYAlgSQBLAlgSwBLAkgCWBLAEsF2QAJYEsCSAJYAV0uvvz+Px/CdbB7DKoT0OGGaAVdHtCcAkA6xCdE8Dxhhg7af7JWCMAdZOukMAYwyw9tAdCBhjgLVB71jADAOsdXRnAMYYYK3T+/68v5ZhgFVd74knMgywNusd8nSGAdZSupMWgzHAmqt3waoYBljjAS9eG8AAK1UvwwBrjN7tS2UYYKXqZRhgZetlGGB9DLjgygEGmN5UvQwDTG+2XoYBBjhb73HDfm6A6WVYAIcAjpsIYIDp7QyYYYBdvy5hAUwvwwALYIABprePXoYBBhhgAZwJuM2YAAPs+nUJC2CAAQZY3p+9RQMMMMAAA+z92Vu0AHb9uoQBFsAAAwwwwAIYYIABtgsAAwywAAYYYIABFsAAAwyw5gBuPDXAALuOjCyAnWYjAyyn2cgAAwwwwAA7zUYWwE6zkQGW02xkgAE2sgD2HyrMC7DcSIYFWAADDLC3SpMKYMfapADLi6UxAQa45eF2/QIMsBkFsPNtOoDliJsOYPU/5fQCDHDqWW85FMC6ymVFL8AAp5541y/ADKceenoBBjj16PeYAmBd8fTTCzDDqQboBVhHGVSTELpsgAUDvQArlgS9AOsrGLts1F+hAGaYXoA1H8kyKjVXJYCbGJ4HptRiBHBzxqPw7H26AL604dOW1j9RADP8MbNJXyuAtcIwvQALY3QBVrJhPwrAimTshwBYkYxtPsCKZGzDAVYkY5sMsPIk21KAdcW/xBTAkgCWAJYEsCSAJQEsASwJYEkASwJYAlgSwJIAlgCWBLAkgCUBLAEsCWBJAEsASwJYEsCSAJYAlgSwJIAlASwBLAlgSQBLAEsCWBLAkgCWAJYEsCSAJQEsASwJYEkASwBLAljS5H4BwwgakSbsQDEAAAAASUVORK5CYII="
@@ -3255,6 +3306,14 @@
           "status": "working",
           "task": "Order the asks and keep the plan",
           "title": "Plan: order of work"
+        },
+        {
+          "kind": "assistant",
+          "name": "assistant",
+          "role": "manager",
+          "status": "working",
+          "task": "Keep the tracker and run the owner's errands",
+          "title": "Assistant: errands and tracker"
         },
         {
           "branch": "feat/feed-paint",
@@ -4637,6 +4696,28 @@
       {
         "agent_session": {
           "kind": "id",
+          "value": "11111111-1111-4111-8111-000000000021"
+        },
+        "agent_status": "idle",
+        "pane_id": "wM:p1",
+        "processes": [
+          {
+            "argv": ["/usr/local/bin/claude", "-n", "assistant"],
+            "cwd": "/fixture/playground",
+            "pid": 900053
+          }
+        ],
+        "scroll": {
+          "offset_from_bottom": 0
+        },
+        "session_id": "11111111-1111-4111-8111-000000000021",
+        "terminal_id": "t-5f000000-0000-4000-8000-000000000021",
+        "transcript_path": "$CONFIG/projects/-fixture-playground/11111111-1111-4111-8111-000000000021.jsonl",
+        "workspace_id": "wM"
+      },
+      {
+        "agent_session": {
+          "kind": "id",
           "value": "11111111-1111-4111-8111-000000000004"
         },
         "agent_status": "blocked",
@@ -5022,6 +5103,10 @@
         "workspace_id": "w5"
       },
       {
+        "label": "assistant",
+        "workspace_id": "wM"
+      },
+      {
         "label": "worker-greed",
         "workspace_id": "w6"
       },
@@ -5172,6 +5257,10 @@
     },
     "900012": {
       "command": "claude -n planner",
+      "start": "Thu Jan  1 08:00:00 2026"
+    },
+    "900053": {
+      "command": "claude -n assistant",
       "start": "Thu Jan  1 08:00:00 2026"
     },
     "900014": {

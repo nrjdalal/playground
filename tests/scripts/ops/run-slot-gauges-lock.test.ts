@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { SCRIPT, machine } from "./run-slot-fake"
@@ -56,7 +56,8 @@ describe("the gauges refresh under one lock", () => {
     const m = machine()
     expect(await slotsTogether(m)).toEqual(["4"])
     expect(existsSync(lock(m))).toBe(false)
-    expect(readFileSync(join(m.ops, "run-slot.gauges"), "utf8")).toMatch(/^\d+ 80 0\n$/)
+    // the last field is the reading before it, none here
+    expect(readFileSync(join(m.ops, "run-slot.gauges"), "utf8")).toMatch(/^\d+ 80 0 120 3\.50 -\n$/)
   })
 
   test("a look that finds the lock held keeps the stale reading and runs no top", async () => {
@@ -120,11 +121,28 @@ describe("the gauges refresh under one lock", () => {
     const m = machine({ idle: 80, topDelay: 1 })
     cache(m, 60, "30")
     held(m, 31)
-    const slots = await slotsTogether(m, 8)
-    expect(slots.every((s) => s === "1" || s === "4")).toBe(true)
+    const looks = await Promise.all(Array.from({ length: 8 }, () => read(start(m))))
+    // the looks that read neither reading, each with its stderr, so a failure on CI names what one printed
+    expect(looks.filter((l) => l.slots !== "1" && l.slots !== "4")).toEqual([])
+    const slots = looks.map((l) => l.slots)
     expect(slots).toContain("4")
     expect(tops(m)).toBeGreaterThanOrEqual(1)
-    expect(readFileSync(join(m.ops, "run-slot.gauges"), "utf8")).toMatch(/^\d+ 80 0\n$/)
+    expect(readFileSync(join(m.ops, "run-slot.gauges"), "utf8")).toMatch(/^\d+ 80 0 120 3\.50 0\n$/)
     expect(existsSync(lock(m))).toBe(false)
+  })
+
+  // a reading that lands while a look counts: stat runs on the lock only in gauges_lock, once its mkdir finds the lock held, so the look's first lanes check has read the stale reading when the fake stat writes a new one, as a refresher's rename would
+  test("a look counts slots 2 to 4 on one reading, even when a new one lands between their checks", async () => {
+    const m = machine({ idle: 80 })
+    cache(m, 60, "30")
+    held(m, 0)
+    const landed = join(m.root, "landed")
+    writeFileSync(
+      join(m.root, "bin", "stat"),
+      `#!/bin/bash\n"${Bun.which("stat")}" "$@"; rc=$?\ncase "$*" in *run-slot.gauges.lock*) [ -e "${landed}" ] || { : > "${landed}"; printf '%s 80 0 120 3.50 0\\n' "$(date +%s)" > "${join(m.ops, "run-slot.gauges")}"; } ;; esac\nexit $rc\n`,
+    )
+    chmodSync(join(m.root, "bin", "stat"), 0o755)
+    expect(await slotsTogether(m)).toEqual(["1"])
+    expect(existsSync(landed)).toBe(true)
   })
 })

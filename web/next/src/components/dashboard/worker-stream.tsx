@@ -11,6 +11,7 @@ import {
   RiEditLine,
   RiErrorWarningLine,
   RiHistoryLine,
+  RiInboxArchiveLine,
   RiQuestionLine,
   RiRefreshLine,
   RiRobot2Line,
@@ -24,7 +25,12 @@ import type { ReactNode } from "react"
 import { Checkpoint } from "@/components/checkpoint"
 import { ActivityLine } from "@/components/dashboard/activity-line"
 import { AgentLink } from "@/components/dashboard/agent-link"
-import { AttachmentChips, chipsFromEntry, chipsFromRefs } from "@/components/dashboard/attachments"
+import {
+  AttachmentChips,
+  chipsFromEntry,
+  chipsFromRefs,
+  type AttachmentChipItem,
+} from "@/components/dashboard/attachments"
 import {
   carriesHand,
   chatShown,
@@ -126,6 +132,7 @@ import {
 import { useAgentsBoard } from "@/lib/agents"
 import {
   attachmentsOf,
+  firstLineOf,
   outboxOf,
   SUBAGENT_TOOLS,
   subagentRunning,
@@ -137,6 +144,7 @@ import {
   type Outbox,
 } from "@/lib/chat"
 import { readChatPrefs, prefsOf, saveChatPrefs, useChatPrefs } from "@/lib/chat-mode"
+import { config } from "@/lib/config"
 import { fetchSubagentSteps, oneLine, type Older } from "@/lib/dashboard"
 import { stepOf } from "@/lib/live-activity"
 import {
@@ -153,6 +161,7 @@ import {
   deliveredAt,
   isNext,
   isUnsentMarker,
+  landed,
   othersWaiting,
   pendingAction,
   retryNote,
@@ -170,6 +179,17 @@ import { fullTime } from "@/lib/time"
 function Recipient({ to }: { to: string }) {
   const sockets = useAgentsBoard().data?.sockets
   return agentLabel(sockets?.[to] ?? withoutRef(to))
+}
+
+// A message row's tail after its bright verb, in the title's muted tone: to or from, the other session (a session when unknown), then the message's first line, so a sent and a received message read alike.
+function Addressed({ by, rest, to }: { by: "from" | "to"; rest: string; to: string | null }) {
+  return (
+    <>
+      {` ${by} `}
+      {to ? <Recipient to={to} /> : "a session"}
+      {`: ${rest}`}
+    </>
+  )
 }
 
 const recipientOf = (part: DashboardToolPart) =>
@@ -195,11 +215,7 @@ function ToolLine({ icon, part }: { icon: ReactNode; part: DashboardToolPart }) 
           {part.title ?? part.toolName}
         </span>
         {message ? (
-          <>
-            {" to "}
-            <Recipient to={message.to} />
-            {`: ${message.rest}`}
-          </>
+          <Addressed by="to" rest={message.rest} to={message.to} />
         ) : part.input.summary ? (
           ` ${part.input.summary}`
         ) : null}
@@ -385,6 +401,51 @@ function Parts({
   })
 }
 
+// Another session's message, folded as a tool row read as a sent one is: Received, then from its sender (plain text, since the row is one button) and its first line, opening to its whole text, its files, its sender linked and Copy. Only a test starts it open.
+export function PeerStep({
+  chips,
+  defaultOpen,
+  from,
+  text,
+}: {
+  chips: AttachmentChipItem[]
+  defaultOpen?: boolean
+  from: string | null
+  text: string
+}) {
+  return (
+    <Trace>
+      <TraceCollapsible defaultOpen={defaultOpen}>
+        <TraceCollapsibleTrigger>
+          <TraceLine className="text-xs">
+            <TraceIcon>
+              <RiInboxArchiveLine />
+            </TraceIcon>
+            <TraceTitle>
+              <span className="text-foreground font-medium">Received</span>
+              <Addressed by="from" rest={firstLineOf(text)} to={from} />
+            </TraceTitle>
+          </TraceLine>
+        </TraceCollapsibleTrigger>
+        <TraceCollapsibleContent className="flex flex-col gap-2">
+          {from ? (
+            <p className="text-xs">
+              From <AgentLink name={from} className="text-foreground" />
+            </p>
+          ) : null}
+          <TranscriptBubble text={text} variant="tinted" />
+          {chips.length ? <AttachmentChips className="max-w-full" items={chips} /> : null}
+          {text.trim() ? (
+            <MessageFooter className="text-2xs min-h-6">
+              <CopyMessage text={text} />
+            </MessageFooter>
+          ) : null}
+        </TraceCollapsibleContent>
+      </TraceCollapsible>
+    </Trace>
+  )
+}
+
 const Step = memo(StepRow, sameStep)
 
 // a row draws again only when what it reads moved, so a board frame or a keystroke leaves the stream's rows alone
@@ -469,17 +530,16 @@ export function StepRow({
   const text = textOf(message)
   // Copy gives the words the bubble shows, so it never hands back the sender's name line the bubble hides
   const shown = peer && sender ? withoutSenderName(text, sender) : text
-  const undo = peer
-    ? null
-    : undoState({
-        marker,
-        newest,
-        now: now.getTime(),
-        sent,
-        unsent: Boolean(message.metadata?.unsent),
-        waiting,
-      })
-  const delivered = deliveredAt({ at, peer, sent })
+  if (peer) return <PeerStep chips={chips} from={from} text={shown} />
+  const undo = undoState({
+    marker,
+    newest,
+    now: now.getTime(),
+    sent,
+    unsent: Boolean(message.metadata?.unsent),
+    waiting,
+  })
+  const delivered = deliveredAt({ at, sent })
   const focusComposer = () => document.getElementById(composer)?.focus()
   return (
     <TranscriptMessage
@@ -487,8 +547,8 @@ export function StepRow({
       bubbleClassName={undo?.kind === "unsent" ? "line-through opacity-70" : undefined}
       now={now}
       text={shown}
-      variant={peer ? "tinted" : "default"}
-      who={peer ? from ? <AgentLink name={from} /> : "session" : "You"}
+      variant="default"
+      who="You"
     >
       {chips.length ? <AttachmentChips className="max-w-full" items={chips} /> : null}
       {undo?.kind === "unsent" ? (
@@ -740,7 +800,7 @@ function PendingMessage({
             }}
           />
         ) : null}
-        {failed ? (
+        {failed && !config.hosted ? (
           <FooterAction
             Icon={RiEditLine}
             label={`Edit "${short}"`}
@@ -875,8 +935,9 @@ function ChatBar({
   )
 }
 
-// What the glide reads of a row: its words (a closed tool row, thinking or subagent run as ROW_WORDS) and whether it rests at its top, a person's or a peer's message, or a card; a turn rests at each of its words instead ([data-rests]).
+// What the glide reads of a row: its words (a closed tool row, thinking, subagent run or peer's message as ROW_WORDS) and whether it rests at its top, a person's message or a card; a turn rests at each of its words instead ([data-rests]).
 const factsOf = (message: DashboardMessage): RowFacts => {
+  if (message.metadata?.kind === "peer") return { rests: false, words: ROW_WORDS }
   if (message.role !== "assistant") return { rests: true, words: wordsIn(textOf(message)) }
   let words = 0
   for (const part of message.parts) {
@@ -923,7 +984,7 @@ export function WorkerStream({
     steps.map((message) => ({ at: message.metadata?.at ?? "", message })),
     needs,
   )
-  const pending = records.filter((m) => m.state !== "delivered")
+  const pending = records.filter((m) => !landed(m))
   const sent = new Map(records.flatMap((m) => (m.entryId ? [[m.entryId, m] as const] : [])))
   // this view is keyed by its session, so this is when its session opened here
   const [openedAt] = useState(() => new Date().toISOString())
@@ -1417,7 +1478,7 @@ export function WorkerStream({
                           <NeedsYouCard
                             item={item.need.item}
                             now={now}
-                            onAnswer={item.need.onAnswer}
+                            onAnswer={config.hosted ? null : item.need.onAnswer}
                             resolution={item.need.resolution}
                           />
                           {needsYouAnchor(item.need.item.id) === newest ? status : null}

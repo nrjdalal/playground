@@ -583,10 +583,10 @@ export const cls = async (
   return clsResult(route, load, shifts, { dispatcherLive })
 }
 
-// A chat view with no composer: a live session that is neither a dispatcher nor hosted, whose view is read-only, so its Checkpoint bar stands under the stream alone. Null when the board has none. Read from a page of the dashboard's own origin.
+// A chat view with no composer: a live session that is neither a dispatcher, the assistant nor hosted, whose view is read-only, so its Checkpoint bar stands under the stream alone. Null when the board has none. Read from a page of the dashboard's own origin.
 export const readOnlyChat = (browser: Browser, { api }: Target): Promise<string | null> =>
   browser.eval<string | null>(
-    `fetch(${JSON.stringify(`${api}/api/v1/workers`)}, { credentials: "include" }).then((response) => response.ok ? response.json() : null).then((body) => { const worker = Array.isArray(body?.data) ? body.data.find((worker) => worker.role !== "dispatcher" && !worker.hosted) : null; return worker ? "/dashboard?worker=" + encodeURIComponent(worker.sessionId) : null }).catch(() => null)`,
+    `fetch(${JSON.stringify(`${api}/api/v1/workers`)}, { credentials: "include" }).then((response) => response.ok ? response.json() : null).then((body) => { const worker = Array.isArray(body?.data) ? body.data.find((worker) => worker.role !== "dispatcher" && !worker.hosted && !worker.assistant) : null; return worker ? "/dashboard?worker=" + encodeURIComponent(worker.sessionId) : null }).catch(() => null)`,
   )
 
 // The chat's Checkpoint bar changing, each step a script so no input excuses its shift: a click turns Reading, a scroll up shows Scroll to end, its click hides it, the up arrow jumps, and a click turns Watching again.
@@ -619,10 +619,11 @@ export const clsChat = async (browser: Browser, { web }: Target): Promise<Result
   return { ...clsResult("/dashboard", "warm", shifts), check }
 }
 
-// Screenshots leave the machine on PRs, so they are taken only on a stack whose dashboard reads the fixture, a made-up machine: a stack that reads the live one (the live dashboard, PLAYGROUND_LIVE_READS, or a person's own clone) shows every real session's name, task and words. The web is asked as well as the API, through its own /api rewrite, since its pages show the API it proxies to, whatever --api names. cls holds to it too, since the live machine's sessions come and go as it loads, and so does send-top, since it types into the dispatcher and writes its reply into the fixture, and send-focus, which sends the dispatcher one message, and slash-menu, which needs the fixture's many skills and types into the dispatcher's box, and reply-focus, which posts a card into this checkout's own database, and upload-keep, which uploads a file into the fixture's folder, and typing-lag, which writes a peer's steps into the fixture's transcripts.
+// Screenshots leave the machine on PRs, so they are taken only on a stack whose dashboard reads the fixture, a made-up machine: a stack that reads the live one (the live dashboard, PLAYGROUND_LIVE_READS, or a person's own clone) shows every real session's name, task and words. The web is asked as well as the API, through its own /api rewrite, since its pages show the API it proxies to, whatever --api names. cls holds to it too, since the live machine's sessions come and go as it loads, and so does send-top, since it types into the dispatcher and writes its reply into the fixture, and send-focus, which sends the dispatcher one message, and slash-menu, which needs the fixture's many skills and types into the dispatcher's box, and reply-focus and aside-bar, which post a card into this checkout's own database, and upload-keep, which uploads a file into the fixture's folder, and typing-lag, which writes a peer's steps into the fixture's transcripts.
 export const fixtureOnly = async (
   { api, web }: Target,
   check:
+    | "aside-bar"
     | "cls"
     | "reply-focus"
     | "screenshots"
@@ -854,7 +855,7 @@ export const endedResult = (
   return pass("ended", `${name} is down and the roster reads ended`)
 }
 
-// A session's end, as the Dashboard reads it (Ended), so a lead in cmux can check a herdr session whose server its own herdr reads cannot reach.
+// A session's end, as the Dashboard reads it (Ended), so a lead can check a herdr session whose server its own herdr reads cannot reach.
 export const ended = async (
   { api, web }: Target,
   cookie: string,

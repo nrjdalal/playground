@@ -24,7 +24,6 @@ const UP: Probes = {
   dispatchers: [{ backend: "claude", name: "dispatcher" }],
   follower: true,
   glm: true,
-  terminal: true,
   web: true,
 }
 
@@ -132,8 +131,7 @@ describe("runStatus", () => {
 
 describe("statusLines", () => {
   test("everything running", () => {
-    expect(statusLines(UP, "cmux terminal")).toEqual([
-      "In a cmux terminal: yes",
+    expect(statusLines(UP)).toEqual([
       "Dashboard web: up",
       "Dashboard API: up",
       "Session follower: running",
@@ -142,21 +140,16 @@ describe("statusLines", () => {
     ])
   })
 
-  test("everything down, outside the terminal, with no GLM", () => {
+  test("everything down, with no GLM", () => {
     expect(
-      statusLines(
-        {
-          api: false,
-          dispatchers: [],
-          follower: false,
-          glm: false,
-          terminal: false,
-          web: false,
-        },
-        "cmux terminal",
-      ),
+      statusLines({
+        api: false,
+        dispatchers: [],
+        follower: false,
+        glm: false,
+        web: false,
+      }),
     ).toEqual([
-      "In a cmux terminal: no",
       "Dashboard web: down",
       "Dashboard API: down",
       "Session follower: stopped",
@@ -167,25 +160,21 @@ describe("statusLines", () => {
 
   test("names each dispatcher by the model it runs, the lead first", () => {
     expect(
-      statusLines(
-        {
-          ...UP,
-          dispatchers: [
-            { backend: "glm", name: "dispatcher-2" },
-            { backend: "claude", name: "dispatcher" },
-          ],
-        },
-        "cmux terminal",
-      ).filter((line) => line.startsWith("Dispatcher")),
+      statusLines({
+        ...UP,
+        dispatchers: [
+          { backend: "glm", name: "dispatcher-2" },
+          { backend: "claude", name: "dispatcher" },
+        ],
+      }).filter((line) => line.startsWith("Dispatcher")),
     ).toEqual(["Dispatcher on Claude: running", "Dispatcher on GLM: running"])
   })
 
   test("a second dispatcher with no lead still says the lead is not running", () => {
     expect(
-      statusLines(
-        { ...UP, dispatchers: [{ backend: null, name: "dispatcher-2" }] },
-        "cmux terminal",
-      ).filter((line) => line.startsWith("Dispatcher")),
+      statusLines({ ...UP, dispatchers: [{ backend: null, name: "dispatcher-2" }] }).filter(
+        (line) => line.startsWith("Dispatcher"),
+      ),
     ).toEqual(["Dispatcher: not running", "Dispatcher on an unknown model: running"])
   })
 })

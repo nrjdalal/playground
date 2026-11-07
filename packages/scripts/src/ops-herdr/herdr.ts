@@ -362,11 +362,13 @@ export const restoreEnv = (
   PLAYGROUND_HERDR_SESSION: session,
 })
 
-// spawn.sh restore prints one line a session (restored, skipped as live, or not restored with its reason), so a restore reads as counts: what came back, what ran already, what each gate holds (a later cycle restores those) and what failed another way; null when no line names a session.
+// spawn.sh restore prints one line a resume record (restored, skipped with its reason, or not restored with its reason), so a restore reads as counts: what came back, what ran already, what the roster keeps down, what else it passed over, what each gate holds (a later cycle restores those) and what failed another way; null when no line names a session.
 export function restoreSummary(output: string): string | null {
   const lines = output.split("\n").filter(Boolean)
-  const count = (prefix: string) => lines.filter((line) => line.startsWith(prefix)).length
-  const missed = lines.filter((line) => line.startsWith("not restored: "))
+  const count = (pattern: RegExp) => lines.filter((line) => pattern.test(line)).length
+  const live = count(/^skipped \S+: live$/)
+  const down = count(/^skipped \S+: its roster row reads /)
+  const missed = lines.filter((line) => line.startsWith("not restored "))
   const gates = new Map<string, number>()
   for (const line of missed) {
     const gate = /\bthe (\w+) gate holds it\b/.exec(line)?.[1]
@@ -374,8 +376,10 @@ export function restoreSummary(output: string): string | null {
   }
   const waiting = [...gates.values()].reduce((sum, n) => sum + n, 0)
   const parts = [
-    [count("restored "), "restored"],
-    [count("skipped "), "already running"],
+    [count(/^restored /), "restored"],
+    [live, "already running"],
+    [down, "down in the roster"],
+    [count(/^skipped /) - live - down, "passed over"],
     ...[...gates]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(

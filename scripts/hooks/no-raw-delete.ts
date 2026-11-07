@@ -8,6 +8,7 @@ import {
   type Command,
   type Env,
   examine,
+  known,
   knownVariables,
   lex,
   marked,
@@ -17,6 +18,7 @@ import {
   PRINTERS,
   program,
   readPath,
+  rootFed,
   run,
   slotWords,
   stdinOf,
@@ -32,7 +34,7 @@ const INSTEAD =
   "Move it to the 7-day trash with playground rm <path> (a worktree: playground rm --worktree <path>), which takes up to 5,000 files or 2 GB; leave a bigger tree or a scratch folder in place for your lead's cleanup, and let bun install rebuild a node_modules in place. A plain rm of a file inside your own worktree or scratchpad, with no -r, still runs."
 
 const WORKTREE =
-  "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it and its commit is on a remote branch."
+  "Remove a worktree with playground rm --worktree <path>, which moves it to the 7-day trash once no live session holds it, it holds no uncommitted change and its work has landed on canary."
 
 const refuse = (
   what: string,
@@ -257,6 +259,11 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const { args, name } = parsed
       const verdict = await judge(cmd, parsed, at, reach)
       if (verdict) return verdict
+      // a root shell's here-string, heredoc, input file or process substitution is its script, which run() leaves to each hook; each part it cannot read is taken as a line break, so the rest is still judged, as the shared reader reads a plain shell's script
+      if (rootFed(cmd)) {
+        const found = await line(known(await stdinOf(cmd, at)), at)
+        if (found) return found
+      }
       const pkg = packageOf(name, args)
       // a judged program named among another's words runs as that program, behind any runner
       if (!READERS.has(name) && !JUDGED.has(name))
@@ -411,13 +418,13 @@ async function inspect(raw: string, environment: Record<string, string | undefin
 
 const bare = (command: string) => command.replace(/[\\'"]/g, "")
 
-// The cheap first look: a name the hook judges, or a $, a backtick, a brace or a glob that can spell one.
+// The cheap first look: a name the hook judges, in any case as macOS runs it, or a $, a backtick, a brace or a glob that can spell one.
 const CANDIDATE =
-  /rm|del|chflags|chmod|clean|worktree|rimraf|rsync|shred|\bg?tar\b|screen|tmux|\bat\b|batch|\$|`|[{*?[]/
+  /rm|del|chflags|chmod|clean|worktree|rimraf|rsync|shred|\bg?tar\b|screen|tmux|\bat\b|batch|\$|`|[{*?[]/i
 
-// A call that reads as a delete, which the hook refuses when it cannot read it.
+// A call that reads as a delete, in any case, which the hook refuses when it cannot read it.
 const DELETES =
-  /\bg?rm\b|-delete\b|\bchflags\b|\bchmod\b|\bclean\b|\bworktree\b|\brimraf\b|\bdel-cli\b|\bg?shred\b|--del|--rem/
+  /\bg?rm\b|-delete\b|\bchflags\b|\bchmod\b|\bclean\b|\bworktree\b|\brimraf\b|\bdel-cli\b|\bg?shred\b|--del|--rem/i
 
 // The Bash command an input names, or undefined when the input does not parse as one.
 function commandOf(raw: string): string | undefined {

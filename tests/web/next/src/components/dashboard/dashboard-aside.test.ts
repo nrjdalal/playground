@@ -87,6 +87,13 @@ describe("the aside window on every dashboard page", () => {
     expect(asideTabs("agent", ["plan"])).toEqual(["inbox", "chat", "plan", "pages", "apps"])
   })
 
+  test("puts each open page or document's tab after the session's tabs and before Apps, the Inbox first as ever", () => {
+    const docs = ["doc:file-a1", "doc:page-report-2.html"] as const
+    expect(asideTabs("page", APPS, docs)).toEqual(["inbox", "chat", ...APPS, ...docs, "apps"])
+    expect(asideTabs("agent", [], docs)).toEqual(["inbox", "chat", "pages", ...docs, "apps"])
+    expect(asideTabs("home", [], docs)[0]).toBe("inbox")
+  })
+
   test("opens an app's square in the aside, beside the page, rather than going to its page", async () => {
     const aside = await source("components/dashboard/dashboard-aside.tsx")
     expect(aside).toContain("<AppPane")
@@ -105,9 +112,7 @@ describe("the aside window on every dashboard page", () => {
   test("counts on the Inbox square what needs you and came since your last look, so a look clears it", async () => {
     const aside = await source("components/dashboard/dashboard-aside.tsx")
     expect(aside).toContain('const inboxSeenAt = useMark("inbox")')
-    expect(aside).toContain(
-      "newInInboxCount(inboxView(inbox.data.items, inbox.dataUpdatedAt).shown, inboxSeenAt)",
-    )
+    expect(aside).toContain("newInInboxCount(inboxView(loudItems(inbox.data)).shown, inboxSeenAt)")
     expect(aside).toContain('count > 0 ? `${count} new` : fresh.inbox && "new"')
     expect(aside).not.toContain("inbox.data?.count")
   })
@@ -312,7 +317,7 @@ describe("the aside's tabs", () => {
     expect(aside).toContain('const CHAT_BOTTOM = "mb-3"')
     expect(aside).toContain('const PANE_BOTTOM = "pb-3"')
     expect(aside).toContain(
-      "className={`relative flex h-full min-h-0 flex-col overflow-hidden px-6 ${SIDE_TOP}`}",
+      "className={`relative flex h-full min-h-0 flex-col overflow-clip px-6 ${SIDE_TOP}`}",
     )
     expect(aside).toContain(
       '${value === "inbox" ? "-mt-3 has-[[data-preview-frame]]:pb-0" : "pt-(--pane-top) [--pane-top:--spacing(1)]"} ${paneBottom}`',

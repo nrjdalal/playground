@@ -23,7 +23,7 @@ const ALLOWLIST = Object.freeze([
   "tests/test_links.py",
   "tests/test_loopback_postgres.py",
   "tests/test_ops_checks.py",
-  "tests/test_ops_cmux.py",
+  "tests/test_ops_jobs.py",
   "tests/test_ops_merge_train.py",
   "tests/test_setup_check.py",
   "tests/test_skill_frontmatter.py",

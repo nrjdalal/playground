@@ -372,7 +372,7 @@ const visitor = (load5: number, limit: number): Visit => {
     if (busyRun) return loaded(busyRun, load5, limit)
     if (PURE.has(name) && !writes(cmd)) return
     const before = earlier
-    const isGit = name.toLowerCase() === "git"
+    const isGit = name === "git"
     let dir = env.cwd
     let k = 0
     for (; isGit && k < args.length; k++) {

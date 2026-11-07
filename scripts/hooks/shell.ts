@@ -3,12 +3,32 @@ import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 // `variable` names the first shell variable a text expands, so a hook can tell `"$HERDR_BIN_PATH"` from any other unknown program.
-export type Text = { reads?: Text[]; unknown?: string; value: string; variable?: string }
+// `splits` marks a text holding a value the lexer cannot read that may expand to several words: `sh` when each such part is an unquoted plain `$X` or `${X}`, which zsh keeps whole unless the line may split it (`Env.splits`), and `always` when any part is in no form the lexer knows as one word (`ONE_WORD`, `QUOTED_ONE_WORD`).
+// `tilde` marks a word that opens with an unquoted ~- or ~+, which zsh expands to the folder it last left or the one it is in.
+export type Text = {
+  reads?: Text[]
+  splits?: "always" | "sh"
+  tilde?: boolean
+  unknown?: string
+  value: string
+  variable?: string
+}
 // `glob` marks a word with a glob character the shell sees outside quotes, so `'{print $1}'` holds none and `{a,'b'}` one.
 // `raw` keeps the source of a word that holds a value the lexer cannot read, so a hook can lex it again once the call has set its variables.
-export type Word = Text & { glob?: boolean; procs?: Command[]; quoted: boolean; raw?: string }
+// `source` is the word as written, quotes and expansions included, so a hook can judge what a word expands rather than what it came to.
+export type Word = Text & {
+  glob?: boolean
+  procs?: Command[]
+  quoted: boolean
+  raw?: string
+  source?: string
+}
 type Redirect = { body?: Text; fd: string; op: string; target?: Word }
 export type Command = {
+  // Set on a while's or an until's condition outside every other loop, and on the script an eval or a source there reads, which the shell runs at least once: a cd there leaves the folder before it behind, as a sure cd does, while `repeated` reads each later pass
+  atLeastOnce?: boolean
+  // Set on the bare copy run() hands a hook's visit for a followed command with a redirect: the command it stands for
+  bareOf?: Command
   // The token of the run of commands this one belongs to: it changes at each operator that runs a command whatever the one before it did (a `;`, a newline, an `&`, an `||`), and carries into every group, body and pipeline the run reaches, so a cd is read as having moved the shell only for the commands whose token is its own
   chain?: number
   // Set when the command runs only if the one before it succeeded (it sits on the right of an `&&`), so a cd of its own has certainly run for every command the same chain joins after it
@@ -22,9 +42,15 @@ export type Command = {
   // Set on the command that opens a body the shell keeps for a later call (a function's, a brace group's, a coproc's), so a cd there may move the shell at any point of the line; a later command of the body is read where it stands
   held?: boolean
   inner?: () => Command[]
+  // Set on every command of a body the shell may keep for a later call (`held`'s, up to its close), so a word's ~- there may expand at that call, wherever the shell has moved by then
+  kept?: boolean
+  // Set on a zsh head whose body is a brace group in its own words (`repeat 3 { cd ..; }`, `while true { … }`, `if true { … }`), which the reader does not read, so the shell reads as able to be in any folder after it (`Env.cwdAnywhere`)
+  opaque?: boolean
   redirects: Redirect[]
   // Set when a count or a loop may run the command more than once, so a relative cd of its own may climb or descend any number of folders
   repeated?: boolean
+  // Set when the command's piped input may run as shell code (codeFed), so the walk judges that input as a script the command runs
+  runsStdin?: boolean
   scope: number
   stdin?: Command
   unsure?: boolean
@@ -42,7 +68,7 @@ type Lexer = {
 }
 type Lexed = { commands: Command[]; scopes: number[] }
 type Pending = { delim: string; quoted: boolean; redirect: Redirect; strip: boolean }
-// `old` is set by a hook that follows zsh's ~-, `old.dir` the folder the shell last left (unset when the hook cannot tell), which an assignment to OLDPWD leaves as it is, so a pushd of ~- or ~+ reads a folder there; a hook that leaves it unset reads both as typed.
+// `old` is set by a hook that follows zsh's ~-, `old.dir` the folder the shell last left (unset when the hook cannot tell), which an assignment to OLDPWD leaves as it is, so a cd's or pushd's ~- or ~+, and a word opening with either, reads a folder there; a hook that leaves it unset reads both as typed.
 export type Env = {
   // The folder a cd names where the reader can read it, taken as the shell's own: the reading every hook had before the proven folder arrived, kept so a hook that reads this field alone keeps its verdicts. A hook reads the proven folder, and every folder the shell may be in, through `places` instead.
   cwd?: string
@@ -63,9 +89,15 @@ export type Env = {
   // Set once a cd's landing folder cannot be named at all (`cd "$X"`, a popd, zsh's two-operand cd), so each hook reads it by its own fail-closed rule, through `places`'s fallback
   cwdUnread?: boolean
   files: Map<string, Text>
+  // Set by a hook that holds the line's steady variables (`steady.ts`): a cd's folder word with those it reads put in, else undefined, so a cd through one is read by the folder it names
+  hold?: (word: Word, cmd: Command, env: Env) => Word | undefined
   known: Record<string, string>
   old?: { dir?: string }
+  // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
+  oldFrom?: string[]
   process: Record<string, string | undefined>
+  // Set where an unquoted plain parameter may split into words (`Word.splits`'s `sh`): a script bash, csh, dash, fish, ksh, sh or tcsh runs, a zsh line or run that may set an option, make an array or name a parameter it expands (`zshSplits`), and every line a runner the hook cannot name may hand to sh
+  splits?: boolean
   vars: Map<string, Text>
 }
 export type Flag = { name: string; value?: Word }
@@ -193,9 +225,11 @@ const GROUPING = new Set(["}", "done", "esac", "fi"])
 export const ASSIGN = /^[A-Za-z_]\w*=/
 // Each wrapper's options, A to Z: its flags, then the options that take a value, short and long; parse reads a cluster (`-Hp`) letter by letter and a value attached (`-pwc`, `--prompt=wc`) or as the next word, and reads an option missing here both as a flag and as taking the next word, so a hook judges the program under each
 type Options = { flags: Set<string>; values: Set<string> }
-const WRAPPERS = new Map<string, Options>(
+// run-slot.sh's CHAIN_WRAPPER_OPTIONS mirrors these lists, which a test holds equal, so its chain reader reads past the same options
+export const WRAPPERS = new Map<string, Options>(
   Object.entries({
     builtin: ["", ""],
+    busybox: ["", ""],
     caffeinate: ["-d -i -m -s -u", "-t -w"],
     command: ["-p -V -v", ""],
     doas: ["-L -n -s", "-a -C -u"],
@@ -242,41 +276,118 @@ function optionValue(word: string, { flags, values }: Options): "next" | "own" |
   return "own"
 }
 
-// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, read as a word or in a cluster of the wrapper's own flags ahead of its first value-taking letter
+// The privilege wrappers' options that start a root shell, which reads its script from stdin when no command follows them: a closed list, which startsRootShell reads
 const ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])],
 ])
-// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell (`sudo -s`, `nice doas -s`, an option or program in a variable taken as one), "shell" for a shell given no script (`sh`, `sudo bash`); a reserved word, a function's name or an assignment before it skipped
-export function stdinShell(cmd: Command): "root" | "shell" | undefined {
+// Whether a command starts a shell that reads its script from stdin, with no command of its own, under any of parse's readings (a shortened long option is one its lists lack, so it is read as taking the next word too); once the readings ran out, any privilege wrapper or su among its words counts as a root shell and any shell's name as a shell: "root" for a privilege wrapper's shell or su not handed a command (`sudo -s`, `nice doas -s`, `su root`, `busybox su`, an option or program in a variable taken as one), "shell" for a shell given no script or stdin's name as one (`sh`, `sudo bash`, `sh -`, `. /dev/fd/0`), and for a shell, an eval, a source or a program the hook cannot read that a pipe or xargs feeds, whatever its arguments; "code" for an interpreter of another language (`python3`, `node18`) that a pipe or xargs feeds, whatever its options or inline program, unless it runs a script file or a module of its own; a reserved word, a function's name or an assignment before it skipped
+export function stdinShell(cmd: Command): StdinKind | undefined {
+  cmd = spreadSplit(cmd)
   const parsed = parse(cmd)
   const kinds = readings(parsed).map((reading) => stdinShellOf(cmd, reading))
   if (parsed.capped) {
     const names = cmd.words.map((w) => program(w.value))
-    if (names.some((n) => ROOT_SHELLS.has(n))) kinds.push("root")
+    if (names.some((n) => ROOT_SHELLS.has(n) || n === "su")) kinds.push("root")
     else if (names.some((n) => SHELLS.has(n))) kinds.push("shell")
   }
-  return kinds.includes("root") ? "root" : kinds.find(Boolean)
+  return kinds.includes("root") ? "root" : kinds.includes("shell") ? "shell" : kinds.find(Boolean)
 }
 
-function stdinShellOf(
-  cmd: Command,
-  { args, first, name, xargs }: Parsed,
-): "root" | "shell" | undefined {
+// The command with each env's split string (`env -S 'sudo -s'`) spread into the words env runs, every env read, quoted or behind another wrapper, in one linear pass over a stack of the words still to read; the grammar is the stdin-shell lines of scripts/hooks/README.md
+function spreadSplit(cmd: Command): Command {
+  if (!cmd.words.some((w) => program(w.value) === "env")) return cmd
+  const options = WRAPPERS.get("env") as Options
+  const out: Word[] = []
+  const rest = [...cmd.words].reverse()
+  let inEnvOptions = false
+  let spreadOne = false
+  for (let w = rest.pop(); w; w = rest.pop()) {
+    const v = w.value
+    const long = inEnvOptions ? envLong(v) : undefined
+    const split =
+      long?.name === "split-string"
+        ? (long.value ?? "")
+        : long || !inEnvOptions
+          ? undefined
+          : SPLIT.exec(v)?.[1]
+    if (split !== undefined) {
+      const text = (split || rest.pop()?.value || "")
+        .replace(/\$\{[^}]*\}/g, UNKNOWN)
+        .replace(/\\[_fnrtv]/g, " ")
+        .replace(/['"\\]/g, "")
+      const words = text.split(/\s+/).filter(Boolean)
+      for (let j = words.length - 1; j >= 0; j--) rest.push({ quoted: false, value: words[j] })
+      spreadOne = true
+      continue
+    }
+    // a lone `-` is env's `-i`, and BSD env reads its options on after it (GNU env's end there, so this reads more than GNU runs); it is written as `-i` for parse
+    if (inEnvOptions && v === "-") {
+      out.push({ ...w, value: "-i" })
+      continue
+    }
+    out.push(w)
+    if (program(v) === "env") inEnvOptions = true
+    else if (!inEnvOptions || ASSIGN.test(v)) continue
+    else if (!v.startsWith("-") || v === "--") inEnvOptions = false
+    else if (
+      long
+        ? ENV_LONG_VALUES.has(long.name) && long.value === undefined
+        : ENV_SHORT_VALUE.test(v) || optionValue(v, options) === "next"
+    ) {
+      const value = rest.pop()
+      if (value) out.push(value)
+    }
+  }
+  return spreadOne ? { ...cmd, words: out } : cmd
+}
+
+// GNU env's long options, each read by any unique prefix as its getopt_long reads it (`--split`, `--u X`), and the ones that take a value; its short ones that take a value end a cluster of its flags (`-a name`, `-iu X`)
+const ENV_LONG = [
+  "argv0",
+  "block-signal",
+  "chdir",
+  "debug",
+  "default-signal",
+  "help",
+  "ignore-environment",
+  "ignore-signal",
+  "list-signal-handling",
+  "null",
+  "split-string",
+  "unset",
+  "version",
+]
+const ENV_LONG_VALUES = new Set(["argv0", "chdir", "split-string", "unset"])
+const ENV_SHORT_VALUE = /^-[0iv]*[aCu]$/
+
+// env's long option a word names, by its full name or a unique prefix, with the value attached after `=`
+function envLong(v: string): { name: string; value?: string } | undefined {
+  const m = /^--([a-z0-9-]+)(?:=([\s\S]*))?$/.exec(v)
+  if (!m) return undefined
+  const hits = ENV_LONG.filter((o) => o.startsWith(m[1]!))
+  const name = hits.includes(m[1]!) ? m[1] : hits.length === 1 ? hits[0] : undefined
+  return name ? { name, value: m[2] } : undefined
+}
+
+export type StdinKind = "code" | "root" | "shell"
+// A command whose piped input may run as code, with the kind stdinShell gives it
+type Fed = { consumer: Command; kind: StdinKind }
+
+function stdinShellOf(cmd: Command, { args, first, name, xargs }: Parsed): StdinKind | undefined {
+  // piped input, or input xargs hands on as words, reaches whatever the command runs, so a command that can run code takes it as code whatever its arguments say
+  const fed = !!cmd.stdin || !!xargs
   if (first && !marked(first.value)) {
-    if (name === "." || name === "source")
-      return args[0]?.value === "/dev/stdin" ? "shell" : undefined
+    if (name === "." || name === "source" || name === "eval")
+      return fed || (name !== "eval" && STDIN_PATHS.has(args[0]?.value ?? "")) ? "shell" : undefined
+    const family = familyOf(name)
+    if (family) return fed && interpreted(family, args, xargs) ? "code" : undefined
+    // su, busybox's applet included, with no command of its own starts a root shell that reads its script from stdin, as `sudo -s` does
+    if (name === "su") return suCommand(args) ? undefined : "root"
     if (!SHELLS.has(name)) return undefined
+    if (fed) return "shell"
     const { inline, operand } = shellOperand(args, name)
-    // xargs hands its input to the shell as words, so with no script of its own, or a placeholder in it, that input is the script
-    if (
-      xargs &&
-      (!operand || (xargs.replace !== undefined && operand.value.includes(xargs.replace)))
-    )
-      return "shell"
-    // a script the shell fills in at run time may be the piped input itself (`sh -c "$(cat)"`)
-    if (inline && operand && cmd.stdin && marked(operand.value)) return "shell"
-    return inline || operand ? undefined : "shell"
+    return inline || (operand && !STDIN_PATHS.has(operand.value)) ? undefined : "shell"
   }
   let at = 0
   for (let w = cmd.words[at]; w && !w.quoted; w = cmd.words[at]) {
@@ -286,31 +397,249 @@ function stdinShellOf(
   }
   const end = first ? cmd.words.indexOf(first) : -1
   const before = cmd.words.slice(at, end === -1 ? undefined : end)
-  const k = before.findIndex((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
-  if (k === -1) return undefined
-  const wrapper = program(before[k].value)
+  // the first unquoted word naming a wrapper, by its basename, as the reading before quoted words were read
+  const firstWrapper = before.find((w) => !w.quoted && ROOT_SHELLS.has(program(w.value)))
+  const wrappers: string[] = []
+  for (const w of before) {
+    if (wrappers.some((wrapper) => startsRootShell(wrapper, w.value))) return "root"
+    // a wrapper: that first one, or a word whose unquoted value is a wrapper's bare name (`'sudo'`, `\doas`, `doas sudo`)
+    if (w === firstWrapper || ROOT_SHELLS.has(w.value.toLowerCase()))
+      wrappers.push(program(w.value))
+  }
+  // a program the hook cannot read, behind a wrapper, may be a root shell
+  if (first && wrappers.length) return "root"
+  // a program the hook cannot read (`$SHELL`, `"$X"`) may be a shell
+  return fed && first ? "shell" : undefined
+}
+
+// The option words su takes before -c or --command for its line to read as a command of its own, each known exactly; any other option word reads as a root shell, so an option's value never hides a -c
+const SU_PLAIN = new Set(["-", "-f", "-l", "-m"])
+// Whether su's words hand it a command: -c or --command with its command, after option words of SU_PLAIN and words the hook reads whole alone (`su root -c <cmd>`, `su - -c <cmd>`), since a value it cannot read, or a glob, may be any option
+const suCommand = (args: Word[]) => {
+  for (const [at, word] of args.entries()) {
+    const { value } = word
+    if (word.unknown !== undefined || word.glob || marked(value)) return false
+    if (value === "-c" || value === "--command") return at + 1 < args.length
+    if (value.startsWith("--command=")) return true
+    if (value.startsWith("-") && !SU_PLAIN.has(value)) return false
+  }
+  return false
+}
+// Whether a word, by its unquoted value, starts a wrapper's root shell: a listed option, alone, as a long one's unambiguous prefix (`--sh`) or in a cluster of the wrapper's flags ahead of its first value-taking letter, or a word the hook cannot read
+function startsRootShell(wrapper: string, value: string): boolean {
+  if (marked(value)) return true
   const shells = ROOT_SHELLS.get(wrapper) as Set<string>
   const { flags, values } = WRAPPERS.get(wrapper) as Options
-  // a cluster's letters up to its first value-taking one, which takes the rest as its value (`-su root`, `-su#0`, `-us`): a shell letter among them, each a flag of the wrapper's own
-  const clustered = (value: string) => {
-    let shell = false
-    for (const c of value.slice(1)) {
-      if (values.has(`-${c}`)) return shell
-      if (!flags.has(`-${c}`)) return false
-      shell ||= shells.has(`-${c}`)
-    }
-    return shell
+  if (value.startsWith("--")) {
+    const named = [...flags, ...values].filter((o) => o.startsWith(value))
+    return shells.has(named.length === 1 ? named[0] : value)
   }
-  // a listed option, alone or in a cluster of the wrapper's own flags (`-Es`, `-su root`), or a word the hook cannot read, which may hold one
-  const starts = ({ quoted, value }: Word) =>
-    marked(value) ||
-    (!quoted && (shells.has(value) || (/^-[A-Za-z]/.test(value) && clustered(value))))
-  return !!first || before.slice(k + 1).some(starts) ? "root" : undefined
+  if (!/^-[A-Za-z]/.test(value)) return false
+  let shell = false
+  for (const c of value.slice(1)) {
+    if (values.has(`-${c}`)) return shell
+    if (!flags.has(`-${c}`)) return false
+    shell ||= shells.has(`-${c}`)
+  }
+  return shell
+}
+
+// Interpreters of another language, whose script the hook cannot read, each by its family: the options that take the next word as their value when none is attached (`values` short, `takes` long), so its script operand is found past them; `own` names an option whose value is a program of its own (a module, a file), which the line does not hold either; any other option, inline code's among them, reads as code
+type Family = { own?: string; takes: string[]; values: string }
+const FAMILIES: Record<string, Family> = {
+  bun: { takes: ["--cwd", "--env-file", "--preload", "--tsconfig-override"], values: "r" },
+  deno: { takes: ["--config", "--import-map"], values: "c" },
+  lua: { takes: [], values: "l" },
+  node: {
+    takes: [
+      "--conditions",
+      "--env-file",
+      "--experimental-loader",
+      "--import",
+      "--input-type",
+      "--inspect-port",
+      "--loader",
+      "--max-old-space-size",
+      "--require",
+      "--stack-size",
+      "--title",
+    ],
+    values: "Cr",
+  },
+  osascript: { takes: [], values: "ls" },
+  perl: { takes: [], values: "I" },
+  php: { own: "f", takes: [], values: "cdf" },
+  python: { own: "m", takes: ["--check-hash-based-pycs"], values: "WXm" },
+  ruby: { takes: [], values: "CEIr" },
+}
+// An interpreter's name, by its family, through a version suffix (`python3.12`, `node18`, `lua5.4`) and the family's other names (`nodejs`, `luajit`)
+const FAMILY = /^(bun|deno|lua|luajit|node|nodejs|osascript|perl|php|python|ruby)[\d.]*$/
+const familyOf = (name: string): Family | undefined => {
+  const base = FAMILY.exec(name)?.[1]
+  return base ? FAMILIES[base === "nodejs" ? "node" : base === "luajit" ? "lua" : base] : undefined
+}
+// Whether a piped interpreter may take its piped input as code: whatever its options say, unless it runs a script file or a module of its own past options its family's table names, named by a literal word the input does not fill in (`node x.js`, `python3 -m json.tool`), whose text is outside the line
+function interpreted(family: Family, args: Word[], xargs: Xargs): boolean {
+  const filled = (word: Word) =>
+    marked(word.value) || (!!xargs?.replace && word.value.includes(xargs.replace))
+  const own = (word: Word | undefined) => !!word && !filled(word) && !STDIN_PATHS.has(word.value)
+  // bun and deno run a bare name as a package script, a subcommand or a program on PATH (`bun run sh`, `bun x sh`, `bun repl`, `deno task x`), so there only a JavaScript or TypeScript file's name is a script of its own
+  const runner = family === FAMILIES.bun || family === FAMILIES.deno
+  const script = (word: Word | undefined) =>
+    own(word) && (!runner || /\.[cm]?[jt]sx?$/.test(word?.value ?? ""))
+  let sub = false
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "--") return !script(args[k + 1])
+    if (value.startsWith("--")) {
+      if (!family.takes.includes(value.split("=")[0])) return true
+      if (!value.includes("=")) k++
+      continue
+    }
+    if (value.startsWith("-") && value !== "-") {
+      const [letter, attached] = [value[1], value.slice(2)]
+      if (!family.values.includes(letter)) return true
+      if (letter === family.own)
+        return !own(attached ? { ...args[k], value: attached } : args[k + 1])
+      if (!attached) k++
+      continue
+    }
+    if (runner && !sub && value === "run") {
+      sub = true
+      continue
+    }
+    return !script(args[k])
+  }
+  return true
+}
+
+// Every command whose piped input may run as code, by the command whose output it reads, with the kind stdinShell gives it: one stdinShell names, or one that opens a loop, a conditional or a brace group whose body up to its closing word holds a command that would be one under the same pipe, since every command of the body reads that stdin; "code" wins over "shell", since the hook can read none of it
+export function codeFed(commands: Command[]): Map<Command, Fed> {
+  const fed = new Map<Command, Fed>()
+  const add = (cmd: Command, kind: StdinKind | undefined) => {
+    if (!kind || !cmd.stdin) return
+    const known = fed.get(cmd.stdin)
+    if (known?.kind !== "code") fed.set(cmd.stdin, { consumer: cmd, kind })
+  }
+  for (const [k, cmd] of commands.entries()) {
+    if (!cmd.stdin) continue
+    add(cmd, stdinShell(cmd))
+    let depth = 0
+    for (let j = k; j < commands.length; j++) {
+      const body = commands[j]
+      for (const m of markers(body.words)) depth += OPENS.has(m) ? 1 : CLOSES.has(m) ? -1 : 0
+      if (j > k) add(cmd, stdinShell({ ...body, stdin: cmd.stdin }))
+      if (depth <= 0) break
+    }
+  }
+  return fed
 }
 
 // Wrappers that take one positional argument (a count or a duration) before the command.
-const COUNTED = new Set(["repeat", "timeout"])
-export const SHELLS = new Set(["bash", "dash", "ksh", "sh", "zsh"])
+export const COUNTED = new Set(["repeat", "timeout"])
+export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"])
+// The shells that make an unquoted parameter several words (fish a list's elements, the rest by splitting); zsh keeps one word unless the line may change that (`ZSH_SPLITS`)
+const SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"])
+// A zsh line that may make an unquoted plain parameter several words: one that sets an option (setopt, unsetopt, emulate, the options array, set's -o, +o, -y or -A), makes an array (an `X=(` or `X+=(` assignment, mapfile, readarray, zparseopts) or sources a file (`source`, `.`), which may do either
+const ZSH_SPLITS =
+  /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/
+// The builtins whose -a or -A makes an array: read and the declaring builtins
+const ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/
+// Whether a zsh line may make an unquoted plain parameter several words: it may set an option, make an array or source a file (`ZSH_SPLITS`), give read or a declaring builtin -a or -A (`ARRAY_MAKERS`), or name a parameter it expands other than by expanding it, since a builtin neither list names may fill that name as an array; each pass is linear in the line, so a long line costs linear time
+export const zshSplits = (line: string): boolean => {
+  if (ZSH_SPLITS.test(line)) return true
+  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
+    const at = command.search(ARRAY_MAKERS)
+    if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at))) return true
+  }
+  const joined = line.replace(/[\\'"]/g, "")
+  const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g
+  const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g))
+  return [...joined.matchAll(expansion)].some(([, name]) => named.has(name))
+}
+// An unquoted expansion zsh reads as one word unless the line splits it (`Text.splits`'s `sh`): a plain parameter by name or digit, braced or not, but one of zsh's own arrays (`ZSH_ARRAYS`)
+const ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/
+// The arrays and hashes zsh sets, ties or fills itself, each several words unquoted (zsh 5.9's zshparam(1), zshzle(1)'s and zshcompwid(1)'s special parameters, zshcompsys(1)'s hook arrays, and zshmodules(1)'s zsh/datetime, zsh/langinfo, zsh/parameter, zsh/sched, zsh/system, zsh/termcap, zsh/terminfo and zsh/zleparameter)
+const ZSH_ARRAYS = new Set([
+  "aliases",
+  "argv",
+  "builtins",
+  "cdpath",
+  "commands",
+  "comppostfuncs",
+  "compprefuncs",
+  "compstate",
+  "dirstack",
+  "dis_aliases",
+  "dis_builtins",
+  "dis_functions",
+  "dis_functions_source",
+  "dis_galiases",
+  "dis_patchars",
+  "dis_reswords",
+  "dis_saliases",
+  "epochtime",
+  "errnos",
+  "fignore",
+  "fpath",
+  "funcfiletrace",
+  "funcsourcetrace",
+  "funcstack",
+  "functions",
+  "functions_source",
+  "functrace",
+  "galiases",
+  "history",
+  "historywords",
+  "jobdirs",
+  "jobstates",
+  "jobtexts",
+  "keymaps",
+  "killring",
+  "langinfo",
+  "mailpath",
+  "manpath",
+  "match",
+  "mbegin",
+  "mend",
+  "module_path",
+  "modules",
+  "nameddirs",
+  "options",
+  "parameters",
+  "patchars",
+  "path",
+  "pipestatus",
+  "psvar",
+  "region_highlight",
+  "registers",
+  "reply",
+  "reswords",
+  "saliases",
+  "signals",
+  "sysparams",
+  "termcap",
+  "terminfo",
+  "userdirs",
+  "usergroups",
+  "watch",
+  "widgets",
+  "words",
+  "zle_bracketed_paste",
+  "zle_highlight",
+  "zsh_eval_context",
+  "zsh_scheduled_events",
+])
+// Whether zsh reads an unquoted expansion as one word: a plain parameter that is none of its own arrays
+const oneWord = (written: string): boolean => {
+  const plain = ONE_WORD.exec(written)
+  return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "")
+}
+// A double-quoted expansion every shell reads as one word: a plain parameter, one with an operator after its name (a default, a pattern cut, a replacement), arithmetic, a command substitution or a backtick; a zsh flag, a subscript, `$@`, `$*` or a default's or alternate's text holding an `@` is none
+const QUOTED_ONE_WORD =
+  /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/
+// The script names a shell or a source reads stdin through
+const STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"])
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 export const PRINTERS = new Set(["echo", "printf"])
 // Every git-reading hook's one list of the words git 2.56 steps over before its subcommand: each option that takes the next word as its value, and --exec-path, which takes none but whose bare form prints git's folder and exits, so the word after it never runs.
@@ -421,6 +750,7 @@ export function varsSince(vars: Map<string, Text>, cursor: number | undefined): 
 
 const merge = (out: Text, part: Text): void => {
   out.value += part.value
+  if (part.splits && out.splits !== "always") out.splits = part.splits
   if (part.unknown) out.unknown ??= part.unknown
   if (part.variable) out.variable ??= part.variable
   if (part.reads?.length) (out.reads ??= []).push(...part.reads)
@@ -445,7 +775,45 @@ export const visible = (value: string): string =>
 
 export const marked = (value: string): boolean => value.includes(UNKNOWN) || value.includes(READ)
 
-export const program = (value: string): string => basename(value.replace(/^=/, ""))
+// The shell's own builtins whose effect a hook follows (its folder, its variables, its aliases, a name's lookup): the shell matches them by their exact case, and in another case one runs no builtin (macOS's /usr/bin/cd and the like run `builtin cd` in a child), so it changes nothing of the shell's
+const SHELL_OWN = new Set([
+  ".",
+  "alias",
+  "cd",
+  "declare",
+  "eval",
+  "export",
+  "hash",
+  "let",
+  "local",
+  "popd",
+  "pushd",
+  "read",
+  "readonly",
+  "set",
+  "shift",
+  "source",
+  "trap",
+  "type",
+  "typeset",
+  "unalias",
+  "unset",
+])
+// Homebrew coreutils' second copies of the wrappers, each run with its plain name's options
+const G_WRAPPERS = new Map([
+  ["genv", "env"],
+  ["gnice", "nice"],
+  ["gnohup", "nohup"],
+  ["gstdbuf", "stdbuf"],
+  ["gtimeout", "timeout"],
+])
+// A command word's program by its basename, in lower case, since macOS's filesystem ignores case and runs a program named in any case; a builtin of SHELL_OWN keeps the word as written unless it is the bare lower-case name, since in another case or by a path it runs macOS's /usr/bin stand-in in a child, and a g-wrapper reads as its plain name
+export const program = (value: string): string => {
+  const base = basename(value.replace(/^=/, ""))
+  const lower = base.toLowerCase()
+  if (SHELL_OWN.has(lower) && value !== lower) return value
+  return G_WRAPPERS.get(lower) ?? lower
+}
 
 // uv's and uvx's options that take the next word as their value, so the word after is not the program
 export const UV_TAKES = new Set([
@@ -499,7 +867,96 @@ function decode(raw: string): string {
 export function lex(src: string, known: Record<string, string> = {}): Lexed {
   const lx: Lexer = { commands: [], i: 0, known, scope: 0, scopes: [-1], src, token: freshToken() }
   list(lx, 0, false)
+  calledAgain(lx.commands, src)
+  braced(lx.commands)
   return { commands: lx.commands, scopes: lx.scopes }
+}
+
+// The heads after which zsh takes a brace group as the body, in the head's own words
+const BRACED = new Set([
+  "elif",
+  "else",
+  "for",
+  "foreach",
+  "if",
+  "repeat",
+  "select",
+  "until",
+  "while",
+])
+
+// Marks each zsh head that holds an unquoted `{` past its command position, closed by a later `}`, as opaque: bash reads `if grep -q { f` with no `}` after it, so that one stays read as typed
+function braced(commands: Command[]): void {
+  for (const [k, c] of commands.entries()) {
+    const head = c.words[0]
+    if (!head || head.quoted || !BRACED.has(head.value)) continue
+    const at = c.words.findIndex((w, i) => i > 0 && !w.quoted && w.value === "{")
+    if (at < 0 || markers(c.words).length > at) continue
+    if (commands.slice(k + 1).some((d) => d.words.some((w) => !w.quoted && w.value === "}")))
+      c.opaque = true
+  }
+}
+
+// A function's body runs each time the line calls it, so its commands are marked repeated unless the line names the function just twice, by its definition and by one call that runs at most once: a call in a loop, in another body, or one the line names anywhere else (an eval's text, a recursive call) may run it again; a name the reader cannot read as a plain word, a call through a word it cannot read, and any eval or source may call it again too
+function calledAgain(commands: Command[], src: string): void {
+  for (const [k, open] of commands.entries()) {
+    const [first, second] = open.words
+    if (!open.held || !first || first.quoted) continue
+    // `function f {` names it in its own words, and `f() {` (or `f() if`, any compound) in the one word before the `()` the lexer reads as an empty group
+    const before = commands[k - 1]?.words
+    const word =
+      first.value === "function"
+        ? second
+        : open.group && before?.length === 1
+          ? before[0]
+          : undefined
+    if (!word) continue
+    let end = k
+    for (let balance = 0; end < commands.length; end++) {
+      const reserved = markers(commands[end].words)
+      balance +=
+        reserved.filter((w) => OPENS.has(w)).length - reserved.filter((w) => CLOSES.has(w)).length
+      if (balance <= 0) break
+    }
+    const body = commands.slice(k, end + 1)
+    const name = word.value.replace(/\(\)$/, "")
+    if (word.quoted || !/^[\w.:-]+$/.test(name)) {
+      for (const c of body) c.repeated = true
+      continue
+    }
+    const outside = commands.filter((_, at) => at < k - 1 || at > end).map(callee)
+    const calls = outside.filter((w) => w?.value === name)
+    const others = outside.some(
+      (w) =>
+        w !== undefined &&
+        (w.unknown !== undefined ||
+          (!w.quoted && (w.value === "eval" || w.value === "source" || w.value === "."))),
+    )
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    // a redirect's target names a file, never a call, so a file of the function's name is no mention of it
+    const files = commands
+      .flatMap((c) => c.redirects)
+      .filter((r) => r.target?.value === name).length
+    const mentions =
+      (src.match(new RegExp(`(?<![\\w.:-])${escaped}(?![\\w.:-])`, "g"))?.length ?? 0) - files
+    const call = commands.find((c, at) => (at < k - 1 || at > end) && callee(c)?.value === name)
+    const once = mentions === 2 && calls.length === 1 && !others && !call?.repeated && !call?.kept
+    if (!once) for (const c of body) c.repeated = true
+  }
+}
+
+// The word a command runs as its program, past its assignments, its reserved words and `builtin` or `command` with their options, quoted or not, so `$'\x66'` reads as the `f` it calls
+function callee(cmd: Command): Word | undefined {
+  return cmd.words.find(
+    (w) =>
+      w.quoted ||
+      !(
+        ASSIGN.test(w.value) ||
+        MARKERS.has(w.value) ||
+        BUILTIN.has(w.value) ||
+        w.value.startsWith("-")
+      ),
+  )
 }
 
 // A subshell or a substitution is a scope of its own, so a cd inside it stays inside it.
@@ -527,6 +984,10 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
   let depth = 0
   let loops = 0
   let after = ""
+  // each body the walk is inside, true for one the shell may keep for a later call
+  const bodies: boolean[] = []
+  // each loop whose `do` the walk has not reached, true for a while's or an until's, whose condition the shell runs once for each pass and once more
+  const heads: boolean[] = []
   // A pipeline's commands and a backgrounded one run in subshells: a cd there leaves the shell where it was.
   const end = (op: string) => {
     const done = cmd
@@ -552,8 +1013,35 @@ function walk(lx: Lexer, scope: number, nested: boolean, inherit?: Command): voi
       if (after === "||" || depth > 0 || body) done.unsure = true
       if (after === "&&") done.chained = true
       done.chain = lx.token
-      if (reserved.some((w) => HELD.has(w))) done.held = true
-      if (loops > 0 || loop) done.repeated = true
+      // `f() if …`, a function whose body is a compound other than a brace group, keeps that body for each call as `f() {` keeps its own
+      const last = lx.commands[lx.commands.length - 1]?.words
+      const compound =
+        !!done.group &&
+        last?.length === 1 &&
+        OPENS.has(reserved[0] ?? "") &&
+        !HELD.has(reserved[0] ?? "")
+      if (reserved.some((w) => HELD.has(w)) || compound) done.held = true
+      if (done.held || bodies.includes(true)) done.kept = true
+      for (const [at, w] of reserved.entries()) {
+        if (OPENS.has(w)) bodies.push(HELD.has(w) || (compound && at === 0))
+        else if (CLOSES.has(w)) bodies.pop()
+      }
+      // zsh's foreach runs its body up to an `end`, with no `do`
+      const each = done.words[0]?.quoted ? undefined : done.words[0]?.value
+      const outer = heads.length === 0 && loops === 0
+      let head = heads.length > 0
+      for (const w of reserved) {
+        if (w === "while" || w === "until" || w === "for" || w === "select")
+          heads.push(w === "while" || w === "until")
+        else if (w === "do") heads.pop()
+        head ||= heads.length > 0
+      }
+      if (each === "foreach") heads.push(false)
+      else if (each === "end" && heads.length > 0 && !loop) heads.pop()
+      // every command between a loop's head and its `do` runs once for each pass: a while's or an until's condition, and the body of zsh's short loops, which have no `do`
+      if (loops > 0 || loop || head || each === "foreach") done.repeated = true
+      if (outer && !loop && reserved.some((w) => w === "while" || w === "until"))
+        done.atLeastOnce = true
       depth = Math.max(0, depth + opened - closed)
       loops = Math.max(0, loops + (loop ? 1 : 0) - (reserved.includes("done") ? 1 : 0))
       // a run ends only at an operator that runs the next command whatever this one did, and only outside every body: a `|` keeps the pipeline in the run, and entering a group, a body or a script keeps the run it was reached through
@@ -721,13 +1209,23 @@ function word(lx: Lexer): Word {
     } else if (c === "$" && next === '"') lx.i++
     else if (c === "$" || c === "`") {
       // an unquoted expansion's value is globbed too
+      const from = lx.i
       const text = c === "$" ? dollar(lx) : backtick(lx)
       merge(out, text)
       if (GLOB_CHARS.test(text.value)) out.glob = true
-    } else if (c === "~" && lx.i === start && (next === "" || next === "/" || BREAK.has(next))) {
+      const written = src.slice(from, lx.i)
+      // a plain parameter or arithmetic splits only where the shell splits one
+      if (marked(text.value))
+        merge(out, {
+          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
+          value: "",
+        })
+    } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir()
       lx.i++
     } else {
+      // a value the hook could not read, pasted into a line read again (an eval's, a script's), is unquoted text there
+      if (c === UNKNOWN || c === READ) out.splits = "always"
       out.value += c
       bare += c
       lx.i++
@@ -736,11 +1234,20 @@ function word(lx: Lexer): Word {
   // the lookahead finds the close once, so a { with no } costs its length rather than its square
   if (/\{(?=[^{}]*\})[^{}]*(?:,|\.\.)/.test(bare)) out.unknown ??= "a brace expansion"
   if (GLOB_CHARS.test(bare)) out.glob = true
-  if (marked(out.value)) out.raw = src.slice(start, lx.i)
+  out.source = src.slice(start, lx.i)
+  if (marked(out.value)) out.raw = out.source
+  // zsh expands ~- and ~+ after removing quotes and filling in expansions, so a word opening with an unquoted ~ is read by its value (`~-"/f"`, `~"-"/f`, `~-$Y/f`)
+  if (src[start] === "~" && TILDE.test(out.value)) out.tilde = true
   return out
 }
 
 const GLOB_CHARS = /[*?[{(]/
+
+// A word's value that opens with ~- or ~+ as zsh expands it: followed by its end, a slash, or a part the shell fills in at run time
+const TILDE = /^~[-+](?=\/|$|\u0000)/
+
+// Whether the character after a word's opening ~ ends that part, so the shell expands it: the word's end, a slash or a break
+const ends = (c = ""): boolean => c === "" || c === "/" || BREAK.has(c)
 
 function double(lx: Lexer): Text {
   const { src } = lx
@@ -751,9 +1258,12 @@ function double(lx: Lexer): Text {
     if (c === "\\") {
       if (next !== "\n") out.value += '$`"\\'.includes(next) ? next : c + next
       lx.i += 2
-    } else if (c === "$") merge(out, dollar(lx))
-    else if (c === "`") merge(out, backtick(lx))
-    else {
+    } else if (c === "$" || c === "`") {
+      const from = lx.i
+      const text = c === "$" ? dollar(lx) : backtick(lx)
+      merge(out, text)
+      if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i))) out.splits = "always"
+    } else {
       out.value += c
       lx.i++
     }
@@ -798,8 +1308,11 @@ function dollar(lx: Lexer): Text {
     lx.i = end
     return variable(name)
   }
-  if (/[A-Za-z_]/.test(next)) {
-    const from = ++lx.i
+  // zsh's $=X, $~X and $^X read X with a flag (a split, a glob, an array join)
+  const flagged = /[=~^]/.test(next) && /[A-Za-z_]/.test(src[lx.i + 2] ?? "")
+  if (flagged || /[A-Za-z_]/.test(next)) {
+    lx.i += flagged ? 2 : 1
+    const from = lx.i
     while (/\w/.test(src[lx.i] ?? "")) lx.i++
     return variable(src.slice(from, lx.i))
   }
@@ -1009,6 +1522,9 @@ function unwrap(state: State, inside: string | undefined, budget: Budget): Parse
         const attached = /^(?:-[IiJ]|--replace=?)(.*)$/.exec(v)?.[1] ?? ""
         take()
         state.xargs.replace = v === "-I" || v === "-J" ? take()?.value : attached || "{}"
+      } else if (wrapper === "env" && v === "-") {
+        // a lone `-` is env's -i, and BSD env reads its options on after it
+        take()
       } else if (v === "--") {
         take()
         while (ASSIGN.test(peek()?.value ?? "")) assign(local, take() as Word)
@@ -1095,7 +1611,11 @@ async function runAll(
     envs.set(scope, child)
     return child
   }
-  for (const cmd of lexed.commands) if (cmd.stdin && stdinShell(cmd)) cmd.stdin.feedsShell = true
+  for (const [producer, { consumer, kind }] of codeFed(lexed.commands)) {
+    producer.feedsShell = true
+    // a script in another language is not read as shell
+    consumer.runsStdin = kind !== "code"
+  }
   for (const cmd of lexed.commands) {
     const verdict = await examine(cmd, envOf(cmd.scope), visit, builtins)
     if (verdict) return verdict
@@ -1104,7 +1624,7 @@ async function runAll(
 
 const subshell = (env: Env): Env => ({ ...env, vars: new Map(env.vars) })
 
-// One command as run() reads it, cd, the shells it starts, eval, and source or . of a process substitution or /dev/stdin followed, for a hook that finds a command inside another (a wrapper's words).
+// One command as run() reads it, cd, the shells it starts, eval, source or . of a process substitution or stdin's name, and piped input a command may run as code followed, for a hook that finds a command inside another (a wrapper's words).
 export async function examine(
   cmd: Command,
   env: Env,
@@ -1113,15 +1633,96 @@ export async function examine(
 ): Promise<string | undefined> {
   tick()
   unchain(cmd, env)
+  if (cmd.opaque) {
+    env.cwdAnywhere = true
+    env.cwdSure = undefined
+    env.cwdUnread = true
+  }
   const [primary, ...others] = readings(parse(cmd))
+  const expanded = expandTilde(cmd, primary.name, env)
   // only the primary reading moves the folder, sets variables and records files, as canary's one reading did; each other runs on a copy of the env before the command
-  const before = others.length > 0 ? apart(env) : env
+  const before = others.length > 0 || expanded.length > 0 ? apart(env) : env
   const verdict = await examineReading(cmd, primary, env, visit, builtins)
   if (verdict) return verdict
   for (const parsed of others) {
     const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins)
     if (verdict) return verdict
   }
+  for (const variant of expanded) {
+    const verdict = await examineExpanded(cmd, variant, before, visit, builtins)
+    if (verdict) return verdict
+  }
+  // piped input the command may run as code is judged as a script it runs, unless its own reading took that input as its script already
+  if (!cmd.runsStdin || stdinScript(primary)) return
+  const script = await stdinOf(cmd, env)
+  return nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins))
+}
+
+// Whether a shell or a source reads its script from stdin, as shell() and examineReading read it
+function stdinScript({ args, name }: Parsed): boolean {
+  if (name === "." || name === "source") return STDIN_PATHS.has(args[0]?.value ?? "")
+  if (!SHELLS.has(name)) return false
+  const { inline, operand } = shellOperand(args, name)
+  return !operand || (!inline && STDIN_PATHS.has(operand.value))
+}
+
+const BLIND = "zsh's ~-, the folder the shell last left, which the hook cannot name on this line"
+
+// In a hook that follows ~-, the words a command's unquoted ~- and ~+ expand to, each set judged beside the typed reading so the hook is never looser than that reading: ~+ as the folder each place reads, ~- as the one folder the shell left when the reader can name it, else as unknown, as a variable the hook cannot expand is, so each guard's own rule for one applies. A command of a body the shell may keep for later is judged both ways, since its ~- may expand now or at a later call. A cd's own folder word keeps the reading chdirTo gives it, and its redirects, which the shell opens before it moves, expand as any other command's.
+function expandTilde(cmd: Command, name: string, env: Env): Command[] {
+  if (!env.old) return []
+  const opens = (w?: Word): w is Word => !!w?.tilde && TILDE.test(w.value)
+  const moves = name === "cd" || name === "popd" || name === "pushd"
+  const words = moves ? [] : cmd.words.filter(opens)
+  const targets = cmd.redirects.filter((r) => opens(r.target))
+  if (words.length === 0 && targets.length === 0) return []
+  const left = leftFolder(env)
+  const lefts = cmd.kept ? [...(left === undefined ? [] : [left]), undefined] : [left]
+  return lefts.map((dir) => {
+    const expand = (w: Word): Word => {
+      if (!opens(w)) return w
+      const rest = w.value.slice(2)
+      if (w.value[1] === "+") return { ...w, tilde: undefined, value: `.${rest}` }
+      return dir === undefined
+        ? { ...w, tilde: undefined, unknown: BLIND, value: UNKNOWN + rest }
+        : { ...w, tilde: undefined, value: dir + rest }
+    }
+    return {
+      ...cmd,
+      redirects: cmd.redirects.map((r) =>
+        opens(r.target) ? { ...r, target: expand(r.target) } : r,
+      ),
+      words: moves ? cmd.words : cmd.words.map(expand),
+    }
+  })
+}
+
+// The expanded words are judged on the command itself, swapped in and back, since hooks key their notes on the command, and on a copy of the env before it, as every other reading is.
+async function examineExpanded(
+  cmd: Command,
+  expanded: Command,
+  before: Env,
+  visit: Visit,
+  builtins: boolean,
+): Promise<string | undefined> {
+  const { redirects, words } = cmd
+  cmd.redirects = expanded.redirects
+  cmd.words = expanded.words
+  try {
+    for (const parsed of readings(parse(cmd))) {
+      const verdict = await examineReading(cmd, parsed, apart(before), visit, builtins)
+      if (verdict) return verdict
+    }
+  } finally {
+    cmd.redirects = redirects
+    cmd.words = words
+  }
+}
+
+// The one folder a ~- names in a hook that follows it, when the reader can name it
+function leftFolder(env: Env): string | undefined {
+  const left = env.oldFrom ?? (env.old?.dir === undefined ? [] : [env.old.dir])
+  return left.length === 1 ? left[0] : undefined
 }
 
 const apart = (env: Env): Env => ({
@@ -1155,13 +1756,14 @@ async function examineReading(
   let verdict: string | undefined
   const followed = SHELLS.has(name) || [".", "cd", "eval", "popd", "pushd", "source"].includes(name)
   if (followed && builtins && cmd.redirects.length > 0) {
-    const bare = { ...cmd, words: [] }
+    const bare = { ...cmd, bareOf: cmd, words: [] }
     verdict = await visit(bare, parse(bare), here)
     if (verdict) return verdict
   }
   if (name === "") {
     for (const [key, value] of local) setVar(env.vars, key, value)
-    if (builtins || cmd.feedsShell) verdict = await visit(cmd, parsed, here)
+    // a root shell with no program of its own (`sudo -s <<< …`) is visited when a redirect feeds it, so a hook can read that script
+    if (builtins || cmd.feedsShell || rootFed(cmd)) verdict = await visit(cmd, parsed, here)
   } else if (name === "cd" || name === "popd" || name === "pushd") {
     // a glob in the folder is judged as any program's words are, since it may land anywhere it matches
     if (name !== "popd" && args.some((a) => GLOB_CHARS.test(a.value)))
@@ -1179,19 +1781,37 @@ async function examineReading(
     )
   else if (
     (name === "source" || name === ".") &&
-    (args[0]?.procs || args[0]?.value === "/dev/stdin")
+    (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))
   ) {
     const script = await scriptOf(args[0], cmd, here)
     verdict =
       (script.unknown ? await visit(cmd, parsed, here) : undefined) ??
-      (await nested(cmd, env, () => run(lexScript(known(script), env), here, visit, builtins)))
+      (await nested(cmd, env, () =>
+        run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins),
+      ))
   } else if (name === "eval") {
     verdict = await nested(cmd, env, () =>
-      run(lexScript(args.map((a) => a.value).join(" "), env), here, visit, builtins),
+      run(
+        again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed),
+        here,
+        visit,
+        builtins,
+      ),
     )
   } else verdict = await visit(cmd, parsed, here)
   await record(cmd, name, args, here)
   return verdict
+}
+
+// A script an eval or a source reads in the line's own shell runs again each time a count or a loop runs that command, so each of its commands is marked repeated, as the line's own would be
+function again(lexed: Lexed, cmd: Command, parsed: Parsed): Lexed {
+  if (!manyTimes(cmd, parsed)) return lexed
+  const more = onceOrMore(cmd, parsed)
+  for (const c of lexed.commands) {
+    if (more && !c.repeated) c.atLeastOnce = true
+    c.repeated = true
+  }
+  return lexed
 }
 
 // Runs a script a command of the line reads (a shell, an eval, a source). The line's own run does not reach into it, since every command of the script runs because that command ran, so the script reads with no chain of the line's; what the script's own trailing chain leaves joins the line's on the way out, under the reading command's own token, since a cd an `&&` made sure at the end of an eval or a source may not have run either.
@@ -1218,16 +1838,25 @@ const sureToRun = (cmd: Command, parsed: Parsed): boolean =>
   !cmd.repeated &&
   (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
 
-// Whether `builtin` or `command` runs the command's program, with nothing but their own options, reserved words and assignments in front of it.
+// Whether the shell runs a command at least once and may run it again: a while's or an until's condition, sure to run as `sureToRun` reads it but for `repeated`, so a count in front of it (`repeat 0`), a body kept for a later call, or an `&&` before the loop (`false && while …`, which may skip it) keeps it out
+const onceOrMore = (cmd: Command, parsed: Parsed): boolean =>
+  !!cmd.atLeastOnce &&
+  !cmd.chained &&
+  !cmd.detached &&
+  !cmd.kept &&
+  !cmd.unsure &&
+  (ownFirst(cmd, parsed.first) || throughBuiltin(cmd, parsed))
+
+// Whether `builtin` or `command` runs the command's program, with nothing but their own options, reserved words and assignments in front of it; each counts only as its bare lower-case word, since `COMMAND` runs macOS's /usr/bin/command in a child and `BUILTIN` is not found.
 const throughBuiltin = (cmd: Command, { first }: Parsed): boolean => {
   if (!first) return false
   const before = cmd.words.slice(0, cmd.words.indexOf(first))
   return (
-    before.some((w) => !w.quoted && BUILTIN.has(program(w.value))) &&
+    before.some((w) => !w.quoted && BUILTIN.has(w.value)) &&
     before.every(
       (w) =>
         !w.quoted &&
-        (BUILTIN.has(program(w.value)) ||
+        (BUILTIN.has(w.value) ||
           w.value.startsWith("-") ||
           MARKERS.has(w.value) ||
           ASSIGN.test(w.value)),
@@ -1277,17 +1906,20 @@ function ancestors(path: string): string[] {
   }
 }
 
+// The sign of a cd's or pushd's folder word that opens with an unquoted ~- or ~+, as zsh expands it, in a hook that follows ~-: the word the lexer marks, whose folder the reader can read
+const tildeSign = (name: string, dir: Word | undefined, env: Env): string | undefined =>
+  (name === "cd" || name === "pushd") && env.old && dir?.tilde && !dir.unknown && !dir.reads?.length
+    ? dir.value[1]
+    : undefined
+
 // The one folder a cd names, taken as the shell's own wherever the reader reads it: `Env.cwd`'s own rule, which every hook read before the proven folder arrived and a hook outside `places` reads still.
 async function cdTarget(name: string, args: Word[], env: Env): Promise<string | undefined> {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
   if (!dir) return homedir()
   const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env))
-  // in a hook that follows ~-, a pushd's unquoted ~- is the folder the shell last left and ~+ the current one, as the shell expands them; beside a folder named ~- or ~+ the typed reading stays, though the shell still expands the word
-  const tilde =
-    !typed && name === "pushd" && env.old && !dir.quoted && !dir.unknown && !dir.reads?.length
-      ? /^~([-+])(?=\/|$)/.exec(dir.value)
-      : null
-  const base = tilde && (tilde[1] === "-" ? env.old?.dir : env.cwd)
+  // in a hook that follows ~-, a cd's or pushd's unquoted ~- is the folder the shell last left and ~+ the current one, as the shell expands them; beside a folder named ~- or ~+ the typed reading stays, though the shell still expands the word
+  const sign = typed ? undefined : tildeSign(name, dir, env)
+  const base = sign && (sign === "-" ? env.old?.dir : env.cwd)
   return base ? await folder(base + dir.value.slice(2)) : typed
 }
 
@@ -1311,7 +1943,10 @@ function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: s
   const paths = new Set<string>()
   const many = manyTimes(cmd, parsed)
   let unread = dirs.length > 1
-  for (const word of dirs.length > 1 ? dirs : [dir]) {
+  for (const typed of dirs.length > 1 ? dirs : [dir]) {
+    // a steady variable's value is read in, so its target, and whether it climbs, is the folder it names; the unread reading the cd had stays beside it, so it is never read looser than before
+    const word = env.hold?.(typed, cmd, env) ?? typed
+    if (word !== typed) unread = true
     for (const base of from.length > 0 ? from : [undefined]) {
       tick()
       const path = pathOf(word, { ...env, cwd: base })
@@ -1329,8 +1964,8 @@ function cdTargets(name: string, cmd: Command, parsed: Parsed, env: Env, from: s
   return { back: dirs.length > 1, paths: [...paths], unread }
 }
 
-// In a hook that follows zsh's ~- (`Env.old` set), a pushd's unquoted ~- returns to a folder the shell was in and ~+ stays in the one it is in; the reader takes every folder `cd -` would go back to, or each one the shell may be in, beside the typed reading and the folder `Env.cwd`'s own reading lands in, so it is never looser than that reading.
-function pushdTilde(
+// In a hook that follows zsh's ~- (`Env.old` set), a cd's or pushd's unquoted ~- returns to a folder the shell was in and ~+ stays in the one it is in; the reader takes every folder `cd -` would go back to, or each one the shell may be in, beside the typed reading and the folder `Env.cwd`'s own reading lands in, so it is never looser than that reading.
+function tildeMove(
   move: Move,
   name: string,
   parsed: Parsed,
@@ -1339,19 +1974,16 @@ function pushdTilde(
   back: string[],
 ): Move {
   const dir = parsed.args.find((a) => !(a.value.startsWith("-") && a.value.length > 1))
-  const tilde =
-    name === "pushd" && env.old && dir && !dir.quoted && !dir.unknown && !dir.reads?.length
-      ? /^~([-+])(?=\/|$)/.exec(dir.value)
-      : null
-  if (!tilde || !dir) return move
-  const bases = tilde[1] === "-" ? back : from
+  const sign = tildeSign(name, dir, env)
+  if (!sign || !dir) return move
+  const bases = sign === "-" ? back : from
   const paths = [
     ...move.paths,
     ...bases.map((base) => base + dir.value.slice(2)),
     ...(env.cwd === undefined ? [] : [env.cwd]),
   ]
   return {
-    back: move.back || tilde[1] === "-",
+    back: move.back || sign === "-",
     paths: [...new Set(paths)],
     unread: move.unread || bases.length === 0,
   }
@@ -1363,6 +1995,8 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
   const left = env.cwd
   env.cwd = name === "popd" || cmd.detached ? undefined : await cdTarget(name, parsed.args, env)
   if (env.old) env.old = name === "popd" ? {} : { dir: env.cwd === undefined ? undefined : left }
+  // a word's ~- names a folder only after a cd the reader is sure of, set below
+  if (env.old) env.oldFrom = []
   const from = startFolders(env)
   const back = [...new Set([...(env.cwdBack ?? []), ...from])]
   // a relative target resolves against each folder a body's cd may have reached too, since a brace group's cd, or a called function's, runs before this one
@@ -1370,7 +2004,7 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
   const move: Move =
     name === "popd"
       ? { back: true, paths: [], unread: true }
-      : pushdTilde(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back)
+      : tildeMove(cdTargets(name, cmd, parsed, env, bases), name, parsed, env, from, back)
   const { paths, unread } = move
   // the folder `Env.cwd`'s own reading left and the one it lands in join them, so the one folder `Env.old` names is always one a `cd -` or a `pushd ~-` of the reader's may go back to
   const named = [left, env.cwd].filter((dir): dir is string => dir !== undefined)
@@ -1391,6 +2025,7 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     env.cwdSure = paths[0]
     env.cwdMaybe = []
     env.cwdUnread = false
+    if (env.old) env.oldFrom = bases
     // the chain holds only to the first command it does not reach, so the folders from before this cd are kept for that one
     if (chained) {
       env.cwdChain = keep([...new Set([...(env.cwdChain ?? []), ...from])], env)
@@ -1399,8 +2034,15 @@ async function chdirTo(name: string, cmd: Command, parsed: Parsed, env: Env): Pr
     return
   }
   env.cwdSure = undefined
+  // a while's or an until's condition runs at least once, so a cd there into folders that are there leaves the ones before it behind, and the shell is in one its passes reach
+  const behind =
+    onceOrMore(cmd, parsed) &&
+    !unread &&
+    !move.back &&
+    paths.length > 0 &&
+    (chained || (await Promise.all(paths.map(isFolder))).every(Boolean))
   // a form that returns to a folder the line named before takes every one of them, since the reader cannot tell which the shell goes back to
-  env.cwdMaybe = keep([...new Set([...(move.back ? back : from), ...paths])], env)
+  env.cwdMaybe = keep([...new Set([...(move.back ? back : behind ? [] : from), ...paths])], env)
   env.cwdUnread = env.cwdUnread || unread || (from.length === 0 && paths.length === 0)
 }
 
@@ -1416,6 +2058,8 @@ function unchain(cmd: Command, env: Env): void {
     env,
   )
   env.cwdSure = undefined
+  // the chain's cd may not have run, so the folder a ~- names is no longer one the reader is sure of
+  if (env.old) env.oldFrom = []
   env.cwdChain = []
   env.cwdChainToken = undefined
 }
@@ -1469,28 +2113,36 @@ async function shell(
   const slot = shellSlot(args, name)
   if (slot) return examine({ ...cmd, words: slot }, env, visit, builtins)
   const { inline, operand } = shellOperand(args, name)
+  // a zsh run with any option but -c may set one that splits
+  const splits = (script: string) =>
+    SPLITTERS.has(name) ||
+    (name === "zsh" &&
+      (zshSplits(script) || args.some((a) => /^[-+]/.test(a.value) && a.value !== "-c")))
   if (operand && inline) {
     let script = operand.value
     if (xargs?.replace && script.includes(xargs.replace)) {
       const fed = await stdinOf(cmd, env)
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim())
     }
-    const verdict = await run(lexScript(script, env), subshell(env), visit, builtins)
-    // a script filled in at run time may be the piped input itself (`sh -c "$(cat)"`), so that input is judged as the script too
-    if (verdict || !cmd.stdin || !marked(operand.value)) return verdict
-    return run(lexScript(known(await stdinOf(cmd, env)), env), subshell(env), visit, builtins)
+    return run(
+      lexScript(script, env),
+      { ...subshell(env), splits: splits(script) },
+      visit,
+      builtins,
+    )
   }
   const script = await scriptOf(operand, cmd, env)
-  return run(lexScript(known(script), env), subshell(env), visit, builtins)
+  const text = known(script)
+  return run(lexScript(text, env), { ...subshell(env), splits: splits(text) }, visit, builtins)
 }
 
 // A script's parts the hook can read, each part it cannot read (a `curl`'s output in a group) taken as a line break, so the rest is still walked.
-const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
+export const known = (script: Text): string => script.value.replaceAll(UNKNOWN, "\n")
 
-// A shell's or source's script: stdin with no operand or `/dev/stdin`, a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
+// A shell's or source's script: stdin with no operand or stdin's name (`-`, `/dev/stdin`, `/dev/fd/0`), a process substitution's output, else unknown; a walk with a budget throws on one too large to hold.
 async function scriptOf(operand: Word | undefined, cmd: Command, env: Env): Promise<Text> {
   const script =
-    !operand || operand.value === "/dev/stdin"
+    !operand || STDIN_PATHS.has(operand.value)
       ? await stdinOf(cmd, env)
       : operand.procs
         ? await outputs(operand.procs, env)
@@ -1597,10 +2249,16 @@ export async function stdinOf(cmd: Command, env: Env): Promise<Text> {
   return held(await stdinText(cmd, env))
 }
 
+// A redirect that feeds stdin text, as stdinOf reads it: a file, a here-string, a heredoc or a process substitution, never a duplicated descriptor
+export const feedsStdin = ({ fd, op }: Redirect): boolean =>
+  (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&"
+
+// Whether a redirect feeds a root shell its script (`sudo -s <<< …`, `su < <(…)`), which run() hands every hook and leaves each to read
+export const rootFed = (cmd: Command): boolean =>
+  cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root"
+
 async function stdinText(cmd: Command, env: Env): Promise<Text> {
-  const input = cmd.redirects.findLast(
-    (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
-  )
+  const input = cmd.redirects.findLast(feedsStdin)
   if (input?.target?.procs) return outputs(input.target.procs, env)
   if (input?.op === "<" || input?.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect")

@@ -5,7 +5,7 @@ import type { RosterKind } from "@packages/config/kinds"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useRef } from "react"
 
-import { labelParts, labelText } from "@/lib/agent-label"
+import { labelParts, labelText, setRosterKinds } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import {
   agentGroup,
@@ -50,6 +50,7 @@ export const AGENTS_MESSAGE_COALESCE_MS = 5_000
 export async function fetchAgents() {
   const { data, error } = await unwrap(apiClient.v1.agents.$get())
   if (error) throw new Error(error.message)
+  setRosterKinds(data.agents)
   return data
 }
 

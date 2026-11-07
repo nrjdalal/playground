@@ -49,6 +49,7 @@ a. **Mirror.** Give the rehearsal an origin of its own: clone the repository bar
 b. **Contain.** Run every later command under `env -i`, so the run inherits nothing from the real environment, `PLAYGROUND_REPO` included, with `HOME` at a throwaway folder inside the scratch folder.
    Put `PATH` together for the run: the stub folder first, then the throwaway `HOME`'s `.bun/bin`, then a folder holding the real `bun`, `bunx` and `node` alone, the runtimes the install, the build and the `playground` command run on (`bunx` since `bun install` runs the checkout's `prepare` script), then the system basics; the real `HOME`'s own bin stays off `PATH`, since its `playground` link points at the real checkout.
    Put a stub on `PATH` for each side-effecting tool the update can call, one that logs each call and refuses; read `update.ts`, `ops-restart/cli.ts` and what they call for the list.
+   Write each stub's link with its literal target path, one `ln -s` a line (`ln -s _stub <scratch>/stubs/gh`), since no-extensions-write refuses a link whose target holds a loop variable, and the whole call with it ([scripts/hooks/README.md](../../../scripts/hooks/README.md#no-extensions-write)).
    Leave `claude` off `PATH` altogether: `link-skills`' `orgs home` step waits for an absent `claude` and fails a stub that refuses.
    Record the before-state (listings and checksums) of everything outside the scratch folder the update could reach, the home folder's bins and links among them, before any install runs, leaving out the main checkout's `.git/config`, which other sessions rewrite as they add branches and worktrees (two v0.0.27 rehearsals in a row read it changed).
    Done when every tool on the list is stubbed or absent, and the before-state is saved.
@@ -67,7 +68,7 @@ d. **Update.** Run `playground update --to <tag>`, then `playground doctor`, sti
    This run proves the last tag's `update.ts` taking the invitee to the candidate, since the clone runs the code it holds.
    When the candidate changes `update.ts` itself, run `playground update --to <tag>` a second time from the updated clone, then `playground doctor`, still contained, so the candidate's own `update.ts` runs.
    The first run leaves the tag's own commit in the throwaway data folder's `ops/update-head`, so a second run reads an empty change set and skips the install, the build and the skills line: first move that file aside when the change is on the no-record path, or write the last tag's commit into it when the change reads the change set, so the second run reads what the first did (the v0.0.26 rehearsal on 1 Nov: the first run ran v0.0.25's `update.ts`, and only the second, with the file moved aside, printed the candidate's new no-record line).
-   Done when each update exits 0, doctor's version line reads `at <tag>` after each, and the MISSING lines are only the containment's own and the machine's own gaps: `claude` off `PATH`, `docker` and `gh` left off it, the pinned `herdr` the throwaway `HOME` lacks, and the `portless proxy` line where no proxy serves 443, while every need the update itself runs on reads ok (`bun`, `git` and `node`, with `python3` from the system basics); the after-state, taken the same way, reads unchanged against the before-state, and each stub's log names the calls the real machine would have taken, and a second run's output shows the step the candidate's change is on, with the line that change adds when it adds one. A step that fails names its caller: when a stub took that call, the update needs it, so contain that call another way (a flag, an env) and run the rehearsal again.
+   Done when each update exits 0, doctor's version line reads `at <tag>` after each, and the MISSING lines are only the containment's own and the machine's own gaps: `claude` off `PATH`, `docker` and `gh` left off it and the pinned `herdr` the throwaway `HOME` lacks, while every need the update itself runs on reads ok (`bun`, `git` and `node`, with `python3` from the system basics); the after-state, taken the same way, reads unchanged against the before-state, and each stub's log names the calls the real machine would have taken, and a second run's output shows the step the candidate's change is on, with the line that change adds when it adds one. A step that fails names its caller: when a stub took that call, the update needs it, so contain that call another way (a flag, an env) and run the rehearsal again.
 
 The rehearsal's result goes into the ship PR's body beside the new-user gate's PASS and FAIL list.
 
@@ -95,12 +96,16 @@ Done when the PR reads `MERGED` and `MERGE` holds its merge commit. A refusal fo
 
 The tag is the last tag's patch plus one (`v0.0.98` is followed by `v0.0.99`); the root `package.json` version is not moved and does not decide it.
 
+The notes take ZeroStarter's shape: the compare link, one emoji section per commit type, then each contributor as `- <name> @<login>`, the name read from the commit's author, and `@<login>` alone when the commit has none. `bun run release:notes <last tag> vX.Y.Z` renders them from GitHub's compare of the two tags (`packages/scripts/src/release-notes/`) and prints them. Write them to a file outside the checkout, and name it by its literal absolute path in `--notes-file`, since the leak guards read a notes file only through a literal path:
+
 ```bash
 gh api -X POST repos/{owner}/{repo}/git/refs -f ref=refs/tags/vX.Y.Z -f sha="$MERGE"
-gh release create vX.Y.Z --verify-tag --latest --generate-notes
+bun run release:notes vX.Y.W vX.Y.Z > /tmp/notes-vX.Y.Z.md   # vX.Y.W is the last tag
+gh release create vX.Y.Z --verify-tag --latest --notes-file /tmp/notes-vX.Y.Z.md
 ```
 
-Done when `gh release list -L 1` shows `vX.Y.Z` marked Latest.
+When a guard refuses the notes for a contributor's name, as no-public-leak refuses a person's name on a public repo, cut that line to `- @<login>`; when it refuses the login, delete the line, or the whole Contributors section when none passes; then create the release again.
+Done when `gh release list -L 1` shows `vX.Y.Z` marked Latest, and its page opens with the compare link.
 
 ## 5. Pull the main checkout
 
@@ -116,6 +121,8 @@ A reset or merge of the main checkout made outside `playground update`, with no 
 
 1. Fetch and fast-forward onto `origin/main`, since `pull --ff-only origin main` there fails with "Cannot fast-forward to multiple branches". A checkout on another branch with a clean tree moves to `main` at `origin/main` first, and a dirty one stops here.
    When `origin/main` declares a dependency the checkout has not linked (`unlinked.ts` reads its manifests with `git show`), it checks out the changed `bun.lock` and `package.json` files and installs before the checkout moves (the fast-forward, or the move to `main` from another branch), since every hook that runs its source (all but the bundled PreToolUse guards) runs the checkout's code the moment it moves; a target that deletes or moves a manifest, or a tree with edits or untracked files of its own, moves first as before, and so does a failed install there (one needing a file the manifests were staged without, such as a patch), after it puts the old commit's manifests back with `git restore`.
+   Then each hook bundle the move adds or changes is written beside its path, renamed over it and staged (`swap-bundles.ts`), since every guard loads its bundle from this checkout and git's own move rewrites a file in place; a checkout with commits or files of its own moves as before, and a swap or a move that fails puts HEAD's bundles back by the same rename, so the next update moves the checkout.
+   The `reset --keep` below writes in place still, on that rare manual path.
    When the fast-forward fails because `main` holds a local commit no remote holds (a session's stray commit there), run `git -C <main checkout> reset --keep origin/main`, the one reset no-main-checkout lets through while the tree is clean, then run `playground update` again.
    When no-main-checkout refuses that reset (a dirty tree, or a commit some remote holds), stop there and send its reason up the chain, since that work or commit is someone else's to keep.
 2. `link-skills.sh`, before anything else, since every later step and every ops job reads `~/.playground`, which it links to `~/.playground` on a machine holding only the old folder; it installs first when the merge declared a dependency the checkout has not linked, since its home set loads the workspace packages; when the merge changed a skill, `playground update` then prints `skills changed:` with each one's folder in the checkout, which you send every lead, for each live checker to read the new text there (the `release` rule says why).
@@ -132,5 +139,5 @@ Done when the main checkout's `HEAD` equals `origin/main`, `playground update` e
 ## Notes
 
 - **Merge method is load-bearing.** `canary` PRs squash; the ship PR merges with a **merge commit** so `main` keeps shared history with `canary` and the next ship's diff stays clean.
-- **The notes are GitHub's.** `--generate-notes` lists the PRs since the last tag, so a ship makes no changelog commit on `canary`.
+- **The notes are rendered, never committed.** `release:notes` groups the commits since the last tag as ZeroStarter's changelogen notes do, with `ci` hidden as ZeroStarter's `changelog.config.json` hides it, and the release keeps them, so a ship makes no changelog commit on `canary` or `main`.
 - **Each tag is made once.** A tag that already exists fails the `git/refs` call: read the last tag again and take the next number.

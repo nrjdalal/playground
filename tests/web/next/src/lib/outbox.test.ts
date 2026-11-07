@@ -10,6 +10,7 @@ import {
   failWithFiles,
   findDelivery,
   isNext,
+  landed,
   MAX_ATTEMPTS,
   matchDeliveries,
   nextToSend,
@@ -659,6 +660,47 @@ describe("delivery", () => {
     expect(matchDeliveries([{ ...typed, sessionId: null }], entries, SESSION)).toEqual([])
   })
 
+  // herdr answers a send only once the box settles, so the transcript can hold the message while its request still runs: its pending copy goes as the line lands, not when the answer comes
+  test("a message still sending is delivered by its entry in the session it was sent to, and a late answer leaves it delivered", () => {
+    const sending = message("a", { at: T0, state: "sending", text: held })
+    const entry = human("e1", "2026-10-06T00:00:01.000Z", held)
+    expect(matchDeliveries([sending], [entry], SESSION)).toEqual([
+      { at: entry.at, entryId: "e1", id: "a" },
+    ])
+    expect(matchDeliveries([{ ...sending, to: "builder" }], [entry], SESSION)).toEqual([])
+    expect(
+      matchDeliveries([sending], [human("e0", "2026-10-05T23:59:59.000Z", held)], SESSION),
+    ).toEqual([])
+    const delivered = outboxReducer([sending], {
+      at: entry.at,
+      entryId: "e1",
+      id: "a",
+      type: "delivered",
+    })
+    // it keeps sending, so the session's next message waits for this answer, while its line stands in for its pending copy
+    expect(delivered[0]).toMatchObject({ entryId: "e1", state: "sending" })
+    expect(landed(delivered[0]!)).toBe(true)
+    expect(landed(sending)).toBe(false)
+    expect(matchDeliveries(delivered, [entry], SESSION)).toEqual([])
+    const queued = message("b", { at: "2026-10-06T00:00:02.000Z", text: "next" })
+    expect(nextToSend([...delivered, queued], "dispatcher", Date.parse(T0))).toBeNull()
+    const answered = outboxReducer(delivered, {
+      at: "2026-10-06T00:00:04.000Z",
+      id: "a",
+      sessionId: "s-1",
+      type: "typed",
+    })
+    expect(answered[0]).toMatchObject({ entryId: "e1", sessionId: "s-1", state: "delivered" })
+    expect(nextToSend([...answered, queued], "dispatcher", Date.parse(T0))?.id).toBe("b")
+    const refused = outboxReducer(delivered, {
+      code: "INTERRUPTED",
+      id: "a",
+      reason: "cut",
+      type: "fail",
+    })
+    expect(refused[0]?.state).toBe("delivered")
+  })
+
   test("a message with files is delivered by an entry with its words and the same files, files alone included", () => {
     const png = { id: "p.png", kind: "image" as const, name: "a.png", previewUrl: null, size: 1 }
     const pdf = { id: "d.pdf", kind: "pdf" as const, name: "b.pdf", previewUrl: null, size: 2 }
@@ -1038,14 +1080,11 @@ describe("typedHeld", () => {
 // The ticks survive a reload: a reload keeps only unsent records, so a message the transcript holds is delivered on its own word.
 describe("deliveredAt", () => {
   test("his message the transcript holds reads delivered at its transcript time once a reload has dropped its record", () => {
-    expect(deliveredAt({ at: T0, peer: false, sent: null })).toBe(T0)
+    expect(deliveredAt({ at: T0, sent: null })).toBe(T0)
   })
   test("the outbox's own time wins while the tab still holds the record", () => {
     const sent = message("a", { deliveredAt: "2026-10-06T19:37:04.000Z", state: "delivered" })
-    expect(deliveredAt({ at: T0, peer: false, sent })).toBe("2026-10-06T19:37:04.000Z")
-  })
-  test("another session's message is never his to tick", () => {
-    expect(deliveredAt({ at: T0, peer: true, sent: null })).toBeNull()
+    expect(deliveredAt({ at: T0, sent })).toBe("2026-10-06T19:37:04.000Z")
   })
 })
 

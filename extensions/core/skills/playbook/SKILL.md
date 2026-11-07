@@ -1,7 +1,7 @@
 ---
 name: playbook
 license: Complete terms in the repository's NOTICE
-description: "Factory rules for the cmux Claude Code sessions Playground runs: roles, chain, lifecycle, the leads' sweep and the standing rules. Use when you are the dispatcher, the Planner, the Builder, Ops, the Optimizer, a worker, reviewer, tester, runner or probe session, or before you spawn, brief, rename or end a cmux session."
+description: "Factory rules for the Claude Code sessions Playground runs in herdr: roles, chain, lifecycle, the leads' sweep and the standing rules. Use when you are the dispatcher, the Planner, the Builder, Ops, the Optimizer, a worker, reviewer, tester, runner or probe session, or before you spawn, brief, rename or end a session."
 hooks:
   PreToolUse:
     - matcher: '^(Bash|Edit|MultiEdit|NotebookEdit|Write|mcp__.+__((\w+_)?[Cc]reate_?[Ii]ssues?|[Ii]ssues?_?[Cc]reate|save_issue))$'
@@ -50,8 +50,11 @@ How the Dashboard shows each role, how a session is named and when a dev stack r
 - Questions, reports and results go up by `SendMessage`, never through `AskUserQuestion`.
 - A message opens with its content, never with your own name, since the Dashboard shows the sender.
   Read [rules/voice.md](../../rules/voice.md) before you name a session or list PR status for the owner.
-- A session's effort, model, permission mode and settings are the owner's: tell him which pane to type into, rather than asking a running session to change its own.
-  The one path past a pane is effort: a lead starts or resumes a session at another effort with spawn.sh's `--effort`, on the owner's word relayed in the **override** shape (SESSIONS.md).
+- A session's effort, model, permission mode and settings are the owner's, changed by the owner's act or word alone, never by a running session asked to change its own.
+  The model and effort of a dispatcher, the Assistant and the hosted session (the one the Dashboard runs on the Agent SDK) are the owner's pick in the menu left of Send in that session's Dashboard composer.
+  Any other session's model or effort changes when a lead starts or resumes it with spawn.sh's `--model` or `--effort`, on the owner's word relayed through the dispatcher in the **override** shape (SESSIONS.md).
+  The hosted session's permission mode is the owner's pick in its composer's mode menu, while approvals are on.
+  Any other session's permission mode and settings stay as spawn.sh's launch flags and the factory's settings set them, and a change to them is a PR to those, until the Dashboard control on a session's row lands (the issue "every step that needs the owner is one GUI action").
 
 ## Standing rules
 
@@ -64,7 +67,7 @@ Cite a rule by its name, in bold; read it whole with `playground rules <name>` w
 - [LIFECYCLE.md](LIFECYCLE.md): when each kind of session starts and ends, the ops jobs, and how Claude Code updates.
   Read it before you start, close or respawn a session, remove a worktree, or update Claude Code.
 - [DISPATCH.md](DISPATCH.md): how the dispatcher, the Planner and the leads route a new ask, bundle work and fill the slots.
-  Read it when you are one of them and an ask arrives, or when Slack mode is on and the owner's DM speaks to you.
+  Read it when you are one of them and an ask arrives; when Slack mode is on and the owner's DM speaks to you, its Slack mode section points to the `slack` skill.
 - [SWEEP.md](SWEEP.md): the leads' sweep, step by step.
   Read it at each sweep.
 - [SESSIONS.md](SESSIONS.md): the commands to spawn, brief, rename, check and end a session, and the headless run that writes Notion for a session with no Notion tools.

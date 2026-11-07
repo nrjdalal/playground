@@ -2,6 +2,7 @@ import { site } from "@packages/config/site"
 import { db } from "@packages/db"
 import { getBuildVersion } from "@packages/env"
 import { env } from "@packages/env/api-hono"
+import { answerKind } from "@packages/message"
 import { describeRoute, openAPIRouteHandler, resolver } from "hono-openapi"
 import { HTTPException } from "hono/http-exception"
 import { z } from "zod"
@@ -9,12 +10,17 @@ import { z } from "zod"
 import { apiReference, serveScalarBundle } from "@/lib/api-reference"
 import { baseApp } from "@/lib/base-app"
 import { keepSweeping } from "@/lib/dashboard/attachments"
+import { readsLive } from "@/lib/dashboard/fixture"
+import { getItem } from "@/lib/dashboard/inbox"
 import { startSdkProbe } from "@/lib/dashboard/sdk"
 import { globalErrorResponses } from "@/lib/error"
 import { DB_TIMEOUT_MS, healthData } from "@/lib/health"
+import { startRelay } from "@/lib/relay/mac"
 import { createServer, upgradeWebSocket } from "@/lib/server"
+import { sessionCookie } from "@/lib/sign-in"
 import { yardClient } from "@/lib/yard/client"
 import { startYardPoll } from "@/lib/yard/inbound"
+import { keychain } from "@/lib/yard/keychain"
 import { requireFeature } from "@/middlewares"
 import {
   accountsRouter,
@@ -28,12 +34,15 @@ import {
   inboxRouter,
   localYardRouter,
   onboardRouter,
+  remoteRouter,
   sessionsRouter,
   settingsRouter,
+  templatesRouter,
   v1Router,
   waitlistRouter,
 } from "@/routers"
 import { mountOldPaths, OLD_PATHS_DOC } from "@/routers/old-paths"
+import { owners } from "@/routers/onboard"
 
 const BUILD_VERSION = getBuildVersion()
 
@@ -95,7 +104,7 @@ const { data, error } = await unwrap(apiClient.health.$get())`,
                     }),
                     dispatcherSlots: z.number().int().min(1).meta({
                       description:
-                        "How many dispatcher rows the Dashboard's sidebar header draws: the primary's, plus the second's while a session of its name is registered or the roster lists it. A stored sidebar draws that many rows, placeholders for those it lacks, so the rows arriving move nothing below them",
+                        "How many dispatcher rows the Dashboard's sidebar header draws: the primary's, plus the second's while a session of its name is registered or the roster lists it in a status other than done or ended. A stored sidebar draws that many rows, placeholders for those it lacks, so the rows arriving move nothing below them",
                       example: 2,
                     }),
                     environment: z
@@ -177,6 +186,8 @@ socket.addEventListener("message", (event) => {
   .route("/v1/ext", extRouter)
   .route("/v1/extensions", extensionsRouter)
   .route("/v1/inbox", inboxRouter)
+  .route("/v1/remote", remoteRouter)
+  .route("/v1/sessions/templates", templatesRouter)
   .route("/v1/sessions", sessionsRouter)
   .route("/v1/settings", settingsRouter)
   .route("/v1/yard", localYardRouter)
@@ -239,14 +250,16 @@ export type {
 } from "@/lib/apps/plan"
 export type { PlanOrder } from "@/lib/apps/plan-order"
 export type { AccountRow } from "@/lib/store/accounts"
-export type { ExtensionRow } from "@/lib/store/extensions"
+export type { BundledRow, ExtensionRow } from "@/lib/store/extensions"
 export type { Preview, PreviewKind } from "@/lib/apps/previews"
 export type * from "@/plugins/registry"
 export type { BatchAnswer, BatchOutcome, BatchRefusalCode } from "@/lib/batch"
 export type { AttachmentKind, EntryAttachment } from "@/lib/dashboard/attachments"
 export type { DashboardFrame } from "@/lib/dashboard/hub"
+export type { RelayStatus } from "@/lib/relay/protocol"
 export type {
   InboxAction,
+  InboxAnswer,
   InboxAttachment,
   InboxAttachmentKind,
   InboxDelivery,
@@ -280,6 +293,40 @@ startSdkProbe()
 
 // Yard's mentions of the owner into the Inbox, once a minute, when YARD_API_URL names a hosted Yard.
 startYardPoll(db, yardClient)
+
+// The relay to the hosted Yard, on a stack that reads this Mac alone, never a fixture's: with YARD_API_URL set and the Keychain token, the owner's browser on Yard reads this dashboard through one socket this API dials out, and sends the writes its paired key signs, each run here as the one local owner.
+if (env.YARD_API_URL && readsLive()) {
+  const api = env.YARD_API_URL
+  let made: Promise<string> | null = null
+  const cookie = () =>
+    (made ??= (async () => {
+      const found = await owners()
+      if (found.length !== 1) throw new Error("the relay needs this Mac's one owner")
+      const { name, value } = await sessionCookie(found[0]!)
+      return `${name}=${value}`
+    })().catch((error: unknown) => {
+      made = null
+      throw error
+    }))
+  startRelay({
+    api,
+    cookie,
+    // a session the API refuses (expired) is made again for the next read
+    dispatch: async (request) => {
+      const response = await app.fetch(request)
+      if (response.status === 401) made = null
+      return response
+    },
+    // a card's kind (answerKind) by its id, as its answer, schedule and dismiss read it, or by the exact `#iN` a message's reply names, never a bare `iN`
+    kindOf: async (key) => {
+      const item = await getItem(db, key)
+      if (!item || (key !== item.id && key !== `#i${item.ref}`)) return null
+      return answerKind(item)
+    },
+    login: async (token) => (await yardClient(api, token).me()).login,
+    token: () => keychain().read(),
+  })
+}
 
 mountOldPaths(routes, {
   apps: appsRouter,

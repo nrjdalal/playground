@@ -8,7 +8,7 @@ import { extensionsDir } from "../../packages/settings/src/rendered"
 import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
-  ASSIGN,
+  codeFed,
   type Command,
   type Env,
   examine,
@@ -37,7 +37,9 @@ import {
   type Visit,
   withDeadline,
   type Word,
+  zshSplits,
 } from "./shell"
+import { held, heldWord, namings, NONE, type Steady, steadyNames, unquoted } from "./steady"
 
 type Environment = Record<string, string | undefined>
 
@@ -48,7 +50,14 @@ const shown = (word: Word): string =>
 const ROUTE =
   "every guard reads its list and policy.json from there, so a session's write would change what a guard allows. A guard's list or setting changes only by the owner typing the playground command as a ! command in the dispatcher's terminal window, which runs without hooks: tell your lead, and the dispatcher hands the owner the command. A session writes nothing there by hand."
 
-const refuse = (what: string) => `no-extensions-write hook refuses ${what}: ${ROUTE}`
+// The guard keys Privacy on the Dashboard's Settings page saves at your login's scope, so a write there names that page as its route.
+const PRIVACY_KEYS = new Set(["factory.archiveRepo", "owner.names"])
+const PRIVACY = "at your login's scope, which Privacy on the Dashboard's Settings page saves"
+const PRIVACY_ROUTE =
+  "every guard reads policy.json from there, so a session's write would change what a guard allows: tell your lead, and the dispatcher asks the owner to save it in Privacy on the Dashboard's Settings page. A session writes nothing there by hand."
+
+const refuse = (what: string) =>
+  `no-extensions-write hook refuses ${what}: ${what.endsWith(PRIVACY) ? PRIVACY_ROUTE : ROUTE}`
 
 const TOO_LONG =
   "a command too long or nested too deep to read inside the hook's time: split it into shorter calls"
@@ -73,6 +82,8 @@ const READERS = new Set([
 ])
 // find's actions that write, remove or run
 const FIND_ACTS = /^-(?:delete|exec|execdir|fls|fprint|fprint0|fprintf|ok|okdir)$/
+// find's actions that write the file named by the next word, a dash-led one too
+const FIND_WRITES = /^-(?:fls|fprint|fprint0|fprintf)$/
 const GIT_READS = new Set([
   "blame",
   "cat-file",
@@ -88,13 +99,52 @@ const GIT_READS = new Set([
 const EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"])
 // Programs that remove or move what they name, so naming a folder above the root takes the root with it, and the guards fall back to core's smaller lists.
 const REMOVERS = new Set(["find", "mv", "rm", "rmdir", "rsync", "unlink"])
+// The removers whose macOS build stops reading options at the first operand, as getopt does, or reads none but a leading -- (unlink), so a later dashed word is an operand
+const GETOPT_REMOVERS = new Set(["mv", "rm", "rmdir", "unlink"])
+// rsync's options that write the path given as their value, read by any prefix since macOS's openrsync takes a shortened long name: its backup, partial and temp folders, its log file and its batch files
+const RSYNC_PATHS = [
+  "backup-dir",
+  "log-file",
+  "only-write-batch",
+  "partial-dir",
+  "temp-dir",
+  "write-batch",
+]
+// rsync's flags whose exact name is a prefix of a path option, which both builds read as the flag
+const RSYNC_FLAGS = new Set(["backup", "partial"])
+// rsync's -T, its temp folder, in a short cluster whose earlier letters take no value (-B, -e, -f, -M and -@ do)
+const RSYNC_TEMP = /^-[^-@BefMT]*T/
+// Programs that write the paths they are given and remove none, each judged on its targets (writeTargets)
+const WRITERS = new Set(["cp", "dd", "install", "ln", "mkdir", "tee", "touch"])
+// Homebrew's GNU coreutils and findutils under their g prefix (gcp, grm, gfind): a coreutils name reads as the remover or writer it names, and gfind and gxargs are examined again as find and xargs, so the tool lookup never yields either
+const GNU_NAMED = /^g(cp|dd|find|install|ln|mkdir|mv|rm|rmdir|tee|touch|unlink|xargs)$/
+// A writer's options that take a value rather than name a target, by short letter (`gnu` for a GNU build alone, `bsd` for macOS's alone) and GNU's long name, with the long flags whose exact name wins over a value option it prefixes: cp's and ln's suffix, install's suffix, flags, group, mode, owner, strip program, and macOS's destdir, hash, link flags, metalog and tags, mkdir's mode, mv's suffix, touch's adjustment, date, reference file and stamp; cp's, install's, ln's and mv's -t names their target folder, and macOS install's -M its metalog, read apart
+const WRITER_TAKES: Record<
+  string,
+  { bsd?: string; flags?: string[]; gnu?: string; long: string[]; short: string }
+> = {
+  cp: { gnu: "S", long: ["no-preserve", "sparse", "suffix"], short: "" },
+  install: {
+    bsd: "BDfhlMT",
+    flags: ["strip"],
+    gnu: "S",
+    long: ["group", "mode", "owner", "strip-program", "suffix"],
+    short: "gmo",
+  },
+  ln: { gnu: "S", long: ["suffix"], short: "" },
+  mkdir: { long: ["mode"], short: "m" },
+  mv: { gnu: "S", long: ["suffix"], short: "" },
+  touch: { long: ["date", "reference", "time"], short: "Adrt" },
+}
 const DUPLICATE = /^(?:\d+|-)$/
 // Whether a redirect writes a file: >, >>, >|, <> or >& to a name, not an fd
 const writer = ({ op, target }: { op: string; target?: Word }): boolean =>
   [">", ">>", ">|", "<>"].includes(op) || (op === ">&" && !DUPLICATE.test(target?.value ?? ""))
 const GLOB = /[*?[{(]/
-// Variables that make git or a pager run a program, so a reader with one set is judged as any other program.
-const RUNS = /^(?:EDITOR|GIT_[A-Z_]+|LESSOPEN|PAGER|VISUAL)$/
+// Variables that make git or a pager run a program, or point git at a config file that can, so a reader with one set is judged as any other program.
+const RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/
+// git's variables that only name an author or a committer, text git never runs
+const GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/
 const CLI = join("packages", "scripts", "src", "playground", "cli.ts")
 
 // Whether a scope's variables set one that makes git or a pager run a program, each name read once.
@@ -119,7 +169,7 @@ function reads(parsed: Parsed, env: Env): boolean {
   const before = args.slice(0, args.length - rest.length - 1).map((a) => a.value)
   return (
     !!sub &&
-    GIT_READS.has(sub) &&
+    (GIT_READS.has(sub) || (sub === "worktree" && rest[0] === "list")) &&
     !before.some((w) => /^-c|^--(?:config-env|exec-path)/.test(w)) &&
     !rest.some((w) => /^(?:--output|-O|--open-files-in-pager|--ext-diff|--textconv)/.test(w))
   )
@@ -159,239 +209,6 @@ function ghFilters(parsed: Parsed): Set<Word> {
   return filters
 }
 
-type Namings = { counts: Map<string, number>; plain: Set<string> }
-
-// The operators after ${K that only read K; any other (`=`, `:=`, zsh's `::=`, a subscript, a modifier) may set it, so it counts as a naming
-const READS_ONLY = /^(?:\}|:?[-+?]|[#%/])/
-
-// How many times the line names each variable other than by reading it ($K, ${K}, ${K:-…} and the other READS_ONLY forms): every other spelling of the name counts, an assignment, an append, a bare word (read's, a for loop's, arithmetic's) and a name spelled across a quote or a backslash (`X\Y`, `X"Y"`, which the shell reads as XY) included, as does one attached after an option cluster's a or v (`printf -vK`), a lone flag (`-K`) aside; and the names an unquoted plain assignment sets (`K=`, where a quoted `"K=a"` is a command), read in one pass
-function namings(command: string): Namings {
-  const counts = new Map<string, number>()
-  const plain = new Set<string>()
-  const add = (key: string) => counts.set(key, (counts.get(key) ?? 0) + 1)
-  for (const m of command.matchAll(/(\$\{[#!]?)?(?<![\w$])([A-Za-z_]\w*)/g)) {
-    const [whole, expanded, key] = m
-    const next = command.slice(m.index + whole.length)
-    if (expanded && READS_ONLY.test(next)) continue
-    const assigns = next[0] === "=" ? "=" : undefined
-    const at = m.index + (expanded?.length ?? 0)
-    if (!expanded && command[at - 1] === "-" && (at < 2 || /\s/.test(command[at - 2]))) {
-      for (let k = 0; k < key.length - 1; k++)
-        if (key[k] === "a" || key[k] === "v") add(key.slice(k + 1))
-      continue
-    }
-    add(key)
-    if (!expanded && assigns === "=" && (at === 0 || /[\s;&|(]/.test(command[at - 1])))
-      plain.add(key)
-  }
-  const from: number[] = []
-  let joined = ""
-  for (let i = 0; i < command.length; i++)
-    if (!"\\'\"".includes(command[i])) {
-      from.push(i)
-      joined += command[i]
-    }
-  for (const m of joined.matchAll(/(?<![\w$])[A-Za-z_]\w*/g)) {
-    const end = m.index + m[0].length - 1
-    if (from[end] - from[m.index] !== end - m.index) add(m[0])
-  }
-  return { counts, plain }
-}
-
-// The parameters the shell sets itself, whose value a later word reads is the shell's and not an assignment's: bash 5.3's bash(1), PARAMETERS, Shell Variables ("The shell sets following variables"); zsh 5.9's zshparam(1), PARAMETERS SET BY THE SHELL; and the names a builtin or a match writes with no name among its words (read's and select's REPLY and reply, `=~`'s and the glob flags' MATCH, MBEGIN, MEND, match, mbegin and mend, and bash's COLUMNS and LINES under checkwinsize)
-const SHELL_SETS = new Set([
-  "ARGC",
-  "BASH",
-  "BASHOPTS",
-  "BASHPID",
-  "COLUMNS",
-  "COPROC",
-  "CPUTYPE",
-  "DIRSTACK",
-  "EGID",
-  "EPOCHREALTIME",
-  "EPOCHSECONDS",
-  "ERRNO",
-  "EUID",
-  "FUNCNAME",
-  "FUNCNEST",
-  "GID",
-  "GROUPS",
-  "HISTCMD",
-  "HOST",
-  "HOSTNAME",
-  "HOSTTYPE",
-  "LINENO",
-  "LINES",
-  "LOGNAME",
-  "MACHTYPE",
-  "MAPFILE",
-  "MATCH",
-  "MBEGIN",
-  "MEND",
-  "OLDPWD",
-  "OPTARG",
-  "OPTIND",
-  "OSTYPE",
-  "PIPESTATUS",
-  "PPID",
-  "PWD",
-  "RANDOM",
-  "REPLY",
-  "SECONDS",
-  "SHELLOPTS",
-  "SHLVL",
-  "SRANDOM",
-  "TRY_BLOCK_ERROR",
-  "TRY_BLOCK_INTERRUPT",
-  "TTY",
-  "TTYIDLE",
-  "UID",
-  "USERNAME",
-  "VENDOR",
-  "_",
-  "argv",
-  "match",
-  "mbegin",
-  "mend",
-  "pipestatus",
-  "reply",
-  "signals",
-  "status",
-])
-// the families of those the manuals list by prefix (BASH_ARGV, COMP_WORDS, READLINE_LINE, ZSH_SUBSHELL, zsh_eval_context)
-const SHELL_SETS_PREFIX = /^(?:BASH_|COMP_|READLINE_|ZSH_|zsh_)/
-
-// The allow-list, the one way a variable's value is held: a name the shell does not set itself, which a plain NAME=value the hook reads whole names once on a line that names no IFS (the rest of steadyNames places that assignment)
-function holdable(key: string, named: Namings, counts: Map<string, number>): boolean {
-  return (
-    counts.get(key) === 1 &&
-    named.plain.has(key) &&
-    !SHELL_SETS.has(key) &&
-    !SHELL_SETS_PREFIX.test(key)
-  )
-}
-
-type Steady = { has: (key: string) => boolean }
-const NONE: Steady = { has: () => false }
-
-// The builtins that set a variable by a name among their words, and the ones that run text as the line's own shell, which can set any
-const NAME_SETTERS = new Set([
-  "declare",
-  "export",
-  "getopts",
-  "let",
-  "local",
-  "mapfile",
-  "printf",
-  "read",
-  "readarray",
-  "readonly",
-  "typeset",
-  "unset",
-])
-const RUNS_TEXT = new Set([".", "eval", "source"])
-// the words that open and close a compound body or group, and the other reserved words a command may lead with
-const OPENS = new Set(["case", "for", "if", "select", "until", "while", "{"])
-const CLOSES = new Set(["done", "esac", "fi", "}"])
-const LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"])
-
-// For each command of the line, the variables whose value the shell has when it runs: each named once, by an unquoted plain assignment that is its command's first word, at the line's top level (outside any function, compound body, group or subshell) and not piped or sent to the background; one the shell always runs (first, or after `;` or `&`) holds for every later command, and one after `&&` only along that `&&` chain, since the shell skips the rest of the chain with it. A line that runs eval or source, sets a variable by a name the hook cannot read whole, or names IFS, holds none, and holdable() is the rest of the allow-list
-function steadyNames(named: Namings, commands: Command[]): (cmd: Command) => Steady {
-  if (named.counts.has("IFS")) return () => NONE
-  const counts = new Map(named.counts)
-  const parses = commands.map((cmd) => parse(cmd))
-  for (const [at, cmd] of commands.entries()) {
-    const { name } = parses[at]
-    if (RUNS_TEXT.has(name)) return () => NONE
-    const loop = cmd.words.findIndex(
-      (w) => !w.quoted && (w.value === "for" || w.value === "select"),
-    )
-    if (!NAME_SETTERS.has(name) && loop === -1) continue
-    // a name the shell reads after quote removal (`read X\Y` sets XY) counts as written, and one the hook cannot read could be any
-    // printf names one only by -v, so its other words are text it prints
-    const v = cmd.words.findIndex((w) => /^-v/.test(w.value))
-    const vName =
-      cmd.words[v]?.value === "-v"
-        ? cmd.words[v + 1]
-        : cmd.words[v] && { ...cmd.words[v], value: cmd.words[v].value.slice(2) }
-    const names = loop !== -1 ? [cmd.words[loop + 1]] : name === "printf" ? [vName] : cmd.words
-    for (const word of names) {
-      if (!word) continue
-      if (marked(word.value.split("=")[0])) return () => NONE
-      for (const key of word.value.match(/[A-Za-z_]\w*/g) ?? [])
-        counts.set(key, (counts.get(key) ?? 0) + 1)
-    }
-  }
-  const set = new Map<string, { at: number; chain?: number }>()
-  const where = new Map<Command, { at: number; chain: number }>()
-  let chain = 0
-  let depth = 0
-  for (const [at, cmd] of commands.entries()) {
-    if (cmd.follows !== "&&") chain++
-    where.set(cmd, { at, chain })
-    const top = depth === 0 && cmd.scope === 0
-    for (let k = 0; k < cmd.words.length; k++) {
-      const { quoted, value } = cmd.words[k]
-      if (quoted) break
-      if (value === "function") k++
-      else if (OPENS.has(value)) depth++
-      else if (CLOSES.has(value)) depth--
-      else if (!LEADS.has(value)) break
-    }
-    if (depth < 0) return () => NONE
-    const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&"
-    if (!top || cmd.detached || (!always && cmd.follows !== "&&")) continue
-    const [first] = cmd.words
-    if (!first || !ASSIGN.test(first.value) || parses[at].name !== "") continue
-    for (const key of parses[at].local.keys())
-      if (holdable(key, named, counts)) set.set(key, always ? { at } : { at, chain })
-  }
-  return (cmd) => {
-    const here = where.get(cmd)
-    if (!here) return NONE
-    return {
-      has: (key) => {
-        const from = set.get(key)
-        return (
-          !!from && from.at < here.at && (from.chain === undefined || from.chain === here.chain)
-        )
-      },
-    }
-  }
-}
-
-// A word with a value the lexer could not read, lexed again with the steady variables the call has set by now; undefined when it holds none, or still holds one the hook cannot read
-function heldWord(word: Word, env: Env, steady: Steady): Word | undefined {
-  return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady)) : undefined
-}
-
-// A raw word lexed with known variables: the one word it makes, or undefined when it still holds a value the hook cannot read
-function relexed(raw: string, known: Record<string, string>): Word | undefined {
-  // a substitution's commands come first, so the word's own command is the last
-  const words = lex(raw, known).commands.at(-1)?.words ?? []
-  return words.length === 1 && !marked(words[0].value) ? words[0] : undefined
-}
-
-// The steady variables the call has set by now whose values the hook holds, an assignment that names an earlier one (`T="$S/x"`) lexed again with it, in the order they were set
-function heldVars(env: Env, steady: Steady): Record<string, string> {
-  const known = { ...env.known }
-  for (const [key, text] of env.vars) {
-    // a TMPDIR the call sets steers mktemp, so mktemp's path stays unheld
-    if (key === "TMPDIR" || !steady.has(key)) continue
-    if (!text.unknown && !marked(text.value)) known[key] = text.value
-    else if ("raw" in text && typeof text.raw === "string") {
-      const again = relexed(text.raw, known)?.value
-      if (again?.startsWith(`${key}=`)) known[key] = again.slice(key.length + 1)
-    }
-  }
-  return known
-}
-
-// Whether the hook holds a word's whole value
-const held = (word: Word, env: Env, steady: Steady): boolean =>
-  !marked(word.value) || !!heldWord(word, env, steady)
-
 // The values git's -c options set before its subcommand (`-c k=v`, `-ck=v`)
 function gitConfigs(args: Word[]): Word[] {
   const configs: Word[] = []
@@ -403,6 +220,100 @@ function gitConfigs(args: Word[]): Word[] {
     else if (!value.startsWith("-")) break
   }
   return configs
+}
+
+// A word past the literal prefix a writer reads its target after (`of=`, `-t`, `--target-directory=`), its raw text cut alike so held() reads the rest; with no raw text that opens with the prefix, an unread rest stays unheld
+const after = (word: Word, cut: number): Word => ({
+  ...word,
+  raw: word.raw?.startsWith(word.value.slice(0, cut)) ? word.raw.slice(cut) : undefined,
+  value: word.value.slice(cut),
+})
+
+// Whether the shell may split a word into several: always for a substitution or a pasted value, and for a parameter where the shell splits one (`Word.splits` in shell.ts)
+const splitIn = (word: Word, splitting = false): boolean =>
+  word.splits === "always" || (word.splits === "sh" && splitting)
+
+// The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install, ln and mv (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch; and every word the shell may split (`Word.splits`), since one of its words may land as a target
+function writeTargets(
+  name: string,
+  args: Word[],
+  gnu: boolean,
+  posix = false,
+  splitting = false,
+): Word[] {
+  const splits = args.filter((word) => splitIn(word, splitting))
+  if (name === "dd")
+    return [
+      ...new Set([
+        ...args.flatMap((word) =>
+          word.value.startsWith("of=")
+            ? [after(word, 3)]
+            : marked(word.value) && !/^[a-z]+=/.test(word.raw ?? word.value)
+              ? [word]
+              : [],
+        ),
+        ...splits,
+      ]),
+    ]
+  const into = name === "cp" || name === "install" || name === "ln" || name === "mv"
+  const takes = WRITER_TAKES[name]
+  const operands: Word[] = []
+  let folder: Word | undefined
+  let folders = false
+  // GNU's cp, install, ln and mv read an unread word before `--` that expands to -t<folder> as their target folder
+  const maybe: Word[] = []
+  // the file macOS's install writes its metalog to
+  const logs: Word[] = []
+  for (let k = 0, options = true; k < args.length; k++) {
+    const word = args[k]
+    const { value } = word
+    if (into && gnu && options && marked(value)) maybe.push(word)
+    if (!options || value === "-" || !value.startsWith("-")) {
+      operands.push(word)
+      // macOS's getopt stops at the first operand, as GNU's does under POSIXLY_CORRECT, so a later dashed word is an operand
+      if (!gnu || posix) options = false
+    } else if (value === "--") options = false
+    else if (value.startsWith("--")) {
+      // a long option GNU reads by any prefix, its value attached after = or as the next word
+      const [, long, attached] = /^--([^=]*)(=?)/.exec(value) ?? []
+      if (into && "target-directory".startsWith(long))
+        folder = attached ? after(word, long.length + 3) : args[++k]
+      else if (name === "install" && "directory".startsWith(long)) folders = true
+      else if (
+        !attached &&
+        !takes?.flags?.includes(long) &&
+        takes?.long.some((take) => take.startsWith(long))
+      )
+        k++
+    } else
+      // a short cluster read letter by letter up to the first that takes a value, whose value is the cluster's rest or else the next word
+      for (let i = 1; i < value.length; i++) {
+        const letter = value[i]
+        if (name === "install" && letter === "d") folders = true
+        else if (into && letter === "t") {
+          folder = i + 1 < value.length ? after(word, i + 1) : args[++k]
+          break
+        } else if (
+          takes?.short.includes(letter) ||
+          (gnu ? takes?.gnu : takes?.bsd)?.includes(letter)
+        ) {
+          const rest = i + 1 < value.length
+          if (!gnu && name === "install" && letter === "M") {
+            const log = rest ? after(word, i + 1) : args[k + 1]
+            if (log) logs.push(log)
+          }
+          if (!rest) k++
+          break
+        }
+      }
+  }
+  // ln's lone operand links into the shell's folder, unless the shell splits it into more operands
+  if (name === "ln" && !folder && operands.length === 1)
+    return [{ quoted: false, value: "." }, ...splits]
+  const targets = into && !folders ? (folder ? [folder] : operands.slice(-1)) : operands
+  // macOS's cp, ln and mv take no target option and write to their last operand, so a split word moves no target there
+  const moved = into && !gnu && name !== "install" ? [] : splits
+  return [...new Set([...targets, ...maybe, ...logs, ...moved])]
 }
 
 // The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from.
@@ -418,6 +329,7 @@ export const GUARD_KEYS = new Set([
   "paths.codeRoot",
   "sessions.aliases",
   "sessions.names",
+  "slack.gatedSends",
   "usage.keychainService",
 ])
 // ext verbs that change a scope's lists or settings, or which scopes the lists and policy.json render from
@@ -435,7 +347,7 @@ function isCli(word: Word, dirs: (string | undefined)[]): boolean {
   tick()
   if (marked(word.value) || word.value.startsWith("-")) return false
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir } as Env))
-  if (program(word.value).toLowerCase() === "playground")
+  if (program(word.value) === "playground")
     return (
       !word.value.includes("/") ||
       !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory())
@@ -461,8 +373,6 @@ const SETS = /^(?:CLAUDE_CODE_SESSION_ID|CLAUDE_CONFIG_DIR|PLAYGROUND_ROLE)\+?=/
 // env's options that clear the whole environment: -i alone or in any cluster of short options, --ignore-environment, or a bare -
 const CLEARS = /^(?:-[^-\s]*i|--ignore-environment$|-$)/
 const SCORE = /\bext\s+score\b/
-// the line's text as a shell it runs reads it: backslash-newlines, a $ before a quote, and every quote and backslash removed
-const unquoted = (text: string) => text.replace(/\\\n|\$(?=["'])|["'\\]/g, "")
 const SCORE_AS_OTHER = `playground ext score on a line that clears or sets ${IDENTITY.join(", ")}, which reads as another author than the calling session`
 
 // Whether words clear or set an identity variable: an assignment or += to one, or env beside -u or --unset naming one or an option that clears the environment.
@@ -570,10 +480,93 @@ function evalProgram({ args, name }: Parsed): Word | undefined {
 
 // The lines an awk program runs, read whatever the line: each string literal of a program that can run a command or write a file
 function programLines({ args, first }: Parsed, rooted: boolean): string[] {
-  if (!AWKS.has(program(first?.value ?? "").toLowerCase())) return []
+  if (!AWKS.has(program(first?.value ?? ""))) return []
   return (awkPrograms(args) ?? [])
     .filter(({ value }) => rooted || awkRuns(value))
     .flatMap(({ value }) => [...value.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]))
+}
+
+const SEDS = new Set(["gsed", "sed"])
+// Whether a word is read as written: no glob and no part the hook cannot read
+const literal = (w: Word) => !w.glob && !marked(w.value)
+// sed's options that write nothing and read no script from elsewhere: -E, -n, -r, -s, -u and -z, alone or clustered, and their long names
+const SED_FLAG =
+  /^-[Enrsuz]+$|^--(?:null-data|posix|quiet|regexp-extended|separate|silent|unbuffered)$/
+// a bracket expression holding no / and no [, which BSD sed reads whole and GNU sed reads to the same end, so both end its regex at one /
+const SED_BRACKET = String.raw`\[\^?\]?[^\]/[\n]*\]`
+// a regex's body up to its closing /, a / inside a bracket expression held by SED_BRACKET alone
+const SED_BODY = String.raw`(?:[^/\\\n[]|\\.|${SED_BRACKET})*/`
+// a replacement's text up to its closing /
+const SED_TEXT = String.raw`(?:[^/\\\n]|\\.)*/`
+const SED_ADDRESS = String.raw`(?:\d+|\$|/${SED_BODY})`
+const SED_ITEM = String.raw`[ \t]*(?:${SED_ADDRESS}(?:[ \t]*,[ \t]*(?:${SED_ADDRESS}|[+~]\d+))?[ \t]*!?[ \t]*)?(?:[=dlnNpPqQ]|s/${SED_BODY}${SED_TEXT}[giImMp0-9]*)[ \t]*`
+// a sed script read whole by a closed grammar: addresses, then =, d, l, n, N, p, P, q, Q or s/// with flags from g, i, I, m, M, p and digits, so it holds no w or W write, no e run and no r read of another file
+const SED_SCRIPT = new RegExp(String.raw`^${SED_ITEM}(?:[;\n]${SED_ITEM})*;?$`)
+
+// Whether a sed call only reads and prints: every option on SED_FLAG's list, and every script (each -e value, else the first operand) a literal word, unglobbed, that SED_SCRIPT holds
+function sedReads(args: Word[]): boolean {
+  const scripts: Word[] = []
+  const operands: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "-e" || value === "--expression") {
+      if (!args[k + 1]) return false
+      scripts.push(args[++k])
+    } else if (value.startsWith("--expression="))
+      scripts.push({ ...args[k], value: value.slice("--expression=".length) })
+    else if (value === "--") {
+      operands.push(...args.slice(k + 1))
+      break
+    } else if (value.startsWith("-") && value !== "-") {
+      if (!SED_FLAG.test(value)) return false
+    } else operands.push(args[k])
+  }
+  const read = scripts.length ? scripts : operands.slice(0, 1)
+  return read.length > 0 && read.every((w) => literal(w) && SED_SCRIPT.test(w.value))
+}
+
+// perl's options that run no other code and write nothing: a, l, n, p and w clustered, the last of them may be e or E, whose script is the next word; -d, -i, -I, -m, -M, -s, -x and the rest are off it
+const PERL_FLAG = /^-[alnpw]*[eE]?$/
+// a regex with no variable, no array and no code block (`(?{`, `(??{`, `(*{`), its $ only an anchor
+const PERL_BODY = String.raw`(?:[^/\\\n@$(]|\((?![?*]\??\{)|\\.|\$(?=[/|)]))*/`
+const PERL_RE = `/${PERL_BODY}`
+// a match variable, $1 to $9 or $&, before no [, { or ->, since perl reads one there as a subscript and runs its expression as code
+const PERL_MATCH = String.raw`\$[1-9&](?![[{]|->)`
+// a value print may name: a string holding only text, \n, \t and the match variables $1 to $9 and $&, or one of those variables, or $_
+const PERL_VALUE = String.raw`(?:"(?:[^"\\$@\n]|\\[nt"\\]|${PERL_MATCH})*"|\$[1-9&_])`
+const PERL_PRINT = String.raw`print(?:[ \t]+${PERL_VALUE}(?:[ \t]*,[ \t]*${PERL_VALUE})*)?(?:[ \t]+(?:for|if|unless|while)[ \t]+${PERL_RE}[gimsx]*)?`
+const PERL_SUB = String.raw`s/${PERL_BODY}(?:[^/\\\n@$]|\\.|${PERL_MATCH})*/[gimsx]*`
+const PERL_ITEM = String.raw`[ \t]*(?:${PERL_PRINT}|${PERL_SUB})[ \t]*`
+// a perl one-liner read whole by a closed grammar: print statements of match variables and plain strings, each optionally under for, if, unless or while a regex, and s/// with flags from g, i, m, s and x, so no regex holds a variable, an array or a code block and no replacement interpolates code
+const PERL_SCRIPT = new RegExp(String.raw`^${PERL_ITEM}(?:;${PERL_ITEM})*;?[ \t]*$`)
+
+// a file operand perl's -n and -p open as a file alone: its 2-arg open runs a name ending or starting in | as a command, and reads <, >, + and & as modes
+const PERL_FILE = /^(?:-|[^\s|<>+&-][^|]*(?<!\s))$/
+
+// Whether a perl call only reads and prints: every option on PERL_FLAG's list, at least one -e or -E script, every script a literal word, unglobbed, that PERL_SCRIPT holds, every file operand a literal PERL_FILE, and no PERL variable set, since PERL5OPT and PERL5LIB load code
+function perlReads({ args, local }: Parsed, env: Env): boolean {
+  if ([...local.keys(), ...env.vars.keys()].some((key) => key.startsWith("PERL"))) return false
+  const scripts: Word[] = []
+  let k = 0
+  for (; k < args.length; k++) {
+    const { value } = args[k]
+    if (value === "--") {
+      k++
+      break
+    }
+    if (!value.startsWith("-") || value === "-") break
+    if (!PERL_FLAG.test(value)) return false
+    if (/[eE]$/.test(value)) {
+      if (!args[k + 1]) return false
+      scripts.push(args[++k])
+    }
+  }
+  const files = args.slice(k)
+  return (
+    scripts.length > 0 &&
+    scripts.every((w) => literal(w) && PERL_SCRIPT.test(w.value)) &&
+    files.every((w) => literal(w) && PERL_FILE.test(w.value))
+  )
 }
 
 // Whether a call's program is its command's own first word, read outright, bare or by a system path, so no wrapper or file of another folder runs in its place
@@ -585,7 +578,7 @@ function ownProgram(cmd: Command, { first, name }: Parsed): boolean {
   )
 }
 
-// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, grep, head, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
+// Whether a call is a closed-list reader whose quoted words are never a command line: awk, cat, cut, git, grep, head, perl, sed, sort, tail, uniq or wc, or a read-only gh call with a jq filter, as its own program (ownProgram), with no variable set in the call
 function narrow(cmd: Command, env: Env): boolean {
   const parsed = parse(cmd)
   const { args, first } = parsed
@@ -600,12 +593,16 @@ function narrow(cmd: Command, env: Env): boolean {
     )
   }
   if (!ownProgram(cmd, parsed)) return false
-  const base = program(first.value).toLowerCase()
+  const base = program(first.value)
   if (AWKS.has(base)) {
     const programs = awkPrograms(args)
     return !!programs && programs.every(({ value }) => !marked(value) && !awkRuns(value))
   }
   if (["cat", "grep", "head", "tail", "wc"].includes(base)) return reads(parsed, env)
+  // a git reader with a word the hook cannot read keeps canary's reading, since that word may be an option that writes or runs (`--output=…`)
+  if (base === "git") return reads(parsed, env) && !args.some(({ value }) => marked(value))
+  if (SEDS.has(base)) return sedReads(args)
+  if (base === "perl") return perlReads(parsed, env)
   if (base === "cut") return true
   // a read-only gh call is narrow when its jq filter is the only word that holds a space
   if (base === "gh") {
@@ -621,8 +618,9 @@ function narrow(cmd: Command, env: Env): boolean {
 // Whether a command is a reader, whose output is only what it read, so a pipe through it carries an evaluator's print on
 const passes = (cmd: Command, env: Env): boolean => narrow(cmd, env) || reads(parse(cmd), env)
 
-// Whether a line holds a shell reading its script from stdin (`sudo -s`, `sh`) anywhere, its groups' and substitutions' included, which runs whatever a reader prints into it
+// Whether a line holds a shell reading its script from stdin (`sudo -s`, `sh`) or a command its pipe feeds as code (codeFed) anywhere, its groups' and substitutions' included, which runs whatever a reader prints into it
 function rooted(commands: Command[]): boolean {
+  if (codeFed(commands).size > 0) return true
   return commands.some(
     (cmd) =>
       !!stdinShell(cmd) ||
@@ -666,7 +664,69 @@ function wholeLine(commands: Command[], env: Env): boolean {
   })
 }
 
-// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own; `vars` is the scope's variables set since their lines were last read.
+// Calls whose string argument a shell runs: exec and execSync in a program that names child_process, and execFile, execFileSync, spawn and spawnSync in a program that names `shell` other than as a key whose whole value is a literal `false` (true, a shell's path, a value read at run time or an expression that starts with `false` all run one). A ~ in that string expands to the home as the shell runs it, so the string is judged as its own shell line rather than left relative to the cwd.
+const IMPLICIT_SHELL = new Set(["exec", "execSync"])
+const SHELL_RUNNER = /\b(exec|execFile|execFileSync|execSync|spawn|spawnSync)\s*\(/g
+// `shell`, a quoted key's quotes included, and the `: false` after it when that is its whole value, ended by a comma or a closing bracket.
+const SHELL_WORD = /(["']?)\bshell\b\1(\s*:\s*false\b(?=\s*[,})]))?/g
+
+// Whether a program names a `shell` other than a key whose whole value is a literal false: read across the program, since a shorthand property, a spread or an options object passed by name carries the option outside the call's own text.
+function namesShell(text: string): boolean {
+  return [...text.matchAll(SHELL_WORD)].some((m) => !m[2])
+}
+
+function skipSpace(src: string, k: number): number {
+  while (k < src.length && /\s/.test(src[k])) k++
+  return k
+}
+
+// A JavaScript string literal at `src[i]` (a ', " or ` quote): its content and the index past the close, or undefined when `src[i]` is no quote or a template holds a ${…} substitution.
+function stringLiteral(src: string, i: number): { end: number; value: string } | undefined {
+  const quote = src[i]
+  if (quote !== '"' && quote !== "'" && quote !== "`") return undefined
+  let value = ""
+  let k = i + 1
+  while (k < src.length && src[k] !== quote) {
+    if (src[k] === "\\") {
+      value += src[k + 1] ?? ""
+      k += 2
+    } else value += src[k++]
+  }
+  if (quote === "`" && value.includes("${")) return undefined
+  return { end: k + 1, value }
+}
+
+// The command string a shell-running call is given, read from just after its `(`: a run of string literals joined by `+`, or undefined when the first argument is not a literal run (an array, a variable, a template with a substitution). A shell variable ($VAR) inside the literal is kept and judged as the shell reads it, so the rest of the line is still judged.
+function commandString(src: string, open: number): string | undefined {
+  let value = ""
+  let k = open
+  for (;;) {
+    k = skipSpace(src, k)
+    const literal = stringLiteral(src, k)
+    if (!literal) return undefined
+    value += literal.value
+    k = skipSpace(src, literal.end)
+    if (src[k] !== "+") break
+    k++
+  }
+  return value
+}
+
+// Each command string a shell-running call in a program's text is given, so a ~ in one is judged as the shell expands it; exec and execSync count only in a program that names child_process, so a regex's or a query's `.exec` is left alone, and a spawn, spawnSync, execFile or execFileSync counts only in a program that names a `shell` other than a key whose whole value is a literal `false`.
+function shellRunnerArgs(text: string): string[] {
+  const out: string[] = []
+  const childProcess = text.includes("child_process")
+  const shell = namesShell(text)
+  for (const m of text.matchAll(SHELL_RUNNER)) {
+    const open = m.index + m[0].length
+    const command = commandString(text, open)
+    if (command === undefined) continue
+    if ((IMPLICIT_SHELL.has(m[1]) && childProcess) || shell) out.push(command)
+  }
+  return out
+}
+
+// Every text of a variable the call sets or exports, and on a line read whole of every word, that holds a space, a leading ! dropped, each read as a command line of its own, and the command string a shell-running call in it is given; `vars` is the scope's variables set since their lines were last read.
 function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean): string[] {
   const { args, first, local } = parsed
   const values = [...local.values(), ...vars].flatMap((text) => {
@@ -678,6 +738,7 @@ function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean)
       values.push(text.value.replace(/^!/, ""))
       // printf and echo -e print a \n as a line break, which a root shell runs as one
       if (rootLine) values.push(...text.value.split("\\n"))
+      values.push(...shellRunnerArgs(text.value))
     }
   values.push(...programLines(parsed, rootLine))
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value))
@@ -699,19 +760,23 @@ function cliWrite(words: Word[]): string | undefined {
   const unread = rest.includes(undefined)
   const positional: (string | undefined)[] = []
   let dry = false
+  let scoped = false
   for (let k = 0; k < rest.length; k++) {
     const word = rest[k]
     if (word !== undefined && switches.includes(word)) dry ||= word === "--dry-run"
-    else if (word?.startsWith("--")) k++
-    else positional.push(word)
+    else if (word?.startsWith("--")) {
+      scoped ||= word.startsWith("--scope")
+      k++
+    } else positional.push(word)
   }
   if (command === "settings") {
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
-    return GUARD_KEYS.has(key)
-      ? `playground settings ${verb} of ${key}, a key a guard reads`
-      : undefined
+    if (!GUARD_KEYS.has(key)) return
+    return PRIVACY_KEYS.has(key) && !scoped
+      ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}`
+      : `playground settings ${verb} of ${key}, a key a guard reads`
   }
   if (verb === "accept")
     return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set"
@@ -812,6 +877,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       }
     }
   }
+  // whether the hook places a write's path, the whole word, with no folder of the shell's: absolute, under ~, or through a variable the call holds
+  const placed = (word: Word, env: Env, steady: Steady) =>
+    pathOf(heldWord(word, env, steady) ?? word, { ...env, cwd: undefined }) !== undefined
+  const afterUnreadCd = (write: string) =>
+    `${write} after a cd to a folder the hook cannot read, which may be ${root}; cd to a literal path first, or name the path absolutely`
   const seen = new Set<string>()
   let steadyAt: (cmd: Command) => Steady = () => NONE
   let whole = false
@@ -835,6 +905,23 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (slot)
       return slot.length === 0 ? undefined : examine({ ...cmd, words: slot }, env, visit, false)
     const { args, first, name, xargs } = parsed
+    // findutils' g names are read again as find and xargs, so every check those two take reads them; the words swap in place, keeping the Command steadyAt knows and the program's path
+    const findutils = GNU_NAMED.exec(name)?.[1]
+    if (first && (findutils === "find" || findutils === "xargs")) {
+      const value = first.value.replace(new RegExp(`g${findutils}$`, "i"), findutils)
+      // a g name env -S splits out of its string is no word of the command, and one written so its name is not the word's end (a trailing slash) has none to swap, so either would be examined as itself again
+      if (!cmd.words.includes(first) || value === first.value)
+        return refuse(
+          `${name} written where the hook cannot read it as ${findutils}, inside env -S's string or with more after its name; run it as a word of its own, ${name} or ${findutils}`,
+        )
+      const { words } = cmd
+      cmd.words = words.map((word) => (word === first ? { ...word, value } : word))
+      try {
+        return await examine(cmd, env, visit, false)
+      } finally {
+        cmd.words = words
+      }
+    }
     // every folder the shell may be in, so a write a cd the reader cannot be sure of would land in the root is judged there too
     for (const here of places(env)) {
       const into = cmd.redirects.find(
@@ -857,6 +944,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       return refuse(
         `a write to ${blind.target.value} on a line that names more folders than the hook carries, since it cannot rule out ${root}; run it as a line of its own after a cd to a literal path`,
       )
+    // after a cd to a folder the hook cannot read (`Env.cwdUnread`), the shell may be in the root, so a writing redirect the hook can place only by the shell's own folder is refused
+    const unplaced = env.cwdUnread
+      ? cmd.redirects.find((r) => r.target && writer(r) && !placed(r.target, env, steadyAt(cmd)))
+      : undefined
+    if (unplaced?.target) return refuse(afterUnreadCd(`a write to ${shown(unplaced.target)}`))
     // a reader is its command's own first word, so a wrapper's option value parse misread never stands in for one
     const reader = !rootLine && ownFirst(cmd, first) && reads(parsed, env)
     const fed = xargs ? await stdinOf(cmd, env) : undefined
@@ -904,7 +996,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
-      const verdict = await run(lexLine(line, env.known), { ...env, vars: new Map() }, visit, true)
+      // a runner the hook cannot name may hand the line to sh, which splits its parameters
+      const verdict = await run(
+        lexLine(line, env.known),
+        { ...env, splits: true, vars: new Map() },
+        visit,
+        true,
+      )
       if (verdict) return verdict
     }
     // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
@@ -921,7 +1019,12 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     if (!first || EXPORTS.has(name) || reader) return
     // a program word the hook cannot read is named as such, so a refusal always names what runs
     const verb = name && !marked(name) ? name : "a program it cannot read"
-    const remover = REMOVERS.has(name)
+    // a GNU build named by its g prefix or reached by its gnubin path reads as the tool it builds, with GNU's options
+    const tool = GNU_NAMED.exec(name)?.[1] ?? name
+    const gnu = tool !== name || first.value.includes("/gnubin/")
+    const remover = REMOVERS.has(tool)
+    // POSIXLY_CORRECT set in the call, by a prefix or on its line, makes a GNU build stop its options at the first operand
+    const posix = gnu && (parsed.local.has("POSIXLY_CORRECT") || env.vars.has("POSIXLY_CORRECT"))
     // a line that names more folders than the reader carries (`Env.cwdAnywhere` in shell.ts) may run inside this root, whatever folder it started in
     if (env.cwdAnywhere)
       return refuse(
@@ -935,17 +1038,44 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (inRoot(here.cwd)) return refuse(`${verb} run inside ${root}`)
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`)
-      // a value the hook cannot read under a remover, or in git's -c, could name the root, so it is refused unless the call holds it
-      const unheld = remover ? args.find((word) => !held(word, here, steady)) : undefined
+      // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
+      const unheld = (
+        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, here.splits) : []
+      ).find((word) => !held(word, here, steady))
       if (unheld)
         return refuse(
-          `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
+          splitIn(unheld, here.splits)
+            ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally`
+            : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
         )
       if (name === "git") {
         const config = gitConfigs(args).find((word) => marked(word.value))
         if (config)
           return refuse(
             `git ${/^-c./.test(config.raw ?? config.value) ? "" : "-c "}${shown(config)}, a value built from a variable or a substitution; write the value literally in the call`,
+          )
+        // git takes --config-env's value from a variable, and a git variable other than an author's or a committer's, or a pager or editor variable, can make git run a program or write, so either from a value the hook does not hold is refused
+        const { rest } = gitCall(args, here)
+        const fromEnv = args
+          .slice(0, args.length - rest.length - 1)
+          .find((word) => /^--config-env(?:=|$)/.test(word.value))
+        if (fromEnv)
+          return refuse(
+            `git ${shown(fromEnv)}, which takes a config value from a variable the hook cannot read; write the value literally with git -c`,
+          )
+        const scoped = runsVariable(here.vars) ? [...here.vars] : []
+        const variable = [
+          ...parsed.local,
+          ...scoped.filter(([key]) => !parsed.local.has(key)),
+        ].find(
+          ([key, value]) =>
+            RUNS.test(key) &&
+            !GIT_TEXT.test(key) &&
+            !held({ ...value, quoted: false }, here, steady),
+        )
+        if (variable)
+          return refuse(
+            `git with ${variable[0]} set to a value the hook does not hold, which git may run or read as config; write the value literally in the call`,
           )
       }
       const scope = since(varsJudged, here.vars, `${here.cwd}\0${remover}`)
@@ -980,6 +1110,51 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         if (named) return refuse(`${verb} under xargs on ${named}`)
       }
     }
+    // after a cd the hook cannot read, a remover's operand or a writer's target the hook can place only by the shell's own folder may be in the root
+    const end = args.findIndex((word) => word.value === "--")
+    // a dash with more after it is an option, while a lone dash is an operand
+    const option = (word: Word) => /^-./.test(word.value)
+    // macOS unlink reads no option but a leading --
+    const stop =
+      !GETOPT_REMOVERS.has(tool) || (gnu && !posix)
+        ? -1
+        : tool === "unlink" && !gnu
+          ? Number(args[0]?.value === "--")
+          : args.findIndex((word) => !option(word))
+    // mv's -t folder, rsync's path values and the file find's write actions name are written to, though their word opens with a dash
+    const values =
+      tool === "mv"
+        ? writeTargets(tool, args, gnu, posix, env.splits)
+        : tool === "rsync"
+          ? args.flatMap((word, k) => {
+              const long = /^--([^=]+)=?/.exec(word.value)
+              const path =
+                long &&
+                !RSYNC_FLAGS.has(long[1]) &&
+                RSYNC_PATHS.some((name) => name.startsWith(long[1]))
+              const cut = path ? long[0].length : RSYNC_TEMP.exec(word.value)?.[0].length
+              if (!cut) return []
+              // with no value attached, the option takes the next word, a dash-led one too
+              if (cut < word.value.length) return [after(word, cut)]
+              return args[k + 1] ? [args[k + 1]] : []
+            })
+          : tool === "find"
+            ? args.flatMap((word, k) =>
+                FIND_WRITES.test(word.value) && args[k + 1] ? [args[k + 1]] : [],
+              )
+            : []
+    const operands = remover
+      ? [
+          ...args.filter(
+            (word, k) => (end !== -1 && k > end) || (stop !== -1 && k >= stop) || !option(word),
+          ),
+          ...values,
+        ]
+      : WRITERS.has(tool)
+        ? writeTargets(tool, args, gnu, posix, env.splits)
+        : []
+    const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
+    if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
   }
   const named = namings(command)
   const known = knownVariables(command, environment, directory)
@@ -996,6 +1171,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
     process: environment,
+    splits: zshSplits(command),
     vars: new Map(),
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs

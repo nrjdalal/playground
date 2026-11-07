@@ -5,9 +5,12 @@ import {
   githubLoginSchema,
   inviteCodeSchema,
   invitePath,
+  keyIdOf,
   MAX_TEXT,
   MESSAGE_KINDS,
   messageSchema,
+  pairKeySchema,
+  signedBytes,
   tokenNameSchema,
   WEB_DEVICE,
 } from "../../../../packages/message/src/index"
@@ -101,5 +104,41 @@ describe("the API's and the web's shared input rules", () => {
     expect(inviteCodeSchema.parse(" YARD-7Q2M ")).toBe("YARD-7Q2M")
     expect(inviteCodeSchema.safeParse("  ").success).toBe(false)
     expect(inviteCodeSchema.safeParse("x".repeat(65)).success).toBe(false)
+  })
+})
+
+// a made-up public key; the expected thumbprint, fingerprint and digest come from shasum and openssl over the same bytes
+const KEY = {
+  crv: "P-256" as const,
+  kty: "EC" as const,
+  x: "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU",
+  y: "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0",
+}
+
+describe("the paired key's words, read by the browser and the Mac alike", () => {
+  test("a key's id is its RFC 7638 thumbprint, and its fingerprint the thumbprint's first 8 bytes in hex", async () => {
+    expect(await keyIdOf(KEY)).toEqual({
+      fingerprint: "a0a2 32c2 f194 a535",
+      id: "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U",
+    })
+  })
+
+  test("a key as WebCrypto exports it keeps only the four members that name it, and no other curve passes", () => {
+    expect(pairKeySchema.parse({ ...KEY, ext: true, key_ops: ["verify"] })).toEqual(KEY)
+    expect(pairKeySchema.safeParse({ ...KEY, crv: "P-384" }).success).toBe(false)
+  })
+
+  test("a write signs its id, time, login, method, path and body's SHA-256, as one JSON array", async () => {
+    const bytes = await signedBytes({
+      at: "2026-11-05T01:00:00.000Z",
+      body: '{"text":"hello"}',
+      id: "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b",
+      login: "owner",
+      method: "POST",
+      path: "/api/v1/messages",
+    })
+    expect(new TextDecoder().decode(bytes)).toBe(
+      '["6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b","2026-11-05T01:00:00.000Z","owner","POST","/api/v1/messages","y7vc0naSNE3l26s6vKukE_sPRTByZ95wgUAVdt8csXY"]',
+    )
   })
 })

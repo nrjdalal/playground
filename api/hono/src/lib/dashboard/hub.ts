@@ -47,10 +47,7 @@ const REFRESH_GAP_MS = 1000
 const SAFETY_REFRESH_MS = 10_000
 const REFRESH_TIMEOUT_MS = 8_000
 
-// A tool call's hook, in cmux's event shape, moves the board only for a picker or a message (a message to a manager moves its sender up); herdr's events name no hook, so each moves it, and the filter goes with cmux's other code.
-const TOOL_HOOKS = new Set(["PostToolUse", "PostToolUseFailure", "PreToolUse"])
-const BOARD_TOOLS = new Set(["AskUserQuestion", "ExitPlanMode", "SendMessage"])
-
+// Every herdr event moves the board (a pane opening, exiting, closing or moving, or a state change), and so does a (re)connect ack; a heartbeat or a line that does not parse does not.
 export const movesTheBoard = (line: string): boolean => {
   let event: unknown
   try {
@@ -59,18 +56,8 @@ export const movesTheBoard = (line: string): boolean => {
     return false
   }
   if (typeof event !== "object" || event === null) return false
-  const { name, payload, type } = event as { name?: unknown; payload?: unknown; type?: unknown }
-  if (type === "ack") return true
-  if (type !== "event") return false
-  const fields =
-    typeof payload === "object" && payload !== null ? (payload as Record<string, unknown>) : {}
-  const hook =
-    typeof fields.hook_event_name === "string"
-      ? fields.hook_event_name
-      : typeof name === "string"
-        ? (name.split(".").at(-1) ?? "")
-        : ""
-  return !TOOL_HOOKS.has(hook) || BOARD_TOOLS.has(String(fields.tool_name))
+  const { type } = event as { type?: unknown }
+  return type === "ack" || type === "event"
 }
 
 // A slow sessions read would hold the board on its old frame, so a refresh gives up after a while with an error frame; the next starts once that read settles, which readServer()'s deadline in herdr.ts bounds.
@@ -115,7 +102,7 @@ export class DashboardHub {
       // herdr's events on one stream, every server's (herdr.ts), or null where this machine runs none; herdrEvents() for every server a stack that reads this machine names unless a test stubs it.
       herdr?: () => HerdrEvents | null
       listLive: typeof listLive
-      // Reads one session's screen for the activity line (terminal.ts) unless a test stubs it.
+      // Reads one session's herdr pane for the activity line (terminal.ts) unless a test stubs it.
       readScreen?: (surface: string) => Promise<string>
       refreshGapMs?: number
       refreshTimeoutMs?: number
@@ -330,7 +317,7 @@ export class DashboardHub {
       this.tails.delete(sessionId)
     }
     for (const [sessionId, path] of transcripts) {
-      // a lost change event leaves its lines past the offset, so a refresh reads an open tail again (cmux.md); a read with nothing past the offset ends at once.
+      // a lost change event leaves its lines past the offset, so a refresh reads an open tail again (herdr.md); a read with nothing past the offset ends at once.
       if (this.tails.has(sessionId)) {
         this.queueRead(sessionId)
         continue
@@ -396,3 +383,45 @@ export class DashboardHub {
 }
 
 export const dashboardHub = new DashboardHub()
+
+// How long the board stays subscribed after the last read, so the hosted relay's read every 5 s takes the newest frame rather than starting the hub's feed and a full refresh each time.
+export const BOARD_HOLD_MS = 30_000
+
+// The board as the socket sends it, for a client with no socket (the hosted relay, which carries requests and no live frames): the newest board frame while it holds a subscription, held holdMs past the last read; null when none comes within timeoutMs.
+export function boardReader(
+  hub: Pick<DashboardHub, "subscribe"> = dashboardHub,
+  { holdMs = BOARD_HOLD_MS, timeoutMs = 10_000 }: { holdMs?: number; timeoutMs?: number } = {},
+): () => Promise<DashboardFrame | null> {
+  let latest: DashboardFrame | null = null
+  let leave: (() => void) | null = null
+  let idle: ReturnType<typeof setTimeout> | null = null
+  const waiters = new Set<(frame: DashboardFrame | null) => void>()
+  const stop = () => {
+    leave?.()
+    leave = null
+    latest = null
+  }
+  return () => {
+    if (idle) clearTimeout(idle)
+    idle = setTimeout(stop, holdMs)
+    idle.unref?.()
+    leave ??= hub.subscribe((frame) => {
+      if (frame.type === "entries") return
+      latest = frame
+      for (const waiter of waiters) waiter(frame)
+    })
+    if (latest) return Promise.resolve(latest)
+    return new Promise((resolve) => {
+      const done = (frame: DashboardFrame | null) => {
+        waiters.delete(done)
+        clearTimeout(timer)
+        resolve(frame)
+      }
+      const timer = setTimeout(() => done(null), timeoutMs)
+      waiters.add(done)
+    })
+  }
+}
+
+// The dashboard's one reader, for GET /api/v1/board.
+export const boardFrame = boardReader()
