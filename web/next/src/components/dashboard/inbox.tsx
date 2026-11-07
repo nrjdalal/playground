@@ -455,6 +455,11 @@ export function AskChoices({
   )
 }
 
+// A signature of an ask's questions, so the card drops its picks and steps back to the first when an in-place edit grows, shrinks, reorders or rewords them, since the picks are held by position and a stale one would land on another question.
+export function picksKey(questions: AskQuestion[]): string {
+  return JSON.stringify(questions.map((q) => [q.question, q.options.map((o) => o.label)]))
+}
+
 // One question of a multi-question ask as the card's choices, numbered for the keys 1 on, with the recommended option badged where it sits; the pick is this question's own, so stepping between questions keeps each. Busy dims them and takes no click, as AskChoices does.
 function QuestionChoices({
   busy,
@@ -608,10 +613,10 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
   const preview = item.preview
   switch (preview.type) {
     case "ask":
-      // an ask with options says what each one does in its choices, so its text stands alone above them
+      // an ask with options or questions says what each one does in its choices, so its text stands alone above them
       return (
         <>
-          {!preview.options && !preview.approve && (
+          {!preview.options && !preview.approve && !preview.questions && (
             <p>On Approve, {agentLabel(item.from)} does this:</p>
           )}
           <Shown preview={preview} />
@@ -991,6 +996,13 @@ export function InboxCard({
   const multi = questions.length > 0
   const [picks, setPicks] = useState<(number | null)[]>(() => questions.map(() => null))
   const [step, setStep] = useState(0)
+  // an in-place bun run ask edit can change the questions under an open card; when it does, drop the picks and step back to the first, as the draft text resyncs above, so a stale pick never lands on another question
+  const [syncedPicks, setSyncedPicks] = useState(() => picksKey(questions))
+  if (picksKey(questions) !== syncedPicks) {
+    setSyncedPicks(picksKey(questions))
+    setPicks(questions.map(() => null))
+    setStep(0)
+  }
   const [note, setNote] = useState("")
   // a secret ask's value, held only until Submit hands it on, then cleared
   const [secret, setSecret] = useState("")
@@ -1455,7 +1467,7 @@ export function InboxCard({
               Send
             </QuestionnaireSubmit>
           </Hint>
-          {multi && questions.length > 1 && (
+          {multi && (
             <>
               <QuestionnairePrevious disabled={busy || step === 0} size="sm" variant="outline" />
               <QuestionnaireNext
@@ -1667,7 +1679,7 @@ export function InboxCard({
             </CardHeader>
             {outcome === null && !folded && (
               <CardContent className="grid gap-(--card-spacing)">
-                {questions.length > 1 && <QuestionnaireProgress />}
+                <QuestionnaireProgress />
                 {questions.map((question, q) => (
                   <QuestionnaireItem key={q} name={`q${q}`} className="gap-2">
                     <QuestionnaireTitle className="text-xs">{question.question}</QuestionnaireTitle>

@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
 import type { InboxItem } from "../../../../../../api/hono/src/lib/dashboard/inbox"
-import { type Choices, choicesOf } from "../../../../../../packages/config/src/inbox"
+import {
+  type AskQuestion,
+  type Choices,
+  choicesOf,
+} from "../../../../../../packages/config/src/inbox"
 import { DashboardContext } from "../../../../../../web/next/src/components/dashboard/dashboard"
 import {
   AskChoices,
@@ -11,6 +15,7 @@ import {
   Inbox,
   InboxCard,
   NewPill,
+  picksKey,
   ShelfDismiss,
   ShelfLabel,
 } from "../../../../../../web/next/src/components/dashboard/inbox"
@@ -151,6 +156,25 @@ describe("a multi-question ask (#1250)", () => {
     ref: 48,
     title: "Port it, and when?",
   } as InboxItem
+
+  test("picksKey changes when an in-place edit grows, shrinks, reorders or rewords the questions, so the card drops stale picks (#1250)", () => {
+    const q = (question: string, labels: string[]): AskQuestion => ({
+      options: labels.map((label, index) => ({
+        go: true,
+        index,
+        label,
+        letter: String.fromCharCode(65 + index),
+      })),
+      question,
+    })
+    const base = [q("Base?", ["staging", "main"]), q("When?", ["now", "later"])]
+    const same = [q("Base?", ["staging", "main"]), q("When?", ["now", "later"])]
+    expect(picksKey(base)).toBe(picksKey(same))
+    expect(picksKey(base)).not.toBe(picksKey([...base, q("Who?", ["ops"])]))
+    expect(picksKey(base)).not.toBe(picksKey([base[0]!]))
+    expect(picksKey(base)).not.toBe(picksKey([base[1]!, base[0]!]))
+    expect(picksKey(base)).not.toBe(picksKey([q("Base?", ["staging", "trunk"]), base[1]!]))
+  })
 
   test("shows its first question lettered, the recommended one badged in place, with Next and Send in the footer", () => {
     const html = opened(multi)

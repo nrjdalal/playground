@@ -89,7 +89,10 @@ test("bun run ask example prints each template, and the usage for a kind it has 
 describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
   let container = ""
   let url = ""
-  let answer: (id: string, input?: { action: "approve" | "deny"; option?: number }) => Promise<void>
+  let answer: (
+    id: string,
+    input?: { action: "approve" | "deny"; option?: number; options?: number[] },
+  ) => Promise<void>
   let dismiss: (id: string) => Promise<void>
   let answerRelayed: (id: string) => Promise<{ delivery: unknown }>
   let reply: (tag: string) => Promise<void>
@@ -368,6 +371,30 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     const none = await post(lettered)
     await answer(none.id, { action: "deny" })
     expect((await cli(["get", none.id])).stderr).toContain("ask: picked C: None of these")
+  })
+
+  test("get prints each question's pick for a multi-question answer (#1250)", async () => {
+    const multi = {
+      from: "worker-envy",
+      preview: {
+        questions: [
+          {
+            options: [{ label: "Staging first" }, { label: "Straight to main" }],
+            question: "Where first?",
+          },
+          { options: [{ label: "Now" }, { label: "After the next ship" }], question: "When?" },
+        ],
+        text: "Pick for each.",
+        type: "ask",
+      },
+      title: "How should it roll out?",
+    }
+    const posted = await post(multi)
+    expect((await cli(["get", posted.id])).stderr).not.toContain("ask: picked")
+    await answer(posted.id, { action: "approve", options: [0, 1] })
+    const got = await cli(["get", posted.tag])
+    expect(got.stderr).toContain("ask: picked A: Staging first · B: After the next ship")
+    expect(JSON.parse(got.stdout).answer).toMatchObject({ choice: "approve", options: [0, 1] })
   })
 
   test("get --ack prints a dismissed update as it is, since an update takes no answer to mark read", async () => {

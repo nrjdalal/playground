@@ -18,7 +18,7 @@ import {
   getItem,
   itemTag,
   openItems,
-  pickOf,
+  pickedLine,
   postItem,
   readAnswer,
   resolveItem,
@@ -260,8 +260,8 @@ if (command === "new" || command === "edit") {
   // An open item is printed as it is, so a poll with --ack only marks the answer once there is one; an update takes none, though a dismissed one records when in its answer.
   if (acking && item) item = await readAnswer(db, item)
   console.log(JSON.stringify(item, null, 2))
-  const picked = item && pickOf(item)
-  if (picked) console.error(`ask: picked ${picked.letter}: ${picked.label}`)
+  const picked = item && pickedLine(item)
+  if (picked) console.error(`ask: picked ${picked}`)
 } else if (command === "open") {
   for (const item of await openItems(db, flags?.from))
     console.log(`${itemTag(item.ref)} ${item.kind} from ${item.from} · ${item.title}`)

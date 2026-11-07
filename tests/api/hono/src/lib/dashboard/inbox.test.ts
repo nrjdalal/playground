@@ -195,9 +195,10 @@ describe("what bun run ask takes", () => {
       ).toBe(false)
     })
 
-    test("a questions list and top-level options or approve are mutually exclusive", () => {
+    test("a questions list and top-level options, approve or deny are mutually exclusive", () => {
       expect(asksQ({ options: OPTIONS, questions: q(2) }).success).toBe(false)
       expect(asksQ({ approve: "Do it", questions: q(2) }).success).toBe(false)
+      expect(asksQ({ deny: "Hold", questions: q(2) }).success).toBe(false)
     })
 
     test("an ask with no questions is unchanged", () => {
@@ -741,6 +742,10 @@ describe("an answer", () => {
     for (const input of invalid) {
       expect(checkAnswer(multi, input)).toHaveProperty("message")
     }
+    // a stray single option beside the per-question picks is refused, not silently ignored
+    expect(checkAnswer(multi, { action: "approve", options: [0, 2], option: 0 })).toEqual({
+      message: "A multi-question ask's approve names a pick for each question, not a single option",
+    })
   })
 
   test("sends a draft as written or as changed, or discards it", () => {

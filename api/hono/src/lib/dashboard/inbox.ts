@@ -447,12 +447,7 @@ export const previewSchema = z.discriminatedUnion("type", [
     checked: oneLine(LIMITS.line).optional(),
     deny: oneLine(LIMITS.line).optional(),
     options: z
-      .array(
-        z.strictObject({
-          description: oneLine(LIMITS.line).optional(),
-          label: oneLine(LIMITS.line),
-        }),
-      )
+      .array(askOption)
       .min(1, OPTIONS_MESSAGE)
       .max(MAX_OPTIONS, OPTIONS_MESSAGE)
       .optional(),
@@ -586,8 +581,11 @@ export const inboxInputSchema = z
     (input) =>
       input.kind !== "decision" ||
       input.preview.type !== "ask" ||
-      !(input.preview.questions && (input.preview.options || input.preview.approve)),
-    "An ask holds either one question's options or a questions list, not both",
+      !(
+        input.preview.questions &&
+        (input.preview.options || input.preview.approve || input.preview.deny)
+      ),
+    "An ask holds either a single question's options, approve or deny, or a questions list, not both",
   )
   .superRefine((input, ctx) => {
     const text =
@@ -901,6 +899,16 @@ function answerOf(
     return { message: "Only a decision's go picks an option" }
   }
   if (
+    option !== undefined &&
+    item.kind === "decision" &&
+    item.preview.type === "ask" &&
+    !!item.preview.questions
+  ) {
+    return {
+      message: "A multi-question ask's approve names a pick for each question, not a single option",
+    }
+  }
+  if (
     options !== undefined &&
     !(
       item.kind === "decision" &&
@@ -1004,6 +1012,23 @@ export function pickOf(item: InboxItem): { index: number; label: string; letter:
   const { choice } = item.answer
   if (choice !== "approve" && choice !== "deny") return null
   return optionOf(item, item.answer) ?? null
+}
+
+// Pure: the pick line bun run ask get prints on stderr: a multi-question answer's pick for each question (picksOf), joined; else a single approve or deny's one letter and label (pickOf); null when the answer names no pick.
+export function pickedLine(item: InboxItem): string | null {
+  if (
+    item.kind === "decision" &&
+    item.answer &&
+    "choice" in item.answer &&
+    item.answer.choice === "approve" &&
+    "options" in item.answer &&
+    item.answer.options
+  ) {
+    const picks = picksOf(item.preview, item.answer.options)
+    return picks?.length ? picks.map((p) => `${p.letter}: ${p.label}`).join(" · ") : null
+  }
+  const single = pickOf(item)
+  return single ? `${single.letter}: ${single.label}` : null
 }
 
 // Pure: what an answer tells its poster, as data: the verb, whether to carry it out, the next step and the exact command that closes the item; the owner's comment in his words, a changed draft's text, a step's or a secret sink's results, never a secret's value; an update takes no answer.
