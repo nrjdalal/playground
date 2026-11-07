@@ -777,6 +777,11 @@ describe("a GLM session's org tools", () => {
     },
     { $label: "gh api of an org", command: "gh api orgs/acme-blue/teams", names: "acme-blue" },
     {
+      $label: "gh api of an org repo past options that take a value",
+      command: "gh api -X GET -H 'Accept: x' repos/acme-blue/demo/pulls",
+      names: "acme-blue/demo",
+    },
+    {
       $label: "git clone of an org repo",
       command: "git clone https://github.com/acme-blue/x",
       names: "acme-blue",

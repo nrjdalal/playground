@@ -34,7 +34,8 @@ async function accountOf(id: unknown, environment: Environment): Promise<string 
   }
 }
 
-const headless = ({ args }: Parsed) =>
+// Whether a claude call runs headless: --print, or -p alone or in a cluster of short options
+export const headless = ({ args }: Parsed) =>
   args.some((a) => a.value === "--print" || /^-[A-Za-z]*p[A-Za-z]*$/.test(a.value))
 
 const sets = (key: string, { local }: Parsed, env: Env) => {

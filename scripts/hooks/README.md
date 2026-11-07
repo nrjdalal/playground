@@ -456,8 +456,15 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   It finds git's subcommand past git's own options through `GIT_TAKES` in `scripts/hooks/shell.ts`, as [no-playground-leak](#no-playground-leak) does, so `git --attr-source HEAD commit` reads as a commit.
   An Opus path's refusal comes first, since that change moves to a Claude worker whatever the load.
   A session is on GLM when its `ANTHROPIC_BASE_URL` points at `api.z.ai`, or when the backend pin spawn.sh keeps under its registry name reads `glm`; a Claude session commits those paths as before.
-  It fails closed only on a call that reads as a git commit or push, or over that load as an install or clone (one whose directory, paths or refs it cannot read, or whose input does not parse), and passes every other call.
+  It fails closed only on a call that reads as a git commit or push, an org tool (below), or over that load as an install or clone (one whose directory, paths or refs it cannot read, or whose input does not parse), and passes every other call.
   Its tests are in `bun run test:file tests/scripts/hooks` too.
+- A factory session on GLM keeps off every org's tracker, chat, docs and repos and off a headless Claude run, as the **glm** rule says: the same hook refuses each such call, naming the rule and the fix, report to your lead, who moves the task to a Claude worker.
+  It refuses a headless `claude` (`-p` or `--print`, read by `headless` in `scripts/hooks/no-headless-login.ts`), a `curl`, `wget`, `http`, `https` or `xh` naming a host under `linear.app`, `slack.com`, `notion.com`, `notion.so` or `notion.site`, and a Linear script (`bun run linear:<name>`, or a path under `packages/scripts/src/linear-*/`).
+  It refuses every MCP tool, since each MCP server here is an org's or an outside service's connector; both settings files register the hook on `^Bash$` alone, so that check acts once a matcher takes `mcp__` tools.
+  A `gh` call is refused when a word names a guarded org (one `ext.links` links, `guardedOrgs`, as [no-playground-leak](#no-playground-leak) reads them): by `-R` or `--repo`, a github.com URL, a `repos/`, `orgs/` or `users/` endpoint, or as a whole word anywhere, a GraphQL query's included.
+  It is also refused when a value the hook cannot read names its repository or `gh api` endpoint, when a search names no owner or repository (`--owner`, `--repo`, or an `org:`, `owner:`, `repo:` or `user:` qualifier), and when it names no repository and falls back to a guarded org's (`GH_REPO`, the checkout's remotes).
+  A `git` call is refused when a word is a guarded org's GitHub URL, or when the checkout it runs in (`-C` included) has a guarded org's remote, and a fetcher naming such a URL is refused too; a policy the hook cannot read refuses every `gh`, `git` and fetcher call with the fix.
+  Out of its reach, as residual risk: a URL held in a variable, a program that fetches by itself (`bun -e`, Python's urllib), a `Read` of an org's checkout and an org's database.
 
 ## no-headless-login
 
