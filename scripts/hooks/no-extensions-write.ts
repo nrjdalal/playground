@@ -38,7 +38,6 @@ import {
   type Visit,
   withDeadline,
   type Word,
-  zshSplits,
 } from "./shell"
 import {
   held,
@@ -239,19 +238,9 @@ const after = (word: Word, cut: number): Word => ({
   value: word.value.slice(cut),
 })
 
-// Whether the shell may split a word into several: always for a substitution or a pasted value, and for a parameter where the shell splits one (`Word.splits` in shell.ts)
-const splitIn = (word: Word, splitting = false): boolean =>
-  word.splits === "always" || (word.splits === "sh" && splitting)
-
 // The words a writer writes to: dd's of= value and any word of its it cannot read, the -t folder of cp, install, ln and mv (GNU's short, attached and shortened long spellings) or else their last operand, ln's shell folder for a lone operand, and every operand of install -d, mkdir, tee and touch; and every word the shell may split (`Word.splits`), since one of its words may land as a target
-function writeTargets(
-  name: string,
-  args: Word[],
-  gnu: boolean,
-  posix = false,
-  splitting = false,
-): Word[] {
-  const splits = args.filter((word) => splitIn(word, splitting))
+function writeTargets(name: string, args: Word[], gnu: boolean, posix = false): Word[] {
+  const splits = args.filter((word) => word.splits)
   if (name === "dd")
     return [
       ...new Set([
@@ -1060,13 +1049,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
-      // a runner the hook cannot name may hand the line to sh, which splits its parameters
-      const verdict = await run(
-        lex(line, env.known),
-        { ...env, splits: true, vars: new Map() },
-        visit,
-        true,
-      )
+      const verdict = await run(lex(line, env.known), { ...env, vars: new Map() }, visit, true)
       if (verdict) return verdict
     }
     // a quiet commit's message is text git never runs, but one naming a gated call is refused all the same
@@ -1104,11 +1087,11 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         return refuse(`git on a clone in ${root}`)
       // a value the hook cannot read under a remover, as a writer's target, or in git's -c, could name the root, so it is refused unless the call holds it
       const unheld = (
-        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, here.splits) : []
+        remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix) : []
       ).find((word) => !held(word, here, steady))
       if (unheld)
         return refuse(
-          splitIn(unheld, here.splits)
+          unheld.splits
             ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally`
             : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`,
         )
@@ -1188,7 +1171,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // mv's -t folder, rsync's path values and the file find's write actions name are written to, though their word opens with a dash
     const values =
       tool === "mv"
-        ? writeTargets(tool, args, gnu, posix, env.splits)
+        ? writeTargets(tool, args, gnu, posix)
         : tool === "rsync"
           ? args.flatMap((word, k) => {
               const long = /^--([^=]+)=?/.exec(word.value)
@@ -1215,7 +1198,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
           ...values,
         ]
       : WRITERS.has(tool)
-        ? writeTargets(tool, args, gnu, posix, env.splits)
+        ? writeTargets(tool, args, gnu, posix)
         : []
     const loose = env.cwdUnread ? operands.find((word) => !placed(word, env, steady)) : undefined
     if (loose) return refuse(afterUnreadCd(`${verb} on ${shown(loose)}`))
@@ -1235,7 +1218,6 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     // zsh starts with OLDPWD at the folder it starts in
     old: { dir: directory },
     process: environment,
-    splits: zshSplits(command),
     vars: new Map(),
   }
   // a line with a root shell is read whole with no reader spared, an awk program's strings its lines, since what a reader prints into the shell runs
