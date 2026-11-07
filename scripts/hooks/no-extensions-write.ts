@@ -1042,18 +1042,17 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         )
       script.push(text.value)
     }
-    // an inline evaluator's program is read with its regex literals masked (maskRegexes), since a regex is neither a path, a glob nor a redirect; a program on a root-shell line or inside a substitution or subshell, whose output a shell may run, is read as written
-    // only where every folder the shell may be in lies outside the root and each folder above it, since from those canary's reading of the program decides, its leading regex read as a path word and its punctuation as globs
+    // an inline evaluator's program is read with its regex literals masked (maskRegexes), since a regex is neither a path, a glob nor a redirect, but as written on a root-shell line or inside a substitution or subshell, whose output a shell may run, and wherever the shell may be in the root or a folder above it, where canary's reading decides
     const away = places(env).every(
       ({ cwd }) => cwd !== undefined && !above(cwd, true) && !inRoot(cwd),
     )
-    const program = rootLine || cmd.scope !== 0 || !away ? undefined : evalProgram(parsed)
+    const evaluated = rootLine || cmd.scope !== 0 || !away ? undefined : evalProgram(parsed)
     const masked =
-      program && !program.glob && !marked(program.value)
-        ? maskRegexes(program.value, (body) => guarded(body, env))
+      evaluated && !evaluated.glob && !marked(evaluated.value)
+        ? maskRegexes(evaluated.value, (body) => guarded(body, env))
         : undefined
     const own = (word: Word): Word =>
-      word === program && masked !== undefined ? { ...word, value: masked } : word
+      word === evaluated && masked !== undefined ? { ...word, value: masked } : word
     for (const raw of reader
       ? []
       : [...script, ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine)]) {

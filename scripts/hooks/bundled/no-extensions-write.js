@@ -8345,9 +8345,9 @@ async function inspect(raw, environment, unknown = false) {
       script.push(text.value);
     }
     const away = places(env).every(({ cwd }) => cwd !== undefined && !above(cwd, true) && !inRoot(cwd));
-    const program = rootLine || cmd.scope !== 0 || !away ? undefined : evalProgram(parsed);
-    const masked = program && !program.glob && !marked(program.value) ? maskRegexes(program.value, (body) => guarded(body, env)) : undefined;
-    const own = (word) => word === program && masked !== undefined ? { ...word, value: masked } : word;
+    const evaluated = rootLine || cmd.scope !== 0 || !away ? undefined : evalProgram(parsed);
+    const masked = evaluated && !evaluated.glob && !marked(evaluated.value) ? maskRegexes(evaluated.value, (body) => guarded(body, env)) : undefined;
+    const own = (word) => word === evaluated && masked !== undefined ? { ...word, value: masked } : word;
     for (const raw of reader ? [] : [...script, ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine)]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
       if (seen.has(line))
