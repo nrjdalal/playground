@@ -3147,6 +3147,88 @@ function awkPrograms(words) {
   }
   return programs.length ? programs : undefined;
 }
+var EVALUATES2 = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"]);
+function evalProgram({ args, name }) {
+  if (name === "agent-browser") {
+    for (let k = 0;k < args.length; k++) {
+      const { value } = args[k];
+      if (value === "eval")
+        return args[k + 1];
+      const option = args[k - 1]?.value ?? "";
+      if (!value.startsWith("-") && !(option.startsWith("--") && !option.includes("=")))
+        return;
+    }
+    return;
+  }
+  if (name !== "bun" && name !== "node")
+    return;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (EVALUATES2.has(value))
+      return args[k + 1];
+    if (/^--(?:eval|print)=/.test(value))
+      return args[k];
+    if (!value.startsWith("-"))
+      return;
+  }
+}
+var REGEX_AFTER = /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\b(?:await|case|delete|do|else|in|instanceof|new|of|return|throw|typeof|void|yield))\s*$/;
+var STRINGIFIES = /\.source\b|\btoString\b|\bString\s*\(|\bJSON\s*\.\s*stringify\b|\.concat\s*\(|\.join\s*\(|\$\{/;
+function maskRegexes(source, guarded) {
+  if (STRINGIFIES.test(source))
+    return source;
+  let out = "";
+  let k = 0;
+  while (k < source.length) {
+    const c = source[k];
+    const close = (end, from) => {
+      for (let j = from;j < source.length; j++) {
+        if (source[j] === "\\")
+          j++;
+        else if (source.startsWith(end, j))
+          return j + end.length;
+      }
+      return -1;
+    };
+    const end = c === '"' || c === "'" || c === "`" ? close(c, k + 1) : source.startsWith("//", k) ? close(`
+`, k + 2) : source.startsWith("/*", k) ? close("*/", k + 2) : undefined;
+    if (end === -1)
+      return source;
+    if (end !== undefined) {
+      out += source.slice(k, end);
+      k = end;
+      continue;
+    }
+    if (c === "/" && REGEX_AFTER.test(out)) {
+      let j = k + 1;
+      let inClass = false;
+      for (;j < source.length && source[j] !== `
+`; j++) {
+        if (source[j] === "\\")
+          j++;
+        else if (source[j] === "[")
+          inClass = true;
+        else if (source[j] === "]")
+          inClass = false;
+        else if (source[j] === "/" && !inClass)
+          break;
+      }
+      if (source[j] !== "/")
+        return source;
+      let flags = j + 1;
+      while (/[a-z]/.test(source[flags] ?? ""))
+        flags++;
+      const body = source.slice(k + 1, j);
+      const kept = guarded(body.replaceAll("\\/", "/")) || /^\s*(?:\+|\.(?!\s*(?:test|exec)\b))/.test(source.slice(flags));
+      out += kept ? source.slice(k, flags) : "RE";
+      k = flags;
+      continue;
+    }
+    out += c;
+    k++;
+  }
+  return out;
+}
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "")))
     return [];
@@ -3444,6 +3526,7 @@ async function inspect(raw, environment, unknown = false) {
     const near = relative(env);
     return value.includes(needle) || !!near && value.includes(near);
   };
+  const guarded = (body, env) => holds(body, env) || body.includes("~") || needle.split(sep2).filter(Boolean).some((part) => body.toLowerCase().includes(part.toLowerCase()));
   const judged = new Map;
   const names = (word, env, remover, literal = false) => {
     const quotedGlob = literal && !word.glob;
@@ -3533,7 +3616,10 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`a root shell whose script (${text.unknown ?? "a value it cannot read"}) the hook cannot read; run its commands as calls of their own, with no root shell`);
       script.push(text.value);
     }
-    for (const raw of reader ? [] : [...script, ...runsOf(parsed, vars, whole, rootLine)]) {
+    const program = rootLine || cmd.scope !== 0 ? undefined : evalProgram(parsed);
+    const masked = program && !program.glob && !marked(program.value) ? maskRegexes(program.value, (body) => guarded(body, env)) : undefined;
+    const own = (word) => word === program && masked !== undefined ? { ...word, value: masked } : word;
+    for (const raw of reader ? [] : [...script, ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine)]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
       if (seen.has(line))
         continue;
@@ -3592,7 +3678,7 @@ async function inspect(raw, environment, unknown = false) {
           return refuse(`${verb} with a variable on ${named}`);
       }
       const literal = !whole && narrow(cmd, here);
-      for (const word of [first, ...args].map((word) => heldWord(word, here, steady) ?? word)) {
+      for (const word of [first, ...args].map((word) => heldWord(own(word), here, steady) ?? own(word))) {
         const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;

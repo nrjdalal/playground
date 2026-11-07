@@ -433,29 +433,6 @@ function awkPrograms(words: Word[]): Word[] | undefined {
   return programs.length ? programs : undefined
 }
 
-// The modules an inline program may read without being able to write or run: a require or import of any other sends it to canary's reading
-const READ_ONLY_MODULES =
-  /^(?:node:)?(?:assert|buffer|console|crypto|events|node:test|path|punycode|querystring|string_decoder|timers|url|util|zlib)$/
-// A token that lets an inline program run a subprocess, write or remove a file, or name a facility the scan cannot see; any one sends the program to canary's reading rather than the lenient opaque one. Fails closed: a require or import of a module off the allowlist, any computed member access, and any string escape count too.
-const IMPURE = [
-  // a subprocess: the child_process family, the Bun shell tag, Bun.spawn and spawnSync
-  /\bchild_process\b|\bexec(?:File)?(?:Sync)?\s*\(|\bspawn(?:Sync)?\s*\(|\bBun\s*\.\s*\$|\bBun\s*\.\s*spawn/,
-  // a filesystem write or removal, by fs, fs/promises or Bun
-  /\b(?:rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|write|writeSync|writeFile|writeFileSync|appendFile|appendFileSync|mkdir|mkdirSync|mkdtemp|mkdtempSync|cp|cpSync|copyFile|copyFileSync|symlink|symlinkSync|link|linkSync|truncate|truncateSync|ftruncate|chmod|chmodSync|chown|chownSync|utimes|utimesSync|createWriteStream|open|openSync)\s*\(|\bBun\s*\.\s*write\b/,
-  // dynamic code or naming the scan cannot follow: eval, new Function, import(), a computed member access, or a module name built at run time
-  /\beval\s*\(|\bnew\s+Function\b|\bimport\s*\(|\[[^\]]*\]\s*\(|\bprocess\s*\.\s*binding\b|\bglobalThis\b|\bglobal\s*\[/,
-  // any \x, \u or octal escape in the text, which can spell a token the other scans miss
-  /\\x[0-9a-fA-F]|\\u|\\[0-7]/,
-]
-// Whether an inline program can only compute and print: no impure token, and every require or import names a read-only module
-function pureCompute(source: string): boolean {
-  if (IMPURE.some((re) => re.test(source))) return false
-  const refs = [...source.matchAll(/\b(?:require|import)\s*\(\s*(["'`])([^"'`]*)\1\s*\)/g)]
-  if (refs.some((m) => !READ_ONLY_MODULES.test(m[2]))) return false
-  // a static import statement names its module the same way
-  const statics = [...source.matchAll(/\bimport\b[^;]*?\bfrom\s*(["'`])([^"'`]*)\1/g)]
-  return !statics.some((m) => !READ_ONLY_MODULES.test(m[2]))
-}
 const EVALUATES = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"])
 // An inline evaluator's program word, JavaScript the shell never reads as a line: bun's or node's -e, --eval, -p or --print value (-pe and -ep included) among the options before any script, or agent-browser's eval script; undefined for any other call
 function evalProgram({ args, name }: Parsed): Word | undefined {
@@ -476,6 +453,66 @@ function evalProgram({ args, name }: Parsed): Word | undefined {
     if (/^--(?:eval|print)=/.test(value)) return args[k]
     if (!value.startsWith("-")) return
   }
+}
+
+// a token after which a / opens a regex literal rather than a division: none, an operator or opening punctuation, or a keyword that takes an expression
+const REGEX_AFTER =
+  /(?:^|[(,=:[!&|?{};+\-*%<>~^]|\b(?:await|case|delete|do|else|in|instanceof|new|of|return|throw|typeof|void|yield))\s*$/
+// a program that can turn a regex into text, so its body could reach a pipe or a file as words
+const STRINGIFIES =
+  /\.source\b|\btoString\b|\bString\s*\(|\bJSON\s*\.\s*stringify\b|\.concat\s*\(|\.join\s*\(|\$\{/
+// A JavaScript program with each regex literal outside its strings, templates and comments masked to a word that is neither a path, a glob nor a redirect, or the program unchanged when it can turn a regex into text or the scan cannot close a literal; a regex that guarded() finds a guarded word in, or one a + or a member access follows, keeps its text
+function maskRegexes(source: string, guarded: (body: string) => boolean): string {
+  if (STRINGIFIES.test(source)) return source
+  let out = ""
+  let k = 0
+  while (k < source.length) {
+    const c = source[k]
+    const close = (end: string, from: number) => {
+      for (let j = from; j < source.length; j++) {
+        if (source[j] === "\\") j++
+        else if (source.startsWith(end, j)) return j + end.length
+      }
+      return -1
+    }
+    const end =
+      c === '"' || c === "'" || c === "`"
+        ? close(c, k + 1)
+        : source.startsWith("//", k)
+          ? close("\n", k + 2)
+          : source.startsWith("/*", k)
+            ? close("*/", k + 2)
+            : undefined
+    if (end === -1) return source
+    if (end !== undefined) {
+      out += source.slice(k, end)
+      k = end
+      continue
+    }
+    if (c === "/" && REGEX_AFTER.test(out)) {
+      let j = k + 1
+      let inClass = false
+      for (; j < source.length && source[j] !== "\n"; j++) {
+        if (source[j] === "\\") j++
+        else if (source[j] === "[") inClass = true
+        else if (source[j] === "]") inClass = false
+        else if (source[j] === "/" && !inClass) break
+      }
+      if (source[j] !== "/") return source
+      let flags = j + 1
+      while (/[a-z]/.test(source[flags] ?? "")) flags++
+      const body = source.slice(k + 1, j)
+      const kept =
+        guarded(body.replaceAll("\\/", "/")) ||
+        /^\s*(?:\+|\.(?!\s*(?:test|exec)\b))/.test(source.slice(flags))
+      out += kept ? source.slice(k, flags) : "RE"
+      k = flags
+      continue
+    }
+    out += c
+    k++
+  }
+  return out
 }
 
 // The lines an awk program runs, read whatever the line: each string literal of a program that can run a command or write a file
@@ -614,9 +651,6 @@ function narrow(cmd: Command, env: Env): boolean {
     return args.filter(({ value }) => value === "-" || !value.startsWith("-")).length <= 1
   return false
 }
-
-// Whether a command is a reader, whose output is only what it read, so a pipe through it carries an evaluator's print on
-const passes = (cmd: Command, env: Env): boolean => narrow(cmd, env) || reads(parse(cmd), env)
 
 // Whether a line holds a shell reading its script from stdin (`sudo -s`, `sh`) or a command its pipe feeds as code (codeFed) anywhere, its groups' and substitutions' included, which runs whatever a reader prints into it
 function rooted(commands: Command[]): boolean {
@@ -834,21 +868,16 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const near = relative(env)
     return value.includes(needle) || (!!near && value.includes(near))
   }
+  // a regex body that names the root, a folder of its path or the home, which a program could print as a path
+  const guarded = (body: string, env: Env) =>
+    holds(body, env) ||
+    body.includes("~") ||
+    needle
+      .split(sep)
+      .filter(Boolean)
+      .some((part) => body.toLowerCase().includes(part.toLowerCase()))
   // What a word of a program that is no reader names: a path in the root, a folder above it, a glob there, or the root's path in its text.
   const judged = new Map<string, string | undefined>()
-  // each command the hook lexes that feeds a pipe, and the command it feeds, so an evaluator whose print reaches a program other than a reader is read as canary reads it, since that program may run what it prints
-  const consumers = new WeakMap<Command, Command>()
-  const lexLine = (line: string, known: Record<string, string>) => {
-    const out = lex(line, known)
-    for (const cmd of out.commands) if (cmd.stdin) consumers.set(cmd.stdin, cmd)
-    return out
-  }
-  // Whether an evaluator's output could reach a shell: down a pipe to a program other than a reader, or into a file by a redirect, which a shell may later read. A command inside a substitution or subshell is barred from the opaque path by its scope instead, since its output leaves that scope into whatever reads it.
-  const feeds = (cmd: Command, env: Env): boolean => {
-    for (let next = consumers.get(cmd); next; next = consumers.get(next))
-      if (!passes(next, env)) return true
-    return cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null")
-  }
   // literal: a closed-list reader's word on a line read call by call, whose quoted glob character is text the reader never expands
   const names = (word: Word, env: Env, remover: boolean, literal = false): string | undefined => {
     const quotedGlob = literal && !word.glob
@@ -979,26 +1008,24 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         )
       script.push(text.value)
     }
-    // an inline evaluator's program is no word of the call when it can only compute and print (pureCompute): its regex, arrow or property access is neither a path, a glob nor a redirect. A program that can run a subprocess, write or remove a file, run dynamic code, whose print feeds a shell, or that sits inside a substitution or subshell whose output a surrounding shell runs (scope above the line's own), is read as canary reads it, each spaced text a command line, on a root-shell line too.
-    const program = rootLine || cmd.scope !== 0 || feeds(cmd, env) ? undefined : evalProgram(parsed)
-    const opaque =
-      program && !program.glob && !marked(program.value) && pureCompute(program.value)
-        ? program
+    // an inline evaluator's program is read with its regex literals masked (maskRegexes), since a regex is neither a path, a glob nor a redirect; a program on a root-shell line or inside a substitution or subshell, whose output a shell may run, is read as written
+    const program = rootLine || cmd.scope !== 0 ? undefined : evalProgram(parsed)
+    const masked =
+      program && !program.glob && !marked(program.value)
+        ? maskRegexes(program.value, (body) => guarded(body, env))
         : undefined
-    const lines = runsOf(
-      opaque ? { ...parsed, args: args.filter((w) => w !== opaque) } : parsed,
-      vars,
-      whole,
-      rootLine,
-    )
-    for (const raw of reader ? [] : [...script, ...lines]) {
+    const own = (word: Word): Word =>
+      word === program && masked !== undefined ? { ...word, value: masked } : word
+    for (const raw of reader
+      ? []
+      : [...script, ...runsOf({ ...parsed, args: args.map(own) }, vars, whole, rootLine)]) {
       const line =
         xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw
       if (seen.has(line)) continue
       seen.add(line)
       // a runner the hook cannot name may hand the line to sh, which splits its parameters
       const verdict = await run(
-        lexLine(line, env.known),
+        lex(line, env.known),
         { ...env, splits: true, vars: new Map() },
         visit,
         true,
@@ -1084,9 +1111,9 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
         if (named) return refuse(`${verb} with a variable on ${named}`)
       }
       const literal = !whole && narrow(cmd, here)
-      for (const word of [first, ...args]
-        .filter((word) => word !== opaque)
-        .map((word) => heldWord(word, here, steady) ?? word)) {
+      for (const word of [first, ...args].map(
+        (word) => heldWord(own(word), here, steady) ?? own(word),
+      )) {
         // a quiet commit's message and a gh filter are text, judged only when the root is in it; a filter's unquoted glob is the shell's, judged as any glob
         const text = (quiet && /\s/.test(word.value)) || (filters.has(word) && !word.glob)
         if (text && !texts(word).some((t) => holds(t.value, here))) continue
@@ -1160,7 +1187,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   const known = knownVariables(command, environment, directory)
   const steered = Object.keys(known).filter((key) => named.counts.has(key))
   if (unknown) for (const key of steered) delete known[key]
-  const lexed = lexLine(command, known)
+  const lexed = lex(command, known)
   steadyAt = steadyNames(named, lexed.commands)
   const env: Env = {
     cwd: directory,
