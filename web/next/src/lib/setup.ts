@@ -39,7 +39,7 @@ export const SETUP = {
 } as const satisfies Record<string, Setup>
 
 // The codes the API gives a read of the sessions' terminal that failed: not installed, or not answering.
-const READ_DOWN = new Set(["CMUX_FAILED", "CMUX_UNAVAILABLE"])
+const READ_DOWN = new Set(["SESSIONS_FAILED", "SESSIONS_UNAVAILABLE"])
 
 // Pure: the line an empty list of sessions shows: none for a refused source, whose alert names the reason; unreachable while the sessions cannot be read; else that no session runs yet.
 export const sessionsSetup = (

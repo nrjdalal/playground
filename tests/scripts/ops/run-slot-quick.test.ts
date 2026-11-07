@@ -363,15 +363,52 @@ describe("a quick run takes its own slot past a full queue", () => {
   })
 
   // retro 2, 31 Oct: 408 of 686 CPU-lane runs ended in 10 s or less and queued 2,004 min against 17 min of running
-  // a plain install also runs past this queue now, as a light run in run-slot-2, so the slot it took is the check
   test("bun install --ignore-scripts", async () => {
     expect(await quick(["bun", "install", "--ignore-scripts"])).toBe(true)
     expect(took).toBe("run-slot-quick")
   })
 
-  // a light run of 1 unit, it fits the slot the big holder leaves, but through the queue
-  test("but a bun install that runs its scripts takes a queue slot", async () => {
-    await quick(["bun", "install"])
+  // PG-1344: a full install ran 1.9 to 3.3 s on a warm cache, its root scripts included, and waited 3 to 6 min in the queue
+  test("and so does a bun install that runs its scripts", async () => {
+    expect(await quick(["bun", "install"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  // a new worktree installs by path, a line no earlier run shares, so the rule, not ran_short, takes it there
+  test("and one with --cwd", async () => {
+    expect(await quick(["bun", "install", "--cwd", "/x/worktrees/a"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  test("and one with --frozen-lockfile", async () => {
+    expect(await quick(["bun", "install", "--frozen-lockfile"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  test("and a bun --cwd=<dir> install", async () => {
+    expect(await quick(["bun", "--cwd=/x/worktrees/a", "install"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  // a bare --cwd before install is no install: bun 1.4.4 runs that shape as package.json's install script (Script not found "install"), as it misreads one before test; it still runs as a light run, on the queue's small share
+  test("but a bun --cwd <dir> install, which bun runs as package.json's install script, takes the queue", async () => {
+    expect(await quick(["bun", "--cwd", "/x/worktrees/a", "install"])).toBe(true)
+    expect(took).toBe("run-slot-2")
+  })
+
+  test("and an env NODE_ENV=x bun install takes run-slot-quick", async () => {
+    expect(await quick(["env", "NODE_ENV=x", "bun", "install"])).toBe(true)
+    expect(took).toBe("run-slot-quick")
+  })
+
+  // install after another subcommand is that subcommand's word: a script named install, or a package bunx runs
+  test("but a bun run install takes the queue", async () => {
+    expect(await quick(["bun", "run", "install"])).toBe(true)
+    expect(took).toBe("run-slot-2")
+  })
+
+  test("and so does a bun x install", async () => {
+    expect(await quick(["bun", "x", "install"])).toBe(true)
     expect(took).toBe("run-slot-2")
   })
 

@@ -128,23 +128,23 @@ const exitOf = (jobs: object[], ...args: string[]) => {
   }
 }
 
-// a job row stored before cmux left the runtimes still names cmux or auto, and ops-up starts it in herdr.
-test("a pass exits 0 and starts a down job stored as cmux or auto in herdr", () => {
-  const cmuxJob = {
+// a job row an older install stored may hold any runtime word, and ops-up starts it in herdr, the one runtime.
+test("a pass exits 0 and starts a down job in herdr whatever runtime word its row holds", () => {
+  const oldJob = {
     command: "bash /x/ops/ops-dashboard/loop.sh",
     name: "ops-dashboard",
-    runtime: "cmux",
+    runtime: "made-up",
     stop: "dashboard",
   }
-  const autoJob = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "auto" }
+  const herdrJob = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "herdr" }
   const launchdJob = { launchd: "blue.acme.x", name: "x" }
-  expect(exitOf([cmuxJob, autoJob, launchdJob])).toEqual({
+  expect(exitOf([oldJob, herdrJob, launchdJob])).toEqual({
     code: 0,
     started: ["ops-dashboard", "ops-x"],
     stderr: "",
   })
   // a row that names no runtime and has a command starts in herdr too, as a hand-kept jobs.json row the render never parsed
-  expect(exitOf([{ ...cmuxJob, runtime: undefined }])).toEqual({
+  expect(exitOf([{ ...oldJob, runtime: undefined }])).toEqual({
     code: 0,
     started: ["ops-dashboard"],
     stderr: "",

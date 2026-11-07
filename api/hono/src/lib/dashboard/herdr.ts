@@ -85,7 +85,7 @@ const paneAt = (surface: string): { pane: string; server: HerdrServer } => {
 // The server is not running: its socket is missing, or refuses (a crash can leave the file behind). Nothing was sent.
 export class HerdrDown extends ApiError {
   constructor(detail: string) {
-    super(503, "CMUX_UNAVAILABLE", `herdr is not running: ${detail}`)
+    super(503, "SESSIONS_UNAVAILABLE", `herdr is not running: ${detail}`)
   }
 }
 
@@ -96,14 +96,18 @@ export class HerdrRefused extends ApiError {
     readonly reason: string,
     message: string,
   ) {
-    super(502, "CMUX_FAILED", `herdr ${method} failed: ${reason}${message ? `, ${message}` : ""}`)
+    super(
+      502,
+      "SESSIONS_FAILED",
+      `herdr ${method} failed: ${reason}${message ? `, ${message}` : ""}`,
+    )
   }
 }
 
 // No answer: the request timed out, or the connection closed after the request went out. A prompt given up this way may have been typed anyway.
 export class HerdrTimedOut extends ApiError {
   constructor(method: string) {
-    super(502, "CMUX_FAILED", `herdr ${method} failed: no answer from herdr`)
+    super(502, "SESSIONS_FAILED", `herdr ${method} failed: no answer from herdr`)
   }
 }
 

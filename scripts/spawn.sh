@@ -54,7 +54,7 @@ set -euo pipefail
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
-#   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, or priority-start.json, a job's own starts), and focus's refusal while priority.json does; it is refused while none does. --firefighting is its old name, and firefighting-stop.json and firefighting-headstart.json stand for priority.json and firefighting-start.json for priority-start.json, aliases until the jobs that write them take the new names
+#   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, an org's own priority-<name>.json, its own urgent window, or priority-start.json, a job's own starts), and focus's refusal while any but priority-start.json does; it is refused while none does. --firefighting is its old name, and firefighting-stop.json and firefighting-headstart.json stand for priority.json and firefighting-start.json for priority-start.json, aliases until the jobs that write them take the new names
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
@@ -69,7 +69,7 @@ set -euo pipefail
 #   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
 #   --runtime cmux     is refused: spawn.sh starts nothing in cmux
 #     With no --runtime, every start and resume opens in herdr, whatever terminal its spawner runs in.
-#     The runtime is recorded at the start in ~/.playground/runtimes/<name>; a resume whose pin reads cmux opens in herdr and rewrites the pin.
+#     The runtime is recorded at every start and resume in ~/.playground/runtimes/<name>, a resume rewriting whatever word the pin held.
 #
 # <name> is lowercase words joined by hyphens that give its kind: a new one from `bun run name <kind>` (<id>-<kind>), an old `<kind>-<words>` one, or a manager's own; the mode gives the kind, and a name that gives none or another is refused, but on a resume.
 # <brief> is a file under ~/.playground. Every session runs at high effort unless --effort names another,
@@ -96,10 +96,13 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 # The roster's manager kinds (kinds.ts' ROSTER_ROLE_OF_KIND), so a kind role_of_kind does not list runs as a lead: an orchestrator. A read that fails leaves the named kinds alone, so an orchestrator is refused rather than guessed.
 MANAGER_KINDS=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { ROSTER_ROLE_OF_KIND as r } from '$REPO/packages/config/src/kinds.ts'; console.log(Object.keys(r).filter((k) => r[k] === 'manager').join(' '))" 2>/dev/null) || MANAGER_KINDS=
-# The priority file standing in the data folder, the first that exists, exit 1 when none does, its content unread: priority.json (an urgent window) and its old names firefighting-stop.json and firefighting-headstart.json pass the load and slots gates and focus, and a job's own start file, priority-start.json or its old name firefighting-start.json, passes the load and slots gates but never focus.
+# The priority file standing in the data folder, one that passes focus first, exit 1 when none does, its content unread: every priority*.json but priority-start.json (priority.json, or an org's own priority-<name>.json, each writer keeping its own) and the old names firefighting-stop.json and firefighting-headstart.json pass the load and slots gates and focus, and a job's own start file, priority-start.json or its old name firefighting-start.json, passes the load and slots gates but never focus.
 priority_file() {
   local f
-  for f in "$DATA/priority.json" "$DATA/firefighting-stop.json" "$DATA/firefighting-headstart.json" "$DATA/priority-start.json" "$DATA/firefighting-start.json"; do
+  for f in "$DATA"/priority*.json "$DATA/firefighting-stop.json" "$DATA/firefighting-headstart.json"; do
+    [ "${f##*/}" != priority-start.json ] && [ -e "$f" ] && { echo "$f"; return 0; }
+  done
+  for f in "$DATA/priority-start.json" "$DATA/firefighting-start.json"; do
     [ -e "$f" ] && { echo "$f"; return 0; }
   done
   return 1
@@ -985,14 +988,6 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
     except ValueError:
         skip(name, "its exec line does not parse")
         continue
-    try:
-        runtime = open(os.path.join(lw, "runtimes", name)).read().strip()
-    except (OSError, ValueError):
-        skip(name, "it has no runtime pin")
-        continue
-    if runtime != "herdr":
-        skip(name, "it runs in " + (runtime if runtime.isalnum() else "another runtime") + ", not herdr")
-        continue
     extras = words[6:]
     keys = extras[::2]
     if (
@@ -1286,16 +1281,8 @@ if [ "$MODE" = resume ]; then
     refuse "no backend pin for $NAME: it cannot know how $NAME ran. Resume it with --backend glm or --backend claude, whichever it ran on, which records the pin."
   fi
 fi
-# A resume runs in herdr: a pin that reads cmux, from a session that started there, opens in herdr and is rewritten below.
+# Every start and resume runs in herdr, the one runtime: a resume reads no pin, and the write below rewrites it whatever word it held.
 RUNTIMES="$DATA/runtimes"
-if [ "$MODE" = resume ] && [ -z "$RUNTIME" ] && [ -e "$RUNTIMES/$NAME" ]; then
-  RUNTIME=$(cat "$RUNTIMES/$NAME") || refuse "it cannot read the runtime pin for $NAME"
-  case "$RUNTIME" in
-    cmux) RUNTIME=herdr ;;
-    herdr) ;;
-    *) refuse "the runtime pin for $NAME reads neither cmux nor herdr. Fix or remove $SHOWN/runtimes/$NAME, or resume with --runtime herdr." ;;
-  esac
-fi
 case "${RUNTIME:=herdr}" in
   herdr) ;;
   *) refuse "--runtime takes herdr, not $RUNTIME" ;;
@@ -1392,9 +1379,9 @@ esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
 PRIORITY_FILE=
 if [ -n "$PRIORITY" ]; then
-  PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json or priority-start.json, or an old name: firefighting-stop.json, firefighting-headstart.json or firefighting-start.json), and none does"
+  PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json, or an old name: firefighting-stop.json, firefighting-headstart.json or firefighting-start.json), and none does"
 fi
-# While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --priority start on priority.json or an old name of it (below).
+# While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --priority start on any priority file but a job's start file (below).
 if FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
 import datetime, json, sys
 try:
@@ -1407,7 +1394,7 @@ if until <= datetime.datetime.now(datetime.timezone.utc):
 print(f"{f.get('session')} until {f['until']}")
 PY
 ); then
-  # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --priority start goes on while priority.json or an old name of it stands; a job's start file leaves focus to hold it, since an urgent ticket's focus comes first
+  # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --priority start goes on while any priority file but a job's start file stands; a job's start file leaves focus to hold it, since an urgent ticket's focus comes first
   { [ -n "$PRIORITY_FILE" ] && case "${PRIORITY_FILE##*/}" in priority-start.json | firefighting-start.json) false ;; *) true ;; esac; } || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
     refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
 fi
