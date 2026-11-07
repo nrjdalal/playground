@@ -268,9 +268,9 @@ describe("zshSplits finds a sourcing command in linear time (PG-1231)", () => {
     ["reserved words", "if ".repeat(70_000)],
     ["bangs", "! ".repeat(100_000)],
     ["case patterns", "a) ".repeat(70_000)],
-    ["unclosed quotes", "a'".repeat(100_000)],
-    ["unclosed double quotes", 'a"'.repeat(100_000)],
-    ["dollar quotes", "$'".repeat(100_000)],
+    ["single-quote runs", "a'".repeat(100_000)],
+    ["double-quote runs", 'a"'.repeat(100_000)],
+    ["dollar-quote runs", "$'".repeat(100_000)],
     ["test closers", "]] ".repeat(70_000)],
     ["reserved words in argument position", "then x ".repeat(30_000)],
   ])("200 KB of %s", async (_, line) => {
