@@ -2,23 +2,11 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, machine } from "./run-slot-fake"
+import { machine, set, slots } from "./run-slot-fake"
 
 // a check waits on its run's exit, so the timeout only catches a hang
 setDefaultTimeout(60_000)
 
-// how many of run-slot to run-slot-4 are held or open now: "4\n" with slots 2 to 4 open, "1\n" with them shut
-const slots = (m: ReturnType<typeof machine>) =>
-  Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() }).stdout.toString()
-// run-slot.sh set's exit code and stderr
-const set = async (m: ReturnType<typeof machine>, ...args: string[]) => {
-  const p = Bun.spawn(["bash", SCRIPT, "set", ...args], {
-    cwd: m.root,
-    env: m.env(),
-    stderr: "pipe",
-  })
-  return { code: await p.exited, err: await new Response(p.stderr).text() }
-}
 // a machine at `idle`% under load1 18 with run-slot.idle-min holding `value` on its last line, below the line a set writes
 const withBar = (value: string, idle: number) => {
   const m = machine({ idle, load1: 18 })
