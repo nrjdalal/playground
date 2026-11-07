@@ -4,9 +4,9 @@ import { homedir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
-import { extensionsDir } from "../../packages/settings/src/rendered"
+import { extensionsDir, readPolicySync } from "../../packages/settings/src/rendered"
 import { bunCall, FILE_TOOLS, gitCall, real } from "./no-main-checkout"
-import { fromFactory } from "./role"
+import { fromFactory, opsLead } from "./role"
 import {
   codeFed,
   type Command,
@@ -344,6 +344,53 @@ export const GUARD_KEYS = new Set([
 ])
 // An ops job's setting turns it on or moves what it runs, so every jobs.<name> is refused, a name the registry lacks included: only the owner's Approve of a guard decision, or Settings > Jobs, sets one.
 const JOB_PREFIX = "jobs."
+// Whether a settings set the Ops lead makes only tunes a number, so it runs; a key that widens or names what a guard allows stays the owner's
+type Tuning = (key: string, value: string, scoped: boolean) => boolean
+const NO_TUNING: Tuning = () => false
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+const parsed = (text: string): unknown => {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
+}
+
+// Pure: whether a set of the key to the value text, as the CLI parses it, only tunes a number against policy.json's values: glm.readOnlyLoad5 to a positive load limit, or a job's row equal field for field to the row policy.json holds but its schedule's interval, a positive integer where the row already has one; a set replaces the whole row, so a row that leaves a field out would drop it, and a --scope, a job with no row and any other key tune nothing
+export function tunes(
+  key: string,
+  text: string,
+  scoped: boolean,
+  values: Record<string, unknown>,
+): boolean {
+  if (scoped) return false
+  const value = parsed(text)
+  if (key === "glm.readOnlyLoad5")
+    return typeof value === "number" && Number.isFinite(value) && value > 0
+  if (!key.startsWith(JOB_PREFIX)) return false
+  const current = values[key]
+  if (!isRecord(current) || !isRecord(value)) return false
+  const [was, now] = [current.schedule, value.schedule]
+  if (!isRecord(was) || !isRecord(now) || typeof was.every !== "number") return false
+  const every = now.every
+  return (
+    Object.keys(now).length === 1 &&
+    typeof every === "number" &&
+    Number.isInteger(every) &&
+    every > 0 &&
+    Bun.deepEquals({ ...value, schedule: was }, current, true)
+  )
+}
+
+// The Ops lead's tuning read against policy.json's values, or none when policy.json does not read
+function tuningOf(environment: Environment): Tuning {
+  const policy = readPolicySync(dataDir(environment))
+  if (policy.refusal !== undefined) return NO_TUNING
+  const { values } = policy.settings
+  return (key, value, scoped) => tunes(key, value, scoped, values)
+}
+
 const BY_APPROVE =
   "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it"
 // ext verbs that change a scope's lists or settings, or which scopes the lists and policy.json render from
@@ -794,7 +841,7 @@ function runsOf(parsed: Parsed, vars: Text[], whole: boolean, rootLine: boolean)
 }
 
 // What of a playground call changes what a guard reads, or undefined; its words split as that command's parseWords splits them, and a word the hook cannot read taken as the worst.
-function cliWrite(words: Word[]): string | undefined {
+function cliWrite(words: Word[], tuning: Tuning = NO_TUNING): string | undefined {
   const [command, verb, ...rest] = words.map((w) => (marked(w.value) ? undefined : w.value))
   if (command === undefined)
     return words.length ? "playground with a command word it cannot read" : undefined
@@ -827,6 +874,8 @@ function cliWrite(words: Word[]): string | undefined {
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
     if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX)) return
+    const value = positional[1]
+    if (verb === "set" && value !== undefined && tuning(key, value, scoped)) return
     return PRIVACY_KEYS.has(key) && !scoped
       ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}`
       : key.startsWith(JOB_PREFIX)
@@ -880,6 +929,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
   if (tool !== "Bash") return
   const { command } = input
   if (typeof command !== "string") return
+  const tuning = (await opsLead(raw, environment)) ? tuningOf(environment) : NO_TUNING
   // nesting makes the lexer's time grow with the square of the length, so a longer command could outlast the hook's timeout
   if (command.length > 131_072) return refuse(TOO_LONG)
   // the root's path from a cwd above it, which a script may name it by
@@ -1020,7 +1070,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
     const calls = reader ? [] : cliCalls(parsed, env)
     const write =
       calls
-        .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords]))
+        .map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords], tuning))
         .find(Boolean) ??
       (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined)
     if (write) return refuse(write)
@@ -1075,7 +1125,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
       if (!/\s/.test(word.value)) continue
       const named = lex(word.value.replace(/^--message=/, ""), env.known)
         .commands.flatMap((c) => cliCalls(parse(c), env))
-        .map((words) => cliWrite(words))
+        .map((words) => cliWrite(words, tuning))
         .find(Boolean)
       if (named) return refuse(named)
     }

@@ -2,9 +2,9 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-extensions-write.ts
-import { existsSync, statSync } from "fs";
-import { homedir as homedir3 } from "os";
-import { dirname as dirname3, join as join5, resolve as resolve4, sep as sep2 } from "path";
+import { existsSync as existsSync2, statSync } from "fs";
+import { homedir as homedir4 } from "os";
+import { dirname as dirname3, join as join6, resolve as resolve4, sep as sep2 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -55,13 +55,53 @@ var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ?
 var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/settings/src/rendered.ts
+import { existsSync, readFileSync } from "fs";
 import { join as join2 } from "path";
+import { fileURLToPath } from "url";
 var CORE = "core";
+var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
 var extensionsDir = (data) => join2(data, "extensions");
+var fixFor = (file) => {
+  const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
+  if (list && !existsSync(join2(coreDir(), "lists", `${list}.json`)))
+    return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`;
+  return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher asks the owner to set up settings, then fill in and save Privacy on the Dashboard's Settings page, which writes it";
+};
+var readRenderedSync = (data, file) => {
+  const dir = extensionsDir(data);
+  if (!existsSync(dir))
+    return {};
+  const parts = file.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === ".."))
+    return { refusal: `${file} is not a path inside the extensions (${dir})` };
+  const path = parts[0] === CORE ? join2(coreDir(), ...parts.slice(1)) : join2(dir, file);
+  return existsSync(path) ? { path } : { refusal: `the extensions root (${dir}) holds no ${file}: ${fixFor(file)}` };
+};
+var readPolicySync = (data, org) => {
+  const read = readRenderedSync(data, "policy.json");
+  if (read.refusal)
+    return { refusal: read.refusal };
+  if (!read.path)
+    return { settings: { schemaVersion: 1, values: {} } };
+  let policy;
+  try {
+    policy = JSON.parse(readFileSync(read.path, "utf8"));
+  } catch {
+    return {
+      refusal: `the extensions' policy.json does not parse (${read.path}): ${fixFor("policy.json")}`
+    };
+  }
+  return {
+    settings: {
+      schemaVersion: 1,
+      values: { ...policy.values, ...org ? policy.orgs?.[org.toLowerCase()] : undefined }
+    }
+  };
+};
 
 // scripts/hooks/no-main-checkout.ts
-import { readdirSync, readFileSync, realpathSync } from "fs";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join4, normalize, resolve as resolve3, sep } from "path";
+import { readdirSync, readFileSync as readFileSync2, realpathSync } from "fs";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join5, normalize, resolve as resolve3, sep } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function joinValues(array, separator = "|") {
@@ -4659,6 +4699,10 @@ var liveSettings = defineSettings({
   }
 });
 
+// scripts/hooks/role.ts
+import { homedir as homedir2 } from "os";
+import { join as join3 } from "path";
+
 // packages/config/src/kinds.ts
 var ROSTER_KINDS = [
   "assistant",
@@ -4675,17 +4719,134 @@ var ROSTER_KINDS = [
   "tester",
   "worker"
 ];
+var isRosterKind = (value) => ROSTER_KINDS.includes(value);
+var FACTORY_ROLE_OF_KIND = {
+  assistant: "lead",
+  builder: "lead",
+  dispatcher: "dispatcher",
+  ops: "lead",
+  optimizer: "lead",
+  orchestrator: "lead",
+  planner: "lead",
+  probe: "probe",
+  researcher: "worker",
+  reviewer: "reviewer",
+  runner: "runner",
+  tester: "tester",
+  worker: "worker"
+};
 var ID_ALPHABET = "23456789bcdfghjkmnpqrstvwxyz";
 var ID_NAME_SOURCE = `[${ID_ALPHABET}]{6}-(?:${ROSTER_KINDS.join("|")})`;
+var PREFIXED = /^(probe|reviewer|runner|tester|worker)-./;
 var ID_NAME = new RegExp(`^[${ID_ALPHABET}]{6}-(${ROSTER_KINDS.join("|")})$`);
+var kindOfName = (name) => (ID_NAME.exec(name) ?? PREFIXED.exec(name))?.[1] ?? null;
+var DEFAULT_SESSION_NAMES = {
+  aliases: {},
+  names: { builder: "builder", dispatcher: "dispatcher", ops: "ops", planner: "planner" }
+};
 var NAMES = Symbol.for("playground.sessionNames");
+var held = globalThis;
+var setSessionNames = (next) => {
+  held[NAMES] = next;
+};
+var getSessionNames = () => held[NAMES] ?? DEFAULT_SESSION_NAMES;
+var namedKinds = () => {
+  const { aliases, names } = getSessionNames();
+  return new Map([
+    ...Object.entries(names).map(([kind, name]) => [name, kind]),
+    [`${names.dispatcher}-2`, "dispatcher"],
+    ...Object.entries(aliases),
+    ["optimizer", "optimizer"]
+  ]);
+};
+var placedKindOfName = (name) => kindOfName(name) ?? namedKinds().get(name) ?? null;
+function roleOfName(name) {
+  const kind = placedKindOfName(name);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
 var SEATLESS = new Set(["ended", "parked"]);
 
 // scripts/hooks/role.ts
 var MANAGER_ROLES = new Set(["dispatcher", "lead", "manager"]);
+var names;
+function loadNames(environment = process.env) {
+  names ??= (async () => {
+    try {
+      const setting = join3(__CHECKOUT + "/scripts/hooks", "../../packages/scripts/src/playground/setting.ts");
+      const read = Bun.spawn(["bun", setting, "sessions.names", "sessions.aliases"], {
+        env: { ...process.env, ...environment },
+        stderr: "ignore",
+        stdout: "pipe"
+      });
+      const [names, aliases] = (await new Response(read.stdout).text()).trim().split(`
+`);
+      if (await read.exited === 0)
+        setSessionNames({ aliases: JSON.parse(aliases), names: JSON.parse(names) });
+    } catch {}
+  })();
+  return names;
+}
+async function registryName(sessionId, environment = process.env) {
+  const dir = join3(environment.CLAUDE_CONFIG_DIR || join3(homedir2(), ".claude"), "sessions");
+  for await (const file of new Bun.Glob("*.json").scan(dir)) {
+    try {
+      const entry = await Bun.file(join3(dir, file)).json();
+      if (entry.sessionId === sessionId && typeof entry.name === "string")
+        return entry.name;
+    } catch {}
+  }
+}
+async function opsLead(raw, environment = process.env) {
+  try {
+    const session = sessionOf(raw);
+    if (typeof session !== "string" || await sessionRole(environment, session) !== "lead")
+      return false;
+    const name = await registryName(session, environment);
+    return name !== undefined && await rosterKind(name, environment) === "ops";
+  } catch {
+    return false;
+  }
+}
+async function rosterKind(name, environment = process.env) {
+  const path = join3(dataDirOf(environment), "roster.json");
+  try {
+    const roster = await Bun.file(path).json();
+    const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
+    return isRosterKind(kind) ? kind : undefined;
+  } catch {
+    return;
+  }
+}
+async function rosterRole(name, environment = process.env) {
+  const kind = await rosterKind(name, environment);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
+}
+async function sessionRole(environment, sessionId) {
+  if (environment.PLAYGROUND_ROLE)
+    return environment.PLAYGROUND_ROLE;
+  if (typeof sessionId !== "string")
+    return "";
+  try {
+    const name = await registryName(sessionId, environment) ?? "";
+    const role = name && await rosterRole(name, environment);
+    if (role)
+      return role;
+    await loadNames(environment);
+    return roleOfName(name);
+  } catch {
+    return "";
+  }
+}
+function sessionOf(raw) {
+  try {
+    return JSON.parse(raw).session_id;
+  } catch {
+    return;
+  }
+}
 
 // scripts/hooks/shell.ts
-import { homedir as homedir2 } from "os";
+import { homedir as homedir3 } from "os";
 import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
@@ -4720,7 +4881,7 @@ function filled(script, mark, value) {
     throw new RangeError("a script too large to read");
   return script.replaceAll(mark, value);
 }
-var held = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
+var held2 = (text) => text.value.length > MAX_BYTES ? unknown(LARGE) : text;
 var BREAK = new Set([" ", "\t", `
 `, ";", "&", "|", "<", ">", "(", ")"]);
 var REDIRECT = /^(\d*|&)(<<<|<<-|<<|<>|<&|>&!?|>>[!|]?|>[!|]|<|>)/;
@@ -5343,7 +5504,7 @@ var merge = (out, part) => {
   if (part.reads?.length)
     (out.reads ??= []).push(...part.reads);
 };
-var join3 = (parts, separator = "") => {
+var join4 = (parts, separator = "") => {
   const out = { value: "" };
   parts.forEach((part, k) => {
     if (k > 0)
@@ -5781,7 +5942,7 @@ function word(lx) {
           value: ""
         });
     } else if (c === "~" && lx.i === start && ends(next)) {
-      out.value += homedir2();
+      out.value += homedir3();
       lx.i++;
     } else {
       if (c === UNKNOWN || c === READ)
@@ -6335,7 +6496,7 @@ var tildeSign = (name, dir, env) => (name === "cd" || name === "pushd") && env.o
 async function cdTarget(name, args, env) {
   const dir = args.find((a) => !(a.value.startsWith("-") && a.value.length > 1));
   if (!dir)
-    return homedir2();
+    return homedir3();
   const typed = dir.value === "-" ? undefined : await folder(pathOf(dir, env));
   const sign = typed ? undefined : tildeSign(name, dir, env);
   const base = sign && (sign === "-" ? env.old?.dir : env.cwd);
@@ -6350,7 +6511,7 @@ function cdTargets(name, cmd, parsed, env, from) {
   const dirs = parsed.args.filter((a) => !(a.value.startsWith("-") && a.value.length > 1));
   const [dir] = dirs;
   if (!dir) {
-    return name === "cd" ? { paths: [homedir2()], unread: false } : { back: true, paths: [homedir2()], unread: true };
+    return name === "cd" ? { paths: [homedir3()], unread: false } : { back: true, paths: [homedir3()], unread: true };
   }
   if (dir.value === "-")
     return { back: true, paths: [], unread: true };
@@ -6504,7 +6665,7 @@ async function scriptOf(operand, cmd, env) {
   return scripts;
 }
 async function outputs(cmds, env) {
-  return join3(await Promise.all(cmds.map((c) => outputOf(c, env))));
+  return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
 }
 async function record2(cmd, name, args, env) {
   for (const r of cmd.redirects) {
@@ -6515,7 +6676,7 @@ async function record2(cmd, name, args, env) {
       continue;
     const stdout = r.fd === "" || r.fd === "1" || r.fd === "&";
     const out = stdout ? await outputOf(cmd, env) : unknown(`what ${name || "a command"} writes to stderr`);
-    env.files.set(path, held(r.op === ">>" ? join3([await existing(path, env), out]) : out));
+    env.files.set(path, held2(r.op === ">>" ? join4([await existing(path, env), out]) : out));
   }
   if (name !== "tee")
     return;
@@ -6524,7 +6685,7 @@ async function record2(cmd, name, args, env) {
   for (const a of args) {
     const path = a.value.startsWith("-") ? undefined : pathOf(a, env);
     if (path)
-      env.files.set(path, held(append ? join3([await existing(path, env), input]) : input));
+      env.files.set(path, held2(append ? join4([await existing(path, env), input]) : input));
   }
 }
 async function existing(path, env) {
@@ -6553,7 +6714,7 @@ async function outputOf(cmd, env) {
         return unknown(LARGE);
       parts.push(part);
     }
-    return join3(parts);
+    return join4(parts);
   }
   if (name === "tee")
     return stdinOf(cmd, env);
@@ -6595,13 +6756,13 @@ async function stdinOf(cmd, env) {
   tick();
   const input = cmd.redirects.findLast((r) => !r.bodyFed && ownFeed(r));
   if (!input)
-    return held(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see"));
-  return held(await redirectText(input, env, false));
+    return held2(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see"));
+  return held2(await redirectText(input, env, false));
 }
 async function scriptStdin(cmd, env) {
   const own = await stdinOf(cmd, env);
   tick();
-  const fed = held(await stdinText(cmd, env));
+  const fed = held2(await stdinText(cmd, env));
   return fed.value === own.value && fed.unknown === own.unknown ? [own] : [own, fed];
 }
 var ownFeed = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
@@ -7327,7 +7488,7 @@ function heldVars(env, steady) {
   }
   return known;
 }
-var held2 = (word, env, steady) => !marked(word.value) || !!heldWord(word, env, steady);
+var held3 = (word, env, steady) => !marked(word.value) || !!heldWord(word, env, steady);
 
 // scripts/hooks/no-main-checkout.ts
 function real(path) {
@@ -7344,7 +7505,7 @@ function real(path) {
     else
       low = mid;
   }
-  return join4(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
+  return join5(resolved(sep + parts.slice(0, low).join(sep)) ?? sep, ...parts.slice(low));
 }
 var resolved = (path) => {
   try {
@@ -7358,7 +7519,7 @@ function nearest(path) {
   for (let dir = path;; dir = dirname2(dir)) {
     const found = resolved(dir);
     if (found !== undefined)
-      return join4(found, ...rest.reverse());
+      return join5(found, ...rest.reverse());
     if (dir === dirname2(dir))
       return path;
     rest.push(basename2(dir));
@@ -7517,7 +7678,7 @@ var writer = ({ op, target }) => [">", ">>", ">|", "<>"].includes(op) || op === 
 var GLOB = /[*?[{(]/;
 var RUNS = /^(?:EDITOR|GIT_[A-Z0-9_]+|HOME|LESSOPEN|PAGER|VISUAL|XDG_CONFIG_HOME)$/;
 var GIT_TEXT = /^GIT_(?:AUTHOR|COMMITTER)_/;
-var CLI = join5("packages", "scripts", "src", "playground", "cli.ts");
+var CLI = join6("packages", "scripts", "src", "playground", "cli.ts");
 var varsRun = new WeakMap;
 function runsVariable(vars) {
   const [cursor, found] = varsRun.get(vars) ?? [undefined, false];
@@ -7675,6 +7836,39 @@ var GUARD_KEYS = new Set([
   "usage.keychainService"
 ]);
 var JOB_PREFIX = "jobs.";
+var NO_TUNING = () => false;
+var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var parsed = (text) => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+};
+function tunes(key, text, scoped, values) {
+  if (scoped)
+    return false;
+  const value = parsed(text);
+  if (key === "glm.readOnlyLoad5")
+    return typeof value === "number" && Number.isFinite(value) && value > 0;
+  if (!key.startsWith(JOB_PREFIX))
+    return false;
+  const current = values[key];
+  if (!isRecord(current) || !isRecord(value))
+    return false;
+  const [was, now] = [current.schedule, value.schedule];
+  if (!isRecord(was) || !isRecord(now) || typeof was.every !== "number")
+    return false;
+  const every = now.every;
+  return Object.keys(now).length === 1 && typeof every === "number" && Number.isInteger(every) && every > 0 && Bun.deepEquals({ ...value, schedule: was }, current, true);
+}
+function tuningOf(environment) {
+  const policy = readPolicySync(dataDir(environment));
+  if (policy.refusal !== undefined)
+    return NO_TUNING;
+  const { values } = policy.settings;
+  return (key, value, scoped) => tunes(key, value, scoped, values);
+}
 var BY_APPROVE = "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it";
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
@@ -7688,7 +7882,7 @@ function isCli(word, dirs) {
     return false;
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir }));
   if (program(word.value) === "playground")
-    return !word.value.includes("/") || !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory());
+    return !word.value.includes("/") || !paths.some((path) => !!path && existsSync2(path) && statSync(path).isDirectory());
   const cli = (sep2 + CLI).toLowerCase();
   return paths.some((path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
 }
@@ -8038,7 +8232,7 @@ function runsOf(parsed, vars, whole, rootLine) {
   values.push(...programLines(parsed, rootLine));
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value));
 }
-function cliWrite(words) {
+function cliWrite(words, tuning = NO_TUNING) {
   const [command, verb, ...rest] = words.map((w) => marked(w.value) ? undefined : w.value);
   if (command === undefined)
     return words.length ? "playground with a command word it cannot read" : undefined;
@@ -8075,6 +8269,9 @@ function cliWrite(words) {
       return `playground settings ${verb} with a word it cannot read`;
     if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX))
       return;
+    const value = positional[1];
+    if (verb === "set" && value !== undefined && tuning(key, value, scoped))
+      return;
     return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : key.startsWith(JOB_PREFIX) ? `playground settings ${verb} of ${key}, ${BY_APPROVE}` : `playground settings ${verb} of ${key}, a key a guard reads`;
   }
   if (verb === "accept")
@@ -8099,7 +8296,7 @@ async function inspect(raw, environment, unknown = false) {
   const input = toolInput ?? {};
   const directory = typeof cwd === "string" ? cwd : undefined;
   const root = real(extensionsDir(dataDir(environment)));
-  const home = environment.HOME || homedir3();
+  const home = environment.HOME || homedir4();
   const needle = root.startsWith(real(home) + sep2) ? root.slice(real(home).length) : root;
   const inRoot = (path) => {
     if (path === undefined)
@@ -8115,7 +8312,7 @@ async function inspect(raw, environment, unknown = false) {
   };
   const file = typeof tool === "string" ? input[FILE_TOOLS[tool]] : undefined;
   if (typeof file === "string") {
-    const expanded = /^~(?:\/|$)/.test(file) ? join5(home, file.slice(1)) : file;
+    const expanded = /^~(?:\/|$)/.test(file) ? join6(home, file.slice(1)) : file;
     return inRoot(resolve4(directory ?? "", expanded)) ? refuse(`a write to ${file}`) : undefined;
   }
   if (tool !== "Bash")
@@ -8123,6 +8320,7 @@ async function inspect(raw, environment, unknown = false) {
   const { command } = input;
   if (typeof command !== "string")
     return;
+  const tuning = await opsLead(raw, environment) ? tuningOf(environment) : NO_TUNING;
   if (command.length > 131072)
     return refuse(TOO_LONG);
   const relative = (env) => env.cwd && above(env.cwd, false) ? root.slice(real(env.cwd).length + 1) : undefined;
@@ -8217,7 +8415,7 @@ async function inspect(raw, environment, unknown = false) {
     const fed = xargs ? await stdinOf(cmd, env) : undefined;
     const stdinWords = !fed ? [] : fed.unknown ? [{ quoted: false, value: UNKNOWN }] : fed.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
     const calls = reader ? [] : cliCalls(parsed, env);
-    const write = calls.map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords])).find(Boolean) ?? (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined);
+    const write = calls.map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords], tuning)).find(Boolean) ?? (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined);
     if (write)
       return refuse(write);
     const vars = !reader && first ? since(varsRead, env.vars, "") : [];
@@ -8248,7 +8446,7 @@ async function inspect(raw, environment, unknown = false) {
     for (const word of quiet ? args : []) {
       if (!/\s/.test(word.value))
         continue;
-      const named = lex(word.value.replace(/^--message=/, ""), env.known).commands.flatMap((c) => cliCalls(parse3(c), env)).map((words) => cliWrite(words)).find(Boolean);
+      const named = lex(word.value.replace(/^--message=/, ""), env.known).commands.flatMap((c) => cliCalls(parse3(c), env)).map((words) => cliWrite(words, tuning)).find(Boolean);
       if (named)
         return refuse(named);
     }
@@ -8268,7 +8466,7 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`${verb} run inside ${root}`);
       if (name === "git" && inRoot(gitCall(args, here).cwd))
         return refuse(`git on a clone in ${root}`);
-      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, here.splits) : []).find((word) => !held2(word, here, steady));
+      const unheld = (remover ? args : WRITERS.has(tool) ? writeTargets(tool, args, gnu, posix, here.splits) : []).find((word) => !held3(word, here, steady));
       if (unheld)
         return refuse(splitIn(unheld, here.splits) ? `${verb} on ${shown(unheld)}, a value the hook does not hold that the shell may split into several words; quote it ("$X") and hold it in the same call, or write the path literally` : `${verb} on ${shown(unheld)}, a value the hook does not hold; hold it in the same call (X=<path>; ${verb} "$X") or write the path literally`);
       if (name === "git") {
@@ -8283,7 +8481,7 @@ async function inspect(raw, environment, unknown = false) {
         const variable = [
           ...parsed.local,
           ...scoped.filter(([key]) => !parsed.local.has(key))
-        ].find(([key, value]) => RUNS.test(key) && !GIT_TEXT.test(key) && !held2({ ...value, quoted: false }, here, steady));
+        ].find(([key, value]) => RUNS.test(key) && !GIT_TEXT.test(key) && !held3({ ...value, quoted: false }, here, steady));
         if (variable)
           return refuse(`git with ${variable[0]} set to a value the hook does not hold, which git may run or read as config; write the value literally in the call`);
       }
