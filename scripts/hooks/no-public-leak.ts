@@ -58,11 +58,11 @@ function ownLinesPast(text: string, owner: string[]): string {
       const m = CONTRIBUTOR.exec(line)
       if (!m && line.trim() !== "") contributors = false
       const names = m?.[1].trim() ?? ""
+      const login = m?.[2] ?? ""
       const mine =
         contributors &&
-        m !== null &&
-        names !== "" &&
-        ownerWords(names, m[2], owner).join(" ") === names.split(/\s+/).join(" ")
+        ownerWords(login, login, owner).length === 1 &&
+        ownerWords(names, login, owner).join(" ") === names.split(/\s+/).filter(Boolean).join(" ")
       return mine ? "" : line
     })
     .join("\n")

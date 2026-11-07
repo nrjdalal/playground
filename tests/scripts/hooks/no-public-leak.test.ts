@@ -83,6 +83,11 @@ describe("a ship's notes may name the owner on the owner's own Contributors line
   }
   const OWN = `## v2\n\n${CONTRIBUTORS}- Quilla @qmarsh\n- @someone\n`
 
+  test("the owner's line holding the login alone passes", async () => {
+    const file = await notes(`${CONTRIBUTORS}- @qmarsh\n- @someone\n`)
+    expect(await run(bash(`gh release create v2 ${R} --notes-file ${file}`), owned)).toBeUndefined()
+  })
+
   test("the owner's line written with CRLF line ends passes", async () => {
     const file = await notes(OWN.replaceAll("\n", "\r\n"))
     expect(await run(bash(`gh release create v2 ${R} --notes-file ${file}`), owned)).toBeUndefined()
@@ -103,6 +108,7 @@ describe("a ship's notes may name the owner on the owner's own Contributors line
       "an outside contributor's name on a Contributors line",
       `${CONTRIBUTORS}- Ostra Vell @ovell\n`,
     ],
+    ["an outside handle alone on a Contributors line", `${CONTRIBUTORS}- @ovell\n`],
     ["the archive's owner as a name on the owner's line", `${CONTRIBUTORS}- Acme @qmarsh\n`],
     ["the archive's owner as name and login", `${CONTRIBUTORS}- Acme @acme\n`],
     ["a heading that ends in Contributors", "### 🩹 Fixes for Contributors\n\n- Quilla @qmarsh\n"],

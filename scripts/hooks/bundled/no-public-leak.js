@@ -10365,7 +10365,8 @@ function ownLinesPast(text, owner) {
     if (!m && line.trim() !== "")
       contributors = false;
     const names = m?.[1].trim() ?? "";
-    const mine = contributors && m !== null && names !== "" && ownerWords(names, m[2], owner).join(" ") === names.split(/\s+/).join(" ");
+    const login = m?.[2] ?? "";
+    const mine = contributors && ownerWords(login, login, owner).length === 1 && ownerWords(names, login, owner).join(" ") === names.split(/\s+/).filter(Boolean).join(" ");
     return mine ? "" : line;
   }).join(`
 `);
