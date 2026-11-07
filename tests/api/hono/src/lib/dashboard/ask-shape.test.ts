@@ -51,6 +51,17 @@ describe("shapeHints", () => {
       }),
     ).toEqual([])
     expect(shapeHints(ask(short))).toEqual([])
+    // a questions ask labels each question's own options, so it needs no top-level label
+    expect(
+      shapeHints({
+        ...ask(short),
+        preview: {
+          questions: [{ options: [{ label: "A" }, { label: "B" }], question: "Which?" }],
+          text: short,
+          type: "ask",
+        },
+      }),
+    ).toEqual([])
   })
 
   test("stays quiet on short prose and on every kind but an ask", () => {
@@ -104,9 +115,9 @@ describe("shapeHints: unlinked refs (#1020)", () => {
       kind: "unlinked",
       refs: ["#1000", "PR 1001"],
     })
-    expect(unlinked("CEDAR-2779 and BRAVO-1322 are done; BRAVO-1322 again.")).toEqual({
+    expect(unlinked("MADECEDAR-2779 and MADEBRAVO-1322 are done; MADEBRAVO-1322 again.")).toEqual({
       kind: "unlinked",
-      refs: ["CEDAR-2779", "BRAVO-1322"],
+      refs: ["MADECEDAR-2779", "MADEBRAVO-1322"],
     })
     expect(unlinked("Landed at d05240d6.")).toEqual({ kind: "unlinked", refs: ["d05240d6"] })
     expect(
@@ -116,11 +127,13 @@ describe("shapeHints: unlinked refs (#1020)", () => {
 
   test("stays quiet on a ref linked in its line, inside a code block, or an Inbox ref", () => {
     expect(unlinked("Merged [#1000](https://github.com/acme/app/pull/1000).")).toBeUndefined()
-    expect(unlinked("CEDAR-2779 is at https://linear.app/acme/issue/CEDAR-2779")).toBeUndefined()
+    expect(
+      unlinked("MADECEDAR-2779 is at https://linear.app/acme/issue/MADECEDAR-2779"),
+    ).toBeUndefined()
     expect(
       unlinked("[`d05240d6`](https://github.com/acme/app/commit/d05240d6) landed."),
     ).toBeUndefined()
-    expect(unlinked("```\nmerged #1000 at d05240d6 for BRAVO-1322\n```")).toBeUndefined()
+    expect(unlinked("```\nmerged #1000 at d05240d6 for MADEBRAVO-1322\n```")).toBeUndefined()
     expect(unlinked("Answered on #i369 and #i41.")).toBeUndefined()
   })
 
@@ -206,6 +219,15 @@ test("asks.md shows each template's text as it is", async () => {
   for (const { preview } of Object.values(ASK_EXAMPLES)) {
     if (preview.type !== "ask") continue
     expect(doc).toContain(preview.text)
-    expect(doc).toContain(`Options: \`${preview.options[0]?.label}\`; Deny: \`${preview.deny}\`.`)
+    if ("questions" in preview) {
+      for (const q of preview.questions) {
+        expect(doc).toContain(q.question)
+        for (const option of q.options) expect(doc).toContain(option.label)
+      }
+    } else {
+      expect(doc).toContain(
+        `Options: \`${preview.options?.[0]?.label}\`; Deny: \`${preview.deny}\`.`,
+      )
+    }
   }
 })

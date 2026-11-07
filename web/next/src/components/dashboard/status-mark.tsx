@@ -1,7 +1,6 @@
 "use client"
 
 import {
-  RiCheckDoubleLine,
   RiCheckLine,
   RiErrorWarningLine,
   RiFileCopyLine,
@@ -17,13 +16,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { oneLine } from "@/lib/dashboard"
 import type { StatusMarkKind } from "@/lib/outbox"
 
+// one mark at a time: a spinner until the transcript holds the message, then one tick
 const MARKS: Record<StatusMarkKind, { Icon: RemixiconComponentType; className?: string }> = {
-  delivered: { Icon: RiCheckDoubleLine },
+  delivered: { Icon: RiCheckLine },
   failed: { Icon: RiErrorWarningLine, className: "text-destructive" },
-  // a pending single check at half strength, so queued, sent and delivered read as three steps in the footer's one colour
-  queued: { Icon: RiCheckLine, className: "text-muted-foreground opacity-50" },
   sending: { Icon: RiLoader4Line, className: "motion-safe:animate-spin" },
-  sent: { Icon: RiCheckLine },
 }
 
 type MarkProps = { hover?: string; label: string; mark: StatusMarkKind }

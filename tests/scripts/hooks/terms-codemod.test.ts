@@ -31,7 +31,7 @@ const refuses = async (text: string) =>
     JSON.stringify({
       cwd: scratch,
       hook_event_name: "PreToolUse",
-      tool_input: { body: `see ${text}`, issueId: "CEDAR-1" },
+      tool_input: { body: `see ${text}`, issueId: "MADECEDAR-1" },
       tool_name: "mcp__linear-shared__save_comment",
     }),
     { CLAUDE_CONFIG_DIR: scratch, PLAYGROUND_DATA_DIR: join(scratch, "data") },

@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  checkSetting,
   importedJob,
   JOBS,
   jobKey,
   jobSchema,
+  orgJobs,
   plistProgram,
   renderJobs,
   settingFields,
@@ -125,7 +127,8 @@ describe("the job registry", () => {
       [{ ...sweep, needsCmux: true }, "herdr"],
       [{ ...sweep, needsCmux: false, runtime: "cmux" }, "herdr"],
       [{ ...noRuntime, needsCmux: true }, "herdr"],
-      [{ ...noRuntime, needsCmux: false }, undefined],
+      // a field the row leaves out reads the registry's, ops-sweep's herdr (PG-1196)
+      [{ ...noRuntime, needsCmux: false }, "herdr"],
     ] as const) {
       const job = stored("ops-sweep", row)
       expect(job.disabled).toBeUndefined()
@@ -189,5 +192,193 @@ describe("the job registry", () => {
       "<key>ProgramArguments</key>\n<array>\n<string>/b/bun</string><string>a &amp; b</string></array><key>WorkingDirectory</key><string>/r</string>"
     expect(plistProgram(xml)).toEqual({ cwd: "/r", program: ["/b/bun", "a & b"] })
     expect(plistProgram("bplist00")).toBeNull()
+  })
+})
+
+// PG-1196: a job's row may hold its enabled field alone, which every reader sees over the registry's entry, so a later change to the registry still reaches a job the owner turned on.
+describe("a job's row holding some of its fields (PG-1196)", () => {
+  const sweep = jobKey("ops-sweep")
+  const on = (value: object) => settingsFor([{ key: sweep, scope: "me", value }], "me").values
+
+  test("its setting takes some of a job's fields, refuses a field no job has, and no job the registry does not name", () => {
+    expect(checkSetting(sweep, { enabled: true })).toEqual({
+      key: sweep,
+      ok: true,
+      value: { enabled: true },
+    })
+    expect(checkSetting(sweep, { enabled: true, madeUp: 1 }).ok).toBe(false)
+    expect(checkSetting(sweep, { enabled: "yes" }).ok).toBe(false)
+    expect(checkSetting("jobs.notAJob", { enabled: true }).ok).toBe(false)
+  })
+
+  test("a row holding enabled alone reads as the registry's job turned on, and a registry change after it reaches the job", () => {
+    expect(on({ enabled: true })[sweep]).toEqual({ ...JOBS["ops-sweep"], enabled: true })
+    const job = JOBS["ops-sweep"]!
+    const before = job.description
+    try {
+      job.description = "A made-up description the registry moved to."
+      expect(on({ enabled: true })[sweep]).toMatchObject({
+        description: "A made-up description the registry moved to.",
+        enabled: true,
+      })
+    } finally {
+      job.description = before
+    }
+  })
+
+  test("a launchd job turned on by enabled alone renders its plist from the registry's label and program", () => {
+    const tick = jobKey("ops-tick")
+    const values = settingsFor([{ key: tick, scope: "me", value: { enabled: true } }], "me").values
+    expect([...renderJobs(values, [], fill).plists.keys()]).toEqual(["com.playground.ops-tick"])
+    expect(renderJobs(values, [], fill).jobs.find((job) => job.name === "ops-tick")).toMatchObject({
+      launchd: "com.playground.ops-tick",
+    })
+  })
+
+  test("a row's own fields win over the registry's, so a whole row stored before reads as it did", () => {
+    expect(on({ enabled: true, schedule: { every: 7 } })[sweep]).toMatchObject({
+      enabled: true,
+      heartbeat: "ops-sweep",
+      schedule: { every: 7 },
+    })
+    const whole = { ...JOBS["ops-sweep"]!, enabled: true, pausedFor: "made-up" }
+    expect(on(whole)[sweep]).toEqual(whole)
+  })
+})
+
+describe("an org's own job row (PG-1335)", () => {
+  const watch = {
+    callsModel: false,
+    command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts --data {data}",
+    cwd: "{data}/ops/ops-watch",
+    description: "Watches an org's own queue.",
+    enabled: true,
+    heartbeat: "ops-watch",
+    schedule: { always: true },
+  }
+  const scripts = { acme: ["ops-watch"], globex: ["ops-watch"] }
+  const rows = (...list: [string, string, unknown][]) =>
+    list.map(([scope, key, value]) => ({ key, scope, value }))
+  const one = (value: unknown, scope = "acme", key = "jobs.opsWatch") =>
+    orgJobs(rows([scope, key, value]), "tester", scripts)
+
+  test("an org-scope row for a job the registry lacks renders into jobs.json, its command filled from the org's script folder", () => {
+    const org = one({ ...watch, config: { prefixes: ["INC"] } })
+    expect(org.refused).toEqual([])
+    const { jobs } = renderJobs({}, [], fill, org.jobs)
+    expect(jobs.find((job) => job.name === "ops-watch")).toEqual({
+      callsModel: false,
+      command: "/b/bun --no-env-file /d/ops/ops-watch/cli.ts --data /d",
+      config: { prefixes: ["INC"] },
+      cwd: "/d/ops/ops-watch",
+      description: "Watches an org's own queue.",
+      heartbeat: "ops-watch",
+      name: "ops-watch",
+      org: "acme",
+      schedule: { always: true },
+    })
+  })
+
+  test("a row with no cwd runs from its script folder, and one turned off renders paused", () => {
+    const { cwd: _, ...rest } = watch
+    const { jobs } = renderJobs({}, [], fill, one({ ...rest, enabled: false }).jobs)
+    expect(jobs.find((job) => job.name === "ops-watch")).toMatchObject({
+      cwd: "/d/ops/ops-watch",
+      disabled: true,
+    })
+  })
+
+  test.each([
+    [
+      "a command run from the checkout",
+      { command: "{bun} {checkout}/packages/scripts/src/ops-watch/cli.ts" },
+    ],
+    ["a command run by another program", { command: "/bin/sh {data}/ops/ops-watch/run.sh" }],
+    ["a script folder the org does not ship", { command: "{bun} {data}/ops/other/cli.ts" }],
+    ["a .. segment out of the folder", { command: "{bun} {data}/ops/ops-watch/../x/cli.ts" }],
+    [
+      "a shell operator after the script",
+      { command: "{bun} {data}/ops/ops-watch/cli.ts; touch x" },
+    ],
+    [
+      "another placeholder in an argument",
+      { command: "{bun} {data}/ops/ops-watch/cli.ts {checkout}" },
+    ],
+    ["a cwd outside the folder", { cwd: "{checkout}" }],
+    ["a cwd in another script folder", { cwd: "{data}/ops/ops-watchers" }],
+    ["a launchd label", { launchd: "com.playground.ops-dashboard" }],
+    ["a program", { program: ["{bun}", "{data}/ops/ops-watch/cli.ts"] }],
+    ["a config that is a list", { config: ["INC"] }],
+    ["a config that is text", { config: "INC" }],
+    ["a stop group, which ops would stop before each start", { stop: "dashboard" }],
+    ["a heartbeat of another job's name", { heartbeat: "ops-dashboard" }],
+    ["a heartbeat out of its folder", { heartbeat: "../x" }],
+    ["a bare script folder as its script", { command: "{bun} {data}/ops/ops-watch" }],
+  ])("a row with %s is refused, named with its org and key, and nothing renders", (_, change) => {
+    const org = one({ ...watch, ...change })
+    expect(org.jobs).toEqual({})
+    expect(org.refused).toHaveLength(1)
+    expect(org.refused[0]).toStartWith("jobs: refused acme jobs.opsWatch: ")
+    expect(renderJobs({}, [], fill, org.jobs).jobs.map((job) => job.name)).not.toContain(
+      "ops-watch",
+    )
+  })
+
+  test("a login-scope row for a job the registry lacks stays refused", () => {
+    const org = one(watch, "tester")
+    expect(org.jobs).toEqual({})
+    expect(org.refused).toEqual([
+      "jobs: refused tester jobs.opsWatch: only an org's scope may add a job the registry lacks",
+    ])
+  })
+
+  test("a row for a registry job is left to the registry, and two orgs naming one job render the first", () => {
+    expect(one(watch, "acme", "jobs.opsSweep")).toEqual({ jobs: {}, refused: [] })
+    const org = orgJobs(
+      rows(
+        ["acme", "jobs.opsWatch", watch],
+        ["globex", "jobs.opsWatch", { ...watch, description: "Theirs." }],
+      ),
+      "tester",
+      scripts,
+    )
+    expect(org.jobs["ops-watch"]?.description).toBe("Watches an org's own queue.")
+    expect(org.refused).toEqual(["jobs: refused globex jobs.opsWatch: acme already adds ops-watch"])
+  })
+
+  test("an org's job replaces a hand-kept jobs.json row of its name", () => {
+    const kept = { command: "old", name: "ops-watch" }
+    const { jobs } = renderJobs({}, [kept], fill, one(watch).jobs)
+    expect(jobs.filter((job) => job.name === "ops-watch")).toHaveLength(1)
+    expect(jobs.find((job) => job.name === "ops-watch")?.command).not.toBe("old")
+  })
+
+  test("an org's job whose row is then refused or gone renders paused, so the runner stops it, and a hand-kept row stays as it is", () => {
+    const first = renderJobs({}, [], fill, one(watch).jobs).jobs
+    const rendered = first.find((job) => job.name === "ops-watch")!
+    for (const org of [one({ ...watch, stop: "dashboard" }).jobs, {}])
+      expect(renderJobs({}, first, fill, org).jobs.find((job) => job.name === "ops-watch")).toEqual(
+        {
+          ...rendered,
+          disabled: true,
+        },
+      )
+    const company = { command: "~/x/run.sh", heartbeat: "ops-company", name: "ops-company" }
+    expect(renderJobs({}, [company], fill).jobs.find((job) => job.name === "ops-company")).toEqual(
+      company,
+    )
+  })
+
+  test("a registry job's row renders as before without config, and with config only adds it", () => {
+    const before = renderJobs({}, [], fill).jobs.find((job) => job.name === "ops-sweep")
+    const withConfig = renderJobs(
+      { [jobKey("ops-sweep")]: { ...JOBS["ops-sweep"], config: { a: 1 } } },
+      [],
+      fill,
+    ).jobs.find((job) => job.name === "ops-sweep")
+    expect(withConfig).toEqual({ ...before, config: { a: 1 } })
+    expect(jobSchema.safeParse({ ...JOBS["ops-sweep"], config: [1] }).success).toBe(false)
+    expect(checkSetting(jobKey("ops-sweep"), { config: "a" }).ok).toBe(false)
+    expect(checkSetting(jobKey("ops-sweep"), { config: { a: 1 } }).ok).toBe(true)
   })
 })

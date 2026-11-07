@@ -65,7 +65,7 @@ const SLACK = {
 }
 
 const PREVIEWS = {
-  ask: { text: "Port DUNE-1401's fix to staging and main.", type: "ask" },
+  ask: { text: "Port MADEDUNE-1401's fix to staging and main.", type: "ask" },
   budget: { amount: "$40", type: "budget", why: "A second account for a week" },
   delete: { type: "delete", what: "47 stale worktrees", why: "They hold 30 GB" },
   schema: { shape: "inbox_item(id text, ref integer)", type: "schema" },
@@ -150,6 +150,63 @@ describe("what bun run ask takes", () => {
     )
   })
 
+  describe("an ask holds several questions, each with its own choices (#1250)", () => {
+    const q = (n: number) =>
+      Array.from({ length: n }, (_, at) => ({
+        options: [{ label: "Yes" }, { label: "No" }],
+        question: `Question ${at + 1}?`,
+      }))
+    const asksQ = (over: object) =>
+      inboxInputSchema.safeParse(decision({ ...PREVIEWS.ask, ...over }))
+
+    test("a questions list takes 2 to 20 entries and refuses 1 or 21", () => {
+      expect(asksQ({ questions: q(2) }).success).toBe(true)
+      expect(asksQ({ questions: q(20) }).success).toBe(true)
+      expect(asksQ({ questions: q(1) }).success).toBe(false)
+      expect(asksQ({ questions: q(21) }).success).toBe(false)
+    })
+
+    test("each entry has its own question and 1 to 5 options, recommended within them", () => {
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ description: "soak a day", label: "staging" }], question: "Base?" },
+            { options: [{ label: "now" }, { label: "later" }], question: "When?" },
+          ],
+        }).success,
+      ).toBe(true)
+      const six = Array.from({ length: 6 }, (_, at) => ({ label: `Way ${at + 1}` }))
+      expect(asksQ({ questions: [{ options: six, question: "Q?" }, ...q(1)] }).success).toBe(false)
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ label: "a" }, { label: "b" }], question: "Q?", recommended: 0 },
+            { options: [{ label: "c" }], question: "R?" },
+          ],
+        }).success,
+      ).toBe(true)
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ label: "a" }, { label: "b" }], question: "Q?", recommended: 2 },
+            ...q(1),
+          ],
+        }).success,
+      ).toBe(false)
+    })
+
+    test("a questions list and top-level options, approve or deny are mutually exclusive", () => {
+      expect(asksQ({ options: OPTIONS, questions: q(2) }).success).toBe(false)
+      expect(asksQ({ approve: "Do it", questions: q(2) }).success).toBe(false)
+      expect(asksQ({ deny: "Hold", questions: q(2) }).success).toBe(false)
+    })
+
+    test("an ask with no questions is unchanged", () => {
+      expect(inboxInputSchema.safeParse(decision(PREVIEWS.ask)).success).toBe(true)
+      expect(asksQ({ options: OPTIONS }).success).toBe(true)
+    })
+  })
+
   test("a draft is a recipient and the words, and an update an outcome with an optional link", () => {
     expect(
       inboxInputSchema.safeParse({
@@ -190,13 +247,13 @@ describe("what bun run ask takes", () => {
         preview: { link, text: "on it", to: "Cameron's thread" },
         title: "Reply to Cameron",
       }).success
-    expect(draft("https://linear.app/acme/issue/DUNE-2186/x")).toBe(true)
+    expect(draft("https://linear.app/acme/issue/MADEDUNE-2186/x")).toBe(true)
     expect(
       draft(
         "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100",
       ),
     ).toBe(true)
-    expect(draft("http://linear.app/acme/issue/DUNE-2186")).toBe(false)
+    expect(draft("http://linear.app/acme/issue/MADEDUNE-2186")).toBe(false)
     expect(draft("https://acme.slack.com/archives/C0MADEUP01/p1700000000000100")).toBe(false)
   })
 
@@ -654,6 +711,43 @@ describe("an answer", () => {
     expect(answerInputSchema.safeParse({ action: "approve", option: 5 }).success).toBe(false)
   })
 
+  test("a multi-question ask approves with one pick per question, within its choices (#1250)", () => {
+    const multi = item({
+      kind: "decision",
+      preview: {
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          { options: [{ label: "now" }, { label: "later" }, { label: "soon" }], question: "When?" },
+        ],
+        text: "Pick for each.",
+        type: "ask",
+      } as never,
+    })
+    expect(checkAnswer(multi, { action: "approve", options: [0, 2] })).toEqual({
+      answer: { choice: "approve", options: [0, 2] },
+      status: "approved",
+    })
+    expect(checkAnswer(multi, { action: "deny" })).toEqual({
+      answer: { choice: "deny" },
+      status: "denied",
+    })
+    const invalid: Parameters<typeof checkAnswer>[1][] = [
+      { action: "approve" },
+      { action: "approve", option: 0 },
+      { action: "approve", options: [0] },
+      { action: "approve", options: [0, 1, 2] },
+      { action: "approve", options: [0, 3] },
+      { action: "approve", options: [2, 0] },
+    ]
+    for (const input of invalid) {
+      expect(checkAnswer(multi, input)).toHaveProperty("message")
+    }
+    // a stray single option beside the per-question picks is refused, not silently ignored
+    expect(checkAnswer(multi, { action: "approve", options: [0, 2], option: 0 })).toEqual({
+      message: "A multi-question ask's approve names a pick for each question, not a single option",
+    })
+  })
+
   test("sends a draft as written or as changed, or discards it", () => {
     const draft = item({ kind: "draft" })
     expect(checkAnswer(draft, { action: "send", text: "hi" })).toEqual({
@@ -684,7 +778,7 @@ describe("an answer", () => {
     expect(checkAnswer(slack, { action: "draft", text: "" })).toHaveProperty("message")
     const linear = item({
       kind: "draft",
-      preview: { link: "https://linear.app/acme/issue/DUNE-1/x", text: "hi", to: "DUNE-1" },
+      preview: { link: "https://linear.app/acme/issue/MADEDUNE-1/x", text: "hi", to: "MADEDUNE-1" },
     })
     expect(checkAnswer(linear, { action: "draft" })).toHaveProperty("message")
     expect(checkAnswer(linear, { action: "send" })).toEqual({
@@ -695,7 +789,7 @@ describe("an answer", () => {
     expect(savesDraft({ link: CHANNEL, text: "hi", to: "@Merritt" })).toBe(true)
     expect(savesDraft({ noLink: "a new DM", text: "hi", to: "@Merritt" })).toBe(true)
     expect(
-      savesDraft({ link: "https://linear.app/acme/issue/DUNE-1/x", text: "hi", to: "x" }),
+      savesDraft({ link: "https://linear.app/acme/issue/MADEDUNE-1/x", text: "hi", to: "x" }),
     ).toBe(false)
     // a draft is a go: its poster closes it with the channel link the draft tool returns
     expect(isGo("draft")).toBe(true)
@@ -839,6 +933,19 @@ describe("an answer", () => {
       ref: 47,
       title: "Which way?",
     })
+    const several = item({
+      id: "vwx",
+      kind: "decision",
+      preview: {
+        ...PREVIEWS.ask,
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          { options: [{ label: "now" }, { label: "later" }, { label: "soon" }], question: "When?" },
+        ],
+      } as never,
+      ref: 48,
+      title: "Pick for each?",
+    })
     const cases: [InboxItem, Parameters<typeof answerPayload>[1], Record<string, unknown>][] = [
       [
         decided,
@@ -882,6 +989,22 @@ describe("an answer", () => {
         lettered,
         { at: AT, choice: "deny" },
         { go: false, option: { index: 3, label: "None of these", letter: "D" }, verb: "pick" },
+      ],
+      // a multi-question ask's approve names one pick per question, each by its letter and label, and reads its note back
+      [
+        several,
+        { at: AT, choice: "approve", note: "both fine", options: [0, 2] },
+        {
+          comment: "both fine",
+          go: true,
+          next: "carry-out",
+          picks: [
+            { index: 0, label: "staging", letter: "A", question: "Base?" },
+            { index: 2, label: "soon", letter: "C", question: "When?" },
+          ],
+          type: "ask",
+          verb: "pick",
+        },
       ],
       [
         decided,
@@ -1420,6 +1543,30 @@ describe("a guard decision (PG-1090)", () => {
   })
 })
 
+// PG-1196: the guard decision also sets a job's enabled field, which no session may write either.
+describe("a guard decision for a job (PG-1196)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
+
+  test("takes a registry job's enabled field alone, or no value", () => {
+    expect(takes({ key: "jobs.opsTicketCard", value: { enabled: true } })).toBe(true)
+    expect(takes({ key: "jobs.opsSweep", value: { enabled: false } })).toBe(true)
+    expect(takes({ key: "jobs.opsTicketCard", value: undefined })).toBe(true)
+  })
+
+  test("refuses a job decision carrying any field but enabled, and a job the registry does not name", () => {
+    for (const change of [
+      { key: "jobs.opsTicketCard", value: { command: "made-up", enabled: true } },
+      { key: "jobs.opsTicketCard", value: { enabled: true, schedule: { every: 5 } } },
+      { key: "jobs.opsTicketCard", value: {} },
+      { key: "jobs.opsTicketCard", value: true },
+      { key: "jobs.opsMadeUp", value: { enabled: true } },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+})
+
 // Made-up accounts: two Claude rows, one of them own, and a GLM row whose label is no Claude email.
 const ACCOUNTS = [
   { email: "pat@example.com", label: "work", renews: 17 },
@@ -1510,7 +1657,7 @@ describe("slackPlace", () => {
 
   test("is null for no link, a place outside Slack, or a Slack link that names no conversation", () => {
     expect(slackPlace(undefined)).toBeNull()
-    expect(slackPlace("https://linear.app/acme/issue/DUNE-1401")).toBeNull()
+    expect(slackPlace("https://linear.app/acme/issue/MADEDUNE-1401")).toBeNull()
     expect(slackPlace("https://app.slack.com/client/T0000000000")).toBeNull()
     expect(slackPlace("https://evil.example/client/T0000000000/C0MADEUP01")).toBeNull()
   })
@@ -1702,6 +1849,53 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       to: "ops",
       via: "session",
     })
+  })
+
+  test("a multi-question ask stores one pick per question and tells its poster each, with the Note (#1250)", async () => {
+    const posted = await post(
+      decision({
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          {
+            options: [{ label: "now" }, { label: "later" }, { label: "soon" }],
+            question: "When?",
+          },
+        ],
+        text: "Pick for each.",
+        type: "ask",
+      }),
+    )
+    const sent: Delivery[] = []
+    const answered = await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve", note: "both fine", options: [0, 2] },
+      {
+        actor,
+        deliver: async (delivery) => {
+          sent.push(delivery)
+          return { at: "2026-10-07T12:00:00.000Z", ok: true, sessionId: "s1" }
+        },
+      },
+    )
+    expect(answered.ok).toBe(true)
+    if (!answered.ok) return
+    expect(answered.item.status).toBe("approved")
+    expect(answered.item.answer).toMatchObject({
+      choice: "approve",
+      note: "both fine",
+      options: [0, 2],
+    })
+    // read the stored answer back: one index per question, and the Note
+    const got = await store.getItem(db, posted.id)
+    expect(got?.answer).toMatchObject({ choice: "approve", note: "both fine", options: [0, 2] })
+    // the poster is told each pick by its letter and label, and the Note as a comment
+    const payload = payloadOf(sent[0]?.text ?? "")
+    expect(payload?.picks).toEqual([
+      { index: 0, label: "staging", letter: "A", question: "Base?" },
+      { index: 2, label: "soon", letter: "C", question: "When?" },
+    ])
+    expect(payload?.comment).toBe("both fine")
   })
 
   describe("a Slack send's files (PG-649)", () => {
@@ -1928,7 +2122,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { action: "draft" },
         { actor, deliver: delivered, upload },
       )
-      const linear = await filedDraft("https://linear.app/acme/issue/DUNE-1401")
+      const linear = await filedDraft("https://linear.app/acme/issue/MADEDUNE-1401")
       await store.answerItem(
         db,
         linear.id,
@@ -2873,7 +3067,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(await stale()).not.toContain(posted.id)
   })
 
-  test("the poster resolves its own alert update; another session, a non-alert item and an unknown id are refused (#658)", async () => {
+  test("the poster resolves its own alert update; another session, a decision and an unknown id are refused (#658)", async () => {
     const alert = async () => {
       const posted = await post({
         from: "ops",
@@ -2908,23 +3102,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const other = await alert()
     expect(await store.resolveItem(db, other.id, { by: "builder" })).toMatchObject({
       code: "CONFLICT",
-      message: "Only ops, which posted it, resolves this alert",
+      message: "Only ops, which posted it, resolves this update",
       ok: false,
     })
-    // a decision settles, it does not resolve; a non-alert update is read or dismissed
+    // a decision settles, it does not resolve
     expect(
       await store.resolveItem(db, (await post(decision(PREVIEWS.budget))).id, { by: "ops" }),
     ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
-    const finding = await post({
-      from: "builder",
-      kind: "update",
-      preview: { outcome: "finding" },
-      title: "Found",
-    })
-    expect(await store.resolveItem(db, finding.id, { by: "builder" })).toMatchObject({
-      code: "VALIDATION_ERROR",
-      ok: false,
-    })
     expect(await store.resolveItem(db, "#i999999", { by: "ops" })).toMatchObject({
       code: "NOT_FOUND",
       ok: false,
@@ -2943,7 +3127,51 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       }),
     ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
     // nothing here leaves an update unread
-    await store.markRead(db, [other.id, finding.id, long.id, archived.id])
+    await store.markRead(db, [other.id, long.id, archived.id])
+  })
+
+  // PG-1349: a finished progress card and the focus card waited for the owner's Done, since resolve took an alert alone
+  test("the poster resolves any update of its own once it has settled, a finished progress card and the focus card included, read and with its note; another session's is refused (PG-1349)", async () => {
+    const at = new Date("2026-10-07T12:00:00.000Z")
+    const progress = await post({
+      from: "worker-made-up",
+      kind: "update",
+      preview: { outcome: "merged", text: "```\nMade-up job  ██████████  3/3\n```" },
+      title: "Made-up job: 3 of 3 steps done",
+    })
+    const done = await store.resolveItem(db, `#i${progress.ref}`, {
+      by: "worker-made-up",
+      note: "All 3 steps done",
+      now: at,
+    })
+    expect(done).toMatchObject({
+      item: {
+        answer: {
+          at: at.toISOString(),
+          by: "worker-made-up",
+          choice: "resolved",
+          note: "All 3 steps done",
+        },
+        readAt: at.toISOString(),
+      },
+      ok: true,
+    })
+    const focus = await post({
+      from: "ops",
+      kind: "update",
+      preview: { outcome: "finding" },
+      title: "Focus for worker-f ended: 0 runs queued while it stood, 0m0s in all",
+    })
+    expect(await store.resolveItem(db, focus.id, { by: "worker-made-up" })).toMatchObject({
+      code: "CONFLICT",
+      message: "Only ops, which posted it, resolves this update",
+      ok: false,
+    })
+    const note = "Everything that came in while focus stood is answered"
+    expect(await store.resolveItem(db, focus.id, { by: "ops", note, now: at })).toMatchObject({
+      item: { answer: { by: "ops", choice: "resolved", note } },
+      ok: true,
+    })
   })
 
   test("ack and settle store where the answer was carried out, and take an https URL alone", async () => {
@@ -2976,19 +3204,19 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       ok: false,
     })
     const settled = await store.settleItem(db, ticket.id, {
-      link: "https://linear.app/team/issue/CEDAR-1",
+      link: "https://linear.app/team/issue/MADECEDAR-1",
     })
     expect(settled.ok && settled.item.answer).toMatchObject({
       choice: "settled",
-      link: "https://linear.app/team/issue/CEDAR-1",
+      link: "https://linear.app/team/issue/MADECEDAR-1",
     })
   })
 
   test("a link's label is kept beside it, needs the link, and is one line", async () => {
     const ticket = await post(decision(PREVIEWS.ticket))
     await store.answerItem(db, ticket.id, { action: "approve" }, { actor })
-    const link = "https://linear.app/acme/issue/DUNE-2186"
-    expect(await store.ackItem(db, ticket.id, { label: "Filed DUNE-2186" })).toMatchObject({
+    const link = "https://linear.app/acme/issue/MADEDUNE-2186"
+    expect(await store.ackItem(db, ticket.id, { label: "Filed MADEDUNE-2186" })).toMatchObject({
       code: "VALIDATION_ERROR",
       ok: false,
     })
@@ -3002,8 +3230,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       code: "VALIDATION_ERROR",
       ok: false,
     })
-    const acked = await store.ackItem(db, ticket.id, { label: " Filed DUNE-2186 ", link })
-    expect(acked.ok && acked.item.answer).toMatchObject({ link, linkLabel: "Filed DUNE-2186" })
+    const acked = await store.ackItem(db, ticket.id, { label: " Filed MADEDUNE-2186 ", link })
+    expect(acked.ok && acked.item.answer).toMatchObject({ link, linkLabel: "Filed MADEDUNE-2186" })
     const other = await post(decision(PREVIEWS.delete))
     const settled = await store.settleItem(db, other.id, {
       label: "Closed acme/app#12",
@@ -3019,14 +3247,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const ticket = await post(decision(PREVIEWS.ticket))
     await store.answerItem(db, ticket.id, { action: "approve" }, { actor })
     await store.ackItem(db, ticket.id, {
-      label: "Filed DUNE-2186",
-      link: "https://linear.app/acme/issue/DUNE-2186",
+      label: "Filed MADEDUNE-2186",
+      link: "https://linear.app/acme/issue/MADEDUNE-2186",
     })
     const again = await store.ackItem(db, ticket.id, {
-      link: "https://linear.app/acme/issue/DUNE-2187",
+      link: "https://linear.app/acme/issue/MADEDUNE-2187",
     })
     expect(again.ok && again.item.answer).toMatchObject({
-      link: "https://linear.app/acme/issue/DUNE-2187",
+      link: "https://linear.app/acme/issue/MADEDUNE-2187",
     })
     expect(again.ok && again.item.answer && "linkLabel" in again.item.answer).toBe(false)
   })
@@ -5252,6 +5480,42 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const set = await post(decision(GUARD))
       await store.answerItem(db, set.id, { action: "clear" }, { actor, settingsData: data })
       expect(atOrg(data)).toEqual([])
+    })
+
+    test("a job's Approve stores its enabled field alone at its scope, so every other field still reads the registry's (PG-1196)", async () => {
+      const data = folder()
+      const key = "jobs.opsTicketCard"
+      const card = { ...GUARD, key, scope: "made-up-me", value: { enabled: true } }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      const read = readSetting(data, key)!
+      expect(read.rows).toEqual([{ key, scope: "made-up-me", value: { enabled: true } }])
+      expect(read.value).toEqual({ ...(read.default as object), enabled: true })
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        set: { exitCode: 0, line: `set ${key} at made-up-me to {"enabled":true}` },
+      })
+      const again = await post(decision(card))
+      expect((await approve(again.id, again.updatedAt, data)).ok).toBe(true)
+      expect((await store.getItem(db, again.id))?.answer).toMatchObject({
+        set: {
+          exitCode: 0,
+          line: `${key} at made-up-me is already {"enabled":true}, so nothing changed`,
+        },
+      })
+    })
+
+    test("a job's Approve keeps the other fields its scope's row holds, and stores no registry field (PG-1196)", async () => {
+      const data = folder()
+      const key = "jobs.opsTicketCard"
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+      const row = { enabled: false, schedule: { every: 7 } }
+      expect(setSetting(data, { key, scope: "made-up-me", value: row }, who).ok).toBe(true)
+      const card = { ...GUARD, key, scope: "made-up-me", value: { enabled: true } }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(readSetting(data, key)!.rows).toEqual([
+        { key, scope: "made-up-me", value: { enabled: true, schedule: { every: 7 } } },
+      ])
     })
 
     test("with no data folder its Approve is refused and the item stays open", async () => {

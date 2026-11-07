@@ -15,7 +15,7 @@ set -euo pipefail
 #      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
 #      a small worker keeping an eighth in its place for the reviewers and testers; a load at or over
 #      that line refuses whatever the CPU's idle share, so the load stays under the cores, but for a
-#      --firefighting start while its trigger file stands (FF_TRIGGER), logged as readings.firefighting
+#      --priority start while a priority file stands (PRIORITY_FILE), logged as readings.priority
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
@@ -23,8 +23,8 @@ set -euo pipefail
 #   Under Claude Code's sandbox the load comes from uptime, and a refused pressure level leaves the swap-ins to decide (scripts/README.md)
 #   3. slots, for a fresh worker start alone (a reviewer, tester or resume skips it, so work
 #      already admitted finishes): `ops/run-slot.sh room`, refusing while runs wait in its queue and no
-#      lane is free with the load units for a run (but for a --firefighting start while its trigger file
-#      stands, FF_TRIGGER, logged as readings.firefighting), or when room gives no reading
+#      lane is free with the load units for a run (but for a --priority start while a priority file
+#      stands, PRIORITY_FILE, logged as readings.priority), or when room gives no reading
 #   4. usage, the launching backend's own window: Claude reads usage.json
 #      (5-hour under 90%, the week within 14.3 points a day of pace, floored at one day's share, readings
 #      no older than 15 minutes; one never written, as on a fresh install before ops-usage first runs, passes,
@@ -54,7 +54,7 @@ set -euo pipefail
 #   spawn.sh close     <name>                           closes the herdr pane spawn.sh opened for <name>, by the label it set, on the server its resume record names; it refuses any other pane and your own, and ends its roster row once the pane closes
 #   --size <small|medium|big>  with any mode but restore or close, anywhere among its words: the item's size the load gate counts, in place of small for a reviewer or tester and the one ops/run-slot.sh size reads from the roster and plan.json for the rest
 #   --check            with any mode but restore or close, anywhere among its words: run every check and gate but the live-name one, print "ok: <name> can start" and start or close nothing
-#   --firefighting     with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a firefighting trigger file stands in the data folder (firefighting-stop.json, firefighting-headstart.json, or ops-firefighting-start's firefighting-start.json), and focus's refusal while one of the first two does; it is refused while none does
+#   --priority         with any mode but restore or close, anywhere among its words: the start passes the load gate and the slots gate's full queue (the memory gate and an unread room still hold it) while a priority file stands in the data folder (priority.json, an urgent window, or priority-start.json, a job's own starts), and focus's refusal while priority.json does; it is refused while none does. --firefighting is its old name, and firefighting-stop.json and firefighting-headstart.json stand for priority.json and firefighting-start.json for priority-start.json, aliases until the jobs that write them take the new names
 #   --brief <file>     with resume alone, anywhere among its words: the resumed session's first prompt has it read ~/.playground/<file>; without it, a resume's first prompt has it act on the after-resume hook's instruction
 #   --account <email>  with any mode but restore or close, anywhere among its words: the session logs in as that Claude account, never this machine's own login, its token read from the Keychain (the service usage.keychainService names) by the new pane's own shell, which stops on an empty one before claude runs; with --backend glm it takes a GLM row's label instead
 #   --backend glm      with any mode but restore, close or a reviewer's or a tester's, outside a checkout of an org ext.links guards and on a brief naming no word of the glm-refused-sources list, anywhere among its words: the session runs on Z.ai's GLM (models.glm, glm-5.3-flash by default) through Claude Code, its key read from the Keychain (the service models.glmKeychainService names, the account its usage.accounts row's label names: --account's, else the first GLM row's) by the new pane's own shell, which stops on an empty one before claude runs
@@ -63,6 +63,7 @@ set -euo pipefail
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
 #   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
+#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PR the checker serves, by its URL or its number alone, or its issue's URL while the PR is not yet opened; on an ended roster row it replaces the row's prs, and its pr with the first pull request named (none for an issue alone), and a checker's start there is refused without it; on a live row, or none, it joins them and gives a row with no pr the first pull request named
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
 #   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
@@ -95,10 +96,10 @@ fi
 DATA=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { dataDir } from '$REPO/packages/env/src/data-dir.ts'; console.log(dataDir())") || { echo "spawn.sh: bun could not resolve the data folder" >&2; exit 1; }
 # The roster's manager kinds (kinds.ts' ROSTER_ROLE_OF_KIND), so a kind role_of_kind does not list runs as a lead: an orchestrator. A read that fails leaves the named kinds alone, so an orchestrator is refused rather than guessed.
 MANAGER_KINDS=$(cd / && env $UNSET "$BUN" --no-env-file -e "import { ROSTER_ROLE_OF_KIND as r } from '$REPO/packages/config/src/kinds.ts'; console.log(Object.keys(r).filter((k) => r[k] === 'manager').join(' '))" 2>/dev/null) || MANAGER_KINDS=
-# The firefighting trigger file standing in the data folder, the first of the three that exists, exit 1 when none does, its content unread; ops-firefighting-start writes the third, firefighting-start.json, for its own starts, which passes the load and slots gates but never focus.
-firefighting_trigger() {
+# The priority file standing in the data folder, the first that exists, exit 1 when none does, its content unread: priority.json (an urgent window) and its old names firefighting-stop.json and firefighting-headstart.json pass the load and slots gates and focus, and a job's own start file, priority-start.json or its old name firefighting-start.json, passes the load and slots gates but never focus.
+priority_file() {
   local f
-  for f in "$DATA/firefighting-stop.json" "$DATA/firefighting-headstart.json" "$DATA/firefighting-start.json"; do
+  for f in "$DATA/priority.json" "$DATA/firefighting-stop.json" "$DATA/firefighting-headstart.json" "$DATA/priority-start.json" "$DATA/firefighting-start.json"; do
     [ -e "$f" ] && { echo "$f"; return 0; }
   done
   return 1
@@ -270,7 +271,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${FF_TRIGGER:-}" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -280,7 +281,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, firefighting = sys.argv[1:14]
+data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority = sys.argv[1:14]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -442,9 +443,9 @@ else:
         share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
         keep = cap * share
         readings["reserve"] = keep
-        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --firefighting start passes while its trigger file stands (FF_TRIGGER), since firefighting comes first, and the memory gate still reads it
-        if firefighting:
-            readings["firefighting"] = firefighting
+        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --priority start passes while a priority file stands (PRIORITY_FILE), since priority work comes first, and the memory gate still reads it
+        if priority:
+            readings["priority"] = priority
         elif readings["load5"] + starts >= cap - keep:
             at = (
                 f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
@@ -487,9 +488,9 @@ try:
         except ValueError:
             refuse("slots", "it cannot read run-slot's lanes and queue (run-slot.sh room)")
         readings.update(lanes=lanes, lanes_free=free, lanes_held=held, waiters=waiters)
-        # a full queue holds a fresh worker so admitted runs finish first, but firefighting comes first, as at the load gate
-        if firefighting:
-            readings["firefighting"] = firefighting
+        # a full queue holds a fresh worker so admitted runs finish first, but priority work comes first, as at the load gate
+        if priority:
+            readings["priority"] = priority
         elif free == 0 and waiters > 0:
             short = "run-slot has no lane open" if lanes == 0 else f"run-slot's {lanes} lanes are all held" if held >= lanes else f"{held} of run-slot's {lanes} lanes are held and the rest lack the load units for a run"
             refuse("slots", f"{short}, and {waiters} {'run waits' if waiters == 1 else 'runs wait'} in its queue (run-slot.sh room). Wait for the queue to drain, or close a worker that is done, and run it again.")
@@ -773,7 +774,7 @@ PY
   esac
 }
 
-# --account, --backend, --model, --effort, --brief, --reports-to, --title, --in, --check and --firefighting may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --model, --effort, --brief, --pr, --reports-to, --title, --in, --check and --priority (or its old name --firefighting) may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -796,11 +797,12 @@ MODELS=$(printf '%s\n' $CLAUDE_MODELS | awk '{ m[NR] = $0 } END { for (i = 1; i 
 CLAUDE_MODEL=
 EFFORT=
 RESUME_BRIEF=
+PR_ARG=
 REPORTS_TO=
 TITLE_ARG=
 IN_DIR=
 CHECK=
-FIREFIGHTING=
+PRIORITY=
 NAME_PROJECT=
 SIZE=
 RUNTIME=
@@ -825,6 +827,15 @@ while [ $# -gt 0 ]; do
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$EFFORT" ] || usage "--effort takes one of low, medium, high, xhigh or max, once"
     case "$2" in --*) usage "--effort needs a value; \"$2\" starts with --" ;; esac
     EFFORT=$2
+    shift 2
+  elif [ "$1" = --pr ]; then
+    [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PR_ARG" ] || usage "--pr takes the PR a checker serves, once"
+    pr_form='^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(pull|issues)/[1-9][0-9]*)$'
+    IFS=, read -ra prs_named <<<"$2"
+    for one in "${prs_named[@]}"; do
+      [[ $one =~ $pr_form ]] || usage "--pr takes a PR's URL or its number alone, or its issue's URL while the PR is not yet opened, comma-separated, not \"$2\""
+    done
+    PR_ARG=$2
     shift 2
   elif [ "$1" = --reports-to ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$REPORTS_TO" ] || usage "--reports-to takes a session name, once"
@@ -858,8 +869,8 @@ while [ $# -gt 0 ]; do
   elif [ "$1" = --check ]; then
     CHECK=1
     shift
-  elif [ "$1" = --firefighting ]; then
-    FIREFIGHTING=1
+  elif [ "$1" = --priority ] || [ "$1" = --firefighting ]; then
+    PRIORITY=1
     shift
   elif [ "$1" = --brief ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RESUME_BRIEF" ] || usage
@@ -911,6 +922,7 @@ MODE=${1:-}
 [ $# -gt 0 ] && shift
 [ -z "$REPORTS_TO" ] || [ "$MODE" = worker ] || usage "--reports-to is for a worker, not ${MODE:-no mode}"
 [ -z "$IN_DIR" ] || [ "$MODE" = worker ] || usage "--in is for a worker, not ${MODE:-no mode}"
+[ -z "$PR_ARG" ] || [[ $MODE =~ ^(column|resume)$ ]] || usage "--pr is for a reviewer's or tester's column or resume, not ${MODE:-no mode}"
 [ -z "$TITLE_ARG" ] || [[ $MODE =~ ^(worker|column|resume)$ ]] || usage "--title is for a worker or a reviewer's or tester's column, not ${MODE:-no mode}"
 # herdr 0.9.5 keeps a resume command only from a source that holds the pane through report-agent, and then shows that source's state in place of its own (measured: a 14s turn read idle throughout), so restore reruns the sessions spawn.sh itself listed, with ops-herdr's resume_agents_on_restore off. Each goes through resume, so the gate and the live-name check judge it, and a live one is left as it is.
 if [ "$MODE" = restore ]; then
@@ -1237,6 +1249,10 @@ elif [ "$MODE" = column ] && [[ $ROLE =~ ^(reviewer|tester)$ ]] && [ -z "$TITLE_
   [ -n "$of" ] || refuse "a $ROLE starts with a title: set its worker's (roster.ts set $TO title=<title>), or pass --title \"Review: <its title>\""
   if [ "$ROLE" = reviewer ]; then TITLE_ARG="Review: $of"; else TITLE_ARG="Test: $of"; fi
 fi
+[ -z "$PR_ARG" ] || [[ $ROLE =~ ^(reviewer|tester)$ ]] || usage "--pr is for a reviewer's or tester's start, not a $ROLE's"
+# A checker's ended row still lists the PRs it last served, which auto-end and the sweep read as done, so they would end it again unseen: its start names the PR it serves now.
+[[ ! $ROLE =~ ^(reviewer|tester)$ ]] || [ -n "$PR_ARG" ] || [ "$(roster_field "$NAME" status)" != ended ] ||
+  refuse "its roster row reads ended and lists the PRs it last served, which auto-end reads as done: name the PR it serves now with --pr <url>, or its issue's URL while the PR is not yet opened"
 if [ "$MODE" != resume ] || [ -n "$BRIEF" ]; then
   # The brief's path under ~/.playground names the same file as its bare name.
   BRIEF=${BRIEF#"$DATA/"}
@@ -1374,11 +1390,11 @@ case "$SIZE" in
   *) ITEM=$(bash "$REPO/scripts/ops/run-slot.sh" size "$NAME" 2>/dev/null) || ITEM= ;;
 esac
 case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
-FF_TRIGGER=
-if [ -n "$FIREFIGHTING" ]; then
-  FF_TRIGGER=$(firefighting_trigger) || refuse "--firefighting starts only while a firefighting trigger file stands in $DATA (firefighting-stop.json, firefighting-headstart.json or firefighting-start.json), and none does"
+PRIORITY_FILE=
+if [ -n "$PRIORITY" ]; then
+  PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json or priority-start.json, or an old name: firefighting-stop.json, firefighting-headstart.json or firefighting-start.json), and none does"
 fi
-# While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --firefighting start on a stop or head-start file (below).
+# While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --priority start on priority.json or an old name of it (below).
 if FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
 import datetime, json, sys
 try:
@@ -1391,8 +1407,8 @@ if until <= datetime.datetime.now(datetime.timezone.utc):
 print(f"{f.get('session')} until {f['until']}")
 PY
 ); then
-  # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --firefighting start goes on while a stop or head-start file stands; the job's start file leaves focus to hold it, since an Urgent ticket's focus comes first
-  { [ -n "$FF_TRIGGER" ] && [ "${FF_TRIGGER##*/}" != firefighting-start.json ]; } || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
+  # the focused session's own reviewer and tester start, the one a column reports to or a resume's roster row serves, so an urgent fix is still checked, and a --priority start goes on while priority.json or an old name of it stands; a job's start file leaves focus to hold it, since an urgent ticket's focus comes first
+  { [ -n "$PRIORITY_FILE" ] && case "${PRIORITY_FILE##*/}" in priority-start.json | firefighting-start.json) false ;; *) true ;; esac; } || case "$ROLE" in reviewer | tester) [ "${TO:-${serves:-}}" = "${FOCUS%% until *}" ] ;; *) false ;; esac ||
     refuse "focus stands for $FOCUS, so no new session starts until it ends but its own reviewer and tester (playground focus off ends it)"
 fi
 # With no id, Claude's resume picker looks the name up only in the transcripts of the folder it starts in (its project folder, named from the folder's real path), so in a folder the session never ran in it finds nothing and the launch waits out its timeout; that check reads every transcript there, so the gate reads first as --check does, logging no start, and the gate proper runs after it.
@@ -1668,6 +1684,23 @@ fi
 set -- set "$NAME" "kind=$KIND"
 # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
 [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
+# A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named (none when it names only an issue); on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
+if [ -n "$PR_ARG" ]; then
+  first_pull=
+  IFS=, read -ra prs_named <<<"$PR_ARG"
+  for one in "${prs_named[@]}"; do
+    if [[ $one =~ ^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*)$ ]]; then
+      first_pull=$one
+      break
+    fi
+  done
+  if [ "$(roster_field "$NAME" status)" = ended ]; then
+    set -- "$@" "prs=$PR_ARG" "pr=$first_pull"
+  else
+    set -- "$@" "prs+=$PR_ARG"
+    [ -n "$(roster_field "$NAME" pr)" ] || [ -z "$first_pull" ] || set -- "$@" "pr=$first_pull"
+  fi
+fi
 # A second dispatcher started under an <id>-dispatcher name records its slot, which roster.ts who dispatcher 2 reads; a dispatcher's name with -2 holds slot 2 by its name.
 [ "$MODE" = manager ] && [ "$KIND" = dispatcher ] && [ -z "$FIRST" ] && ! second_dispatcher "$NAME" && set -- "$@" "slot=2"
 if [ "$MODE" = column ]; then

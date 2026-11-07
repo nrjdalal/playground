@@ -79,8 +79,10 @@ describe("the hosted dashboard writes only what a paired key signs", () => {
     expect(source).toContain(
       'const noted = outcome === null && item.kind !== "update" && !secretAsk',
     )
-    expect(source).toContain("{!folded && answers && (noted || !config.hosted) && (")
-    expect(source).toContain("answerItem(item, action, text, note.trim() || undefined, option)")
+    expect(source).toContain("!folded && answers && (noted || !config.hosted) ? (")
+    expect(source).toContain(
+      "answerItem(item, action, text, note.trim() || undefined, option, options)",
+    )
   })
 
   test("the Inbox shows the line without a key, and a card holds its footer and note box only where its answer goes, never its Reply, read tick, Retry or bulk buttons", async () => {
@@ -88,7 +90,7 @@ describe("the hosted dashboard writes only what a paired key signs", () => {
     expect(source).toContain("{!writes.send && <ReadOnlyLine />}")
     expect(source).toContain("const answers = writes.answers(item)")
     expect(source).toContain("const footer = !answers ? (")
-    expect(source).toContain("{!folded && answers && (noted || !config.hosted) && (")
+    expect(source).toContain("!folded && answers && (noted || !config.hosted) ? (")
     expect(source).toContain("if (!answers) return false")
     expect(source).toContain("{unread && !config.hosted ? (")
     expect(source).toMatch(/retryable\(item, now\) &&\s+!config\.hosted && \(/)

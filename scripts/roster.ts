@@ -255,7 +255,13 @@ function checkRetask(
   if (!["reviewer", "tester"].includes(kindOf(next.name, next.kind) ?? "")) return
   const moved = (k: string) => entry[k] !== undefined && next[k] !== entry[k]
   const given = (k: string) => pairs.some(([p]) => p === k)
-  if (assign ? entry.pr && given("pr") !== given("worker") : moved("pr") || moved("worker"))
+  // spawn.sh's restart of an ended checker names the PRs it serves now, prs and pr in one set
+  const restart = entry.status === "ended" && given("prs")
+  if (
+    assign
+      ? entry.pr && given("pr") !== given("worker")
+      : (moved("pr") && !restart) || moved("worker")
+  )
     throw new Refusal(
       `roster.ts: ${entry.name} is a checker, so it moves to another PR through roster.ts assign ${entry.name} <title> <task> worker=<worker> pr=<url> [repo=<owner>/<name>], which sets its worker, pr, repo and title together`,
       1,

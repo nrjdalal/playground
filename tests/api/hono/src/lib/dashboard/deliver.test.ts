@@ -29,7 +29,11 @@ import {
   HerdrRefused,
   HerdrTimedOut,
 } from "../../../../../../api/hono/src/lib/dashboard/herdr"
-import type { Entry } from "../../../../../../api/hono/src/lib/dashboard/transcript"
+import {
+  clip,
+  TEXT_LIMIT,
+  type Entry,
+} from "../../../../../../api/hono/src/lib/dashboard/transcript"
 import type { Live, Worker } from "../../../../../../api/hono/src/lib/dashboard/workers"
 import {
   MESSAGE_MAX_CHARS,
@@ -106,9 +110,21 @@ const OLDER: Entry = {
   tool: null,
 }
 
+// A person's line as Claude Code writes it for each prompt it takes, so a send whose box reads empty at once is shown to have gone.
+const tookLine = (text: string, at: Date, n: number): Entry => ({
+  at: at.toISOString(),
+  from: null,
+  id: `took-${n}`,
+  kind: "human",
+  text,
+  tool: null,
+})
+
 // A fake herdr pane and activity table: each message as it went, whole, as one prompt to the pane it went to, and what was recorded, in order. `failOn` refuses a send as herdr does before sending anything.
 function fakes(board: Live, failOn?: (text: string, index: number) => boolean) {
   const typed: { surface: string; text: string }[] = []
+  const wrote: Entry[] = []
+  const took = (text: string) => void wrote.push(tookLine(text, deps.now(), wrote.length))
   const recorded: string[] = []
   const rows = new Map<string, Date>()
   const skillsRead: string[] = []
@@ -120,6 +136,7 @@ function fakes(board: Live, failOn?: (text: string, index: number) => boolean) {
     prompt: async (surface, text) => {
       if (failOn?.(text, typed.length)) throw new Error("no such pane")
       typed.push({ surface, text })
+      took(text)
     },
     readScreen: async () => EMPTY,
     readSession: async () => board,
@@ -128,14 +145,14 @@ function fakes(board: Live, failOn?: (text: string, index: number) => boolean) {
       await typing()
       if (event.id) rows.set(event.id, deps.now())
     },
-    said: async () => [OLDER],
+    said: async () => [OLDER, ...wrote],
     skills: async (cwd) => {
       skillsRead.push(cwd)
       return new Set(["end-of-day", "acme"])
     },
     wait: async () => {},
   }
-  return { deps, recorded, skillsRead, typed }
+  return { deps, recorded, skillsRead, took, typed }
 }
 
 const actor = { email: "owner@local.host", id: "u-1" }
@@ -215,7 +232,7 @@ describe("refusal", () => {
   })
 
   test("everything else goes, a leading # or @ and a / mid-text included", () => {
-    for (const text of ["# heading", "@greed look", "run /acme CEDAR-1 next", "a\n/b"]) {
+    for (const text of ["# heading", "@greed look", "run /acme MADECEDAR-1 next", "a\n/b"]) {
       expect(refusal(text)).toBeNull()
     }
   })
@@ -716,7 +733,7 @@ describe("deliver", () => {
         await typing()
         if (event.id) rows.set(event.id, new Date())
       },
-      said: async () => [OLDER],
+      said: async () => [OLDER, ...typed.map((text, n) => tookLine(text, new Date(), n))],
       skills: async () => new Set(),
       wait: async () => {},
     }
@@ -1075,22 +1092,40 @@ describe("the herdr answer route", () => {
 
 describe("deliver to a herdr session", () => {
   const HERDR = "herdr:factory:w1:p1"
-  // A herdr session's board and a terminal that takes its message as one agent.prompt, which `fail` refuses as herdr would.
-  function herdr(fail?: unknown) {
-    const state = live([worker()], { "s-dispatcher": HERDR })
+  // A herdr session's board and a terminal that takes its message as one agent.prompt, which `fail` refuses as herdr would; a test whose message is left unproven names a session of its own, since deliver() then holds that session's next message.
+  function herdr(fail?: unknown, sessionId = "s-dispatcher") {
+    const state = live([worker({ sessionId })], { [sessionId]: HERDR })
     const sent: { surface: string; text: string }[] = []
     const recorded: string[] = []
-    const { deps } = fakes(state)
+    const { deps, took } = fakes(state)
     // as the real record's transaction, a row stands only once the typing went whole
     deps.record = async (event, typing) => {
       await typing()
       recorded.push(event.summary)
     }
+    // Claude Code writes a prompt's line once it takes it: the first read after the paste that shows the box empty, not holding it nor a queue hint, whatever screen a test sets
+    const owed: string[] = []
+    let read = deps.readScreen
+    Object.defineProperty(deps, "readScreen", {
+      get: () => async (surface: string) => {
+        const shown = await read(surface)
+        if (inputState(shown) === "empty" && !shown.includes("Press up to")) {
+          for (const text of owed.splice(0)) took(text)
+        }
+        return shown
+      },
+      set: (next: DeliverDeps["readScreen"]) => {
+        read = next
+      },
+    })
+    // a paste a test names here Claude Code leaves in its box, its Enter lost, so it writes no line until a later Enter takes it (`took`)
+    const stays = new Set<string>()
     deps.prompt = async (surface, text) => {
       if (fail) throw fail
       sent.push({ surface, text })
+      if (!stays.has(text)) owed.push(text)
     }
-    return { deps, recorded, sent }
+    return { deps, recorded, sent, stays, took }
   }
 
   test("the whole message goes as one prompt to its pane, after the input box reads empty", async () => {
@@ -1338,6 +1373,7 @@ describe("deliver to a herdr session", () => {
         const run = queuedRun(QUEUED_ABOVE)
         await run.send()
         run.deps.readScreen = async () => EMPTY
+        run.deps.said = async () => [OLDER]
         run.at(QUEUED_MS - 1)
         expect(await run.send()).toMatchObject({ code: "QUEUED", ok: false })
         expect(run.sent).toHaveLength(1)
@@ -1348,6 +1384,9 @@ describe("deliver to a herdr session", () => {
         const run = queuedRun(compacting(`❯ ${MESSAGE}`))
         await run.send()
         run.deps.readScreen = async () => EMPTY
+        // no line for the held paste; the Retry's paste is taken at once and writes one
+        run.deps.said = async () =>
+          run.sent.length > 1 ? [OLDER, tookLine(MESSAGE, run.deps.now(), 0)] : [OLDER]
         run.at(QUEUED_MS)
         const lost = await run.send()
         expect(lost).toMatchObject({ code: "LOST", ok: false })
@@ -1493,8 +1532,8 @@ describe("deliver to a herdr session", () => {
     })
 
     // 24 Oct 02:58Z: dispatcher's box held the owner's image message, pasted and never submitted, which every later try refused as a draft until the owner pressed Enter in the terminal; the box's shape is the one dispatcher's transcript recorded at 03:13Z
-    test("an image message whose settle read the box empty before its paste was drawn gets its Enter from the next message, which then goes", async () => {
-      const { deps, recorded, sent } = herdr()
+    test("an image message whose box read empty before its paste was drawn waits queued, and its own retry presses Enter on it before the next message goes", async () => {
+      const { deps, recorded, sent, stays, took } = herdr()
       const words = "I have Linear status twice. We can remove the next block, no?"
       const png: Attachment = {
         id: "a.png",
@@ -1502,38 +1541,47 @@ describe("deliver to a herdr session", () => {
         path: "/home/x/.playground/attachments/11111111-2222-4333-8444-555555555555.png",
         size: 9000,
       }
+      const pasted = withAttachments(words, [png])
+      stays.add(pasted)
       const id = "11111111-2222-4333-8444-000000000004"
       const stuckBox = screen(`❯ [Image #6]${words}`, "  Attached:")
       const enters: string[] = []
       let drawn = false
       deps.pressEnter = async (surface) => {
         enters.push(surface)
+        if (drawn) took(pasted)
         drawn = false
       }
-      // its own settle reads the box empty before the paste is drawn, so it reads sent, as the live dashboard's log shows (200 in 2s); the paste is drawn after
+      // its own settle reads the box empty before the paste is drawn (the live dashboard's log, 200 in 2s), and no transcript line shows it went, so it waits queued rather than reading sent
       deps.readScreen = async () => (drawn ? stuckBox : EMPTY)
       const message = { actor, attachments: [png], text: words, to: "dispatcher" }
-      expect(await deliver({ ...message, id }, deps)).toMatchObject({ ok: true })
+      const first = await deliver({ ...message, id }, deps)
+      expect(first).toMatchObject({ code: "QUEUED", ok: false })
       drawn = true
-      // the next message from the composer finds the box holding that paste: it presses Enter on it, then pastes its own
+      // its own retry finds the paste drawn in the box and presses Enter on it, pasting nothing again
+      const queuedAt = first.ok ? undefined : first.queuedAt
+      expect(await deliver({ ...message, id, queuedAt }, deps)).toMatchObject({ ok: true })
+      // then the next message goes on its own, never after it in the box
       const next = await deliver(
         { actor, id: "11111111-2222-4333-8444-000000000005", text: "and this", to: "dispatcher" },
         deps,
       )
       expect(next).toMatchObject({ ok: true })
       expect(enters).toEqual([HERDR])
-      expect(sent.map((s) => s.text)).toEqual([withAttachments(words, [png]), "and this"])
+      expect(sent.map((s) => s.text)).toEqual([pasted, "and this"])
       expect(recorded).toHaveLength(2)
     })
 
     // a reviewer: Claude Code folds a paste of more than 2 line breaks or 800 characters into [Pasted text #n +k lines], k its line breaks, so a long message stuck the 24 Oct way is known by that count
     test("an earlier paste Claude Code folded gets its Enter from the next message when the fold counts its line breaks", async () => {
-      const { deps, recorded, sent } = herdr()
+      const { deps, recorded, sent, stays, took } = herdr()
       const words = "one\n\ntwo\n\nthree"
+      stays.add(words)
       const enters: string[] = []
       let box = EMPTY
       deps.pressEnter = async (surface) => {
         enters.push(surface)
+        if (box !== EMPTY) took(words)
         box = EMPTY
       }
       deps.readScreen = async () => box
@@ -1543,7 +1591,9 @@ describe("deliver to a herdr session", () => {
         text: words,
         to: "dispatcher",
       }
-      expect(await deliver(first, deps)).toMatchObject({ ok: true })
+      // drawn after its settle, with no line, so it waits queued
+      const firstTry = await deliver(first, deps)
+      expect(firstTry).toMatchObject({ code: "QUEUED", ok: false })
       box = screen("❯ [Pasted text #1 +3 lines]")
       const other = {
         actor,
@@ -1557,21 +1607,29 @@ describe("deliver to a herdr session", () => {
       expect(await deliver(other, deps)).toMatchObject({ ok: true })
       expect(enters).toEqual([HERDR])
       expect(sent.map((s) => s.text)).toEqual([words, "and this"])
+      // the first's own retry reads its line and types nothing
+      const queuedAt = firstTry.ok ? undefined : firstTry.queuedAt
+      expect(await deliver({ ...first, queuedAt }, deps)).toMatchObject({ ok: true })
+      expect(sent).toHaveLength(2)
       expect(recorded).toHaveLength(2)
     })
 
     // a reviewer: the message whose Enter sent an earlier held one leaves it unsent in memory, so that one's own retry reads it gone and types nothing
     test("a held message another message's Enter sent reads delivered on its own retry, typing nothing", async () => {
-      const { deps, sent } = herdr()
+      const { deps, sent, took } = herdr()
       const enters: string[] = []
       let box = EMPTY
       deps.prompt = async (surface, text) => {
         sent.push({ surface, text })
         if (text === "the held one") box = screen("❯ the held one")
+        else took(text)
       }
       deps.pressEnter = async (surface) => {
         enters.push(surface)
-        if (enters.length > 1) box = EMPTY
+        if (enters.length > 1) {
+          took("the held one")
+          box = EMPTY
+        }
       }
       deps.readScreen = async () => box
       const held = {
@@ -1594,7 +1652,8 @@ describe("deliver to a herdr session", () => {
     })
 
     test("a later message waits, typing nothing, while an earlier paste of the dashboard's stays in the box after its Enter", async () => {
-      const { deps, recorded, sent } = herdr()
+      const { deps, recorded, sent, stays } = herdr(undefined, "s-stuck")
+      stays.add("the first, still stuck")
       const enters: string[] = []
       let drawn = false
       deps.pressEnter = async (surface) => {
@@ -1606,7 +1665,8 @@ describe("deliver to a herdr session", () => {
         id: "11111111-2222-4333-8444-000000000006",
         text: "the first, still stuck",
       }
-      expect(await deliver({ ...first, to: "dispatcher" }, deps)).toMatchObject({ ok: true })
+      // drawn after its settle, with no line, so it waits queued
+      expect(await deliver({ ...first, to: "dispatcher" }, deps)).toMatchObject({ code: "QUEUED" })
       drawn = true
       const next = await deliver(
         { actor, id: "11111111-2222-4333-8444-000000000007", text: "the second", to: "dispatcher" },
@@ -1616,28 +1676,26 @@ describe("deliver to a herdr session", () => {
       expect(next).not.toHaveProperty("pasted")
       expect(enters).toEqual([HERDR])
       expect(sent.map((s) => s.text)).toEqual(["the first, still stuck"])
-      expect(recorded).toHaveLength(1)
+      expect(recorded).toEqual([])
     })
 
     // a reviewer: Up in the terminal recalls a message that went back into the box, which must never be sent again
     test("a box holding a paste the transcript shows went is the owner's recall, and holds with no Enter", async () => {
       const { deps, recorded, sent } = herdr()
       const enters: string[] = []
-      let went = false
+      let recalled = false
       deps.pressEnter = async (surface) => {
         enters.push(surface)
       }
-      deps.said = async () =>
-        went
-          ? [
-              OLDER,
-              { ...OLDER, at: "2026-10-06T12:00:01.000Z", id: "e1", text: "the recalled one" },
-            ]
-          : [OLDER]
-      deps.readScreen = async () => (went ? screen("❯ the recalled one") : EMPTY)
+      // it went at once, its line written
+      deps.said = async () => [
+        OLDER,
+        { ...OLDER, at: "2026-10-06T12:00:01.000Z", id: "e1", text: "the recalled one" },
+      ]
+      deps.readScreen = async () => (recalled ? screen("❯ the recalled one") : EMPTY)
       const first = { actor, id: "11111111-2222-4333-8444-00000000000a", text: "the recalled one" }
       expect(await deliver({ ...first, to: "dispatcher" }, deps)).toMatchObject({ ok: true })
-      went = true
+      recalled = true
       const next = await deliver(
         { actor, id: "11111111-2222-4333-8444-00000000000b", text: "the next", to: "dispatcher" },
         deps,
@@ -1650,7 +1708,7 @@ describe("deliver to a herdr session", () => {
 
     // a reviewer: a transcript read that does not reach back to the paste cannot show it did not go, so the box holds
     test("a remembered paste the transcript read does not reach back to holds with no Enter", async () => {
-      const { deps, sent } = herdr()
+      const { deps, sent } = herdr(undefined, "s-out-of-reach")
       const enters: string[] = []
       let drawn = false
       deps.pressEnter = async (surface) => {
@@ -1663,7 +1721,8 @@ describe("deliver to a herdr session", () => {
         id: "11111111-2222-4333-8444-00000000000c",
         text: "an old one, out of reach",
       }
-      expect(await deliver({ ...first, to: "dispatcher" }, deps)).toMatchObject({ ok: true })
+      // no line it can read shows it went, so it waits queued
+      expect(await deliver({ ...first, to: "dispatcher" }, deps)).toMatchObject({ code: "QUEUED" })
       drawn = true
       const next = await deliver(
         { actor, id: "11111111-2222-4333-8444-00000000000d", text: "the next", to: "dispatcher" },
@@ -1672,6 +1731,14 @@ describe("deliver to a herdr session", () => {
       expect(next).toMatchObject({ code: "INPUT_NOT_EMPTY", ok: false })
       expect(enters).toEqual([])
       expect(sent).toHaveLength(1)
+    })
+
+    test("a one-line message past the transcript's clip is proven by its clipped line", async () => {
+      const { deps } = herdr(undefined, "s-long")
+      const text = "long ".repeat(1000).trim()
+      deps.said = async () => [OLDER, tookLine(clip(text, TEXT_LIMIT), deps.now(), 0)]
+      const id = "11111111-2222-4333-8444-000000001331"
+      expect(await deliver({ actor, id, text, to: "dispatcher" }, deps)).toMatchObject({ ok: true })
     })
 
     // a reviewer: a message of files alone has no first line of words, so its transcript entry is matched by its files
@@ -1684,24 +1751,22 @@ describe("deliver to a herdr session", () => {
         size: 9000,
       }
       const enters: string[] = []
-      let went = false
+      let recalled = false
       deps.pressEnter = async (surface) => {
         enters.push(surface)
       }
-      deps.said = async () =>
-        went
-          ? [
-              OLDER,
-              {
-                ...OLDER,
-                at: "2026-10-06T12:00:01.000Z",
-                attachments: [{ id: null, kind: "image" as const }],
-                id: "e2",
-                text: "",
-              },
-            ]
-          : [OLDER]
-      deps.readScreen = async () => (went ? screen("❯ [Image #3]", "  Attached:") : EMPTY)
+      // it went at once, its line written
+      deps.said = async () => [
+        OLDER,
+        {
+          ...OLDER,
+          at: "2026-10-06T12:00:01.000Z",
+          attachments: [{ id: null, kind: "image" as const }],
+          id: "e2",
+          text: "",
+        },
+      ]
+      deps.readScreen = async () => (recalled ? screen("❯ [Image #3]", "  Attached:") : EMPTY)
       const first = {
         actor,
         attachments: [png],
@@ -1709,7 +1774,7 @@ describe("deliver to a herdr session", () => {
         text: "",
       }
       expect(await deliver({ ...first, to: "dispatcher" }, deps)).toMatchObject({ ok: true })
-      went = true
+      recalled = true
       const next = await deliver(
         { actor, id: "11111111-2222-4333-8444-00000000000f", text: "the next", to: "dispatcher" },
         deps,
@@ -1721,7 +1786,7 @@ describe("deliver to a herdr session", () => {
 
     // Claude Code folds a long paste into one mark, so its words cannot be read: a fold is taken as a paste of the dashboard's only when that paste would fold and its line breaks are the fold's count
     test("a retry presses Enter on its own paste folded into [Pasted text #n +k lines], and not on a fold of another count or of a message too short to fold", async () => {
-      const { deps, sent } = herdr()
+      const { deps, sent, took } = herdr()
       const words = "seven\n\neight\n\nnine"
       const enters: string[] = []
       let box = EMPTY
@@ -1755,6 +1820,7 @@ describe("deliver to a herdr session", () => {
       expect(sent).toHaveLength(1)
       deps.prompt = async (surface, text) => {
         sent.push({ surface, text })
+        took(text)
       }
       const short = {
         actor,
@@ -1934,4 +2000,94 @@ test("no delivery or answer copy sends the owner to a terminal", async () => {
     )
     expect({ file, sent }).toEqual({ file, sent: [] })
   }
+})
+
+// Two messages sent to a busy dispatcher reached it as one prompt, the second pasted after the first with no break ("…Inbox preferablythe tick…"): the first's Enter was lost while Claude Code, slow under load, had not yet drawn its paste, so the box read empty after the send and the first read typed, and the second was pasted after it. A fake Claude Code here draws each paste a while after it lands and loses the first paste's Enter.
+describe("a paste Claude Code draws late", () => {
+  const PANE = "herdr:factory:w3:p1"
+  const NOW = Date.parse("2026-10-06T12:00:00.000Z")
+  const FIRST = "What reads the Inbox preferably"
+  const SECOND = "the tick and loader, should be one until sent"
+  // the box as Claude Code holds it, the prompts it took, and how many more reads still show the box as it was before the last paste
+  function lateClaude(lag: number) {
+    const state = live([worker()], { "s-dispatcher": PANE })
+    const { deps } = fakes(state)
+    let box = ""
+    let shown = ""
+    let behind = 0
+    let pastes = 0
+    const took: string[] = []
+    const draw = () => (box ? screen(`❯ ${box}`) : EMPTY)
+    deps.prompt = async (_surface, text) => {
+      shown = draw()
+      box += text
+      behind = lag
+      // the first paste's Enter lands while the paste is still being taken in, and is lost
+      if (pastes++ > 0) {
+        took.push(box)
+        box = ""
+      }
+    }
+    deps.pressEnter = async () => {
+      if (!box) return
+      took.push(box)
+      box = ""
+    }
+    deps.readScreen = async () => {
+      if (behind > 0) {
+        behind--
+        return shown
+      }
+      return draw()
+    }
+    deps.said = async () => [
+      OLDER,
+      ...took.map((text, i): Entry => ({
+        at: new Date(NOW).toISOString(),
+        from: null,
+        id: `took-${i}`,
+        kind: "human",
+        text,
+        tool: null,
+      })),
+    ]
+    return { deps, took }
+  }
+
+  // each message as the outbox sends it: again under its own id and queuedAt while the API reads it held, and the next only once the one before settles
+  async function sendInTurn(deps: DeliverDeps, texts: string[]) {
+    for (const [i, text] of texts.entries()) {
+      const id = `22222222-3333-4444-8555-${String(i + 1).padStart(12, "0")}`
+      let queuedAt: string | undefined
+      for (let tries = 0; tries < 20; tries++) {
+        const result = await deliver({ actor, id, queuedAt, text, to: "dispatcher" }, deps)
+        if (result.ok || result.code !== "QUEUED") break
+        queuedAt = result.queuedAt
+      }
+    }
+  }
+
+  test("two messages reach the session as two prompts, never one joined", async () => {
+    const { deps, took } = lateClaude(12)
+    await sendInTurn(deps, [FIRST, SECOND])
+    expect(took).toEqual([FIRST, SECOND])
+  })
+
+  // the composer's outbox and the Inbox's answers each send in their own order and retry on their own, so neither waits for the other: deliver() holds the second while the first's paste is unproven
+  test("an Inbox answer and a composer message sent in the same second arrive as two prompts", async () => {
+    const { deps, took } = lateClaude(12)
+    const sends = [
+      { id: "33333333-4444-4555-8666-000000000001", text: FIRST },
+      { id: "33333333-4444-4555-8666-000000000002", text: SECOND },
+    ].map((send) => ({ ...send, done: false, queuedAt: undefined as string | undefined }))
+    for (let round = 0; round < 20 && sends.some((send) => !send.done); round++) {
+      for (const send of sends.filter((one) => !one.done)) {
+        const { id, queuedAt, text } = send
+        const result = await deliver({ actor, id, queuedAt, text, to: "dispatcher" }, deps)
+        if (result.ok) send.done = true
+        else if (result.code === "QUEUED") send.queuedAt = result.queuedAt
+      }
+    }
+    expect(took).toEqual([FIRST, SECOND])
+  })
 })

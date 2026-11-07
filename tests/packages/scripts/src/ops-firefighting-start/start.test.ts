@@ -31,7 +31,7 @@ const CONFIG: StartConfig = {
   brief: "brief-ff.md",
   freshMinutes: 10,
   in: "/made-up/code/app",
-  prefixes: ["MADE", "ALSO"],
+  prefixes: ["MADE", "MADEALSO"],
 }
 const MINUTE = 60_000
 
@@ -213,12 +213,12 @@ describe("ops-firefighting-start", () => {
     const s = setup({
       ...line("MADE-1", "Medium", 100),
       ...line("MADE-2", "Low", 50),
-      ...line("ALSO-3", "High", 300),
+      ...line("MADEALSO-3", "High", 300),
       ...line("MADE-5", "Medium", 90),
     })
     await s.pass()
     await s.pass()
-    expect(s.titles()).toEqual(["ALSO-3 firefight", "MADE-5 firefight"])
+    expect(s.titles()).toEqual(["MADEALSO-3 firefight", "MADE-5 firefight"])
     expect(s.sent.filter((t) => t.startsWith("Waiting on"))).toEqual([
       "Waiting on MADE-1 (Medium): the cap of 2 in progress is reached",
       "Waiting on MADE-2 (Low): the cap of 2 in progress is reached",
@@ -226,12 +226,12 @@ describe("ops-firefighting-start", () => {
   })
 
   test("an Urgent starts first and alone in its beat, and the High after it waits under its focus, told once (#1160)", async () => {
-    const s = setup({ ...line("ALSO-3", "High", 300), ...line("MADE-4", "Urgent", 400) })
+    const s = setup({ ...line("MADEALSO-3", "High", 300), ...line("MADE-4", "Urgent", 400) })
     await s.pass()
     await s.pass()
     expect(s.titles()).toEqual(["MADE-4 firefight"])
     expect(s.sent.filter((t) => t.startsWith("Waiting on"))).toEqual([
-      "Waiting on ALSO-3 (High): focus stands for worker-made-up-1",
+      "Waiting on MADEALSO-3 (High): focus stands for worker-made-up-1",
     ])
   })
 
@@ -507,7 +507,7 @@ describe("ops-firefighting-start", () => {
       ...line("MADE-1", "High", 1, { theirs: true }),
       ...line("MADE-2", "High", 2, { busy: true }),
       ...line("MADE-3", "High", 3, { open: false }),
-      ...line("OTHER-4", "Urgent", 4),
+      ...line("MADEOTHER-4", "Urgent", 4),
     })
     await s.pass()
     await s.pass()

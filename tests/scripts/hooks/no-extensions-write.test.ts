@@ -919,6 +919,8 @@ describe("a quoted argument is read as a command line only where a program runs 
       "env's lone dash ahead of a harmless program",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - ls",
     ],
+    ["a redirect through a variable set to a scratch path", "D=/tmp/scratch-dir; echo x > $D/x"],
+    ["a redirect through a for loop's literal words", "for id in 1 2; do echo x > $id.log; done"],
     [
       "env's lone dash and an unset ahead of a harmless program",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - -u X ls",
@@ -949,6 +951,53 @@ describe("a quoted argument is read as a command line only where a program runs 
   ])("%s runs from a worktree", async (_, command) => {
     expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
   })
+
+  test.each([
+    [
+      "bun -e holding a regex with a lookbehind",
+      `bun -e 'const r = /(?<=x)y/; console.log(r.test("xy"))'`,
+    ],
+    [
+      "node -e holding a regex with a lookbehind",
+      `node -e 'const r = /(?<=a)b/; console.log(r.test("ab"))'`,
+    ],
+    [
+      "agent-browser eval holding an anchored regex of a tag",
+      `agent-browser eval 'const ok = /^<div>/.test(document.body.innerHTML); ok'`,
+    ],
+    ["node -pe holding a regex with a lookbehind", `node -pe '/(?<=a)b/.test("ab")'`],
+    [
+      "agent-browser eval after a valued option holding an anchored regex of a tag",
+      `agent-browser --session x eval 'const ok = /^<div>/.test(document.body.innerHTML); ok'`,
+    ],
+    ["node -e opening with a regex with a lookbehind", `node -e '/(?<=a)b/.test("ab")'`],
+    [
+      "bun -e holding a regex with a lookbehind, piped into a reader",
+      `bun -e 'const r = /(?<=a)b/; console.log(r.test("ab"))' | head -1`,
+    ],
+    [
+      "awk reading a file into a variable with getline",
+      `awk 'BEGIN { while ((getline line < "notes.md") > 0) n++; print n }'`,
+    ],
+  ])("%s runs from a worktree", async (_, command) => {
+    expect(await at(command, join(homedir(), "x", ".claude", "worktrees", "y"))).toBeUndefined()
+  })
+
+  test.each([
+    ["node -e opening with a regex that tests a string", `node -e '/^a/.test("ab")'`],
+    ["node -pe opening with a regex that tests a string", `node -pe '/^a/.test("ab")'`],
+    ["bun -e opening with a regex that tests a string", `bun -e '/x/.test("x")'`],
+  ])(
+    "%s runs from the home, the data folder and a worktree, as canary reads it",
+    async (_, command) => {
+      for (const cwd of [
+        homedir(),
+        join(homedir(), ".playground"),
+        join(homedir(), "x", ".claude", "worktrees", "y"),
+      ])
+        expect(await at(command, cwd)).toBeUndefined()
+    },
+  )
 
   test.each([
     ["rm of mktemp's folder", 'T=$(mktemp -d); rm -rf "$T"'],
@@ -1644,6 +1693,19 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["the roster's writer", "bun scripts/roster.ts set w status=working"],
     ["a write in a worktree", "echo x > notes.txt"],
     ["rm elsewhere", "rm -rf /tmp/scratch-dir"],
+    ["a redirect through a variable set to a scratch path", "D=/tmp/scratch-dir; echo x > $D/x"],
+    [
+      "an append through a variable exported to a scratch path",
+      'export D=/tmp/scratch-dir; echo x >> "$D/x"',
+    ],
+    [
+      "a redirect through a for loop's literal words",
+      "for id in 1 2; do gh run view $id > /tmp/run-$id.log; done",
+    ],
+    [
+      "a redirect through two nested for loops' literal words",
+      "for id in 1 2; do for j in a b; do echo x > /tmp/$id-$j.log; done; done",
+    ],
     ["a glob elsewhere", "rm -rf /tmp/scratch-dir/*"],
     ["a printer naming the root", `echo ${ROOT}`],
     ["tr with a bare slash", "tr / _ < /tmp/x"],
@@ -2137,10 +2199,7 @@ describe("a playground CLI call that no guard reads runs", () => {
     ["settings why", "playground settings why ext.links"],
     ["settings set of a key no guard reads", "playground settings set ui.theme dark --reason x"],
     ["settings reset of a key no guard reads", "playground settings reset ui.theme --reason x"],
-    [
-      "settings import-jobs, which writes jobs.* keys alone",
-      "playground settings import-jobs /tmp/jobs.json",
-    ],
+    ["settings import-jobs --dry-run", "playground settings import-jobs /tmp/jobs.json --dry-run"],
     ["rules", "playground rules voice"],
     ["uninstall without --purge", "playground uninstall"],
     ["status", "playground status"],
@@ -2255,6 +2314,32 @@ describe("a guard decision's keys are the keys the hook gates (PG-1090)", () => 
       )
     },
   )
+})
+
+// PG-1196: the guard decision also sets a job's enabled field, so a session's own write of it stays refused, the owner's Approve or Settings > Jobs the one way in.
+describe("a job's setting is the owner's alone (PG-1196)", () => {
+  test.each(["jobs.opsTicketCard", "jobs.opsSweep", "jobs.opsFirefightingStart"])(
+    "a session's own settings set and reset of %s are refused",
+    async (key) => {
+      expect(await bash(`playground settings set ${key} '{"enabled":true}' --reason r`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+      expect(await bash(`playground settings reset ${key} --reason r`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+    },
+  )
+
+  // import-jobs writes a jobs.<name> for each job its file lists, on unless the file marks it disabled, so a session's run would turn a job on itself
+  test.each([
+    "playground settings import-jobs /tmp/jobs.json",
+    "playground settings import-jobs /tmp/jobs.json --scope acme-test",
+    "playground settings import-jobs /tmp/jobs.json --launch-agents /tmp/agents",
+  ])("a session's own %s is refused, naming the guard decision", async (command) => {
+    const refusal = await bash(command)
+    expect(refusal).toContain("no-extensions-write hook refuses")
+    expect(refusal).toContain("post a guard decision with bun run ask new")
+  })
 })
 
 describe("a refusal for a value the hook does not hold names it in readable text", () => {

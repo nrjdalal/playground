@@ -42,6 +42,8 @@ git commit -m "<type>(<scope>): <subject>"
 | **Subject** | Imperative, lowercase, no period. The commit-msg hook rejects a header over 100 chars or a capitalized subject (`subject-case`).                                                          |
 | **Body**    | Optional; explain "why", not "what". Wrap lines at 100 (the hook rejects longer).                                                                                                       |
 
+In a factory session, the no-unslotted-run hook lints a `-m` or `-F` message with the checkout's commitlint before the command runs, and refuses with commitlint's problem lines, so a bad subject costs seconds rather than pre-commit's wait for its slot ([scripts/hooks/README.md](../../../scripts/hooks/README.md#no-unslotted-run)).
+
 Leave out a `Co-authored-by` trailer (repo rule): the commit-msg hook refuses one in any case, whatever an attribution reminder asks. It also runs commitlint (`@commitlint/config-conventional`), and `pg-scope`, which refuses a `(PG-<n>)` scope that names another item than the branch's `PG-<n>-` prefix, naming both; commit it on that item's branch. Pre-commit runs these steps in order, and the first that fails stops the commit:
 
 1. `main-checkout` refuses a commit in the factory's main checkout (the one `~/.playground/ops/run-slot.sh` links into), naming the fix: commit in a worktree under `.claude/worktrees/`.
