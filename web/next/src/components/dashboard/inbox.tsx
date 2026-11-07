@@ -119,6 +119,7 @@ import { useYardWrites } from "@/hooks/use-yard-writes"
 import { ACCOUNTS_QUERY_KEY } from "@/lib/accounts"
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
+import { readPicks, savePicks } from "@/lib/ask-picks"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
 import { copyToClipboard } from "@/lib/clipboard"
 import { config } from "@/lib/config"
@@ -1005,20 +1006,37 @@ export function InboxCard({
     setSynced(posted)
     if (draft === synced) setDraft(posted)
   }
-  const [pick, setPick] = useState<number | null>(null)
-  // a multi-question ask's picks, one option index per question, and the question in sight, held here as the single pick is so the card steps through them before its Submit sends them all at once
+  // a multi-question ask's picks, one option index per question, and the question in sight, held below as the single pick is so the card steps through them before its Submit sends them all at once
   const questions = item.kind === "decision" ? questionsOf(item.preview) : []
   const multi = questions.length > 0
-  const [picks, setPicks] = useState<(number | null)[]>(() => questions.map(() => null))
-  const [step, setStep] = useState(0)
+  // the card's answer in progress comes back after a list refresh or a shelf move remounts it (ask-picks store), as a draft card's words do: its pick(s), the question in sight and the Note, read once under its own id; the picks and step are taken only while the questions' signature still matches, so a stale pick never lands on another question, while the Note stands on its own
+  const sig = picksKey(questions)
+  const [restored] = useState(() => readPicks()[item.id] ?? null)
+  const sigKept =
+    restored !== null && restored.sig === sig && restored.picks.length === questions.length
+  const [pick, setPick] = useState<number | null>(sigKept ? restored.pick : null)
+  const [picks, setPicks] = useState<(number | null)[]>(
+    sigKept ? restored.picks : questions.map(() => null),
+  )
+  const [step, setStep] = useState(sigKept ? restored.step : 0)
   // an in-place bun run ask edit can change the questions under an open card; when it does, drop the picks and step back to the first, as the draft text resyncs above, so a stale pick never lands on another question
-  const [syncedPicks, setSyncedPicks] = useState(() => picksKey(questions))
-  if (picksKey(questions) !== syncedPicks) {
-    setSyncedPicks(picksKey(questions))
+  const [syncedPicks, setSyncedPicks] = useState(() => sig)
+  if (sig !== syncedPicks) {
+    setSyncedPicks(sig)
     setPicks(questions.map(() => null))
     setStep(0)
   }
-  const [note, setNote] = useState("")
+  const [note, setNote] = useState(restored?.note ?? "")
+  // the card's answer in progress is kept under its id while it can still take it, and cleared once answered, settled or archived, so it stays in step with a draft card's words
+  const keepsAnswer = item.kind === "decision" && schedulable(item)
+  useEffect(() => {
+    savePicks(
+      item.id,
+      keepsAnswer
+        ? { note, pick, picks, sig, step }
+        : { note: "", pick: null, picks: [], sig: "[]", step: 0 },
+    )
+  }, [item.id, keepsAnswer, note, pick, picks, sig, step])
   // a secret ask's value, held only until Submit hands it on, then cleared
   const [secret, setSecret] = useState("")
   const secretKey =
