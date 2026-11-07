@@ -38,8 +38,8 @@ type Input = {
 const WRITES = new Set(["Edit", "MultiEdit", "Write"])
 const ID = /^[\w-]+$/
 // the bare name, or a plugin's or a folder's scoped copy (`ws-home:writing-for-agents`)
-const LOADS = new RegExp(`^(?:[\\w./-]+:)?${SKILL}$`)
-const TYPED = new RegExp(`^\\s*/(?:[\\w./-]+:)?${SKILL}(?:\\s|$)`)
+export const LOADS = new RegExp(`^(?:[\\w./-]+:)?${SKILL}$`)
+export const TYPED = new RegExp(`^\\s*/(?:[\\w./-]+:)?${SKILL}(?:\\s|$)`)
 // a checkout is the factory's when it holds the factory's own skill, in core or in either folder an older worktree's branch may have, so a worktree matches and another org's repository does not
 const FACTORY_MARKERS = [
   join("extensions", "core", "skills", "playbook", "SKILL.md"),
@@ -53,7 +53,7 @@ const configDir = (env: Environment) =>
 const marks = (env: Environment) => join(dataDirOf(env), "writing-first")
 
 // One mark per session, and per subagent within it: a subagent's hook input carries its parent's session id beside its own agent id (measured on Claude Code 2.1.296, 13 Oct), so a parent's load would otherwise let an unloaded subagent write.
-function markOf(input: Input, env: Environment): string | undefined {
+export function markOf(input: Input, env: Environment): string | undefined {
   const session = typeof input.session_id === "string" ? input.session_id : ""
   const agent = typeof input.agent_id === "string" ? input.agent_id : ""
   if (!ID.test(session) || (agent && !ID.test(agent))) return

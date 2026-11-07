@@ -490,8 +490,8 @@ describe("a run under a role", () => {
     expect(await calls(projects, Date.now() - 3600_000)).toEqual([{ command: "ls", cwd: "/h" }])
     const list = await calls(projects, Date.now() - 3600_000, true)
     expect(list.toSorted((x, y) => x.session!.localeCompare(y.session!))).toEqual([
-      { command: "ls", cwd: "/h", name: "abc-worker", session: "s1" },
-      { command: "ls", cwd: "/h", session: "s2" },
+      { command: "ls", cwd: "/h", loaded: false, name: "abc-worker", session: "s1" },
+      { command: "ls", cwd: "/h", loaded: false, session: "s2" },
     ])
   })
 })

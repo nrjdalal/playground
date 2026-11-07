@@ -17,8 +17,9 @@ import { dirname, join, resolve } from "node:path"
 import { dataDirOf } from "@packages/env/data-dir"
 
 import { rosterRole } from "../../../scripts/hooks/role"
+import { LOADS, markOf, SKILL, TYPED } from "../../../scripts/hooks/writing-first"
 
-// Measures a head's hooks against a canary sha, each form or call reaching each hook's check() as data alone and never run, under --role's role and a scratch data folder, a hook canary lacks against an allow-all baseline: `sweep --forms <module>` passes the forms a module exports from the home, the data folder and a worktree, `replay` the last day's Bash calls from this machine's transcripts, `--role session` each under its own session's role; a clean head's result is stored under its key and printed again for a day without a run; started bare it queues itself through run-slot, as commit-slot.ts queues a commit's build.
+// Measures a head's hooks against a canary sha, each form or call reaching each hook's check() as data alone and never run, under --role's role and a scratch data folder, a hook canary lacks against an allow-all baseline: `sweep --forms <module>` passes the forms a module exports from the home, the data folder and a worktree, `replay` the last day's Bash calls from this machine's transcripts, `--role session` each under its own session's role and the writing-first marks its own transcript gives it; a clean head's result is stored under its key and printed again for a day without a run; started bare it queues itself through run-slot, as commit-slot.ts queues a commit's build.
 
 export type Check = (
   raw: string,
@@ -26,7 +27,7 @@ export type Check = (
   main?: string,
 ) => Promise<string | undefined> | string | undefined
 type Form = { command: string; inClass?: boolean }
-type Call = { command: string; cwd: string; name?: string; session?: string }
+type Call = { command: string; cwd: string; loaded?: boolean; name?: string; session?: string }
 type Env = Record<string, string | undefined>
 type Tally = { inClass: number; outClass: number }
 
@@ -149,15 +150,19 @@ export const envOf =
     }
   }
 
-// The data folder's entries a check() writes, writing-first's marks, and the roster the run reads roles from, copied into the scratch folder; every other entry is linked
-export const COPIED = ["roster.json", "writing-first"]
+// The roster the run reads roles from, copied into the scratch folder; every other entry is linked
+export const COPIED = ["roster.json"]
+
+// writing-first's marks, started empty, since today's marks would decide a past call: a replay writes each session's mark as its transcript loads the skill (replay, below)
+export const EMPTY = ["writing-first"]
 
 // A data folder of the run's own, so a check()'s write lands there while every read and protected path resolves to the real data folder's entry through its link
 export function scratchData(real: string, base = tmpdir()): string {
   const data = mkdtempSync(join(base, "hook-differential-data-"))
   for (const entry of existsSync(real) ? readdirSync(real) : [])
     if (COPIED.includes(entry)) cpSync(join(real, entry), join(data, entry), { recursive: true })
-    else symlinkSync(join(real, entry), join(data, entry))
+    else if (!EMPTY.includes(entry)) symlinkSync(join(real, entry), join(data, entry))
+  for (const entry of EMPTY) mkdirSync(join(data, entry))
   return data
 }
 
@@ -220,7 +225,22 @@ export async function sweep(
   return { changed, counts }
 }
 
-// Every Bash call of the transcripts under `projects` newer than `since`, a sub-agent's nested ones included, one per folder and command; bySession keeps one per session, folder and command, each with its session and the name its transcript's agent-name lines last gave it
+// A prompt that loads writing-for-agents as writing-first's UserPromptSubmit reads one, or as the transcript records a typed command
+const COMMAND = new RegExp(`<command-name>/(?:[\\w./-]+:)?${SKILL}</command-name>`)
+const typed = (content: unknown) =>
+  (typeof content === "string"
+    ? [{ text: content, type: "text" }]
+    : Array.isArray(content)
+      ? content
+      : []
+  ).some(
+    (part: { text?: unknown; type?: unknown } | null) =>
+      part?.type === "text" &&
+      typeof part.text === "string" &&
+      (TYPED.test(part.text) || COMMAND.test(part.text)),
+  )
+
+// Every Bash call of the transcripts under `projects` newer than `since`, a sub-agent's nested ones included, one per folder and command; bySession keeps one per session, load state, folder and command, each with its session, the name its transcript's agent-name lines last gave it, and whether its transcript had loaded writing-for-agents since its last compaction, a load before `since` included
 export async function calls(projects: string, since: number, bySession = false): Promise<Call[]> {
   const found = new Map<string, Call>()
   const names = new Map<string, string>()
@@ -228,14 +248,17 @@ export async function calls(projects: string, since: number, bySession = false):
   for (const file of files.map(String).filter((f) => f.endsWith(".jsonl"))) {
     const path = join(projects, file)
     if (statSync(path).mtimeMs < since) continue
+    let loaded = false
     for (const line of (await Bun.file(path).text()).split("\n")) {
       const named = bySession && line.includes('"agent-name"')
-      if (!line.includes('"Bash"') && !named) continue
+      const marks = bySession && (line.includes('"compact_boundary"') || line.includes(SKILL))
+      if (!line.includes('"Bash"') && !named && !marks) continue
       let entry: {
         agentName?: unknown
         cwd?: unknown
         message?: { content?: unknown }
         sessionId?: unknown
+        subtype?: unknown
         timestamp?: string
         type?: unknown
       }
@@ -249,23 +272,32 @@ export async function calls(projects: string, since: number, bySession = false):
         names.set(session, entry.agentName)
         continue
       }
-      if (Date.parse(entry.timestamp ?? "") < since || typeof entry.cwd !== "string") continue
+      // writing-first's SessionStart clears a session's marks at each compaction
+      if (entry.type === "system" && entry.subtype === "compact_boundary") {
+        loaded = false
+        continue
+      }
+      if (entry.type === "user" && typed(entry.message?.content)) loaded = true
       const content = Array.isArray(entry.message?.content) ? entry.message.content : []
       for (const part of content as {
-        input?: { command?: unknown }
+        input?: { command?: unknown; skill?: unknown }
         name?: string
         type?: string
-      }[])
-        if (
-          part?.type === "tool_use" &&
-          part.name === "Bash" &&
-          typeof part.input?.command === "string"
-        )
-          found.set(`${bySession ? session : ""}\0${entry.cwd}\0${part.input.command}`, {
+      }[]) {
+        if (part?.type !== "tool_use") continue
+        if (part.name === "Skill" && typeof part.input?.skill === "string")
+          loaded ||= LOADS.test(part.input.skill)
+        if (part.name !== "Bash" || typeof part.input?.command !== "string") continue
+        if (Date.parse(entry.timestamp ?? "") < since || typeof entry.cwd !== "string") continue
+        found.set(
+          `${bySession ? `${session}\0${loaded}` : ""}\0${entry.cwd}\0${part.input.command}`,
+          {
             command: part.input.command,
             cwd: entry.cwd,
-            ...(bySession ? { session } : {}),
-          })
+            ...(bySession ? { loaded, session } : {}),
+          },
+        )
+      }
     }
   }
   const list = [...found.values()]
@@ -274,7 +306,7 @@ export async function calls(projects: string, since: number, bySession = false):
   return list
 }
 
-// Each call from its own folder through both hooks: the same, newly allowed and newly refused
+// Each call from its own folder through both hooks: the same, newly allowed and newly refused; the calls made before their transcript's load go first, then each loaded call's session is marked in its scratch data folder as writing-first marks a load, and its calls follow
 export async function replay(
   canary: Check,
   head: Check,
@@ -286,7 +318,7 @@ export async function replay(
 ) {
   const counts = { calls: list.length, "newly allowed": 0, "newly refused": 0, same: 0 }
   const changed: string[] = []
-  for (const call of list) {
+  const judge = async (call: Call) => {
     const own = env(call)
     const [was, now] = [
       await allows(canary, call, own, main, repo),
@@ -298,6 +330,16 @@ export async function replay(
       changed.push(`${now ? "allowed" : "refused"} ${call.cwd} :: ${call.command.slice(0, 300)}`)
     }
   }
+  const loaded = list.filter((call) => call.loaded)
+  for (const call of list) if (!call.loaded) await judge(call)
+  for (const call of loaded) {
+    const data = env(call).PLAYGROUND_DATA_DIR
+    const mark = data && markOf({ session_id: call.session }, { PLAYGROUND_DATA_DIR: data })
+    if (!mark) continue
+    mkdirSync(dirname(mark), { recursive: true })
+    writeFileSync(mark, "")
+  }
+  for (const call of loaded) await judge(call)
   return { changed, counts }
 }
 
@@ -550,9 +592,11 @@ async function main(args: string[]): Promise<number> {
   const real = dataDirOf(process.env, home)
   const session =
     role === "session" ? await sessionRoles(list, { ...process.env, HOME: home }) : undefined
-  const env = envOf({ ...session, data: scratchData(real), home, role })
   const defaulted = session
-    ? { "default role": list.filter((c) => !session.roles.get(c.name ?? "")).length }
+    ? {
+        "default role": list.filter((c) => !session.roles.get(c.name ?? "")).length,
+        marked: list.filter((c) => c.loaded).length,
+      }
     : {}
   const headMain = dirname(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]))
   const result = { changed: [] as string[], counts: [] as string[] }
@@ -563,6 +607,8 @@ async function main(args: string[]): Promise<number> {
     const canary: Check = absent ? () => undefined : (await import(own)).check
     const head: Check = (await import(join(root, "scripts/hooks", `${hook}.ts`))).check
     const main = TAKES_MAIN.includes(hook) ? headMain : undefined
+    // a scratch data folder per hook, so the marks one hook's replay writes never reach the next's
+    const env = envOf({ ...session, data: scratchData(real), home, role })
     const { changed, counts } =
       mode === "sweep"
         ? await sweep(canary, head, forms, home, main, headMain, env)
