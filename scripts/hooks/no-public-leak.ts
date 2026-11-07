@@ -1,6 +1,7 @@
 // PreToolUse hook for the factory's sessions (role.ts), registered in both settings files: refuses a write to a public repository (a pull request, an issue, a review or a comment, through gh, gh api, curl or the GitHub MCP) whose text holds a name, a handle, a company term, a Slack id or a Linear key from its list, or an email address or an archive link, since everything written there is public once the repository is. Its reason names the kind of text, never the text; it reads every write as no-playground-leak does, through that guard's engine, and each kind as the trace ratchet counts it (packages/scripts/src/trace-count/kinds.ts).
 import "../../packages/env/src/aliases"
 import { dataDir } from "../../packages/env/src/data-dir"
+import { CONTRIBUTORS_HEADING, ownerWords } from "../../packages/scripts/src/release-notes/notes"
 import {
   EMPTY_LIST,
   isPublicList,
@@ -12,6 +13,7 @@ import {
   type Repos,
   reposOf,
 } from "../../packages/scripts/src/trace-count/kinds"
+import { ownerSettings } from "../../packages/settings/src/owner"
 import { readPolicy } from "../../packages/settings/src/rendered"
 import { guardList } from "./lists"
 import { type Hit, inspectAs, type Policy, refusedList } from "./no-playground-leak"
@@ -38,17 +40,49 @@ const SAID: Partial<Record<Kind, Hit>> = {
   },
 }
 
-function finder(list: PublicList, repos: Repos): (text: string) => Hit | undefined {
+// A plain ship notes write, one `gh release create` or `edit` with no substitution, chain, pipe or redirect, the one call whose notes may name the owner.
+const SHIP = /^\s*gh release (?:create|edit)\b[^`$();&|<>\n]*$/
+// A line the renderer's Contributors section holds: `- <names> @<login>` or the login alone.
+const CONTRIBUTOR = /^- ((?:\S+ )*)@([\w-]+)\s*$/
+// The notes with the owner's own Contributors line read past: the section opens at the renderer's heading and stays open while each line is blank or a contributor's, and a line there whose login and every name owner.names lists is read past, so the same names anywhere else are still refused.
+function ownLinesPast(text: string, owner: string[]): string {
+  let contributors = false
+  return text
+    .split("\n")
+    .map((line) => {
+      if (line.replace(/\r$/, "") === CONTRIBUTORS_HEADING) {
+        contributors = true
+        return line
+      }
+      const m = CONTRIBUTOR.exec(line)
+      if (!m && line.trim() !== "") contributors = false
+      const names = m?.[1].trim() ?? ""
+      const login = m?.[2] ?? ""
+      const mine =
+        contributors &&
+        owner.some((word) => word.toLowerCase() === login.toLowerCase()) &&
+        ownerWords(names, login, owner).join(" ") === names.split(/\s+/).filter(Boolean).join(" ")
+      return mine ? "" : line
+    })
+    .join("\n")
+}
+
+// owner: owner.names alone, given only for a plain ship write, since the archive's owner is no name the owner goes by.
+function finder(
+  list: PublicList,
+  repos: Repos,
+  owner?: string[],
+): (text: string) => Hit | undefined {
   const kinds = patterns(list, repos).filter(([kind]) => SAID[kind])
   return (text) => {
-    const said = readPast(text, repos)
+    const said = readPast(owner ? ownLinesPast(text, owner) : text, repos)
     const found = kinds.find(([, re]) => said.search(re) !== -1)
     return found && SAID[found[0]]
   }
 }
 
-const policy = (list: PublicList, repos: Repos): Policy => ({
-  find: finder(list, repos),
+const policy = (list: PublicList, repos: Repos, owner?: string[]): Policy => ({
+  find: finder(list, repos, owner),
   git: false,
   guard: "no-public-leak",
   guarded: (repo) => repos.public.includes(`${repo.owner}/${repo.repo}`.toLowerCase()),
@@ -57,6 +91,18 @@ const policy = (list: PublicList, repos: Repos): Policy => ({
   what: "private text",
   why: `Everything written to ${repos.public.join(" or ")} is public once the repository is, and stays cached after, so it names no person, company or private record.`,
 })
+
+const shipWrite = (raw: string): boolean => {
+  try {
+    const { tool_input: input, tool_name: tool } = JSON.parse(raw) as {
+      tool_input?: { command?: unknown }
+      tool_name?: unknown
+    }
+    return tool === "Bash" && typeof input?.command === "string" && SHIP.test(input.command)
+  } catch {
+    return false
+  }
+}
 
 // Fails closed on its list, which only the store holds (lists.ts), and on a store it cannot read for the repositories (factory.publicRepo and factory.archiveRepo), and, as no-playground-leak, only on a call that may write.
 export async function check(
@@ -81,7 +127,15 @@ export async function check(
       raw,
       `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`,
     )
-  return inspectAs(policy(loaded.list ?? EMPTY_LIST, reposOf(read.settings)), raw, environment)
+  return inspectAs(
+    policy(
+      loaded.list ?? EMPTY_LIST,
+      reposOf(read.settings),
+      shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined,
+    ),
+    raw,
+    environment,
+  )
 }
 
 if (import.meta.main) {

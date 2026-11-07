@@ -42,6 +42,7 @@ links     each PR, ticket and page it names
 callout   one, only for what must not be missed
 choices   yes or no: Approve: <verb ...>  Deny: <verb ...>
           or A to E: A. <verb ...>  B. <verb ...>  None of these
+          or questions: 2 to 20, each its own A to E, asked one at a time
 ```
 
 Mermaid is to join the pictures; until then a flow is drawn in ASCII.

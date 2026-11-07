@@ -51,6 +51,17 @@ describe("shapeHints", () => {
       }),
     ).toEqual([])
     expect(shapeHints(ask(short))).toEqual([])
+    // a questions ask labels each question's own options, so it needs no top-level label
+    expect(
+      shapeHints({
+        ...ask(short),
+        preview: {
+          questions: [{ options: [{ label: "A" }, { label: "B" }], question: "Which?" }],
+          text: short,
+          type: "ask",
+        },
+      }),
+    ).toEqual([])
   })
 
   test("stays quiet on short prose and on every kind but an ask", () => {
@@ -206,6 +217,15 @@ test("asks.md shows each template's text as it is", async () => {
   for (const { preview } of Object.values(ASK_EXAMPLES)) {
     if (preview.type !== "ask") continue
     expect(doc).toContain(preview.text)
-    expect(doc).toContain(`Options: \`${preview.options[0]?.label}\`; Deny: \`${preview.deny}\`.`)
+    if ("questions" in preview) {
+      for (const q of preview.questions) {
+        expect(doc).toContain(q.question)
+        for (const option of q.options) expect(doc).toContain(option.label)
+      }
+    } else {
+      expect(doc).toContain(
+        `Options: \`${preview.options?.[0]?.label}\`; Deny: \`${preview.deny}\`.`,
+      )
+    }
   }
 })

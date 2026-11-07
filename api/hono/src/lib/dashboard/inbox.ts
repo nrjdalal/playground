@@ -10,6 +10,7 @@ import {
   choicesOf,
   CLOCKS_STOPPED_AT,
   MAX_OPTIONS,
+  picksOf,
   rowOfAnswer,
 } from "@packages/config/inbox"
 import type { ActivityActor, Database } from "@packages/db"
@@ -422,6 +423,34 @@ export type KeychainRead = (item: string) => Promise<string | null>
 
 const OPTIONS_MESSAGE = `An ask offers 1 to ${MAX_OPTIONS} options, each with a label: one for a yes or no, two or more for lettered choices`
 
+// One ask option: a label and an optional one-line description.
+const askOption = z.strictObject({
+  description: oneLine(LIMITS.line).optional(),
+  label: oneLine(LIMITS.line),
+})
+
+// The most and fewest questions one ask holds.
+export const MAX_QUESTIONS = 20
+export const MIN_QUESTIONS = 2
+const QUESTIONS_MESSAGE = `An ask holds ${MIN_QUESTIONS} to ${MAX_QUESTIONS} questions, each with its own ${MAX_OPTIONS}-at-most options`
+
+// One question in a multi-question ask: its own words, its 1-to-5 options in the ask's shape, and an optional recommended option index, marked on the card rather than moved.
+const askQuestion = z
+  .strictObject({
+    options: z.array(askOption).min(1, OPTIONS_MESSAGE).max(MAX_OPTIONS, OPTIONS_MESSAGE),
+    question: oneLine(LIMITS.line),
+    recommended: z
+      .number()
+      .int()
+      .min(0)
+      .max(MAX_OPTIONS - 1)
+      .optional(),
+  })
+  .refine((q) => q.recommended === undefined || q.recommended < q.options.length, {
+    error: "An ask question's recommended index is one of its own options",
+    path: ["recommended"],
+  })
+
 // What Approve does, one shape per kind of approval the owner keeps (playbook's ask rule): an extension accept, an apps change, a grant's System Settings pane, a guard setting or an own account change, which the dashboard carries out itself, a Slack message, a ship of canary, a new Linear ticket, a delete, a schema, a budget, or a plain ask, whose words say what its poster does on Approve, for a decision no other shape fits (a production port, a work request from outside the chain, or a step only he can take, such as plugging in the Mac, where Approve means done and Deny means he can't). An ask labels its options in ELI5 / ASD-STE100, one line each: one option and deny for a yes or no, or 2 to 5 for lettered choices, A to E, then None of these (choicesOf); the card shows its text as the quoted block above them. A secret asks for a value instead of a yes, which goes straight to its sink and is kept nowhere. A reveal shows the owner a Keychain item's value on the owner's click instead, kept nowhere either.
 export const previewSchema = z.discriminatedUnion("type", [
   z.strictObject({
@@ -430,14 +459,14 @@ export const previewSchema = z.discriminatedUnion("type", [
     checked: oneLine(LIMITS.line).optional(),
     deny: oneLine(LIMITS.line).optional(),
     options: z
-      .array(
-        z.strictObject({
-          description: oneLine(LIMITS.line).optional(),
-          label: oneLine(LIMITS.line),
-        }),
-      )
+      .array(askOption)
       .min(1, OPTIONS_MESSAGE)
       .max(MAX_OPTIONS, OPTIONS_MESSAGE)
+      .optional(),
+    questions: z
+      .array(askQuestion)
+      .min(MIN_QUESTIONS, QUESTIONS_MESSAGE)
+      .max(MAX_QUESTIONS, QUESTIONS_MESSAGE)
       .optional(),
     text: words,
     type: z.literal("ask"),
@@ -560,6 +589,16 @@ export const inboxInputSchema = z
       !(input.preview.approve && input.preview.options),
     "An ask labels its go row in options or in approve, not both",
   )
+  .refine(
+    (input) =>
+      input.kind !== "decision" ||
+      input.preview.type !== "ask" ||
+      !(
+        input.preview.questions &&
+        (input.preview.options || input.preview.approve || input.preview.deny)
+      ),
+    "An ask holds either a single question's options, approve or deny, or a questions list, not both",
+  )
   .superRefine((input, ctx) => {
     const text =
       input.kind === "draft"
@@ -634,6 +673,7 @@ export type InboxAnswer = {
   note?: string
   opened?: RunResult
   option?: number
+  options?: number[]
   owned?: RunResult
   set?: RunResult
   uploaded?: number
@@ -795,6 +835,17 @@ export const answerInputSchema = z.strictObject({
     .min(0)
     .max(MAX_OPTIONS - 1)
     .optional(),
+  options: z
+    .array(
+      z
+        .number()
+        .int()
+        .min(0)
+        .max(MAX_OPTIONS - 1),
+    )
+    .min(MIN_QUESTIONS)
+    .max(MAX_QUESTIONS)
+    .optional(),
   seen: z.iso.datetime().optional(),
   text: z.string().trim().max(LIMITS.text).optional(),
 })
@@ -852,18 +903,54 @@ export function checkAnswer(
 
 function answerOf(
   item: Shape<"kind" | "preview" | "status">,
-  { action, option, text }: AnswerInput,
+  { action, option, options, text }: AnswerInput,
 ): { answer: Omit<InboxAnswer, "at">; status: InboxStatus } | { message: string } {
   if (item.kind === "update") return { message: "An update is read, not answered" }
   if (item.status !== "open") return { message: "This item is already answered" }
   if (option !== undefined && !(item.kind === "decision" && action === "approve")) {
     return { message: "Only a decision's go picks an option" }
   }
+  if (
+    option !== undefined &&
+    item.kind === "decision" &&
+    item.preview.type === "ask" &&
+    !!item.preview.questions
+  ) {
+    return {
+      message: "A multi-question ask's approve names a pick for each question, not a single option",
+    }
+  }
+  if (
+    options !== undefined &&
+    !(
+      item.kind === "decision" &&
+      action === "approve" &&
+      item.preview.type === "ask" &&
+      !!item.preview.questions
+    )
+  ) {
+    return { message: "Only a multi-question ask's approve names a pick for each question" }
+  }
   // Dismiss on what still waits sets it aside as the old `clear` did, its poster told so, and sends it to Done; a secret ask takes it too, since no value travels
   if (action === "dismiss") return { answer: { choice: "clear" }, status: "cleared" }
   if (item.kind === "decision") {
     if (item.preview.type === "secret") {
       return { message: "A secret ask takes its value through its Submit alone" }
+    }
+    // a multi-question ask is approved with one pick for each of its questions, each within that question's options, and denied or set aside as a whole
+    if (item.preview.type === "ask" && item.preview.questions) {
+      const questions = item.preview.questions
+      if (action === "clear") return { answer: { choice: "clear" }, status: "cleared" }
+      if (action === "deny") return { answer: { choice: "deny" }, status: "denied" }
+      if (
+        action !== "approve" ||
+        options === undefined ||
+        options.length !== questions.length ||
+        options.some((pick, at) => pick >= questions[at]!.options.length)
+      ) {
+        return { message: `Pick one of each of its ${questions.length} questions` }
+      }
+      return { answer: { choice: "approve", options }, status: "approved" }
     }
     // a lettered decision's go names which of its go rows the owner picked, and takes no Edit, which names none; a yes or no has one
     const go = choicesOf(item.preview)?.rows.filter((row) => row.go).length ?? 1
@@ -926,12 +1013,34 @@ function optionOf(item: InboxItem, answer: { choice: string; option?: number }) 
   return row ? { index: row.index, label: row.label, letter: row.letter } : undefined
 }
 
+// The pick the owner made in each question of a multi-question ask, as the card lettered and labelled them (picksOf), for the poster's payload.
+function picksFor(item: InboxItem, options: number[]) {
+  return item.kind === "decision" ? (picksOf(item.preview, options) ?? undefined) : undefined
+}
+
 // Pure: the option an approved or denied decision's answer picked, as its letter and label, for bun run ask get; null for any other item or answer.
 export function pickOf(item: InboxItem): { index: number; label: string; letter: string } | null {
   if (item.kind !== "decision" || !item.answer || !("choice" in item.answer)) return null
   const { choice } = item.answer
   if (choice !== "approve" && choice !== "deny") return null
   return optionOf(item, item.answer) ?? null
+}
+
+// Pure: the pick line bun run ask get prints on stderr: a multi-question answer's pick for each question (picksOf), joined; else a single approve or deny's one letter and label (pickOf); null when the answer names no pick.
+export function getPickLine(item: InboxItem): string | null {
+  if (
+    item.kind === "decision" &&
+    item.answer &&
+    "choice" in item.answer &&
+    item.answer.choice === "approve" &&
+    "options" in item.answer &&
+    item.answer.options
+  ) {
+    const picks = picksOf(item.preview, item.answer.options)
+    return picks?.length ? picks.map((p) => `${p.letter}: ${p.label}`).join(" · ") : null
+  }
+  const single = pickOf(item)
+  return single ? `${single.letter}: ${single.label}` : null
 }
 
 // Pure: what an answer tells its poster, as data: the verb, whether to carry it out, the next step and the exact command that closes the item; the owner's comment in his words, a changed draft's text, a step's or a secret sink's results, never a secret's value; an update takes no answer.
@@ -994,7 +1103,9 @@ export function answerPayload(item: InboxItem, answer: InboxAnswer | InboxProvid
         close: "link" in item.preview ? ack : ackOrWhy,
         go: true,
         next: "carry-out",
-        option: optionOf(item, answer),
+        ...(answer.options
+          ? { picks: picksFor(item, answer.options) }
+          : { option: optionOf(item, answer) }),
         verb: "pick",
       }
     case "deny":
