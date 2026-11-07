@@ -307,18 +307,46 @@ describe("a run under a role", () => {
     expect(session({ ...call, name: undefined })).not.toHaveProperty("PLAYGROUND_ROLE")
   })
 
-  test("the scratch data folder holds a copy of the roster and a link to the extensions, and nothing else", () => {
-    const real = join(DIR, "real-data")
-    mkdirSync(join(real, "extensions"), { recursive: true })
-    mkdirSync(join(real, "session-state"), { recursive: true })
+  // a made-up data folder with the entries the guards read or protect, and the writing-first marks a check() writes
+  const realData = (name: string) => {
+    const real = join(DIR, name)
+    for (const dir of ["extensions", "ops/dashboard", "session-state", "ticket-approvals"])
+      mkdirSync(join(real, dir), { recursive: true })
+    mkdirSync(join(real, "writing-first"), { recursive: true })
+    writeFileSync(join(real, "writing-first", "s1"), "")
     writeFileSync(join(real, "roster.json"), "{}")
+    return real
+  }
+
+  test("the scratch data folder copies the roster and the writing-first marks, and links every other entry of the real one", () => {
+    const real = realData("real-data")
     const data = scratchData(real, DIR)
     expect(data).not.toBe(real)
+    for (const copied of ["roster.json", "writing-first"])
+      expect(lstatSync(join(data, copied)).isSymbolicLink()).toBe(false)
     expect(readFileSync(join(data, "roster.json"), "utf8")).toBe("{}")
-    expect(lstatSync(join(data, "roster.json")).isSymbolicLink()).toBe(false)
-    expect(lstatSync(join(data, "extensions")).isSymbolicLink()).toBe(true)
-    expect(realpathSync(join(data, "extensions"))).toBe(realpathSync(join(real, "extensions")))
-    expect(existsSync(join(data, "session-state"))).toBe(false)
+    expect(existsSync(join(data, "writing-first", "s1"))).toBe(true)
+    for (const linked of ["extensions", "ops", "session-state", "ticket-approvals"]) {
+      expect(lstatSync(join(data, linked)).isSymbolicLink()).toBe(true)
+      expect(realpathSync(join(data, linked))).toBe(realpathSync(join(real, linked)))
+    }
+  })
+
+  test("a guard that protects a data-folder path decides a call in the scratch folder as it does in the real one", async () => {
+    const real = realData("guarded-data")
+    const raw = JSON.stringify({
+      cwd: DIR,
+      tool_input: { command: `cp ${join(DIR, "made-up")} ${join(real, "ticket-approvals", "x")}` },
+      tool_name: "Bash",
+    })
+    const as = (data: string) => ({
+      HOME: DIR,
+      PLAYGROUND_DATA_DIR: data,
+      PLAYGROUND_ROLE: "worker",
+    })
+    const linear = (await import("../../../../scripts/hooks/no-linear-ticket")).check as Check
+    expect(await linear(raw, as(real))).toBeString()
+    expect(await linear(raw, as(scratchData(real, DIR)))).toBeString()
   })
 
   test("a session's role comes from the roster by its transcript name, and its registry entry names it", async () => {
