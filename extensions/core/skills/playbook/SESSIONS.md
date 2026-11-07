@@ -238,9 +238,11 @@ A sweep reads each agent's state from four places:
 ## Message a session
 
 `SendMessage` takes a live session's name.
-When a send by name fails for a session `ListAgents` lists, send the same message again to the `uds:/tmp/cc-socks/<pid>.sock` address that session's newest message came from (its `from`).
+A send that reports `Failed to send` may still arrive, so a sender re-sends it once at most, its first line marked `re-send`, and a receiver drops a `re-send` copy of a message it already holds.
+When the failed send went by name to a session `ListAgents` lists, that one re-send goes to the `uds:/tmp/cc-socks/<pid>.sock` address the session's newest message came from (its `from`).
+The after-resume re-send (Spawn's resume) takes the same `re-send` marker.
 Before you report that a session is acting on your message, read its session-state record as Check a session reads it: a record still holding `stuck` or `usage-limit` holds the message unread.
-Done when the send returns success.
+Done when the send, or its one re-send, returns success.
 
 ## A headless run
 
