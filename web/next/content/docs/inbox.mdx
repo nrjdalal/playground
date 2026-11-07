@@ -16,11 +16,11 @@ Untick **Auto-hide tab bar** at the top of the user menu to keep it shown, with 
 
 Each item is a card of one of three kinds:
 
-- **Decision**: something a session will do only with your yes, such as a question only you can answer, a Slack message, a ship to main, a new Linear ticket, a delete, a database change, a spend, accepting an extension proposal, adding an app to your apps or taking one off, opening System Settings for a permission agent-desktop needs, setting a guard setting, a value a guard reads to allow or deny a session's call, or marking one of your Claude accounts as your own, or unmarking it.
+- **Decision**: something a session will do only with your yes, such as a question only you can answer, a Slack message, a ship to main, a new Linear ticket, a delete, a database change, a spend, accepting an extension proposal, adding an app to your apps or taking one off, opening System Settings for a permission agent-desktop needs, setting a guard setting, a value a guard reads to allow or deny a session's call, or whether an ops job runs, or marking one of your Claude accounts as your own, or unmarking it.
   The card shows exactly what happens when you approve it, except a secret ask, which takes a value instead, and a card that shows you one (see Give a secret).
   Each pull request, ticket or page a card names is a link, so you can open it and check for yourself: a ship's pull requests and a delete's worktrees and branches included.
   On an accept, your **Approve** has the dashboard accept the proposal itself, or each of a set in the order the card lists them, and the card then shows what that gave ([Extensions](/docs/extensions#review)).
-  On a guard setting, your **Approve** has the dashboard write the value the card shows, and a card its session changed after you read it asks you to read it again.
+  On a guard setting, your **Approve** has the dashboard write the value the card shows, and a card its session changed after you read it asks you to read it again; an ops job's card turns the job on or off alone, keeping the command and schedule Playground ships ([Ops jobs](/docs/jobs)), and a value already in place changes nothing.
   On an own account card, your **Approve** has the dashboard set or clear that one account's Own account switch in Settings > Accounts, every other account as it was, and the card then shows what it found.
 - **Draft**: a Slack message or a Linear comment, ready to send in your name.
   The card shows its words, and Open thread shows where it goes.
@@ -78,8 +78,9 @@ Each decision shows its options as choices: press a number key, or click one, th
 
 - A yes or no shows **Approve**, which tells the session to carry it out, and **Deny**, which tells it not to, each over one line saying what it does.
 - A choice between real alternatives shows lettered options, A to E, each over what it does, then **None of these**.
+- A set of calls at once asks its questions one at a time, each its own lettered options under a progress bar with **Previous** and **Next**; you pick one for each, and **Send** turns on once none is left.
 
-Once you answer, the card names the option you picked, such as `B · Hotfix main` or `Approve · Ship 3f9a2c1 to main`.
+Once you answer, the card names the option you picked, such as `B · Hotfix main` or `Approve · Ship 3f9a2c1 to main`; a set of questions names one for each, such as `A. Staging first · B. Now`.
 
 Every open card ends in a comment box above its buttons.
 On a decision or draft waiting for you it reads **Add an optional comment**: what you type goes to the session with whatever you answer, and the answered card shows it under its result as `You: <your words>`.

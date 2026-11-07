@@ -181,7 +181,7 @@ describe("dm upload (PG-649)", () => {
       [],
       ["/etc/hosts"],
       ["C0MADEUP01"],
-      ["3f0e7a52-1c4b-4d2a-9e6f-0000000000a1", "--channel", "C0OTHER001"],
+      ["3f0e7a52-1c4b-4d2a-9e6f-0000000000a1", "--channel", "C0MADE0101"],
       ["3f0e7a52-1c4b-4d2a-9e6f-0000000000a1", "1700000000.000100"],
     ]) {
       const run = Bun.spawnSync(

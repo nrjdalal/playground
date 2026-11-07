@@ -148,7 +148,7 @@ describe("the token, from the Keychain's slack item", () => {
     }) as typeof fetch)
     try {
       expect(
-        await slackOf(token)("chat.postMessage", { channel: "D0FIXTURE", text: "hi" }),
+        await slackOf(token)("chat.postMessage", { channel: "D0MADE0201", text: "hi" }),
       ).toEqual({
         ok: true,
         ts: "1.000100",

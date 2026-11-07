@@ -49,6 +49,18 @@ import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
 var dataDir = (env = process.env) => dataDirOf(env);
 
+// packages/scripts/src/release-notes/notes.ts
+var HIDDEN = new Set(["ci"]);
+var ARTICLES = new Set(["a", "an", "the"]);
+var COMMANDS = new Set(["bun", "bunx", "gh", "git", "npx", "playground"]);
+var CONTRIBUTORS_HEADING = "### \u2764\uFE0F Contributors";
+function ownerWords(name, login, owner) {
+  const own = new Set(owner.map((word) => word.toLowerCase()));
+  if (!own.has(login.toLowerCase()))
+    return [];
+  return name.split(/\s+/).filter((word) => own.has(word.toLowerCase()));
+}
+
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
   const numericValues = Object.values(entries).filter((v) => typeof v === "number");
@@ -6171,6 +6183,7 @@ var jobFields = strictObject({
   stop: string2().min(1).optional()
 });
 var jobSchema = preprocess(withoutNeedsCmux, jobFields);
+var jobRowSchema = preprocess(withoutNeedsCmux, jobFields.partial());
 var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
 var terminal = (name, command, job) => ({
   callsModel: false,
@@ -6276,7 +6289,8 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     aliases: OLD_KEYS[name],
     default: job,
     description: `The ${name} ops job: ${job.description}`,
-    schema: jobSchema
+    merge: true,
+    schema: jobRowSchema
   }
 ])));
 // packages/settings/src/models.ts
@@ -7393,6 +7407,36 @@ var slice = (word, from) => {
 };
 var visible = (value) => value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ");
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
+var PLAIN = /^[\w./=,:@%-]$/;
+var unreadWord = (word) => {
+  if (word.unknown !== undefined || marked(word.value))
+    return true;
+  const src = word.source;
+  if (src === undefined)
+    return ![...word.value].every((c) => PLAIN.test(c));
+  for (let i = 0;i < src.length; i++) {
+    const c = src[i];
+    if (c === "\\")
+      i++;
+    else if (c === "'") {
+      i = src.indexOf("'", i + 1);
+      if (i === -1)
+        return true;
+    } else if (c === '"') {
+      for (i++;i < src.length && src[i] !== '"'; i++)
+        if (src[i] === "\\")
+          i++;
+        else if (src[i] === "$" && src[i + 1] === "(")
+          i = balanced(src, i + 1, "(", ")") - 1;
+        else if (src[i] === "`")
+          i = src.indexOf("`", i + 1);
+      if (i === -1 || i >= src.length)
+        return true;
+    } else if (!PLAIN.test(c))
+      return true;
+  }
+  return false;
+};
 var SHELL_OWN = new Set([
   ".",
   "alias",
@@ -8261,7 +8305,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
         break;
     }
   } else if (name === "eval") {
-    verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record2(cmd, name, args, here);
@@ -9073,15 +9117,19 @@ async function registryName(sessionId, environment = process.env) {
     } catch {}
   }
 }
-async function rosterRole(name, environment = process.env) {
+async function rosterKind(name, environment = process.env) {
   const path = join4(dataDirOf(environment), "roster.json");
   try {
     const roster = await Bun.file(path).json();
     const kind = roster.agents?.find((agent) => agent?.name === name)?.kind;
-    return isRosterKind(kind) ? FACTORY_ROLE_OF_KIND[kind] : "";
+    return isRosterKind(kind) ? kind : undefined;
   } catch {
-    return "";
+    return;
   }
+}
+async function rosterRole(name, environment = process.env) {
+  const kind = await rosterKind(name, environment);
+  return kind ? FACTORY_ROLE_OF_KIND[kind] : "";
 }
 async function sessionRole(environment, sessionId) {
   if (environment.PLAYGROUND_ROLE)
@@ -10305,16 +10353,36 @@ var SAID = {
     fix: "Leave the id out, and say what the conversation settled."
   }
 };
-function finder(list, repos) {
+var SHIP = /^\s*gh release (?:create|edit)\b[^`$();&|<>\n]*$/;
+var CONTRIBUTOR = /^- ((?:\S+ )*)@([\w-]+)\s*$/;
+function ownLinesPast(text, owner) {
+  let contributors = false;
+  return text.split(`
+`).map((line) => {
+    if (line.replace(/\r$/, "") === CONTRIBUTORS_HEADING) {
+      contributors = true;
+      return line;
+    }
+    const m = CONTRIBUTOR.exec(line);
+    if (!m && line.trim() !== "")
+      contributors = false;
+    const names = m?.[1].trim() ?? "";
+    const login = m?.[2] ?? "";
+    const mine = contributors && owner.some((word) => word.toLowerCase() === login.toLowerCase()) && ownerWords(names, login, owner).join(" ") === names.split(/\s+/).filter(Boolean).join(" ");
+    return mine ? "" : line;
+  }).join(`
+`);
+}
+function finder(list, repos, owner) {
   const kinds = patterns(list, repos).filter(([kind]) => SAID[kind]);
   return (text) => {
-    const said = readPast(text, repos);
+    const said = readPast(owner ? ownLinesPast(text, owner) : text, repos);
     const found = kinds.find(([, re]) => said.search(re) !== -1);
     return found && SAID[found[0]];
   };
 }
-var policy2 = (list, repos) => ({
-  find: finder(list, repos),
+var policy2 = (list, repos, owner) => ({
+  find: finder(list, repos, owner),
   git: false,
   guard: "no-public-leak",
   guarded: (repo) => repos.public.includes(`${repo.owner}/${repo.repo}`.toLowerCase()),
@@ -10323,6 +10391,14 @@ var policy2 = (list, repos) => ({
   what: "private text",
   why: `Everything written to ${repos.public.join(" or ")} is public once the repository is, and stays cached after, so it names no person, company or private record.`
 });
+var shipWrite = (raw) => {
+  try {
+    const { tool_input: input, tool_name: tool } = JSON.parse(raw);
+    return tool === "Bash" && typeof input?.command === "string" && SHIP.test(input.command);
+  } catch {
+    return false;
+  }
+};
 async function check(raw, environment = process.env) {
   const loaded = await guardList("no-public-leak", "no-public-leak", isPublicList, EMPTY_LIST, environment);
   if (loaded.refusal)
@@ -10330,7 +10406,7 @@ async function check(raw, environment = process.env) {
   const read = await readPolicy(dataDir(environment));
   if (read.refusal !== undefined)
     return refusedList(raw, `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`);
-  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings)), raw, environment);
+  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
 }
 if (import.meta.main) {
   const raw = await Bun.stdin.text();

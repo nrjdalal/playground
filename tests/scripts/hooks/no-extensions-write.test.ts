@@ -2152,10 +2152,7 @@ describe("a playground CLI call that no guard reads runs", () => {
     ["settings why", "playground settings why ext.links"],
     ["settings set of a key no guard reads", "playground settings set ui.theme dark --reason x"],
     ["settings reset of a key no guard reads", "playground settings reset ui.theme --reason x"],
-    [
-      "settings import-jobs, which writes jobs.* keys alone",
-      "playground settings import-jobs /tmp/jobs.json",
-    ],
+    ["settings import-jobs --dry-run", "playground settings import-jobs /tmp/jobs.json --dry-run"],
     ["rules", "playground rules voice"],
     ["uninstall without --purge", "playground uninstall"],
     ["status", "playground status"],
@@ -2272,6 +2269,32 @@ describe("a guard decision's keys are the keys the hook gates (PG-1090)", () => 
   )
 })
 
+// PG-1196: the guard decision also sets a job's enabled field, so a session's own write of it stays refused, the owner's Approve or Settings > Jobs the one way in.
+describe("a job's setting is the owner's alone (PG-1196)", () => {
+  test.each(["jobs.opsTicketCard", "jobs.opsSweep", "jobs.opsFirefightingStart"])(
+    "a session's own settings set and reset of %s are refused",
+    async (key) => {
+      expect(await bash(`playground settings set ${key} '{"enabled":true}' --reason r`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+      expect(await bash(`playground settings reset ${key} --reason r`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+    },
+  )
+
+  // import-jobs writes a jobs.<name> for each job its file lists, on unless the file marks it disabled, so a session's run would turn a job on itself
+  test.each([
+    "playground settings import-jobs /tmp/jobs.json",
+    "playground settings import-jobs /tmp/jobs.json --scope acme-test",
+    "playground settings import-jobs /tmp/jobs.json --launch-agents /tmp/agents",
+  ])("a session's own %s is refused, naming the guard decision", async (command) => {
+    const refusal = await bash(command)
+    expect(refusal).toContain("no-extensions-write hook refuses")
+    expect(refusal).toContain("post a guard decision with bun run ask new")
+  })
+})
+
 describe("a refusal for a value the hook does not hold names it in readable text", () => {
   test.each([
     ["a variable", "rm -f $X/x", "rm on $X/x,"],
@@ -2354,5 +2377,21 @@ describe("a held path past any other heredoc or a quote the scan cannot place is
     ],
   ])("%s", async (_, command) => {
     expect(await bash(command, WORK)).toBeDefined()
+  })
+})
+
+// An eval of literal text is followed as the line its words make, so it runs where those commands would; refused-forms/1198.ts holds the forms it refuses
+describe("an eval of literal text runs", () => {
+  test.each([
+    ["an eval of one quoted line", "eval 'echo hi'"],
+    ["an eval of literal words", "eval echo hi"],
+    ["an eval of a chain", "eval 'cd /tmp && ls'"],
+    ["an eval of a heredoc read by a substitution", "eval \"$(cat <<'EOF'\necho hi\nEOF\n)\""],
+    ["an eval of plain words", "eval git status"],
+    ["an eval of each plain character", "eval echo a-b.c/d=e,f:g@h%i"],
+    ["an eval of a quoted glob operator", "eval 'ls ^x'"],
+    ["an eval of an escaped glob operator", "eval echo \\^x"],
+  ])("%s runs from the checkout and the home", async (_, command) => {
+    for (const cwd of [CHECKOUT, HOME]) expect(await bash(command, cwd)).toBeUndefined()
   })
 })

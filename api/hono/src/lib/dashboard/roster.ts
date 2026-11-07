@@ -41,6 +41,7 @@ export const rosterAgentSchema = z.object({
   lastReportAt: isoTime.optional(),
   name: z.string().min(1),
   pr: z.string().regex(PR_URL_RE, "a GitHub pull request URL").optional(),
+  prs: z.array(z.string().min(1)).optional(),
   repo: z
     .string()
     .regex(/^[\w.-]+\/[\w.-]+$/, "owner/name")
