@@ -635,6 +635,20 @@ Only the first reading moves the folder, sets variables and records files for th
 - Both pre-push jobs that read the pushed refs on stdin, `conflict-markers` and `keeps-canary`, run as lefthook scripts, each a one-line `.lefthook/pre-push/<name>.sh` that execs its check, since lefthook 2.2.2 skips every pre-push command and job while the checked-out branch has nothing new against its upstream, a push of another branch included, and runs a script on every push.
   `audit` and `ensure-branches`, which read no pushed ref, stay commands; `tests/lefthook.test.ts` pins both scripts and runs them under the real lefthook with the checked-out branch level.
 
+## no-outside-pr-code
+
+- A reviewer or tester reads an outside author's PR and leaves its code unrun, since its tests, scripts and installs would run that author's code on this machine.
+  `scripts/hooks/no-outside-pr-code.ts` refuses a Bash or Monitor line by a session role.ts places as a `reviewer` or `tester`, its sub-agents included (they run under the session's own hooks and `PLAYGROUND_ROLE`), when the line touches an outside clone and any command on it does more than read or move the clone.
+  An outside clone is a folder named as the reviewer brief names a review clone, `review-<n>` or `review-<repo>-<n>`, whose origin's PR `<n>` has an author other than the repo's owner, on a repo a user owns; an org repo's PRs are its colleagues', so they stay out.
+  It reads the author once with `gh api repos/<repo>/pulls/<n>` and keeps it in the data folder (`hook-outside-pr/`), since it never changes; a PR it cannot read counts as outside.
+  A line touches a clone when a command's folder sits in one (the tool's `cwd`, a `cd`, `env -C`, a shell's `-c` script, a run-slot call's command), when a word names a path in one or a folder holding one (`find`, `cp -r`, a glob), or when it holds a folder or word the hook cannot read while an outside clone exists on this machine.
+  A command reads when `read-only.ts`'s `readsWords` passes it, run by a bare program name with no redirect and no variable set for it.
+  It moves the clone with one of four literal git forms, `git fetch <remote> <refspec>`, `git checkout --detach <rev>`, `git switch --detach <rev>` and `git worktree add [--detach] <path> <rev>`, which run no file the PR holds while the clone has no `node_modules`.
+  Its reason names the reads (the Read, Grep and Glob tools, `gh pr diff`, git's diff, log and show) and asks the verdict to say the code was read, not run, scored on the PR's own GitHub checks.
+  It acts for checkers alone: a worker, a lead and the owner's own sessions run any clone, and checkers run the owner's own PRs and an org repo's as before.
+  It refuses a line it cannot read, and its tests are `bun run test:file tests/scripts/hooks/no-outside-pr-code.test.ts`.
+  Its registration in both settings files lands in a later ship than its script, as [Registered in both settings files](#registered-in-both-settings-files) says.
+
 ## no-prompt-stop
 
 - A factory session never waits on a permission prompt no one answers: `scripts/hooks/no-prompt-stop.ts`, registered beside no-stash, refuses the Bash shapes Claude Code stops on, with a reason the session acts on:
