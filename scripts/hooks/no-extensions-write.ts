@@ -466,7 +466,7 @@ const REGEX_AFTER =
 // a program that can turn a regex into text, so its body could reach a pipe or a file as words
 const STRINGIFIES =
   /\.source\b|\btoString\b|\bString\s*\(|\bJSON\s*\.\s*stringify\b|\.concat\s*\(|\.join\s*\(|\$\{/
-// A JavaScript program with each regex literal outside its strings, templates and comments masked to a word that is neither a path, a glob nor a redirect, or the program unchanged when it can turn a regex into text or the scan cannot close a literal; a regex that guarded() finds a guarded word in, or one a + or a member access follows, keeps its text
+// A JavaScript program with each regex literal outside its strings, templates and comments masked to a word that is neither a path, a glob nor a redirect, or the program unchanged when it can turn a regex into text or the scan cannot close a literal; a regex that guarded() finds a guarded word in, or one a + or a member other than test or exec follows, keeps its text
 function maskRegexes(source: string, guarded: (body: string) => boolean): string {
   if (STRINGIFIES.test(source)) return source
   let out = ""
