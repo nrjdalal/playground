@@ -65,7 +65,7 @@ const SLACK = {
 }
 
 const PREVIEWS = {
-  ask: { text: "Port DUNE-1401's fix to staging and main.", type: "ask" },
+  ask: { text: "Port MADEDUNE-1401's fix to staging and main.", type: "ask" },
   budget: { amount: "$40", type: "budget", why: "A second account for a week" },
   delete: { type: "delete", what: "47 stale worktrees", why: "They hold 30 GB" },
   schema: { shape: "inbox_item(id text, ref integer)", type: "schema" },
@@ -247,13 +247,13 @@ describe("what bun run ask takes", () => {
         preview: { link, text: "on it", to: "Cameron's thread" },
         title: "Reply to Cameron",
       }).success
-    expect(draft("https://linear.app/acme/issue/DUNE-2186/x")).toBe(true)
+    expect(draft("https://linear.app/acme/issue/MADEDUNE-2186/x")).toBe(true)
     expect(
       draft(
         "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100",
       ),
     ).toBe(true)
-    expect(draft("http://linear.app/acme/issue/DUNE-2186")).toBe(false)
+    expect(draft("http://linear.app/acme/issue/MADEDUNE-2186")).toBe(false)
     expect(draft("https://acme.slack.com/archives/C0MADEUP01/p1700000000000100")).toBe(false)
   })
 
@@ -778,7 +778,7 @@ describe("an answer", () => {
     expect(checkAnswer(slack, { action: "draft", text: "" })).toHaveProperty("message")
     const linear = item({
       kind: "draft",
-      preview: { link: "https://linear.app/acme/issue/DUNE-1/x", text: "hi", to: "DUNE-1" },
+      preview: { link: "https://linear.app/acme/issue/MADEDUNE-1/x", text: "hi", to: "MADEDUNE-1" },
     })
     expect(checkAnswer(linear, { action: "draft" })).toHaveProperty("message")
     expect(checkAnswer(linear, { action: "send" })).toEqual({
@@ -789,7 +789,7 @@ describe("an answer", () => {
     expect(savesDraft({ link: CHANNEL, text: "hi", to: "@Merritt" })).toBe(true)
     expect(savesDraft({ noLink: "a new DM", text: "hi", to: "@Merritt" })).toBe(true)
     expect(
-      savesDraft({ link: "https://linear.app/acme/issue/DUNE-1/x", text: "hi", to: "x" }),
+      savesDraft({ link: "https://linear.app/acme/issue/MADEDUNE-1/x", text: "hi", to: "x" }),
     ).toBe(false)
     // a draft is a go: its poster closes it with the channel link the draft tool returns
     expect(isGo("draft")).toBe(true)
@@ -1657,7 +1657,7 @@ describe("slackPlace", () => {
 
   test("is null for no link, a place outside Slack, or a Slack link that names no conversation", () => {
     expect(slackPlace(undefined)).toBeNull()
-    expect(slackPlace("https://linear.app/acme/issue/DUNE-1401")).toBeNull()
+    expect(slackPlace("https://linear.app/acme/issue/MADEDUNE-1401")).toBeNull()
     expect(slackPlace("https://app.slack.com/client/T0000000000")).toBeNull()
     expect(slackPlace("https://evil.example/client/T0000000000/C0MADEUP01")).toBeNull()
   })
@@ -2122,7 +2122,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { action: "draft" },
         { actor, deliver: delivered, upload },
       )
-      const linear = await filedDraft("https://linear.app/acme/issue/DUNE-1401")
+      const linear = await filedDraft("https://linear.app/acme/issue/MADEDUNE-1401")
       await store.answerItem(
         db,
         linear.id,
@@ -3067,7 +3067,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(await stale()).not.toContain(posted.id)
   })
 
-  test("the poster resolves its own alert update; another session, a non-alert item and an unknown id are refused (#658)", async () => {
+  test("the poster resolves its own alert update; another session, a decision and an unknown id are refused (#658)", async () => {
     const alert = async () => {
       const posted = await post({
         from: "ops",
@@ -3102,23 +3102,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const other = await alert()
     expect(await store.resolveItem(db, other.id, { by: "builder" })).toMatchObject({
       code: "CONFLICT",
-      message: "Only ops, which posted it, resolves this alert",
+      message: "Only ops, which posted it, resolves this update",
       ok: false,
     })
-    // a decision settles, it does not resolve; a non-alert update is read or dismissed
+    // a decision settles, it does not resolve
     expect(
       await store.resolveItem(db, (await post(decision(PREVIEWS.budget))).id, { by: "ops" }),
     ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
-    const finding = await post({
-      from: "builder",
-      kind: "update",
-      preview: { outcome: "finding" },
-      title: "Found",
-    })
-    expect(await store.resolveItem(db, finding.id, { by: "builder" })).toMatchObject({
-      code: "VALIDATION_ERROR",
-      ok: false,
-    })
     expect(await store.resolveItem(db, "#i999999", { by: "ops" })).toMatchObject({
       code: "NOT_FOUND",
       ok: false,
@@ -3137,7 +3127,51 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       }),
     ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
     // nothing here leaves an update unread
-    await store.markRead(db, [other.id, finding.id, long.id, archived.id])
+    await store.markRead(db, [other.id, long.id, archived.id])
+  })
+
+  // PG-1349: a finished progress card and the focus card waited for the owner's Done, since resolve took an alert alone
+  test("the poster resolves any update of its own once it has settled, a finished progress card and the focus card included, read and with its note; another session's is refused (PG-1349)", async () => {
+    const at = new Date("2026-10-07T12:00:00.000Z")
+    const progress = await post({
+      from: "worker-made-up",
+      kind: "update",
+      preview: { outcome: "merged", text: "```\nMade-up job  ██████████  3/3\n```" },
+      title: "Made-up job: 3 of 3 steps done",
+    })
+    const done = await store.resolveItem(db, `#i${progress.ref}`, {
+      by: "worker-made-up",
+      note: "All 3 steps done",
+      now: at,
+    })
+    expect(done).toMatchObject({
+      item: {
+        answer: {
+          at: at.toISOString(),
+          by: "worker-made-up",
+          choice: "resolved",
+          note: "All 3 steps done",
+        },
+        readAt: at.toISOString(),
+      },
+      ok: true,
+    })
+    const focus = await post({
+      from: "ops",
+      kind: "update",
+      preview: { outcome: "finding" },
+      title: "Focus for worker-f ended: 0 runs queued while it stood, 0m0s in all",
+    })
+    expect(await store.resolveItem(db, focus.id, { by: "worker-made-up" })).toMatchObject({
+      code: "CONFLICT",
+      message: "Only ops, which posted it, resolves this update",
+      ok: false,
+    })
+    const note = "Everything that came in while focus stood is answered"
+    expect(await store.resolveItem(db, focus.id, { by: "ops", note, now: at })).toMatchObject({
+      item: { answer: { by: "ops", choice: "resolved", note } },
+      ok: true,
+    })
   })
 
   test("ack and settle store where the answer was carried out, and take an https URL alone", async () => {
@@ -3170,19 +3204,19 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       ok: false,
     })
     const settled = await store.settleItem(db, ticket.id, {
-      link: "https://linear.app/team/issue/CEDAR-1",
+      link: "https://linear.app/team/issue/MADECEDAR-1",
     })
     expect(settled.ok && settled.item.answer).toMatchObject({
       choice: "settled",
-      link: "https://linear.app/team/issue/CEDAR-1",
+      link: "https://linear.app/team/issue/MADECEDAR-1",
     })
   })
 
   test("a link's label is kept beside it, needs the link, and is one line", async () => {
     const ticket = await post(decision(PREVIEWS.ticket))
     await store.answerItem(db, ticket.id, { action: "approve" }, { actor })
-    const link = "https://linear.app/acme/issue/DUNE-2186"
-    expect(await store.ackItem(db, ticket.id, { label: "Filed DUNE-2186" })).toMatchObject({
+    const link = "https://linear.app/acme/issue/MADEDUNE-2186"
+    expect(await store.ackItem(db, ticket.id, { label: "Filed MADEDUNE-2186" })).toMatchObject({
       code: "VALIDATION_ERROR",
       ok: false,
     })
@@ -3196,8 +3230,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       code: "VALIDATION_ERROR",
       ok: false,
     })
-    const acked = await store.ackItem(db, ticket.id, { label: " Filed DUNE-2186 ", link })
-    expect(acked.ok && acked.item.answer).toMatchObject({ link, linkLabel: "Filed DUNE-2186" })
+    const acked = await store.ackItem(db, ticket.id, { label: " Filed MADEDUNE-2186 ", link })
+    expect(acked.ok && acked.item.answer).toMatchObject({ link, linkLabel: "Filed MADEDUNE-2186" })
     const other = await post(decision(PREVIEWS.delete))
     const settled = await store.settleItem(db, other.id, {
       label: "Closed acme/app#12",
@@ -3213,14 +3247,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const ticket = await post(decision(PREVIEWS.ticket))
     await store.answerItem(db, ticket.id, { action: "approve" }, { actor })
     await store.ackItem(db, ticket.id, {
-      label: "Filed DUNE-2186",
-      link: "https://linear.app/acme/issue/DUNE-2186",
+      label: "Filed MADEDUNE-2186",
+      link: "https://linear.app/acme/issue/MADEDUNE-2186",
     })
     const again = await store.ackItem(db, ticket.id, {
-      link: "https://linear.app/acme/issue/DUNE-2187",
+      link: "https://linear.app/acme/issue/MADEDUNE-2187",
     })
     expect(again.ok && again.item.answer).toMatchObject({
-      link: "https://linear.app/acme/issue/DUNE-2187",
+      link: "https://linear.app/acme/issue/MADEDUNE-2187",
     })
     expect(again.ok && again.item.answer && "linkLabel" in again.item.answer).toBe(false)
   })

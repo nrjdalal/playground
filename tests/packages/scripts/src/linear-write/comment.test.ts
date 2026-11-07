@@ -33,7 +33,7 @@ beforeAll(async () => {
             commentCreate: {
               comment: {
                 id: "c-new",
-                url: "https://linear.app/example/issue/DUNE-1#comment-c-new",
+                url: "https://linear.app/example/issue/MADEDUNE-1#comment-c-new",
               },
               success: true,
             },
@@ -64,7 +64,7 @@ describe("linear-write comment", () => {
   test("posts the file's contents as the ticket's comment", async () => {
     ticket = issue([])
     const path = await file(BODY)
-    const result = await comment(gql(), "DUNE-1", path)
+    const result = await comment(gql(), "MADEDUNE-1", path)
     if (!result.posted) throw new Error("expected a post")
     expect(result.comment.id).toBe("c-new")
     const mutation = calls.at(-1)
@@ -78,7 +78,7 @@ describe("linear-write comment", () => {
   test("skips when a ticket comment's first line already matches, naming its url", async () => {
     ticket = issue([PAST])
     const path = await file("A past comment about something else.\nDifferent rest.")
-    const result = await comment(gql(), "DUNE-1", path)
+    const result = await comment(gql(), "MADEDUNE-1", path)
     if (result.posted) throw new Error("expected a skip")
     expect(result.url).toBe(PAST.url)
     expect(calls.at(-1)?.query).toContain("issue(")
@@ -88,7 +88,7 @@ describe("linear-write comment", () => {
   test("matches the first line past surrounding whitespace", async () => {
     ticket = issue([{ body: BODY, url: "https://linear.app/x#c2" }])
     const path = await file(`  ${BODY.split("\n", 1)[0]}\nDifferent rest.`)
-    const result = await comment(gql(), "DUNE-1", path)
+    const result = await comment(gql(), "MADEDUNE-1", path)
     if (result.posted) throw new Error("expected a skip")
     expect(result.url).toBe("https://linear.app/x#c2")
   })
@@ -96,17 +96,17 @@ describe("linear-write comment", () => {
   test("refuses a ticket whose dedupe read is cut short", async () => {
     ticket = issue([PAST], true)
     const path = await file(BODY)
-    await expect(comment(gql(), "DUNE-1", path)).rejects.toThrow("more than 100 comments")
+    await expect(comment(gql(), "MADEDUNE-1", path)).rejects.toThrow("more than 100 comments")
   })
 
   test("refuses an empty file", async () => {
     ticket = issue([])
     const path = await file("   \n")
-    await expect(comment(gql(), "DUNE-1", path)).rejects.toThrow("the file is empty")
+    await expect(comment(gql(), "MADEDUNE-1", path)).rejects.toThrow("the file is empty")
   })
 
   test("refuses a missing file", async () => {
     ticket = issue([])
-    await expect(comment(gql(), "DUNE-1", join(dir, "no-such.md"))).rejects.toThrow()
+    await expect(comment(gql(), "MADEDUNE-1", join(dir, "no-such.md"))).rejects.toThrow()
   })
 })

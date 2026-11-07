@@ -87,7 +87,7 @@ const agent = (name: string, fields: Record<string, unknown> = {}) =>
     role: "worker",
     sessionId: `s-${name}`,
     task: "Fix the thing in prod",
-    ticket: "CEDAR-1",
+    ticket: "MADECEDAR-1",
     ...fields,
   }) as unknown as Agents[number]
 
@@ -111,7 +111,12 @@ describe("the stored sidebar", () => {
       { "s-worker-gone": ["ask-2"], "s-worker-greed": ["ask-1"], "s-worker-idle": [] },
     )
     expect(shown.agents).toEqual([
-      expect.objectContaining({ pr: { number: 102 }, report: null, task: null, ticket: "CEDAR-1" }),
+      expect.objectContaining({
+        pr: { number: 102 },
+        report: null,
+        task: null,
+        ticket: "MADECEDAR-1",
+      }),
     ])
     expect(shown.waiting).toEqual({ "s-worker-greed": ["ask-1"] })
   })
