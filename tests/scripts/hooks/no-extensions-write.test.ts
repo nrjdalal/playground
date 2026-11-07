@@ -2396,7 +2396,7 @@ describe("an eval of literal text runs", () => {
   })
 })
 
-// The Ops lead sets a guard setting that only tunes a number: glm.readOnlyLoad5 to a positive limit, and a job's row changed in its schedule's interval alone, read against policy.json, since a set replaces the whole row and a row that leaves a field out would drop it; every other change, and every other session, stays with the owner
+// The Ops lead sets a guard setting that only tunes a number: glm.readOnlyLoad5 to a positive limit, and a job's row changed in its schedule's interval alone, read against the row the login's scope stores, since a set replaces that row and the render reads every field it leaves out from the registry; every other change, and every other session, stays with the owner
 describe("the Ops lead's tuning of a guard setting", () => {
   const home = mkdtempSync(join(tmpdir(), "no-extensions-write-tuning-"))
   const data = join(home, ".playground")
@@ -2406,15 +2406,36 @@ describe("the Ops lead's tuning of a guard setting", () => {
   mkdirSync(work)
   mkdirSync(join(data, "extensions", "hooks"), { recursive: true })
   mkdirSync(join(config, "sessions"), { recursive: true })
+  // each job as policy.json renders it, its stored row over the registry's entry
+  const job = (fields: object) => ({
+    callsModel: false,
+    command: "bun run x",
+    cwd: "{checkout}",
+    description: "a job",
+    enabled: false,
+    runtime: "launchd",
+    ...fields,
+  })
   writeFileSync(
     join(data, "extensions", "policy.json"),
     JSON.stringify({
       values: {
-        "jobs.opsAlways": { schedule: { always: true } },
-        "jobs.opsAwake": { enabled: true, schedule: { every: 300 } },
+        "jobs.opsAlways": job({ enabled: true, schedule: { always: true } }),
+        "jobs.opsAwake": job({ enabled: true, schedule: { every: 300 } }),
+        "jobs.opsFresh": job({ schedule: { every: 60 } }),
+        "jobs.opsOrg": job({ enabled: true, schedule: { every: 60 } }),
       },
     }),
   )
+  // the rows each scope stores: the login's, and an org's that holds a row for a job
+  writeFileSync(join(data, "extensions", "login"), "me\n")
+  for (const [scope, values] of [
+    ["me", { "jobs.opsAlways": { enabled: true }, "jobs.opsAwake": { enabled: true } }],
+    ["acme", { "jobs.opsOrg": { enabled: true } }],
+  ] as const) {
+    mkdirSync(join(data, "extensions", scope, ".git"), { recursive: true })
+    writeFileSync(join(data, "extensions", scope, "settings.json"), JSON.stringify(values))
+  }
   writeFileSync(
     join(data, "roster.json"),
     JSON.stringify({
@@ -2452,8 +2473,12 @@ describe("the Ops lead's tuning of a guard setting", () => {
   const TUNES = [
     ["glm.readOnlyLoad5 to a new limit", "playground settings set glm.readOnlyLoad5 20 --reason r"],
     [
-      "a job's interval, its row otherwise as it stands",
+      "a job's interval, its stored row otherwise as it stands",
       `playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "the interval of a job its login stores no row for",
+      `playground settings set jobs.opsFresh '{"schedule":{"every":600}}' --reason r`,
     ],
   ]
 
@@ -2505,8 +2530,16 @@ describe("the Ops lead's tuning of a guard setting", () => {
       `playground settings set jobs.opsAwake '{"enabled":true,"schedule":{"every":1.5}}' --reason r`,
     ],
     [
-      "a job always on moved to an interval",
-      `playground settings set jobs.opsAlways '{"schedule":{"every":600}}' --reason r`,
+      "a job's whole rendered row with a new interval, which would pin the registry's fields",
+      `playground settings set jobs.opsAwake '{"callsModel":false,"command":"bun run x","cwd":"{checkout}","description":"a job","enabled":true,"runtime":"launchd","schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job whose rendered schedule is no interval, moved to one",
+      `playground settings set jobs.opsAlways '{"enabled":true,"schedule":{"every":600}}' --reason r`,
+    ],
+    [
+      "a job an org's scope stores a row for",
+      `playground settings set jobs.opsOrg '{"schedule":{"every":600}}' --reason r`,
     ],
     [
       "a job policy.json holds no row for",
