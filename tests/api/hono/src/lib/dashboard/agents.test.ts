@@ -1506,8 +1506,8 @@ describe("branchTicketOf", () => {
   })
 
   test("another repository's branch that starts with a Linear ID gives that ID", () => {
-    expect(branchTicketOf("cedar-1234-export", "acme-labs/example-repo", own)).toBe("CEDAR-1234")
-    expect(branchTicketOf("DUNE-2582", "acme-labs/gke-deployments", own)).toBe("DUNE-2582")
+    expect(branchTicketOf("fix-1234-export", "acme-labs/example-repo", own)).toBe("FIX-1234")
+    expect(branchTicketOf("ABC-2582", "acme-labs/gke-deployments", own)).toBe("ABC-2582")
   })
 
   test("any other branch names none", () => {
@@ -1515,7 +1515,7 @@ describe("branchTicketOf", () => {
       ["nd-603-aside-setup-lines", own],
       ["test-855-stack", own],
       ["pr-843", own],
-      ["cedar-1234-export", null],
+      ["fix-1234-export", null],
       ["vx-step1-soak", own],
       ["feat/board-colours", "acme-labs/example-repo"],
       ["research-939-pg-baseline", "acme-labs/example-repo"],
