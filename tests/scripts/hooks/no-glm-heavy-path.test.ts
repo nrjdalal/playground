@@ -1143,6 +1143,21 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
     }
   })
 
+  test("a database client aimed off this machine is refused on GLM under a policy that guards no org", async () => {
+    const open = storeWith(join(DIR, "no-org-data"), {}, {})
+    for (const command of [
+      "psql -h db.example.com app",
+      "pg_basebackup -h db.example.com -D out",
+      "pgcli -h db.example.com app",
+      "pgbench -h db.example.com app",
+      "mycli -h db.example.com app",
+    ]) {
+      const reason = await refusal(input(command), { ...GLM, PLAYGROUND_DATA_DIR: open }, CALM)
+      expect(reason).toContain("db.example.com")
+      expect(reason).toContain("glm rule")
+    }
+  })
+
   test("a database client on this machine passes on GLM", async () => {
     for (const command of [
       "psql -h 127.0.0.1 -U postgres app",
