@@ -464,6 +464,8 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       'echo $(ls /bin/s*.none 2> /dev/null); touch "$MARKER"',
       // round 6 of #1219: a substitution read to the script's end runs as before when no glob in it can be docker or a shell
       'x=$(echo "$(echo a)"); ls /bin/s*.none 2> /dev/null; touch "$MARKER"',
+      'x=$(echo ${HOME}); ls *.ts 2> /dev/null; touch "$MARKER"',
+      'x=$(git rev-parse "a)b" 2> /dev/null); ls *.ts 2> /dev/null; touch "$MARKER"',
     ])
       test(`while a glob that is no program word runs as before: ${script}`, async () => {
         const r = await run(["sh", "-c", script])
