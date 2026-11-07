@@ -51,6 +51,19 @@ describe("opsRowOf", () => {
     expect(opsRowOf("ops-dashboard", beat(), null, NOW).status).toBe("running")
   })
 
+  // #1336: a job that refuses its config writes why to its heartbeat, which Settings > Jobs' card shows beside the config
+  test("carries the heartbeat's configRefused, its last refusal of its config, and none while it holds none (#1336)", () => {
+    const why = "config.hours takes HH-HH, not made-up"
+    expect(opsRowOf("ops-dashboard", beat({ configRefused: why }), true, NOW)).toMatchObject({
+      configRefused: why,
+      status: "running",
+    })
+    expect(opsRowOf("ops-dashboard", beat(), true, NOW)).not.toHaveProperty("configRefused")
+    expect(opsRowOf("ops-dashboard", beat({ configRefused: 7 }), true, NOW)).not.toHaveProperty(
+      "configRefused",
+    )
+  })
+
   test("carries the callsModel and model jobs.json marks, whatever the id says", () => {
     expect(
       opsRowOf("ops-dashboard", beat(), true, NOW, false, {

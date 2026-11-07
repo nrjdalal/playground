@@ -55,6 +55,7 @@ import {
   resetSetting,
   setSetting,
   settingHistory,
+  settingRows,
 } from "../../../../../../packages/settings/src/settings-folder"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
@@ -1555,15 +1556,36 @@ describe("a guard decision for a job (PG-1196)", () => {
     expect(takes({ key: "jobs.opsTicketCard", value: undefined })).toBe(true)
   })
 
-  test("refuses a job decision carrying any field but enabled, and a job the registry does not name", () => {
+  // #1336: a job the registry does not name is an org's own job, whose enabled field alone is a part Approve writes over the org's row, so only a value that is neither a part nor a whole row is refused
+  test("refuses a job decision carrying any field but enabled, and a job the registry does not name with neither a part nor a whole row", () => {
     for (const change of [
       { key: "jobs.opsTicketCard", value: { command: "made-up", enabled: true } },
       { key: "jobs.opsTicketCard", value: { enabled: true, schedule: { every: 5 } } },
       { key: "jobs.opsTicketCard", value: {} },
       { key: "jobs.opsTicketCard", value: true },
-      { key: "jobs.opsMadeUp", value: { enabled: true } },
+      { key: "jobs.opsMadeUp", value: { enabled: true, schedule: { every: 5 } } },
     ]) {
       expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+
+  // #1336: a session proposes a job's config as a new object, which core checks only for being an object
+  test("takes a registry job's config alone, as an object of any fields (#1336)", () => {
+    expect(takes({ key: "jobs.opsSweep", value: { config: {} } })).toBe(true)
+    expect(
+      takes({ key: "jobs.opsSweep", value: { config: { hours: "09-18", made: ["up"] } } }),
+    ).toBe(true)
+  })
+
+  test("refuses a config that is not an object, and a config beside another field (#1336)", () => {
+    for (const value of [
+      { config: [] },
+      { config: "hours=09-18" },
+      { config: null },
+      { config: 7 },
+      { config: {}, enabled: true },
+    ]) {
+      expect(takes({ key: "jobs.opsSweep", value }), JSON.stringify(value)).toBe(false)
     }
   })
 })
@@ -1589,9 +1611,15 @@ describe("a guard decision for an org's own job (PG-1363)", () => {
     expect(takes({ key: "jobs.opsWatch", value: undefined })).toBe(true)
   })
 
+  test("takes its enabled field alone or its config alone, which Approve writes over the org's row (#1336)", () => {
+    expect(takes({ key: "jobs.opsWatch", value: { enabled: false } })).toBe(true)
+    expect(takes({ key: "jobs.opsWatch", value: { config: { prefixes: ["X"] } } })).toBe(true)
+  })
+
   test("refuses a row that is no job, a config that is no object, and a key that is no job's name", () => {
     for (const change of [
-      { key: "jobs.opsWatch", value: { enabled: true } },
+      { key: "jobs.opsWatch", value: { config: {}, enabled: true } },
+      { key: "jobs.opsWatch", value: { config: ["X"] } },
       { key: "jobs.opsWatch", value: { ...row, config: ["X"] } },
       { key: "jobs.opsWatch", value: { ...row, madeUp: 1 } },
       { key: "jobs.ops-watch", value: row },
@@ -5572,6 +5600,49 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       })
     })
 
+    test("an org's own job's enabled or config Approve writes it over the org's row, and is refused while the org holds none (#1336)", async () => {
+      const data = folder()
+      const key = "jobs.opsWatch"
+      const scope = "acme-test"
+      const row = {
+        callsModel: false,
+        command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+        config: { prefixes: ["X"] },
+        description: "Watches an org's own queue.",
+        enabled: true,
+        heartbeat: "ops-watch",
+        schedule: { every: 60 },
+      }
+      const answer = async (value: object) => {
+        const posted = await post(decision({ ...GUARD, key, scope, value }))
+        expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+        return ((await store.getItem(db, posted.id))!.answer as { set: { line: string } }).set.line
+      }
+      expect(await answer({ enabled: false })).toBe(`${key} has no row at ${scope} to change`)
+      writeFiles(data, scope, new Map([["scripts/ops-watch/cli.ts", "console.log(1)"]]), {
+        author: "owner",
+        reason: "ship the script",
+      })
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+      expect(setSetting(data, { key, scope, value: row }, who).ok).toBe(true)
+      const stored = () =>
+        settingRows(data).find((each) => each.key === key && each.scope === scope)
+      expect(await answer({ enabled: false })).toStartWith(`set ${key} at ${scope} to {`)
+      expect(stored()?.value).toEqual({ ...row, enabled: false })
+      expect(await answer({ config: { prefixes: ["Y"] } })).toStartWith(
+        `set ${key} at ${scope} to {`,
+      )
+      expect(stored()?.value).toEqual({ ...row, config: { prefixes: ["Y"] }, enabled: false })
+      // with its script folder gone, the merged row no longer passes the org job's check, so turning it on is refused and the row stays
+      writeFiles(data, scope, new Map([["scripts/ops-watch/cli.ts", null]]), {
+        author: "owner",
+        reason: "remove the script",
+      })
+      const on = await answer({ enabled: true })
+      expect(on).toStartWith(`${key}: `)
+      expect(stored()?.value).toEqual({ ...row, config: { prefixes: ["Y"] }, enabled: false })
+    })
+
     test("a job's Approve keeps the other fields its scope's row holds, and stores no registry field (PG-1196)", async () => {
       const data = folder()
       const key = "jobs.opsTicketCard"
@@ -5584,6 +5655,36 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(readSetting(data, key)!.rows).toEqual([
         { key, scope: "made-up-me", value: { enabled: true, schedule: { every: 7 } } },
       ])
+    })
+
+    test("a job's config Approve writes that object alone over its scope's row, every other field kept (#1336)", async () => {
+      const data = folder()
+      const key = "jobs.opsSweep"
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+      const row = { config: { hours: "00-23" }, enabled: true, schedule: { every: 7 } }
+      expect(setSetting(data, { key, scope: "made-up-me", value: row }, who).ok).toBe(true)
+      const config = { hours: "09-18", made: ["up"] }
+      const card = { ...GUARD, key, scope: "made-up-me", value: { config } }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(readSetting(data, key)!.rows).toEqual([
+        { key, scope: "made-up-me", value: { config, enabled: true, schedule: { every: 7 } } },
+      ])
+      // the stored answer is jsonb, which orders an object's keys its own way, so the line's JSON is read back rather than matched as text
+      const set = (
+        (await store.getItem(db, posted.id))!.answer as { set: { exitCode: number; line: string } }
+      ).set
+      expect(set.exitCode).toBe(0)
+      const prefix = `set ${key} at made-up-me to `
+      expect(set.line.startsWith(prefix)).toBe(true)
+      expect(JSON.parse(set.line.slice(prefix.length))).toEqual({
+        config,
+        enabled: true,
+        schedule: { every: 7 },
+      })
+      expect(settingHistory(data, key)?.[0]?.reason).toBe(
+        `the owner approved it in the Inbox (#i${posted.ref})`,
+      )
     })
 
     test("with no data folder its Approve is refused and the item stays open", async () => {
