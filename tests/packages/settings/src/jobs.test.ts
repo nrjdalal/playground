@@ -309,6 +309,10 @@ describe("an org's own job row (PG-1335)", () => {
     ["a program", { program: ["{bun}", "{data}/ops/ops-watch/cli.ts"] }],
     ["a config that is a list", { config: ["INC"] }],
     ["a config that is text", { config: "INC" }],
+    ["a stop group, which ops would stop before each start", { stop: "dashboard" }],
+    ["a heartbeat of another job's name", { heartbeat: "ops-dashboard" }],
+    ["a heartbeat out of its folder", { heartbeat: "../x" }],
+    ["a bare script folder as its script", { command: "{bun} {data}/ops/ops-watch" }],
   ])("a row with %s is refused, named with its org and key, and nothing renders", (_, change) => {
     const org = one({ ...watch, ...change })
     expect(org.jobs).toEqual({})
