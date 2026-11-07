@@ -7169,7 +7169,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
-    verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
+    verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
   else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
@@ -7863,10 +7863,9 @@ function commandReads(cmd) {
   if (cmd.redirects.length > 0 || cmd.words.some((w) => /[*?[{()$]/.test(w.value)))
     return false;
   const words = cmd.words.map((w) => w.value);
-  if (words.length === 0)
-    return true;
-  if (words.some(marked))
-    return false;
+  return words.length === 0 || !words.some(marked) && readsWords(words);
+}
+function readsWords(words) {
   const [name, ...args] = words;
   if (name === "git") {
     const k = args[0] === "-C" ? 2 : 0;
