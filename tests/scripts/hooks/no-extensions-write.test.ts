@@ -2396,11 +2396,14 @@ describe("an eval of literal text runs", () => {
   })
 })
 
-// The Ops lead sets a guard setting that only tunes a number (#1354): glm.readOnlyLoad5 to a positive limit, and a job's row changed in its schedule's interval alone, read against policy.json, since a set replaces the whole row and a row that leaves a field out would drop it; every other change, and every other session, stays with the owner
+// The Ops lead sets a guard setting that only tunes a number: glm.readOnlyLoad5 to a positive limit, and a job's row changed in its schedule's interval alone, read against policy.json, since a set replaces the whole row and a row that leaves a field out would drop it; every other change, and every other session, stays with the owner
 describe("the Ops lead's tuning of a guard setting", () => {
   const home = mkdtempSync(join(tmpdir(), "no-extensions-write-tuning-"))
   const data = join(home, ".playground")
   const config = join(home, "config")
+  // a call runs from a worktree, since from the home, which holds the data folder, a glob character in a word reads as a path into the extensions
+  const work = join(home, "work")
+  mkdirSync(work)
   mkdirSync(join(data, "extensions", "hooks"), { recursive: true })
   mkdirSync(join(config, "sessions"), { recursive: true })
   writeFileSync(
@@ -2436,7 +2439,7 @@ describe("the Ops lead's tuning of a guard setting", () => {
   const as = (session: string, role: string, command: string) =>
     check(
       JSON.stringify({
-        cwd: home,
+        cwd: work,
         hook_event_name: "PreToolUse",
         session_id: session,
         tool_input: { command },
@@ -2464,7 +2467,9 @@ describe("the Ops lead's tuning of a guard setting", () => {
       ["s-worker", "worker"],
       ["s-unnamed", "lead"],
     ])
-      expect(await as(session, role, command)).toContain("no-extensions-write hook refuses")
+      expect(await as(session, role, command)).toContain(
+        "no-extensions-write hook refuses playground settings",
+      )
   })
 
   test.each([
@@ -2523,6 +2528,6 @@ describe("the Ops lead's tuning of a guard setting", () => {
       "playground settings set glm.readOnlyLoad5 20 --reason r && playground settings set live.branch x --reason r",
     ],
   ])("the Ops lead is refused %s", async (_, command) => {
-    expect(await ops(command)).toContain("no-extensions-write hook refuses")
+    expect(await ops(command)).toContain("no-extensions-write hook refuses playground settings")
   })
 })
