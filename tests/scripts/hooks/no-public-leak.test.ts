@@ -17,7 +17,7 @@ const TERMS = {
   handles: ["quillco", "qmarsh"],
   linearKeys: ["VX"],
   names: ["Quilla Marsh"],
-  slackIds: ["C0FAKE1234"],
+  slackIds: ["C0MADE0401"],
 }
 let scratch = ""
 let stored = ""
@@ -52,6 +52,106 @@ const run = (raw: string, data = stored) => check(raw, env(data))
 const R = "--repo quillco/playground"
 // The factory's repository, the first the guard keeps while factory.publicRepo is unset.
 const UNSET_R = `--repo ${UNSET_REPOS.public[0]}`
+
+// A made-up owner, Quilla (@qmarsh), whose names owner.names lists, and an outside contributor, Ostra Vell (@ovell).
+const OWNER_TERMS = {
+  ...TERMS,
+  companies: ["Acme"],
+  handles: ["ovell", "qmarsh"],
+  names: ["Ostra Vell", "Quilla"],
+}
+const CONTRIBUTORS = "### ❤️ Contributors\n\n"
+
+describe("a ship's notes may name the owner on the owner's own Contributors line alone", () => {
+  let owned = ""
+  beforeAll(async () => {
+    owned = join(scratch, "owned")
+    storeWith(
+      owned,
+      { "no-public-leak.json": JSON.stringify(OWNER_TERMS) },
+      {
+        "factory.archiveRepo": "acme/archive",
+        "factory.publicRepo": "quillco/playground",
+        "owner.names": ["qmarsh", "quilla"],
+      },
+    )
+  })
+  const notes = async (text: string) => {
+    const file = join(scratch, `notes-${Bun.hash(text)}.md`)
+    await Bun.write(file, text)
+    return file
+  }
+  const OWN = `## v2\n\n${CONTRIBUTORS}- Quilla @qmarsh\n- @someone\n`
+
+  test("the owner's line holding the login alone passes", async () => {
+    const file = await notes(`${CONTRIBUTORS}- @qmarsh\n- @someone\n`)
+    expect(await run(bash(`gh release create v2 ${R} --notes-file ${file}`), owned)).toBeUndefined()
+  })
+
+  test("the owner's line written with CRLF line ends passes", async () => {
+    const file = await notes(OWN.replaceAll("\n", "\r\n"))
+    expect(await run(bash(`gh release create v2 ${R} --notes-file ${file}`), owned)).toBeUndefined()
+  })
+
+  test.each(["create v2", "edit v2"])("gh release %s passes the owner's line", async (verb) => {
+    expect(
+      await run(bash(`gh release ${verb} ${R} --notes-file ${await notes(OWN)}`), owned),
+    ).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "the owner's name on another line of the notes",
+      `### 🩹 Fixes\n\n- Quilla's fix\n\n${CONTRIBUTORS}- Quilla @qmarsh\n`,
+    ],
+    [
+      "an outside contributor's name on a Contributors line",
+      `${CONTRIBUTORS}- Ostra Vell @ovell\n`,
+    ],
+    ["an outside handle alone on a Contributors line", `${CONTRIBUTORS}- @ovell\n`],
+    ["the archive's owner as a name on the owner's line", `${CONTRIBUTORS}- Acme @qmarsh\n`],
+    ["the archive's owner as name and login", `${CONTRIBUTORS}- Acme @acme\n`],
+    ["a heading that ends in Contributors", "### 🩹 Fixes for Contributors\n\n- Quilla @qmarsh\n"],
+    [
+      "an indented heading after the section",
+      `${CONTRIBUTORS}- @x\n   ### 🩹 Fixes\n\n- Quilla @qmarsh\n`,
+    ],
+    [
+      "an HTML heading after the section",
+      `${CONTRIBUTORS}- @x\n<h3>Fixes</h3>\n\n- Quilla @qmarsh\n`,
+    ],
+    ["a fence after the section", `${CONTRIBUTORS}- @x\n\`\`\`\n- Quilla @qmarsh\n`],
+    ["an outside name on the owner's login", `${CONTRIBUTORS}- Ostra Vell @qmarsh\n`],
+    ["the owner's line outside the Contributors section", `### 🩹 Fixes\n\n- Quilla @qmarsh\n`],
+  ])("a ship's notes holding %s are refused", async (_, text) => {
+    expect(
+      await run(bash(`gh release create v2 ${R} --notes-file ${await notes(text)}`), owned),
+    ).toContain("no-public-leak hook refused")
+  })
+
+  test.each([
+    [
+      "a ship's title",
+      (f: string) => `gh release create v2 ${R} --title "Quilla's ship" --notes-file ${f}`,
+    ],
+    [
+      "an edited ship's title",
+      (f: string) => `gh release edit v2 ${R} --title "Quilla @qmarsh" --notes-file ${f}`,
+    ],
+    ["an issue's body", (f: string) => `gh issue create ${R} -t x --body-file ${f}`],
+    ["a pull request's body", (f: string) => `gh pr create ${R} -t x --body-file ${f}`],
+    ["a comment", (f: string) => `gh pr comment 1 ${R} --body-file ${f}`],
+    [
+      "a ship's create joined to a comment",
+      (f: string) =>
+        `gh release create v2 ${R} --notes-file ${f} && gh pr comment 1 ${R} --body-file ${f}`,
+    ],
+  ])("the owner's line in %s is refused", async (_, command) => {
+    expect(await run(bash(command(await notes(OWN))), owned)).toContain(
+      "no-public-leak hook refused",
+    )
+  })
+})
 
 describe("a write to the public repository holding private text is refused", () => {
   test.each([
@@ -97,7 +197,7 @@ describe("a write to the public repository holding private text is refused", () 
   test.each([
     ["a handle", "thanks @qmarsh", "qmarsh"],
     ["a company term", "built for Vantorix", "Vantorix"],
-    ["a Slack id", "settled in C0FAKE1234", "C0FAKE1234"],
+    ["a Slack id", "settled in C0MADE0401", "C0MADE0401"],
     ["a Linear key", "fixes VX-42", "VX-42"],
     ["an email address", "mail quilla@example.com", "quilla@example.com"],
     ["an archive link", "see https://github.com/acme/archive/pull/9", "acme/archive"],
@@ -266,7 +366,7 @@ describe("it fails closed on its list", () => {
       ],
       [
         "a Slack MCP post",
-        mcp("mcp__slack-shared__chat_post_message", { channel: "C0FAKE9999", text: "hi" }),
+        mcp("mcp__slack-shared__chat_post_message", { channel: "C0MADE0404", text: "hi" }),
       ],
     ])("refuses %s", async (_, raw) => {
       expect(await run(raw, lacks())).toContain("holds no hooks/no-public-leak.json")

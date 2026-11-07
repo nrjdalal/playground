@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 
 import { renderNotes } from "../../../../../packages/scripts/src/release-notes/notes"
+import { check } from "../../../../../scripts/hooks/no-public-leak"
+import { storeWith } from "../../../../scripts/hooks/render-set"
 
 const REPO = "acme/widgets"
 const URL = `https://github.com/${REPO}`
@@ -75,7 +80,7 @@ const COMMITS = [
 describe("renderNotes (PG-1213)", () => {
   const notes = renderNotes({ commits: COMMITS, from: "v0.0.1", repo: REPO, to: "v0.0.2" })
 
-  test("renders ZeroStarter's shape: the compare link, emoji sections in changelogen's order, then each contributor's name and handle", () => {
+  test("renders ZeroStarter's shape: the compare link, emoji sections in changelogen's order, then each contributor's login alone", () => {
     expect(notes).toBe(
       [
         `[compare changes](${URL}/compare/v0.0.1...v0.0.2)`,
@@ -105,8 +110,8 @@ describe("renderNotes (PG-1213)", () => {
         "",
         "### ❤️ Contributors",
         "",
-        "- Pat Example @pat-dev",
-        "- Sam Example @sam-ops",
+        "- @pat-dev",
+        "- @sam-ops",
         "",
       ].join("\n"),
     )
@@ -244,8 +249,9 @@ describe("renderNotes (PG-1213)", () => {
     },
   )
 
-  test("a contributor reads with the author's name before the handle, and the handle alone when no name was read", () => {
-    const notes = renderNotes({
+  // three made-up commits: one author twice with a name, one with none
+  const named = (owner?: string[]) =>
+    renderNotes({
       commits: [
         {
           login: "pat-dev",
@@ -270,9 +276,58 @@ describe("renderNotes (PG-1213)", () => {
         },
       ],
       from: "v1",
+      owner,
       repo: REPO,
       to: "v2",
     })
-    expect(notes.split("### ❤️ Contributors\n\n")[1]).toBe("- Pat Example @pat-dev\n- @sam-ops\n")
+  const contributors = (notes: string) => notes.split("### ❤️ Contributors\n\n")[1]
+
+  test("a contributor reads as the login alone when no owner names are set", () => {
+    expect(contributors(named())).toBe("- @pat-dev\n- @sam-ops\n")
+  })
+
+  test("the owner's line carries the author name's words owner.names lists, every other line the login alone", () => {
+    expect(contributors(named(["pat", "pat-dev"]))).toBe("- Pat @pat-dev\n- @sam-ops\n")
+  })
+
+  test("an owner whose author name holds no owner.names word reads as the login alone", () => {
+    expect(contributors(named(["pat-dev"]))).toBe("- @pat-dev\n- @sam-ops\n")
+  })
+
+  test("the public repo's leak guard passes the owner's line in a ship's notes file, and refuses the same text as an issue's body", async () => {
+    const scratch = await mkdtemp(join(tmpdir(), "notes-leak-"))
+    const data = storeWith(
+      join(scratch, "data"),
+      {
+        "no-public-leak.json": JSON.stringify({
+          companies: ["Vantorix"],
+          handles: ["pat-dev"],
+          linearKeys: ["VX"],
+          names: ["Pat"],
+          slackIds: ["C0FAKE1234"],
+        }),
+      },
+      {
+        "factory.archiveRepo": "acme/archive",
+        "factory.publicRepo": REPO,
+        "owner.names": ["pat", "pat-dev"],
+      },
+    )
+    const file = join(scratch, "notes.md")
+    await Bun.write(file, named(["pat", "pat-dev"]))
+    const write = (command: string) =>
+      check(
+        JSON.stringify({
+          cwd: scratch,
+          hook_event_name: "PreToolUse",
+          tool_input: { command },
+          tool_name: "Bash",
+        }),
+        { CLAUDE_CONFIG_DIR: scratch, PLAYGROUND_DATA_DIR: data },
+      )
+    expect(await write(`gh release create v2 --repo ${REPO} --notes-file ${file}`)).toBeUndefined()
+    expect(await write(`gh issue create --repo ${REPO} --title x --body-file ${file}`)).toContain(
+      "no-public-leak",
+    )
   })
 })

@@ -218,6 +218,45 @@ describe("set", () => {
     expect(worker.code).toBe(0)
   })
 
+  test("an ended checker's restart moves its pr together with its prs in one set, as spawn.sh's --pr writes them, while a set naming pr alone is still refused (#1135)", async () => {
+    const ended: Agent = {
+      kind: "reviewer",
+      name: "k3v9q2-reviewer",
+      pr: "https://github.com/acme/app/pull/1",
+      prs: ["https://github.com/acme/app/pull/1"],
+      role: "worker",
+      status: "ended",
+      task: "Review #1",
+      title: "Reviewer of x7mh4d-worker",
+      worker: "x7mh4d-worker",
+    }
+    const restart = await run(configWith([ended]), [
+      "set",
+      "k3v9q2-reviewer",
+      "status=starting",
+      "prs=https://github.com/acme/app/pull/2",
+      "pr=https://github.com/acme/app/pull/2",
+    ])
+    expect(restart.code).toBe(0)
+    expect(agentOf(restart.roster, "k3v9q2-reviewer")).toEqual({
+      ...ended,
+      pr: "https://github.com/acme/app/pull/2",
+      prs: ["https://github.com/acme/app/pull/2"],
+      status: "starting",
+    })
+    const issue = await run(configWith([ended]), [
+      "set",
+      "k3v9q2-reviewer",
+      "status=starting",
+      "prs=https://github.com/acme/app/issues/5",
+      "pr=",
+    ])
+    expect(issue.code).toBe(0)
+    expect(agentOf(issue.roster, "k3v9q2-reviewer")?.pr).toBeUndefined()
+    const alone = await run(configWith([ended]), ["set", "k3v9q2-reviewer", "pr=2"])
+    expect(alone.code).toBe(1)
+  })
+
   test("a title loses a trailing (#N) and is cut to 40 characters; an empty value removes its key", async () => {
     const r = await run(configWith([]), [
       "set",

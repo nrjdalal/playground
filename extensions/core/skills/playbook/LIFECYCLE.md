@@ -8,8 +8,8 @@ The commands for each start and end are in [SESSIONS.md](SESSIONS.md), and every
 The dashboard lists the dispatcher, and dispatcher-2 while one is started, in the sidebar's header, above the session groups, lists the Planner, both leads, the Optimizer and any other orchestrator, such as the Assistant, under Orchestrators, A to Z by roster title or in the order the owner dragged them into,
 nests each checker under the worker whose PR it checks (by the `worker` key on the checker's roster entry, set at spawn, else its `pr`, else its name: `reviewer-sloth-2-sendtop` under `worker-sloth-2`),
 and puts probes in Other, where they never wait on the owner.
-Each row reads by a plain name with no @: a manager by its role word alone (Builder, Ops, Planner, Optimizer, Assistant, and an orchestrator's with its id, Orchestrator C8m3nr), a worker by its ticket and pull request with no role word (`ENG-1591#1598`), else its title, and a reviewer,
-tester or runner the same way with its role word after (`ENG-1591#1598 Reviewer`, `Keep the dashboard up · runner`).
+Each row reads by a plain name with no @: a manager by its role word alone (Builder, Ops, Planner, Optimizer, Assistant, and an orchestrator's with its id, Orchestrator C8m3nr), a worker by its ticket and pull request with no role word (`AB-1591#1598`), else its title, and a reviewer,
+tester or runner the same way with its role word after (`AB-1591#1598 Reviewer`, `Keep the dashboard up · runner`).
 A new session is named `<id>-<kind>` by `bun run name <kind>`, a checker with an id of its own ([SESSIONS.md](SESSIONS.md#spawn)); one started before keeps the name it has.
 A worker's dev stack runs only while it tests: it stops the stack through its own background task once a round of testing ends, and starts it again for the next; anything that must outlive a chore gets a runner.
 No session builds or holds a demo stack for the owner, since changes are tried on the live dashboard alone: what he should try reaches him on the live dashboard once it merges into canary, and a tester's stack serves its tests alone.
@@ -192,6 +192,8 @@ Ops runs an update when the owner asks for one:
    **Done when** `claude --version` prints a newer version than the one you noted.
 3. Resume each named session on the list onto the new binary, one at a time: close it by [SESSIONS.md](SESSIONS.md#end), then run its resume record, `bash ~/.playground/resume/<name>.sh`, which resumes it with the `--account` its start was given, the model it started with and an effort other than high ([SESSIONS.md](SESSIONS.md#spawn) says how a resume picks a login).
    A session with no record resumes with `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <folder> <session-id>`, adding the `--model` and the `--effort` its line shows when it runs on Claude, and `--account` with the account it started on when that is a second account ([SESSIONS.md](SESSIONS.md#spawn)).
+   A reviewer or tester resumes by running its record's `exec` line by hand (the record forwards no arguments) with `--pr <its PRs, comma-separated>` appended: its roster row's `pr` first, then the rest of its `prs`, read before the close, since spawn.sh sets the ended row's `pr` to the first named.
+   The close ends its row, and spawn.sh refuses a checker's start on an ended row that names no PR.
    The managers go in [Starts and ends](#starts-and-ends)'s order, Ops first: Ops sends the dispatcher the list's path and asks for its own resume, and once Ops runs again the dispatcher tells it to carry on at step 3.
    Ops also does dispatcher-2, when one runs, and optimizer; the Builder does its workers, Ops its runners, each worker its checkers, each spawner its probes, and the owner his own; Ops sends `$LIST`'s path to each session that resumes others.
    A session that ended on its own since step 1, its roster row `ended` with a report saying why, stays ended.
