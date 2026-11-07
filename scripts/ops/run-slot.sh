@@ -492,7 +492,7 @@ chain_steps() {
     [ -n "$file" ] && break
     # an unplaced first word runs a program this cannot read, so a shell word after it runs a script this cannot read too (its -c script, a script file or stdin), whatever follows it
     if [ -n "$unplaced" ]; then
-      case " $CHAIN_SHELLS " in *" ${a##*/} "*) return 1 ;; esac
+      case " $CHAIN_SHELLS " in *" $(basename -- "$a" | tr '[:upper:]' '[:lower:]') "*) return 1 ;; esac
       continue
     fi
     if [ -z "$first" ]; then
@@ -606,7 +606,7 @@ def programs(step, i):
     while i < len(step):
         w = step[i]
         words.append(w)
-        name = os.path.basename(w)
+        name = os.path.basename(w).lower()
         if name not in wrappers:
             return words
         flags, values = options.get(name, (set(), set()))
@@ -737,7 +737,7 @@ for k, step in enumerate(steps):
     if cases and seps[k + 1] in (";;", ";&", ";;&"):
         cases[-1] = "pat"
     hidden = lambda w: w == "eval" or "$" in w
-    if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
+    if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]).lower() in wrappers and any(map(hidden, step[i + 1 :])))):
         unread = True
     # a chain shell word (in any letter case) anywhere past VAR=x, whatever program leads the step, runs a script this does not read: its own -c script (a nested chain, split only one level), a script file, or one fed on stdin (a pipe, a < redirect or a heredoc), behind any option, value or fd number, so it reads as one it cannot read
     if any(os.path.basename(w).lower() in shells for w in step[i:]):

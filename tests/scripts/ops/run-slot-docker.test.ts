@@ -296,6 +296,13 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
       [["sh", "-c", "true; /usr/local/bin/DOCKER build ."], CHAIN],
       [["sh", "-c", "echo docker build . | SH"], CANNOT],
       [["sh", "-c", "echo $(true); Docker build ."], CHAIN],
+      [["sh", "-c", "`echo Docker` build ."], CANNOT],
+      [["foo", "SH", "-c", "docker build ."], CANNOT],
+      [["arch", "-arm64", "SH", "-c", "docker build ."], CANNOT],
+      [["sh", "-c", "NICE /usr/local/bin/doc?er build ."], GLOB],
+      [["sh", "-c", "NICE -n 5 /usr/local/bin/doc?er build ."], GLOB],
+      [["sh", "-c", "x=docker; NICE $x build ."], CANNOT],
+      [["sh", "-c", "Env $X docker build ."], CANNOT],
     ] as const)
       test(`a program word in another letter case: ${argv.join(" ")}`, async () => {
         const r = await run([...argv])
