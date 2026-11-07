@@ -143,11 +143,11 @@ export const sendFailed = (item: InboxItem): boolean =>
 
 // The failures Retry is offered after, the API's RETRY_CODES restated since the web imports its types alone (a test holds the two equal): nothing was typed, so a retry cannot type the answer twice.
 export const RETRY_CODES = [
-  "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
   "LOST",
   "NOT_FOUND",
   "ON_PICKER",
+  "SESSIONS_FAILED",
   "UPLOAD_FAILED",
 ] as const
 

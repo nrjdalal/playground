@@ -52,6 +52,7 @@ import { rowsFit } from "./row-fit"
 import { sendFocus } from "./send-focus"
 import { sendTop } from "./send-top"
 import { slashMenu } from "./slash-menu"
+import { STREAM_RENDERS_SCRIPT, streamRenders } from "./stream-renders"
 import { tooltips } from "./tooltips"
 import { TYPING_LAG_SCRIPT, typingLag } from "./typing-lag"
 import { uploadKeep } from "./upload-keep"
@@ -106,6 +107,12 @@ Checks (default: all)
                 percentile (RAIL), reporting keydown to paint beside it unjudged; it writes into
                 the fixture's transcripts and empties the box after, so only on this checkout's
                 own fixture stack
+  stream-renders
+                on /dashboard at 1280x800, with Playground's turn written past the stream's cap,
+                writes 10 steps into that turn one at a time and counts what each component drew
+                while they landed, failing when a text part's words, a row or a row's name link
+                drew past what a step may draw (its own, plus a clock tick's row each); it writes
+                into the fixture's transcripts, so only on this checkout's own fixture stack
   rows          on /dashboard, at the stock sidebar width and at 11rem, every menu row above
                 the footer is 32px, every row's and member row's words fit its box and none
                 runs past its padded edge, no first-line label ends in an ellipsis at the
@@ -206,8 +213,9 @@ Options
   --json           print the results as JSON
 
 Beyond the agent sign-in, which it signs out of again, and send-top, send-focus, slash-menu,
-reply-focus, typing-lag and upload-keep, which a stack that reads live data refuses, and
-aside-bar's row jump, which skips one, it only reads, so it is safe against the live dashboard.`
+reply-focus, stream-renders, typing-lag and upload-keep, which a stack that reads live data
+refuses, and aside-bar's row jump, which skips one, it only reads, so it is safe against the
+live dashboard.`
 
 const parse = () => {
   try {
@@ -547,6 +555,34 @@ const typingLags = (at: Target) =>
     )
   })
 
+// As typing-lag: its counter is an init script, written to a file for the run, and it writes into the fixture's transcripts, so only this checkout's own stack.
+const streamRendersChecks = (at: Target) =>
+  guard("stream-renders", async () => {
+    if (!fixture)
+      return {
+        check: "stream-renders",
+        detail: "needs this checkout's own stack, not --web and --api",
+        ok: false,
+      }
+    const source = await fixtureOnly(at, "stream-renders")
+    if (!source.ok) return source
+    const script = join(tmpdir(), `playground-verify-stream-renders-${process.pid}.js`)
+    await Bun.write(script, STREAM_RENDERS_SCRIPT)
+    return holding(
+      () => Bun.file(script).delete(),
+      () =>
+        browse(
+          at,
+          "stream-renders",
+          async (browser) => {
+            await browser.signIn(at)
+            return [await streamRenders(browser, at, fixture)]
+          },
+          [script],
+        ),
+    )
+  })
+
 const uploadKeeps = (at: Target) =>
   guard("upload-keep", async () => {
     const source = await fixtureOnly(at, "upload-keep")
@@ -751,6 +787,7 @@ else {
   if (check === "send-top") results.push(...(await sendTops(at)))
   if (check === "send-focus") results.push(...(await sendFocuses(at)))
   if (check === "typing-lag") results.push(...(await typingLags(at)))
+  if (check === "stream-renders") results.push(...(await streamRendersChecks(at)))
   if (check === "aside-bar") results.push(...(await asideBars(at)))
   if (check === "changelog-entry") results.push(...(await changelogEntries(at)))
   if (check === "cls" || check === "all") results.push(...(await layoutShifts(at, check === "all")))

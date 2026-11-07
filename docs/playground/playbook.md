@@ -1,7 +1,7 @@
 ## What it does
 
 `playbook` holds the operating rules of Playground's factory, the Claude Code sessions herdr runs on the owner's behalf: who does what, who reports to whom, how sessions start and end, how the leads keep watch,
-and the standing rules (override, gate, comments, release, dashboard, clock, eta, roster, ask, tickets, classified, signal, main, voice, terminal, local page, correction, upstream, verify, memory, writing, ci, slots, unstick, usage, glm, battery, context, rounds, polling, github, workers, meetings, talk).
+and the standing rules (ask, battery, ci, classified, clock, comments, context, correction, dashboard, eta, gate, github, glm, local page, main, meetings, memory, override, polling, public, release, roster, rounds, signal, slots, talk, terminal, tickets, unstick, upstream, usage, verify, voice, workers, writing).
 It lives in the repo rather than in one session's memory, so every session loads the same rules.
 
 ## When to reach for it
@@ -104,7 +104,7 @@ For a focused stretch, such as a timed test, a demo or an hour of deep work, `pl
 While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep and that session's own reviewer and tester keep running.
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
 A priority start (spawn.sh's `--priority`, or its old name `--firefighting`) passes the load gate and a full run-slot queue at the slots gate while a priority file stands, and the memory gate still applies to it.
-It passes focus too on `priority.json`, while a job's own `priority-start.json` never does (the old `firefighting-*.json` names are aliases), and the job itself holds its High, Medium and Low starts while focus stands.
+It passes focus too on `priority.json` or an org's own `priority-<name>.json`, while a job's own `priority-start.json` never does (the old `firefighting-*.json` names are aliases), and the job itself holds its High, Medium and Low starts while focus stands.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
