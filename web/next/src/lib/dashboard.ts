@@ -522,7 +522,10 @@ export const pickWorker = (
     : (dispatcherOf(workers, primary)?.sessionId ?? null)
 
 // Pure: the live session a transcript link to a worker's view names, by the ?worker= in it; null for any other link.
-export const viewWorker = (href: string, workers: Worker[]): Worker | null => {
+export const viewWorker = <T extends Pick<Worker, "sessionId">>(
+  href: string,
+  workers: T[],
+): T | null => {
   let id: string | null
   try {
     id = new URL(href).searchParams.get("worker")

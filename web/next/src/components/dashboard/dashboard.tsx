@@ -85,6 +85,73 @@ const NO_ORDER: readonly string[] = []
 // Exported for the tests that render a view inside a dashboard of its own.
 export const DashboardContext = createContext<DashboardContext | null>(null)
 
+// What a name in a message reads of the live sessions (AgentLink, an @Name, a transcript link): the facts a label needs and the view each session opens. One value for as long as the same sessions are live under the same names, roles and models, apart from DashboardContext, whose value moves on every board frame: a stream's hundreds of names and words would otherwise draw again on each.
+export type SessionFacts = Pick<
+  Worker,
+  "assistant" | "effort" | "model" | "name" | "role" | "sessionId"
+>
+export type Sessions = {
+  // The primary dispatcher's name as the API gives it; null until the socket's first board.
+  dispatcher: string | null
+  // Each @Name a session wrote, as the view of the live session it names, by its raw name or else its label, in any case; null outside the dashboard, where no session is live.
+  mentions: ((mention: string) => string | null) | null
+  sessions: SessionFacts[] | null
+}
+
+// Outside the dashboard, where no session is live.
+export const NO_SESSIONS: Sessions = { dispatcher: null, mentions: null, sessions: null }
+
+export const SessionsContext = createContext<Sessions>(NO_SESSIONS)
+
+// Pure: the sessions a board holds, as SessionsContext gives them.
+export const sessionsOf = (workers: Worker[] | null, dispatcher: string | null): Sessions => {
+  if (!workers) return { dispatcher, mentions: null, sessions: null }
+  const sessions = workers.map(
+    ({ assistant, effort, model, name, role, sessionId }): SessionFacts => ({
+      ...(assistant ? { assistant } : {}),
+      effort,
+      model,
+      name,
+      role,
+      sessionId,
+    }),
+  )
+  const views = new Map<string, string>()
+  for (const { name, sessionId } of sessions)
+    views.set(agentLabel(name).toLowerCase(), sessionView(sessionId))
+  for (const { name, sessionId } of sessions) views.set(name.toLowerCase(), sessionView(sessionId))
+  return { dispatcher, mentions: (mention) => views.get(mention.toLowerCase()) ?? null, sessions }
+}
+
+// Pure: everything sessionsOf reads, as one string, so its value holds while that holds.
+export const sessionsKeyOf = (workers: Worker[] | null, dispatcher: string | null): string =>
+  workers === null
+    ? ""
+    : [
+        dispatcher ?? "",
+        ...workers
+          .map((w) =>
+            [
+              w.sessionId,
+              w.name,
+              w.role,
+              w.model ?? "",
+              w.effort ?? "",
+              w.assistant ? "a" : "",
+            ].join("\t"),
+          )
+          .sort(),
+      ].join("\n")
+
+// The value made on the render its key last changed on, so a consumer holds one object while the key holds: state set during render, React's way of keeping a value across renders.
+function useKeyed<T>(key: string, make: () => T): T {
+  const [kept, setKept] = useState(() => ({ key, value: make() }))
+  if (kept.key === key) return kept.value
+  const value = make()
+  setKept({ key, value })
+  return value
+}
+
 // One live dashboard for the whole dashboard, opened only for the owner rung the API demands (a socket the API refuses would only say reconnecting), so the sidebar's worker list and the page's stream share a socket and a selection. The selected worker is the URL's ?worker=, so a link opens straight to it. Only /dashboard selects one: the one ?worker= names, else the dispatcher, whose chat is the dashboard's home; on another page no worker row is current. Beside any page but your chat, the aside window holds Playground's chat, so his transcript is read there too.
 export function DashboardProvider({
   allowed,
@@ -244,6 +311,9 @@ export function DashboardProvider({
     watched,
   ])
   const selectedProblem = selectedId === primaryId ? ownProblem : pickedProblem
+  const sessions = useKeyed(sessionsKeyOf(workers, dispatcher), () =>
+    sessionsOf(workers, dispatcher),
+  )
   // One value for as long as nothing in it changes, so a render of the provider alone (a key typed into the composer, an inbox poll that brought nothing new) re-renders none of the views that read it.
   const value = useMemo<DashboardContext>(
     () => ({
@@ -294,35 +364,17 @@ export function DashboardProvider({
     ],
   )
 
-  return <DashboardContext value={value}>{children}</DashboardContext>
+  return (
+    <DashboardContext value={value}>
+      <SessionsContext value={sessions}>{children}</SessionsContext>
+    </DashboardContext>
+  )
 }
 
 export function useDashboard(): DashboardContext {
   const dashboard = use(DashboardContext)
   if (!dashboard) throw new Error("useDashboard needs a DashboardProvider")
   return dashboard
-}
-
-// Each @Name a session wrote, as the view of the live session it names, by its raw name or else its label, in any case; null outside the dashboard, where no session is live. Kept while the same sessions are live, in any order, so a message is not parsed again on every frame or when the board reorders.
-export function useMentions(): ((mention: string) => string | null) | null {
-  const workers = use(DashboardContext)?.workers
-  const key =
-    workers
-      ?.map((w) => `${w.sessionId} ${w.name}`)
-      .sort()
-      .join("\n") ?? ""
-  return useMemo(() => {
-    if (!key) return null
-    const lines = key.split("\n").map((line) => line.split(/ (.*)/))
-    const views = new Map<string, string>()
-    for (const [sessionId = "", name = ""] of lines) {
-      views.set(agentLabel(name).toLowerCase(), sessionView(sessionId))
-    }
-    for (const [sessionId = "", name = ""] of lines) {
-      views.set(name.toLowerCase(), sessionView(sessionId))
-    }
-    return (mention) => views.get(mention.toLowerCase()) ?? null
-  }, [key])
 }
 
 const sessionView = (sessionId: string) => `/dashboard?worker=${encodeURIComponent(sessionId)}`

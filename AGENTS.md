@@ -187,7 +187,7 @@ ZeroStarter's rules above govern Playground too; this section adds its own.
   GitHub's own close on the `Closes #<n>` merge needs no comment, since the PR's review has already checked each item.
 - ALWAYS: Keep app copy generic, so anyone can run the app: the app speaks to the signed-in owner as you and names no person, and an org-specific value (a GitHub org, a Linear team, a Slack channel, the dispatcher's name, a path) comes from config with a sensible default.
   The skills stay the owner's own.
-- A new worktree can clone a sibling's `node_modules` in place of a full install, through run-slot ([scripts/README.md](./scripts/README.md#a-worktrees-node_modules)).
+- A new worktree takes a full `bun install` through run-slot, 2 to 4 s on the warm cache, and clones a sibling's `node_modules` only on a cold cache ([scripts/README.md](./scripts/README.md#a-worktrees-node_modules)).
   Remove worktrees one at a time, never in parallel, and keep one review worktree across a PR's rounds.
 - Every worktree of a checkout shares one `git stash` list, so a pop can take another worker's entry: set work aside with a commit, and take a before-shot from a separate worktree on `origin/canary`.
 - Commit before a red-first swap, so the file's edits sit in a commit, and restore it with `git checkout HEAD -- <file>`, which brings back that commit, where `git checkout -- <file>` brings back the index, which holds the swap once it is staged: on 1 Nov a worker's restore after a red-first swap took the file's uncommitted edits with it, and the work was redone.
@@ -287,7 +287,7 @@ The owner does not review Playground PRs: the review loop is the gate ([ADR 0004
 1. Make the change on a branch from `origin/canary` in `.claude/worktrees/`, with a test or a red-first check when behaviour changes, and open it as a draft into `canary` whose body paraphrases its ask.
    The body is written with the [pr](./extensions/core/skills/pr/SKILL.md) skill, called through the Skill tool: a `## TL;DR` of two sentences or more on top, then its Summary, Evidence and Merge Danger, then `## Links` last.
    Its TL;DR is in plain words: what the owner sees or can do now, in words a person uses, with no factory or code jargon such as pane, slot or jsonb.
-   The body gate (`packages/scripts/src/pr-merge/body.ts`, read by Checks, `pr:merge`, merge-on-ready and the train) takes the template, its TL;DR free of `Outcome:` label lines.
+   The body gate (`packages/scripts/src/pr-merge/body.ts`, read by Checks, `pr:merge`, merge-on-ready and the train) takes the template, its TL;DR free of `Outcome:` label lines, and its Evidence an `A/B:` line.
    The Changelog (`api/hono/src/plugins/changelog/sources.ts`) reads a body's `Outcome:` line, else the TL;DR's first bullet or a prose TL;DR's first sentence.
    Before the review's round 1, settle in your own pass what a round should never spend its turn on (most late findings were docs, skill, body and wording ones): run doc-sync over the change, give each touched doc and skill a writing-for-agents read (a completion criterion on every step, positive phrasing, reference disclosed into sibling files, one meaning in one place),
    and fill the template above; the reviewer still judges everything.

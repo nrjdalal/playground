@@ -9,7 +9,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 ## spawn.sh
 
 - While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start, naming focus's session and its end, but two: a reviewer or tester that reports to the focused session (a resume's, the worker its roster row names),
-  and a `--priority` start while `priority.json`, an urgent window, stands in the data folder.
+  and a `--priority` start while a priority file stands in the data folder: `priority.json`, an urgent window, or any `priority-<name>.json`, an org's own urgent window, each writer keeping its own file.
   A job's own `priority-start.json` passes the load and slots gates alone, never focus; with no priority file, a `--priority` start is refused.
   `--firefighting` is `--priority`'s old name, and `firefighting-stop.json` and `firefighting-headstart.json` stand for `priority.json` and ops-firefighting-start's `firefighting-start.json` (below) for `priority-start.json`: aliases until the jobs that write them take the new names.
 - ops-firefighting-start (`bun run ops:firefighting-start`, `jobs.opsFirefightingStart`, off by default) starts the firefighting workers: each minute it reads the relay's `firefighting.json` and runs `spawn.sh worker <name> <brief> --firefighting` for each open ticket whose key `firefighting.start.prefixes` lists,
@@ -185,15 +185,20 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
 ## A worktree's node_modules
 
-- A new worktree can take `node_modules` as an APFS clone of a sibling worktree's with the same `bun.lock` (`~/.playground/ops/run-slot.sh <your name> -- cp -cR <sibling>/node_modules <worktree>/`, through run-slot since a clone is a heavy run: three load spikes on 13 Oct, fseventsd near 100%, came from clones),
+- A new worktree takes `node_modules` from a full `bun install` through run-slot (`~/.playground/ops/run-slot.sh <your name> -- bun install --cwd <worktree>`), which takes `run-slot-quick`: on the shared warm cache it runs in 2 to 4 s on about 3 s of CPU, its root `postinstall` and `prepare` scripts included, where a clone runs 32 to 36 s on about 27 s of CPU (PG-1344, each measured three times).
+  Then give it a `.env` by the `dev` skill's Start, since `check-types` builds `@packages/auth`, which validates `BETTER_AUTH_SECRET` and `POSTGRES_URL`.
+  The clone is the fallback for a cold cache alone (`~/.bun/install/cache` empty: a full install then downloaded every package in 353 s, measured once).
+  It is an APFS clone of a sibling worktree's `node_modules` with the same `bun.lock` (`~/.playground/ops/run-slot.sh <your name> -- cp -cR <sibling>/node_modules <worktree>/`, through run-slot since a clone is a heavy run: three load spikes on 13 Oct, fseventsd near 100%, came from clones),
   and once that clone succeeds, run-slot clones each workspace's own `node_modules` from the sibling with the same flags (`CLONE_WORKSPACES` in `scripts/ops/run-slot.sh`, run in the clone's own process group), so the worktree is ready for its checks with no install.
   A clone can wait before it starts, since run-slot spaces clones 180 s apart and holds one near the load brake or beside a big run, naming the hold on stderr ([ops/README.md](ops/README.md#run-slot)).
-  The clone has no `dist` folders and no data table metrics: `bun run test:file` and `bun run check-types:tests` build the unbuilt packages their files import, and write the metrics when missing, before they run (`prebuildTests` in `packages/scripts/src/verify/prebuild.ts`), so a clone runs either one directly.
+  Neither route builds a `dist` folder or the data table metrics: `bun run test:file` and `bun run check-types:tests` build the unbuilt packages their files import, and write the metrics when missing, before they run (`prebuildTests` in `packages/scripts/src/verify/prebuild.ts`), so a fresh worktree runs either one directly.
+  Pre-push's `keeps-canary.sh` builds `@packages/config` itself when its `dist` is missing (`packages/scripts/src/pr-merge/config-dist.ts`), since `prepush.ts` imports it and a fresh worktree's first push failed on `Cannot find module '@packages/config/verdicts'` after every route.
+  A build that fails refuses the push, naming `bunx turbo run build --filter=@packages/config` through run-slot as the fix.
   While the clone runs, its holder line (`run-slot-clone.holder` in the ops folder) names the sibling it reads from and the worktree it copies into, so `playground rm --worktree` refuses either one, naming the clone, until the clone ends (`clone_ends` in `scripts/ops/run-slot.sh`, `clonesOf` in `packages/scripts/src/playground/rm.ts`).
   rm reads the line again right before its move, so a clone that starts while rm counts the worktree's files still keeps it.
   When the copy prints any error, run `~/.playground/ops/run-slot.sh <your name> -- bun install --force --ignore-scripts --cwd <worktree>`, since a plain install then looks healthy while check-types fails on a missing module.
   Tests: `bun run test:file tests/scripts/ops/run-slot-nested-clone.test.ts tests/packages/scripts/src/playground/rm.test.ts tests/packages/safe-delete/src/index.test.ts`.
-  A review worktree that only reads (no test run, no commit) takes no clone at all.
+  A review worktree that only reads (no test run, no commit) takes no install at all.
   AGENTS.md has worktrees removed one at a time, since removing several at once drove fseventsd past 300% CPU and the load to 77.
 - A worker, reviewer or tester that ends automatically takes its worktrees with it, one at a time: dev stack, worktree, `playground-<worktree>-db` and `-redis` containers and branch (`cleanWorktree` in `scripts/ops/optimizer/auto_end.ts`; the factory's SESSIONS.md End holds the rules).
 - After `git worktree move`, remove the moved worktree's `web/next/.source` and `web/next/.next`, which keep the old absolute path, so the next pre-commit build fails with `webpack loader path ... is outside configured roots`.

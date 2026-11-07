@@ -1,4 +1,4 @@
-// The PR body the body and merge-on-ready tests share, in the pr skill's template.
+// The PR body the body and merge-on-ready tests share, in the pr skill's template, its Evidence opening with an A/B line.
 export const SKILL_BODY = [
   "## TL;DR",
   "",
@@ -10,6 +10,7 @@ export const SKILL_BODY = [
   "",
   "## Evidence",
   "",
+  "- A/B: rows a PR shows, A canary 2, B branch 1, n=12 against a bar of 1",
   "- **Before:** two rows. **After:** one.",
   "",
   "## Merge Danger",

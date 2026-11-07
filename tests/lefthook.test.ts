@@ -422,6 +422,16 @@ test("pre-push runs its stdin jobs as scripts, each execing its check", async ()
   }
 })
 
+// PG-1344: prepush.ts imports @packages/config, whose dist no install route builds, so keeps-canary builds it first
+test("keeps-canary builds the config dist before it execs prepush.ts", async () => {
+  const text = await Bun.file(join(ROOT, ".lefthook/pre-push/keeps-canary.sh")).text()
+  const build = text.indexOf(
+    "\nbun --no-env-file packages/scripts/src/pr-merge/config-dist.ts || exit 1\n",
+  )
+  expect(build).toBeGreaterThan(-1)
+  expect(build).toBeLessThan(text.indexOf("\nexec "))
+})
+
 // this repo's pre-push marker job, its script run from this checkout, in a scratch repo whose commits go in with hooks off, fed git's pre-push lines: each pushed ref is read from its remote sha when this clone has it, else from its merge-base with origin/canary, and a delete reads nothing
 test("the pre-push marker check refuses a pushed conflict marker a hooks-off commit let through", async () => {
   const markers = await pushScript("conflict-markers.sh")

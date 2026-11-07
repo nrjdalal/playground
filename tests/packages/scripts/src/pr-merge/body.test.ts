@@ -156,3 +156,45 @@ describe("bodyRefusal, given the PR's changed files", () => {
     ).toBeNull()
   })
 })
+
+// #1476: every PR states its measured comparison, so the gate reads an A/B line in the Evidence
+describe("bodyRefusal, reading the Evidence's A/B line", () => {
+  const AB = "- A/B: rows a PR shows, A canary 2, B branch 1, n=12 against a bar of 1"
+  const without = SKILL_BODY.replace(`${AB}\n`, "")
+
+  test("takes a body whose Evidence holds an A/B line, as a bullet, in bold or as plain text", () => {
+    expect(bodyRefusal(SKILL_BODY)).toBeNull()
+    for (const line of [
+      "A/B: rows a PR shows, A canary 2, B branch 1, n=12",
+      "**A/B:** rows a PR shows, A canary 2, B branch 1, n=12",
+      "- **A/B**: rows a PR shows, A canary 2, B branch 1, n=12",
+      "* __A/B:__ rows a PR shows, A canary 2, B branch 1, n=12",
+    ])
+      expect(bodyRefusal(SKILL_BODY.replace(AB, line))).toBeNull()
+  })
+
+  test("refuses a body whose Evidence holds no A/B line, naming the fix", () => {
+    const why = bodyRefusal(without)
+    expect(why).toContain("A/B:")
+    expect(why).toContain("No runtime metric")
+  })
+
+  test("takes A/B: No runtime metric with the check that stands in", () => {
+    expect(
+      bodyRefusal(SKILL_BODY.replace(AB, "- A/B: No runtime metric; docs-wrap --check stands in")),
+    ).toBeNull()
+  })
+
+  test("reads the line only in the Evidence, outside a code fence, at the start of its line", () => {
+    const inSummary = without.replace(
+      "The board reads each PR once.",
+      `The board reads each PR once.\n\n${AB}`,
+    )
+    expect(bodyRefusal(inSummary)).toContain("A/B:")
+    const fenced = without.replace("- **Before:**", `\`\`\`text\n${AB}\n\`\`\`\n- **Before:**`)
+    expect(bodyRefusal(fenced)).toContain("A/B:")
+    expect(bodyRefusal(without.replace("**After:** one.", "**After:** one, A/B: none."))).toContain(
+      "A/B:",
+    )
+  })
+})
