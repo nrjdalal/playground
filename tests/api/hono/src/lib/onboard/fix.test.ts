@@ -267,7 +267,7 @@ describe("each fix runs its fixed argv", () => {
     const { adminLine } = await import("../../../../../../api/hono/src/lib/onboard/fix")
     const m = machine()
     const marker = join(m.root, "ran")
-    const home = `/Users/o'b "x" $(touch ${marker}) \\ \`touch ${marker}\``
+    const home = `/Users/owner'b "x" $(touch ${marker}) \\ \`touch ${marker}\``
     const line = adminLine(
       ["/usr/bin/env"],
       { PORTLESS_STATE_DIR: `${home}/.portless` },

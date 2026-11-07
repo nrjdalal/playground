@@ -40,13 +40,13 @@ const LIST = {
   handles: ["qmarsh"],
   linearKeys: ["VX"],
   names: ["Quilla Marsh"],
-  slackIds: ["C0FAKE1234"],
+  slackIds: ["C0MADE0401"],
 }
 
 describe("the trace count", () => {
   test("counts each kind, its list-fed kinds from the list", () => {
     const text = [
-      "Quilla Marsh and @qmarsh at Vantorix, in C0FAKE1234, on VX-12",
+      "Quilla Marsh and @qmarsh at Vantorix, in C0MADE0401, on VX-12",
       `mail ${["quilla", "qwerty.io"].join("@")}, see #123, as ${OLD_NAME.dispatcher} and ${OLD_NAME.builder} said`,
       "https://github.com/octo/vault/pull/4",
       `run ${OLD_SKILL} and ${OLD_SKILL}-scan, not playground-review`,

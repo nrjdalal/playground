@@ -802,14 +802,14 @@ describe("herdrServers and readScreen", () => {
 
   test("names Playground's servers by default, where ops-herdr serves them, and only names herdr takes", () => {
     // ops-herdr's sockets follow HOME, never CLAUDE_CONFIG_DIR, so a session on another login reads the same servers
-    expect(herdrServers({ CLAUDE_CONFIG_DIR: "/c", HOME: "/home/u" }).map((s) => s.socket)).toEqual(
-      [
-        "/home/u/.playground/herdr/playground.sock",
-        "/home/u/.playground/herdr/playground-probes.sock",
-      ],
-    )
+    expect(
+      herdrServers({ CLAUDE_CONFIG_DIR: "/c", HOME: "/home/someone" }).map((s) => s.socket),
+    ).toEqual([
+      "/home/someone/.playground/herdr/playground.sock",
+      "/home/someone/.playground/herdr/playground-probes.sock",
+    ])
     for (const env of [
-      { HOME: "/home/u" },
+      { HOME: "/home/someone" },
       { PLAYGROUND_HERDR_DIR: "/h", PLAYGROUND_HERDR_SESSIONS: "a,b" },
     ]) {
       expect(herdrServers(env).map((s) => s.socket)).toEqual(

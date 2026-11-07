@@ -6,7 +6,7 @@ import { makeScratch, removeScratch } from "../../../../../packages/safe-delete/
 import { fakeKeychain } from "../../../../extensions/slack/skills/slack/scripts/fake-keychain"
 
 const CLI = join(import.meta.dir, "../../../../../packages/scripts/src/dm/cli.ts")
-const SLACK = { "slack.dmChannel": "D0FIXTURE", "slack.dmOwner": "U0OWNER" }
+const SLACK = { "slack.dmChannel": "D0MADE0201", "slack.dmOwner": "U0OWNER" }
 const ON = { "ext.bundled": ["slack"] }
 const NOT_SET_UP =
   "Slack is not set up here: reach the owner through the Inbox with bun run ask new (an update)"
