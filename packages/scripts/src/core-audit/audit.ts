@@ -116,21 +116,10 @@ export function leg1(files: File[], terms: Terms): Hit[] {
   )
 }
 
-// A placeholder a doc or a default may write: an id holding EXAMPLE or MADE, a home of one of these generic users, a tracker key's team of the factory's own (PG), a made-up one or a standard's name (UTF-8, SHA-256, ISO-8601).
+// A placeholder a doc or a default may write: an id holding EXAMPLE or MADE, a home of one of these generic users, a tracker key's team of the factory's own (PG), a made-up one or a standard's name (UTF-8, SHA-256); a team a real org could hold stays off it.
 const PLACEHOLDER_ID = /EXAMPLE|MADE/
 const PLACEHOLDER_HOMES = new Set(["me", "owner", "runner", "someone", "x", "you"])
-const PLACEHOLDER_KEYS = new Set([
-  "AB",
-  "ABC",
-  "ACME",
-  "ENG",
-  "FIX",
-  "ISO",
-  "MADE",
-  "PG",
-  "SHA",
-  "UTF",
-])
+const PLACEHOLDER_KEYS = new Set(["AB", "ABC", "ACME", "FIX", "MADE", "PG", "SHA", "UTF"])
 
 // Leg 2, needing no list: a Slack id or a person's home path written into the tree outside the tests and the fixtures, whose values are made up, belongs in config with a sensible default, and a tracker key takes a placeholder.
 export function leg2(files: File[]): Hit[] {

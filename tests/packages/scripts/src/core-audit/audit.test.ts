@@ -148,11 +148,12 @@ describe("leg 2: org-shaped values, with no list", () => {
   test("reports a tracker key outside tests, past the factory's own, the made-up ones and standards", () => {
     const files: File[] = [
       { path: "src/x.ts", text: "ok\n// see DUNE-44\n" },
+      { path: "src/y.ts", text: "ENG-262\n" },
       { path: "tests/z.test.ts", text: "DUNE-44\n" },
-      { path: "docs/ok.md", text: "PG-12, ABC-123, ENG-262, UTF-8, SHA-256, ISO-8601, x-DUNE-4\n" },
+      { path: "docs/ok.md", text: "PG-12, ABC-123, AB-262, UTF-8, SHA-256, x-DUNE-4\n" },
     ]
     const hits = leg2(files)
-    expect(at(hits)).toEqual(["src/x.ts:2 trackerKey"])
+    expect(at(hits)).toEqual(["src/x.ts:2 trackerKey", "src/y.ts:1 trackerKey"])
     expect(hits[0]!.where).toBe("a placeholder key such as PG-1")
   })
 })
