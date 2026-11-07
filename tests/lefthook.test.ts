@@ -1221,22 +1221,33 @@ test("pre-commit runs the native-title and dashboard-map tests when a file they 
   }
 }, 60_000)
 
-// The pre-commit hooks-bundle job, as lefthook.yml holds it.
-const hooksBundleJob = async () =>
+// The hooks-bundle job of a lefthook stage, as lefthook.yml holds it.
+const hooksBundleJob = async (stage: "pre-commit" | "pre-push" = "pre-commit") =>
   (
-    Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as {
-      "pre-commit": { commands: Record<string, Record<string, unknown> | undefined> }
-    }
-  )["pre-commit"].commands["hooks-bundle"]
+    Bun.YAML.parse(await Bun.file(join(ROOT, "lefthook.yml")).text()) as Record<
+      string,
+      { commands: Record<string, Record<string, unknown> | undefined> }
+    >
+  )[stage]!.commands["hooks-bundle"]
 
-test("a pre-commit job runs hooks-bundle --check after lint-staged, skipped in a merge", async () => {
+test("a pre-commit job runs hooks-bundle --check, which reads the index, after lint-staged, skipped in a merge", async () => {
   expect(await hooksBundleJob()).toMatchObject({
     priority: 4,
-    run: expect.stringMatching(
-      /^if ! git diff --quiet -- scripts\/hooks\/bundled .* bun --no-env-file packages\/scripts\/src\/hooks-bundle\.ts --check$/,
-    ),
+    run: "bun --no-env-file packages/scripts/src/hooks-bundle.ts --check",
     skip: ["merge"],
   })
+})
+
+// a canary change to a bundle input can stale a head whose own bundles are fresh, as CI's merge ref builds them (#1365)
+test("a pre-push job checks the bundles of the head merged with origin/canary, on the pre-commit job's glob, merges included", async () => {
+  const push = await hooksBundleJob("pre-push")
+  expect(push).toMatchObject({
+    glob: (await hooksBundleJob())?.glob,
+    run: expect.stringMatching(
+      /bun --no-env-file packages\/scripts\/src\/hooks-bundle\.ts --check --merged origin\/canary$/,
+    ),
+  })
+  expect(push).not.toHaveProperty("skip")
 })
 
 // Each committed bundle names every module it holds in a `// <path>` comment, so the folders the job must watch are read from the bundles themselves: a guard that starts importing another folder fails here until the glob holds it.
@@ -1315,10 +1326,10 @@ describe("the pre-commit hooks-bundle job", () => {
       expect(stale.out).toContain("hooks-bundle: stale in scripts/hooks/bundled: role.js")
       expect(stale.out).toContain("run `bun run hooks:bundle` and commit scripts/hooks/bundled")
       bundle()
-      // the rebuilt bundle left unstaged: the commit would carry the old one, which --check alone, reading the disk, passes
+      // the rebuilt bundle left unstaged: the commit would carry the old one, which --check, reading the index, names
       const unstaged = hook()
       expect(unstaged.code).not.toBe(0)
-      expect(unstaged.out).toContain("run git add scripts/hooks/bundled, then commit again")
+      expect(unstaged.out).toContain("hooks-bundle: stale in scripts/hooks/bundled: role.js")
       git("add", "-A")
       expect(hook()).toMatchObject({ code: 0 })
     } finally {
@@ -1337,13 +1348,14 @@ describe("the pre-commit hooks-bundle job", () => {
       git("add", "scripts/hooks/role.ts")
       const refused = hook()
       expect(refused.code).not.toBe(0)
-      expect(refused.out).toContain("run git add scripts/hooks/bundled, then commit again")
-      // an untracked file there refuses too, as a new guard's first bundle would be
-      git("checkout", "--", "scripts/hooks/bundled/role.js")
+      expect(refused.out).toContain("hooks-bundle: stale in scripts/hooks/bundled: role.js")
+      // an untracked file there is no part of the commit, so a commit whose index is fresh passes beside it
+      git("reset", "-q")
+      git("checkout", "--", "scripts/hooks")
       writeFileSync(join(dir, "scripts", "hooks", "bundled", "extra.js"), "new\n")
-      const untracked = hook()
-      expect(untracked.code).not.toBe(0)
-      expect(untracked.out).toContain("run git add scripts/hooks/bundled, then commit again")
+      writeFileSync(join(dir, "README.md"), "more docs\n")
+      git("add", "README.md")
+      expect(hook()).toMatchObject({ code: 0 })
     } finally {
       rmSync(dir, { force: true, recursive: true })
     }
