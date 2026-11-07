@@ -1,6 +1,6 @@
 import { ANSWER_LEAD, payloadOf } from "@packages/config/inbox"
 
-// What the chat shows for an Inbox answer line: the card's #iN, the option you picked or else the verb, and your note.
+// What the chat shows for an Inbox answer line: the card's #iN, the option you picked, each question's pick for a multi-question answer, or else the verb, and your note.
 export type AnswerChip = {
   id: string
   label: string
@@ -15,7 +15,9 @@ export const answerChipOf = (text: string): AnswerChip | null => {
   if (!payload) return null
   return {
     id: payload.id,
-    label: payload.option?.label ?? payload.verb,
+    label: payload.picks?.length
+      ? payload.picks.map((pick) => `${pick.letter}. ${pick.label}`).join(" · ")
+      : (payload.option?.label ?? payload.verb),
     note: payload.comment?.trim() || null,
     ref: payload.ref,
   }

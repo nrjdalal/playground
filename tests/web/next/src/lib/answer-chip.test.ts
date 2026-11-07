@@ -31,6 +31,20 @@ describe("answerChipOf", () => {
     })
   })
 
+  test("a multi-question answer shows each question's pick (#1250)", () => {
+    const line = answerLine(
+      payload({
+        picks: [
+          { index: 0, label: "Staging first", letter: "A", question: "Where first?" },
+          { index: 1, label: "After the next ship", letter: "B", question: "When?" },
+        ],
+      }),
+    )
+    expect(answerChipOf(line)).toMatchObject({
+      label: "A. Staging first · B. After the next ship",
+    })
+  })
+
   test("a verb with no option shows the verb", () => {
     const line = answerLine(payload({ kind: "draft", next: "close", verb: "send" }))
     expect(answerChipOf(line)).toMatchObject({ label: "send", note: null, ref: "#i343" })
