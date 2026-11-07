@@ -187,6 +187,7 @@ test("an org's own job row renders from its installed script folder, and a row p
     command: `/b/bun --no-env-file ${fill.data}/ops/ops-watch/cli.ts`,
     config: { prefixes: ["INC"] },
     cwd: `${fill.data}/ops/ops-watch`,
+    org: "acme",
   })
   expect(rendered.map((job) => job.name)).not.toContain("ops-stray")
   expect(readFileSync(join(data, "ops", "ops-watch", "cli.ts"), "utf8")).toBe(

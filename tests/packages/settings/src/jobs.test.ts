@@ -274,6 +274,7 @@ describe("an org's own job row (PG-1335)", () => {
       description: "Watches an org's own queue.",
       heartbeat: "ops-watch",
       name: "ops-watch",
+      org: "acme",
       schedule: { always: true },
     })
   })
@@ -350,6 +351,22 @@ describe("an org's own job row (PG-1335)", () => {
     const { jobs } = renderJobs({}, [kept], fill, one(watch).jobs)
     expect(jobs.filter((job) => job.name === "ops-watch")).toHaveLength(1)
     expect(jobs.find((job) => job.name === "ops-watch")?.command).not.toBe("old")
+  })
+
+  test("an org's job whose row is then refused or gone renders paused, so the runner stops it, and a hand-kept row stays as it is", () => {
+    const first = renderJobs({}, [], fill, one(watch).jobs).jobs
+    const rendered = first.find((job) => job.name === "ops-watch")!
+    for (const org of [one({ ...watch, stop: "dashboard" }).jobs, {}])
+      expect(renderJobs({}, first, fill, org).jobs.find((job) => job.name === "ops-watch")).toEqual(
+        {
+          ...rendered,
+          disabled: true,
+        },
+      )
+    const company = { command: "~/x/run.sh", heartbeat: "ops-company", name: "ops-company" }
+    expect(renderJobs({}, [company], fill).jobs.find((job) => job.name === "ops-company")).toEqual(
+      company,
+    )
   })
 
   test("a registry job's row renders as before without config, and with config only adds it", () => {
