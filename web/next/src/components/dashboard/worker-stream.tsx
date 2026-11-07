@@ -754,7 +754,7 @@ function PendingMessage({
           failed && "text-destructive flex-wrap",
         )}
         label={status}
-        mark={statusMark(message, busy)}
+        mark={statusMark(message)}
         action={
           action === "unsend" ? (
             <FooterAction

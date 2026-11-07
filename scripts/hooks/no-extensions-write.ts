@@ -40,7 +40,16 @@ import {
   type Word,
   zshSplits,
 } from "./shell"
-import { held, heldWord, namings, NONE, type Steady, steadyNames, unquoted } from "./steady"
+import {
+  held,
+  heldReadings,
+  heldWord,
+  namings,
+  NONE,
+  type Steady,
+  steadyNames,
+  unquoted,
+} from "./steady"
 
 type Environment = Record<string, string | undefined>
 
@@ -973,6 +982,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
             (GLOB.test(r.target.value) && !!names(r.target, here, true))),
       )
       if (into?.target) return refuse(`a write to ${pathOf(into.target, here)}`)
+      // a writing redirect's target through a variable is judged by what the value the hook holds names, a for loop's literal words each in turn; one it holds no value for runs, as it did before
+      for (const r of cmd.redirects) {
+        if (!r.target || !writer(r) || !marked(r.target.value)) continue
+        const words = heldReadings(r.target, here, steadyAt(cmd)) ?? []
+        const named = words.map((word) => names(word, here, false)).find(Boolean)
+        if (named) return refuse(`a write to ${named}`)
+      }
     }
     // past the cap the root may be a folder places() dropped, so a writing redirect whose target leans on the shell's own folder is refused before a reader or an echo lets it run
     const blind = env.cwdAnywhere
