@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { SCRIPT, WAITING, stop, machine } from "./run-slot-fake"
@@ -64,7 +64,7 @@ const subshells = (trace: string) => {
   }
   return n
 }
-// the processes the waiters started together each second over `window` seconds, once each has printed its first wait line and a whole poll has passed in which none began a look (look_mark) and each is in its sleep, since a waiter whose first look ran before the others had joined looks once more at them: the window counts idle polls alone
+// the processes the waiters started together each second over `window` seconds, once each has printed its first wait line and a whole poll has passed in which each is in its sleep and no queue waiter began a look (look_mark, which the clone loop never calls), since a waiter whose first look ran before the others had joined looks once more at them
 const starts = async (
   count: string,
   waiters: Waiter[],
@@ -113,6 +113,18 @@ describe("waiters cost close to nothing while they wait", () => {
     expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 15, 30)).toBeLessThan(5)
   })
 
+  // a count of polls to look again on (an older copy's 20) sets each waiter looking within the window, about 900 to 2,200 processes a look with ten tickets
+  test("and across 25 polls, with nothing changed, fewer than 20 a poll", async () => {
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+    m.hold("run-slot", 3, "big")
+    m.hold("run-slot-2", 3, "big")
+    const { count, path } = shim(m)
+    const waiters = Array.from({ length: 10 }, (_, i) =>
+      waiter(m, path, `worker-${i}`, ["touch"], { RUN_SLOT_POLL: "1" }),
+    )
+    expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 1, 25)).toBeLessThan(20)
+  })
+
   test("and so do ten clone waiters behind the load brake", async () => {
     const m = machine({ cores: 8, load1: 2, load5: 20 })
     mkdirSync(join(m.root, "node_modules"))
@@ -121,5 +133,24 @@ describe("waiters cost close to nothing while they wait", () => {
       waiter(m, path, `worker-${i}`, ["cp", "-R", "node_modules"], { RUN_SLOT_POLL: "5" }),
     )
     expect(await starts(count, waiters, /^run-slot\.sh: this clone waits /m, 5, 10)).toBeLessThan(5)
+  })
+})
+
+// round 1 of the review of issue 1338's fix: a head whose idle poll watched the files and the load alone missed the CPU opening slots 2 to 4, and waited 20 polls
+describe("a waiter at the head reads the gate that held its last look", () => {
+  test("so a run held by shut lanes takes run-slot-2 within a poll of the CPU opening them", async () => {
+    const m = machine({ idle: 10 })
+    m.hold("run-slot", 3, "big")
+    const { path } = shim(m)
+    const w = waiter(m, path, "worker-a", ["touch"], { RUN_SLOT_POLL: "1" })
+    while (!/^\+\d+ look_mark$/m.test(w.err) || !/^\+0 sleep 1$/m.test(w.err)) await Bun.sleep(50)
+    const top = join(m.root, "bin", "top")
+    writeFileSync(top, readFileSync(top, "utf8").replace(/ 10% idle/, " 80% idle"))
+    rmSync(join(m.ops, "run-slot.gauges"), { force: true })
+    const from = w.err.length
+    while (!existsSync(w.marker)) await Bun.sleep(50)
+    // the gauges keep a reading 10 s, which this test's removal of run-slot.gauges skips, so a poll or two passes between the CPU opening and the take
+    expect(w.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0).toBeLessThanOrEqual(2)
+    await stop(w.p)
   })
 })
