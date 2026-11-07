@@ -722,6 +722,9 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   `check-types-tests` first writes `web/next`'s data-table metrics, outside the slot, as CI does.
   The pre-commit steps `native-title` and `dashboard-map` each run a test of under 60 ms when a file it reads is staged, since both tests turned branches red in CI on 5 Nov while no commit ran them.
   `native-title` runs `tests/web/next/src/native-title.test.ts` for a file under `web/next/src/`, and `dashboard-map` runs `tests/packages/scripts/src/verify/dashboard-map.test.ts` for one under `web/next/src/`, `api/hono/src/` or `packages/scripts/src/verify/`, each also for its own test file.
+  It refuses a `git commit` whose message the checkout's own commitlint (`node_modules/.bin/commitlint`, reading the checkout's config) refuses, from any folder and behind run-slot's `--`, naming commitlint's problem lines, since commit-msg lints the message only after pre-commit's build has waited for its slot (one commit waited 56 minutes, then failed on its subject).
+  It reads the message from `-m` or `--message` (several joined as paragraphs, as git joins them), or the file or stdin (`-`, a heredoc) that `-F` names; a commit with `--no-verify` or `-n`, `--edit`, another commit's message (`-C`, `-c`, `--fixup`, `--squash`), a message the hook cannot read or a checkout with no commitlint passes to commit-msg as before, and so does a lint that runs past 8 s.
+  Measured inside the hook: a median of 96 ms over 5 runs, against its 15 s timeout.
   Tests: `bun run test:file tests/packages/scripts/src/commit-slot.test.ts tests/lefthook.test.ts tests/scripts/ops/run-slot-quick.test.ts`.
 
 ## rules
