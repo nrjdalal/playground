@@ -15,7 +15,9 @@ set -euo pipefail
 #      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
 #      a small worker keeping an eighth in its place for the reviewers and testers; a load at or over
 #      that line refuses whatever the CPU's idle share, so the load stays under the cores, but for a
-#      --priority start while a priority file stands (PRIORITY_FILE), logged as readings.priority
+#      --priority start while a priority file stands (PRIORITY_FILE), logged as readings.priority,
+#      and a resume within 15 minutes of close ending a row that read live (JUST_CLOSED), logged as
+#      readings.just_closed
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
@@ -45,7 +47,7 @@ set -euo pipefail
 #   spawn.sh worker    <name> <brief> --title "<t>"    its own workspace, this checkout or --in's folder; reports to the builder (roster.ts who builder), or to --reports-to's session
 #   spawn.sh runner    <name> <brief>                  its own workspace, this checkout; reports to ops (roster.ts who ops)
 #   spawn.sh column    <reviewer|tester|probe|lead|dispatcher> <name> <reports-to> <pane> <brief>
-#                      a column right of a herdr pane id (w1:p2), its spawner's own being $HERDR_PANE_ID; a cmux surface:N is refused
+#                      a column right of a herdr pane id (w1:p2), its spawner's own being $HERDR_PANE_ID
 #   spawn.sh column    <manager> <pane> <brief>        a manager's column names it once: a lead (sessions.names' builder, ops or planner, an <id>-builder, -ops or -planner, or a name the roster kinds) reports to the first dispatcher, and the first dispatcher (sessions.names' dispatcher or an <id>-dispatcher) is briefed by the session running spawn.sh
 #   spawn.sh probe     <name> <reports-to> <brief>     in herdr alone: its own workspace, this checkout, for a server with no pane to split beside
 #   spawn.sh manager   <dispatcher|second dispatcher|optimizer|builder|ops|planner|orchestrator> <brief>   its own workspace in the main checkout's .claude/worktrees/leads: the first dispatcher (sessions.names' dispatcher), which works with the owner and reports to no session; the second dispatcher (Inbox #i520), sessions.names' dispatcher with -2 or an <id>-dispatcher it records as slot=2, on --backend glm or --account <a second account>; the optimizer (optimizer, an <id>-optimizer, or a session the roster gives the optimizer kind) and the builder, ops and planner (playground <manager> starts each), leads; these report to the first dispatcher; an orchestrator, a session whose roster row holds a manager kind of kinds.ts (ROSTER_ROLE_OF_KIND) and reportsTo, set first with roster.ts set <name> kind=<kind> reportsTo=<session>, a lead reporting to that session
@@ -67,7 +69,6 @@ set -euo pipefail
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
 #   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
-#   --runtime cmux     is refused: spawn.sh starts nothing in cmux
 #     With no --runtime, every start and resume opens in herdr, whatever terminal its spawner runs in.
 #     The runtime is recorded at every start and resume in ~/.playground/runtimes/<name>, a resume rewriting whatever word the pin held.
 #
@@ -272,7 +273,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -282,7 +283,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority = sys.argv[1:14]
+data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed = sys.argv[1:15]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -444,9 +445,11 @@ else:
         share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
         keep = cap * share
         readings["reserve"] = keep
-        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --priority start passes while a priority file stands (PRIORITY_FILE), since priority work comes first, and the memory gate still reads it
+        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --priority start passes while a priority file stands (PRIORITY_FILE), since priority work comes first, and a resume of a row spawn.sh closed live in the last 15 minutes passes (JUST_CLOSED), since that session already counts in the load; the memory gate still reads both
         if priority:
             readings["priority"] = priority
+        elif just_closed:
+            readings["just_closed"] = just_closed
         elif readings["load5"] + starts >= cap - keep:
             at = (
                 f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
@@ -857,7 +860,6 @@ while [ $# -gt 0 ]; do
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RUNTIME" ] || usage
     case "$2" in
       --*) usage "--runtime needs a value; \"$2\" starts with --" ;;
-      cmux) usage "--runtime cmux is refused: spawn.sh starts nothing in cmux, and every session opens in herdr" ;;
       herdr) ;;
       *) usage "--runtime takes herdr alone, not \"$2\"" ;;
     esac
@@ -1024,7 +1026,7 @@ PY
   done <<<"$lines"
   exit "$failed"
 fi
-# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row once the pane closes, leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
+# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row once the pane closes, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
 if [ "$MODE" = close ]; then
   NAME=${1:-close}
   [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
@@ -1055,6 +1057,9 @@ except (ValueError, KeyError, TypeError):
     refuse "herdr would not close pane $panes (${said:-no answer from herdr})"
   fi
   echo "closed $NAME (pane $panes on $server)"
+  # The close keeps its time and the row's status before it ends it, for the load gate's pass of a resume within 15 minutes (JUST_CLOSED, below).
+  was=$(roster_field "$NAME" status)
+  { mkdir -p "$DATA/closes" && echo "$(date -u +%s) $(date -u +%FT%TZ) ${was:-none}" > "$DATA/closes/$NAME"; } 2>/dev/null || true
   if ! said=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" status=ended 2>&1 >/dev/null); then
     [ -n "$said" ] && echo "roster.ts says: $said" >&2
     echo "spawn.sh: $NAME closed, but its roster write failed; record it with $BUN $ROSTER set $NAME status=ended, adding task=<what it does> for a name the roster lacks" >&2
@@ -1122,7 +1127,6 @@ case "$MODE" in
     KIND=$ROLE
     [[ $ROLE =~ ^(dispatcher|lead)$ ]] && KIND=$(kind_of "$NAME")
     word "$TO" || refuse "it reports to a session name, not $TO"
-    [[ ! $SURFACE =~ ^surface:[0-9]+$ ]] || refuse "$SURFACE is a cmux surface, and spawn.sh starts nothing in cmux: a column opens beside a herdr pane id (w1:p2), its spawner's own being \$HERDR_PANE_ID"
     [[ $SURFACE =~ ^w[0-9A-Za-z]+:p[0-9A-Za-z]+$ ]] || refuse "$SURFACE is not a herdr pane id (w1:p2): a column in herdr opens beside a pane, its spawner's own being \$HERDR_PANE_ID"
     ;;
   probe)
@@ -1378,6 +1382,14 @@ case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
 PRIORITY_FILE=
 if [ -n "$PRIORITY" ]; then
   PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json), and none does"
+fi
+# A resume within 15 minutes of spawn.sh closing its row while it read live (not ended, parked, paused or done) passes the load gate, as a Claude Code update's close and resume do, since that session already counts in the load it comes back into; a new start, an older close and a close of a row that read otherwise meet it.
+JUST_CLOSED=
+if [ "$MODE" = resume ] && [ -f "$DATA/closes/$NAME" ] && read -r closed_at closed_iso closed_was < "$DATA/closes/$NAME"; then
+  case "${closed_was:-none}" in
+    none | ended | parked | paused | done) ;;
+    *) if [[ $closed_at =~ ^[0-9]+$ ]] && age=$(($(date -u +%s) - closed_at)) && [ "$age" -ge 0 ] && [ "$age" -le 900 ]; then JUST_CLOSED="its $closed_was row closed at $closed_iso"; fi ;;
+  esac
 fi
 # While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --priority start on any priority file but a job's start file (below).
 if FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
@@ -1693,7 +1705,7 @@ if [ "$MODE" = column ]; then
 else
   # A worker or runner records whom it reports to, --reports-to's session or its lead's seat, which the Dashboard's tree and every escalation read; a resume keeps the row's.
   [[ $MODE =~ ^(worker|runner)$ ]] && set -- "$@" "reportsTo=$TO"
-  # The roster's surface is a cmux one (surface:N), which a herdr session never has, so a session in a workspace of its own clears a column's old one; its pane's label carries its name.
+  # A session in a workspace of its own clears the roster surface a column's anchor left; its pane's label carries its name.
   set -- "$@" "surface="
 fi
 # set keeps an entry's work for a respawned session, and creates a new one.

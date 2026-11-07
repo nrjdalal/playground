@@ -20,6 +20,7 @@ import {
 import { liveInput } from "../../../../scripts/ops/optimizer/idle_sessions"
 import { pending } from "../ops-outbox/drain"
 import { focusCard } from "../playground/focus"
+import { dashboardCheckout, NO_CHECKOUT } from "../playground/probe"
 import { swapBundles, unswapBundles } from "../swap-bundles"
 import { writeAtomic } from "../write-atomic"
 import { dashboardWatch } from "./dashboard-watch"
@@ -645,6 +646,33 @@ export const trashPurge =
     await appendFile(join(ctx.ops, "log", "trash-purge.log"), `${isoSeconds(ctx.now)} ${line}\n`)
   }
 
+// The idle-compaction trial (ADR 0020): the idle-compact bin sends /compact to each worker or runner of 200k+ tokens 50 to 58 minutes after its last turn, and each line it prints lands in ops/log/idle-compact.log; a failed pass throws, so the beat reads failed. PLAYGROUND_LIVE_READS names the live machine outright, since the Dashboard checkout reads it by its branch only while git answers, and a stray PLAYGROUND_FIXTURE beside it refuses into the log.
+// The beat runs the bin straight from the Dashboard's checkout, not `bun run idle-compact` from ops-tick's folder: the package.json script's prebuild starts an unslotted turbo build in the main checkout right after a ship, and the bin's env validates only against the Dashboard checkout's own .env, which load-dotenv reads from the --cwd.
+export const idleCompact = async (ctx: Context, checkout = dashboardCheckout(ctx.repo)) => {
+  if (checkout === null) throw new Error(`idle-compact: ${NO_CHECKOUT}`)
+  const pass = await ctx.run(
+    [
+      "env",
+      "PLAYGROUND_LIVE_READS=1",
+      "bun",
+      "--cwd",
+      join(checkout, "api/hono"),
+      "--no-env-file",
+      join(checkout, "api/hono/src/bin/idle-compact.ts"),
+    ],
+    120_000,
+  )
+  const said = lines(pass.out)
+  if (said.length > 0) {
+    await mkdir(join(ctx.ops, "log"), { recursive: true })
+    await appendFile(
+      join(ctx.ops, "log", "idle-compact.log"),
+      said.map((line) => `${isoSeconds(ctx.now)} ${line.slice(0, 300)}\n`).join(""),
+    )
+  }
+  if (pass.code !== 0) throw new Error(`idle-compact: ${said.at(-1) ?? `exit ${pass.code}`}`)
+}
+
 const words = (text: string) => async (ctx: Context) => void (await ctx.send("optimizer", text))
 
 // Every worktree of the repo's clone on canary, and the leads worktree on its leads branch, kept at the head of the origin branch each tracks (canary's, and for leads the branch the install cloned, which spawn.sh's cut sets: main on a public install), so every session runs that line rather than the live checkout: a fast-forward after a fetch, never in one holding an open change, an incoming change to bun.lock or a package.json fast-forwarding and installing back to back inside one run-slot slot (a fast-forward whose install then waited 42s for a slot once left a roster.ts run on new code and old node_modules) and owing that install in tick/canary-pull-owed.json until one exits 0, and a pull or install that fails named to ops once a failure, marked by its words in tick/canary-pull-told.json and cleared once that worktree pulls and owes no install.
@@ -840,6 +868,7 @@ export const BEATS: Beat[] = [
     to: "ops/log/nightly-clean.log, and the Inbox",
   },
   { cron: "17 * * * *", name: "trash-purge", run: trashPurge(), to: "ops/log/trash-purge.log" },
+  { cron: "*/5 * * * *", name: "idle-compact", run: idleCompact, to: "ops/log/idle-compact.log" },
   { cron: "*/5 * * * *", name: "canary-pull", run: canaryPull, to: "ops, once a failed pull" },
   { cron: "*/5 * * * *", name: "relay-watch", run: relayWatch, to: "the Inbox, by bun run ask" },
   { cron: "*/10 * * * *", name: "guard-probe", run: guardProbe, to: "dispatcher" },

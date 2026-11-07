@@ -105,6 +105,7 @@ While it stands, every merge waits, every other session's heavy run waits in the
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
 A priority start (spawn.sh's `--priority`) passes the load gate and a full run-slot queue at the slots gate while a priority file stands, and the memory gate still applies to it.
 It passes focus too on `priority.json` or an org's own `priority-<name>.json`, while a job's own `priority-start.json` never does.
+A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the load gate as well, as a Claude Code update's close and resume do, and the memory gate still applies to it.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
@@ -175,7 +176,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A resumed session restarts any dev stack it served and re-arms its watches, CronList before CronCreate, since the resume kept its crons and dropped its background tasks.
   The factory no longer moves sessions to GLM at 98% usage (retired on Inbox #i827): the account rotation moves it between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
 - A session started with no `--runtime`, from any terminal, or with `--runtime herdr`, opens in herdr, in a pane labelled with its name, and its next resume opens there too.
-  spawn.sh starts nothing in cmux: it refuses `--runtime cmux` and a column started beside a cmux surface, and every resume opens in herdr, whatever word its runtime pin held.
+  spawn.sh opens every session in herdr: it refuses a `--runtime` other than herdr and a column started beside anything but a herdr pane, and every resume opens in herdr, whatever word its runtime pin held.
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused, one that never got its first message included,
@@ -239,7 +240,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   CI checks that nothing in the repo kills by name, pattern or port; a command a session types is the rule's to hold.
 - No session builds, tests, commits or writes a file in the main checkout, which every installed skill follows: the **main** rule.
   A hook refuses each of those there, naming the fix, while its upkeep (a pull, a fetch, rebuilding the shared packages with env validation off after a pull that changes them, `git reset --keep origin/main` off a stray local commit, relinking the skills) and reads run.
-- Nothing types into another session's pane in the owner's name: sessions and ops alerts reach a session through `SendMessage` (the **voice** rule), and the dashboard types only for his own clicks.
+- Nothing types into another session's pane in the owner's name: sessions and ops alerts reach a session through `SendMessage` (the **voice** rule), and the dashboard types only for his own clicks, but for the idle compact's `/compact` into an idle worker or runner, which the owner approved (ADR 0020).
   A test fails on any other caller of the dashboard's `deliver()` and on any text in the repo that types into a pane, Escape on the usage-limit dialog and a manager's `playground picker` on a permission prompt aside.
 - A page for the owner (a report, a comparison, a mock, a diagram) is a local HTML file in the session's scratchpad, kept with `playground page` and posted as an Inbox card's `html` attachment, so the Inbox's viewer shows it and nothing opens on the owner's screen (the **local page** rule), since a claude.ai artifact publishes under whichever account the session holds.
   The page then stays on the Pages tab of the session's view, of the one it was made for and of the dispatcher's.

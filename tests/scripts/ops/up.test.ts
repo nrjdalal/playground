@@ -151,10 +151,10 @@ test("a pass exits 0 and starts a down job in herdr whatever runtime word its ro
   })
 })
 
-// an old ~/.zshrc hook still calls up.py --once-per-cmux in each terminal it opens, so an argument up.py does not know starts nothing.
+// an argument up.py does not know starts nothing.
 test("an argument up.py does not know is refused with its usage and runs no pass", () => {
   const job = { command: "bash /x/ops/ops-x/loop.sh", name: "ops-x", runtime: "herdr" }
-  for (const args of [["--once-per-cmux"], ["--restarted"], ["--sessions", "x"]])
+  for (const args of [["--once"], ["--restarted"], ["--sessions", "x"]])
     expect(exitOf([job], ...args)).toEqual({
       code: 1,
       started: [],

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 
 import {
+  asksDecision,
   check,
   type Deps,
   DASHBOARD_DEADLINE_MS,
@@ -14,6 +15,7 @@ import {
   STEPS_REASON,
 } from "../../../scripts/hooks/no-chat-question"
 import { capital, OLD, OLD_NAMES } from "../../session-names"
+import { ITEMS } from "./inbox-items"
 import { storeWith } from "./render-set"
 
 const script = join(import.meta.dir, "..", "..", "..", "scripts", "hooks", "no-chat-question.ts")
@@ -385,6 +387,70 @@ describe("what passes", () => {
     ).toBeUndefined()
   })
 
+  // a progress card counts for steps alone, so it never stands in for the decision a chat ask puts to the owner (#1486)
+  test("a decision asked beside a progress card is refused, since the card is listed, not open", async () => {
+    expect(
+      await stop("Should I merge PR 12 now? Progress is in #i42.", {
+        statuses: { "#i42": "listed" },
+      }),
+    ).toBe(`${REASON} (#i42 is listed, not open or archived while open)`)
+    expect(
+      await stop(
+        `Should I merge PR 12 now?\n1. Rotate the key.\n2. Restart the API.\n3. Check /api/health.\nProgress is in #i42.`,
+        {
+          statuses: { "#i42": "listed" },
+        },
+      ),
+    ).toBe(`${REASON} (#i42 is listed, not open or archived while open)`)
+  })
+
+  // a table row answers its own cell's question, so its ? is no ask; a row's other words still are; on 7 Nov two such rows beside a progress card each brought a copy of the card (#1486)
+  test("a question in a markdown table row is no ask, while a plain question line and a row's ask phrase still are", () => {
+    expect(asksDecision("| Check | Result |\n|---|---|\n| Did it still answer then? | yes |")).toBe(
+      false,
+    )
+    expect(asksDecision("Did it still answer then?")).toBe(true)
+    expect(asksDecision("| Step | Who |\n|---|---|\n| Merge now? | your call |")).toBe(true)
+  })
+
+  test.each([
+    ["a header row with a ? column", "| PR | Merged? |\n|---|---|\n| 1493 | yes |", false],
+    [
+      "a row whose last cell asks",
+      "| PR | Score | Next |\n|---|---|---|\n| 1493 | 3/5 | Merge after the fix? |",
+      true,
+    ],
+    ["a one-cell row", "| Merge PR 12 now? |", true],
+    [
+      "a row whose answer cell is empty",
+      "| Check | Result |\n|---|---|\n| Ship it today? |  |",
+      true,
+    ],
+    ["a line opening with a pipe and no closing one", "| Ship it today?", true],
+  ])("a table's ? asks only when no cell after it answers it: %s", (_name, reply, asks) => {
+    expect(asksDecision(reply)).toBe(asks)
+  })
+
+  test("a table of answered questions naming a progress card passes", async () => {
+    expect(
+      await stop(
+        "| Check | Result |\n|---|---|\n| Did it still answer then? | yes |\n\nProgress is in #i42.",
+        {
+          statuses: { "#i42": "listed" },
+        },
+      ),
+    ).toBeUndefined()
+  })
+
+  // an open decision the owner archived still waits on the owner, so an ask naming it passes, as it did before the listed rule (#1486)
+  test("a decision asked again beside an open decision the owner archived passes", async () => {
+    expect(
+      await stop("It's in the inbox as #i41: ship canary 3f9a2c1 tonight?", {
+        statuses: { "#i41": "archived while open" },
+      }),
+    ).toBeUndefined()
+  })
+
   test("a reply naming a closed item and an open one", async () => {
     expect(
       await stop("#i40 is done. The next call is #i41: should it wait?", {
@@ -439,7 +505,7 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
 
   test("a named item that is not open fails closed with why", async () => {
     expect(await stop(`${STEPS}\nTracked in #i40.`, { statuses: { "#i40": "approved" } })).toBe(
-      `${STEPS_REASON} (#i40 is approved, not open)`,
+      `${STEPS_REASON} (#i40 is approved, not open or listed)`,
     )
   })
 
@@ -458,6 +524,22 @@ describe("a manager's reply that keeps steps or a table for Quilla goes in one I
       await stop(`${STEPS}\nIt's in the inbox as #i42.`, { statuses: { "#i42": "open" } }),
     ).toBeUndefined()
   })
+
+  // an update is stored done from the moment it is posted while the Inbox still lists it, so a gate that took open alone asked for a copy of the card on every progress edit (#1486)
+  test("passed: 3 numbered steps that name a progress card the Inbox lists", async () => {
+    expect(
+      await stop(`${STEPS}\nProgress is in #i42.`, { statuses: { "#i42": "listed" } }),
+    ).toBeUndefined()
+  })
+
+  test.each(["archived", "archived while open", "denied", "dismissed", "done", "settled"])(
+    "refused: 3 numbered steps whose only card is %s",
+    async (standing) => {
+      expect(await stop(`${STEPS}\nProgress is in #i42.`, { statuses: { "#i42": standing } })).toBe(
+        `${STEPS_REASON} (#i42 is ${standing}, not open or listed)`,
+      )
+    },
+  )
 
   test("a lead's steps go to the dispatcher as a draft, so the card is posted once", async () => {
     expect(DRAFT_REASON).toBe(
@@ -590,12 +672,12 @@ test("run as Claude Code runs it, a report stops with no output", async () => {
 
 describe("the dashboard read's time limits (#1269)", () => {
   // A checkout whose bun run ask writes its pid beside it, then answers each ref after its delay, as the live dashboard's does under load.
-  const stubDashboard = (delays: Record<string, number>, status = "open") => {
+  const stubDashboard = (delays: Record<string, number>, item: object = { status: "open" }) => {
     const dir = mkdtempSync(join(tmpdir(), "no-chat-question-dashboard-"))
     mkdirSync(join(dir, "api", "hono", "src", "bin"), { recursive: true })
     writeFileSync(
       join(dir, "api", "hono", "src", "bin", "dashboard-ask.ts"),
-      `const ref = process.argv[3]\nawait Bun.write(\`\${import.meta.dir}/\${ref.slice(1)}.pid\`, String(process.pid))\nawait Bun.sleep(${JSON.stringify(delays)}[ref] ?? 0)\nconsole.log(JSON.stringify({ status: ${JSON.stringify(status)} }))\n`,
+      `const ref = process.argv[3]\nawait Bun.write(\`\${import.meta.dir}/\${ref.slice(1)}.pid\`, String(process.pid))\nawait Bun.sleep(${JSON.stringify(delays)}[ref] ?? 0)\nconsole.log(JSON.stringify(${JSON.stringify(item)}))\n`,
     )
     return dir
   }
@@ -613,6 +695,16 @@ describe("the dashboard read's time limits (#1269)", () => {
       },
       { itemStatus, sessionName: () => undefined },
     )
+
+  // bun run ask get prints the whole item: an update is stored done from its post on, so whether the Inbox lists it, and what was done with it, is read from its answer and readAt (#1486)
+  test.each(ITEMS.filter((c) => c.standing))(
+    "$name reads $standing",
+    async ({ item, standing }) => {
+      const dashboard = stubDashboard({}, item)
+      stubs.push(dashboard)
+      expect(await readStatus("#i1", dashboard)).toBe(standing as string)
+    },
+  )
 
   test("an open item bun run ask takes 5s to read, as under a load spike, reads as open", async () => {
     const dashboard = stubDashboard({ "#i1": 5000 })
