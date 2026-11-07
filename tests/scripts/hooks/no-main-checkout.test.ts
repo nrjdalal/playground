@@ -1019,3 +1019,43 @@ describe("a git write in the live Dashboard's checkout is refused to every sessi
     expect(await live("git commit -m x", "worker", OTHER)).toBeUndefined()
   })
 })
+
+describe("the live checkout's reading", () => {
+  const RMAIN = mkdtempSync(join(tmpdir(), "no-main-checkout-live-read-"))
+  const DESK = join(RMAIN, ".claude", "worktrees", "desk")
+  mkdirSync(DESK, { recursive: true })
+  mkdirSync(join(RMAIN, ".git", "worktrees", "desk"), { recursive: true })
+  writeFileSync(
+    join(RMAIN, ".git", "worktrees", "desk", "HEAD"),
+    "ref: refs/heads/live/dashboard\n",
+  )
+  // worktree.useRelativePaths writes gitdir relative to the admin folder
+  writeFileSync(
+    join(RMAIN, ".git", "worktrees", "desk", "gitdir"),
+    "../../../.claude/worktrees/desk/.git\n",
+  )
+  const BAD = join(RMAIN, "bad-data")
+  mkdirSync(join(BAD, "extensions"), { recursive: true })
+  writeFileSync(
+    join(BAD, "extensions", "policy.json"),
+    JSON.stringify({ values: { "live.branch": 5 } }),
+  )
+  afterAll(() => rmSync(RMAIN, { force: true, recursive: true }))
+
+  const at = (command: string, cwd: string, data = join(RMAIN, "data")) =>
+    check(
+      JSON.stringify({ cwd, tool_input: { command }, tool_name: "Bash" }),
+      { HOME: "/u", PLAYGROUND_DATA_DIR: data, PLAYGROUND_ROLE: "worker" },
+      RMAIN,
+    )
+
+  test("finds the checkout from a gitdir written relative to its admin folder", async () => {
+    expect(await at("git reset --hard", DESK)).toContain("the live Dashboard's checkout")
+  })
+
+  test("a live.branch the policy holds in no form it reads keeps the main checkout's guard", async () => {
+    expect(await at("lefthook run pre-commit", RMAIN, BAD)).toContain(
+      "no-main-checkout hook refuses",
+    )
+  })
+})

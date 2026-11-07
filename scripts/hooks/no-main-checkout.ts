@@ -61,7 +61,13 @@ export function liveCheckout(
   for (const name of names) {
     try {
       if (readFileSync(join(worktrees, name, "HEAD"), "utf8").trim() !== head) continue
-      return dirname(readFileSync(join(worktrees, name, "gitdir"), "utf8").trim())
+      // git writes gitdir absolute, but worktree.useRelativePaths writes it relative to this admin folder
+      return dirname(
+        resolve(
+          join(worktrees, name),
+          readFileSync(join(worktrees, name, "gitdir"), "utf8").trim(),
+        ),
+      )
     } catch {
       // a worktree whose files went with it
     }
@@ -543,8 +549,13 @@ async function inspect(raw: string, environment: Record<string, string | undefin
   if (tool !== "Bash") return
   const { command } = input
   if (typeof command !== "string") return
-  const found = liveCheckout(main, environment)
-  live = found === undefined ? undefined : real(found)
+  // a policy or worktree read that throws guards no live checkout, so check()'s fail-open never takes the main checkout's guard with it
+  try {
+    const found = liveCheckout(main, environment)
+    live = found === undefined ? undefined : real(found)
+  } catch {
+    live = undefined
+  }
   const known = knownVariables(command, environment, directory)
   const lexed = lex(command, known)
   // the shell each pipeline feeds, by the command whose output it reads, since the walk judges that command in the folder the pipeline runs in and never visits a shell of its own

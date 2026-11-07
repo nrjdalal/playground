@@ -7376,7 +7376,7 @@ function liveCheckout(main, environment) {
     try {
       if (readFileSync2(join5(worktrees, name, "HEAD"), "utf8").trim() !== head)
         continue;
-      return dirname2(readFileSync2(join5(worktrees, name, "gitdir"), "utf8").trim());
+      return dirname2(resolve3(join5(worktrees, name), readFileSync2(join5(worktrees, name, "gitdir"), "utf8").trim()));
     } catch {}
   }
 }
@@ -7785,8 +7785,12 @@ async function inspect(raw, environment, main) {
   const { command } = input;
   if (typeof command !== "string")
     return;
-  const found = liveCheckout(main, environment);
-  live = found === undefined ? undefined : real(found);
+  try {
+    const found = liveCheckout(main, environment);
+    live = found === undefined ? undefined : real(found);
+  } catch {
+    live = undefined;
+  }
   const known = knownVariables(command, environment, directory);
   const lexed = lex(command, known);
   const fed = codeFed(lexed.commands);
