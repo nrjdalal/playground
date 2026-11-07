@@ -6247,7 +6247,7 @@ var JOBS = {
       "{bun}",
       "--no-env-file",
       "{dashboard}/packages/scripts/src/ops-restore/cli.ts",
-      "--repo",
+      "--main",
       "{checkout}"
     ]
   },

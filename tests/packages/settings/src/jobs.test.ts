@@ -88,7 +88,7 @@ describe("the job registry", () => {
     const { plists } = renderJobs({ [jobKey("ops-restore")]: restore }, [], fill)
     const plist = plists.get("com.playground.ops-restore")!
     expect(plist).toContain("<string>/c/desk/packages/scripts/src/ops-restore/cli.ts</string>")
-    expect(plist).toContain("<string>--repo</string><string>/c</string></array>")
+    expect(plist).toContain("<string>--main</string><string>/c</string></array>")
     expect(plist).toContain("<key>WorkingDirectory</key><string>/c/desk</string>")
   })
 

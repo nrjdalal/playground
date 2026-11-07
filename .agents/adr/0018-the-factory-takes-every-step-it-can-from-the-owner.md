@@ -1,6 +1,6 @@
 # The factory takes every step it can from the owner
 
-Five steps went to the owner because a rule said so, not because only the owner could take them: setting a guard's tuning value, writing to an extension repo, restoring a lost main checkout, answering a permission prompt a standing rule already settles, and picking a session's model and effort. The owner's standing direction is that the factory takes every step it can and involves the owner only when truly blocked. The owner approved moving all five through one Inbox decision.
+Five steps went to the owner because a rule said so, not because only the owner could take them: setting a guard's tuning value, writing to an extension repo, restoring a lost main checkout, answering a permission prompt a standing rule already settles, and picking a session's model and effort. The owner's standing direction is that the factory takes every step it can and involves the owner only when truly blocked. The owner approved moving all five in Inbox #i455.
 
 ## Decision
 

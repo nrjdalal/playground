@@ -203,12 +203,14 @@ Ops runs an update when the owner asks for one:
 
 Every PreToolUse guard runs from the main checkout and fails closed ([scripts/hooks/README.md](../../../../scripts/hooks/README.md#registered-in-both-settings-files)): with its scripts gone every factory session's Bash is refused, its Edit and Write too, while with only its packages gone the guards still run, since each runs a committed bundle that needs none.
 No session can then repair it, so ops-restore does (`packages/scripts/src/ops-restore/cli.ts`, `jobs.opsRestore`, off until Ops turns it on): a launchd job with no hook, run from the Dashboard's checkout, which a wiped main checkout leaves standing.
-Every 5 minutes it reads the guards the factory settings register, and acts only once a guard's bundle and source are both gone on two looks in a row, 5 minutes apart, while no run slot's holder runs the main checkout's upkeep (`playground update`, `link-skills.sh` or `bun install`, read by the holder's pid):
+Every 5 minutes it reads the guards the factory settings register (the main checkout's while it holds them, else the Dashboard's), and keeps origin's URL in `ops/restore/origin.txt` while the checkout is whole.
+It acts only once a guard's bundle and source are both gone on two looks in a row, at least 5 minutes apart with no gap over 10, while no run slot's holder runs upkeep (`playground update`, `link-skills.sh` or any `bun install`, read by the holder's pid):
 
-1. It puts the files back: `git -C <main checkout> checkout -- .` while its `.git` is in place, first keeping `git status --porcelain` whole in `ops/restore/status-<time>.txt` and naming in its report anything but the loss, since the main checkout stays clean.
-   With `.git` gone it restores in place, since a clone refuses the folder the delete left `node_modules`, `.env` and `.claude/worktrees` in: `init`, `remote add origin` with its own checkout's origin URL, `fetch origin`, then `checkout -f -B main origin/main`.
+1. It puts the files back: `git -C <main checkout> checkout -- .` while its `.git` is in place, first keeping `git status --porcelain` whole in `ops/restore/status-<time>.txt`, whose path each report names, with anything but the loss, since the main checkout stays clean.
+   With `.git` gone it restores in place, since a clone refuses the folder the delete left `node_modules`, `.env` and `.claude/worktrees` in: `init`, `remote add origin` with the URL `origin.txt` kept, `fetch origin`, then `checkout -f -B main origin/main`; every worktree of the old `.git`, the Dashboard's included, then needs `git worktree repair` run from it, which its report names.
 2. It runs `bun install --cwd <main checkout>` through its own checkout's run-slot, then `<main checkout>/scripts/link-skills.sh`, for the hooks and scripts that run from source.
 3. It checks the guards again and tells ops and the dispatcher what it did.
    A step that fails is told to them once, naming the step, and the job tries again only after the guards are back; Ops then finishes these steps by hand from a session whose guards start.
+   With the guards still gone, or the job off, no factory session's Bash runs: that is a true block, so the session that finds it tells the dispatcher by SendMessage, and the owner's way back is one GUI action, the Dashboard's restore control, which runs steps 1 to 3 from the dashboard's server, where no factory Bash runs (not built yet).
 
-**Done when** ops-restore's report reads that every guard starts again, or Ops has finished a stopped restore's steps.
+**Done when** ops-restore's report reads that every guard starts again, or Ops, else the owner's restore control on a true block, has finished a stopped restore's steps.
