@@ -30,7 +30,7 @@ export const groups: Group[] = [
       ["a quoted append through a variable the hook cannot read", 'echo x >> "$D/x"'],
       [
         "a redirect through a loop variable after its loop has ended",
-        "for d in /tmp; do :; done; echo y > $d/y",
+        "for d in x; do :; done; echo y > $d/y",
       ],
       ["a redirect on a loop's done through its variable", "for id in 1 2; do :; done > $id.log"],
       [
@@ -55,6 +55,10 @@ export const groups: Group[] = [
         "a redirect through a for loop's word that climbs into the root",
         "for id in x; do echo x > $id/../extensions/y; done",
       ],
+      [
+        "a redirect after an echo whose words read as a for loop",
+        "echo for d in extensions; echo x > $d/y",
+      ],
     ],
   },
 ]
@@ -67,4 +71,5 @@ export const allowed = [
   "a redirect on a loop's done through its variable",
   "a redirect through a loop variable its body sets again",
   "a redirect through a loop variable whose list expands",
+  "a redirect after an echo whose words read as a for loop",
 ]

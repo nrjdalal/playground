@@ -861,7 +861,7 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
             (GLOB.test(r.target.value) && !!names(r.target, here, true))),
       )
       if (into?.target) return refuse(`a write to ${pathOf(into.target, here)}`)
-      // a writing redirect's target through a variable is judged by the path the hook holds for it, a for loop's literal words each in turn; one it holds no value for runs, as it did before
+      // a writing redirect's target through a variable is judged by what the value the hook holds names, a for loop's literal words each in turn; one it holds no value for runs, as it did before
       for (const r of cmd.redirects) {
         if (!r.target || !writer(r) || !marked(r.target.value)) continue
         const words = heldReadings(r.target, here, steadyAt(cmd)) ?? []

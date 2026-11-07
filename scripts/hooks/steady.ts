@@ -1,4 +1,4 @@
-// The steady variables of a line, the one way a hook holds a variable's value: each named once, by a plain assignment the hook reads whole at the line's top level, so a later word that reads it can be lexed again with its value
+// The steady variables of a line, the one way a writer or a cd holds a variable's value: each named once, by a plain assignment the hook reads whole at the line's top level, so a later word that reads it can be lexed again with its value
 import { ASSIGN, type Command, type Env, lex, marked, parse, type Parsed, type Word } from "./shell"
 
 // the line's text as a shell it runs reads it: backslash-newlines, a $ before a quote, and every quote and backslash removed
@@ -362,7 +362,7 @@ const TIED = new Set([
   "watch",
 ])
 
-// The allow-list, the one way a variable's value is held: a name the shell neither sets itself nor ties to another, which a plain NAME=value the hook reads whole names once on a line that names no IFS (the rest of steadyNames places that assignment)
+// The allow-list, the one way a writer or a cd holds a variable's value: a name the shell neither sets itself nor ties to another, which a plain NAME=value the hook reads whole names once on a line that names no IFS (the rest of steadyNames places that assignment)
 function holdable(key: string, named: Namings, counts: Map<string, number>): boolean {
   return (
     counts.get(key) === 1 &&
@@ -599,8 +599,10 @@ const bareExport = ({ args, name }: Parsed): boolean =>
 
 // A for loop's variable and the words of its list, when each is a literal with no glob and nothing else on the line names the variable, so in the loop's body it holds one of them: `for id in 1 2; do`, never zsh's `for id (1 2)`, a list that expands, or a select, whose value is typed
 function forList(cmd: Command, named: Namings): { key: string; values: string[] } | undefined {
-  const at = cmd.words.findIndex((w) => !w.quoted && w.value === "for")
-  const [key, word, ...values] = at === -1 ? [] : cmd.words.slice(at + 1)
+  // the command's leading reserved word, after any LEADS word or `{`, the same `for` the depth walk counts
+  const at = cmd.words.findIndex((w) => w.quoted || !(LEADS.has(w.value) || w.value === "{"))
+  if (at === -1 || cmd.words[at].quoted || cmd.words[at].value !== "for") return undefined
+  const [key, word, ...values] = cmd.words.slice(at + 1)
   if (!key || key.quoted || !PLAIN_NAME.test(key.value) || named.counts.get(key.value) !== 1)
     return undefined
   if (!word || word.quoted || word.value !== "in" || values.length === 0) return undefined
