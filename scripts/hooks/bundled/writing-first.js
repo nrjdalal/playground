@@ -7310,21 +7310,88 @@ async function judge(input, env) {
     return;
   return refusal(input, env, target);
 }
-var INTERPRETER = /^(bun|deno|node|nodejs|perl|python|ruby)[\d.]*$/;
-var CODE_FLAGS = new Set(["-c", "-e", "-E", "-p", "--eval", "--print"]);
+var FAMILIES2 = {
+  bun: {
+    code: "ep",
+    takes: ["--cwd", "--env-file", "--preload", "--tsconfig-override"],
+    values: "r"
+  },
+  deno: { code: "", takes: ["--config", "--import-map"], values: "c" },
+  node: {
+    code: "ep",
+    takes: [
+      "--conditions",
+      "--env-file",
+      "--import",
+      "--input-type",
+      "--loader",
+      "--require",
+      "--title"
+    ],
+    values: "Cr"
+  },
+  perl: { attached: true, code: "eE", rest: "iIlmMx0", takes: [], values: "" },
+  python: {
+    attached: true,
+    code: "c",
+    module: "m",
+    takes: ["--check-hash-based-pycs"],
+    values: "WX"
+  },
+  ruby: { attached: true, code: "e", rest: "ix0", takes: [], values: "CEIr" }
+};
+var FAMILY2 = /^(bun|deno|node|nodejs|perl|python|ruby)[\d.]*$/;
 var PATHLIKE = /[^\s'"`()[\]{},;:=<>|&$*?!]+/g;
-async function inlineTargets(name, args, cmd, here) {
-  if (!INTERPRETER.test(name))
-    return [];
+function inlineCode(family, args) {
   const code = [];
   let k = 0;
   for (;k < args.length; k++) {
     const v = args[k].value;
-    if (CODE_FLAGS.has(v) && args[k + 1])
-      code.push(args[++k].value);
-    else if (!v.startsWith("-") || v === "-")
+    if (v === "--")
+      return { code, k: k + 1, module: false };
+    if (/^--(?:eval|print)=/.test(v))
+      code.push(v.slice(v.indexOf("=") + 1));
+    else if (v === "--eval" || v === "--print") {
+      if (args[k + 1])
+        code.push(args[++k].value);
+    } else if (v.startsWith("--")) {
+      if (family.takes.includes(v))
+        k++;
+    } else if (v.startsWith("-") && v !== "-") {
+      for (let c = 1;c < v.length; c++) {
+        const letter = v[c];
+        const attached = v.slice(c + 1);
+        if (letter === family.module)
+          return { code, k, module: true };
+        if (family.code.includes(letter)) {
+          if (attached && family.attached)
+            code.push(attached);
+          else if (args[k + 1])
+            code.push(args[++k].value);
+          break;
+        }
+        if (family.values.includes(letter)) {
+          if (!attached)
+            k++;
+          break;
+        }
+        if (family.rest?.includes(letter))
+          break;
+      }
+    } else
       break;
   }
+  return { code, k, module: false };
+}
+async function inlineTargets(name, args, cmd, here) {
+  const base = FAMILY2.exec(name)?.[1];
+  if (!base)
+    return [];
+  const family = FAMILIES2[base === "nodejs" ? "node" : base];
+  const evaled = base === "deno" && args[0]?.value === "eval";
+  const { code, k, module } = evaled ? { code: args.slice(1, 2).map((a) => a.value), k: 2, module: false } : inlineCode(family, args);
+  if (module)
+    return [];
   const operand = args[k]?.value;
   if (code.length === 0) {
     if (operand !== undefined && operand !== "-")
@@ -7340,6 +7407,36 @@ async function inlineTargets(name, args, cmd, here) {
   ];
   return words.filter((w) => w.includes("/") || w.endsWith(".md"));
 }
+var COPY_VALUES = new Set(["-g", "-m", "-o", "-S"]);
+function copiedInto(name, args) {
+  if (name !== "cp" && name !== "mv" && name !== "install")
+    return [];
+  let folder;
+  const operands = [];
+  for (let k = 0;k < args.length; k++) {
+    const v = args[k].value;
+    if (v === "-t" || v === "--target-directory")
+      folder = args[++k];
+    else if (v.startsWith("--target-directory="))
+      folder = { ...args[k], value: v.slice(19) };
+    else if (/^-t./.test(v))
+      folder = { ...args[k], value: v.slice(2) };
+    else if (COPY_VALUES.has(v))
+      k++;
+    else if (!v.startsWith("-"))
+      operands.push(args[k]);
+  }
+  const destination = folder ?? operands.pop();
+  if (!destination)
+    return [];
+  return [
+    ...name === "install" ? [destination] : [],
+    ...operands.map((source) => ({
+      ...destination,
+      value: join4(destination.value, basename2(source.value))
+    }))
+  ];
+}
 async function bashTarget(input, env) {
   const command = input.tool_input?.command;
   if (typeof command !== "string")
@@ -7351,8 +7448,7 @@ async function bashTarget(input, env) {
     const { args, name } = parsed;
     for (const here of places(at, directory)) {
       const named = writeTargets(cmd, name, args);
-      if (name === "install")
-        named.push(...args.filter((a) => !a.value.startsWith("-")).slice(-1));
+      named.push(...copiedInto(name, args));
       for (const word of named) {
         const path = pathOf(word, here);
         if (path && await scoped(real(path), env))

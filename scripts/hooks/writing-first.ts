@@ -1,4 +1,4 @@
-// Hook on PreToolUse (Bash, Edit, MultiEdit, Skill, Write), UserPromptSubmit and SessionStart: refuses a write to an agent-facing doc, a Bash call's direct one included, until the session has loaded writing-for-agents (playbook's **writing** rule).
+// Hook on PreToolUse (Edit, MultiEdit, Skill, Write), UserPromptSubmit and SessionStart: refuses a write to an agent-facing doc until the session has loaded writing-for-agents (playbook's **writing** rule); its check() reads a Bash call's direct write too, which the matcher reaches once it names Bash.
 import { existsSync, readdirSync, realpathSync, unlinkSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
@@ -8,6 +8,7 @@ import { UPSTREAM_SKILLS } from "../../packages/scripts/src/vendor-upstream/stag
 import { writeTargets } from "./no-main-checkout"
 import { fromFactory } from "./role"
 import {
+  type Command,
   type Env,
   knownVariables,
   lex,
@@ -189,28 +190,97 @@ async function judge(input: Input, env: Environment): Promise<string | undefined
   return refusal(input, env, target)
 }
 
-// An interpreter of another language, by its name through a version suffix (python3.12, node18)
-const INTERPRETER = /^(bun|deno|node|nodejs|perl|python|ruby)[\d.]*$/
-// the options whose next word is inline code
-const CODE_FLAGS = new Set(["-c", "-e", "-E", "-p", "--eval", "--print"])
+// An interpreter of another language by its family, through a version suffix (python3.12, node18): the short letters that carry inline code (attached where `attached` says, as python's -c'…' and perl's -e'…', else the next word, so node's -pe reads its program next), those that take a value (attached or the next word), and those that take the rest of their word; a module (python -m) runs a program by name
+type Family = {
+  attached?: boolean
+  code: string
+  module?: string
+  rest?: string
+  takes: string[]
+  values: string
+}
+const FAMILIES: Record<string, Family> = {
+  bun: {
+    code: "ep",
+    takes: ["--cwd", "--env-file", "--preload", "--tsconfig-override"],
+    values: "r",
+  },
+  deno: { code: "", takes: ["--config", "--import-map"], values: "c" },
+  node: {
+    code: "ep",
+    takes: [
+      "--conditions",
+      "--env-file",
+      "--import",
+      "--input-type",
+      "--loader",
+      "--require",
+      "--title",
+    ],
+    values: "Cr",
+  },
+  perl: { attached: true, code: "eE", rest: "iIlmMx0", takes: [], values: "" },
+  python: {
+    attached: true,
+    code: "c",
+    module: "m",
+    takes: ["--check-hash-based-pycs"],
+    values: "WX",
+  },
+  ruby: { attached: true, code: "e", rest: "ix0", takes: [], values: "CEIr" },
+}
+const FAMILY = /^(bun|deno|node|nodejs|perl|python|ruby)[\d.]*$/
 // a word of code text that may name a file: one holding a slash, or a .md file's name
 const PATHLIKE = /[^\s'"`()[\]{},;:=<>|&$*?!]+/g
 
-// The words an inline interpreter script may write to: each path-like word of its code (an inline -c or -e program, or a heredoc or here-string it reads as its script) and of its arguments; none for a script run by name, which is the repo's own or the caller's file.
-async function inlineTargets(
-  name: string,
-  args: Word[],
-  cmd: Parameters<Visit>[0],
-  here: Env,
-): Promise<string[]> {
-  if (!INTERPRETER.test(name)) return []
+// An interpreter call's inline code (a -c or -e program, attached, in a cluster, or as --eval=), and the index of its first operand; module is set when it runs a program by name (python -m)
+function inlineCode(family: Family, args: Word[]): { code: string[]; k: number; module: boolean } {
   const code: string[] = []
   let k = 0
   for (; k < args.length; k++) {
     const v = args[k]!.value
-    if (CODE_FLAGS.has(v) && args[k + 1]) code.push(args[++k]!.value)
-    else if (!v.startsWith("-") || v === "-") break
+    if (v === "--") return { code, k: k + 1, module: false }
+    if (/^--(?:eval|print)=/.test(v)) code.push(v.slice(v.indexOf("=") + 1))
+    else if (v === "--eval" || v === "--print") {
+      if (args[k + 1]) code.push(args[++k]!.value)
+    } else if (v.startsWith("--")) {
+      if (family.takes.includes(v)) k++
+    } else if (v.startsWith("-") && v !== "-") {
+      for (let c = 1; c < v.length; c++) {
+        const letter = v[c]!
+        const attached = v.slice(c + 1)
+        if (letter === family.module) return { code, k, module: true }
+        if (family.code.includes(letter)) {
+          if (attached && family.attached) code.push(attached)
+          else if (args[k + 1]) code.push(args[++k]!.value)
+          break
+        }
+        if (family.values.includes(letter)) {
+          if (!attached) k++
+          break
+        }
+        if (family.rest?.includes(letter)) break
+      }
+    } else break
   }
+  return { code, k, module: false }
+}
+
+// The words an inline interpreter script may write to: each path-like word of its code (an inline program, deno's eval, or a heredoc or here-string it reads as its script) and of its arguments; none for a script or module run by name, which is the repo's own or the caller's file.
+async function inlineTargets(
+  name: string,
+  args: Word[],
+  cmd: Command,
+  here: Env,
+): Promise<string[]> {
+  const base = FAMILY.exec(name)?.[1]
+  if (!base) return []
+  const family = FAMILIES[base === "nodejs" ? "node" : base]!
+  const evaled = base === "deno" && args[0]?.value === "eval"
+  const { code, k, module } = evaled
+    ? { code: args.slice(1, 2).map((a) => a.value), k: 2, module: false }
+    : inlineCode(family, args)
+  if (module) return []
   const operand = args[k]?.value
   if (code.length === 0) {
     // a script file or a subcommand by name runs no inline code
@@ -226,7 +296,33 @@ async function inlineTargets(
   return words.filter((w) => w.includes("/") || w.endsWith(".md"))
 }
 
-// The first agent-facing doc a Bash call writes directly, as the call names it: a redirect's, tee's, cp's, mv's, install's or an in-place sed's or perl's target, or a path an inline interpreter script names; a target the reader cannot place is passed, since the hook nudges and fails open.
+// The options of cp, mv and install whose next word is a value, not an operand (install's mode, owner, group and suffix, GNU's suffix); -t names the target folder
+const COPY_VALUES = new Set(["-g", "-m", "-o", "-S"])
+// The files a cp, mv or install creates in a folder it is given: each source's name under the destination (its last operand, or -t's folder), judged beside the destination itself, so a copy into the repo root or docs/ is read by the file it lands as
+function copiedInto(name: string, args: Word[]): Word[] {
+  if (name !== "cp" && name !== "mv" && name !== "install") return []
+  let folder: Word | undefined
+  const operands: Word[] = []
+  for (let k = 0; k < args.length; k++) {
+    const v = args[k]!.value
+    if (v === "-t" || v === "--target-directory") folder = args[++k]
+    else if (v.startsWith("--target-directory=")) folder = { ...args[k]!, value: v.slice(19) }
+    else if (/^-t./.test(v)) folder = { ...args[k]!, value: v.slice(2) }
+    else if (COPY_VALUES.has(v)) k++
+    else if (!v.startsWith("-")) operands.push(args[k]!)
+  }
+  const destination = folder ?? operands.pop()
+  if (!destination) return []
+  return [
+    ...(name === "install" ? [destination] : []),
+    ...operands.map((source) => ({
+      ...destination,
+      value: join(destination.value, basename(source.value)),
+    })),
+  ]
+}
+
+// The first agent-facing doc a Bash call writes directly, as the call names it: a redirect's, tee's, cp's, mv's, install's or an in-place sed's or perl's target, a cp's, mv's or install's file in the folder it is given, or a path an inline interpreter script names; a target the reader cannot place is passed, since the hook nudges and fails open.
 async function bashTarget(input: Input, env: Environment): Promise<string | undefined> {
   const command = input.tool_input?.command
   if (typeof command !== "string") return
@@ -237,7 +333,7 @@ async function bashTarget(input: Input, env: Environment): Promise<string | unde
     const { args, name } = parsed
     for (const here of places(at, directory)) {
       const named = writeTargets(cmd, name, args)
-      if (name === "install") named.push(...args.filter((a) => !a.value.startsWith("-")).slice(-1))
+      named.push(...copiedInto(name, args))
       for (const word of named) {
         const path = pathOf(word, here)
         if (path && (await scoped(real(path), env))) return word.value

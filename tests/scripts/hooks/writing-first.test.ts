@@ -129,6 +129,23 @@ describe("a Bash call's direct write to an agent-facing doc waits for writing-fo
       "an inline script handed the doc as an argument",
       `python3 - docs/playground/x.md <<'PY'\nimport sys\nopen(sys.argv[1], "w").write("x")\nPY`,
     ],
+    ["install", "install -m 644 /tmp/x scripts/README.md"],
+    ["an in-place perl", "perl -pi -e 's/a/b/' AGENTS.md"],
+    ["cp into the repo root", "cp /tmp/AGENTS.md ."],
+    ["cp into docs/", "cp /tmp/a.md docs/"],
+    ["mv into the hooks folder", "mv /tmp/README.md scripts/hooks/"],
+    ["mv into the dashboard rules", "mv /tmp/stack.md .agents/dashboard"],
+    ["install into the repo root", "install -m 644 /tmp/AGENTS.md ."],
+    ["cp -t into a folder", "cp -t docs/playground /tmp/x.md"],
+    ["python's code attached to -c", `python3 -c"open('AGENTS.md', 'w').write('x')"`],
+    ["python's -c in a cluster", `python3 -Ic "open('AGENTS.md', 'w').write('x')"`],
+    [
+      "python's -c after a valued option",
+      `python3 -W ignore -c "open('AGENTS.md', 'w').write('x')"`,
+    ],
+    ["node's --eval=", `node --eval="require('fs').writeFileSync('AGENTS.md', 'x')"`],
+    ["node's -pe", `node -pe "require('fs').writeFileSync('AGENTS.md', 'x')"`],
+    ["deno eval", `deno eval "Deno.writeTextFileSync('AGENTS.md', 'x')"`],
   ])("%s", async (_, command) => {
     const reason = (await bash(session(), command)) ?? ""
     expect(reason).toContain("writing-first hook refuses this Bash")
@@ -153,6 +170,8 @@ describe("a Bash call's direct write to an agent-facing doc waits for writing-fo
     ["a redirect to a file that is not agent-facing", "echo x > README.md"],
     ["a redirect outside the repository", "echo x > /tmp/AGENTS.md"],
     ["a script run by name", "python3 tools/fix.py AGENTS.md"],
+    ["a module run by name", "python3 -m tools.fix AGENTS.md"],
+    ["a copy of a doc out to a folder elsewhere", "cp AGENTS.md /tmp/"],
     ["a line the hook cannot read", 'echo x > "$(pick-a-doc)"'],
   ])("%s runs", async (_, command) => {
     expect(await bash(session(), command)).toBeUndefined()
