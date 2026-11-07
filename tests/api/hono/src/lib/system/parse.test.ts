@@ -87,10 +87,10 @@ describe("parsePs", () => {
 describe("lsof", () => {
   test("parseCwds: each process's working directory", () => {
     const out =
-      "p9919\nfcwd\nn/Users/n/dispatcher/.claude/worktrees/leads\np16065\nfcwd\nn/Users/n/dispatcher\n"
+      "p9919\nfcwd\nn/Users/you/dispatcher/.claude/worktrees/leads\np16065\nfcwd\nn/Users/you/dispatcher\n"
     expect([...parseCwds(out)]).toEqual([
-      [9919, "/Users/n/dispatcher/.claude/worktrees/leads"],
-      [16065, "/Users/n/dispatcher"],
+      [9919, "/Users/you/dispatcher/.claude/worktrees/leads"],
+      [16065, "/Users/you/dispatcher"],
     ])
   })
 
@@ -129,8 +129,8 @@ describe("lsof", () => {
 
 describe("docker", () => {
   test("parseDockerHost: a unix socket's path, else nothing", () => {
-    expect(parseDockerHost('"unix:///Users/n/.orbstack/run/docker.sock"\n')).toBe(
-      "/Users/n/.orbstack/run/docker.sock",
+    expect(parseDockerHost('"unix:///Users/you/.orbstack/run/docker.sock"\n')).toBe(
+      "/Users/you/.orbstack/run/docker.sock",
     )
     expect(parseDockerHost('"tcp://10.0.0.2:2375"')).toBeNull()
     expect(parseDockerHost("")).toBeNull()

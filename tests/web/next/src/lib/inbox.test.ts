@@ -2041,7 +2041,7 @@ describe("uploadsOn", () => {
       `${team}/D0MADEUP11?cdn_fallback=1#top`,
       `${THREAD}?x=1`,
       `${team}/C0MADEUP01/thread/C0MADEUP01-notats`,
-      `${team}/C0MADEUP01/thread/C0OTHER001-1700000000.000100`,
+      `${team}/C0MADEUP01/thread/C0MADE0101-1700000000.000100`,
       `${team}/C0MADEUP01/thread`,
       `${THREAD}/more`,
       `${team}/C0MADEUP01/files/F0MADEUP01`,

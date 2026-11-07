@@ -9,7 +9,7 @@ const LIST = {
   handles: ["qmarsh", "tbell"],
   linearKeys: ["VX", "OPS"],
   names: ["Quilla", "Marsh", "Tobin"],
-  slackIds: ["U0FAKE1234", "C0FAKE9876"],
+  slackIds: ["U0MADE0402", "C0MADE0403"],
 }
 const REPOS = {
   archive: "octo/archive",
@@ -24,13 +24,13 @@ describe("the swap pass", () => {
       "Avery Blair and Corin; avery; BLAIR",
     )
     expect(swap("@qmarsh and tbell").text).toBe("@octo-avery and octo-blair")
-    expect(swap("in U0FAKE1234 and C0FAKE9876").text).toBe("in U0MADEUP01 and C0MADEUP02")
+    expect(swap("in U0MADE0402 and C0MADE0403").text).toBe("in U0MADEUP01 and C0MADEUP02")
     expect(swap("VX-12, ops-7 and OPS-").text).toBe("BRAVO-12, acme-7 and OPS-")
     expect(swap("Vantorix Labs ships vantorix, VANTORIX").text).toBe("Acme ships acme, ACME")
   })
 
   test("the same text always swaps the same way, and a swapped text counts no list value", () => {
-    const text = "Quilla (qmarsh) at Vantorix asked in U0FAKE1234 about VX-3"
+    const text = "Quilla (qmarsh) at Vantorix asked in U0MADE0402 about VX-3"
     expect(swap(text)).toEqual(swap(text))
     expect(swap(text).counts).toEqual({
       companies: 1,

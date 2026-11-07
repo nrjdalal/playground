@@ -140,7 +140,7 @@ describe("playground picker (PG-2184)", () => {
   })
 
   test("a prompt for another call in the same worktree gets no key, though both share the cd prefix and the waiting call's header shows above it", async () => {
-    const cd = `cd /Users/acme-dev/acme-dev/${OLD.dispatcher}/.claude/worktrees/pg-2184-stuck-alerts && `
+    const cd = `cd /Users/me/acme-dev/${OLD.dispatcher}/.claude/worktrees/pg-2184-stuck-alerts && `
     const a = `${cd}ls -la packages`
     const b = `${cd}rm -rf ~/.playground/extensions/.no-such-folder`
     const screen = PERMISSION.replace("⏺ Bash(rm -rf build)", `⏺ Bash(${a})`).replace(
@@ -214,14 +214,14 @@ describe("playground picker (PG-2184)", () => {
   })
 
   test("the screen read off a real pane matches its call: the command wrapped in a narrow column, a warning and Claude Code's countdown below it", async () => {
-    const command = `cd /Users/acme-dev/acme-dev/${OLD.dispatcher}/.claude/worktrees/pg-2184-stuck-alerts && f=x:1,2; for p in \${(s:,:)\${f#*:}}; do echo "$p"; done`
+    const command = `cd /Users/me/acme-dev/${OLD.dispatcher}/.claude/worktrees/pg-2184-stuck-alerts && f=x:1,2; for p in \${(s:,:)\${f#*:}}; do echo "$p"; done`
     const screen = [
       "",
       "───────────────────────────",
       " Bash command",
       " PG-2184 probe split",
       "╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌",
-      " │ cd /Users/acme-dev/acme",
+      " │ cd /Users/me/acme",
       ` │ -dev/${OLD.dispatcher}/.claude/w`,
       " │ orktrees/pg-2184-stuck-",
       " │ alerts && f=x:1,2; for",

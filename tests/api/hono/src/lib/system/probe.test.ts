@@ -13,7 +13,7 @@ import {
 // One argument of the kind each probe takes, so every argv can be built.
 const SAMPLE: Partial<Record<Probe, unknown>> = {
   cwds: 501,
-  socketHolder: "/Users/n/.orbstack/run/docker.sock",
+  socketHolder: "/Users/you/.orbstack/run/docker.sock",
   sockets: 501,
   starts: [9919, 11239],
 }

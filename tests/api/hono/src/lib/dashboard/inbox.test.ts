@@ -328,7 +328,7 @@ describe("what bun run ask takes", () => {
     })
     for (const token of [
       "<@U0EXAMPLE02>",
-      "<@W0A1HBY26MQ|farley>",
+      "<@W0MADE0001|farley>",
       "<!subteam^S0A1HBY26MQ>",
       "<!subteam^S0A1HBY26MQ|@octo-avery>",
       "<!here>",
@@ -1500,7 +1500,7 @@ describe("slackPlace", () => {
   test("is null for a thread part that does not parse, so the files never land outside the reply's thread", () => {
     for (const bad of [
       `${CHANNEL}/thread/C0MADEUP01-notats`,
-      `${CHANNEL}/thread/C0OTHER001-1700000000.000100`,
+      `${CHANNEL}/thread/C0MADE0101-1700000000.000100`,
       `${CHANNEL}/thread`,
       `${CHANNEL}/thread/C0MADEUP01-1700000000.000100/more`,
       `${CHANNEL}/files/F0MADEUP01`,

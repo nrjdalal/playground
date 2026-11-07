@@ -24,11 +24,12 @@ The runner, `bun run core-audit`, prints the hits and exits 1 on any, or 2 when 
 | A list term in a test or a fixture   | a made-up value in core (`MADE`, `acme`) |
 | A list term anywhere else            | the org's extension                      |
 | A Slack id or a home path            | config with a sensible default           |
+| The same in a test or a fixture      | a placeholder id or home                 |
 | A tracker key (leg 2)                | a placeholder key such as `PG-1`         |
 | A one-org skill, rule, script or job | the org's extension                      |
 
 A placeholder passes leg 2: an id holding `EXAMPLE` or `MADE`, a home of `you`, `me`, `owner`, `someone`, `runner` or `x`, a key of the factory's `PG`, a made-up team or a standard such as `UTF-8`.
-Leg 2 reads no `tests/` yet, since a test's made-up ids do not hold a placeholder shape today.
+Leg 2 reads `tests/` and the fixtures for Slack ids and homes, and its tracker key reads neither yet ([PG-1319](https://github.com/nrjdalal/playground/issues/1319)).
 
 ## It's working if
 
