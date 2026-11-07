@@ -4,7 +4,7 @@
 
 ## Decision
 
-The grilling batch holds only its one-way-door questions: a breaking schema change, a budget, an outward send to someone the owner has not cleared, an irreversible delete, a new ticket, the closed set the **ask** rule names. Every two-way-door question grilling raises, the factory answers itself with grilling's own recommended answer and records (an ADR when its reason should outlast the work, else the issue), never putting it to the owner. When no one-way-door question is left, no batch goes.
+The grilling batch holds only its one-way-door questions, the closed set the **ask** rule names, such as a breaking schema change, a budget, an outward send to someone the owner has not cleared, an irreversible delete or a new ticket. Every two-way-door question grilling raises, the factory answers itself with grilling's own recommended answer and records (an ADR when its reason should outlast the work, else the issue), never putting it to the owner. When no one-way-door question is left, no batch goes.
 
 The batch keeps the shape ADR 0012 gave it: one plain `ask` decision with no approve or deny labels, each question numbered with its recommended answer, Approve taking the recommendations and Edit giving the owner's own by number. A second batch goes only when an answer opens a new one-way-door question. A live grilling with the owner is still kept for an ask whose intent is unclear.
 

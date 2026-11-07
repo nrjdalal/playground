@@ -34,9 +34,9 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   never put to him.
   The work org's scope is its ticket and the Product team's decisions, and a plan or lane adds nothing beyond them; a gap or a disagreement goes to your lead as a question (`.agents/decisions.md`).
   A breaking change, and a message to anyone but a developer, go to him as **ask** says.
-  Before a lane builds one of the owner's asks, it posts one Inbox update with two lines, what it understood and what it will build, only when the ask changes behaviour drastically (a visible change to how he works, a removal, or a reversal of a standing rule), so the owner sees the lane reads the ask as he does;
-  it posts a decision in place of the update only when the ask removes or reverses the owner's own rule, the one door here he cannot cheaply undo;
-  every other ask builds with no item, and the item still never gates the lane: he reads and corrects, and his correction refines the ask (done by hand once, #i325 to #i327).
+  Before a lane builds one of the owner's asks, it posts one Inbox update with two lines, what it understood and what it will build, only when the ask changes behaviour drastically (a visible change to how he works, or a removal), so the owner sees the lane reads the ask as he does;
+  it posts a decision in place of the update only when the ask removes or reverses the owner's own rule, the one door here he cannot cheaply undo, so that card carries a Deny where the update carries none;
+  every other ask builds with no item, and neither the update nor the decision gates the lane, which builds while he reads (**ask**): he reads and corrects, his Deny reversing a decision where a correction only refines the ask (done by hand once, #i325 to #i327).
 - A brief hands every step a session can do to the session itself (Inbox #i405: a brief had a person type `/qa-day product testing` into a worker's pane, which the session could have done itself): for a skill with `disable-model-invocation: true`, the worker follows the step the brief names itself.
   A skill that carries `hooks:` is loaded through the Skill tool once its author makes it model-invocable, its typed-only parts gated inside the hook as ADR 0001 in `.agents/adr/` does, so the hook is armed.
   Until then the worker follows only that skill's read-only steps, and reports its other steps to its lead, who asks the skill's author for the change.

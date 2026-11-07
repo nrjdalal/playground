@@ -93,5 +93,6 @@ describe("DISPATCH.md", () => {
     expect(text).toContain(
       "it posts a decision in place of the update only when the ask removes or reverses the owner's own rule",
     )
+    expect(text).toContain("neither the update nor the decision gates the lane")
   })
 })

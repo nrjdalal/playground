@@ -22,9 +22,8 @@ describe("brief-rush.md scopes itself to the lanes it binds (#2235)", () => {
   test("the owner step narrows to an org ticket and an outward send (#1350)", async () => {
     const text = await read(join("scripts/briefs", "brief-rush.md"))
     expect(text).toContain(
-      "Only these reach him, via the dispatcher: a new org ticket, and an outward send",
+      "A slice sends only these to him, via the dispatcher: a new org ticket, and an outward send",
     )
-    expect(text).toContain("Only an org ticket and an outward send go to him")
     expect(text).not.toContain(
       "shipping canary to main, new Linear tickets, irreversible deletes, and budget",
     )
