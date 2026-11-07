@@ -850,6 +850,29 @@ export const visible = (value: string): string =>
   value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ")
 
 export const marked = (value: string): boolean => value.includes(UNKNOWN) || value.includes(READ)
+// The bare characters no glob option makes an operator without a paren
+const PLAIN = /^[\w./=,:@%-]$/
+// Whether an eval takes a word as other than written: an unread part, or a bare character outside PLAIN, which some shell option makes a glob whose file names run as code
+export const unreadWord = (word: Word): boolean => {
+  if (word.unknown !== undefined || marked(word.value)) return true
+  const src = word.source
+  if (src === undefined) return ![...word.value].every((c) => PLAIN.test(c))
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]
+    if (c === "\\") i++
+    else if (c === "'") {
+      i = src.indexOf("'", i + 1)
+      if (i === -1) return true
+    } else if (c === '"') {
+      for (i++; i < src.length && src[i] !== '"'; i++)
+        if (src[i] === "\\") i++
+        else if (src[i] === "$" && src[i + 1] === "(") i = balanced(src, i + 1, "(", ")") - 1
+        else if (src[i] === "`") i = src.indexOf("`", i + 1)
+      if (i === -1 || i >= src.length) return true
+    } else if (!PLAIN.test(c)) return true
+  }
+  return false
+}
 
 // The shell's own builtins whose effect a hook follows (its folder, its variables, its aliases, a name's lookup): the shell matches them by their exact case, and in another case one runs no builtin (macOS's /usr/bin/cd and the like run `builtin cd` in a child), so it changes nothing of the shell's
 const SHELL_OWN = new Set([
@@ -1890,14 +1913,17 @@ async function examineReading(
       if (verdict) break
     }
   } else if (name === "eval") {
-    verdict = await nested(cmd, env, () =>
-      run(
-        again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed),
-        here,
-        visit,
-        builtins,
-      ),
-    )
+    // an eval of an unread word runs code the hook never sees, so a hook judges the eval itself, as the source branch does
+    verdict =
+      (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ??
+      (await nested(cmd, env, () =>
+        run(
+          again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed),
+          here,
+          visit,
+          builtins,
+        ),
+      ))
   } else verdict = await visit(cmd, parsed, here)
   await record(cmd, name, args, here)
   return verdict
