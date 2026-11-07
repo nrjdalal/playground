@@ -1460,7 +1460,7 @@ TAG=
 SANDBOX=
 [ "$ROLE" = probe ] && SANDBOX=sandbox-
 BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k.json"
-# A --memory launch builds a file of its own, so the shared one every other session reads stays without the two keys.
+# A --memory launch builds a file of its own, so the shared one every other session reads keeps the factory's memory off.
 [ -n "$MEMORY_DIR" ] && BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k-memory-$NAME.json"
 # The folder the session runs in, as the launch below moves to it.
 OWN=${DIR:-$REPO}

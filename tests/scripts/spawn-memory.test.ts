@@ -16,12 +16,12 @@ describe("--memory <dir> turns auto-memory on for one launch (#1484)", () => {
   const SHARED = "factory-settings-sandbox-400k.json"
   const OWN = "factory-settings-sandbox-400k-memory-probe-x.json"
 
-  test("without it, a probe's built file holds no memory key, as before", async () => {
+  test("without it, a probe's built file keeps the factory's memory off, as before", async () => {
     const r = await spawn(["probe", "probe-x", "ops", "p.md"], [])
     expect(r.code, r.err).toBe(0)
     expect(launchAfterRm(r)).toContain(` --settings ${settingsOf(r, SHARED)} `)
     const built = builtOf(r, SHARED)
-    expect(built).not.toHaveProperty("autoMemoryEnabled")
+    expect(built.autoMemoryEnabled).toBe(false)
     expect(built).not.toHaveProperty("autoMemoryDirectory")
     expect(existsSync(settingsOf(r, OWN))).toBe(false)
   })
