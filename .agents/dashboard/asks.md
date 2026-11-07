@@ -428,6 +428,7 @@
   ```
 
 - A `guard` decision asks the owner to set a guard setting, a key a guard reads to allow or deny a call, since no session can write one (`no-extensions-write` refuses it, `scripts/hooks/README.md`): any session posts the card, and only the owner's Approve writes the setting.
+  The Ops lead's own set of `glm.readOnlyLoad5`, or of a job's interval alone, is the one exception, so neither needs a card.
   Its `key` is one of `GUARD_SETTING_KEYS` (`packages/settings/src/guard-keys.ts`, which the hook's `GUARD_KEYS` matches) or a registry job's `jobs.<name>`, `scope` is the owner's login or an org (core changes by a pull request), `value` is what the key's schema takes,
   checked as it is posted (a job takes `{"enabled": true|false}` alone),
   or left out to take the setting back to its default, and `why` says why (`guardSchema` in `api/hono/src/lib/dashboard/inbox.ts`);
