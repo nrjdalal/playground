@@ -1420,6 +1420,30 @@ describe("a guard decision (PG-1090)", () => {
   })
 })
 
+// PG-1196: the guard decision also sets a job's enabled field, which no session may write either.
+describe("a guard decision for a job (PG-1196)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
+
+  test("takes a registry job's enabled field alone, or no value", () => {
+    expect(takes({ key: "jobs.opsTicketCard", value: { enabled: true } })).toBe(true)
+    expect(takes({ key: "jobs.opsSweep", value: { enabled: false } })).toBe(true)
+    expect(takes({ key: "jobs.opsTicketCard", value: undefined })).toBe(true)
+  })
+
+  test("refuses a job decision carrying any field but enabled, and a job the registry does not name", () => {
+    for (const change of [
+      { key: "jobs.opsTicketCard", value: { command: "made-up", enabled: true } },
+      { key: "jobs.opsTicketCard", value: { enabled: true, schedule: { every: 5 } } },
+      { key: "jobs.opsTicketCard", value: {} },
+      { key: "jobs.opsTicketCard", value: true },
+      { key: "jobs.opsMadeUp", value: { enabled: true } },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+})
+
 // Made-up accounts: two Claude rows, one of them own, and a GLM row whose label is no Claude email.
 const ACCOUNTS = [
   { email: "pat@example.com", label: "work", renews: 17 },
@@ -5252,6 +5276,42 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const set = await post(decision(GUARD))
       await store.answerItem(db, set.id, { action: "clear" }, { actor, settingsData: data })
       expect(atOrg(data)).toEqual([])
+    })
+
+    test("a job's Approve stores its enabled field alone at its scope, so every other field still reads the registry's (PG-1196)", async () => {
+      const data = folder()
+      const key = "jobs.opsTicketCard"
+      const card = { ...GUARD, key, scope: "made-up-me", value: { enabled: true } }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      const read = readSetting(data, key)!
+      expect(read.rows).toEqual([{ key, scope: "made-up-me", value: { enabled: true } }])
+      expect(read.value).toEqual({ ...(read.default as object), enabled: true })
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        set: { exitCode: 0, line: `set ${key} at made-up-me to {"enabled":true}` },
+      })
+      const again = await post(decision(card))
+      expect((await approve(again.id, again.updatedAt, data)).ok).toBe(true)
+      expect((await store.getItem(db, again.id))?.answer).toMatchObject({
+        set: {
+          exitCode: 0,
+          line: `${key} at made-up-me is already {"enabled":true}, so nothing changed`,
+        },
+      })
+    })
+
+    test("a job's Approve keeps the other fields its scope's row holds, and stores no registry field (PG-1196)", async () => {
+      const data = folder()
+      const key = "jobs.opsTicketCard"
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+      const row = { enabled: false, schedule: { every: 7 } }
+      expect(setSetting(data, { key, scope: "made-up-me", value: row }, who).ok).toBe(true)
+      const card = { ...GUARD, key, scope: "made-up-me", value: { enabled: true } }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(readSetting(data, key)!.rows).toEqual([
+        { key, scope: "made-up-me", value: { enabled: true, schedule: { every: 7 } } },
+      ])
     })
 
     test("with no data folder its Approve is refused and the item stays open", async () => {
