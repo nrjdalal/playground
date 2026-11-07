@@ -1311,8 +1311,9 @@ describe("prepare-only starts", () => {
     lines: Record<string, Line> = {},
     prepare: Record<string, string> = { "MADE-5": REGISTERED },
     extra: Record<string, unknown> = {},
+    options: Parameters<typeof setup>[2] = {},
   ) => {
-    const s = setup(lines, { "firefighting.json": prepareFile(lines, prepare), ...extra })
+    const s = setup(lines, { "firefighting.json": prepareFile(lines, prepare), ...extra }, options)
     writeFileSync(join(s.data, "brief-ff-prepare.md"), "Prepare {TICKET} as {NAME}, locally.\n")
     const rosterSets = () =>
       s.runs
@@ -1440,5 +1441,98 @@ describe("prepare-only starts", () => {
       "stop MADE-5: someone else took it before you claimed it; keep its branch local, push nothing, and end",
       "Stopped worker-made-up-1, the prepare-only worker for MADE-5: someone else took it",
     ])
+  })
+
+  // The roster a session's row reads after a pass, which the fake's roster sets never write.
+  const row = (s: { data: string }, fields: Record<string, string>) =>
+    writeFileSync(
+      join(s.data, "roster.json"),
+      JSON.stringify({
+        agents: [{ name: "worker-made-up-1", status: "working", ticket: "MADE-5", ...fields }],
+      }),
+    )
+
+  test("P9: a prepare-only start refused before its ticket is listed leaves no prepare brief, so the full start under the same name takes the full one", async () => {
+    let refuse = true
+    const s = prepared(undefined, undefined, undefined, {
+      spawned: (argv) =>
+        refuse
+          ? { code: 1, out: `spawn.sh refuses ${argv[2]}: the load gate holds it\n` }
+          : { code: 0, out: "" },
+    })
+    await s.pass(PREPARE)
+    refuse = false
+    s.later(1)
+    s.relay(1, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.titles()).toEqual(["MADE-5 prepare", "MADE-5 firefight"])
+    expect(await Bun.file(join(s.data, "brief-worker-made-up-1.md")).text()).toBe(
+      "Work MADE-5 as worker-made-up-1.\n",
+    )
+    expect(s.rosterSets()).toEqual([["set", "worker-made-up-1", "ticket=MADE-5"]])
+  })
+
+  test("P10: a prepare-only worker that stopped and ended holds nothing off: its ticket listed the same day starts a full worker", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(1, {}, {})
+    await s.pass(PREPARE)
+    s.later(1)
+    row(s, { mode: "prepare", status: "ended" })
+    s.relay(2, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.titles()).toEqual(["MADE-5 prepare", "MADE-5 firefight"])
+    expect(s.sent.at(-1)).toBe(
+      "Started worker-made-up-2 for MADE-5 (Medium) with --firefighting, from brief-ff.md",
+    )
+  })
+
+  test("P11: a claim whose mode= did not land is set again on the next fresh beat, and once more on none after it reads clear", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(1, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    row(s, { mode: "prepare" })
+    s.later(1)
+    s.relay(2, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.rosterSets().slice(1)).toEqual([
+      ["set", "worker-made-up-1", "mode="],
+      ["set", "worker-made-up-1", "mode="],
+    ])
+    row(s, {})
+    s.later(1)
+    s.relay(3, line("MADE-5", "Medium", 1), {})
+    await s.pass(PREPARE)
+    expect(s.rosterSets()).toHaveLength(3)
+  })
+
+  test("P12: a prepare-only start whose mode=prepare did not land is set again on the next fresh beat", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    row(s, {})
+    s.later(1)
+    s.relay(1, {}, { "MADE-5": REGISTERED }, [])
+    await s.pass(PREPARE)
+    expect(s.rosterSets()).toEqual([
+      ["worker-made-up-1", "ticket=MADE-5", "mode=prepare"],
+      ["set", "worker-made-up-1", "mode=prepare"],
+    ])
+  })
+
+  test("P13: a line someone else took while its ticket waits in the prepare map stops its prepare-only worker", async () => {
+    const s = prepared()
+    await s.pass(PREPARE)
+    s.later(1)
+    s.relay(1, line("MADE-5", "Medium", 1, { theirs: true }), { "MADE-5": REGISTERED }, [])
+    await s.pass(PREPARE)
+    expect(s.sentTo.slice(1, 3)).toEqual(["worker-made-up-1", "builder"])
+    expect(s.sent.slice(1, 3)).toEqual([
+      "stop MADE-5: someone else took it, so it is not ours to take; keep its branch local, push nothing, and end",
+      "Stopped worker-made-up-1, the prepare-only worker for MADE-5: someone else took it",
+    ])
+    expect([s.state().prepared, s.titles()]).toEqual([{}, ["MADE-5 prepare"]])
   })
 })

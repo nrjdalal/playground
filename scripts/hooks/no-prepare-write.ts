@@ -1,4 +1,4 @@
-// PreToolUse hook: refuses a prepare-only worker (a session whose roster row reads mode=prepare, which ops-firefighting-start sets) every call that would claim or publish its ticket before the tracker's digest lists it: a Linear or Slack MCP tool that writes, a GitHub MCP pull request create, `gh pr create`, a `gh api` POST to a repo's pulls and a `git push` to any remote, since a pushed branch is a visible write in the org's repo. The job clears the mode when it tells the session to claim, and the same calls then run. Input it cannot read lets the call run.
+// PreToolUse hook: refuses a prepare-only worker (a session whose roster row reads mode=prepare, which ops-firefighting-start sets) every call that would claim or publish its ticket before the tracker's digest lists it: a Linear, Slack or GitHub MCP tool that writes, a `gh pr` or `gh issue` call that is not a read, a `gh api` call that is not a GET or a graphql mutation, and a `git push` or `git send-pack` to any remote, since a pushed branch is a visible write in the org's repo. The job clears the mode when it tells the session to claim, and the same calls then run. Input it cannot read lets the call run.
 import "../../packages/env/src/aliases"
 import { join } from "node:path"
 
@@ -14,8 +14,12 @@ import {
   lex,
   PRINTERS,
   program,
+  readPath,
   run,
+  type Text,
+  UNKNOWN,
   type Visit,
+  visible,
   type Word,
 } from "./shell"
 
@@ -27,7 +31,10 @@ const LINEAR_READ = /^(?:extract_|get_|list_|search_|whoami$)/
 // A Slack tool that only reads; every other Slack tool posts, edits, reacts, joins or marks.
 const SLACK_READ =
   /^(?:conversations_(?:history|list|replies|unreads)$|files_info$|search_|usergroups_(?:list|me)$|users_)/
-const PULLS = /^repos\/[^/]+\/[^/]+\/pulls\/?$/
+// A GitHub MCP tool that only reads, by its verb or its _read suffix; every other GitHub tool writes.
+const GITHUB_READ = /^(?:get_|list_|search_)|_read$/
+// The `gh pr` and `gh issue` verbs that only read.
+const GH_READS = new Set(["checks", "diff", "list", "status", "view"])
 
 // The session's roster row's mode, read from the data folder's roster by its registry name; undefined when either does not read.
 async function modeOf(sessionId: unknown, environment: Environment): Promise<string | undefined> {
@@ -49,6 +56,7 @@ function mcp(tool: string): string | undefined {
   if (!server || !name) return
   if (/linear/i.test(server) && !LINEAR_READ.test(name)) return refuse(`the Linear tool ${name}`)
   if (/slack/i.test(server) && !SLACK_READ.test(name)) return refuse(`the Slack tool ${name}`)
+  if (/github/i.test(server) && !GITHUB_READ.test(name)) return refuse(`the GitHub tool ${name}`)
   if (name === "create_pull_request") return refuse(`the tool ${name}`)
 }
 
@@ -63,21 +71,33 @@ const visit: Visit = async (cmd, { args, name }, env) => {
     : git(args.slice(nested + 1))
 }
 
-const git = (args: Word[]): string | undefined =>
-  gitCommand(args).sub?.value === "push" ? refuse("git push") : undefined
+const git = (args: Word[]): string | undefined => {
+  const sub = gitCommand(args).sub?.value
+  return sub === "push" || sub === "send-pack" ? refuse(`git ${sub}`) : undefined
+}
 
 async function gh(args: Word[], cmd: Command, env: Env): Promise<string | undefined> {
   const { head, rest } = ghCommand(args)
-  if (head.join(" ") === "pr create") return refuse("gh pr create")
+  if ((head[0] === "pr" || head[0] === "issue") && head[1] && !GH_READS.has(head[1]))
+    return refuse(`gh ${head[0]} ${visible(head[1])}`)
   if (head[0] !== "api") return
   const request = await ghApi(rest, cmd, env, undefined)
-  if (!request || request.method !== "POST") return
+  if (!request) return
   const path = request.endpoint.value
     .replace(/^https?:\/\/[^/]+/i, "")
     .replace(/^\/+/, "")
     .replace(/^api\/v3\//, "")
     .split("?")[0]!
-  if (PULLS.test(path)) return refuse(`gh api POST ${path}`)
+  if (path === "graphql") {
+    // a `$(cat file)` in the query marks where that file's text goes, so each file it reads is read too
+    const texts: Text[] = []
+    for (const t of [...request.fields.map((f) => f.text), ...request.inputs])
+      texts.push(t, ...(await Promise.all((t.reads ?? []).map((r) => readPath(r, env)))))
+    if (texts.some((t) => t.unknown || t.value.includes(UNKNOWN) || /mutation/i.test(t.value)))
+      return refuse("a gh api graphql mutation, or a query the hook cannot read")
+    return
+  }
+  if (request.method !== "GET") return refuse(`gh api ${request.method} ${visible(path)}`)
 }
 
 async function inspect(raw: string, environment: Environment): Promise<string | undefined> {

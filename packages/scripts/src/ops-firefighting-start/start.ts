@@ -43,7 +43,7 @@ type Line = {
   urgency?: string
   urgent?: boolean
 }
-type Row = { name?: string; status?: string; ticket?: string; title?: string }
+type Row = { mode?: string; name?: string; status?: string; ticket?: string; title?: string }
 
 // What a beat keeps between passes: when it first watched, the UTC day each roster row was first seen ended (empty for one already ended on the first beat), the session started for each ticket, the prepare-only session of each ticket not yet claimed, the name a ticket whose start was refused keeps, the line last told for each, when each closed line was first seen closed, when Linear first read each of those open again (kept for a ticket card to read), and when Linear was last asked.
 export type State = {
@@ -166,21 +166,41 @@ export async function startPass({
         )
       : [],
   )
-  // A prepared ticket that leaves the prepare map with no clock entry (closed, taken by someone else, never posted in time, or the relay's window ended) is no longer ours: its session stops with its branch local, on any fresh beat, outside the window too, and one whose row ended is let go.
+  // A prepared ticket that leaves the prepare map with no clock entry (closed, never posted in time, or the relay's window ended), or whose line someone else took while it waits there, is no longer ours: its session stops with its branch local, on any fresh beat, outside the window too, and one whose row ended is let go.
   for (const [id, session] of Object.entries(state.prepared)) {
-    if (prepare.has(id) || listed.has(id)) continue
+    if (listed.has(id)) continue
+    const theirs = ff?.lines?.[id]?.theirs === true
+    if (prepare.has(id) && !theirs) continue
     delete state.prepared[id]
     delete state.started[id]
     await save()
     if (ENDED.has(rowOf(session)?.status ?? "")) continue
+    const why = theirs ? "someone else took it" : "it left the prepare list with no digest entry"
     await ctx.send(
       session,
-      `stop ${id}: it left the prepare list with no digest entry, so it is not ours to take; keep its branch local, push nothing, and end`,
+      `stop ${id}: ${why}, so it is not ours to take; keep its branch local, push nothing, and end`,
     )
-    await tell(
-      id,
-      `Stopped ${session}, the prepare-only worker for ${id}: it left the prepare list with no digest entry`,
-    )
+    await tell(id, `Stopped ${session}, the prepare-only worker for ${id}: ${why}`)
+  }
+  // The roster's mode is what no-prepare-write reads, so on every fresh beat a live row of a session this job started is set again where its mode and the job's state disagree: mode=prepare while the session is prepare-only, none once it claimed.
+  const preparing = new Set(Object.values(state.prepared))
+  for (const [id, session] of Object.entries(state.started)) {
+    const row = rowOf(session)
+    if (!row || ENDED.has(row.status ?? "")) continue
+    const want = preparing.has(session) ? "prepare" : ""
+    if ((row.mode ?? "") === want) continue
+    const set = await ctx.run([
+      process.execPath,
+      join(ctx.repo, "scripts", "roster.ts"),
+      "set",
+      session,
+      `mode=${want}`,
+    ])
+    if (set.code !== 0)
+      await tell(
+        id,
+        `Could not set mode=${want} on ${session}'s roster row for ${id}: ${lastLine(set.out)}`,
+      )
   }
   // The owner takes tickets only inside the start window: outside it, or on a day off, nothing starts and the start file goes, while a focus already standing is left to its session; the line names the window, never the beat's time or day, so a closed stretch is told once, and the next close once more.
   if (!inWindow(config, ctx.now)) {
@@ -203,7 +223,9 @@ export async function startPass({
     if (!listed.has(line.id) && line.open === true)
       await tell(line.id, `Skipped ${line.id}: no digest of the tracker lists it`)
   const lines = matched.filter((l) => listed.has(l.id))
-  const endedToday = (id: string) => rowsFor(id).find((r) => r.name && state.ended[r.name] === day)
+  // a prepare-only worker's end, its row still mode=prepare, holds nothing off: the ticket's full start may follow the same day
+  const endedToday = (id: string) =>
+    rowsFor(id).find((r) => r.name && r.mode !== "prepare" && state.ended[r.name] === day)
   // A ticket is held by a live row that carries it or whose title it leads, or by the session this job started for it while that row is not ended, or not yet written.
   const held = (id: string) =>
     rowsFor(id).some((r) => !ENDED.has(r.status ?? "")) ||
@@ -367,12 +389,11 @@ export async function startPass({
     state.named[id] = session
     await save()
     const brief = `brief-${session}.md`
-    // a retry under the kept name reuses the brief its first try wrote
-    if (!(await Bun.file(join(data, brief)).exists()))
-      await Bun.write(
-        join(data, brief),
-        (await template.text()).replaceAll("{TICKET}", id).replaceAll("{NAME}", session),
-      )
+    // every try writes the brief from the template it starts from now, so a prepare-only try refused before its ticket was listed leaves no prepare brief for the full start under the same name
+    await Bun.write(
+      join(data, brief),
+      (await template.text()).replaceAll("{TICKET}", id).replaceAll("{NAME}", session),
+    )
     const argv = [
       join(ctx.repo, "scripts", "spawn.sh"),
       "worker",

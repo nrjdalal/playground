@@ -47,6 +47,12 @@ describe("no-prepare-write", () => {
     "mcp__slack-shared__reactions_add",
     "mcp__slack-shared__conversations_join",
     "mcp__github-shared__create_pull_request",
+    "mcp__github-shared__push_files",
+    "mcp__github-shared__create_branch",
+    "mcp__github-shared__create_or_update_file",
+    "mcp__github-shared__merge_pull_request",
+    "mcp__github-shared__add_issue_comment",
+    "mcp__github-shared__issue_write",
   ])("refuses a prepare-only worker the write tool %s", async (name) => {
     expect(await check(tool(name), env)).toStartWith("no-prepare-write hook refused the ")
   })
@@ -61,7 +67,17 @@ describe("no-prepare-write", () => {
     "git -C /made-up/app push --force-with-lease",
     "cd /made-up/app && git push another-remote HEAD",
     "timeout 60 git push",
-  ])("refuses a prepare-only worker the PR create or push %s", async (command) => {
+    "git send-pack origin HEAD",
+    "gh pr comment 1 --body made-up",
+    "gh pr ready 1",
+    "gh pr merge 1 --squash",
+    "gh issue create --title made-up --body made-up",
+    "gh issue comment 1 --body made-up",
+    "gh api repos/made-up/app/issues/1/comments -f body=made-up",
+    "gh api -X PATCH repos/made-up/app/issues/1 -f state=closed",
+    "gh api graphql -f query='mutation { createPullRequest(input: {}) { clientMutationId } }'",
+    'gh api graphql -f query="$(cat /made-up/q.graphql)"',
+  ])("refuses a prepare-only worker the GitHub write or push %s", async (command) => {
     expect(await check(bash(command), env)).toContain("this session is a prepare-only worker")
   })
 
@@ -73,6 +89,10 @@ describe("no-prepare-write", () => {
     "mcp__slack-shared__conversations_replies",
     "mcp__slack-shared__search_messages",
     "mcp__github-shared__pull_request_read",
+    "mcp__github-shared__issue_read",
+    "mcp__github-shared__get_file_contents",
+    "mcp__github-shared__list_pull_requests",
+    "mcp__github-shared__search_code",
   ])("lets a prepare-only worker read with %s", async (name) => {
     expect(await check(tool(name), env)).toBeUndefined()
   })
@@ -81,6 +101,13 @@ describe("no-prepare-write", () => {
     "gh pr view 1 --json state",
     "gh pr list",
     "gh api repos/made-up/app/pulls",
+    "gh pr diff 1",
+    "gh pr checks 1",
+    "gh pr status",
+    "gh issue view 1",
+    "gh issue list --state open",
+    "gh api graphql -f query='query { viewer { login } }'",
+    "gh run view 1 --log-failed",
     "git commit -m made-up",
     "git -C /made-up/app status",
     "git log --oneline -1",
@@ -96,6 +123,19 @@ describe("no-prepare-write", () => {
       expect(await check(bash("gh pr create --fill", session), env)).toBeUndefined()
       expect(await check(bash("git push -u origin made-up", session), env)).toBeUndefined()
     }
+  })
+
+  test("reads a graphql query from the file a $(cat) names: a mutation there is refused, a query runs", async () => {
+    await Bun.write(join(config, "q.graphql"), "query { viewer { login } }")
+    await Bun.write(
+      join(config, "m.graphql"),
+      "mutation { addComment(input: {}) { clientMutationId } }",
+    )
+    const graphql = (file: string) => bash(`gh api graphql -f query="$(cat ${join(config, file)})"`)
+    expect(await check(graphql("q.graphql"), env)).toBeUndefined()
+    expect(await check(graphql("m.graphql"), env)).toContain(
+      "this session is a prepare-only worker",
+    )
   })
 
   test("fails open on input it cannot read", async () => {
