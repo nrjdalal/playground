@@ -53,6 +53,78 @@ const R = "--repo quillco/playground"
 // The factory's repository, the first the guard keeps while factory.publicRepo is unset.
 const UNSET_R = `--repo ${UNSET_REPOS.public[0]}`
 
+// A made-up owner, Quilla (@qmarsh), whose names owner.names lists, and an outside contributor, Ostra Vell (@ovell).
+const OWNER_TERMS = { ...TERMS, handles: ["ovell", "qmarsh"], names: ["Ostra Vell", "Quilla"] }
+const CONTRIBUTORS = "### ❤️ Contributors\n\n"
+
+describe("a ship's notes may name the owner on the owner's own Contributors line alone", () => {
+  let owned = ""
+  beforeAll(async () => {
+    owned = join(scratch, "owned")
+    storeWith(
+      owned,
+      { "no-public-leak.json": JSON.stringify(OWNER_TERMS) },
+      {
+        "factory.archiveRepo": "acme/archive",
+        "factory.publicRepo": "quillco/playground",
+        "owner.names": ["qmarsh", "quilla"],
+      },
+    )
+  })
+  const notes = async (text: string) => {
+    const file = join(scratch, `notes-${Bun.hash(text)}.md`)
+    await Bun.write(file, text)
+    return file
+  }
+  const OWN = `## v2\n\n${CONTRIBUTORS}- Quilla @qmarsh\n- @someone\n`
+
+  test.each(["create v2", "edit v2"])("gh release %s passes the owner's line", async (verb) => {
+    expect(
+      await run(bash(`gh release ${verb} ${R} --notes-file ${await notes(OWN)}`), owned),
+    ).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "the owner's name on another line of the notes",
+      `### 🩹 Fixes\n\n- Quilla's fix\n\n${CONTRIBUTORS}- Quilla @qmarsh\n`,
+    ],
+    [
+      "an outside contributor's name on a Contributors line",
+      `${CONTRIBUTORS}- Ostra Vell @ovell\n`,
+    ],
+    ["an outside name on the owner's login", `${CONTRIBUTORS}- Ostra Vell @qmarsh\n`],
+    ["the owner's line outside the Contributors section", `### 🩹 Fixes\n\n- Quilla @qmarsh\n`],
+  ])("a ship's notes holding %s are refused", async (_, text) => {
+    expect(
+      await run(bash(`gh release create v2 ${R} --notes-file ${await notes(text)}`), owned),
+    ).toContain("no-public-leak hook refused")
+  })
+
+  test.each([
+    [
+      "a ship's title",
+      (f: string) => `gh release create v2 ${R} --title "Quilla's ship" --notes-file ${f}`,
+    ],
+    [
+      "an edited ship's title",
+      (f: string) => `gh release edit v2 ${R} --title "Quilla @qmarsh" --notes-file ${f}`,
+    ],
+    ["an issue's body", (f: string) => `gh issue create ${R} -t x --body-file ${f}`],
+    ["a pull request's body", (f: string) => `gh pr create ${R} -t x --body-file ${f}`],
+    ["a comment", (f: string) => `gh pr comment 1 ${R} --body-file ${f}`],
+    [
+      "a ship's create joined to a comment",
+      (f: string) =>
+        `gh release create v2 ${R} --notes-file ${f} && gh pr comment 1 ${R} --body-file ${f}`,
+    ],
+  ])("the owner's line in %s is refused", async (_, command) => {
+    expect(await run(bash(command(await notes(OWN))), owned)).toContain(
+      "no-public-leak hook refused",
+    )
+  })
+})
+
 describe("a write to the public repository holding private text is refused", () => {
   test.each([
     ["gh pr create", `gh pr create ${R} --title "Fix export" --body "Asked by Quilla Marsh"`],

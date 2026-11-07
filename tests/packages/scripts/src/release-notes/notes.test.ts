@@ -250,7 +250,7 @@ describe("renderNotes (PG-1213)", () => {
   )
 
   // three made-up commits: one author twice with a name, one with none
-  const named = (names?: boolean) =>
+  const named = (owner?: string[]) =>
     renderNotes({
       commits: [
         {
@@ -276,50 +276,58 @@ describe("renderNotes (PG-1213)", () => {
         },
       ],
       from: "v1",
-      names,
+      owner,
       repo: REPO,
       to: "v2",
     })
+  const contributors = (notes: string) => notes.split("### ❤️ Contributors\n\n")[1]
 
-  test("a contributor reads as the login alone by default, so the notes name no person", () => {
-    expect(named().split("### ❤️ Contributors\n\n")[1]).toBe("- @pat-dev\n- @sam-ops\n")
+  test("a contributor reads as the login alone when no owner names are set", () => {
+    expect(contributors(named())).toBe("- @pat-dev\n- @sam-ops\n")
   })
 
-  test("with names on, a contributor reads with the author's name before the login, and the login alone when no name was read", () => {
-    expect(named(true).split("### ❤️ Contributors\n\n")[1]).toBe(
-      "- Pat Example @pat-dev\n- @sam-ops\n",
-    )
+  test("the owner's line carries the author name's words owner.names lists, every other line the login alone", () => {
+    expect(contributors(named(["pat", "pat-dev"]))).toBe("- Pat @pat-dev\n- @sam-ops\n")
   })
 
-  test("the public repo's leak guard passes the default notes as a release write's notes file, and refuses them with names on", async () => {
+  test("an owner whose author name holds no owner.names word reads as the login alone", () => {
+    expect(contributors(named(["pat-dev"]))).toBe("- @pat-dev\n- @sam-ops\n")
+  })
+
+  test("the public repo's leak guard passes the owner's line in a ship's notes file, and refuses the same text as an issue's body", async () => {
     const scratch = await mkdtemp(join(tmpdir(), "notes-leak-"))
     const data = storeWith(
       join(scratch, "data"),
       {
         "no-public-leak.json": JSON.stringify({
           companies: ["Vantorix"],
-          handles: ["qmarsh"],
+          handles: ["pat-dev"],
           linearKeys: ["VX"],
-          names: ["Pat Example"],
+          names: ["Pat"],
           slackIds: ["C0FAKE1234"],
         }),
       },
-      { "factory.archiveRepo": "acme/archive", "factory.publicRepo": REPO },
+      {
+        "factory.archiveRepo": "acme/archive",
+        "factory.publicRepo": REPO,
+        "owner.names": ["pat", "pat-dev"],
+      },
     )
-    const write = async (names: boolean) => {
-      const file = join(scratch, `notes-${names}.md`)
-      await Bun.write(file, named(names))
-      return check(
+    const file = join(scratch, "notes.md")
+    await Bun.write(file, named(["pat", "pat-dev"]))
+    const write = (command: string) =>
+      check(
         JSON.stringify({
           cwd: scratch,
           hook_event_name: "PreToolUse",
-          tool_input: { command: `gh release create v2 --repo ${REPO} --notes-file ${file}` },
+          tool_input: { command },
           tool_name: "Bash",
         }),
         { CLAUDE_CONFIG_DIR: scratch, PLAYGROUND_DATA_DIR: data },
       )
-    }
-    expect(await write(false)).toBeUndefined()
-    expect(await write(true)).toContain("no-public-leak")
+    expect(await write(`gh release create v2 --repo ${REPO} --notes-file ${file}`)).toBeUndefined()
+    expect(await write(`gh issue create --repo ${REPO} --title x --body-file ${file}`)).toContain(
+      "no-public-leak",
+    )
   })
 })

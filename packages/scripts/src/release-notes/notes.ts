@@ -68,6 +68,7 @@ export function renderNotes({
   commits: NoteCommit[]
   from: string
   names?: boolean
+  owner?: string[]
   repo: string
   to: string
 }): string {
