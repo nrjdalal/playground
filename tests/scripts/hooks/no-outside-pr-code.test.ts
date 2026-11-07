@@ -224,8 +224,12 @@ describe("no-outside-pr-code reads the session's PRs to choose read mode", () =>
   test.each([
     ["one outside PR among its PRs", "s-mixed", "outside author"],
     ["a PR the hook cannot read", "s-unread", "outside author"],
-    ["no PR on its row", "s-none", "roster.ts assign"],
-    ["only an issue on its row", "s-issue", "roster.ts assign"],
+    ["no PR on its row", "s-none", "bun scripts/roster.ts set <this session's name> pr=<pull url>"],
+    [
+      "only an issue on its row",
+      "s-issue",
+      "bun scripts/roster.ts set <this session's name> pr=<pull url>",
+    ],
   ])("a checker with %s is in read mode", async (_, session, words) => {
     expect(await judge(call("bun test", OUTSIDE, session))).toContain(words)
   })

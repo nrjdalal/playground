@@ -105,7 +105,7 @@ const GITHUB_URL = /^(?:https:\/\/github\.com\/|git@github\.com:)[\w.-]+\/[\w.-]
 
 // Read mode's reason, by why the session is in it.
 const REASONS = {
-  none: 'its roster row names no PR, so the hook cannot rule out an outside author\'s code. Its worker sets the PR it serves: bun scripts/roster.ts assign <this session> "<title>" review worker=<worker> pr=<pull url>.',
+  none: "its roster row names no PR, so the hook cannot rule out an outside author's code. A checker spawn.sh started without --pr has none; its worker or lead names the PR it serves from the main checkout: bun scripts/roster.ts set <this session's name> pr=<pull url>.",
   outside:
     "it serves an outside author's PR, whose tests, scripts and installs run that author's code on this machine. Read the PR instead: the Read, Grep and Glob tools, gh pr diff, git diff and git show <rev> in the clone, and move the clone with git fetch and git checkout --detach. Score on the PR's own GitHub checks, and say in the verdict that its code was read, not run.",
 }

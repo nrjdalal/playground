@@ -693,7 +693,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   It finds the row by the session's registry name, the same read role.ts makes, and takes its PRs from the row's `pr` and the pull URLs in its `prs`.
   A PR is outside when its author is not the repo's owner on a repo a user owns, read once with `gh api repos/<repo>/pulls/<n>` and kept in the data folder (`hook-outside-pr/`); a PR it cannot read counts as outside, and that failure is kept for an hour.
   An org repo's PRs are its colleagues', so a checker of those, or of the owner's own PRs, runs them as before.
-  A row with no PR, or only an issue's URL, is read mode too, and its reason names `bun scripts/roster.ts assign` with `pr=`, which a worker sets when it spawns its checker.
+  A row with no PR, or only an issue's URL, is read mode too, and its reason names the one-line fix its worker or lead runs, `bun scripts/roster.ts set <name> pr=<pull url>`, since `spawn.sh` writes a checker's `pr` only when started with `--pr`.
   In read mode a Bash or Monitor line passes only when every command on it is on the allowlist, so a command the hook cannot read is refused.
   The allowlist holds `read-only.ts`'s `readsWords`, a few utilities that run no file they name (`cat`, `grep`, `jq`, `ls` and the rest of `UTILITIES`), `sed -n` printing a range of lines or patterns, `sed` with one substitution whose flags write no file, and `gh` but for `gh pr checkout`.
   It holds git's reads (`GIT_READS`: diff, log, show, grep, merge-base, ls-tree, cat-file and the rest) with any option but those that start a program or write a file (`-O`, `--output`).
