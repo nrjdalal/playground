@@ -33,7 +33,7 @@ import {
   setSetting,
   slackSettings,
 } from "@packages/settings"
-import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm"
 import { z } from "zod"
 
 import { fileNameOf } from "../download"
@@ -762,7 +762,7 @@ export const saidOf = (text: string): string | undefined => {
   return said.length > SAID_CHARS ? `${said.slice(0, SAID_CHARS - 1)}…` : said
 }
 
-// The poster cleared its own alert update (`bun run ask resolve`), which had resolved itself: read, so nothing was left for him to dismiss.
+// The poster cleared its own update (`bun run ask resolve`), which had settled: read, so nothing was left for the owner to dismiss.
 export type InboxResolved = {
   at: string
   by: string
@@ -2590,8 +2590,11 @@ export async function staleItems(
   return rows.map(toItem)
 }
 
-// Every item still open (a decision or draft not yet answered, one put away with Later and one answered in chat included, until it moves to Done), oldest first, one sender's alone when from is given: what a session reads before it posts, so it names an open item on the same thing rather than posting it twice (`bun run ask open`).
-export async function openItems(db: Database, from?: string): Promise<InboxItem[]> {
+// Every item still open (a decision or draft not yet answered, one put away with Later and one answered in chat included, until it moves to Done), oldest first, one sender's alone when from is given and those posted from since and before until alone when given: what a session reads before it posts, so it names an open item on the same thing rather than posting it twice (`bun run ask open`), and what ops-tick reads to resolve the focus card.
+export async function openItems(
+  db: Database,
+  { from, since, until }: { from?: string; since?: Date; until?: Date } = {},
+): Promise<InboxItem[]> {
   const rows = await db
     .select()
     .from(inboxItem)
@@ -2600,6 +2603,8 @@ export async function openItems(db: Database, from?: string): Promise<InboxItem[
         eq(inboxItem.status, "open"),
         sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
         from === undefined ? undefined : eq(inboxItem.from, from),
+        since === undefined ? undefined : gte(inboxItem.createdAt, since),
+        until === undefined ? undefined : lt(inboxItem.createdAt, until),
       ),
     )
     .orderBy(inboxItem.ref)
@@ -2779,7 +2784,7 @@ export async function settleItem(
   return { item: toItem(row), ok: true }
 }
 
-// The poster clears its own alert update (`bun run ask resolve`), once it has resolved itself: it marks the alert read, records the resolution inside its answer and leaves it closed, so the owner never dismisses a cleared alert by hand. Another session's alert, a non-alert item and an unknown id are refused.
+// The poster clears its own update (`bun run ask resolve`) once it has settled: an alert whose cause cleared, a progress card whose last step is done, the focus card once what it pointed at is answered. It marks the update read, records the resolution inside its answer and leaves it closed, so the owner never presses Done on it by hand. Another session's update, a decision or draft and an unknown id are refused.
 export async function resolveItem(
   db: Database,
   key: string,
@@ -2796,18 +2801,17 @@ export async function resolveItem(
   if (note !== undefined && ARCHIVES.test(note)) return notApp()
   const item = await getItem(db, key)
   if (!item) return NOT_FOUND
-  if (item.kind !== "update" || item.preview.outcome !== "alert") {
+  if (item.kind !== "update") {
     return {
       code: "VALIDATION_ERROR",
-      message:
-        "Only an alert update resolves; a decision or draft settles, and another update is read or dismissed",
+      message: "Only an update resolves; a decision or draft settles",
       ok: false,
     }
   }
   if (by !== item.from) {
     return {
       code: "CONFLICT",
-      message: `Only ${item.from}, which posted it, resolves this alert`,
+      message: `Only ${item.from}, which posted it, resolves this update`,
       ok: false,
     }
   }
@@ -2835,7 +2839,7 @@ export async function resolveItem(
     )
     .returning()
   if (!row) {
-    return { code: "CONFLICT", message: "This alert is already resolved", ok: false }
+    return { code: "CONFLICT", message: "This update is already resolved", ok: false }
   }
   return { item: toItem(row), ok: true }
 }

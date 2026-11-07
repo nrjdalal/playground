@@ -3101,7 +3101,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(await stale()).not.toContain(posted.id)
   })
 
-  test("the poster resolves its own alert update; another session, a non-alert item and an unknown id are refused (#658)", async () => {
+  test("the poster resolves its own alert update; another session, a decision and an unknown id are refused (#658)", async () => {
     const alert = async () => {
       const posted = await post({
         from: "ops",
@@ -3136,23 +3136,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const other = await alert()
     expect(await store.resolveItem(db, other.id, { by: "builder" })).toMatchObject({
       code: "CONFLICT",
-      message: "Only ops, which posted it, resolves this alert",
+      message: "Only ops, which posted it, resolves this update",
       ok: false,
     })
-    // a decision settles, it does not resolve; a non-alert update is read or dismissed
+    // a decision settles, it does not resolve
     expect(
       await store.resolveItem(db, (await post(decision(PREVIEWS.budget))).id, { by: "ops" }),
     ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
-    const finding = await post({
-      from: "builder",
-      kind: "update",
-      preview: { outcome: "finding" },
-      title: "Found",
-    })
-    expect(await store.resolveItem(db, finding.id, { by: "builder" })).toMatchObject({
-      code: "VALIDATION_ERROR",
-      ok: false,
-    })
     expect(await store.resolveItem(db, "#i999999", { by: "ops" })).toMatchObject({
       code: "NOT_FOUND",
       ok: false,
@@ -3171,7 +3161,51 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       }),
     ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
     // nothing here leaves an update unread
-    await store.markRead(db, [other.id, finding.id, long.id, archived.id])
+    await store.markRead(db, [other.id, long.id, archived.id])
+  })
+
+  // PG-1349: a finished progress card and the focus card waited for the owner's Done, since resolve took an alert alone
+  test("the poster resolves any update of its own once it has settled, a finished progress card and the focus card included, read and with its note; another session's is refused (PG-1349)", async () => {
+    const at = new Date("2026-10-07T12:00:00.000Z")
+    const progress = await post({
+      from: "worker-made-up",
+      kind: "update",
+      preview: { outcome: "merged", text: "```\nMade-up job  ██████████  3/3\n```" },
+      title: "Made-up job: 3 of 3 steps done",
+    })
+    const done = await store.resolveItem(db, `#i${progress.ref}`, {
+      by: "worker-made-up",
+      note: "All 3 steps done",
+      now: at,
+    })
+    expect(done).toMatchObject({
+      item: {
+        answer: {
+          at: at.toISOString(),
+          by: "worker-made-up",
+          choice: "resolved",
+          note: "All 3 steps done",
+        },
+        readAt: at.toISOString(),
+      },
+      ok: true,
+    })
+    const focus = await post({
+      from: "ops",
+      kind: "update",
+      preview: { outcome: "finding" },
+      title: "Focus for worker-f ended: 0 runs queued while it stood, 0m0s in all",
+    })
+    expect(await store.resolveItem(db, focus.id, { by: "worker-made-up" })).toMatchObject({
+      code: "CONFLICT",
+      message: "Only ops, which posted it, resolves this update",
+      ok: false,
+    })
+    const note = "Everything that came in while focus stood is answered"
+    expect(await store.resolveItem(db, focus.id, { by: "ops", note, now: at })).toMatchObject({
+      item: { answer: { by: "ops", choice: "resolved", note } },
+      ok: true,
+    })
   })
 
   test("ack and settle store where the answer was carried out, and take an https URL alone", async () => {
