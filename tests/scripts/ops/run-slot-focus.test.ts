@@ -2,19 +2,10 @@ import { describe, expect, setDefaultTimeout, test } from "bun:test"
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import { SCRIPT, WAITING, machine, stop } from "./run-slot-fake"
+import { SCRIPT, WAITING, machine, set, stop } from "./run-slot-fake"
 
 // a check waits on its run's exit or a line it prints, so the timeout only catches a hang
 setDefaultTimeout(60_000)
-
-const set = async (m: ReturnType<typeof machine>, ...args: string[]) => {
-  const p = Bun.spawn(["bash", SCRIPT, "set", ...args], {
-    cwd: m.root,
-    env: m.env(),
-    stderr: "pipe",
-  })
-  return { code: await p.exited, err: await new Response(p.stderr).text() }
-}
 
 const iso = (ms: number) => `${new Date(ms).toISOString().slice(0, 19)}Z`
 

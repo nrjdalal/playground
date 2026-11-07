@@ -489,7 +489,7 @@ describe("a manager starts in a workspace of its own, in the leads worktree", ()
       .filter((l) => !l.startsWith("spawn.sh: "))
     expect(lines[0]).toStartWith("  spawn.sh worker ")
     expect(r.err).toContain("  --effort <level> ")
-    expect(lines.at(-1)).toStartWith("    The runtime is recorded at the start")
+    expect(lines.at(-1)).toStartWith("    The runtime is recorded at every start and resume")
   })
 
   // The optimizer is a manager that reports to OLD.dispatcher and runs on Claude (brief-optimizer.md), so it starts as a lead.
