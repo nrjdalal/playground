@@ -7,7 +7,7 @@ hooks:
     - matcher: '^(Bash|Edit|MultiEdit|NotebookEdit|Write|mcp__.+__((\w+_)?[Cc]reate_?[Ii]ssues?|[Ii]ssues?_?[Cc]reate|save_issue))$'
       hooks:
         - type: command
-          command: '{ s=scripts/hooks/bundled/no-linear-ticket.js; [ -f "$PLAYGROUND_REPO/$s" ] || s=scripts/hooks/no-linear-ticket.ts; [ -f "$PLAYGROUND_REPO/$s" ]; } || { [ -z "$PLAYGROUND_ROLE" ] && exit 0; echo "no-linear-ticket: no guard script in the main checkout (${PLAYGROUND_REPO:-not found}); refusing. Restore it from the owner''s own window: playbook LIFECYCLE.md, Restoring the main checkout" >&2; exit 2; }; cd -P "$PLAYGROUND_REPO" && bun --no-env-file "$s"; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo "no-linear-ticket: crashed (exit $c); refusing. Fix: bun install in $PLAYGROUND_REPO" >&2; exit 2; }; exit $c'
+          command: '{ s=scripts/hooks/bundled/no-linear-ticket.js; [ -f "$PLAYGROUND_REPO/$s" ] || s=scripts/hooks/no-linear-ticket.ts; [ -f "$PLAYGROUND_REPO/$s" ]; } || { [ -z "$PLAYGROUND_ROLE" ] && exit 0; echo "no-linear-ticket: no guard script in the main checkout (${PLAYGROUND_REPO:-not found}); refusing. ops-restore puts it back, else Ops by playbook LIFECYCLE.md, Restoring the main checkout" >&2; exit 2; }; cd -P "$PLAYGROUND_REPO" && bun --no-env-file "$s"; c=$?; [ $c = 0 ] || [ $c = 2 ] || { echo "no-linear-ticket: crashed (exit $c); refusing. Fix: bun install in $PLAYGROUND_REPO" >&2; exit 2; }; exit $c'
           timeout: 15
 ---
 
@@ -50,9 +50,9 @@ How the Dashboard shows each role, how a session is named and when a dev stack r
 - Questions, reports and results go up by `SendMessage`, never through `AskUserQuestion`.
 - A message opens with its content, never with your own name, since the Dashboard shows the sender.
   Read [rules/voice.md](../../rules/voice.md) before you name a session or list PR status for the owner.
-- A session's effort, model, permission mode and settings are the owner's, changed by the owner's act or word alone, never by a running session asked to change its own.
+- A running session's model, effort, permission mode and settings change by a start or a resume, or by the owner's own act, never by the session asked to change its own.
   The model and effort of a dispatcher, the Assistant and the hosted session (the one the Dashboard runs on the Agent SDK) are the owner's pick in the menu left of Send in that session's Dashboard composer.
-  Any other session's model or effort changes when a lead starts or resumes it with spawn.sh's `--model` or `--effort`, on the owner's word relayed through the dispatcher in the **override** shape (SESSIONS.md).
+  A lead picks any other session's model and effort as it starts or resumes it, by brief-rush's model classes (`scripts/briefs/brief-rush.md`), through spawn.sh's `--model` and `--effort` (SESSIONS.md); the owner's word, relayed in the **override** shape, outranks the class.
   The hosted session's permission mode is the owner's pick in its composer's mode menu, while approvals are on.
   Any other session's permission mode and settings stay as spawn.sh's launch flags and the factory's settings set them, and a change to them is a PR to those, until the Dashboard control on a session's row lands (the issue "every step that needs the owner is one GUI action").
 
