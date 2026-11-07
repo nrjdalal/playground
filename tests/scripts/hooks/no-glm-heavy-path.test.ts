@@ -839,6 +839,10 @@ describe("a GLM session's org tools", () => {
       ["bun --cwd=packages/scripts src/linear-read/cli.ts MADE-1", "Linear script"],
       ["bun dm send x.md", "DM sender"],
       ["node ./packages/scripts/src/dm/cli.ts send", "DM sender"],
+      ["./packages/scripts/src/linear-read/cli.ts MADE-1", "Linear script"],
+      ["bun --cwd $D run linear:read MADE-1", "a folder a value it cannot read names"],
+      ["cd $D && bun run dm hi", "a folder a value it cannot read names"],
+      ["cd $D && bun run build", "a folder a value it cannot read names"],
     ]) {
       const { claude, glm } = await both(input(command, scripts))
       expect(claude).toBeUndefined()

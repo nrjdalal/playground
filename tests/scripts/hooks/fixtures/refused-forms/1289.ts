@@ -122,6 +122,25 @@ export const groups: Group[] = [
         "npx --package=@anthropic-ai/claude-code claude -p hi",
       ],
       ["git -C a folder held in a variable", "C=/tmp; git -C $C log -1"],
+      // round 3: an org script run as its own program, and a runner in a folder the hook cannot read
+      [
+        "the tracker's script run as its own program",
+        "./packages/scripts/src/linear-read/cli.ts MADE-1",
+      ],
+      [
+        "the tracker's script run by a bare relative path",
+        "packages/scripts/src/linear-read/cli.ts MADE-1",
+      ],
+      [
+        "the tracker's script run from its folder",
+        "cd packages/scripts/src/linear-read && ./cli.ts MADE-1",
+      ],
+      ["bun --cwd of a folder held in a variable", "bun --cwd $D run linear:read MADE-1"],
+      [
+        "a package script after cd to a folder held in a variable",
+        "cd $D && bun linear:read MADE-1",
+      ],
+      ["any runner after cd to a folder held in a variable", "cd $D && bun run build"],
     ],
   },
   {
