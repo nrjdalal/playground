@@ -304,7 +304,7 @@ describe("tick", () => {
     expect(inputs).toEqual([])
   })
 
-  // PG-1349: a week alert waited in the owner's Inbox for his Done after its week had reset
+  // PG-1349: a week alert waited in the owner's Inbox for the owner's Done after its week had reset
   test("an Inbox week alert resolves itself once usage.json reads that account's week back under its mark, and stays while the week is over it (PG-1349)", async () => {
     const ops = scratch()
     writeFileSync(
@@ -1766,6 +1766,40 @@ describe("the focus card", () => {
     const after = fake(ops, new Date("2026-10-19T09:15:00.000Z"))
     await beat("focus-card").run(after.ctx)
     expect(after.runs).toEqual([])
+  })
+
+  // PG-1349 round 1: a kept card that had resolved stayed after a later card failed, and every beat after threw on it, so no new card posted
+  test("a kept card already resolved is dropped, one whose resolve fails stays for the next beat, and the beat still posts a new card", async () => {
+    const ops = scratch()
+    mkdirSync(join(ops, "tick"), { recursive: true })
+    const window = { since: "2026-10-19T07:00:00.000Z", until: "2026-10-19T07:30:00.000Z" }
+    const doneCard = { by: OLD.ops, id: "aaaaaaaa-0000-4000-8000-000000000001", ...window }
+    const downCard = { by: OLD.ops, id: "bbbbbbbb-0000-4000-8000-000000000002", ...window }
+    writeFileSync(join(ops, "tick", "focus-cards.json"), JSON.stringify([doneCard, downCard]))
+    writeFileSync(
+      join(ops, "..", "focus.json"),
+      JSON.stringify({
+        reason: "a timed demo",
+        session: "worker-f",
+        since: "2026-10-19T08:00:00.000Z",
+        until: "2026-10-19T09:00:00.000Z",
+      }),
+    )
+    const ended = fake(ops, new Date("2026-10-19T09:00:30.000Z"), {
+      ...ASKED,
+      "ask open": "",
+      [`resolve ${doneCard.id}`]: { code: 1, err: "ask: This update is already resolved\n" },
+      [`resolve ${downCard.id}`]: { code: 1, err: "ask: the dashboard is down\n" },
+    })
+    await expect(beat("focus-card").run(ended.ctx)).rejects.toThrow("ask: the dashboard is down")
+    expect(ended.runs.at(-1)).toEqual(["bun", "run", "--silent", "--cwd", "/repo", "ask", "new"])
+    const kept = JSON.parse(readFileSync(join(ops, "tick", "focus-cards.json"), "utf8")) as {
+      id: string
+    }[]
+    expect(kept.map((card) => card.id)).toEqual([
+      downCard.id,
+      "f167b6b9-f570-4f15-a4b4-eb15b8c4876f",
+    ])
   })
 
   test("a post that fails throws, so the beat names it and the next one tries again", async () => {
