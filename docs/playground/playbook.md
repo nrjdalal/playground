@@ -108,6 +108,7 @@ What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
 Once focus ends, either way, one Inbox card says the same, and the quiet items count again.
+The card moves to Done by itself once everything that came in while focus stood is answered.
 
 ## Tickets
 
