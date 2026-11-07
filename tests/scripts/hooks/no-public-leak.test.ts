@@ -54,7 +54,12 @@ const R = "--repo quillco/playground"
 const UNSET_R = `--repo ${UNSET_REPOS.public[0]}`
 
 // A made-up owner, Quilla (@qmarsh), whose names owner.names lists, and an outside contributor, Ostra Vell (@ovell).
-const OWNER_TERMS = { ...TERMS, handles: ["ovell", "qmarsh"], names: ["Ostra Vell", "Quilla"] }
+const OWNER_TERMS = {
+  ...TERMS,
+  companies: ["Acme"],
+  handles: ["ovell", "qmarsh"],
+  names: ["Ostra Vell", "Quilla"],
+}
 const CONTRIBUTORS = "### ❤️ Contributors\n\n"
 
 describe("a ship's notes may name the owner on the owner's own Contributors line alone", () => {
@@ -78,6 +83,11 @@ describe("a ship's notes may name the owner on the owner's own Contributors line
   }
   const OWN = `## v2\n\n${CONTRIBUTORS}- Quilla @qmarsh\n- @someone\n`
 
+  test("the owner's line written with CRLF line ends passes", async () => {
+    const file = await notes(OWN.replaceAll("\n", "\r\n"))
+    expect(await run(bash(`gh release create v2 ${R} --notes-file ${file}`), owned)).toBeUndefined()
+  })
+
   test.each(["create v2", "edit v2"])("gh release %s passes the owner's line", async (verb) => {
     expect(
       await run(bash(`gh release ${verb} ${R} --notes-file ${await notes(OWN)}`), owned),
@@ -93,6 +103,18 @@ describe("a ship's notes may name the owner on the owner's own Contributors line
       "an outside contributor's name on a Contributors line",
       `${CONTRIBUTORS}- Ostra Vell @ovell\n`,
     ],
+    ["the archive's owner as a name on the owner's line", `${CONTRIBUTORS}- Acme @qmarsh\n`],
+    ["the archive's owner as name and login", `${CONTRIBUTORS}- Acme @acme\n`],
+    ["a heading that ends in Contributors", "### 🩹 Fixes for Contributors\n\n- Quilla @qmarsh\n"],
+    [
+      "an indented heading after the section",
+      `${CONTRIBUTORS}- @x\n   ### 🩹 Fixes\n\n- Quilla @qmarsh\n`,
+    ],
+    [
+      "an HTML heading after the section",
+      `${CONTRIBUTORS}- @x\n<h3>Fixes</h3>\n\n- Quilla @qmarsh\n`,
+    ],
+    ["a fence after the section", `${CONTRIBUTORS}- @x\n\`\`\`\n- Quilla @qmarsh\n`],
     ["an outside name on the owner's login", `${CONTRIBUTORS}- Ostra Vell @qmarsh\n`],
     ["the owner's line outside the Contributors section", `### 🩹 Fixes\n\n- Quilla @qmarsh\n`],
   ])("a ship's notes holding %s are refused", async (_, text) => {

@@ -49,6 +49,17 @@ import { join, resolve } from "path";
 var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
 var dataDir = (env = process.env) => dataDirOf(env);
 
+// packages/scripts/src/release-notes/notes.ts
+var HIDDEN = new Set(["ci"]);
+var ARTICLES = new Set(["a", "an", "the"]);
+var COMMANDS = new Set(["bun", "bunx", "gh", "git", "npx", "playground"]);
+function ownerWords(name, login, owner) {
+  const own = new Set(owner.map((word) => word.toLowerCase()));
+  if (!own.has(login.toLowerCase()))
+    return [];
+  return name.split(/\s+/).filter((word) => own.has(word.toLowerCase()));
+}
+
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
 function getEnumValues(entries) {
   const numericValues = Object.values(entries).filter((v) => typeof v === "number");
@@ -10340,29 +10351,35 @@ var SAID = {
   }
 };
 var SHIP = /^\s*gh release (?:create|edit)\b[^`$();&|<>\n]*$/;
+var CONTRIBUTORS = /^### \u2764\uFE0F Contributors\r?$/;
+var CONTRIBUTOR = /^- ((?:\S+ )*)@([\w-]+)\s*$/;
 function ownLinesPast(text, owner) {
-  const own = new Set(owner.map((word) => word.toLowerCase()));
   let contributors = false;
   return text.split(`
 `).map((line) => {
-    if (/^#{1,6}\s/.test(line))
-      contributors = /\bContributors\s*$/.test(line);
-    const m = contributors ? /^- ((?:\S+ )+)@([\w-]+)\s*$/.exec(line) : null;
-    const mine = m !== null && own.has(m[2].toLowerCase()) && m[1].trim().split(" ").every((word) => own.has(word.toLowerCase()));
+    if (CONTRIBUTORS.test(line)) {
+      contributors = true;
+      return line;
+    }
+    const m = CONTRIBUTOR.exec(line);
+    if (!m && line.trim() !== "")
+      contributors = false;
+    const names = m?.[1].trim() ?? "";
+    const mine = contributors && m !== null && names !== "" && ownerWords(names, m[2], owner).join(" ") === names.split(/\s+/).join(" ");
     return mine ? "" : line;
   }).join(`
 `);
 }
-function finder(list, repos, ship) {
+function finder(list, repos, owner) {
   const kinds = patterns(list, repos).filter(([kind]) => SAID[kind]);
   return (text) => {
-    const said = readPast(ship ? ownLinesPast(text, repos.owner) : text, repos);
+    const said = readPast(owner ? ownLinesPast(text, owner) : text, repos);
     const found = kinds.find(([, re]) => said.search(re) !== -1);
     return found && SAID[found[0]];
   };
 }
-var policy2 = (list, repos, ship) => ({
-  find: finder(list, repos, ship),
+var policy2 = (list, repos, owner) => ({
+  find: finder(list, repos, owner),
   git: false,
   guard: "no-public-leak",
   guarded: (repo) => repos.public.includes(`${repo.owner}/${repo.repo}`.toLowerCase()),
@@ -10386,7 +10403,7 @@ async function check(raw, environment = process.env) {
   const read = await readPolicy(dataDir(environment));
   if (read.refusal !== undefined)
     return refusedList(raw, `no-public-leak hook refused this call: ${read.refusal}, then run the call again.`);
-  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw)), raw, environment);
+  return inspectAs(policy2(loaded.list ?? EMPTY_LIST, reposOf(read.settings), shipWrite(raw) ? ownerSettings.get(read.settings, "owner.names") : undefined), raw, environment);
 }
 if (import.meta.main) {
   const raw = await Bun.stdin.text();
