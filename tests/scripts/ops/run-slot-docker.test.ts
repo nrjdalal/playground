@@ -74,6 +74,20 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     expect(existsSync(join(m.ops, "run-slot-docker"))).toBe(false)
   })
 
+  // #1228: macOS's default disk runs docker by a name in any letter case, so the name reads as docker's
+  for (const argv of [
+    ["Docker", "build", "."],
+    ["nice", "/usr/local/bin/DOCKER", "build", "."],
+  ])
+    test(`a docker build named in another letter case waits for run-slot-docker: ${argv.join(" ")}`, async () => {
+      const m = dockerMachine()
+      m.holdDocker()
+      const run = m.start("worker-d", {}, SCRIPT, argv)
+      expect(await run.saw(/waiting for run-slot-docker/g)).toBe(true)
+      m.release("run-slot-docker")
+      await run.ran()
+    })
+
   test("a run that builds no image starts beside a held run-slot-docker", async () => {
     const m = dockerMachine()
     m.holdDocker()
@@ -273,6 +287,21 @@ describe("run-slot runs one docker build at a time on the machine (#1083)", () =
     const CHAIN = "refuses a chain that builds a docker image"
     const CANNOT = "cannot read this chain's steps, so it refuses one that names docker or portless"
     const GLOB = "a program word written as a glob or a brace that can expand to docker or podman"
+
+    // #1228: macOS's default disk ignores case, so a docker or chain shell word in any letter case runs that program and reads as its name
+    for (const [argv, why] of [
+      [["SH", "-c", "docker build ."], CHAIN],
+      [["/bin/Bash", "-c", "docker build ."], CHAIN],
+      [["sh", "-c", "Docker build ."], CHAIN],
+      [["sh", "-c", "true; /usr/local/bin/DOCKER build ."], CHAIN],
+      [["sh", "-c", "echo docker build . | SH"], CANNOT],
+      [["sh", "-c", "echo $(true); Docker build ."], CANNOT],
+    ] as const)
+      test(`a program word in another letter case: ${argv.join(" ")}`, async () => {
+        const r = await run([...argv])
+        expect(r.code).toBe(2)
+        expect(r.err).toContain(why)
+      })
 
     test("a wrapper with an option value before sh -c", async () => {
       const r = await run(["nice", "-n", "5", "sh", "-c", "docker build ."])
