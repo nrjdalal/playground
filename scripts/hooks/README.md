@@ -138,12 +138,13 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
 - A factory session that has just compacted its context is told what to reread: `scripts/hooks/after-compact.ts`, a SessionStart hook with the `compact` matcher in both `scripts/factory-settings.json` and `.claude/settings.json`,
   adds its instruction (load playbook again, then reread its roster entry, its open Inbox items, its PRs and the decisions register, `.agents/decisions.md`) to the session's context,
   since Claude Code re-attaches a skill after a compaction cut to about 5k tokens or drops it (playbook's **context** rule); the `rules` hook puts the standing rules beside it.
+  A manager's (a `MANAGER_ROLES` role) also checks that its `playground alerts-wait` task still runs (`WAITER`), since a lead with none heard a stuck alert 5m50s late on 7 Nov.
   It says nothing to the owner's own sessions here, fails open, and its tests are in `bun run test:file tests/scripts/hooks`.
 
 ## after-resume
 
 - A factory session resumed after a restart is told what the restart took (playbook's **context** rule): `scripts/hooks/after-resume.ts`, a SessionStart hook with the `resume` matcher in both `scripts/factory-settings.json` and `.claude/settings.json`, adds its instruction to the session's context:
-  re-arm every background loop and watch it had running and each cron CronList no longer shows, and re-send each message to another session that got no reply in the 10 minutes before its last entry before the restart.
+  re-arm every background loop and watch it had running and each cron CronList no longer shows, and re-send each message to another session that got no reply in the 10 minutes before its last entry before the restart; a manager's adds after-compact's `WAITER` line.
   That time is the newest timestamp in the tail of the transcript SessionStart names, since a resumed process writes no timestamped line before its first input (measured on 2.1.309), and the resume's own time when the transcript gives none; the text names both, since the session may read it hours later.
   Any restart that resumes a session fires it: Claude Code's `--resume` fires SessionStart with source `resume` (measured on Claude Code 2.1.309 through `spawn.sh resume`, where `spawn.sh`'s first start reads `startup`), and the restart ends every background task the old process held.
   A session idle at the restart takes no turn and so never reads the instruction, so `spawn.sh resume` (a herdr restore, an account switch, an update's resume records) gives a resume with no `--brief` a first prompt that names the session, whom it reports to (from its roster row, by [spawn.sh](../README.md#spawnsh)'s order), and has it act on the instruction;
@@ -804,7 +805,11 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   [the shell-pane docs page](../../docs/playground/shell-pane.md#where-it-fits) says what the check reads and the gaps it leaves open.
   `playground rm --discard` reads the same lookup (`sessionAbove`) the other way (`callerOf` in `packages/scripts/src/playground/rm.ts`): a claude process above the call makes it a session's, which needs an approved delete decision unless the worktree's PR has merged or closed, and none makes it a terminal's.
   Before the lookup, rm refuses a call whose parent is pid 1 or one the system cannot read without that decision or that PR state, since a detached call's climb would find no claude process.
-  When it writes `stuck` or `failed` for a factory session, it also queues one line in the ops outbox (`ops-stuck-alert.jsonl`, which the relay sends by SendMessage) for the session's manager alone, by `managerFor()` in `packages/scripts/src/stuck-alert.ts`: the session, its roster task, the reason, the command or question, and its last message (playbook's **unstick**);
+  When it writes `stuck` or `failed` for a factory session, it also queues one line in the ops outbox (`ops-stuck-alert.jsonl`, which the relay sends by SendMessage) for the session's manager, by `managerFor()` in `packages/scripts/src/stuck-alert.ts`: the session, its roster task, the reason, the command or question, and its last message (playbook's **unstick**).
+  A built-in Claude Code prompt (its own safety check on an `rm` inside a heredoc, say) writes the same `stuck` record and the same alert as a hook's.
+  When the manager's `playground alerts-wait` is not live (`waiterLive()`: the pid in `alerts-wait/<name>.pid` under the outbox runs, or the waiter handed over an alert in the last 5 minutes), the alert also goes to Ops in the same second to send on, and the manager's line names the restart (`alertLines()`),
+  since a built-in prompt times out in 120s while the relay reached a manager with no waiter 5m50s on (both measured 7 Nov); the dispatcher's line `unstick.escalateMinutes` on still follows.
+  Each line to Ops names Ops' own restart while its waiter is not live, and a session whose manager is a worker (a probe's) gets its one line alone, since only a manager keeps a waiter.
   An orchestrator's manager, the Assistant's for one, is the session its roster row reports to.
   The dispatcher's own and a session outside the factory queue nothing.
   It acts for every session, fails open, and its tests are in `bun run test:file tests/scripts/hooks`.

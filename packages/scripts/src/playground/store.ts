@@ -14,6 +14,7 @@ import {
   KINDS,
   listExtensions,
   listItems,
+  lostModes,
   type Outcome,
   putItem,
   type Ref,
@@ -29,7 +30,7 @@ import { SETTINGS_USAGE, settingsCommand } from "./settings"
 export type Out = (line: string) => void
 
 export const EXT_USAGE =
-  "usage: playground ext init [--yes | --dry-run] | add <name> [<owner/name>] [--yes | --dry-run] | order <name>... | link <name> <org|*> | unlink <name> <org|*> | remove <name> | sync [<scope>] | list [--scope <scope>] [--kind <kind>] | show <scope> <kind> <key> [--rev <sha>] | put <scope> <kind> <key> <path|-> --reason <why> [--attach <path>]... | which <skill> [--repo <dir> | --org <org>] | why <scope> <kind> <key> | why <skill> [--repo <dir> | --org <org>] | diff <scope> <kind> <key> --from <sha> --to <sha> | search <words> [--kind <kind>] | export <dir> | import <dir> [--dry-run] | import --from-tree <dir> [--dry-run] | import-scripts <ops-dir> <job>... --org <org> [--dry-run] | score <scope> <kind> <key> <sha> <0-5> --reason <why> | accept|reject <scope> <kind> <key> <sha> --reason <why>"
+  "usage: playground ext init [--yes | --dry-run] | add <name> [<owner/name>] [--yes | --dry-run] | order <name>... | link <name> <org|*> | unlink <name> <org|*> | remove <name> | sync [<scope>] | list [--scope <scope>] [--kind <kind>] | show <scope> <kind> <key> [--rev <sha>] | put <scope> <kind> <key> <path|-> --reason <why> [--attach <path>]... | which <skill> [--repo <dir> | --org <org>] | why <scope> <kind> <key> | why <skill> [--repo <dir> | --org <org>] | diff <scope> <kind> <key> --from <sha> --to <sha> | search <words> [--kind <kind>] | export <dir> | import <dir> [--dry-run] | import --from-tree <dir> [--dry-run] | import-scripts <ops-dir> <job>... --org <org> [--dry-run] | score <scope> <kind> <key> <sha> <0-5> --reason <why> | accept|reject <scope> <kind> <key> <sha> --reason <why> | check-modes"
 
 const MIME: Record<string, string> = {
   ".json": "application/json",
@@ -85,7 +86,10 @@ const filesUnder = (dir: string): string[] =>
     e.isDirectory() ? filesUnder(join(dir, e.name)) : e.isFile() ? [join(dir, e.name)] : [],
   )
 
-// A revision's content from its path: a skill's folder, or a script's, as its files, a list's file as its value, any other kind's file (or stdin, `-`) as its body; each --attach file read here and sent as bytes, never a path the API reads.
+// A file its owner may run, whose executable bit put keeps.
+const runs = (file: string) => (statSync(file).mode & 0o100) !== 0
+
+// A revision's content from its path: a skill's folder, or a script's, as its files, a list's file as its value, any other kind's file (or stdin, `-`) as its body; each --attach file read here and sent as bytes, never a path the API reads, and a script's or a skill's files that run directly named in executable.
 export const contentOf = async (
   kind: string,
   path: string,
@@ -100,15 +104,20 @@ export const contentOf = async (
   if (kind === "skill" || (kind === "script" && path !== "-" && statSync(path).isDirectory())) {
     if (path === "-" || !statSync(path).isDirectory())
       throw new Usage("a skill is added from its folder")
+    const names = filesUnder(path)
     return {
       attachments,
-      files: Object.fromEntries(
-        filesUnder(path).map((f) => [relative(path, f), readFileSync(f, "utf8")]),
-      ),
+      executable: names.filter(runs).map((f) => relative(path, f)),
+      files: Object.fromEntries(names.map((f) => [relative(path, f), readFileSync(f, "utf8")])),
     }
   }
   const text = path === "-" ? await stdin() : readFileSync(path, "utf8")
-  return kind === "list" ? { attachments, value: JSON.parse(text) } : { attachments, body: text }
+  if (kind === "list") return { attachments, value: JSON.parse(text) }
+  return {
+    attachments,
+    body: text,
+    executable: kind === "script" && path !== "-" && runs(path) ? ["."] : [],
+  }
 }
 
 export type Io = {
@@ -283,6 +292,14 @@ export async function extCommand(words: string[], io: Io): Promise<number> {
     const verdict: Verdict = verb === "score" ? { kind: "score", score: score! } : { kind: verb }
     const judged = done(judgeItem(io.data, at, rev, verdict, who))
     io.out(`rev ${judged.rev} is ${judged.state}`)
+  } else if (verb === "check-modes") {
+    const lost = lostModes(io.data)
+    for (const line of lost) io.out(line)
+    io.out(
+      lost.length
+        ? "put each again from a copy that has its executable bit: playground ext put <scope> <kind> <key> <path> --reason <why>"
+        : "every stored file that starts with #! keeps its executable bit",
+    )
   } else if (verb === "import-scripts") {
     need(positional[1], "a job folder to import")
     return (await import("./import-scripts")).importScripts(
