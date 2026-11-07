@@ -90,7 +90,7 @@ describe("no-playground-leak fails closed on its lists", () => {
     JSON.stringify({
       cwd: scratch,
       hook_event_name: "PreToolUse",
-      tool_input: { body, issueId: "CEDAR-1" },
+      tool_input: { body, issueId: "MADECEDAR-1" },
       tool_name: "mcp__linear-shared__save_comment",
     })
   const read = JSON.stringify({

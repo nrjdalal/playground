@@ -28,8 +28,8 @@ The runner, `bun run core-audit`, prints the hits and exits 1 on any, or 2 when 
 | A tracker key (leg 2)                           | a placeholder key such as `PG-1`         |
 | A one-org skill, rule, script, job, key or flag | the org's extension                      |
 
-A placeholder passes leg 2: an id holding `EXAMPLE` or `MADE`, a home of `you`, `me`, `owner`, `someone`, `runner` or `x`, a key of the factory's `PG`, a made-up team or a standard such as `UTF-8`.
-Leg 2 reads `tests/` and the fixtures for Slack ids and homes, and its tracker key reads neither yet ([PG-1319](https://github.com/nrjdalal/playground/issues/1319)).
+A placeholder passes leg 2: an id holding `EXAMPLE` or `MADE`, a home of `you`, `me`, `owner`, `someone`, `runner` or `x`, a key whose team holds `MADE` or is the factory's `PG`, a made-up team or a standard such as `UTF-8`.
+Leg 2 reads every file, `tests/` and the fixtures included, for all three kinds.
 
 ## One org's process
 
