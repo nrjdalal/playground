@@ -46,6 +46,7 @@ import {
   payloadOf,
 } from "../../../../../../packages/config/src/inbox"
 import { RELAY_ANSWER_KINDS } from "../../../../../../packages/message/src/index"
+import { writeFiles } from "../../../../../../packages/settings/src/folder"
 import { GUARD_SETTING_KEYS } from "../../../../../../packages/settings/src/guard-keys"
 import { judgeItem, putItem } from "../../../../../../packages/settings/src/items"
 import { loginPath } from "../../../../../../packages/settings/src/rendered"
@@ -54,6 +55,7 @@ import {
   resetSetting,
   setSetting,
   settingHistory,
+  settingRows,
 } from "../../../../../../packages/settings/src/settings-folder"
 
 const CHANNEL = "https://app.slack.com/client/T0000000000/C0MADEUP01"
@@ -65,7 +67,7 @@ const SLACK = {
 }
 
 const PREVIEWS = {
-  ask: { text: "Port DUNE-1401's fix to staging and main.", type: "ask" },
+  ask: { text: "Port MADEDUNE-1401's fix to staging and main.", type: "ask" },
   budget: { amount: "$40", type: "budget", why: "A second account for a week" },
   delete: { type: "delete", what: "47 stale worktrees", why: "They hold 30 GB" },
   schema: { shape: "inbox_item(id text, ref integer)", type: "schema" },
@@ -247,13 +249,13 @@ describe("what bun run ask takes", () => {
         preview: { link, text: "on it", to: "Cameron's thread" },
         title: "Reply to Cameron",
       }).success
-    expect(draft("https://linear.app/acme/issue/DUNE-2186/x")).toBe(true)
+    expect(draft("https://linear.app/acme/issue/MADEDUNE-2186/x")).toBe(true)
     expect(
       draft(
         "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100",
       ),
     ).toBe(true)
-    expect(draft("http://linear.app/acme/issue/DUNE-2186")).toBe(false)
+    expect(draft("http://linear.app/acme/issue/MADEDUNE-2186")).toBe(false)
     expect(draft("https://acme.slack.com/archives/C0MADEUP01/p1700000000000100")).toBe(false)
   })
 
@@ -778,7 +780,7 @@ describe("an answer", () => {
     expect(checkAnswer(slack, { action: "draft", text: "" })).toHaveProperty("message")
     const linear = item({
       kind: "draft",
-      preview: { link: "https://linear.app/acme/issue/DUNE-1/x", text: "hi", to: "DUNE-1" },
+      preview: { link: "https://linear.app/acme/issue/MADEDUNE-1/x", text: "hi", to: "MADEDUNE-1" },
     })
     expect(checkAnswer(linear, { action: "draft" })).toHaveProperty("message")
     expect(checkAnswer(linear, { action: "send" })).toEqual({
@@ -789,7 +791,7 @@ describe("an answer", () => {
     expect(savesDraft({ link: CHANNEL, text: "hi", to: "@Merritt" })).toBe(true)
     expect(savesDraft({ noLink: "a new DM", text: "hi", to: "@Merritt" })).toBe(true)
     expect(
-      savesDraft({ link: "https://linear.app/acme/issue/DUNE-1/x", text: "hi", to: "x" }),
+      savesDraft({ link: "https://linear.app/acme/issue/MADEDUNE-1/x", text: "hi", to: "x" }),
     ).toBe(false)
     // a draft is a go: its poster closes it with the channel link the draft tool returns
     expect(isGo("draft")).toBe(true)
@@ -1155,7 +1157,11 @@ describe("the list", () => {
   })
 
   test("an answer that failed to send needs him, newest first among what does, until he dismisses it", () => {
-    const failed = { code: "CMUX_FAILED", reason: "no answer from cmux", status: "failed" } as const
+    const failed = {
+      code: "SESSIONS_FAILED",
+      reason: "no answer from cmux",
+      status: "failed",
+    } as const
     const answer = { at: "2026-10-07T11:00:00.000Z", choice: "send" } as const
     const items = [
       item({ kind: "update", ref: 3 }),
@@ -1554,13 +1560,74 @@ describe("a guard decision for a job (PG-1196)", () => {
     expect(takes({ key: "jobs.opsTicketCard", value: undefined })).toBe(true)
   })
 
-  test("refuses a job decision carrying any field but enabled, and a job the registry does not name", () => {
+  // #1336: a job the registry does not name is an org's own job, whose enabled field alone is a part Approve writes over the org's row, so only a value that is neither a part nor a whole row is refused
+  test("refuses a job decision carrying any field but enabled, and a job the registry does not name with neither a part nor a whole row", () => {
     for (const change of [
       { key: "jobs.opsTicketCard", value: { command: "made-up", enabled: true } },
       { key: "jobs.opsTicketCard", value: { enabled: true, schedule: { every: 5 } } },
       { key: "jobs.opsTicketCard", value: {} },
       { key: "jobs.opsTicketCard", value: true },
-      { key: "jobs.opsMadeUp", value: { enabled: true } },
+      { key: "jobs.opsMadeUp", value: { enabled: true, schedule: { every: 5 } } },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+
+  // #1336: a session proposes a job's config as a new object, which core checks only for being an object
+  test("takes a registry job's config alone, as an object of any fields (#1336)", () => {
+    expect(takes({ key: "jobs.opsSweep", value: { config: {} } })).toBe(true)
+    expect(
+      takes({ key: "jobs.opsSweep", value: { config: { hours: "09-18", made: ["up"] } } }),
+    ).toBe(true)
+  })
+
+  test("refuses a config that is not an object, and a config beside another field (#1336)", () => {
+    for (const value of [
+      { config: [] },
+      { config: "hours=09-18" },
+      { config: null },
+      { config: 7 },
+      { config: {}, enabled: true },
+    ]) {
+      expect(takes({ key: "jobs.opsSweep", value }), JSON.stringify(value)).toBe(false)
+    }
+  })
+})
+
+// PG-1363: the guard decision also places an org's own job, a whole row the setting's write then checks against the org's script folders.
+describe("a guard decision for an org's own job (PG-1363)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
+  const row = {
+    callsModel: false,
+    command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+    description: "Watches a made-up org's queue.",
+    enabled: true,
+    heartbeat: "ops-watch",
+    schedule: { every: 60 },
+  }
+
+  test("takes a whole job row for a job the registry lacks, or no value", () => {
+    expect(takes({ key: "jobs.opsWatch", value: row })).toBe(true)
+    expect(takes({ key: "jobs.opsWatch", value: { ...row, config: { prefixes: ["X"] } } })).toBe(
+      true,
+    )
+    expect(takes({ key: "jobs.opsWatch", value: undefined })).toBe(true)
+  })
+
+  test("takes its enabled field alone or its config alone, which Approve writes over the org's row (#1336)", () => {
+    expect(takes({ key: "jobs.opsWatch", value: { enabled: false } })).toBe(true)
+    expect(takes({ key: "jobs.opsWatch", value: { config: { prefixes: ["X"] } } })).toBe(true)
+  })
+
+  test("refuses a row that is no job, a config that is no object, and a key that is no job's name", () => {
+    for (const change of [
+      { key: "jobs.opsWatch", value: { config: {}, enabled: true } },
+      { key: "jobs.opsWatch", value: { config: ["X"] } },
+      { key: "jobs.opsWatch", value: { ...row, config: ["X"] } },
+      { key: "jobs.opsWatch", value: { ...row, madeUp: 1 } },
+      { key: "jobs.ops-watch", value: row },
+      { key: "jobs.", value: row },
     ]) {
       expect(takes(change), JSON.stringify(change)).toBe(false)
     }
@@ -1657,7 +1724,7 @@ describe("slackPlace", () => {
 
   test("is null for no link, a place outside Slack, or a Slack link that names no conversation", () => {
     expect(slackPlace(undefined)).toBeNull()
-    expect(slackPlace("https://linear.app/acme/issue/DUNE-1401")).toBeNull()
+    expect(slackPlace("https://linear.app/acme/issue/MADEDUNE-1401")).toBeNull()
     expect(slackPlace("https://app.slack.com/client/T0000000000")).toBeNull()
     expect(slackPlace("https://evil.example/client/T0000000000/C0MADEUP01")).toBeNull()
   })
@@ -2122,7 +2189,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         { action: "draft" },
         { actor, deliver: delivered, upload },
       )
-      const linear = await filedDraft("https://linear.app/acme/issue/DUNE-1401")
+      const linear = await filedDraft("https://linear.app/acme/issue/MADEDUNE-1401")
       await store.answerItem(
         db,
         linear.id,
@@ -3067,7 +3134,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(await stale()).not.toContain(posted.id)
   })
 
-  test("the poster resolves its own alert update; another session, a non-alert item and an unknown id are refused (#658)", async () => {
+  test("the poster resolves its own alert update; another session, a decision and an unknown id are refused (#658)", async () => {
     const alert = async () => {
       const posted = await post({
         from: "ops",
@@ -3102,23 +3169,13 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const other = await alert()
     expect(await store.resolveItem(db, other.id, { by: "builder" })).toMatchObject({
       code: "CONFLICT",
-      message: "Only ops, which posted it, resolves this alert",
+      message: "Only ops, which posted it, resolves this update",
       ok: false,
     })
-    // a decision settles, it does not resolve; a non-alert update is read or dismissed
+    // a decision settles, it does not resolve
     expect(
       await store.resolveItem(db, (await post(decision(PREVIEWS.budget))).id, { by: "ops" }),
     ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
-    const finding = await post({
-      from: "builder",
-      kind: "update",
-      preview: { outcome: "finding" },
-      title: "Found",
-    })
-    expect(await store.resolveItem(db, finding.id, { by: "builder" })).toMatchObject({
-      code: "VALIDATION_ERROR",
-      ok: false,
-    })
     expect(await store.resolveItem(db, "#i999999", { by: "ops" })).toMatchObject({
       code: "NOT_FOUND",
       ok: false,
@@ -3137,7 +3194,51 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       }),
     ).toMatchObject({ code: "VALIDATION_ERROR", ok: false })
     // nothing here leaves an update unread
-    await store.markRead(db, [other.id, finding.id, long.id, archived.id])
+    await store.markRead(db, [other.id, long.id, archived.id])
+  })
+
+  // PG-1349: a finished progress card and the focus card waited for the owner's Done, since resolve took an alert alone
+  test("the poster resolves any update of its own once it has settled, a finished progress card and the focus card included, read and with its note; another session's is refused (PG-1349)", async () => {
+    const at = new Date("2026-10-07T12:00:00.000Z")
+    const progress = await post({
+      from: "worker-made-up",
+      kind: "update",
+      preview: { outcome: "merged", text: "```\nMade-up job  ██████████  3/3\n```" },
+      title: "Made-up job: 3 of 3 steps done",
+    })
+    const done = await store.resolveItem(db, `#i${progress.ref}`, {
+      by: "worker-made-up",
+      note: "All 3 steps done",
+      now: at,
+    })
+    expect(done).toMatchObject({
+      item: {
+        answer: {
+          at: at.toISOString(),
+          by: "worker-made-up",
+          choice: "resolved",
+          note: "All 3 steps done",
+        },
+        readAt: at.toISOString(),
+      },
+      ok: true,
+    })
+    const focus = await post({
+      from: "ops",
+      kind: "update",
+      preview: { outcome: "finding" },
+      title: "Focus for worker-f ended: 0 runs queued while it stood, 0m0s in all",
+    })
+    expect(await store.resolveItem(db, focus.id, { by: "worker-made-up" })).toMatchObject({
+      code: "CONFLICT",
+      message: "Only ops, which posted it, resolves this update",
+      ok: false,
+    })
+    const note = "Everything that came in while focus stood is answered"
+    expect(await store.resolveItem(db, focus.id, { by: "ops", note, now: at })).toMatchObject({
+      item: { answer: { by: "ops", choice: "resolved", note } },
+      ok: true,
+    })
   })
 
   test("ack and settle store where the answer was carried out, and take an https URL alone", async () => {
@@ -3170,19 +3271,19 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       ok: false,
     })
     const settled = await store.settleItem(db, ticket.id, {
-      link: "https://linear.app/team/issue/CEDAR-1",
+      link: "https://linear.app/team/issue/MADECEDAR-1",
     })
     expect(settled.ok && settled.item.answer).toMatchObject({
       choice: "settled",
-      link: "https://linear.app/team/issue/CEDAR-1",
+      link: "https://linear.app/team/issue/MADECEDAR-1",
     })
   })
 
   test("a link's label is kept beside it, needs the link, and is one line", async () => {
     const ticket = await post(decision(PREVIEWS.ticket))
     await store.answerItem(db, ticket.id, { action: "approve" }, { actor })
-    const link = "https://linear.app/acme/issue/DUNE-2186"
-    expect(await store.ackItem(db, ticket.id, { label: "Filed DUNE-2186" })).toMatchObject({
+    const link = "https://linear.app/acme/issue/MADEDUNE-2186"
+    expect(await store.ackItem(db, ticket.id, { label: "Filed MADEDUNE-2186" })).toMatchObject({
       code: "VALIDATION_ERROR",
       ok: false,
     })
@@ -3196,8 +3297,8 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       code: "VALIDATION_ERROR",
       ok: false,
     })
-    const acked = await store.ackItem(db, ticket.id, { label: " Filed DUNE-2186 ", link })
-    expect(acked.ok && acked.item.answer).toMatchObject({ link, linkLabel: "Filed DUNE-2186" })
+    const acked = await store.ackItem(db, ticket.id, { label: " Filed MADEDUNE-2186 ", link })
+    expect(acked.ok && acked.item.answer).toMatchObject({ link, linkLabel: "Filed MADEDUNE-2186" })
     const other = await post(decision(PREVIEWS.delete))
     const settled = await store.settleItem(db, other.id, {
       label: "Closed acme/app#12",
@@ -3213,14 +3314,14 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const ticket = await post(decision(PREVIEWS.ticket))
     await store.answerItem(db, ticket.id, { action: "approve" }, { actor })
     await store.ackItem(db, ticket.id, {
-      label: "Filed DUNE-2186",
-      link: "https://linear.app/acme/issue/DUNE-2186",
+      label: "Filed MADEDUNE-2186",
+      link: "https://linear.app/acme/issue/MADEDUNE-2186",
     })
     const again = await store.ackItem(db, ticket.id, {
-      link: "https://linear.app/acme/issue/DUNE-2187",
+      link: "https://linear.app/acme/issue/MADEDUNE-2187",
     })
     expect(again.ok && again.item.answer).toMatchObject({
-      link: "https://linear.app/acme/issue/DUNE-2187",
+      link: "https://linear.app/acme/issue/MADEDUNE-2187",
     })
     expect(again.ok && again.item.answer && "linkLabel" in again.item.answer).toBe(false)
   })
@@ -3670,7 +3771,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
   })
 
   const failing = async () => ({
-    code: "CMUX_FAILED",
+    code: "SESSIONS_FAILED",
     ok: false as const,
     reason: "cmux sessions failed: no answer from cmux",
   })
@@ -3685,7 +3786,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     )
     if (!answered.ok) throw new Error(answered.message)
     expect(answered.item.status).toBe("approved")
-    expect(answered.item.delivery).toMatchObject({ code: "CMUX_FAILED", status: "failed" })
+    expect(answered.item.delivery).toMatchObject({ code: "SESSIONS_FAILED", status: "failed" })
     const later = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000)
     const list = await store.listItems(db, later)
     expect(list.items.map((i) => i.id)).toContain(posted.id)
@@ -3693,6 +3794,43 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(list.items.filter(store.deliveryFailed).map((i) => i.id)).toEqual([posted.id])
     expect(await store.dismissItems(db, [posted.id])).toBe(1)
     expect((await store.listItems(db, later)).items.map((i) => i.id)).not.toContain(posted.id)
+  })
+
+  // #1440 renamed the sessions read's codes; a row recorded under an old one reads through toItem's alias for one ship (ADR 0015), and the row itself stays as stored
+  test("a delivery stored under an old code reads as its sessions-named code, and a new failure records the new code alone (#1440)", async () => {
+    const posted = await post(decision(PREVIEWS.delete))
+    const answered = await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve" },
+      { actor, deliver: failing },
+    )
+    if (!answered.ok) throw new Error(answered.message)
+    const reader = new SQL(url, { max: 1 })
+    const stored = async (): Promise<string[]> =>
+      (
+        await reader`select delivery ->> 'code' as code from inbox_item where id = ${posted.id}`
+      ).map((row: { code: string }) => row.code)
+    try {
+      expect(await stored()).toEqual(["SESSIONS_FAILED"])
+      for (const [old, now] of [
+        ["CMUX_FAILED", "SESSIONS_FAILED"],
+        ["CMUX_UNAVAILABLE", "SESSIONS_UNAVAILABLE"],
+      ] as const) {
+        await reader`update inbox_item set delivery = jsonb_set(delivery, '{code}', to_jsonb(${old}::text)) where id = ${posted.id}`
+        expect(await stored()).toEqual([old])
+        expect((await store.getItem(db, posted.id))?.delivery).toMatchObject({
+          code: now,
+          status: "failed",
+        })
+        const listed = (await store.listItems(db)).items.find((item) => item.id === posted.id)
+        expect(listed?.delivery).toMatchObject({ code: now, status: "failed" })
+        expect(await stored()).toEqual([old])
+      }
+    } finally {
+      await reader.close()
+    }
+    await store.dismissItems(db, [posted.id])
   })
 
   test("a set-aside item stays in the list past a week, for the Archive shelf, and never counts", async () => {
@@ -3724,7 +3862,10 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const posted = await post(decision(SLACK))
     await store.answerItem(db, posted.id, { action: "approve" }, { actor, deliver: failing })
     const again = await store.retryDelivery(db, posted.id, { actor, deliver: failing })
-    expect(again.ok && again.item.delivery).toMatchObject({ code: "CMUX_FAILED", status: "failed" })
+    expect(again.ok && again.item.delivery).toMatchObject({
+      code: "SESSIONS_FAILED",
+      status: "failed",
+    })
     const sent: Delivery[] = []
     const deliver = async (delivery: Delivery) => {
       sent.push(delivery)
@@ -4444,7 +4585,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         {
           actor,
           deliver: async () => ({
-            code: "CMUX_FAILED",
+            code: "SESSIONS_FAILED",
             ok: false,
             reason:
               "The sessions read was cut short (a herdr server or pane did not answer whole), so dispatcher was not found; nothing was typed.",
@@ -4454,7 +4595,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         },
       )
       expect(provided.ok && provided.item.delivery).toMatchObject({
-        code: "CMUX_FAILED",
+        code: "SESSIONS_FAILED",
         status: "failed",
       })
       const saved = provided.ok ? provided.item.answer : null
@@ -5470,6 +5611,82 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       })
     })
 
+    test("an org's own job's Approve places its whole row, and approving the same row again changes nothing (PG-1363)", async () => {
+      const data = folder()
+      writeFiles(data, "acme-test", new Map([["scripts/ops-watch/cli.ts", "console.log(1)"]]), {
+        author: "owner",
+        reason: "ship the script",
+      })
+      const key = "jobs.opsWatch"
+      const row = {
+        callsModel: false,
+        command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+        description: "Watches an org's own queue.",
+        enabled: true,
+        heartbeat: "ops-watch",
+        schedule: { every: 60 },
+      }
+      const card = { ...GUARD, key, scope: "acme-test", value: row }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        set: { exitCode: 0, line: expect.stringContaining(`set ${key} at acme-test to {`) },
+      })
+      const again = await post(decision(card))
+      expect((await approve(again.id, again.updatedAt, data)).ok).toBe(true)
+      expect((await store.getItem(db, again.id))?.answer).toMatchObject({
+        set: {
+          exitCode: 0,
+          line: expect.stringMatching(
+            new RegExp(`^${key} at acme-test is already \\{.*\\}, so nothing changed$`),
+          ),
+        },
+      })
+    })
+
+    test("an org's own job's enabled or config Approve writes it over the org's row, and is refused while the org holds none (#1336)", async () => {
+      const data = folder()
+      const key = "jobs.opsWatch"
+      const scope = "acme-test"
+      const row = {
+        callsModel: false,
+        command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+        config: { prefixes: ["X"] },
+        description: "Watches an org's own queue.",
+        enabled: true,
+        heartbeat: "ops-watch",
+        schedule: { every: 60 },
+      }
+      const answer = async (value: object) => {
+        const posted = await post(decision({ ...GUARD, key, scope, value }))
+        expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+        return ((await store.getItem(db, posted.id))!.answer as { set: { line: string } }).set.line
+      }
+      expect(await answer({ enabled: false })).toBe(`${key} has no row at ${scope} to change`)
+      writeFiles(data, scope, new Map([["scripts/ops-watch/cli.ts", "console.log(1)"]]), {
+        author: "owner",
+        reason: "ship the script",
+      })
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+      expect(setSetting(data, { key, scope, value: row }, who).ok).toBe(true)
+      const stored = () =>
+        settingRows(data).find((each) => each.key === key && each.scope === scope)
+      expect(await answer({ enabled: false })).toStartWith(`set ${key} at ${scope} to {`)
+      expect(stored()?.value).toEqual({ ...row, enabled: false })
+      expect(await answer({ config: { prefixes: ["Y"] } })).toStartWith(
+        `set ${key} at ${scope} to {`,
+      )
+      expect(stored()?.value).toEqual({ ...row, config: { prefixes: ["Y"] }, enabled: false })
+      // with its script folder gone, the merged row no longer passes the org job's check, so turning it on is refused and the row stays
+      writeFiles(data, scope, new Map([["scripts/ops-watch/cli.ts", null]]), {
+        author: "owner",
+        reason: "remove the script",
+      })
+      const on = await answer({ enabled: true })
+      expect(on).toStartWith(`${key}: `)
+      expect(stored()?.value).toEqual({ ...row, config: { prefixes: ["Y"] }, enabled: false })
+    })
+
     test("a job's Approve keeps the other fields its scope's row holds, and stores no registry field (PG-1196)", async () => {
       const data = folder()
       const key = "jobs.opsTicketCard"
@@ -5482,6 +5699,36 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(readSetting(data, key)!.rows).toEqual([
         { key, scope: "made-up-me", value: { enabled: true, schedule: { every: 7 } } },
       ])
+    })
+
+    test("a job's config Approve writes that object alone over its scope's row, every other field kept (#1336)", async () => {
+      const data = folder()
+      const key = "jobs.opsSweep"
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+      const row = { config: { hours: "00-23" }, enabled: true, schedule: { every: 7 } }
+      expect(setSetting(data, { key, scope: "made-up-me", value: row }, who).ok).toBe(true)
+      const config = { hours: "09-18", made: ["up"] }
+      const card = { ...GUARD, key, scope: "made-up-me", value: { config } }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(readSetting(data, key)!.rows).toEqual([
+        { key, scope: "made-up-me", value: { config, enabled: true, schedule: { every: 7 } } },
+      ])
+      // the stored answer is jsonb, which orders an object's keys its own way, so the line's JSON is read back rather than matched as text
+      const set = (
+        (await store.getItem(db, posted.id))!.answer as { set: { exitCode: number; line: string } }
+      ).set
+      expect(set.exitCode).toBe(0)
+      const prefix = `set ${key} at made-up-me to `
+      expect(set.line.startsWith(prefix)).toBe(true)
+      expect(JSON.parse(set.line.slice(prefix.length))).toEqual({
+        config,
+        enabled: true,
+        schedule: { every: 7 },
+      })
+      expect(settingHistory(data, key)?.[0]?.reason).toBe(
+        `the owner approved it in the Inbox (#i${posted.ref})`,
+      )
     })
 
     test("with no data folder its Approve is refused and the item stays open", async () => {

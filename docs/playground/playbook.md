@@ -35,7 +35,7 @@ A session outside the factory has no reason to.
 Each rule is its own intent file, `extensions/core/rules/<name>.md`: its first line is the glance, the lines after it its what and why, with each value a `{key}` slot.
 A rule that belongs to one login alone lives in that login extension's own `rules/`, and the `rules` hook shows its glance under "Your own rules:".
 The lifecycle, dispatch and sweep are in `LIFECYCLE.md`, `DISPATCH.md` and `SWEEP.md`, each read when its moment comes.
-`LIFECYCLE.md` also holds the main checkout's restore, run from the owner's own `!` window, since with the checkout gone every guard refuses a factory session's Bash.
+`LIFECYCLE.md` also holds the main checkout's restore, which the ops-restore job runs with no hook, since with the checkout gone every guard refuses a factory session's Bash.
 At every session start, resume and compaction the `rules` hook puts each rule file's glance in front of the session, its slots filled with this machine's settings (`playground rules <name>` prints one whole), and after a compaction a second hook tells it to load the skill again, so the rules arrive even when the skill was dropped.
 A test holds `SKILL.md` under 14,000 characters and its pointer to the rules folder; another holds the rule list above to the files in `extensions/core/rules/`.
 
@@ -56,6 +56,7 @@ and an ask with no marker gets a thread through `playground thread` (each Inbox 
 Before a fix gets a plan row or a worker, the manager greps the open PRs' diffs for the bug's file and function, and hands the fix to the PR that already holds it or drops it, so two PRs never fix one thing in parallel.
 Work goes out in bundles: the Planner groups the issues that touch one surface, such as the sidebar or the chat, into one bundle, and a bundle is one worker, one PR, one review loop and one tester pass per head, its tester driving only the pages and files the bundle touches.
 Two pieces of work that depend on each other in meaning stack only for no line overlap: the test is a merge-tree of the two heads against the parent's merge base with canary, and the child holds behind its parent until the parent merges.
+pr:merge and merge-on-ready hold it there: they refuse a child whose `Stacked on #N` line names an unmerged parent (the `parent` gate in [pr-merge's README](../../packages/scripts/src/pr-merge/README.md)).
 A stacked child merges its parent's branch in once, when the parent scores 5/5 or merges, taking the parent's final head, the head the parent merges at (DISPATCH.md's bundles), since every merge is a head its reviewer scores again.
 A stacked child retargeted to canary after its parent merges pushes a merge of canary before it asks for review, since GitHub can keep a retargeted PR conflicting, with no CI run, until a push makes it recompute.
 A stack held at 5/5 until the owner's try syncs with canary only on a conflict, plus once before the try, and each sync's round cites CI where CI can stand in for the local run, since every sync re-scores every PR in the stack.
@@ -102,11 +103,13 @@ No factory session blocks on him: one that posted a decision carries on or ends 
 For a focused stretch, such as a timed test, a demo or an hour of deep work, `playground focus on --session <name> --reason "<why>"` gives one session the Mac for up to 180 minutes.
 While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep and that session's own reviewer and tester keep running.
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
-A firefighting start (spawn.sh's `--firefighting`) passes the load gate and a full run-slot queue at the slots gate while a firefighting trigger file stands, and the memory gate still applies to it; it passes focus too on a stop or head-start file, while the starter job's own file never does, and the job itself holds its High, Medium and Low starts while focus stands.
+A priority start (spawn.sh's `--priority`, or its old name `--firefighting`) passes the load gate and a full run-slot queue at the slots gate while a priority file stands, and the memory gate still applies to it.
+It passes focus too on `priority.json`, while a job's own `priority-start.json` never does (the old `firefighting-*.json` names are aliases), and the job itself holds its High, Medium and Low starts while focus stands.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
 Once focus ends, either way, one Inbox card says the same, and the quiet items count again.
+The card moves to Done by itself once everything that came in while focus stood is answered.
 
 ## Tickets
 
@@ -135,8 +138,10 @@ The channel is where the owner's and the colleague's Playgrounds talk:
 a post there speaks as Playground and ends with an italic _Sent via Playground_, since it goes out through the owner's Slack account, and the hook refuses a Slack MCP chat post there without it, and refuses any curl write that names the channel.
 Its links go as link chips: rich text of plain words and links alone, each link labelled with its address and shortened, ending in the italic signature, and the hook refuses any other rich content there.
 An observer in the channel is answered directly when they write there.
-The dispatcher sorts each ask from the colleague, their Playground or the observer into three: it answers it, fixes a small shared bug and tells the owner after, or puts it to the owner first, and the owner's asks always come first (`CHANNEL.md` beside the skill).
-A simple, working PR from the colleague is the dispatcher's to decide and record, and it merges as their own PR after a read-only review, so their name stays on the work; only a hard-to-undo change to how the owner works goes to the owner's Inbox.
+The dispatcher sorts each ask from the colleague, their Playground or the observer into three: it answers it; it takes a change that can be undone within Playground's own repo and changes no standing rule, recording why; or it puts a hard-to-undo change, any change to a standing rule, a looser guard or anything outside the repo to the owner first.
+The standing rules change only on the owner's own ask, so a colleague's ask that adds, tightens or loosens one always waits for the owner.
+The owner's asks always come first (`CHANNEL.md` beside the skill).
+A simple, working PR from the colleague that changes no standing rule is the dispatcher's to decide and record, and it merges as their own PR after a read-only review, so their name stays on the work; only a hard-to-undo change to how the owner works goes to the owner's Inbox.
 The hook also refuses a guarded org's write it cannot read.
 Like the ticket guard, a hook that cannot start refuses the call, and one that times out lets it through, where the rule still binds the session.
 
@@ -165,11 +170,12 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   GLM's unused credits lapse at each reset (`~/.playground/zai-usage.json`, the Usage app), so the lead pulls the next eligible item forward while GLM has room before the reset.
   A GLM session's commit or push that touches the app's pages, the factory's hooks, spawn.sh, the merge and verify scripts, the commit hooks or the CI workflows is refused by the `no-glm-heavy-path` hook, naming the files, so that work goes to a Claude worker.
   While the Mac's 5-minute load is over 15, the same hook also refuses a GLM session's installs, node_modules clones, commits and pushes, so it waits for the load to fall.
+  The same hook refuses a GLM session's headless Claude run and its calls to an org's tracker, chat, docs and repos, and every MCP tool or resource read, so that work goes to a Claude worker.
   A session resumed with `--brief <file>` starts by reading that brief; without one, its first prompt has it act on the after-resume hook's instruction, so it re-arms its background tasks and re-sends its unanswered messages.
   A resumed session restarts any dev stack it served and re-arms its watches, CronList before CronCreate, since the resume kept its crons and dropped its background tasks.
   The factory no longer moves sessions to GLM at 98% usage (retired on Inbox #i827): the account rotation moves it between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
 - A session started with no `--runtime`, from any terminal, or with `--runtime herdr`, opens in herdr, in a pane labelled with its name, and its next resume opens there too.
-  spawn.sh starts nothing in cmux: it refuses `--runtime cmux` and a column started beside a cmux surface, and a session that ran in cmux resumes in herdr.
+  spawn.sh starts nothing in cmux: it refuses `--runtime cmux` and a column started beside a cmux surface, and every resume opens in herdr, whatever word its runtime pin held.
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused, one that never got its first message included,
@@ -179,8 +185,8 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   The one exception is a scratch herdr server the session starts for a test, its socket in the session's own temporary folder, which it can drive through that socket alone, but never to start Claude.
   So a herdr session ends through `spawn.sh close <name>`, which closes only the pane spawn.sh opened under that name, never the caller's own, and marks the session ended on the roster.
 - A new session's name reads like `k3m9px-worker`: a new 6-letter id, then what the session is, so no name is ever used twice, and its checkers get ids of their own, as `b7k2mq-reviewer` and `h4n8zt-tester`.
-- Every session starts at high effort; another effort is the owner's choice alone, which the owner picks for a dispatcher, the Assistant or the hosted session (the one the Dashboard runs on the Agent SDK) in the menu left of Send in its Dashboard composer.
-  A lead sets it for any other session with spawn.sh's `--effort` at a start or a resume, on the owner's word relayed through the dispatcher in the **override** shape.
+- Every session starts at high effort; the owner picks a dispatcher's, the Assistant's or the hosted session's (the one the Dashboard runs on the Agent SDK) in the menu left of Send in its Dashboard composer.
+  A lead picks any other session's model by brief-rush's model classes and its effort, high by brief-rush's model rule, with spawn.sh's `--model` and `--effort` at a start or a resume, and the owner's word in the **override** shape outranks both.
 - Every session runs on `models.default` (Opus) unless it was started on GLM or with spawn.sh's `--model` naming another of `models.claude`, and every subagent it starts for work runs on Sonnet unless its call names a model,
   from the factory settings' `CLAUDE_CODE_SUBAGENT_MODEL=sonnet` (the owner approved #i492, 17 Oct; on GLM the alias maps to GLM), so a brief or subagent call that needs Opus names `model: opus`.
   The owner picks another model for a dispatcher, the Assistant or the hosted session in the menu left of Send in its Dashboard composer.
@@ -190,7 +196,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A production bug's port, a request for work from a session outside the chain and a step only he can take (plug in the Mac, log in, add a key; Approve means done and Deny means he can't, and a secret value he holds goes to a Vercel project or a Keychain item through a secret ask, whose card hands it straight to its sink, or anywhere else where the item says, 1Password or a file,
   never into chat or a stored row) go to him as a plain ask, its words saying exactly what Approve does,
   and ships to `main` run on his standing yes.
-  Every two-way door, a design, an order or the scope inside an ask he approved, the factory picks itself and records in an ADR or on the issue, and a grilling sends him only the questions nothing in the repo or his past words settles, batched as one plain ask.
+  Every two-way door, a design, an order or the scope inside an ask he approved, the factory picks itself and records in an ADR or on the issue, and a grilling sends him only its one-way-door questions that nothing in the repo or his past words settles, batched as one plain ask.
 - No decision reaches the owner as a question in chat.
   The inbox gate, a hook on Playground and the leads, refuses to end a turn whose last reply asks him to decide (any question mark outside code, quotes and lines to other agents, rhetorical ones and headings included, or words such as "say yes", "your call" or "should I") until that reply names an item open in his Inbox, so the session names the one already open on the same thing,
   or else posts it there and says so, where a lead sends it to the dispatcher, who posts it; a pointer he is free to skip ("if you want to look") is no ask.

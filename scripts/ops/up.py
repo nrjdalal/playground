@@ -2,8 +2,8 @@
 """ops-up: start every ops job in jobs.json that is not healthy, and leave healthy ones alone.
 
 A job ops starts in a terminal (one whose `runtime` names one, or that names none and has a command and no launchd label) runs as a pane of the Ops
-workspace on the factory herdr server (the binary pin.json names, as spawn.sh reaches it). An old `runtime` of cmux or auto reads
-as herdr.
+workspace on the factory herdr server (the binary pin.json names, as spawn.sh reaches it). A `runtime`, whatever word an older
+install stored, reads as herdr, the one runtime.
 
   up.py                      check every job once; start each unhealthy terminal job as a pane of herdr's Ops workspace
   up.py --restarted <a,b>    a plain pass, once any running pass ends, with those jobs' starts dropped first, so GRACE holds
@@ -91,10 +91,8 @@ def healthy(job):
 
 
 def is_herdr(job):
-    """Whether ops starts the job in a terminal, which is herdr: its runtime names one, an old row's cmux or auto included, or it names none and has a command and no launchd label (a hand-kept jobs.json row the render never parsed)."""
-    if "runtime" not in job:
-        return bool(job.get("command")) and not job.get("launchd")
-    return job["runtime"] in ("auto", "cmux", "herdr")
+    """Whether ops starts the job in a terminal, which is herdr: its runtime names one, whatever word an older install stored, or it names none and has a command and no launchd label (a hand-kept jobs.json row the render never parsed)."""
+    return job.get("runtime") is not None or (bool(job.get("command")) and not job.get("launchd"))
 
 
 def is_dashboard(job):
@@ -273,7 +271,7 @@ JOBS_RENDER = os.path.join(os.path.dirname(os.path.dirname(HERE)), "packages", "
 
 
 def render_jobs():
-    """jobs.json from the store's job settings, each org's script folders under ops, and each enabled launchd job's plist into ops/launch-agents, which launchd does not read until the switch, a turned-off job's plist going to the trash (exit 1 logs the one the trash kept); a machine with no store keeps its own jobs.json, and one whose store read is refused keeps the last and logs why."""
+    """jobs.json from the store's job settings and each org's own job rows, each org's script folders under ops, and each enabled launchd job's plist into ops/launch-agents, which launchd does not read until the switch, a turned-off job's plist going to the trash (exit 1 logs the one the trash kept and each org job row refused); a machine with no store keeps its own jobs.json, and one whose store read is refused keeps the last and logs why."""
     bun = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
     if not (os.path.exists(bun) and os.path.exists(JOBS_RENDER)):
         return
@@ -285,9 +283,9 @@ def render_jobs():
         return
     if r.returncode in (0, 1) and r.stdout.strip() and "unchanged" not in r.stdout:
         log(r.stdout.strip())
-    kept = [line for line in (r.stderr or "").splitlines() if line.startswith("jobs: kept ")]
-    if r.returncode == 1 and kept:
-        log(" ".join(kept))
+    named = [line for line in (r.stderr or "").splitlines() if line.startswith(("jobs: kept ", "jobs: refused "))]
+    if r.returncode == 1 and named:
+        log(" ".join(named))
     elif r.returncode not in (0, 3):
         log(f"jobs.json kept: {one_line_answer(r.stderr or r.stdout)}")
 

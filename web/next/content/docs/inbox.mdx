@@ -20,7 +20,7 @@ Each item is a card of one of three kinds:
   The card shows exactly what happens when you approve it, except a secret ask, which takes a value instead, and a card that shows you one (see Give a secret).
   Each pull request, ticket or page a card names is a link, so you can open it and check for yourself: a ship's pull requests and a delete's worktrees and branches included.
   On an accept, your **Approve** has the dashboard accept the proposal itself, or each of a set in the order the card lists them, and the card then shows what that gave ([Extensions](/docs/extensions#review)).
-  On a guard setting, your **Approve** has the dashboard write the value the card shows, and a card its session changed after you read it asks you to read it again; an ops job's card turns the job on or off alone, keeping the command and schedule Playground ships ([Ops jobs](/docs/jobs)), and a value already in place changes nothing.
+  On a guard setting, your **Approve** has the dashboard write the value the card shows, and a card its session changed after you read it asks you to read it again; a job's card turns the job on or off alone or gives it a new config alone, keeping the rest of its value, so a registry job keeps the command and schedule Playground ships, an org's own job's card can also place its whole row ([Ops jobs](/docs/jobs)), and a value already in place changes nothing.
   On an own account card, your **Approve** has the dashboard set or clear that one account's Own account switch in Settings > Accounts, every other account as it was, and the card then shows what it found.
 - **Draft**: a Slack message or a Linear comment, ready to send in your name.
   The card shows its words, and Open thread shows where it goes.

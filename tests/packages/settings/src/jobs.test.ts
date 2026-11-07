@@ -6,6 +6,7 @@ import {
   JOBS,
   jobKey,
   jobSchema,
+  orgJobs,
   plistProgram,
   renderJobs,
   settingFields,
@@ -83,6 +84,16 @@ describe("the job registry", () => {
     expect([...plists.keys()]).toEqual(["com.playground.ops-tick"])
   })
 
+  // #1354: a wiped main checkout takes its own scripts with it, so the restore runs from the Dashboard's
+  test("ops-restore's plist runs from the Dashboard's checkout and names the main checkout it restores", () => {
+    const restore = { ...JOBS["ops-restore"]!, enabled: true }
+    const { plists } = renderJobs({ [jobKey("ops-restore")]: restore }, [], fill)
+    const plist = plists.get("com.playground.ops-restore")!
+    expect(plist).toContain("<string>/c/desk/packages/scripts/src/ops-restore/cli.ts</string>")
+    expect(plist).toContain("<string>--main</string><string>/c</string></array>")
+    expect(plist).toContain("<key>WorkingDirectory</key><string>/c/desk</string>")
+  })
+
   test("a value its schema refuses falls back to the default, and a job the registry does not know is kept as it stands", () => {
     const company = { command: "~/x/run.sh", heartbeat: "ops-company", name: "ops-company" }
     const { jobs } = renderJobs(
@@ -96,52 +107,56 @@ describe("the job registry", () => {
     expect(jobs.map((job) => job.name)).toEqual([...jobs.map((job) => job.name)].sort())
   })
 
-  test("a stored row naming cmux, auto or herdr loads and runs in herdr, and one with an unknown key is skipped", () => {
-    const sweep = jobKey("ops-sweep")
-    const stored = (value: Record<string, unknown>) =>
-      renderJobs(
-        settingsFor([{ key: sweep, scope: "me", value }], "me").values,
-        [],
-        fill,
-      ).jobs.find((job) => job.name === "ops-sweep")!
-    const on = { ...JOBS["ops-sweep"]!, enabled: true }
-    for (const row of [{ ...on, runtime: "cmux" }, { ...on, runtime: "auto" }, on]) {
-      expect(stored(row).disabled).toBeUndefined()
-      expect(stored(row).runtime).toBe("herdr")
-    }
-    expect(stored({ ...on, madeUp: true }).disabled).toBe(true)
-  })
-
-  test("a stored row that still carries needsCmux loads with its enabled state and without the field, and one that set it with no runtime runs in herdr", () => {
+  test("a stored row loses no job: an unknown runtime reads as herdr, an unknown key is dropped, and a row kept by hand stays whole", () => {
     const stored = (name: string, value: Record<string, unknown>) =>
       renderJobs(
         settingsFor([{ key: jobKey(name), scope: "me", value }], "me").values,
         [],
         fill,
       ).jobs.find((job) => job.name === name)!
-    for (const name of Object.keys(JOBS)) expect(JOBS[name]).not.toHaveProperty("needsCmux")
-    const sweep = { ...JOBS["ops-sweep"]!, enabled: true }
-    const { runtime: _, ...noRuntime } = sweep
-    for (const [row, runtime] of [
-      [{ ...sweep, needsCmux: true }, "herdr"],
-      [{ ...sweep, needsCmux: false, runtime: "cmux" }, "herdr"],
-      [{ ...noRuntime, needsCmux: true }, "herdr"],
-      // a field the row leaves out reads the registry's, ops-sweep's herdr (PG-1196)
-      [{ ...noRuntime, needsCmux: false }, "herdr"],
-    ] as const) {
+    const on = { ...JOBS["ops-sweep"]!, enabled: true }
+    const { runtime: _, ...noRuntime } = on
+    // the needsCmux rows carry the retired flag that marked a terminal job, in each shape an install stored it before the flag left the schema: whole or with enabled alone, true or false
+    for (const row of [
+      { ...on, runtime: "made-up" },
+      { ...on, madeUp: true },
+      { ...noRuntime, needsCmux: true },
+      { ...on, needsCmux: false },
+      { enabled: true, needsCmux: true },
+      { enabled: true, needsCmux: false },
+    ]) {
       const job = stored("ops-sweep", row)
       expect(job.disabled).toBeUndefined()
-      expect(job.runtime).toBe(runtime)
+      expect(job.runtime).toBe("herdr")
+      expect(job).not.toHaveProperty("madeUp")
       expect(job).not.toHaveProperty("needsCmux")
     }
-    expect(stored("ops-sweep", { ...sweep, needsCmux: true, madeUp: true }).disabled).toBe(true)
-    const tick = stored("ops-tick", { ...JOBS["ops-tick"]!, enabled: false, needsCmux: false })
-    expect(tick.disabled).toBe(true)
-    expect(tick).not.toHaveProperty("needsCmux")
-    const company = { command: "~/x/run.sh", heartbeat: "ops-company", name: "ops-company" }
-    const kept = { ...company, needsCmux: true }
-    const { jobs } = renderJobs({}, [kept], fill)
-    expect(jobs.find((job) => job.name === "ops-company")).toEqual({ ...company, runtime: "herdr" })
+    const tick = stored("ops-tick", { ...JOBS["ops-tick"]!, enabled: true, madeUp: true })
+    expect(tick.disabled).toBeUndefined()
+    expect(tick).not.toHaveProperty("madeUp")
+    const kept = {
+      command: "~/x/run.sh",
+      heartbeat: "ops-company",
+      madeUp: true,
+      name: "ops-company",
+    }
+    expect(renderJobs({}, [kept], fill).jobs.find((job) => job.name === "ops-company")).toEqual(
+      kept,
+    )
+  })
+
+  test("a write with an unknown key is refused, as one with a runtime other than herdr is", () => {
+    const sweep = jobKey("ops-sweep")
+    expect(checkSetting(sweep, { enabled: true, madeUp: true })).toEqual({
+      message: expect.stringContaining('Unrecognized key: "madeUp"'),
+      ok: false,
+    })
+    expect(checkSetting(sweep, { enabled: true, runtime: "made-up" }).ok).toBe(false)
+    expect(checkSetting(sweep, { enabled: true })).toEqual({
+      key: sweep,
+      ok: true,
+      value: { enabled: true },
+    })
   })
 
   test("its schema takes every shape the runner reads, and refuses a job with no schedule", () => {
@@ -181,9 +196,9 @@ describe("the job registry", () => {
       key: "jobs.opsSweep",
       value: { enabled: false, pausedFor: "made-up" },
     })
-    const old = importedJob({ name: "ops-sweep", needsCmux: true }, null)
+    const old = importedJob({ madeUp: true, name: "ops-sweep", runtime: "made-up" }, null)
     expect(old).toMatchObject({ key: "jobs.opsSweep", value: { enabled: true, runtime: "herdr" } })
-    expect("value" in old && old.value).not.toHaveProperty("needsCmux")
+    expect("value" in old && old.value).not.toHaveProperty("madeUp")
   })
 
   test("a plist's program and folder read from its XML, and a plist with none reads as null", () => {
@@ -242,5 +257,149 @@ describe("a job's row holding some of its fields (PG-1196)", () => {
     })
     const whole = { ...JOBS["ops-sweep"]!, enabled: true, pausedFor: "made-up" }
     expect(on(whole)[sweep]).toEqual(whole)
+  })
+})
+
+describe("an org's own job row (PG-1335)", () => {
+  const watch = {
+    callsModel: false,
+    command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts --data {data}",
+    cwd: "{data}/ops/ops-watch",
+    description: "Watches an org's own queue.",
+    enabled: true,
+    heartbeat: "ops-watch",
+    schedule: { always: true },
+  }
+  const scripts = { acme: ["ops-watch"], globex: ["ops-watch"] }
+  const rows = (...list: [string, string, unknown][]) =>
+    list.map(([scope, key, value]) => ({ key, scope, value }))
+  const one = (value: unknown, scope = "acme", key = "jobs.opsWatch") =>
+    orgJobs(rows([scope, key, value]), "tester", scripts)
+
+  test("an org-scope row for a job the registry lacks renders into jobs.json, its command filled from the org's script folder", () => {
+    const org = one({ ...watch, config: { prefixes: ["INC"] } })
+    expect(org.refused).toEqual([])
+    const { jobs } = renderJobs({}, [], fill, org.jobs)
+    expect(jobs.find((job) => job.name === "ops-watch")).toEqual({
+      callsModel: false,
+      command: "/b/bun --no-env-file /d/ops/ops-watch/cli.ts --data /d",
+      config: { prefixes: ["INC"] },
+      cwd: "/d/ops/ops-watch",
+      description: "Watches an org's own queue.",
+      heartbeat: "ops-watch",
+      name: "ops-watch",
+      org: "acme",
+      schedule: { always: true },
+    })
+  })
+
+  test("a row with no cwd runs from its script folder, and one turned off renders paused", () => {
+    const { cwd: _, ...rest } = watch
+    const { jobs } = renderJobs({}, [], fill, one({ ...rest, enabled: false }).jobs)
+    expect(jobs.find((job) => job.name === "ops-watch")).toMatchObject({
+      cwd: "/d/ops/ops-watch",
+      disabled: true,
+    })
+  })
+
+  test.each([
+    [
+      "a command run from the checkout",
+      { command: "{bun} {checkout}/packages/scripts/src/ops-watch/cli.ts" },
+    ],
+    ["a command run by another program", { command: "/bin/sh {data}/ops/ops-watch/run.sh" }],
+    ["a script folder the org does not ship", { command: "{bun} {data}/ops/other/cli.ts" }],
+    ["a .. segment out of the folder", { command: "{bun} {data}/ops/ops-watch/../x/cli.ts" }],
+    [
+      "a shell operator after the script",
+      { command: "{bun} {data}/ops/ops-watch/cli.ts; touch x" },
+    ],
+    [
+      "another placeholder in an argument",
+      { command: "{bun} {data}/ops/ops-watch/cli.ts {checkout}" },
+    ],
+    ["a cwd outside the folder", { cwd: "{checkout}" }],
+    ["a cwd in another script folder", { cwd: "{data}/ops/ops-watchers" }],
+    ["a launchd label", { launchd: "com.playground.ops-dashboard" }],
+    ["a program", { program: ["{bun}", "{data}/ops/ops-watch/cli.ts"] }],
+    ["a config that is a list", { config: ["INC"] }],
+    ["a config that is text", { config: "INC" }],
+    ["a stop group, which ops would stop before each start", { stop: "dashboard" }],
+    ["a heartbeat of another job's name", { heartbeat: "ops-dashboard" }],
+    ["a heartbeat out of its folder", { heartbeat: "../x" }],
+    ["a bare script folder as its script", { command: "{bun} {data}/ops/ops-watch" }],
+  ])("a row with %s is refused, named with its org and key, and nothing renders", (_, change) => {
+    const org = one({ ...watch, ...change })
+    expect(org.jobs).toEqual({})
+    expect(org.refused).toHaveLength(1)
+    expect(org.refused[0]).toStartWith("jobs: refused acme jobs.opsWatch: ")
+    expect(renderJobs({}, [], fill, org.jobs).jobs.map((job) => job.name)).not.toContain(
+      "ops-watch",
+    )
+  })
+
+  test("a row an older install stored keeps its job: a key the schema does not name is dropped, and any runtime reads as herdr (PG-1439)", () => {
+    const org = one({ ...watch, madeUp: true, runtime: "made-up" })
+    expect(org.refused).toEqual([])
+    expect(org.jobs["ops-watch"]).toMatchObject({ enabled: true, org: "acme", runtime: "herdr" })
+    expect(org.jobs["ops-watch"]).not.toHaveProperty("madeUp")
+  })
+
+  test("a login-scope row for a job the registry lacks stays refused", () => {
+    const org = one(watch, "tester")
+    expect(org.jobs).toEqual({})
+    expect(org.refused).toEqual([
+      "jobs: refused tester jobs.opsWatch: only an org's scope may add a job the registry lacks",
+    ])
+  })
+
+  test("a row for a registry job is left to the registry, and two orgs naming one job render the first", () => {
+    expect(one(watch, "acme", "jobs.opsSweep")).toEqual({ jobs: {}, refused: [] })
+    const org = orgJobs(
+      rows(
+        ["acme", "jobs.opsWatch", watch],
+        ["globex", "jobs.opsWatch", { ...watch, description: "Theirs." }],
+      ),
+      "tester",
+      scripts,
+    )
+    expect(org.jobs["ops-watch"]?.description).toBe("Watches an org's own queue.")
+    expect(org.refused).toEqual(["jobs: refused globex jobs.opsWatch: acme already adds ops-watch"])
+  })
+
+  test("an org's job replaces a hand-kept jobs.json row of its name", () => {
+    const kept = { command: "old", name: "ops-watch" }
+    const { jobs } = renderJobs({}, [kept], fill, one(watch).jobs)
+    expect(jobs.filter((job) => job.name === "ops-watch")).toHaveLength(1)
+    expect(jobs.find((job) => job.name === "ops-watch")?.command).not.toBe("old")
+  })
+
+  test("an org's job whose row is then refused or gone renders paused, so the runner stops it, and a hand-kept row stays as it is", () => {
+    const first = renderJobs({}, [], fill, one(watch).jobs).jobs
+    const rendered = first.find((job) => job.name === "ops-watch")!
+    for (const org of [one({ ...watch, stop: "dashboard" }).jobs, {}])
+      expect(renderJobs({}, first, fill, org).jobs.find((job) => job.name === "ops-watch")).toEqual(
+        {
+          ...rendered,
+          disabled: true,
+        },
+      )
+    const company = { command: "~/x/run.sh", heartbeat: "ops-company", name: "ops-company" }
+    expect(renderJobs({}, [company], fill).jobs.find((job) => job.name === "ops-company")).toEqual(
+      company,
+    )
+  })
+
+  test("a registry job's row renders as before without config, and with config only adds it", () => {
+    const before = renderJobs({}, [], fill).jobs.find((job) => job.name === "ops-sweep")
+    const withConfig = renderJobs(
+      { [jobKey("ops-sweep")]: { ...JOBS["ops-sweep"], config: { a: 1 } } },
+      [],
+      fill,
+    ).jobs.find((job) => job.name === "ops-sweep")
+    expect(withConfig).toEqual({ ...before, config: { a: 1 } })
+    expect(jobSchema.safeParse({ ...JOBS["ops-sweep"], config: [1] }).success).toBe(false)
+    expect(checkSetting(jobKey("ops-sweep"), { config: "a" }).ok).toBe(false)
+    expect(checkSetting(jobKey("ops-sweep"), { config: { a: 1 } }).ok).toBe(true)
   })
 })

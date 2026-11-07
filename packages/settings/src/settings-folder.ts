@@ -4,8 +4,18 @@ import { join } from "node:path"
 // By relative path, so a test outside the package type-checks it, where @/ is not its src.
 import { stableJson } from "./diff"
 import { guardedOrgs } from "./ext"
-import { deriveHooks, extGit, extLog, scopesIn, writeFiles, writeRoot } from "./folder"
+import {
+  deriveHooks,
+  extGit,
+  extLog,
+  scopesIn,
+  scriptFilesOf,
+  writeFiles,
+  writeRoot,
+} from "./folder"
+import { fromStored, jobSchema, orgJob, orgJobKey } from "./jobs"
 import { CORE, extensionsDir, loginOf, scopeDir } from "./rendered"
+import { secretIn } from "./secrets"
 import {
   checkAgainst,
   checkSetting,
@@ -15,6 +25,7 @@ import {
   SCHEMA_VERSION,
   settingFields,
   settingsFor,
+  storedValue,
 } from "./settings"
 
 // The settings half of the extensions folder: each scope's values in <scope>/settings.json, each write one commit in that scope's clone whose author is who asked, whose message is the reason and whose Setting trailer names the key, with the root's policy.json rebuilt from every scope beside it.
@@ -33,10 +44,14 @@ const readValues = (data: string, scope: string): Record<string, unknown> => {
   }
 }
 
-// Every value set at a scope, core's (in the checkout, where scopeDir finds it) first; a key no piece defines stays a row, so a write of another key keeps it.
+// Every value set at a scope, core's (in the checkout, where scopeDir finds it) first, each as the read takes it (storedValue, and fromStored for an org's own job row, which no field defines), so a write that sends a row back with its change, as Settings > Jobs' toggle and the Inbox's Approve do, sends it as the read takes it; a key no piece defines stays a row, so a write of another key keeps it.
 export const settingRows = (data: string): Row[] =>
   [CORE, ...scopesIn(data).filter((scope) => scope !== CORE)].flatMap((scope) =>
-    Object.entries(readValues(data, scope)).map(([key, value]) => ({ key, scope, value })),
+    Object.entries(readValues(data, scope)).map(([key, value]) => ({
+      key,
+      scope,
+      value: orgJobKey(key) ? fromStored(value) : storedValue(key, value),
+    })),
   )
 
 // policy.json: the settings a session in the home set reads, and those of a session in each guarded org's repos.
@@ -148,6 +163,52 @@ const commit = (
   )
 }
 
+// The script folders a scope ships, each <scope>/scripts/<key>/, by key.
+const scriptKeys = (data: string, scope: string): string[] => [
+  ...new Set(scriptFilesOf(data, scope).map((parts) => parts[1]!)),
+]
+
+// An org's own job row as a write stores it, checked as the render reads it (orgJob), as it stands, so a misspelled key is refused: the job's schema, its own heartbeat, no stop group, a command and cwd in a script folder the scope ships, and no other org already adding the job, since the render runs the first org's row in A to Z order and refuses the rest.
+const orgJobRow = (
+  data: string,
+  input: { key: string; scope: string; value: unknown },
+): Result<{ value: unknown }> => {
+  const read = orgJob(
+    input.key,
+    input.scope,
+    input.value,
+    loginOf(data),
+    scriptKeys(data, input.scope),
+  )
+  if ("refused" in read) return { message: `${input.key}: ${read.refused}`, ok: false, status: 400 }
+  const login = loginOf(data)
+  const holder = scopesIn(data).find(
+    (scope) =>
+      scope !== input.scope &&
+      input.key in readValues(data, scope) &&
+      !(
+        "refused" in
+        orgJob(
+          input.key,
+          scope,
+          fromStored(readValues(data, scope)[input.key]),
+          login,
+          scriptKeys(data, scope),
+        )
+      ),
+  )
+  if (holder)
+    return { message: `${input.key}: ${holder} already adds ${read.name}`, ok: false, status: 400 }
+  const secret = secretIn(input.value)
+  if (secret)
+    return {
+      message: `${input.key}: the value holds ${secret}; keep the secret in the Keychain or the environment and set its name`,
+      ok: false,
+      status: 400,
+    }
+  return { ok: true, value: jobSchema.parse(input.value) }
+}
+
 export const setSetting = (
   data: string,
   input: { key: string; scope: string; value: unknown },
@@ -155,6 +216,13 @@ export const setSetting = (
 ): Result<{ key: string; scope: string; value: unknown }> => {
   const bad = badScope(data, input.scope)
   if (bad) return bad
+  if (orgJobKey(input.key)) {
+    const row = orgJobRow(data, input)
+    if (!row.ok) return row
+    const values = { ...readValues(data, input.scope), [input.key]: row.value }
+    commit(data, input.scope, input.key, values, who)
+    return { key: input.key, ok: true, scope: input.scope, value: row.value }
+  }
   const checked = checkSetting(input.key, input.value)
   if (!checked.ok) return { message: checked.message, ok: false, status: 400 }
   const values = readValues(data, input.scope)
@@ -177,10 +245,10 @@ export const resetSetting = (
 ): Result<{ key: string; scope: string }> => {
   const bad = badScope(data, input.scope)
   if (bad) return bad
-  const key = resolveKey(input.key)
+  const key = resolveKey(input.key) ?? (orgJobKey(input.key) ? input.key : undefined)
   if (!key) return { message: `no setting ${input.key}`, ok: false, status: 404 }
   const values = readValues(data, input.scope)
-  const names = namesOf(key).filter((name) => name in values)
+  const names = (resolveKey(key) ? namesOf(key) : [key]).filter((name) => name in values)
   if (!names.length)
     return {
       message: `${key} has no value at ${input.scope}: it is at its default`,

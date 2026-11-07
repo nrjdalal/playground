@@ -16,6 +16,7 @@ import {
   extensionsDir,
   scopeDir,
   type Who,
+  writeFiles,
 } from "../../../../packages/settings/src"
 
 process.env.PLAYGROUND_LOGIN = "made-up-me"
@@ -255,5 +256,145 @@ describe("a job set by its enabled field alone (PG-1196)", () => {
     const data = fresh()
     expect(set(data, "jobs.opsMadeUp", ME, { enabled: true }, who("no such job")).ok).toBe(false)
     expect(existsSync(join(extensionsDir(data), ME, "settings.json"))).toBe(false)
+  })
+})
+
+describe("a job row an older install stored (PG-1439)", () => {
+  const key = "jobs.opsSweep"
+  const stored = { enabled: true, madeUp: true, runtime: "made-up" }
+  // the login's scope holding a row a write refuses: a key the schema does not name, and a runtime other than herdr
+  const old = () => {
+    const data = fresh()
+    set(data, "folderFixture.count", ME, 2, who("make the login"))
+    writeFiles(
+      data,
+      ME,
+      new Map([["settings.json", JSON.stringify({ "folderFixture.count": 2, [key]: stored })]]),
+      { author: "owner", reason: "a row an older install stored" },
+    )
+    return data
+  }
+
+  test("every read hands it out as the render takes it, so a toggle that sends it back lands", () => {
+    const data = old()
+    const held = readSetting(data, key)!.rows.find((row) => row.scope === ME)!.value
+    expect(held).toEqual({ enabled: true, runtime: "herdr" })
+    expect(listSettings(data).rows.find((row) => row.key === key)!.value).toEqual(held)
+    expect(readSetting(data, key)!.value).toMatchObject({ enabled: true, runtime: "herdr" })
+    const toggled = set(data, key, ME, { ...(held as object), enabled: false }, who("turn it off"))
+    expect(toggled.ok).toBe(true)
+    expect(file(data, `${ME}/settings.json`)[key]).toEqual({ enabled: false, runtime: "herdr" })
+  })
+
+  test("a write that adds a key the schema does not name is still refused, and the stored row stays", () => {
+    const data = old()
+    expect(set(data, key, ME, { enabled: false, madeUp: true }, who("a misspelled key"))).toEqual({
+      message: expect.stringContaining('Unrecognized key: "madeUp"'),
+      ok: false,
+      status: 400,
+    })
+    expect(file(data, `${ME}/settings.json`)[key]).toEqual(stored)
+  })
+})
+
+describe("an org's own job row (PG-1363)", () => {
+  const key = "jobs.opsWatch"
+  const row = {
+    callsModel: false,
+    command: "{bun} --no-env-file {data}/ops/ops-watch/cli.ts",
+    config: { prefixes: ["INC"] },
+    description: "Watches an org's own queue.",
+    enabled: true,
+    heartbeat: "ops-watch",
+    schedule: { every: 60 },
+  }
+  // a data folder whose acme scope ships the ops-watch script folder
+  const shipped = () => {
+    const data = fresh()
+    set(data, "folderFixture.count", ME, 2, who("make the login"))
+    writeFiles(data, "acme", new Map([["scripts/ops-watch/cli.ts", "console.log(1)"]]), {
+      author: "owner",
+      reason: "ship the script",
+    })
+    return data
+  }
+
+  test("set writes a row the render takes at the org's scope, and reset takes it out", () => {
+    const data = shipped()
+    expect(set(data, key, "acme", row, who("run acme's watch"))).toEqual({
+      key,
+      ok: true,
+      scope: "acme",
+      value: row,
+    })
+    expect(file(data, "acme/settings.json")[key]).toEqual(row)
+    expect(resetSetting(data, { key, scope: "acme" }, who("stop acme's watch")).ok).toBe(true)
+    expect(file(data, "acme/settings.json")[key]).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "a script folder the org does not ship",
+      { ...row, command: "{bun} {data}/ops/other/cli.ts" },
+      "its command must run a script in a folder its org ships",
+    ],
+    ["a stop group", { ...row, stop: "dashboard" }, "an org's job names no stop group"],
+    [
+      "another job's heartbeat",
+      { ...row, heartbeat: "ops-dashboard" },
+      "its heartbeat must be its own name",
+    ],
+    ["a value that is no job", { enabled: true }, "heartbeat Invalid input"],
+  ])(
+    "a row with %s is refused with the render's reason, and nothing is stored",
+    (_, value, why) => {
+      const data = shipped()
+      const result = set(data, key, "acme", value, who("a bad row"))
+      expect(result).toMatchObject({ ok: false })
+      expect("message" in result && result.message).toContain(why)
+      expect(existsSync(join(extensionsDir(data), "acme", "settings.json"))).toBe(false)
+    },
+  )
+
+  test("a row an older install stored is handed out as the render takes it, so a second org's row for its job is still refused (PG-1439)", () => {
+    const data = shipped()
+    const stored = { ...row, madeUp: true, runtime: "made-up" }
+    writeFiles(data, "acme", new Map([["settings.json", JSON.stringify({ [key]: stored })]]), {
+      author: "owner",
+      reason: "a row an older install stored",
+    })
+    writeFiles(data, "aaa", new Map([["scripts/ops-watch/cli.ts", "console.log(2)"]]), {
+      author: "owner",
+      reason: "ship the script",
+    })
+    const held = listSettings(data).rows.find((each) => each.key === key && each.scope === "acme")
+    expect(held!.value).toEqual({ ...row, runtime: "herdr" })
+    const result = set(data, key, "aaa", row, who("run aaa's watch"))
+    expect(result).toMatchObject({ ok: false })
+    expect("message" in result && result.message).toContain("acme already adds ops-watch")
+    expect(file(data, "acme/settings.json")[key]).toEqual(stored)
+  })
+
+  test("a second org's row for a job another org adds is refused with the render's reason, so an org earlier in A to Z order cannot take it over", () => {
+    const data = shipped()
+    writeFiles(data, "aaa", new Map([["scripts/ops-watch/cli.ts", "console.log(2)"]]), {
+      author: "owner",
+      reason: "ship the script",
+    })
+    expect(set(data, key, "acme", row, who("run acme's watch")).ok).toBe(true)
+    const result = set(data, key, "aaa", row, who("run aaa's watch"))
+    expect(result).toMatchObject({ ok: false })
+    expect("message" in result && result.message).toContain("acme already adds ops-watch")
+    expect(existsSync(join(extensionsDir(data), "aaa", "settings.json"))).toBe(false)
+    expect(set(data, key, "acme", { ...row, enabled: false }, who("pause acme's watch")).ok).toBe(
+      true,
+    )
+  })
+
+  test("the login's scope takes no row for a job the registry lacks", () => {
+    const data = shipped()
+    const result = set(data, key, ME, row, who("at the login"))
+    expect(result).toMatchObject({ ok: false })
+    expect(file(data, `${ME}/settings.json`)[key]).toBeUndefined()
   })
 })

@@ -28,7 +28,7 @@ playground status     one line each for the Dashboard, the follower, each dispat
 playground sweep <lead>
                       what changed since that lead's last sweep (alerts, the merge queue, load5 crossing 15, the single-slot flag, its rows' passed ETAs, its parked rows' closed or unreadable holds), or quiet
 playground focus [on --session <name> --reason "<why>" [--for <minutes>] | off]
-                      give one session the Mac for up to 180 minutes (120 by default): every merge, every other session's heavy run and every new session but its own reviewer and tester and a firefighting start waits until off or its end, and the Inbox holds what comes in quiet but an alert; off prints how many runs queued while it stood and how long they waited, the line the Inbox's card carries once focus ends; bare, it prints the focus standing
+                      give one session the Mac for up to 180 minutes (120 by default): every merge, every other session's heavy run and every new session but its own reviewer and tester and a priority start waits until off or its end, and the Inbox holds what comes in quiet but an alert; off prints how many runs queued while it stood and how long they waited, the line the Inbox's card carries once focus ends; bare, it prints the focus standing
 playground page <file.html> --title "<title>" --by <session> [--for <session>]
                       keep a page for the Dashboard: copy it into the previews folder under a free name, with its title as its caption and a line in pages.jsonl, and print the copy's path for an Inbox card's html attachment (bun run ask new), opening nothing; it shows on the Pages tab of --by's view, of --for's and of the dispatcher's
 playground update [--to <tag>]
@@ -68,8 +68,8 @@ playground settings import-jobs <jobs.json> [--launch-agents <dir>] [--scope <sc
                       once, at the switch: each ops job jobs.json lists becomes its jobs.<name> setting (your login's scope by default), a launchd job's program read from its plist; a job the registry does not know stays in jobs.json
 playground ext which <skill> [--repo <dir>]
                       print the folder of the copy of <skill> a session in <dir> loads, from whichever scope holds it
-playground ext init [--yes | --dry-run] | add <name> [<owner/name>] [--yes] | order | link | unlink | remove | sync [<scope>] | list | show | put | why | diff | search | export <dir> | import <dir> [--dry-run] | import --from-tree <dir> | import-scripts <ops-dir> <job>... --org <org> | score | accept | reject
-                      make (on your yes, typed or --yes) or reuse your private repo and clone your login's folder from it, sync each scope with its repo now, read the extensions, put an item's next revision from a file, a folder or stdin with its reason and attachments as one commit in its scope, search them, export or import every scope as a folder of clones, seed the guards' lists from a folder of list files, bring each job folder in as an org's script once at the switch, and score, accept or reject a proposal
+playground ext init [--yes | --dry-run] | add <name> [<owner/name>] [--yes] | order | link | unlink | remove | sync [<scope>] | list | show | put | why | diff | search | export <dir> | import <dir> [--dry-run] | import --from-tree <dir> | import-scripts <ops-dir> <job>... --org <org> | score | accept | reject | check-modes
+                      make (on your yes, typed or --yes) or reuse your private repo and clone your login's folder from it, sync each scope with its repo now, read the extensions, put an item's next revision from a file, a folder or stdin with its reason and attachments as one commit in its scope, search them, export or import every scope as a folder of clones, seed the guards' lists from a folder of list files, bring each job folder in as an org's script once at the switch, score, accept or reject a proposal, and list once the stored scripts that lost their executable bit
 playground migrate --archive <checkout> --pre-squash <sha> --org <org> [--old <rev>] [--dry-run]
                       once, at the switch: move the old data folder in ~/.claude to ~/.playground, seed your login's settings and the release owners' list from the archive checkout (its canary, or --old, and the pre-squash head), bring the hand-made skills into the org's scope unless its clone holds them, then, with the Dashboard's job stopped, make each move the migration table at the pre-squash head lists: renamed and dropped jobs, archived stale copies, moved state files, and renamed variables in your profiles and LaunchAgents, and last runs playground herdr pin; a value already set is left
 playground uninstall [--purge]
@@ -122,6 +122,7 @@ export const WORDS: Record<string, number | "rest"> = {
   doctor: 0,
   "ext accept": 4,
   "ext add": 2,
+  "ext check-modes": 0,
   "ext diff": 3,
   "ext export": 1,
   "ext import": 1,

@@ -241,7 +241,7 @@ describe("Feed cards", () => {
 
   // Only after a refusal that may have let the answer through does the card ask to send again deliberately.
   test("an answer may have gone only after herdr took its keys and could not show them land", () => {
-    for (const code of ["CMUX_FAILED", "INTERRUPTED", "UNCONFIRMED"])
+    for (const code of ["INTERRUPTED", "SESSIONS_FAILED", "UNCONFIRMED"])
       expect(mayHaveGone(code)).toBe(true)
     for (const code of ["INVALID", "DISABLED", "NOT_PENDING", "BUSY", undefined]) {
       expect(mayHaveGone(code)).toBe(false)

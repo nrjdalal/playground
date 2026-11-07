@@ -24,14 +24,17 @@ import {
   itemKeySchema,
   JOBS,
   jobKey,
+  jobSchema,
   KINDS,
+  orgJobKey,
   readSetting,
   resetSetting,
   SCOPE_NAME,
   setSetting,
+  settingRows,
   slackSettings,
 } from "@packages/settings"
-import { and, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm"
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm"
 import { z } from "zod"
 
 import { fileNameOf } from "../download"
@@ -361,14 +364,22 @@ export const appsChange = (list: string[], preview: InboxApps): { list: string[]
 // The owner's own apps list and the CLI that writes it: the login's scope, its list as accepted (empty when it has none, null when it is not a list of names), and `playground ext`. store/extensions.ts's ownerApps is the real one.
 export type OwnerApps = { login: string; read: () => string[] | null; run: ExtRun }
 
-// A registry job's setting key, which a guard decision turns on or off by its enabled field alone, so its command, schedule and runtime still come from the registry.
+// A registry job's setting key, which a guard decision turns on or off by its enabled field alone, or gives a new config object alone, so its command, schedule and runtime still come from the registry; core checks a config only for being an object, and the job checks each field itself.
 const JOB_KEYS = Object.keys(JOBS).map(jobKey)
-const jobSwitch = z.strictObject({ enabled: z.boolean() })
+const jobPart = z.union([
+  z.strictObject({ enabled: z.boolean() }),
+  z.strictObject({ config: z.record(z.string(), z.unknown()) }),
+])
+// An org's own job's setting key, jobs.<camelName> for a job the registry lacks, whose whole row a guard decision places, or whose enabled field or config alone it changes over the row its scope holds; the write checks the row against the org's script folders
+const orgJobKeySchema = z
+  .string()
+  .regex(/^jobs\.[a-z][A-Za-z0-9]*$/)
+  .refine(orgJobKey)
 
-// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS) or a registry job's, the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes (a job's enabled field alone), or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
+// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS), a registry job's or an org's own job's, the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes (a job's enabled field alone or its config alone, or an org's own job's whole row, which the write checks against that org's script folders), or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
 const guardSchema = z
   .strictObject({
-    key: z.union([z.enum(GUARD_SETTING_KEYS), z.enum(JOB_KEYS)]),
+    key: z.union([z.enum(GUARD_SETTING_KEYS), z.enum(JOB_KEYS), orgJobKeySchema]),
     scope: extScopeSchema,
     type: z.literal("guard"),
     value: z.unknown().optional(),
@@ -376,9 +387,20 @@ const guardSchema = z
   })
   .superRefine((preview, ctx) => {
     if (preview.value === undefined) return
-    if (JOB_KEYS.includes(preview.key) && !jobSwitch.safeParse(preview.value).success) {
-      const message = `${preview.key} takes its enabled field alone, {"enabled": true} or {"enabled": false}: its command, schedule and runtime come from the registry`
+    if (JOB_KEYS.includes(preview.key) && !jobPart.safeParse(preview.value).success) {
+      const message = `${preview.key} takes its enabled field alone, {"enabled": true} or {"enabled": false}, or its config alone, {"config": {...}}: its command, schedule and runtime come from the registry`
       ctx.addIssue({ code: "custom", message, path: ["value"] })
+      return
+    }
+    if (orgJobKey(preview.key)) {
+      if (jobPart.safeParse(preview.value).success) return
+      const parsed = jobSchema.safeParse(preview.value)
+      if (!parsed.success)
+        ctx.addIssue({
+          code: "custom",
+          message: `${preview.key} takes its enabled field alone, its config alone or a whole job row: ${z.prettifyError(parsed.error).replaceAll("\n", " ")}`,
+          path: ["value"],
+        })
       return
     }
     const checked = checkSetting(preview.key, preview.value)
@@ -745,7 +767,7 @@ export const saidOf = (text: string): string | undefined => {
   return said.length > SAID_CHARS ? `${said.slice(0, SAID_CHARS - 1)}…` : said
 }
 
-// The poster cleared its own alert update (`bun run ask resolve`), which had resolved itself: read, so nothing was left for him to dismiss.
+// The poster cleared its own update (`bun run ask resolve`), which had settled: read, so nothing was left for the owner to dismiss.
 export type InboxResolved = {
   at: string
   by: string
@@ -1233,11 +1255,11 @@ export const deliveryFailed = (item: InboxItem): boolean =>
 
 // The delivery failures that come before anything is typed (deliver.ts's DELIVERY_FAILURES says which, and UPLOAD_FAILED, a Slack send's files refused before its words), and LOST, an answer Claude Code held that neither its screen nor its transcript shows QUEUED_MS on, so Retry cannot type the answer twice; after any other (INTERRUPTED, or ERROR when the adapter threw) the answer may be in the session already, so its card offers Check it for me.
 export const RETRY_CODES = [
-  "CMUX_FAILED",
   "INPUT_NOT_EMPTY",
   "LOST",
   "NOT_FOUND",
   "ON_PICKER",
+  "SESSIONS_FAILED",
   "UPLOAD_FAILED",
 ] as const
 
@@ -1346,6 +1368,19 @@ export function inboxOrder(items: InboxItem[], now = new Date()): InboxItem[] {
 
 type Row = typeof inboxItem.$inferSelect
 
+// The codes a sessions read's failure was recorded under before they took the sessions' name, each read as its new code for one ship (ADR 0015), after which this alias goes.
+const DELIVERY_CODE_ALIASES = new Map([
+  ["CMUX_FAILED", "SESSIONS_FAILED"],
+  ["CMUX_UNAVAILABLE", "SESSIONS_UNAVAILABLE"],
+])
+
+// A stored delivery as the API reads it: a failure recorded under an old code reads under its new one, while the row stays as stored.
+const deliveryOf = (stored: unknown): InboxDelivery | null => {
+  const delivery = (stored as InboxDelivery | null) ?? null
+  if (delivery?.status !== "failed") return delivery
+  return { ...delivery, code: DELIVERY_CODE_ALIASES.get(delivery.code) ?? delivery.code }
+}
+
 const toItem = (row: Row): InboxItem =>
   ({
     answer:
@@ -1360,7 +1395,7 @@ const toItem = (row: Row): InboxItem =>
         | InboxSettled
         | null) ?? null,
     createdAt: row.createdAt.toISOString(),
-    delivery: (row.delivery as InboxDelivery | null) ?? null,
+    delivery: deliveryOf(row.delivery),
     from: row.from,
     id: row.id,
     kind: row.kind,
@@ -1893,11 +1928,16 @@ function guardWrite(data: string, preview: InboxGuard, ref: number, actor: strin
       ? { exitCode: 0, line: `took ${key} at ${scope} back to its default` }
       : { exitCode: 1, line: reset.message }
   }
-  // a job's enabled field goes over the row its scope holds, never the registry's fields, so the rest still follow the registry
-  const held = readSetting(data, key)?.rows.find((row) => row.scope === scope)?.value
-  const next = JOB_KEYS.includes(key)
-    ? { ...(held as object | undefined), ...(value as object) }
-    : value
+  // a job's enabled field or config goes over the row its scope holds, never the registry's fields, so the rest still follow the registry; an org's own job is no setting readSetting knows, so its row is read from its scope's settings directly
+  const held = (
+    orgJobKey(key)
+      ? settingRows(data).filter((row) => row.key === key)
+      : (readSetting(data, key)?.rows ?? [])
+  ).find((row) => row.scope === scope)?.value
+  const part = (JOB_KEYS.includes(key) || orgJobKey(key)) && jobPart.safeParse(value).success
+  if (part && orgJobKey(key) && held === undefined)
+    return { exitCode: 1, line: `${key} has no row at ${scope} to change` }
+  const next = part ? { ...(held as object | undefined), ...(value as object) } : value
   if (held !== undefined && isDeepStrictEqual(held, next))
     return {
       exitCode: 0,
@@ -2573,8 +2613,11 @@ export async function staleItems(
   return rows.map(toItem)
 }
 
-// Every item still open (a decision or draft not yet answered, one put away with Later and one answered in chat included, until it moves to Done), oldest first, one sender's alone when from is given: what a session reads before it posts, so it names an open item on the same thing rather than posting it twice (`bun run ask open`).
-export async function openItems(db: Database, from?: string): Promise<InboxItem[]> {
+// Every item still open (a decision or draft not yet answered, one put away with Later and one answered in chat included, until it moves to Done), oldest first, one sender's alone when from is given and those posted from since and before until alone when given: what a session reads before it posts, so it names an open item on the same thing rather than posting it twice (`bun run ask open`), and what ops-tick reads to resolve the focus card.
+export async function openItems(
+  db: Database,
+  { from, since, until }: { from?: string; since?: Date; until?: Date } = {},
+): Promise<InboxItem[]> {
   const rows = await db
     .select()
     .from(inboxItem)
@@ -2583,6 +2626,8 @@ export async function openItems(db: Database, from?: string): Promise<InboxItem[
         eq(inboxItem.status, "open"),
         sql`${inboxItem.answer} ->> 'dismissedAt' is null`,
         from === undefined ? undefined : eq(inboxItem.from, from),
+        since === undefined ? undefined : gte(inboxItem.createdAt, since),
+        until === undefined ? undefined : lt(inboxItem.createdAt, until),
       ),
     )
     .orderBy(inboxItem.ref)
@@ -2762,7 +2807,7 @@ export async function settleItem(
   return { item: toItem(row), ok: true }
 }
 
-// The poster clears its own alert update (`bun run ask resolve`), once it has resolved itself: it marks the alert read, records the resolution inside its answer and leaves it closed, so the owner never dismisses a cleared alert by hand. Another session's alert, a non-alert item and an unknown id are refused.
+// The poster clears its own update (`bun run ask resolve`) once it has settled: an alert whose cause cleared, a progress card whose last step is done, the focus card once what it pointed at is answered. It marks the update read, records the resolution inside its answer and leaves it closed, so the owner never presses Done on it by hand. Another session's update, a decision or draft and an unknown id are refused.
 export async function resolveItem(
   db: Database,
   key: string,
@@ -2779,18 +2824,17 @@ export async function resolveItem(
   if (note !== undefined && ARCHIVES.test(note)) return notApp()
   const item = await getItem(db, key)
   if (!item) return NOT_FOUND
-  if (item.kind !== "update" || item.preview.outcome !== "alert") {
+  if (item.kind !== "update") {
     return {
       code: "VALIDATION_ERROR",
-      message:
-        "Only an alert update resolves; a decision or draft settles, and another update is read or dismissed",
+      message: "Only an update resolves; a decision or draft settles",
       ok: false,
     }
   }
   if (by !== item.from) {
     return {
       code: "CONFLICT",
-      message: `Only ${item.from}, which posted it, resolves this alert`,
+      message: `Only ${item.from}, which posted it, resolves this update`,
       ok: false,
     }
   }
@@ -2818,7 +2862,7 @@ export async function resolveItem(
     )
     .returning()
   if (!row) {
-    return { code: "CONFLICT", message: "This alert is already resolved", ok: false }
+    return { code: "CONFLICT", message: "This update is already resolved", ok: false }
   }
   return { item: toItem(row), ok: true }
 }

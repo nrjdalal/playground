@@ -33,6 +33,7 @@ export const OPS_DOES: Record<string, string> = {
   "ops-merge-train": "Merges ready pull requests together",
   "ops-merge-watch": "Tests merges made outside the merge tools",
   "ops-report": "Writes the report for the Plan app",
+  "ops-restore": "Puts a lost main checkout back once its guards are gone",
   "ops-session-resume": "Tells each session to carry on once its usage limit resets",
   "ops-slack-watch": "Tells Playground about watched Slack DMs and work messages to you",
   "ops-sweep": "Checks runners, probes, asks and heartbeats",
@@ -65,6 +66,7 @@ export const RUNNER_NAMES: Record<string, string> = {
   "ops-merge-train": "Merge train",
   "ops-merge-watch": "Outside merge checker",
   "ops-report": "Factory report",
+  "ops-restore": "Checkout restore",
   "ops-session-resume": "Usage-limit resumes",
   "ops-slack-watch": "Slack watcher",
   "ops-sweep": "Cleanup sweep",
@@ -105,6 +107,8 @@ export type OpsStatus = "down" | "failing" | "running" | "waiting"
 // One job as its row shows it: its plain name, whether it calls a model and which, what it does, its status, the reason when it is not running, when it last beat, whether jobs.json pauses it, its schedule from jobs.json, and a problem when that schedule and its heartbeat disagree.
 export type OpsRow = {
   callsModel: boolean
+  // the job's last refusal of its config, as its heartbeat's configRefused says, which Settings > Jobs' card shows beside the config; absent while it holds none
+  configRefused?: string
   does: string | null
   job: string
   lastBeatAt: string | null
@@ -163,13 +167,16 @@ export function opsRowOf(
     return { ...row, lastBeatAt: null, reason: `Heartbeat names ${beat.job}`, status: "down" }
   }
   const lastBeatAt = new Date(beat.lastBeatAt).toISOString()
+  const refused = (json as { configRefused?: unknown }).configRefused
+  const withRefused =
+    typeof refused === "string" && refused ? { ...row, configRefused: refused } : row
   // the heartbeat's cycle is the Down clock, so a schedule saying another pace is named rather than left to drift
   const problem =
     schedule?.every && schedule.every !== beat.cycleSeconds
       ? `Its schedule says every ${schedule.every}s, its heartbeat every ${beat.cycleSeconds}s`
       : null
   const down = (reason: string): OpsRow => ({
-    ...row,
+    ...withRefused,
     lastBeatAt,
     problem,
     reason,
@@ -181,17 +188,17 @@ export function opsRowOf(
     return down(`No beat for over ${STALE_CYCLES * beat.cycleSeconds}s`)
   }
   const waiting = /^waiting: (.+)/.exec(beat.lastResult)?.[1]
-  if (waiting) return { ...row, lastBeatAt, problem, reason: waiting, status: "waiting" }
+  if (waiting) return { ...withRefused, lastBeatAt, problem, reason: waiting, status: "waiting" }
   if (beat.lastResult !== "ok") {
     return {
-      ...row,
+      ...withRefused,
       lastBeatAt,
       problem,
       reason: beat.lastResult || "No result",
       status: "failing",
     }
   }
-  return { ...row, lastBeatAt, problem, reason: null, status: "running" }
+  return { ...withRefused, lastBeatAt, problem, reason: null, status: "running" }
 }
 
 const pidOf = (text: string | null): number | null => {

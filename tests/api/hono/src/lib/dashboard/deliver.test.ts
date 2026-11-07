@@ -232,7 +232,7 @@ describe("refusal", () => {
   })
 
   test("everything else goes, a leading # or @ and a / mid-text included", () => {
-    for (const text of ["# heading", "@greed look", "run /acme CEDAR-1 next", "a\n/b"]) {
+    for (const text of ["# heading", "@greed look", "run /acme MADECEDAR-1 next", "a\n/b"]) {
       expect(refusal(text)).toBeNull()
     }
   })
@@ -528,7 +528,7 @@ describe("deliver", () => {
     let reads = 0
     deps.board = async () => (reads++, cut)
     const refused = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
-    expect(refused).toMatchObject({ code: "CMUX_FAILED", ok: false })
+    expect(refused).toMatchObject({ code: "SESSIONS_FAILED", ok: false })
     expect(refused.ok ? "" : refused.reason).not.toContain("No live session is named")
     expect(reads).toBe(2)
     expect(typed).toEqual([])
@@ -624,13 +624,13 @@ describe("deliver", () => {
     expect(typed).toEqual([])
   })
 
-  test("a board that cannot be read is CMUX_FAILED, with the read's own words", async () => {
+  test("a board that cannot be read is SESSIONS_FAILED, with the read's own words", async () => {
     const { deps } = fakes(live([]))
     deps.board = async () => {
       throw new Error("Access denied")
     }
     const result = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
-    expect(result).toMatchObject({ code: "CMUX_FAILED" })
+    expect(result).toMatchObject({ code: "SESSIONS_FAILED" })
     expect(result.ok ? "" : result.reason).toBe("Could not read the sessions: Access denied")
   })
 
@@ -817,7 +817,7 @@ describe("deliver", () => {
         deliver({ actor, text: "a1\na2", to: "dispatcher" }, deps),
         deliver({ actor, text: "b1", to: "dispatcher" }, deps),
       ])
-      expect(a).toMatchObject({ code: "CMUX_FAILED" })
+      expect(a).toMatchObject({ code: "SESSIONS_FAILED" })
       expect(b.ok).toBe(true)
       expect(typed).toEqual(["b1"])
     })
@@ -868,13 +868,13 @@ describe("deliver", () => {
     }
   })
 
-  test("a session's own read that does not answer is CMUX_FAILED, and nothing is typed", async () => {
+  test("a session's own read that does not answer is SESSIONS_FAILED, and nothing is typed", async () => {
     const { deps, typed } = fakes(board())
     deps.readSession = async () => {
       throw new Error("herdr did not answer")
     }
     const result = await deliver({ actor, text: "hi", to: "dispatcher" }, deps)
-    expect(result).toMatchObject({ code: "CMUX_FAILED", ok: false })
+    expect(result).toMatchObject({ code: "SESSIONS_FAILED", ok: false })
     expect(result.ok ? "" : result.reason).toBe("Could not read the sessions: herdr did not answer")
     expect(typed).toEqual([])
   })
@@ -1949,8 +1949,8 @@ describe("deliver to a herdr session", () => {
       [new HerdrRefused("agent.prompt", "timeout", ""), "INTERRUPTED"],
       [new HerdrRefused("agent.prompt", "agent_prompt_stalled", ""), "INTERRUPTED"],
       [new HerdrTimedOut("agent.prompt"), "INTERRUPTED"],
-      [new HerdrDown("connect ENOENT"), "CMUX_FAILED"],
-      [new HerdrRefused("agent.prompt", "invalid_request", ""), "CMUX_FAILED"],
+      [new HerdrDown("connect ENOENT"), "SESSIONS_FAILED"],
+      [new HerdrRefused("agent.prompt", "invalid_request", ""), "SESSIONS_FAILED"],
     ]
     for (const [error, code] of cases) {
       const { deps } = herdr(error)

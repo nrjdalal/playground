@@ -2920,9 +2920,6 @@ function handlePipeResult(left, next, ctx) {
   }
   return next._zod.run({ value: left.value, issues: left.issues }, ctx);
 }
-var $ZodPreprocess = /* @__PURE__ */ $constructor("$ZodPreprocess", (inst, def) => {
-  $ZodPipe.init(inst, def);
-});
 var $ZodReadonly = /* @__PURE__ */ $constructor("$ZodReadonly", (inst, def) => {
   $ZodType.init(inst, def);
   defineLazyInternal(inst, "propValues", (zod) => zod.def.innerType._zod.propValues);
@@ -5844,10 +5841,6 @@ function pipe(in_, out) {
     out
   });
 }
-var ZodPreprocess = /* @__PURE__ */ $constructor("ZodPreprocess", (inst, def) => {
-  ZodPipe.init(inst, def);
-  $ZodPreprocess.init(inst, def);
-});
 var ZodReadonly = /* @__PURE__ */ $constructor("ZodReadonly", (inst, def) => {
   $ZodReadonly.init(inst, def);
   ZodType.init(inst, def);
@@ -5870,13 +5863,6 @@ function refine(fn, _params = {}) {
 }
 function superRefine(fn, params) {
   return _superRefine(fn, params);
-}
-function preprocess(fn, schema) {
-  return new ZodPreprocess({
-    type: "pipe",
-    in: transform(fn),
-    out: schema
-  });
 }
 // packages/settings/src/rendered.ts
 import { existsSync, readFileSync } from "fs";
@@ -6057,6 +6043,161 @@ var STALE_MS = 5 * 60000;
 
 // packages/settings/src/items.ts
 var ATTACHMENT_LIMIT = 50 * 1024 * 1024;
+
+// packages/settings/src/jobs.ts
+var jobSchema = strictObject({
+  callsModel: boolean2(),
+  command: string2().min(1).optional(),
+  config: record(string2(), unknown()).optional(),
+  cwd: string2().min(1).optional(),
+  description: string2().min(1),
+  disabledWhy: string2().optional(),
+  enabled: boolean2(),
+  heartbeat: string2().min(1),
+  launchd: string2().min(1).optional(),
+  model: string2().min(1).optional(),
+  neverPause: boolean2().optional(),
+  pausedFor: string2().optional(),
+  program: array(string2().min(1)).min(1).optional(),
+  runtime: _enum(["herdr"]).optional(),
+  schedule: union([
+    strictObject({ always: literal(true) }),
+    strictObject({ every: number2().int().positive() })
+  ]),
+  stop: string2().min(1).optional()
+});
+var fromStored = (row) => {
+  if (!row || typeof row !== "object" || Array.isArray(row))
+    return row;
+  const kept = Object.fromEntries(Object.entries(row).filter(([key]) => Object.hasOwn(jobSchema.shape, key)));
+  return kept.runtime === undefined ? kept : { ...kept, runtime: "herdr" };
+};
+var jobRowSchema = jobSchema.partial();
+var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
+var terminal = (name, command, job) => ({
+  callsModel: false,
+  command,
+  cwd: "{checkout}",
+  enabled: false,
+  heartbeat: name,
+  runtime: "herdr",
+  ...job
+});
+var launchd = (name, job) => ({
+  callsModel: false,
+  cwd: "{checkout}",
+  enabled: false,
+  heartbeat: name,
+  launchd: `com.playground.${name}`,
+  program: ["{bun}", "--no-env-file", `{checkout}/packages/scripts/src/${name}/cli.ts`],
+  ...job
+});
+var bunJob = (name, root = "{checkout}") => `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`;
+var JOBS = {
+  "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
+    description: "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
+    schedule: { always: true }
+  }),
+  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
+    cwd: "{dashboard}",
+    description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
+    schedule: { every: 300 }
+  }),
+  "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
+    cwd: "{dashboard}",
+    description: "Keeps the live dashboard running on its branch's latest head.",
+    enabled: true,
+    schedule: { every: 60 },
+    stop: "dashboard"
+  }),
+  "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
+    description: "In Slack mode, hands each message in the owner's DM to the dispatcher, the session in the assistant seat too when no reply lands in 3 minutes.",
+    schedule: { every: 60 }
+  }),
+  "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
+    description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
+    schedule: { every: 86400 }
+  }),
+  "ops-firefighting-start": terminal("ops-firefighting-start", `${bunJob("ops-firefighting-start")} --data {data}`, {
+    description: "Starts a firefighting worker for each open ticket no session holds, Urgent first, and holds focus for an Urgent one's.",
+    schedule: { every: 60 }
+  }),
+  "ops-flow": launchd("ops-flow", {
+    description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",
+    schedule: { every: 60 }
+  }),
+  "ops-herdr": launchd("ops-herdr", {
+    description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
+    schedule: { every: 60 }
+  }),
+  "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
+    description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
+    schedule: { every: 60 }
+  }),
+  "ops-merge-train": terminal("ops-merge-train", "python3 -I {checkout}/scripts/ops/merge-train/run.py", {
+    description: "Runs the merge train: builds a train of ready PRs and checks each step.",
+    neverPause: true,
+    schedule: { every: 60 }
+  }),
+  "ops-restore": {
+    ...launchd("ops-restore", {
+      description: "Restores a lost main checkout by the playbook's steps once a guard is gone on two looks 5 minutes apart.",
+      schedule: { every: 60 }
+    }),
+    cwd: "{dashboard}",
+    program: [
+      "{bun}",
+      "--no-env-file",
+      "{dashboard}/packages/scripts/src/ops-restore/cli.ts",
+      "--main",
+      "{checkout}"
+    ]
+  },
+  "ops-session-resume": launchd("ops-session-resume", {
+    description: "Queues a carry-on line for each factory session once its usage limit resets.",
+    schedule: { every: 60 }
+  }),
+  "ops-sweep": terminal("ops-sweep", bunJob("ops-sweep"), {
+    description: "The Ops lead's sweep: runners, probes, asks, heartbeats and the forecast.",
+    schedule: { every: 300 }
+  }),
+  "ops-tick": launchd("ops-tick", {
+    description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
+    schedule: { every: 60 }
+  }),
+  "ops-ticket-card": terminal("ops-ticket-card", bunJob("ops-ticket-card"), {
+    description: "Keeps one Inbox card of the day's watched tickets, edited in place on every change.",
+    schedule: { every: 60 }
+  }),
+  "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
+    description: "Reads every live session's screen and clears a factory session stuck on a prompt.",
+    neverPause: true,
+    schedule: { every: 120 }
+  }),
+  "ops-usage": terminal("ops-usage", "python3 -I {checkout}/scripts/ops/usage/run.py", {
+    description: "Reads the account's usage windows into usage.json every 5 minutes.",
+    enabled: true,
+    neverPause: true,
+    schedule: { every: 300 }
+  }),
+  "ops-zai-usage": launchd("ops-zai-usage", {
+    description: "Reads the GLM plan's credits into zai-usage.json, which the spawn gate reads.",
+    schedule: { every: 300 }
+  })
+};
+var OLD_KEYS = { "ops-dashboard": ["jobs.opsDesk"] };
+var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([name, job]) => [
+  jobKey(name),
+  {
+    aliases: OLD_KEYS[name],
+    default: job,
+    description: `The ${name} ops job: ${job.description}`,
+    merge: true,
+    schema: jobRowSchema,
+    stored: fromStored
+  }
+])));
+var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);
 // packages/settings/src/factory.ts
 var repo = string2().regex(/^(?:[A-Za-z0-9-]+\/[A-Za-z0-9._-]+)?$/, "a repository as owner/name, or empty for unset");
 var factorySettings = defineSettings({
@@ -6155,144 +6296,6 @@ var gateSettings = defineSettings({
     schema: number2().int().positive()
   }
 });
-// packages/settings/src/jobs.ts
-var withoutNeedsCmux = (row) => {
-  if (!row || typeof row !== "object" || !("needsCmux" in row))
-    return row;
-  const { needsCmux, ...rest } = row;
-  return needsCmux === true && rest.runtime === undefined ? { ...rest, runtime: "herdr" } : rest;
-};
-var jobFields = strictObject({
-  callsModel: boolean2(),
-  command: string2().min(1).optional(),
-  cwd: string2().min(1).optional(),
-  description: string2().min(1),
-  disabledWhy: string2().optional(),
-  enabled: boolean2(),
-  heartbeat: string2().min(1),
-  launchd: string2().min(1).optional(),
-  model: string2().min(1).optional(),
-  neverPause: boolean2().optional(),
-  pausedFor: string2().optional(),
-  program: array(string2().min(1)).min(1).optional(),
-  runtime: preprocess((runtime) => runtime === "cmux" || runtime === "auto" ? "herdr" : runtime, _enum(["herdr"])).optional(),
-  schedule: union([
-    strictObject({ always: literal(true) }),
-    strictObject({ every: number2().int().positive() })
-  ]),
-  stop: string2().min(1).optional()
-});
-var jobSchema = preprocess(withoutNeedsCmux, jobFields);
-var jobRowSchema = preprocess(withoutNeedsCmux, jobFields.partial());
-var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
-var terminal = (name, command, job) => ({
-  callsModel: false,
-  command,
-  cwd: "{checkout}",
-  enabled: false,
-  heartbeat: name,
-  runtime: "herdr",
-  ...job
-});
-var launchd = (name, job) => ({
-  callsModel: false,
-  cwd: "{checkout}",
-  enabled: false,
-  heartbeat: name,
-  launchd: `com.playground.${name}`,
-  program: ["{bun}", "--no-env-file", `{checkout}/packages/scripts/src/${name}/cli.ts`],
-  ...job
-});
-var bunJob = (name, root = "{checkout}") => `{bun} --no-env-file ${root}/packages/scripts/src/${name}/cli.ts`;
-var JOBS = {
-  "ops-awake": terminal("ops-awake", `${bunJob("ops-awake")} --data {data}`, {
-    description: "Keeps the Mac awake on AC power and on battery with caffeinate, display and lock unchanged.",
-    schedule: { always: true }
-  }),
-  "ops-changelog": terminal("ops-changelog", bunJob("ops-changelog", "{dashboard}"), {
-    cwd: "{dashboard}",
-    description: "Syncs new canary merges and main versions into the Changelog every 5 minutes.",
-    schedule: { every: 300 }
-  }),
-  "ops-dashboard": terminal("ops-dashboard", "{dashboard}/scripts/ops/dashboard/run.sh", {
-    cwd: "{dashboard}",
-    description: "Keeps the live dashboard running on its branch's latest head.",
-    enabled: true,
-    schedule: { every: 60 },
-    stop: "dashboard"
-  }),
-  "ops-dm-watch": terminal("ops-dm-watch", bunJob("ops-dm-watch"), {
-    description: "In Slack mode, hands each message in the owner's DM to the dispatcher, the session in the assistant seat too when no reply lands in 3 minutes.",
-    schedule: { every: 60 }
-  }),
-  "ops-ext-sync": terminal("ops-ext-sync", bunJob("ops-ext-sync"), {
-    description: "Syncs each extension with its private repository at 02:30, pushed only after a clean secrets scan.",
-    schedule: { every: 86400 }
-  }),
-  "ops-firefighting-start": terminal("ops-firefighting-start", `${bunJob("ops-firefighting-start")} --data {data}`, {
-    description: "Starts a firefighting worker for each open ticket no session holds, Urgent first, and holds focus for an Urgent one's.",
-    schedule: { every: 60 }
-  }),
-  "ops-flow": launchd("ops-flow", {
-    description: "Tells the leads when a ready PR's checks stall or a run slot is held too long.",
-    schedule: { every: 60 }
-  }),
-  "ops-herdr": launchd("ops-herdr", {
-    description: "Starts each herdr server that is down, on the pinned binary and the repo's config.",
-    schedule: { every: 60 }
-  }),
-  "ops-machine": terminal("ops-machine", `${bunJob("ops-machine")} --data {data}`, {
-    description: "Writes one line a minute of the machine's load, memory and live sessions to machine.jsonl.",
-    schedule: { every: 60 }
-  }),
-  "ops-merge-train": terminal("ops-merge-train", "python3 -I {checkout}/scripts/ops/merge-train/run.py", {
-    description: "Runs the merge train: builds a train of ready PRs and checks each step.",
-    neverPause: true,
-    schedule: { every: 60 }
-  }),
-  "ops-session-resume": launchd("ops-session-resume", {
-    description: "Queues a carry-on line for each factory session once its usage limit resets.",
-    schedule: { every: 60 }
-  }),
-  "ops-sweep": terminal("ops-sweep", bunJob("ops-sweep"), {
-    description: "The Ops lead's sweep: runners, probes, asks, heartbeats and the forecast.",
-    schedule: { every: 300 }
-  }),
-  "ops-tick": launchd("ops-tick", {
-    description: "The factory's timed beats: the roll gate, the tick, the usage-limit watch and the sweeps.",
-    schedule: { every: 60 }
-  }),
-  "ops-ticket-card": terminal("ops-ticket-card", bunJob("ops-ticket-card"), {
-    description: "Keeps one Inbox card of the day's watched tickets, edited in place on every change.",
-    schedule: { every: 60 }
-  }),
-  "ops-unstick": terminal("ops-unstick", "python3 -I {checkout}/scripts/ops/unstick/run.py", {
-    description: "Reads every live session's screen and clears a factory session stuck on a prompt.",
-    neverPause: true,
-    schedule: { every: 120 }
-  }),
-  "ops-usage": terminal("ops-usage", "python3 -I {checkout}/scripts/ops/usage/run.py", {
-    description: "Reads the account's usage windows into usage.json every 5 minutes.",
-    enabled: true,
-    neverPause: true,
-    schedule: { every: 300 }
-  }),
-  "ops-zai-usage": launchd("ops-zai-usage", {
-    description: "Reads the GLM plan's credits into zai-usage.json, which the spawn gate reads.",
-    schedule: { every: 300 }
-  })
-};
-var OLD_KEYS = { "ops-dashboard": ["jobs.opsDesk"] };
-var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([name, job]) => [
-  jobKey(name),
-  {
-    aliases: OLD_KEYS[name],
-    default: job,
-    description: `The ${name} ops job: ${job.description}`,
-    merge: true,
-    schema: jobRowSchema
-  }
-])));
 // packages/settings/src/models.ts
 var id = string2().regex(/^[a-z0-9][a-z0-9.-]*$/, "a model id, such as claude-opus-5-5");
 var modelSettings = defineSettings({
@@ -7158,128 +7161,6 @@ function bodyOf(commands, k) {
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
-var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]/;
-var LEADS = new Set([
-  "!",
-  "-",
-  "builtin",
-  "command",
-  "elif",
-  "exec",
-  "if",
-  "nocorrect",
-  "noglob",
-  "time",
-  "until",
-  "while"
-]);
-function sources(line) {
-  let command = true;
-  for (const [raw] of line.replace(/\\\n/g, "").matchAll(/[;&|(){}\n]|(?:\$'(?:[^'\\]|\\[\s\S])*'?|'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]|[^\s;&|(){}'"\\])+/g)) {
-    const word = raw.replace(/\$'/g, "'").replace(/['"\\]/g, "");
-    if (/^[;&|(){}\n]$/.test(raw) || /^(?:\]\]|do|else|then)$/.test(word))
-      command = true;
-    else if (!command)
-      continue;
-    else if (word === "source" || word === "." || word === "eval")
-      return true;
-    else if (!LEADS.has(word) && !/^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(word))
-      command = false;
-  }
-  return false;
-}
-var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
-var zshSplits = (line) => {
-  if (ZSH_SPLITS.test(line))
-    return true;
-  for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
-    const at = command.search(ARRAY_MAKERS);
-    if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at)))
-      return true;
-  }
-  const joined = line.replace(/[\\'"]/g, "");
-  if (sources(line) || sources(joined))
-    return true;
-  const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
-  const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
-  return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
-};
-var ONE_WORD = /^\$(?:([A-Za-z_]\w*)|\d|\{(?:([A-Za-z_]\w*)|\d+)\})$/;
-var ZSH_ARRAYS = new Set([
-  "aliases",
-  "argv",
-  "builtins",
-  "cdpath",
-  "commands",
-  "comppostfuncs",
-  "compprefuncs",
-  "compstate",
-  "dirstack",
-  "dis_aliases",
-  "dis_builtins",
-  "dis_functions",
-  "dis_functions_source",
-  "dis_galiases",
-  "dis_patchars",
-  "dis_reswords",
-  "dis_saliases",
-  "epochtime",
-  "errnos",
-  "fignore",
-  "fpath",
-  "funcfiletrace",
-  "funcsourcetrace",
-  "funcstack",
-  "functions",
-  "functions_source",
-  "functrace",
-  "galiases",
-  "history",
-  "historywords",
-  "jobdirs",
-  "jobstates",
-  "jobtexts",
-  "keymaps",
-  "killring",
-  "langinfo",
-  "mailpath",
-  "manpath",
-  "match",
-  "mbegin",
-  "mend",
-  "module_path",
-  "modules",
-  "nameddirs",
-  "options",
-  "parameters",
-  "patchars",
-  "path",
-  "pipestatus",
-  "psvar",
-  "region_highlight",
-  "registers",
-  "reply",
-  "reswords",
-  "saliases",
-  "signals",
-  "sysparams",
-  "termcap",
-  "terminfo",
-  "userdirs",
-  "usergroups",
-  "watch",
-  "widgets",
-  "words",
-  "zle_bracketed_paste",
-  "zle_highlight",
-  "zsh_eval_context",
-  "zsh_scheduled_events"
-]);
-var oneWord = (written) => {
-  const plain = ONE_WORD.exec(written);
-  return !!plain && !ZSH_ARRAYS.has(plain[1] ?? plain[2] ?? "");
-};
 var QUOTED_ONE_WORD = /^(?:\$(?:[A-Za-z_]\w*|\d|\{(?:[A-Za-z_]\w*|\d+)(?::?[-+=?][^}@]*|(?:[#%]{1,2}|\/{1,2})[^}]*)?\}|\([\s\S]*\))|`[\s\S]*`)$/;
 var STDIN_PATHS = new Set(["-", "/dev/fd/0", "/dev/stdin", "/proc/self/fd/0"]);
 var EXPORTS = new Set(["declare", "export", "local", "readonly", "typeset"]);
@@ -7383,8 +7264,8 @@ var setVar = (vars, key, value) => {
 };
 var merge2 = (out, part) => {
   out.value += part.value;
-  if (part.splits && out.splits !== "always")
-    out.splits = part.splits;
+  if (part.splits)
+    out.splits = true;
   if (part.unknown)
     out.unknown ??= part.unknown;
   if (part.variable)
@@ -7819,23 +7700,18 @@ function word(lx) {
     } else if (c === "$" && next === '"')
       lx.i++;
     else if (c === "$" || c === "`") {
-      const from = lx.i;
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge2(out, text);
       if (GLOB_CHARS.test(text.value))
         out.glob = true;
-      const written = src.slice(from, lx.i);
       if (marked(text.value))
-        merge2(out, {
-          splits: oneWord(written) || written.startsWith("$((") ? "sh" : "always",
-          value: ""
-        });
+        out.splits = true;
     } else if (c === "~" && lx.i === start && ends(next)) {
       out.value += homedir2();
       lx.i++;
     } else {
       if (c === UNKNOWN || c === READ)
-        out.splits = "always";
+        out.splits = true;
       out.value += c;
       bare += c;
       lx.i++;
@@ -7871,7 +7747,7 @@ function double(lx) {
       const text = c === "$" ? dollar(lx) : backtick(lx);
       merge2(out, text);
       if (marked(text.value) && !QUOTED_ONE_WORD.test(src.slice(from, lx.i)))
-        out.splits = "always";
+        out.splits = true;
     } else {
       out.value += c;
       lx.i++;
@@ -8295,7 +8171,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
     if (builtins)
       verdict = await visit(cmd, parsed, here);
   } else if (SHELLS.has(name))
-    verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
+    verdict = (here.visitShells ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
   else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
     const scripts = await scriptOf(args[0], cmd, here);
     verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
@@ -8506,18 +8382,17 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
   if (slot)
     return examine({ ...cmd, words: slot }, env, visit, builtins);
   const { inline, operand } = shellOperand(args, name);
-  const splits = (script) => SPLITTERS.has(name) || name === "zsh" && (zshSplits(script) || args.some((a) => /^[-+]/.test(a.value) && a.value !== "-c"));
   if (operand && inline) {
     let script = operand.value;
     if (xargs?.replace && script.includes(xargs.replace)) {
       const fed = await stdinOf(cmd, env);
       script = filled(script, xargs.replace, fed.unknown ? UNKNOWN : fed.value.trim());
     }
-    return run(lexScript(script, env), { ...subshell(env), splits: splits(script) }, visit, builtins);
+    return run(lexScript(script, env), subshell(env), visit, builtins);
   }
   for (const script of await scriptOf(operand, cmd, env)) {
     const text = known(script);
-    const verdict = await run(lexScript(text, env), { ...subshell(env), splits: splits(text) }, visit, builtins);
+    const verdict = await run(lexScript(text, env), subshell(env), visit, builtins);
     if (verdict)
       return verdict;
   }
@@ -8990,10 +8865,9 @@ function commandReads(cmd) {
   if (cmd.redirects.length > 0 || cmd.words.some((w) => /[*?[{()$]/.test(w.value)))
     return false;
   const words = cmd.words.map((w) => w.value);
-  if (words.length === 0)
-    return true;
-  if (words.some(marked))
-    return false;
+  return words.length === 0 || !words.some(marked) && readsWords(words);
+}
+function readsWords(words) {
   const [name, ...args] = words;
   if (name === "git") {
     const k = args[0] === "-C" ? 2 : 0;

@@ -12,7 +12,6 @@ import {
   RiChat3Line,
   RiCheckDoubleLine,
   RiCheckLine,
-  RiCloseCircleLine,
   RiCloseLine,
   RiDeleteBinLine,
   RiDraftLine,
@@ -119,6 +118,7 @@ import { useYardWrites } from "@/hooks/use-yard-writes"
 import { ACCOUNTS_QUERY_KEY } from "@/lib/accounts"
 import { agentLabel, roleLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
+import { EMPTY_PICKS, readPicks, savePicks } from "@/lib/ask-picks"
 import { HOLDS_RELOAD } from "@/lib/build-reload"
 import { copyToClipboard } from "@/lib/clipboard"
 import { config } from "@/lib/config"
@@ -461,6 +461,12 @@ export function AskChoices({
 // A signature of an ask's questions, so the card drops its picks and steps back to the first when an in-place edit grows, shrinks, reorders or rewords them, since the picks are held by position and a stale one would land on another question.
 export function picksKey(questions: AskQuestion[]): string {
   return JSON.stringify(questions.map((q) => [q.question, q.options.map((o) => o.label)]))
+}
+
+// A signature of a single-question ask's choice rows, so the card drops its kept pick when an in-place edit changes, reorders or rewords them, since the pick is held by position; picksKey does the same for a multi-question ask.
+export function choicesKey(choices: Choices | null): string {
+  if (!choices) return "[]"
+  return JSON.stringify([choices.shape, choices.rows.map((r) => [r.label, r.letter, r.go])])
 }
 
 // One question of a multi-question ask as the card's choices, numbered for the keys 1 on, with the recommended option badged where it sits; the pick is this question's own, so stepping between questions keeps each. Busy dims them and takes no click, as AskChoices does.
@@ -1005,20 +1011,38 @@ export function InboxCard({
     setSynced(posted)
     if (draft === synced) setDraft(posted)
   }
-  const [pick, setPick] = useState<number | null>(null)
-  // a multi-question ask's picks, one option index per question, and the question in sight, held here as the single pick is so the card steps through them before its Submit sends them all at once
+  // a multi-question ask's picks, one option index per question, and the question in sight, held below as the single pick is so the card steps through them before its Submit sends them all at once
   const questions = item.kind === "decision" ? questionsOf(item.preview) : []
   const multi = questions.length > 0
-  const [picks, setPicks] = useState<(number | null)[]>(() => questions.map(() => null))
-  const [step, setStep] = useState(0)
-  // an in-place bun run ask edit can change the questions under an open card; when it does, drop the picks and step back to the first, as the draft text resyncs above, so a stale pick never lands on another question
-  const [syncedPicks, setSyncedPicks] = useState(() => picksKey(questions))
-  if (picksKey(questions) !== syncedPicks) {
-    setSyncedPicks(picksKey(questions))
+  // a single-question ask's choice rows, used both for the signature below and the pick's row further down
+  const choices = multi ? null : decisionChoices(item)
+  // the card's answer in progress is kept under its id while it can still take it, and cleared once answered, settled or archived, so it stays in step with a draft card's words
+  const keepsAnswer = item.kind === "decision" && schedulable(item)
+  // the card's answer in progress comes back after a list refresh or a shelf move remounts it (ask-picks store), as a draft card's words do: its pick(s), the question in sight and the Note, read once under its own id while it still keeps an answer; the pick(s) and step are taken only while the signature still matches, so a stale pick never lands on another option, while the Note stands on its own
+  const sig = multi ? picksKey(questions) : choicesKey(choices)
+  const [restored] = useState(() => (keepsAnswer ? (readPicks()[item.id] ?? null) : null))
+  const sigKept =
+    restored !== null &&
+    restored.sig === sig &&
+    restored.picks.length === questions.length &&
+    restored.step < Math.max(questions.length, 1)
+  const [pick, setPick] = useState<number | null>(sigKept ? restored.pick : null)
+  const [picks, setPicks] = useState<(number | null)[]>(
+    sigKept ? restored.picks : questions.map(() => null),
+  )
+  const [step, setStep] = useState(sigKept ? restored.step : 0)
+  // an in-place bun run ask edit can change the questions or a single ask's options under an open card; when the signature moves, drop the pick, picks and step back to the first, as the draft text resyncs above, so a stale pick never lands on another option
+  const [syncedPicks, setSyncedPicks] = useState(() => sig)
+  if (sig !== syncedPicks) {
+    setSyncedPicks(sig)
+    setPick(null)
     setPicks(questions.map(() => null))
     setStep(0)
   }
-  const [note, setNote] = useState("")
+  const [note, setNote] = useState(restored?.note ?? "")
+  useEffect(() => {
+    savePicks(item.id, keepsAnswer ? { note, pick, picks, sig, step } : EMPTY_PICKS)
+  }, [item.id, keepsAnswer, note, pick, picks, sig, step])
   // a secret ask's value, held only until Submit hands it on, then cleared
   const [secret, setSecret] = useState("")
   const secretKey =
@@ -1142,8 +1166,7 @@ export function InboxCard({
       item.title
     )
 
-  // a decision's rows, but a secret's, which takes a value, or a multi-question ask's, which steps through its own questions; its footer sits in the form beside its Send while it is open, and every other card's answers from outside it
-  const choices = multi ? null : decisionChoices(item)
+  // choices is the single ask's rows computed above, null for a multi-question ask; its footer sits in the form beside its Send while it is open, and every other card's answers from outside it
   const picked = pick === null ? null : (choices?.rows[pick] ?? null)
   // every question of a multi-question ask answered, so its Submit may send them all at once
   const allPicked = multi && picks.every((p) => p !== null)
@@ -1426,7 +1449,7 @@ export function InboxCard({
           waiting(item)
             ? "it goes to Done, and its poster is told it is set aside"
             : "it goes to Done, marked dismissed",
-          <RiCloseCircleLine />,
+          <RiCloseLine />,
           () => void onAnswer("dismiss"),
         )}
       <Reopen open={open} setOpen={setToggled} />

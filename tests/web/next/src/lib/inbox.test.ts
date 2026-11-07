@@ -147,7 +147,7 @@ describe("a secret ask (PG-59)", () => {
     const untold = {
       ...provided([{ environment: "Keychain", exitCode: 0, line: "saved" } as never]),
       delivery: {
-        code: "CMUX_FAILED",
+        code: "SESSIONS_FAILED",
         reason:
           "The sessions read was cut short (a herdr server or pane did not answer whole), so dispatcher was not found; nothing was typed.",
         status: "failed",
@@ -210,7 +210,7 @@ describe("an accept decision (PG-658)", () => {
   test("an accept its poster was not told of says why beside the result", () => {
     const unsent = item({
       ...approved({ exitCode: 0, line: "rev 9b8c7d6 is accepted" }),
-      delivery: { code: "CMUX_FAILED", reason: "cmux is not running", status: "failed" },
+      delivery: { code: "SESSIONS_FAILED", reason: "cmux is not running", status: "failed" },
     } as never)
     expect(outcomeLine(unsent)).toBe(
       "Approve · Accept the skill end-of-day · Accepted: rev 9b8c7d6 is accepted · Send failed: cmux is not running",
@@ -890,10 +890,10 @@ describe("resultLink", () => {
 
   test("names the link by what was carried out: the poster's label first", () => {
     expect(
-      resultLink(sent("https://linear.app/acme/issue/DUNE-2186/x", "Filed DUNE-2186")),
+      resultLink(sent("https://linear.app/acme/issue/MADEDUNE-2186/x", "Filed MADEDUNE-2186")),
     ).toEqual({
-      href: "https://linear.app/acme/issue/DUNE-2186/x",
-      label: "Filed DUNE-2186",
+      href: "https://linear.app/acme/issue/MADEDUNE-2186/x",
+      label: "Filed MADEDUNE-2186",
     })
   })
 
@@ -907,8 +907,8 @@ describe("resultLink", () => {
       "Open thread",
     )
     expect(
-      resultLink(sent("https://linear.app/acme/issue/dune-2186/export-times-out"))?.label,
-    ).toBe("DUNE-2186")
+      resultLink(sent("https://linear.app/acme/issue/madedune-2186/export-times-out"))?.label,
+    ).toBe("MADEDUNE-2186")
     expect(resultLink(sent("https://github.com/acme/gke-deployments/pull/1083"))?.label).toBe(
       "acme/gke-deployments#1083",
     )
@@ -931,7 +931,7 @@ describe("a draft's thread", () => {
     })
   const SLACK =
     "https://app.slack.com/client/T0000000000/C0MADEUP01/thread/C0MADEUP01-1700000000.000100"
-  const LINEAR = "https://linear.app/acme/issue/DUNE-2186/export-times-out"
+  const LINEAR = "https://linear.app/acme/issue/MADEDUNE-2186/export-times-out"
 
   test("its label comes from where its link points: a Linear comment, else a Slack draft", () => {
     expect(kindWord(draft(LINEAR))).toBe("Linear comment")
@@ -943,7 +943,7 @@ describe("a draft's thread", () => {
     expect(upfrontLink(draft(SLACK))).toEqual({ href: SLACK, label: "Open thread" })
     expect(upfrontLink(draft(LINEAR))).toEqual({ href: LINEAR, label: "Open thread" })
     expect(upfrontLink(draft())).toBeNull()
-    expect(upfrontLink(draft("http://linear.app/acme/issue/DUNE-1"))).toBeNull()
+    expect(upfrontLink(draft("http://linear.app/acme/issue/MADEDUNE-1"))).toBeNull()
     expect(upfrontLink(draft("javascript:alert(1)"))).toBeNull()
   })
 
@@ -995,7 +995,7 @@ describe("an answer that failed to send", () => {
         choice: "send",
         ...(dismissed ? { dismissedAt: dismissed } : {}),
       },
-      delivery: { code: "CMUX_FAILED", reason: "no answer from cmux", status: "failed" },
+      delivery: { code: "SESSIONS_FAILED", reason: "no answer from cmux", status: "failed" },
       kind: "draft",
       ref,
       status: "sent",
@@ -1060,7 +1060,7 @@ describe("a sent draft before its poster acks it", () => {
       outcomeLine(
         sent({
           delivery: typed,
-          preview: { link: "https://linear.app/acme/issue/DUNE-1/x", text: "hi", to: "Cam" },
+          preview: { link: "https://linear.app/acme/issue/MADEDUNE-1/x", text: "hi", to: "Cam" },
         }),
       ),
     ).toBe("Sent")
@@ -1114,7 +1114,7 @@ describe("a sent draft before its poster acks it", () => {
 
 describe("a draft saved in Slack", () => {
   const SLACK = "https://app.slack.com/client/T0000000000/D0MADEUP11"
-  const LINEAR = "https://linear.app/acme/issue/DUNE-1/x"
+  const LINEAR = "https://linear.app/acme/issue/MADEDUNE-1/x"
   const drafted = (over: Partial<InboxItem> = {}) =>
     item({
       answer: { at: "x", choice: "draft" },
@@ -1128,7 +1128,7 @@ describe("a draft saved in Slack", () => {
     const previews = [
       { link: SLACK, text: "hi", to: "Merritt DM" },
       { noLink: "a new DM", text: "hi", to: "Merritt DM" },
-      { link: LINEAR, text: "hi", to: "DUNE-1" },
+      { link: LINEAR, text: "hi", to: "MADEDUNE-1" },
     ]
     const shown = previews.map((preview) => canDraft(item({ kind: "draft", preview })))
     expect(shown).toEqual([true, true, false])
@@ -1470,7 +1470,7 @@ describe("Schedule (put an ask away until a time, then it asks again)", () => {
   })
   const failedSend = item({
     answer: { at: "2026-10-09T06:00:00.000Z", choice: "send" },
-    delivery: { code: "CMUX_FAILED", reason: "no answer from cmux", status: "failed" },
+    delivery: { code: "SESSIONS_FAILED", reason: "no answer from cmux", status: "failed" },
     kind: "draft",
     ref: 76,
     status: "sent",
@@ -1877,7 +1877,7 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
   test("a card that rises to an open tier shows open: an answer that failed to send, an update made unread", () => {
     const failed = {
       ...answered,
-      delivery: { code: "CMUX_FAILED", reason: "no answer from cmux", status: "failed" },
+      delivery: { code: "SESSIONS_FAILED", reason: "no answer from cmux", status: "failed" },
     } as InboxItem
     expect(foldsByDefault(failed, NOW)).toBe(false)
     expect(foldsByDefault({ ...read, readAt: null }, NOW)).toBe(false)
@@ -1997,7 +1997,11 @@ describe("uploadsOn", () => {
     [
       item({
         kind: "draft",
-        preview: { ...words, attachments: FILES, link: "https://linear.app/acme/issue/DUNE-1/x" },
+        preview: {
+          ...words,
+          attachments: FILES,
+          link: "https://linear.app/acme/issue/MADEDUNE-1/x",
+        },
       }),
       null,
     ],

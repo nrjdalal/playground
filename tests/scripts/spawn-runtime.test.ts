@@ -409,15 +409,15 @@ describe("a resume opens in herdr, whatever runtime its start recorded", () => {
     ).toEqual(["pane", "run", "w5:p1"])
   })
 
-  // A session that started in cmux, before herdr took over, resumes in herdr, and its pin then reads herdr.
-  test("a resume whose pin reads cmux opens in herdr and rewrites the pin (#2076)", async () => {
+  // The pin is rewritten at every resume, so one holding any word from an older install opens in herdr.
+  test("a resume whose pin holds another word opens in herdr and rewrites the pin", async () => {
     const r = await spawn(
       ["resume", "worker-x", root, SESSION],
       [],
-      { CMUX_SOCKET_PATH: join(scratch, "cmux.sock") },
+      {},
       undefined,
       claude,
-      pinned("cmux"),
+      pinned("made-up"),
     )
     expect(r.code, r.err).toBe(0)
     expect(r.cmux).toBeUndefined()
@@ -429,18 +429,5 @@ describe("a resume opens in herdr, whatever runtime its start recorded", () => {
     expect(launchOf(r)).toContain(`claude --resume ${SESSION} -n worker-x`)
     expect(execLine(r, "worker-x")).toBe(`exec spawn.sh resume worker-x ${root} ${SESSION}`)
     expect(readFileSync(lw(r.home, "runtimes", "worker-x"), "utf8")).toBe("herdr\n")
-  })
-
-  test("a runtime pin that reads neither is refused", async () => {
-    const r = await spawn(
-      ["resume", "worker-x", root, SESSION],
-      [],
-      {},
-      undefined,
-      claude,
-      pinned("tmux"),
-    )
-    expect(r.code).toBe(1)
-    expect(r.err).toContain("the runtime pin for worker-x reads neither cmux nor herdr")
   })
 })

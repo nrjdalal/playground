@@ -228,16 +228,16 @@ esac
       await stop(p)
       return waiting
     }
-    // Puts a dead waiter's ticket in the queue and says whether this waiter, as the one live waiter left, removed it in a look and is still waiting; false at once if it ends first, and a ticket that never goes (a run-slot.priority pick skips the queue reads) fails by the timeout, never as a pass
+    // Puts a dead waiter's ticket at the queue's front (0-, before every ticket a test writes) and says whether this waiter, as the one live waiter left, removed it in a look and is still waiting, since a waiter behind the head looks when the oldest's pid has ended (issue 1338); false at once if it ends first, and a ticket that never goes (a run-slot.priority pick skips the queue reads) fails by the timeout, never as a pass
     const lookedAgain = async () => {
       const gone = Bun.spawn(["true"])
       await gone.exited
-      const path = join(ops, "run-slot.waiters", `1-${gone.pid}-worker-gone`)
+      const path = join(ops, "run-slot.waiters", `0-${gone.pid}-worker-gone`)
       writeFileSync(path, "s2 21 1 small\n")
       while (!ended && existsSync(path)) await Bun.sleep(20)
       return !ended && !existsSync(marker)
     }
-    return { marker, p, ran, saw, waits }
+    return { marker, p, ran, saw, stderr: () => err, waits }
   }
   const canTake = async (slot: string, who: string, extra: Record<string, string> = {}) => {
     const p = Bun.spawn(["bash", SCRIPT, "can-take", slot, who], { cwd: root, env: env(extra) })
@@ -294,4 +294,17 @@ esac
     tickets,
     waits,
   }
+}
+
+// what `run-slot.sh slots` prints on the machine: the count of run-slot to run-slot-4 held or open now, "4\n" with all four open and "1\n" with slots 2 to 4 shut
+export const slots = (m: ReturnType<typeof machine>) =>
+  Bun.spawnSync(["bash", SCRIPT, "slots"], { cwd: m.root, env: m.env() }).stdout.toString()
+// run-slot.sh set's exit code and stderr on the machine
+export const set = async (m: ReturnType<typeof machine>, ...args: string[]) => {
+  const p = Bun.spawn(["bash", SCRIPT, "set", ...args], {
+    cwd: m.root,
+    env: m.env(),
+    stderr: "pipe",
+  })
+  return { code: await p.exited, err: await new Response(p.stderr).text() }
 }

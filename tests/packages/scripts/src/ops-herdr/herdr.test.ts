@@ -611,7 +611,7 @@ const AFTER_BOOT = [
   "skipped c-worker: live",
   "skipped i-worker: its roster row reads ended",
   "skipped j-worker: its roster row reads parked",
-  "skipped k-worker: it has no runtime pin",
+  "skipped k-worker: its exec line does not parse",
   "not restored g-worker: the usage gate holds it: it cannot read zai-usage.json",
   ...["d", "e", "f"].map(
     (id) =>
