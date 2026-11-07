@@ -7,12 +7,19 @@ import { dollarReplacements, FIX } from "../../../../packages/scripts/src/replac
 const pid = "$" + "$"
 const match = "$" + "&"
 const group = "$" + "1"
+const escapedTick = "$" + "\\`"
+const escapedQuote = "$" + "\\'"
 
 describe("dollarReplacements", () => {
   test("flags $$, $` and $' in any literal replacement, the 7 Nov run-slot.sh slip among them", () => {
     expect(dollarReplacements(`s.replace("a", "echo ${pid}")`)).toEqual([1])
     expect(dollarReplacements(`ok\ns.replaceAll(/a/g, 'x ${"$"}\` y')`)).toEqual([2])
     expect(dollarReplacements(`s.replace(MARK, \`mark-${pid}\`)`)).toEqual([1])
+  })
+
+  test("reads an escaped quote beside the $ as the character it stands for", () => {
+    expect(dollarReplacements('s.replace("a", `x ' + escapedTick + " y`)")).toEqual([1])
+    expect(dollarReplacements(`s.replace('a', 'it${escapedQuote}s')`)).toEqual([1])
   })
 
   test("flags $& after a string search, which JS swaps for the match", () => {

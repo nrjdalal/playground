@@ -57,14 +57,16 @@ const argument = (s: string, i: number): { end: number; text: string } => {
   return { end: j, text: s.slice(i, j).trim() }
 }
 
-// The literal's own text when the argument is one string or template alone, its `${…}` parts dropped; null otherwise.
+// The literal's own text when the argument is one string or template alone, each escape decoded (so `$\`` reads as `` $` ``) and its `${…}` parts dropped; null otherwise.
 const literal = (text: string): string | null => {
   const quote = text[0]
   if (quote !== '"' && quote !== "'" && quote !== "`") return null
   if (pastQuoted(text, 0) !== text.length) return null
   let body = ""
   for (let j = 1; j < text.length - 1; j++) {
-    if (quote === "`" && text[j] === "$" && text[j + 1] === "{") j = pastNested(text, j + 1) - 1
+    if (text[j] === "\\") body += text[++j]
+    else if (quote === "`" && text[j] === "$" && text[j + 1] === "{")
+      j = pastNested(text, j + 1) - 1
     else body += text[j]
   }
   return body
