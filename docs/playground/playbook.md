@@ -56,6 +56,7 @@ and an ask with no marker gets a thread through `playground thread` (each Inbox 
 Before a fix gets a plan row or a worker, the manager greps the open PRs' diffs for the bug's file and function, and hands the fix to the PR that already holds it or drops it, so two PRs never fix one thing in parallel.
 Work goes out in bundles: the Planner groups the issues that touch one surface, such as the sidebar or the chat, into one bundle, and a bundle is one worker, one PR, one review loop and one tester pass per head, its tester driving only the pages and files the bundle touches.
 Two pieces of work that depend on each other in meaning stack only for no line overlap: the test is a merge-tree of the two heads against the parent's merge base with canary, and the child holds behind its parent until the parent merges.
+pr:merge and merge-on-ready hold it there: they refuse a child whose `Stacked on #N` line names an unmerged parent (the `parent` gate in [pr-merge's README](../../packages/scripts/src/pr-merge/README.md)).
 A stacked child merges its parent's branch in once, when the parent scores 5/5 or merges, taking the parent's final head, the head the parent merges at (DISPATCH.md's bundles), since every merge is a head its reviewer scores again.
 A stacked child retargeted to canary after its parent merges pushes a merge of canary before it asks for review, since GitHub can keep a retargeted PR conflicting, with no CI run, until a push makes it recompute.
 A stack held at 5/5 until the owner's try syncs with canary only on a conflict, plus once before the try, and each sync's round cites CI where CI can stand in for the local run, since every sync re-scores every PR in the stack.
@@ -174,7 +175,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   A resumed session restarts any dev stack it served and re-arms its watches, CronList before CronCreate, since the resume kept its crons and dropped its background tasks.
   The factory no longer moves sessions to GLM at 98% usage (retired on Inbox #i827): the account rotation moves it between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
 - A session started with no `--runtime`, from any terminal, or with `--runtime herdr`, opens in herdr, in a pane labelled with its name, and its next resume opens there too.
-  spawn.sh starts nothing in cmux: it refuses `--runtime cmux` and a column started beside a cmux surface, and a session that ran in cmux resumes in herdr.
+  spawn.sh starts nothing in cmux: it refuses `--runtime cmux` and a column started beside a cmux surface, and every resume opens in herdr, whatever word its runtime pin held.
   Claude's folder trust and MCP prompts are answered for it only under the code root (`paths.codeRoot`, else the folder that holds the main checkout) and `~/<org>` for each org `ext.links` guards; anywhere else it waits for the owner.
   A probe on a herdr server with no pane yet opens in a workspace of its own (`spawn.sh probe`), and when herdr refuses to open one, spawn.sh shows herdr's own reason.
   After a herdr server restarts, the factory's or the probes', its ops job runs `spawn.sh restore` for it, which brings back every herdr session that ran on that server and whose roster row is not done, ended, parked or paused, one that never got its first message included,

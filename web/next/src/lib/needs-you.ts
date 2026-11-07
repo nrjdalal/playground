@@ -71,7 +71,7 @@ export type OnAnswer = (
 >
 
 // The answer route's refusals after which the answer may already be in the session.
-const MAY_HAVE_GONE = new Set(["CMUX_FAILED", "INTERRUPTED", "UNCONFIRMED"])
+const MAY_HAVE_GONE = new Set(["INTERRUPTED", "SESSIONS_FAILED", "UNCONFIRMED"])
 
 export const mayHaveGone = (feed: unknown): boolean => MAY_HAVE_GONE.has(String(feed))
 

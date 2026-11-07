@@ -1157,7 +1157,11 @@ describe("the list", () => {
   })
 
   test("an answer that failed to send needs him, newest first among what does, until he dismisses it", () => {
-    const failed = { code: "CMUX_FAILED", reason: "no answer from cmux", status: "failed" } as const
+    const failed = {
+      code: "SESSIONS_FAILED",
+      reason: "no answer from cmux",
+      status: "failed",
+    } as const
     const answer = { at: "2026-10-07T11:00:00.000Z", choice: "send" } as const
     const items = [
       item({ kind: "update", ref: 3 }),
@@ -3767,7 +3771,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
   })
 
   const failing = async () => ({
-    code: "CMUX_FAILED",
+    code: "SESSIONS_FAILED",
     ok: false as const,
     reason: "cmux sessions failed: no answer from cmux",
   })
@@ -3782,7 +3786,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     )
     if (!answered.ok) throw new Error(answered.message)
     expect(answered.item.status).toBe("approved")
-    expect(answered.item.delivery).toMatchObject({ code: "CMUX_FAILED", status: "failed" })
+    expect(answered.item.delivery).toMatchObject({ code: "SESSIONS_FAILED", status: "failed" })
     const later = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000)
     const list = await store.listItems(db, later)
     expect(list.items.map((i) => i.id)).toContain(posted.id)
@@ -3790,6 +3794,43 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     expect(list.items.filter(store.deliveryFailed).map((i) => i.id)).toEqual([posted.id])
     expect(await store.dismissItems(db, [posted.id])).toBe(1)
     expect((await store.listItems(db, later)).items.map((i) => i.id)).not.toContain(posted.id)
+  })
+
+  // #1440 renamed the sessions read's codes; a row recorded under an old one reads through toItem's alias for one ship (ADR 0015), and the row itself stays as stored
+  test("a delivery stored under an old code reads as its sessions-named code, and a new failure records the new code alone (#1440)", async () => {
+    const posted = await post(decision(PREVIEWS.delete))
+    const answered = await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve" },
+      { actor, deliver: failing },
+    )
+    if (!answered.ok) throw new Error(answered.message)
+    const reader = new SQL(url, { max: 1 })
+    const stored = async (): Promise<string[]> =>
+      (
+        await reader`select delivery ->> 'code' as code from inbox_item where id = ${posted.id}`
+      ).map((row: { code: string }) => row.code)
+    try {
+      expect(await stored()).toEqual(["SESSIONS_FAILED"])
+      for (const [old, now] of [
+        ["CMUX_FAILED", "SESSIONS_FAILED"],
+        ["CMUX_UNAVAILABLE", "SESSIONS_UNAVAILABLE"],
+      ] as const) {
+        await reader`update inbox_item set delivery = jsonb_set(delivery, '{code}', to_jsonb(${old}::text)) where id = ${posted.id}`
+        expect(await stored()).toEqual([old])
+        expect((await store.getItem(db, posted.id))?.delivery).toMatchObject({
+          code: now,
+          status: "failed",
+        })
+        const listed = (await store.listItems(db)).items.find((item) => item.id === posted.id)
+        expect(listed?.delivery).toMatchObject({ code: now, status: "failed" })
+        expect(await stored()).toEqual([old])
+      }
+    } finally {
+      await reader.close()
+    }
+    await store.dismissItems(db, [posted.id])
   })
 
   test("a set-aside item stays in the list past a week, for the Archive shelf, and never counts", async () => {
@@ -3821,7 +3862,10 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
     const posted = await post(decision(SLACK))
     await store.answerItem(db, posted.id, { action: "approve" }, { actor, deliver: failing })
     const again = await store.retryDelivery(db, posted.id, { actor, deliver: failing })
-    expect(again.ok && again.item.delivery).toMatchObject({ code: "CMUX_FAILED", status: "failed" })
+    expect(again.ok && again.item.delivery).toMatchObject({
+      code: "SESSIONS_FAILED",
+      status: "failed",
+    })
     const sent: Delivery[] = []
     const deliver = async (delivery: Delivery) => {
       sent.push(delivery)
@@ -4541,7 +4585,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         {
           actor,
           deliver: async () => ({
-            code: "CMUX_FAILED",
+            code: "SESSIONS_FAILED",
             ok: false,
             reason:
               "The sessions read was cut short (a herdr server or pane did not answer whole), so dispatcher was not found; nothing was typed.",
@@ -4551,7 +4595,7 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
         },
       )
       expect(provided.ok && provided.item.delivery).toMatchObject({
-        code: "CMUX_FAILED",
+        code: "SESSIONS_FAILED",
         status: "failed",
       })
       const saved = provided.ok ? provided.item.answer : null

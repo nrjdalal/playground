@@ -147,7 +147,7 @@ describe("a secret ask (PG-59)", () => {
     const untold = {
       ...provided([{ environment: "Keychain", exitCode: 0, line: "saved" } as never]),
       delivery: {
-        code: "CMUX_FAILED",
+        code: "SESSIONS_FAILED",
         reason:
           "The sessions read was cut short (a herdr server or pane did not answer whole), so dispatcher was not found; nothing was typed.",
         status: "failed",
@@ -210,7 +210,7 @@ describe("an accept decision (PG-658)", () => {
   test("an accept its poster was not told of says why beside the result", () => {
     const unsent = item({
       ...approved({ exitCode: 0, line: "rev 9b8c7d6 is accepted" }),
-      delivery: { code: "CMUX_FAILED", reason: "cmux is not running", status: "failed" },
+      delivery: { code: "SESSIONS_FAILED", reason: "cmux is not running", status: "failed" },
     } as never)
     expect(outcomeLine(unsent)).toBe(
       "Approve · Accept the skill end-of-day · Accepted: rev 9b8c7d6 is accepted · Send failed: cmux is not running",
@@ -995,7 +995,7 @@ describe("an answer that failed to send", () => {
         choice: "send",
         ...(dismissed ? { dismissedAt: dismissed } : {}),
       },
-      delivery: { code: "CMUX_FAILED", reason: "no answer from cmux", status: "failed" },
+      delivery: { code: "SESSIONS_FAILED", reason: "no answer from cmux", status: "failed" },
       kind: "draft",
       ref,
       status: "sent",
@@ -1470,7 +1470,7 @@ describe("Schedule (put an ask away until a time, then it asks again)", () => {
   })
   const failedSend = item({
     answer: { at: "2026-10-09T06:00:00.000Z", choice: "send" },
-    delivery: { code: "CMUX_FAILED", reason: "no answer from cmux", status: "failed" },
+    delivery: { code: "SESSIONS_FAILED", reason: "no answer from cmux", status: "failed" },
     kind: "draft",
     ref: 76,
     status: "sent",
@@ -1877,7 +1877,7 @@ describe("a card folds by priority, the ones needing an answer staying open", ()
   test("a card that rises to an open tier shows open: an answer that failed to send, an update made unread", () => {
     const failed = {
       ...answered,
-      delivery: { code: "CMUX_FAILED", reason: "no answer from cmux", status: "failed" },
+      delivery: { code: "SESSIONS_FAILED", reason: "no answer from cmux", status: "failed" },
     } as InboxItem
     expect(foldsByDefault(failed, NOW)).toBe(false)
     expect(foldsByDefault({ ...read, readAt: null }, NOW)).toBe(false)

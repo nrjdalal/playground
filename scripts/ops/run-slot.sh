@@ -30,7 +30,7 @@ stamp() { stat -L -c '%i %Y' "$1" 2>/dev/null || stat -L -f '%i %m' "$1" 2>/dev/
 STAMP=$(stamp "$SELF")
 # A hand-set runner-host/slot-off kept the runner box idle for two days, so each ops switch carries "<who> <iso set> <iso expiry> <reason>"
 # (run-slot.sh set, below) and drops itself past its expiry; a file with no such line counts as set at its mtime with the default 4 hours, and as off while that mtime reads back empty
-SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
+SWITCHES="run-slot.3-off run-slot.4-off run-slot.clone-off run-slot.focus run-slot.idle-min run-slot.load5-cap run-slot.single runner-host/off runner-host/slot-off"
 # whether switch $1 (a path under ops) is on; one past its expiry is moved to <name>.expired-<ts> and logged in run-slot.runs.log
 switch_on() {
   local f="$OPS/$1" line ends now m
@@ -210,8 +210,8 @@ if [ "${1:-}" = size ]; then
   size_of "$2"
   exit
 fi
-# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, focus, load5-cap, single,
-# or the runner host's off or slot-off, for 4 hours unless --for says; a value (load5-cap's cap) goes on the line below. A set with no reason is refused
+# run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]: turn on switch 3-off, 4-off, clone-off, focus, idle-min, load5-cap, single,
+# or the runner host's off or slot-off, for 4 hours unless --for says; a value (idle-min's bar, load5-cap's cap) goes on the line below. A set with no reason is refused
 if [ "${1:-}" = set ]; then
   usage='usage: run-slot.sh set <who> <switch> [<value>] --reason "<why>" [--for <n>m|<n>h]'
   [ $# -ge 3 ] || { echo "$usage" >&2; exit 2; }
@@ -227,8 +227,8 @@ if [ "${1:-}" = set ]; then
   case "$who" in *[!A-Za-z0-9._#-]*|"") echo "run-slot.sh: <who> is a session name (letters, digits, . _ - #)" >&2; exit 2 ;; esac
   case "$name" in
     off|slot-off) path=runner-host/$name ;;
-    3-off|4-off|clone-off|focus|load5-cap|single) path=run-slot.$name ;;
-    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, focus, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
+    3-off|4-off|clone-off|focus|idle-min|load5-cap|single) path=run-slot.$name ;;
+    *) echo "run-slot.sh: no switch $name (3-off, 4-off, clone-off, focus, idle-min, load5-cap, single, off, slot-off)" >&2; exit 2 ;;
   esac
   [ -n "$reason" ] || { echo "run-slot.sh: a set takes --reason \"<why>\", so whoever finds the switch on knows why it stands" >&2; exit 2; }
   case "$span" in [0-9]*m) unit=60 ;; [0-9]*h) unit=3600 ;; *) unit= ;; esac
@@ -1411,13 +1411,13 @@ cheap_sig() {
     SIG="$SIG|$f"
     p=
     case "$f" in
-      *.holder | */run-slot.priority | */run-slot.load5-cap | */run-slot.focus) l=; read -r l < "$f" 2>/dev/null; SIG="$SIG=$l"; [ "${f%.holder}" = "$f" ] || { p=${l#* }; p=${p%% *}; } ;;
+      *.holder | */run-slot.priority | */run-slot.load5-cap | */run-slot.focus) l=; read -r l 2>/dev/null < "$f"; SIG="$SIG=$l"; [ "${f%.holder}" = "$f" ] || { p=${l#* }; p=${p%% *}; } ;;
       "$QUEUE"/*) p=${f##*/}; p=${p#*-}; p=${p%%-*} ;;
     esac
     case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac
   done
   for d in "$@"; do
-    for f in "$d"/run-slot*.holder; do l=; read -r l < "$f" 2>/dev/null; SIG="$SIG|$f=$l"; p=${l#* }; p=${p%% *}; case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac; done
+    for f in "$d"/run-slot*.holder; do l=; read -r l 2>/dev/null < "$f"; SIG="$SIG|$f=$l"; p=${l#* }; p=${p%% *}; case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac; done
   done
 }
 # the load's line, its 1- and 5-minute loads in whole numbers, which a waiter at the head looks again on (two processes, so only the head reads it)
@@ -1425,7 +1425,7 @@ cheap_load() { local l; l=$(loadavg); set -- $l; LOAD="${2%%.*} ${3%%.*}"; }
 # whether this waiter's ticket is the queue's oldest, the one that names who goes next in run-slot.next
 oldest_is_me() { local a=("$QUEUE"/*); [ -n "$TICKET" ] && [ "${a[0]}" = "$TICKET" ]; }
 # the lines a waiter behind the head watches: who the oldest waiter names next, and the lead's pick and focus, which name a session whatever its place
-next_sig() { local f l; NSIG=; for f in "$NEXTF" "$OPS/run-slot.priority" "$OPS/run-slot.focus"; do l=; read -r l < "$f" 2>/dev/null; NSIG="$NSIG|$l"; done; }
+next_sig() { local f l; NSIG=; for f in "$NEXTF" "$OPS/run-slot.priority" "$OPS/run-slot.focus"; do l=; read -r l 2>/dev/null < "$f"; NSIG="$NSIG|$l"; done; }
 # the epoch second the first rule a look reads by the clock alone turns, nothing while none will: a ticket reaching AGED (the queue's order),
 # run-slot.priority's hour, a switch's expiry and a holder line with no pid going stale at 2 hours, so a waiter at the head looks again then
 due_at() {
@@ -1435,7 +1435,7 @@ due_at() {
     [ -e "$f" ] || continue
     case "$f" in
       */run-slot.priority) m=3600 ;;
-      *.holder) l=; read -r _ l _ < "$f" 2>/dev/null; case "$l" in '' | *[!0-9]*) m=7200 ;; *) continue ;; esac ;;
+      *.holder) l=; read -r _ l _ 2>/dev/null < "$f"; case "$l" in '' | *[!0-9]*) m=7200 ;; *) continue ;; esac ;;
       *) m=$AGED ;;
     esac
     e=$(mtime "$f") || continue
@@ -1444,7 +1444,7 @@ due_at() {
   done
   for f in $SWITCHES; do
     [ -e "$OPS/$f" ] || continue
-    l=; read -r l < "$OPS/$f" 2>/dev/null
+    l=; read -r l 2>/dev/null < "$OPS/$f"
     if [[ "$l" =~ ^[^\ ]+\ [0-9-]{10}T[0-9:]{8}Z\ ([0-9-]{10}T[0-9:]{8}Z)\  ]]; then
       e=$(date -u -j -f %Y-%m-%dT%H:%M:%SZ "${BASH_REMATCH[1]}" +%s 2>/dev/null || date -u -d "${BASH_REMATCH[1]}" +%s 2>/dev/null) || continue
     else
@@ -1739,7 +1739,13 @@ slot_open() {
   fi
   return 0
 }
-# whether the gauges open slots 2 to 4: mem_ok passing and the CPU 40% idle or more under load1 45 (5 Nov, 06:19 to 07:45Z: a 50% bar from load1 30
+# the CPU idle share slots 2 to 4 open at under load1 45: 40, or run-slot.idle-min's bar while it stands, a whole number from 0 to 100 on the file's last line as load_line reads its cap (issue 1431: a constant bar left Ops no way to put more of a machine's cores to use short of a code change); any other value keeps 40
+idle_min() {
+  local bar
+  bar=$(switch_on run-slot.idle-min && tail -n 1 "$OPS/run-slot.idle-min" | grep -xE '[0-9]{1,3}'); [ -n "$bar" ] && [ "$bar" -le 100 ] || bar=40
+  echo "$bar"
+}
+# whether the gauges open slots 2 to 4: mem_ok passing and the CPU idle at idle_min's bar or more, 40% unless run-slot.idle-min says, under load1 45 (5 Nov, 06:19 to 07:45Z: a 50% bar from load1 30
 # to 45 left the CPU at a median 48% idle, and 14 of its 30 CPU shuts read 40 to 49% idle) (dispatcher, 3 Nov: the resting sessions held load1 at 14 to 20 on 15 cores while the CPU sat 53 to 67% idle, so the old load1 lines of 12
 # and the cores left one lane open with 24 to 33 runs waiting; retro 36, 4 Nov: at a load1 30 stop the lanes were shut 109 of 120 minutes
 # with the CPU about half idle, and heavy runs waited up to 122 minutes); load1 45 stays a hard stop for the spikes, load1 64 after a burst
@@ -1756,7 +1762,7 @@ lanes_open() {
     -) told idle "run-slot.sh: cannot read the CPU's idle share (top -l 2 -n 0), so slots 2 to 4 stay shut" ;;
     busy) told busy "$BUSY_TOLD" ;;
   esac
-  if [ "${load%.*}" -lt 45 ] 2>/dev/null; then need=40; fi
+  if [ "${load%.*}" -lt 45 ] 2>/dev/null; then need=$(idle_min); fi
   if [ -z "$need" ]; then
     why=load1
   elif [ "$idle" = - ] || [ "$idle" = busy ] || ! [ "${idle%.*}" -ge "$need" ] 2>/dev/null; then
@@ -2077,13 +2083,13 @@ if [ -n "$KIND" ]; then
   # the clone's spacing is shared, so one waiter works it out about every 15 to 24 s for all of them (issue 1338): run-slot.clone-verdict holds the CPU slots' and
   # the clone lane's holder lines it was worked out under, then its verdict, and a waiter takes one written no earlier than its own last tick under the same lines, so a verdict serves up to 48 s
   CLONE_VERDICT="$OPS/run-slot.clone-verdict"
-  clone_holders() { local s l; HL=; for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-clone; do l=; [ -d "$OPS/$s" ] && { read -r l < "$OPS/$s.holder" 2>/dev/null; l="held $l"; }; HL="$HL|$l"; done; }
+  clone_holders() { local s l; HL=; for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-clone; do l=; [ -d "$OPS/$s" ] && { read -r l 2>/dev/null < "$OPS/$s.holder"; l="held $l"; }; HL="$HL|$l"; done; }
   clone_verdict() {
     local h v
     clone_holders
     if [ -n "$CT0" ] && [ $((SECONDS - CT0)) -lt "$CTICK" ] && [ "$HL" = "$CHL" ]; then spaced=$CSP; return; fi
     h= v=
-    { read -r h; read -r v; } < "$CLONE_VERDICT" 2>/dev/null
+    { read -r h; read -r v; } 2>/dev/null < "$CLONE_VERDICT"
     if [ -n "$CT0" ] && [ -e "$CLONE_VERDICT" ] && ! [ "$REF" -nt "$CLONE_VERDICT" ] && [ "$h" = "$HL" ]; then
       CSP=$v
     else
@@ -2191,7 +2197,7 @@ while :; do
   # pick's next ticket included once its first has gone, looks again at once (its poll reads run-slot.next)
   if [ -n "$TICKET" ] && oldest_is_me; then
     pf=; [ -e "$OPS/run-slot.priority" ] || [ -e "$OPS/run-slot.focus" ] && pf=$(prio_first)
-    nx=; read -r nx < "$NEXTF" 2>/dev/null
+    nx=; read -r nx 2>/dev/null < "$NEXTF"
     [ "$nx" = "${fw:--} ${fw2:--} ${pf:--}" ] || printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null
   fi
   prev=$LOOKER
