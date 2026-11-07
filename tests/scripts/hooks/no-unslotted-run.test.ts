@@ -191,7 +191,7 @@ describe("a run through run-slot, a light run, or one outside the worktrees runs
     ["outside the repo", "bun run test", OUTSIDE],
     ["the worktrees folder itself", "bun install", `${MAIN}/.claude/worktrees`],
   ])("%s", async (_name, command, cwd) => {
-    expect(await commit(command, cwd)).toBeUndefined()
+    expect(await bash(command, cwd)).toBeUndefined()
   })
 
   test("a cd the hook cannot follow leaves the command alone", async () => {
@@ -446,6 +446,7 @@ const forms = (subject: string, file: string): [string, string][] => [
   ["git -C from another folder", `cd ${OUTSIDE} && git -C ${REPO} commit -m "${subject}"`],
   ["through run-slot", `${SLOT} git commit -m "${subject}"`],
   ["-F after a git add, which writes no file", `git add bad.txt good.txt && git commit -F ${file}`],
+  ["-m from a file read by its own cat", `git commit -m "$(cat ${file})"`],
   [
     "-F - from a heredoc after a command that may write a file",
     `touch x && git commit -F - <<'EOF'\n${subject}\nEOF`,
