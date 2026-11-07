@@ -148,13 +148,15 @@ export const envOf =
     }
   }
 
-// A data folder of the run's own, so a hook's write lands there: the roster copied, and the extensions, the guards' lists and policy.json, linked from the real data folder
+// The data folder's entries a check() writes, writing-first's marks, and the roster the run reads roles from, copied into the scratch folder; every other entry is linked
+export const COPIED = ["roster.json", "writing-first"]
+
+// A data folder of the run's own, so a check()'s write lands there while every read and protected path resolves to the real data folder's entry through its link
 export function scratchData(real: string, base = tmpdir()): string {
   const data = mkdtempSync(join(base, "hook-differential-data-"))
-  if (existsSync(join(real, "roster.json")))
-    cpSync(join(real, "roster.json"), join(data, "roster.json"))
-  if (existsSync(join(real, "extensions")))
-    symlinkSync(join(real, "extensions"), join(data, "extensions"))
+  for (const entry of existsSync(real) ? readdirSync(real) : [])
+    if (COPIED.includes(entry)) cpSync(join(real, entry), join(data, entry), { recursive: true })
+    else symlinkSync(join(real, entry), join(data, entry))
   return data
 }
 
@@ -196,9 +198,10 @@ export async function sweep(
   for (const { command, inClass } of forms)
     for (const cwd of cwdsOf(home)) {
       counts.cases++
+      const own = env({ command, cwd })
       const [was, now] = [
-        await allows(canary, { command, cwd }, env({ command, cwd }), main, repo),
-        await allows(head, { command, cwd }, env({ command, cwd }), main, repo),
+        await allows(canary, { command, cwd }, own, main, repo),
+        await allows(head, { command, cwd }, own, main, repo),
       ]
       if (was === now) {
         counts.same++
@@ -277,9 +280,10 @@ export async function replay(
   const counts = { calls: list.length, "newly allowed": 0, "newly refused": 0, same: 0 }
   const changed: string[] = []
   for (const call of list) {
+    const own = env(call)
     const [was, now] = [
-      await allows(canary, call, env(call), main, repo),
-      await allows(head, call, env(call), main, repo),
+      await allows(canary, call, own, main, repo),
+      await allows(head, call, own, main, repo),
     ]
     if (was === now) counts.same++
     else {
