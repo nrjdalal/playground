@@ -435,7 +435,7 @@ if [ -z "$KIND_ONLY" ] && [ -z "$CAN_TAKE" ] && [ -z "$MODEL_BOUND" ] && [ -x "$
   [ "$rc" -ne 255 ] && exit "$rc"
   echo "run-slot.sh: the runner host could not take it, so it waits for a slot here" >&2
 fi
-# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell word), and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, a step holding a chain shell word anywhere (a nested chain, a script file or a shell fed its script on stdin), or with a command substitution beside docker, podman or a portless compose
+# A `sh -c`, `bash -c`, `zsh -c`, `dash -c` or `ksh -c` chain's steps, or a `bash <script file>`'s, behind any CHAIN_WRAPPERS words, which come out as a step of their own, one a line, each step's words joined by \x1f, as shlex splits the script at each run of &, |, ;, <, > and parentheses (5 Nov: a script that only commits waited in the general queue); see scripts/ops/README.md's commit lane for the comment, \ and newline reads, the cd and env-word steps, the -e, -u, -x, -v and -o pipefail options read past after -c, and the quoted ?, *, [, {, # and ~ each held as \x02 to \x07, and nothing for any other command, a docker or podman one included (exit 0), or for a chain it cannot read (exit 1: an option word it does not read, an option word before a file, a file it cannot read, a script holding a raw \x02 to \x07 byte, one shlex cannot split or one over 64 KB, or a first word it cannot place before a shell word), its steps with exit 3 for a chain with a program word, in any step, written as an unquoted glob or brace that can expand to docker or podman, and its steps with exit 1 for a chain with a step that eval or a $ word runs, past VAR=x words or behind a wrapper, a step holding a chain shell word anywhere (a nested chain, a script file or a shell fed its script on stdin), a program word, or the program word behind a wrapper (every later word past an option its list lacks), written as an unquoted brace or a glob that can expand to a shell or a wrapper, or with a command substitution beside docker, podman or a portless compose
 # the wrappers chain_steps reads past to the program they run, A to Z, each as <name>|<flags>|<options that take a value>, and the ones that take one count or duration before it: scripts/hooks/shell.ts's WRAPPERS and COUNTED, with the env and xargs options its parse reads by hand, which a test holds equal
 CHAIN_WRAPPER_OPTIONS="builtin||
 busybox||
@@ -528,8 +528,8 @@ chain_steps() {
   [ -n "$first" ] || return 0
   if [ -n "$file" ]; then plain "$file" && [ -f "$file" ] && [ -r "$file" ] || return 1; fi
   [ -n "$script$file" ] || return 1
-  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" "$CHAIN_WRAPPERS" "$CHAIN_SHELLS" <<'PY'
-import os, re, shlex, sys
+  python3 -I - "${file:+-f}${script:+-c}" "$file$script" "${lead%$'\x1f'}" "$CHAIN_WRAPPERS" "$CHAIN_SHELLS" "$CHAIN_WRAPPER_OPTIONS" "$CHAIN_COUNTED" <<'PY'
+import fnmatch, os, re, shlex, sys
 
 try:
     text = sys.argv[2]
@@ -549,6 +549,7 @@ try:
         lines.append(buf)
         buf = None
     text = "\n".join(lines + ([buf] if buf is not None else []))
+    raw = text
     # each ?, *, [, {, # or ~ inside quotes or after a backslash becomes \x02 to \x07, which sh leaves as written, so plain() tells a quoted message's from one sh expands
     held, out, quote, esc = "?*[{#~", [], "", False
     if any(chr(n) in text for n in range(2, 8)):
@@ -592,18 +593,164 @@ for i, step in enumerate(steps):
 # a step that eval or a $ word runs, past VAR=x or behind a wrapper word, a step holding a chain shell word (a nested chain, a script file or a script on stdin), or a command substitution in a chain whose script or lead words name docker, podman or a portless compose (shlex splits a backquote's inner script at ;, so a name split across its steps is read over the whole chain), names its program only when the shell runs it, so the chain prints its steps but reads as one it cannot read
 wrappers = set(sys.argv[4].split())
 shells = set(sys.argv[5].split())
-if any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3]):
-    sys.exit(1)
-for step in steps:
-    i = 0
-    while i < len(step) and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", step[i]):
+
+
+options = {n: (set(f.split()), set(v.split())) for n, f, v in (l.split("|") for l in sys.argv[6].splitlines() if l)}
+counted = set(sys.argv[7].split())
+
+
+# the words a step runs as its program, past VAR=x and, as wrapper_option reads them, each wrapper's options, their values and its count; past an option a wrapper's list lacks, every later word, failing closed
+def programs(step, i):
+    words = []
+    while i < len(step):
+        w = step[i]
+        words.append(w)
+        name = os.path.basename(w)
+        if name not in wrappers:
+            return words
+        flags, values = options.get(name, (set(), set()))
         i += 1
+        while i < len(step) and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", step[i]):
+            i += 1
+        while i < len(step) and ((step[i].startswith("-") and step[i] != "-") or re.match(r"[A-Za-z_][A-Za-z0-9_]*=", step[i])):
+            o = step[i]
+            i += 1
+            if not o.startswith("-"):
+                continue
+            if o == "--":
+                break
+            key = o.split("=")[0] if o.startswith("--") else None
+            if key is not None:
+                if key in values and key == o:
+                    i += 1
+                elif key not in values and key not in flags:
+                    return words + step[i:]
+            elif name == "nice" and o[1:].isdigit():
+                pass
+            else:
+                for k, c in enumerate(o[1:], 1):
+                    if "-" + c in values:
+                        i += k == len(o) - 1
+                        break
+                    if "-" + c not in flags:
+                        return words + step[i:]
+        while i < len(step) and re.match(r"[A-Za-z_][A-Za-z0-9_]*=", step[i]):
+            i += 1
+        if name in counted:
+            i += 1
+    return words
+
+
+# a word's brace expansions, as bash makes them from a comma list or a one-letter or number range, innermost first, up to 4096 words; a brace it cannot expand stays as written
+def braces(w):
+    m = re.search(r"\{([^{}]*)\}", w)
+    r = m and re.fullmatch(r"(-?\d+|[A-Za-z])\.\.(-?\d+|[A-Za-z])(?:\.\.-?\d+)?", m.group(1))
+    if m and "," in m.group(1):
+        parts = m.group(1).split(",")
+    elif r and r[1].isalpha() == r[2].isalpha():
+        a, b = (ord(r[1]), ord(r[2])) if r[1].isalpha() else (int(r[1]), int(r[2]))
+        parts = (chr(n) if r[1].isalpha() else str(n) for n in range(a, b + (1 if b >= a else -1), 1 if b >= a else -1))
+    else:
+        return [w]
+    out = []
+    for p in parts:
+        if len(out) >= 4096:
+            break
+        out += braces(w[: m.start()] + p + w[m.end() :])
+    return out
+
+
+# a word an unquoted glob or brace can expand to one of names with, by basename; a bracket holding [:, [= or [. (a class fnmatch does not read) can expand to any, failing closed
+def can_be(w, names):
+    for e in braces(w):
+        p = os.path.basename(e).replace("[^", "[!")
+        if re.search(r"\[[^\]]*\[[:=.]", p) or any(fnmatch.fnmatchcase(n, p) for n in names):
+            return True
+    return False
+
+
+reserved = {"!", "{", "coproc", "do", "elif", "else", "function", "if", "then", "until", "while"}
+unread = any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3])
+# a command substitution's script ($( ) or a backquote, outside single quotes and $'…', where a backslash escapes a quote), split at blanks, quotes and ; | & ( ) < > with backslashes dropped: a glob or brace in it that can expand to docker, podman or a chain shell reads as one it cannot read, wherever it sits (a case word or pattern, or a word it does not lead), so docker_kind reads its pieces
+subs, j, quote = [], 0, ""
+while j < len(raw):
+    c = raw[j]
+    if c == "\\" and quote != "'":
+        j += 2
+        continue
+    if not quote and raw.startswith("$'", j):
+        quote, j = "$", j + 2
+        continue
+    if (c == "'" and quote == "$") or (c in "'\"" and quote in ("", c)):
+        quote = "" if quote else c
+    elif quote not in ("'", "$") and (c == "`" or raw.startswith("$(", j)):
+        end, depth, inner = j + (1 if c == "`" else 2), 1, ""
+        while end < len(raw) and depth:
+            if raw[end] == "\\" and inner != "'":
+                end += 1
+            elif inner == '"' and (raw[end] == "`" or raw.startswith("$(", end)):
+                end = len(raw)
+                break
+            elif inner:
+                inner = "" if raw[end] == ("'" if inner == "$" else inner) else inner
+            elif c != "`" and raw.startswith("$'", end):
+                inner, end = "$", end + 1
+            elif raw[end] in "'\"" and c != "`":
+                inner = raw[end]
+            elif c == "`":
+                depth -= raw[end] == "`"
+            else:
+                depth += (raw[end] == "(") - (raw[end] == ")")
+            end += 1
+        # a ) its count cannot place (a case pattern's, a heredoc body's, a comment's, one in a ${…}, one after a $( or backquote inside a double quote in it) may end it early, so one holding case, <<, # or ${, or such a quoted substitution (above), reads to the script's end, failing closed
+        if re.search(r"(^|[\s;&|()`])(case(\s|$)|#)|<<|\$\{", raw[j + 1 : end]):
+            end = len(raw)
+        subs.append(raw[j + 1 : end])
+        j = end
+        continue
+    j += 1
+for w in re.split(r"[\s;|&()<>\"'`]+", " ".join(subs).replace("\\", "")):
+    brace = "{" in w and re.search(r",|\.\.", w)
+    if (brace or re.search(r"[*?[]", w)) and can_be(w, {"docker", "podman"} | shells):
+        unread = True
+# each open case's state: pat while its patterns run (after `case … in`, or after ;;, ;& or ;;&, through each | up to the closing )), cmd for the arm's commands after that )
+cases = []
+for k, step in enumerate(steps):
+    # past VAR=x and the reserved words that lead a command (if, then, do, !, coproc, function and its name, and the rest)
+    i = 0
+    while i < len(step) and (re.match(r"[A-Za-z_][A-Za-z0-9_]*=", step[i]) or step[i] in reserved):
+        i += 2 if step[i] == "function" else 1
+    head = step[i] if i < len(step) else None
+    if head == "esac" and cases:
+        cases.pop()
+        if cases and seps[k + 1] in (";;", ";&", ";;&"):
+            cases[-1] = "pat"
+        continue
+    # a pattern names no program, so `*)` reads as no glob of one; the case line itself names none either, and may hold the first pattern
+    if (cases and cases[-1] == "pat") or head == "case":
+        if head == "case":
+            cases.append("pat")
+        if step and seps[k + 1] == ")" and (head != "case" or len(step) - i > 3):
+            cases[-1] = "cmd"
+        continue
+    if cases and seps[k + 1] in (";;", ";&", ";;&"):
+        cases[-1] = "pat"
     hidden = lambda w: w == "eval" or "$" in w
     if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
-        sys.exit(1)
+        unread = True
     # a chain shell word anywhere past VAR=x, whatever program leads the step, runs a script this does not read: its own -c script (a nested chain, split only one level), a script file, or one fed on stdin (a pipe, a < redirect or a heredoc), behind any option, value or fd number, so it reads as one it cannot read
     if any(os.path.basename(w) in shells for w in step[i:]):
-        sys.exit(1)
+        unread = True
+    # the program word, or the program word behind a wrapper (every later word past an option its list lacks), written as an unquoted glob or brace runs whatever the shell expands it to: one that can expand to docker or podman exits 3 in any step, however unreadable the rest, which docker_kind refuses, and a brace, or a glob that can expand to a shell or a wrapper, reads as one it cannot read
+    for w in programs(step, i):
+        brace = "{" in w and re.search(r",|\.\.", w)
+        if not brace and not re.search(r"[*?[]", w):
+            continue
+        if can_be(w, ("docker", "podman")):
+            sys.exit(3)
+        if brace or can_be(w, shells | wrappers):
+            unread = True
+sys.exit(1 if unread else 0)
 PY
 }
 # a git run's subcommand, past env, VAR=x and git's own options, each of -C, -c, --git-dir, --work-tree, --namespace and --config-env with its value; nothing for a step that runs no git
@@ -978,15 +1125,32 @@ heavy_build() {
 }
 # packages/scripts/src/docker-build.ts, the docker build reader run-slot shares with the hooks
 docker_reader() { "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" "$@" </dev/null; }
+# the pieces of a command's words that hold a glob or brace character, one a line, each word split at blanks, quotes, backquotes and the shell's ; | & ( ) < >, its backslashes dropped as an outer shell's quote removal drops them
+glob_pieces() { printf '%s\n' "$@" | tr -d '\\' | tr -s "[:space:];|&()<>\"'\`" '\n' | grep -E '[*?[]|[{].*(,|[.][.])'; }
 # A docker build, as docker_reader reads it past the hooks' wrappers: run (one image), each (a compose build of no service or several, built one at a time), refuse <why>, or nothing; a chain with a docker build in any step is refused, so each build is a run of its own, and so is a chain whose words name docker or portless and whose steps chain_steps cannot read
 docker_kind() {
-  local found line words steps fix="run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"
-  # the reader starts only for a command that names docker or portless, so every other run skips its bun start
-  case " $* " in *docker*|*portless*) ;; *) return ;; esac
+  local found line words steps pieces rc=0 fix="run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"
+  local glob="refuse run-slot.sh refuses a chain with a program word written as a glob or a brace that can expand to docker or podman: $fix"
+  # the reader starts only for a command that names docker or portless, so every other run skips its bun start; one that holds a glob or brace character is read for a program word that can expand to docker or podman (exit 3)
+  case " $* " in
+    *docker*|*portless*) ;;
+    *[\*\?\[\{]*)
+      chain_steps "$@" > /dev/null || rc=$?
+      # a chain it cannot read may run a glob in a script it does not open (a nested -c, one fed on stdin, eval's words), so each piece of its words, split at blanks, quotes and shell punctuation, is read as a program word of its own
+      if [ "$rc" -eq 1 ]; then
+        rc=0 pieces=$(glob_pieces "$@")
+        [ -z "$pieces" ] || chain_steps sh -c "$pieces" > /dev/null || rc=$?
+      fi
+      [ "$rc" -eq 3 ] && echo "$glob"
+      return ;;
+    *) return ;;
+  esac
   found=$(docker_reader kind -- "$@")
   [ "$found" != none ] && { echo "$found"; return; }
   # a chain whose steps chain_steps cannot read may hold a docker build, so it is refused rather than read as no steps
-  steps=$(chain_steps "$@") || { echo "refuse run-slot.sh cannot read this chain's steps, so it refuses one that names docker or portless: $fix"; return; }
+  steps=$(chain_steps "$@") || rc=$?
+  [ "$rc" -eq 3 ] && { echo "$glob"; return; }
+  [ "$rc" -eq 0 ] || { echo "refuse run-slot.sh cannot read this chain's steps, so it refuses one that names docker or portless: $fix"; return; }
   while IFS= read -r line; do
     IFS=$'\x1f' read -ra words <<< "$line"
     [ ${#words[@]} -gt 0 ] || continue
