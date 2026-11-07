@@ -523,6 +523,12 @@ describe("what it passes and how it fails", () => {
     expect(await check("{not json: git push", GLM, CALM)).toContain("could not read this call")
     expect(await check("{not json: echo hi", GLM, CALM)).toBeUndefined()
   })
+
+  test("a runner the prefilter lets through to the parse runs when the parse fails, since the catch path reads its own prefilter", async () => {
+    expect(await check("{not json: bun run build", GLM, CALM)).toBeUndefined()
+    expect(await check("{not json: cd $D && ./cli.ts", GLM, CALM)).toBeUndefined()
+    expect(await check("{not json: gh pr list", GLM, CALM)).toContain("glm rule")
+  })
 })
 
 describe("a GLM session while load5 is over 15", () => {
@@ -908,6 +914,17 @@ describe("a GLM session's org tools", () => {
       name: "mcp__github-shared__get_file_contents",
       input: { owner: "qzx", repo: "x" },
     },
+    { $label: "Claude Code's resource list", name: "ListMcpResourcesTool" },
+    {
+      $label: "Claude Code's resource read",
+      name: "ReadMcpResourceTool",
+      input: { server: "linear-shared", uri: "made-up://MADE-1" },
+    },
+    {
+      $label: "Claude Code's resource folder read",
+      name: "ReadMcpResourceDirTool",
+      input: { server: "linear-shared", uri: "made-up://MADE" },
+    },
   ])(
     "an MCP tool of $label is refused on GLM and passes on Claude",
     async ({ name, input: given }) => {
@@ -915,6 +932,7 @@ describe("a GLM session's org tools", () => {
       expect(claude).toBeUndefined()
       expect(glm).toContain(name)
       expect(glm).toContain("glm rule")
+      expect(glm).toContain("report to your lead")
     },
   )
 
@@ -1079,5 +1097,45 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
       "echo postgres://app@db.example.com/app",
     ])
       expect(await refusal(input(command), ON_GLM, CALM)).toBeUndefined()
+  })
+})
+
+describe("its registration", () => {
+  // the matcher each settings file registers the hook under, read from the file a session loads
+  const matchers = async () =>
+    Promise.all(
+      [".claude/settings.json", "scripts/factory-settings.json"].map(async (file) => {
+        const { hooks } = (await Bun.file(join(root, file)).json()) as {
+          hooks: { PreToolUse: { hooks: { command: string }[]; matcher: string }[] }
+        }
+        const entry = hooks.PreToolUse.find((e) =>
+          e.hooks.some((h) => h.command.includes("no-glm-heavy-path")),
+        )
+        return { file, matcher: new RegExp(entry?.matcher ?? "(?!)") }
+      }),
+    )
+
+  test("both settings files send it every Bash call, every MCP tool and Claude Code's three MCP resource tools, and no other tool", async () => {
+    for (const { file, matcher } of await matchers()) {
+      for (const tool of [
+        "Bash",
+        "ListMcpResourcesTool",
+        "ReadMcpResourceDirTool",
+        "ReadMcpResourceTool",
+        "mcp__linear-shared__list_issues",
+        "mcp__slack-shared__conversations_history",
+      ])
+        expect({ file, tool, sent: matcher.test(tool) }).toEqual({ file, tool, sent: true })
+      for (const tool of [
+        "Edit",
+        "Write",
+        "WebFetch",
+        "Agent",
+        "xBash",
+        "Bashful",
+        "ListMcpResourcesToolx",
+      ])
+        expect({ file, tool, sent: matcher.test(tool) }).toEqual({ file, tool, sent: false })
+    }
   })
 })
