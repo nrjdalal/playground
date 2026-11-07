@@ -1,12 +1,14 @@
 import {
   accessSync,
   constants,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   renameSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs"
 import { homedir, tmpdir } from "node:os"
@@ -14,7 +16,9 @@ import { dirname, join, resolve } from "node:path"
 
 import { dataDirOf } from "@packages/env/data-dir"
 
-// Measures a head's hooks against a canary sha, each form or call reaching each hook's check() as data alone and never run: `sweep --forms <module>` passes the forms a module exports from the home, the data folder and a worktree, `replay` the last day's Bash calls from this machine's transcripts; a clean head's result is stored under its key and printed again for a day without a run; started bare it queues itself through run-slot, as commit-slot.ts queues a commit's build.
+import { rosterRole } from "../../../scripts/hooks/role"
+
+// Measures a head's hooks against a canary sha, each form or call reaching each hook's check() as data alone and never run, under --role's role and a scratch data folder, a hook canary lacks against an allow-all baseline: `sweep --forms <module>` passes the forms a module exports from the home, the data folder and a worktree, `replay` the last day's Bash calls from this machine's transcripts, `--role session` each under its own session's role; a clean head's result is stored under its key and printed again for a day without a run; started bare it queues itself through run-slot, as commit-slot.ts queues a commit's build.
 
 export type Check = (
   raw: string,
@@ -22,11 +26,12 @@ export type Check = (
   main?: string,
 ) => Promise<string | undefined> | string | undefined
 type Form = { command: string; inClass?: boolean }
-type Call = { command: string; cwd: string }
+type Call = { command: string; cwd: string; name?: string; session?: string }
+type Env = Record<string, string | undefined>
 type Tally = { inClass: number; outClass: number }
 
 const USAGE =
-  "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>]> --canary <sha> --hook <name> [--hook <name> ...] [--all] [--fresh]"
+  "usage: bun run hooks:differential <sweep --forms <module> | replay [--hours <n>] [--role session]> --canary <sha> --hook <name> [--hook <name> ...] [--role <role>] [--all] [--fresh]"
 
 const DAY = 24 * 3600 * 1000
 
@@ -98,17 +103,77 @@ async function pinned<T>(repo: string | undefined, run: () => Promise<T>): Promi
   }
 }
 
-// main undefined leaves a hook's own default in place, as a call with no third argument does
-const allows = (check: Check, call: Call, home: string, main?: string, repo?: string) =>
+// The env a call reaches check() under: the home and PATH alone unless the run gives more (envOf, below); main undefined leaves a hook's own default in place, as a call with no third argument does
+const allows = (check: Check, call: Call, env: Env, main?: string, repo?: string) =>
   pinned(
     repo,
     async () =>
       (await check(
-        JSON.stringify({ cwd: call.cwd, tool_input: { command: call.command }, tool_name: "Bash" }),
-        { HOME: home },
+        JSON.stringify({
+          cwd: call.cwd,
+          ...(call.session === undefined ? {} : { session_id: call.session }),
+          tool_input: { command: call.command },
+          tool_name: "Bash",
+        }),
+        env,
         main,
       )) === undefined,
   )
+
+const bare = (home: string) => (): Env => ({ HOME: home, PATH: process.env.PATH })
+
+// Each call's env: the home, PATH and the scratch data folder; PLAYGROUND_ROLE set to --role's role, or with --role session to the role the roster gives the call's session by its transcript name, its session named in a scratch registry (CLAUDE_CONFIG_DIR); a name the roster lacks keeps the default, PLAYGROUND_ROLE unset, where a hook places the session by its name itself
+export const envOf =
+  ({
+    config,
+    data,
+    home,
+    role,
+    roles,
+  }: {
+    config?: string
+    data: string
+    home: string
+    role?: string
+    roles?: Map<string, string>
+  }) =>
+  (call: Call): Env => {
+    const own = role === "session" ? roles?.get(call.name ?? "") || undefined : role
+    return {
+      ...(config === undefined ? {} : { CLAUDE_CONFIG_DIR: config }),
+      HOME: home,
+      PATH: process.env.PATH,
+      PLAYGROUND_DATA_DIR: data,
+      ...(own === undefined ? {} : { PLAYGROUND_ROLE: own }),
+    }
+  }
+
+// A data folder of the run's own, so a hook's write lands there: the roster copied, and the extensions, the guards' lists and policy.json, linked from the real data folder
+export function scratchData(real: string, base = tmpdir()): string {
+  const data = mkdtempSync(join(base, "hook-differential-data-"))
+  if (existsSync(join(real, "roster.json")))
+    cpSync(join(real, "roster.json"), join(data, "roster.json"))
+  if (existsSync(join(real, "extensions")))
+    symlinkSync(join(real, "extensions"), join(data, "extensions"))
+  return data
+}
+
+// The role the roster's kind gives each transcript name, from the real data folder, and a scratch registry naming each named session, for --role session
+export async function sessionRoles(list: Call[], real: Env, base = tmpdir()) {
+  const config = mkdtempSync(join(base, "hook-differential-config-"))
+  mkdirSync(join(config, "sessions"))
+  const roles = new Map<string, string>()
+  for (const { name, session } of list) {
+    if (!name) continue
+    if (!roles.has(name)) roles.set(name, await rosterRole(name, real))
+    if (session)
+      writeFileSync(
+        join(config, "sessions", `${session}.json`),
+        JSON.stringify({ name, sessionId: session }),
+      )
+  }
+  return { config, roles }
+}
 
 // Each form from each folder through both hooks: the same, newly allowed and newly refused, each split by the form's class (a form with no class is outside it)
 export async function sweep(
@@ -118,6 +183,7 @@ export async function sweep(
   home: string,
   main?: string,
   repo?: string,
+  env: (call: Call) => Env = bare(home),
 ) {
   const counts = {
     cases: 0,
@@ -131,8 +197,8 @@ export async function sweep(
     for (const cwd of cwdsOf(home)) {
       counts.cases++
       const [was, now] = [
-        await allows(canary, { command, cwd }, home, main, repo),
-        await allows(head, { command, cwd }, home, main, repo),
+        await allows(canary, { command, cwd }, env({ command, cwd }), main, repo),
+        await allows(head, { command, cwd }, env({ command, cwd }), main, repo),
       ]
       if (was === now) {
         counts.same++
@@ -144,19 +210,33 @@ export async function sweep(
   return { changed, counts }
 }
 
-// Every Bash call of the transcripts under `projects` newer than `since`, a sub-agent's nested ones included, one per folder and command
-export async function calls(projects: string, since: number): Promise<Call[]> {
+// Every Bash call of the transcripts under `projects` newer than `since`, a sub-agent's nested ones included, one per folder and command; bySession keeps one per session, folder and command, each with its session and the name its transcript's agent-name lines last gave it
+export async function calls(projects: string, since: number, bySession = false): Promise<Call[]> {
   const found = new Map<string, Call>()
+  const names = new Map<string, string>()
   const files = existsSync(projects) ? readdirSync(projects, { recursive: true }) : []
   for (const file of files.map(String).filter((f) => f.endsWith(".jsonl"))) {
     const path = join(projects, file)
     if (statSync(path).mtimeMs < since) continue
     for (const line of (await Bun.file(path).text()).split("\n")) {
-      if (!line.includes('"Bash"')) continue
-      let entry: { cwd?: unknown; message?: { content?: unknown }; timestamp?: string }
+      const named = bySession && line.includes('"agent-name"')
+      if (!line.includes('"Bash"') && !named) continue
+      let entry: {
+        agentName?: unknown
+        cwd?: unknown
+        message?: { content?: unknown }
+        sessionId?: unknown
+        timestamp?: string
+        type?: unknown
+      }
       try {
         entry = JSON.parse(line)
       } catch {
+        continue
+      }
+      const session = typeof entry.sessionId === "string" ? entry.sessionId : undefined
+      if (named && entry.type === "agent-name" && session && typeof entry.agentName === "string") {
+        names.set(session, entry.agentName)
         continue
       }
       if (Date.parse(entry.timestamp ?? "") < since || typeof entry.cwd !== "string") continue
@@ -171,13 +251,17 @@ export async function calls(projects: string, since: number): Promise<Call[]> {
           part.name === "Bash" &&
           typeof part.input?.command === "string"
         )
-          found.set(`${entry.cwd}\0${part.input.command}`, {
+          found.set(`${bySession ? session : ""}\0${entry.cwd}\0${part.input.command}`, {
             command: part.input.command,
             cwd: entry.cwd,
+            ...(bySession ? { session } : {}),
           })
     }
   }
-  return [...found.values()]
+  const list = [...found.values()]
+  for (const call of list)
+    if (call.session && names.has(call.session)) call.name = names.get(call.session)
+  return list
 }
 
 // Each call from its own folder through both hooks: the same, newly allowed and newly refused
@@ -188,13 +272,14 @@ export async function replay(
   home: string,
   main?: string,
   repo?: string,
+  env: (call: Call) => Env = bare(home),
 ) {
   const counts = { calls: list.length, "newly allowed": 0, "newly refused": 0, same: 0 }
   const changed: string[] = []
   for (const call of list) {
     const [was, now] = [
-      await allows(canary, call, home, main, repo),
-      await allows(head, call, home, main, repo),
+      await allows(canary, call, env(call), main, repo),
+      await allows(head, call, env(call), main, repo),
     ]
     if (was === now) counts.same++
     else {
@@ -257,6 +342,7 @@ type Options = {
   hours: number
   mode: "replay" | "sweep"
   ref: string
+  role?: string
 }
 
 const SHOWN = 20
@@ -275,12 +361,15 @@ export function parse(args: string[]): Options | undefined {
   const hooks = args.flatMap((a, i) => (args[i - 1] === "--hook" ? [a] : []))
   const formsAt = option(args, "--forms")
   const hours = Number(option(args, "--hours") ?? 24)
+  const role = option(args, "--role")
   if (
     (mode !== "sweep" && mode !== "replay") ||
     !ref ||
     hooks.length === 0 ||
     (mode === "sweep" && !formsAt) ||
-    !(hours > 0)
+    !(hours > 0) ||
+    (args.includes("--role") && (!role || role.startsWith("-"))) ||
+    (mode === "sweep" && role === "session")
   )
     return undefined
   return {
@@ -291,6 +380,7 @@ export function parse(args: string[]): Options | undefined {
     hours,
     mode,
     ref,
+    role,
   }
 }
 
@@ -317,7 +407,7 @@ const cleanTree = (root: string) =>
 const formsBlob = (root: string, options: Options) =>
   git(root, ["hash-object", resolve(options.formsAt!)])
 
-// A run's key: the head's tree at a clean worktree, the canary sha, the mode with its inputs (the forms module's blob, or the hours and the newest transcript), the sorted hooks and --all; a worktree with any modified or untracked file has none
+// A run's key: the head's tree at a clean worktree, the canary sha, the mode with its inputs (the forms module's blob, or the hours and the newest transcript), the sorted hooks, --all and --role; a worktree with any modified or untracked file has none
 export function keyOf({
   canary,
   options,
@@ -335,7 +425,15 @@ export function keyOf({
     options.mode === "sweep" ? formsBlob(root, options) : `${options.hours}:${newest(projects)}`
   const key = new Bun.CryptoHasher("sha256")
     .update(
-      JSON.stringify([head, canary, options.mode, input, options.hooks.toSorted(), options.all]),
+      JSON.stringify([
+        head,
+        canary,
+        options.mode,
+        input,
+        options.hooks.toSorted(),
+        options.all,
+        options.role ?? "",
+      ]),
     )
     .digest("hex")
     .slice(0, 16)
@@ -411,7 +509,7 @@ async function main(args: string[]): Promise<number> {
     console.error(USAGE)
     return 2
   }
-  const { formsAt, hooks, hours, mode, ref } = options
+  const { formsAt, hooks, hours, mode, ref, role } = options
   const root = git(process.cwd(), ["rev-parse", "--show-toplevel"])
   const missing = hooks.filter((h) => !existsSync(join(root, "scripts/hooks", `${h}.ts`)))
   if (missing.length > 0) {
@@ -434,23 +532,34 @@ async function main(args: string[]): Promise<number> {
       Bun.spawnSync(argv, { cwd, stderr: "inherit", stdin, stdout: "pipe" }),
     sha,
   })
-  const absent = hooks.filter((h) => !existsSync(join(before, "scripts/hooks", `${h}.ts`)))
-  if (absent.length > 0) {
-    console.error(`hook-differential: canary has no hook named ${absent.join(", ")} to compare`)
-    return 2
-  }
-  const list = mode === "replay" ? await calls(projects, Date.now() - hours * 3600 * 1000) : []
+  const list =
+    mode === "replay"
+      ? await calls(projects, Date.now() - hours * 3600 * 1000, role === "session")
+      : []
+  const real = dataDirOf(process.env, home)
+  const session =
+    role === "session" ? await sessionRoles(list, { ...process.env, HOME: home }) : undefined
+  const env = envOf({ ...session, data: scratchData(real), home, role })
+  const defaulted = session
+    ? { "default role": list.filter((c) => !session.roles.get(c.name ?? "")).length }
+    : {}
   const headMain = dirname(git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]))
   const result = { changed: [] as string[], counts: [] as string[] }
   for (const hook of hooks) {
-    const canary: Check = (await import(join(before, "scripts/hooks", `${hook}.ts`))).check
+    const own = join(before, "scripts/hooks", `${hook}.ts`)
+    const absent = !existsSync(own)
+    // A hook canary lacks is measured against a baseline that allows every call, so each refusal it makes counts as newly refused
+    const canary: Check = absent ? () => undefined : (await import(own)).check
     const head: Check = (await import(join(root, "scripts/hooks", `${hook}.ts`))).check
     const main = TAKES_MAIN.includes(hook) ? headMain : undefined
     const { changed, counts } =
       mode === "sweep"
-        ? await sweep(canary, head, forms, home, main, headMain)
-        : await replay(canary, head, list, home, main, headMain)
-    result.counts.push(JSON.stringify({ hook, ...counts }))
+        ? await sweep(canary, head, forms, home, main, headMain, env)
+        : await replay(canary, head, list, home, main, headMain, env)
+    const baseline = absent ? { baseline: "allow-all: canary has no such hook" } : {}
+    result.counts.push(
+      JSON.stringify({ hook, ...baseline, ...(role ? { role } : {}), ...defaulted, ...counts }),
+    )
     console.log(result.counts.at(-1))
     for (const line of linesOf(hook, changed, options.all)) {
       result.changed.push(line)
