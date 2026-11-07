@@ -2,7 +2,7 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-extensions-write.ts
-import { existsSync, statSync } from "fs";
+import { existsSync as existsSync2, statSync } from "fs";
 import { homedir as homedir4 } from "os";
 import { dirname as dirname3, join as join6, resolve as resolve4, sep as sep2 } from "path";
 
@@ -55,12 +55,52 @@ var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ?
 var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/settings/src/rendered.ts
+import { existsSync, readFileSync } from "fs";
 import { join as join2 } from "path";
+import { fileURLToPath } from "url";
 var CORE = "core";
+var coreDir = () => fileURLToPath(new URL("../../../extensions/core", import.meta.url));
 var extensionsDir = (data) => join2(data, "extensions");
+var fixFor = (file) => {
+  const list = /^hooks\/(.+)\.json$/.exec(file)?.[1];
+  if (list && !existsSync(join2(coreDir(), "lists", `${list}.json`)))
+    return `tell your lead, and the dispatcher hands the owner ! playground ext put <login> list ${list} <file> --reason <why> to type in the dispatcher's terminal window, which writes it, since core ships no such list`;
+  return file.startsWith("hooks/") ? "tell your lead, and the dispatcher hands the owner ! playground ext import --from-tree extensions/core/lists to type in the dispatcher's terminal window, which seeds the guards' lists" : "tell your lead, and the dispatcher asks the owner to set up settings, then fill in and save Privacy on the Dashboard's Settings page, which writes it";
+};
+var readRenderedSync = (data, file) => {
+  const dir = extensionsDir(data);
+  if (!existsSync(dir))
+    return {};
+  const parts = file.split("/");
+  if (parts.some((part) => part === "" || part === "." || part === ".."))
+    return { refusal: `${file} is not a path inside the extensions (${dir})` };
+  const path = parts[0] === CORE ? join2(coreDir(), ...parts.slice(1)) : join2(dir, file);
+  return existsSync(path) ? { path } : { refusal: `the extensions root (${dir}) holds no ${file}: ${fixFor(file)}` };
+};
+var readPolicySync = (data, org) => {
+  const read = readRenderedSync(data, "policy.json");
+  if (read.refusal)
+    return { refusal: read.refusal };
+  if (!read.path)
+    return { settings: { schemaVersion: 1, values: {} } };
+  let policy;
+  try {
+    policy = JSON.parse(readFileSync(read.path, "utf8"));
+  } catch {
+    return {
+      refusal: `the extensions' policy.json does not parse (${read.path}): ${fixFor("policy.json")}`
+    };
+  }
+  return {
+    settings: {
+      schemaVersion: 1,
+      values: { ...policy.values, ...org ? policy.orgs?.[org.toLowerCase()] : undefined }
+    }
+  };
+};
 
 // scripts/hooks/no-main-checkout.ts
-import { readdirSync, readFileSync, realpathSync } from "fs";
+import { readdirSync, readFileSync as readFileSync2, realpathSync } from "fs";
 import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join5, normalize, resolve as resolve3, sep } from "path";
 
 // node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/util.js
@@ -4756,6 +4796,17 @@ async function registryName(sessionId, environment = process.env) {
     } catch {}
   }
 }
+async function opsLead(raw, environment = process.env) {
+  try {
+    const session = sessionOf(raw);
+    if (typeof session !== "string" || await sessionRole(environment, session) !== "lead")
+      return false;
+    const name = await registryName(session, environment);
+    return name !== undefined && await rosterKind(name, environment) === "ops";
+  } catch {
+    return false;
+  }
+}
 async function rosterKind(name, environment = process.env) {
   const path = join3(dataDirOf(environment), "roster.json");
   try {
@@ -7788,6 +7839,39 @@ var GUARD_KEYS = new Set([
   "usage.keychainService"
 ]);
 var JOB_PREFIX = "jobs.";
+var NO_TUNING = () => false;
+var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+var parsed = (text) => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+};
+function tunes(key, text, scoped, values) {
+  if (scoped)
+    return false;
+  const value = parsed(text);
+  if (key === "glm.readOnlyLoad5")
+    return typeof value === "number" && Number.isFinite(value) && value > 0;
+  if (!key.startsWith(JOB_PREFIX))
+    return false;
+  const current = values[key];
+  if (!isRecord(current) || !isRecord(value))
+    return false;
+  const [was, now] = [current.schedule, value.schedule];
+  if (!isRecord(was) || !isRecord(now) || typeof was.every !== "number")
+    return false;
+  const every = now.every;
+  return Object.keys(now).length === 1 && typeof every === "number" && Number.isInteger(every) && every > 0 && Bun.deepEquals({ ...value, schedule: was }, current, true);
+}
+function tuningOf(environment) {
+  const policy = readPolicySync(dataDir(environment));
+  if (policy.refusal !== undefined)
+    return NO_TUNING;
+  const { values } = policy.settings;
+  return (key, value, scoped) => tunes(key, value, scoped, values);
+}
 var BY_APPROVE = "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it";
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
@@ -7801,7 +7885,7 @@ function isCli(word, dirs) {
     return false;
   const paths = dirs.map((dir) => pathOf(word, { cwd: dir }));
   if (program(word.value) === "playground")
-    return !word.value.includes("/") || !paths.some((path) => !!path && existsSync(path) && statSync(path).isDirectory());
+    return !word.value.includes("/") || !paths.some((path) => !!path && existsSync2(path) && statSync(path).isDirectory());
   const cli = (sep2 + CLI).toLowerCase();
   return paths.some((path) => !!path && [path, `${path}.ts`].some((at) => real(at).toLowerCase().endsWith(cli)));
 }
@@ -8069,7 +8153,7 @@ function runsOf(parsed, vars, whole, rootLine) {
   values.push(...programLines(parsed, rootLine));
   return [...new Set(values)].filter((value) => /\s/.test(value) && !marked(value));
 }
-function cliWrite(words) {
+function cliWrite(words, tuning = NO_TUNING) {
   const [command, verb, ...rest] = words.map((w) => marked(w.value) ? undefined : w.value);
   if (command === undefined)
     return words.length ? "playground with a command word it cannot read" : undefined;
@@ -8105,6 +8189,9 @@ function cliWrite(words) {
     if (unread || key === undefined)
       return `playground settings ${verb} with a word it cannot read`;
     if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX))
+      return;
+    const value = positional[1];
+    if (verb === "set" && value !== undefined && tuning(key, value, scoped))
       return;
     return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : key.startsWith(JOB_PREFIX) ? `playground settings ${verb} of ${key}, ${BY_APPROVE}` : `playground settings ${verb} of ${key}, a key a guard reads`;
   }
@@ -8154,6 +8241,7 @@ async function inspect(raw, environment, unknown = false) {
   const { command } = input;
   if (typeof command !== "string")
     return;
+  const tuning = await opsLead(raw, environment) ? tuningOf(environment) : NO_TUNING;
   if (command.length > 131072)
     return refuse(TOO_LONG);
   const relative = (env) => env.cwd && above(env.cwd, false) ? root.slice(real(env.cwd).length + 1) : undefined;
@@ -8247,7 +8335,7 @@ async function inspect(raw, environment, unknown = false) {
     const fed = xargs ? await stdinOf(cmd, env) : undefined;
     const stdinWords = !fed ? [] : fed.unknown ? [{ quoted: false, value: UNKNOWN }] : fed.value.split(/\s+/).filter(Boolean).map((value) => ({ quoted: false, value }));
     const calls = reader ? [] : cliCalls(parsed, env);
-    const write = calls.map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords])).find(Boolean) ?? (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined);
+    const write = calls.map((words) => cliWrite(xargs?.replace ? words : [...words, ...stdinWords], tuning)).find(Boolean) ?? (calls.some((words) => scoreAsOther(words, cmd, parsed, env)) ? SCORE_AS_OTHER : undefined);
     if (write)
       return refuse(write);
     const vars = !reader && first ? since(varsRead, env.vars, "") : [];
@@ -8274,7 +8362,7 @@ async function inspect(raw, environment, unknown = false) {
     for (const word of quiet ? args : []) {
       if (!/\s/.test(word.value))
         continue;
-      const named = lex(word.value.replace(/^--message=/, ""), env.known).commands.flatMap((c) => cliCalls(parse3(c), env)).map((words) => cliWrite(words)).find(Boolean);
+      const named = lex(word.value.replace(/^--message=/, ""), env.known).commands.flatMap((c) => cliCalls(parse3(c), env)).map((words) => cliWrite(words, tuning)).find(Boolean);
       if (named)
         return refuse(named);
     }
@@ -8424,5 +8512,6 @@ if (import.meta.main) {
 export {
   GUARD_KEYS,
   check,
-  guarded
+  guarded,
+  tunes
 };

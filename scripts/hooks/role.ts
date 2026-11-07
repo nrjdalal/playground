@@ -57,6 +57,22 @@ export async function registryName(
   }
 }
 
+// Whether the hook input's session is the Ops lead: the lead role, and its name in Claude Code's registry has the roster's ops kind; a read that throws names no one.
+export async function opsLead(
+  raw: string,
+  environment: Environment = process.env,
+): Promise<boolean> {
+  try {
+    const session = sessionOf(raw)
+    if (typeof session !== "string" || (await sessionRole(environment, session)) !== "lead")
+      return false
+    const name = await registryName(session, environment)
+    return name !== undefined && (await rosterKind(name, environment)) === "ops"
+  } catch {
+    return false
+  }
+}
+
 // The roster's kind for a name, or undefined when the roster has no entry of that name with a kind on the list, or cannot be read.
 export async function rosterKind(
   name: string,
