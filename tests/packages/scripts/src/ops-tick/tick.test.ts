@@ -848,6 +848,29 @@ describe("the beats that send no line", () => {
       "removed 1 (20261020T000000Z-s)",
     )
   })
+
+  test("the idle compact runs bun run idle-compact every 5 minutes and logs each line it prints", async () => {
+    expect(beat("idle-compact").cron).toBe("*/5 * * * *")
+    const ops = scratch()
+    const said = "compacted aaaaaa-worker: 250k tokens, idle 55 min\n"
+    const { ctx, runs, sent } = fake(ops, at(20, 5), { "idle-compact": said })
+    await beat("idle-compact").run(ctx)
+    expect(runs).toEqual([["bun", "run", "--silent", "--cwd", "/repo", "idle-compact"]])
+    expect(sent).toEqual([])
+    expect(await Bun.file(join(ops, "log", "idle-compact.log")).text()).toContain(
+      "compacted aaaaaa-worker: 250k tokens, idle 55 min",
+    )
+  })
+
+  test("the idle compact writes no log line on a quiet pass, and a failed pass reads failed", async () => {
+    const ops = scratch()
+    await beat("idle-compact").run(fake(ops, at(20, 5)).ctx)
+    expect(existsSync(join(ops, "log", "idle-compact.log"))).toBe(false)
+    const failing = fake(ops, at(20, 10), { "idle-compact": { code: 1, err: "herdr is down\n" } })
+    await expect(beat("idle-compact").run(failing.ctx)).rejects.toThrow(
+      "bun run idle-compact: herdr is down",
+    )
+  })
 })
 
 describe("the optimizer's beats", () => {

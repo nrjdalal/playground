@@ -1011,7 +1011,7 @@ describe.skipIf(!existsSync(HERDR))("herdr's schema", () => {
   })
 })
 
-// Every herdr call in the dashboard goes through herdr.ts, and only deliver.ts sends a message.
+// Every herdr call in the dashboard goes through herdr.ts, and only deliver.ts sends a message, beside the idle compact's `/compact` (ADR 0020).
 const API = join(import.meta.dir, "../../../../../../api/hono/src")
 const sources = () =>
   [...new Bun.Glob("**/*.ts").scanSync({ cwd: API })].map((file) => ({
@@ -1032,7 +1032,7 @@ describe("herdr's boundary", () => {
   })
 
   // prompt() or pressEnter() named from any path to herdr (`@/lib/dashboard/herdr`, `./herdr`, `../dashboard/herdr`), imported or re-exported, and the whole module taken (a namespace import, `export *`, `import()`), which reaches both too
-  test("only deliver.ts imports herdr's prompt and pressEnter", () => {
+  test("only deliver.ts and idle-compact.ts import herdr's prompt and pressEnter", () => {
     const from = String.raw`\s*from\s*["'][^"']*\/herdr["']`
     const reaches = new RegExp(
       [
@@ -1045,8 +1045,9 @@ describe("herdr's boundary", () => {
     expect(
       sources()
         .filter(({ text }) => reaches.test(text))
-        .map((s) => s.file),
-    ).toEqual(["lib/dashboard/deliver.ts"])
+        .map((s) => s.file)
+        .sort(),
+    ).toEqual(["lib/dashboard/deliver.ts", "lib/dashboard/idle-compact.ts"])
     for (const form of [
       'import { prompt } from "../dashboard/herdr"',
       'export { prompt } from "@/lib/dashboard/herdr"',
@@ -1147,13 +1148,13 @@ describe("typing into a pane", () => {
   })
 })
 
-// herdr's pane writes, the one way the dashboard types into a pane: herdr.ts alone names them, and of those that type, prompt() and pressEnter() reach only deliver.ts (the owner's composer, the Linear app's row actions and the owner's inbox answers) and typeKeys() only feed.ts, whose answerHerdr() serves the herdr answer route, POST /api/v1/workers/:sessionId/feed/:requestId, the owner's own Submit on a prompt's card, since an answer from the card is the owner's own Submit.
+// herdr's pane writes, the one way the dashboard types into a pane: herdr.ts alone names them, and of those that type, prompt() and pressEnter() reach only deliver.ts (the owner's composer, the Linear app's row actions and the owner's inbox answers), with prompt() also reaching idle-compact.ts, the one ops pass the owner approved (ADR 0020), and typeKeys() only feed.ts, whose answerHerdr() serves the herdr answer route, POST /api/v1/workers/:sessionId/feed/:requestId, the owner's own Submit on a prompt's card, since an answer from the card is the owner's own Submit.
 const HERDR_TS = "api/hono/src/lib/dashboard/herdr.ts"
 const HERDR_WRITES =
   /["'`](?:agent\.(?:prompt|send_keys)|pane\.(?:send_input|send_keys|send_text))["'`]/
 const HERDR_TYPERS: Record<string, string[]> = {
   pressEnter: ["api/hono/src/lib/dashboard/deliver.ts"],
-  prompt: ["api/hono/src/lib/dashboard/deliver.ts"],
+  prompt: ["api/hono/src/lib/dashboard/deliver.ts", "api/hono/src/lib/dashboard/idle-compact.ts"],
   typeKeys: ["api/hono/src/lib/dashboard/feed.ts"],
 }
 
@@ -1200,10 +1201,10 @@ describe("herdr's pane writes", () => {
     ).toEqual([])
   })
 
-  test("prompt() and pressEnter() reach only deliver.ts, and typeKeys() only feed.ts's herdr answer route", async () => {
+  test("prompt() reaches only deliver.ts and idle-compact.ts, pressEnter() only deliver.ts, and typeKeys() only feed.ts's herdr answer route", async () => {
     const files = await sourceFiles()
     for (const [name, allowed] of Object.entries(HERDR_TYPERS)) {
-      expect([name, herdrTypers(files, name)]).toEqual([name, allowed])
+      expect([name, herdrTypers(files, name).sort()]).toEqual([name, allowed])
     }
   })
 
