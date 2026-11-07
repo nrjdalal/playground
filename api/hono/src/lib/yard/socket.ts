@@ -39,13 +39,21 @@ const sendHere = (userIds: string[], frame: Frame) => {
       }
 }
 
-// With KV_URL set, every instance subscribes to one Redis channel, so a post on one instance reaches a socket held by another; without it, the instance's own sockets alone.
+// With KV_URL set, every instance subscribes to one Redis channel, so a post on one instance reaches a socket held by another; without it, the instance's own sockets alone. The channel delivers each message id once, so a publish whose first try landed and then reported a closed connection reaches a socket once.
 const channel = env.KV_URL
   ? redisChannel({
       name: CHANNEL,
       onMessage: (raw) => {
         const { frame, userIds } = JSON.parse(raw) as { frame: Frame; userIds: string[] }
         sendHere(userIds, frame)
+      },
+      id: (raw) => {
+        try {
+          const read = JSON.parse(raw) as { frame?: Frame }
+          return read.frame?.type === "message" ? read.frame.message.id : undefined
+        } catch {
+          return undefined
+        }
       },
       url: env.KV_URL,
       wanted: () => open.size > 0,
