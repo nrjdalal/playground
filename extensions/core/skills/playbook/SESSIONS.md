@@ -29,7 +29,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`), its own and each `slots.peers` folder's, each weighing half its item's load units, under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
    less a quarter (`gates.smallReserve`) kept for small items unless the start is small (`--size small|medium|big`, else small for a reviewer or tester, else the roster's or plan.json's size, else medium; [rules/slots.md](../../rules/slots.md)), while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the checkers,
    refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores, and the refusal names the load, the starts and the line;
-   a `--priority` start passes it while `priority.json`, an org's own `priority-<name>.json` or a job's own `priority-start.json` stands in the data folder, since priority work comes first;
+   a `--priority` start passes it while `priority.json`, an org's own `priority-<name>.json` or a job's own `priority-start.json` stands in the data folder, since priority work comes first,
+   and so does a resume within 15 minutes of `spawn.sh close` ending a row that read live, since that session already counts in the load it comes back into;
    memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, a run-slot lane free with the load units for a run, or an empty queue (`scripts/ops/run-slot.sh room`), so a new worker never joins a queue it has no room in, while checkers, resumes and moves skip it,
    and a `--priority` start passes a full queue with a priority file standing, as at the load gate; and the launching backend's usage:
    Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone,
@@ -84,7 +85,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
      Done when the restarted stack answers its `/api/health` and each watch is armed once.
      Before a close that a resume follows (an account move), wait until the session has no run-slot run in flight, since the close kills that run.
      Before an account move, its dispatcher tells every session that serves a dev stack, so what it serves does not go down unannounced.
-     Resumes go about 2 minutes apart to start, since spawn.sh's load gate counts recent starts and refuses a burst; a refused resume waits and runs again.
+     A resume within 15 minutes of its close passes spawn.sh's load gate (Spawn, above); later resumes go about 2 minutes apart, since the gate counts recent starts and refuses a burst, and a refused resume waits and runs again.
 
    It prints herdr's answer (`herdr pane <id> workspace <id>`) and records the session's `kind`, a checker's `worker=<its worker's full name>`, a worker's or runner's `reportsTo=<the session it reports to>` and, for an entry with no task, a `task` as [ROSTER.md](ROSTER.md) says, in the roster,
    by `set` through the checkout's `scripts/roster.ts`, which keeps a respawned session's work.
@@ -157,7 +158,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    A session resumed that way gets its hooks from its folder alone: Claude Code loads `.claude/settings.json` from the session's own folder, and in a checkout whose settings carry the same hooks they load from there and read the role from the session's name, but anywhere else (a work-org checkout, an older checkout, a subfolder) nothing does,
    so a factory session resumed without its settings where its own folder's `.claude/settings.json` lacks them is respawned from its handoff through spawn.sh, never left running as resumed.
    Every Ops sweep runs `python3 -I <main checkout>/scripts/ops/up.py --sessions`, which names each one (and none once each is respawned), and sends each to the one it reports to (a checker's or probe's spawner; the dispatcher's goes to Ops), which respawns it, since a live session keeps its name:
-   the session writes a handoff ([Write a handoff](#write-a-handoff), `~/.playground/handoffs/<name>.md`: its open items, each PR with its head, its next step), its pane closes ([End](#end)), and a spawn under the same name ([Spawn](#spawn)) briefs the respawned session with the handoff, which the respawned-session row of ROSTER.md records.
+   the session writes a handoff ([Write a handoff](#write-a-handoff), `~/.playground/handoffs/<name>.md`), its pane closes ([End](#end)), and a spawn under the same name ([Spawn](#spawn)) briefs the respawned session with the handoff, which the respawned-session row of ROSTER.md records.
    A resume's `<dir>` is a folder Claude Code already trusts (the Playground checkout or a worktree under it), never a scratchpad or /tmp path.
    In a folder it has never trusted, the session stops on the folder-trust dialog, which no session may approve, and `ListAgents` never lists it.
    A resumed session, a checker included, runs in the worktree or clone it ran in: spawn.sh resume refuses to move a session into the main checkout unless it started there, and refuses a removed folder, naming its branch and, for a the dispatcher worktree, the `git worktree add` line that brings it back.
@@ -213,8 +214,9 @@ Done when `ListAgents` shows the session busy on the brief and the roster shows 
 ## Write a handoff
 
 A handoff, for a respawn, a parked chore or a priority close, counts as written only once `TZ=UTC ls -l <path>` prints its file, and the report that names it quotes that line.
+A handoff names the session's open items, each PR with its head, its next step and its own transcript path, which `ls ~/.claude/projects/*/<id>.jsonl` prints, `<id>` the session id in `~/.playground/resume/<name>.sh`, so whoever picks the work up can read there a detail the handoff dropped.
 A hook can refuse the write and leave nothing on disk, so a session whose write a hook refused answers the hook and retries the same write before it reports.
-Done when `TZ=UTC ls -l <path>` prints the file and the report quotes that line.
+Done when `TZ=UTC ls -l <path>` prints the file, `ls` prints the transcript path it names, and the report quotes the `ls -l` line.
 
 ## Rename
 
