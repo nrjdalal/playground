@@ -16,15 +16,15 @@ A fresh install has every job off but two: `jobs.opsDashboard`, the Dashboard's 
 Settings > Jobs on the Dashboard lists every job with what it does, when it runs, whether it is on and whether your settings set it.
 Its switch saves the job's `enabled` field alone at your login's scope, with a reason, over any other field your scope's value holds.
 
-A session cannot write a job's setting (the `no-extensions-write` hook refuses `playground settings set` and `reset` of every `jobs.<name>`), so it asks you with an Inbox guard decision whose value is `{"enabled": true}` or `{"enabled": false}` alone; your Approve writes it the same way ([Inbox](/docs/inbox)).
+A session cannot write a job's setting (the `no-extensions-write` hook refuses `playground settings set` and `reset` of every `jobs.<name>`, and `settings import-jobs` but its `--dry-run`), so it asks you with an Inbox guard decision whose value is `{"enabled": true}` or `{"enabled": false}` alone; your Approve writes it the same way ([Inbox](/docs/inbox)).
 
-From your own terminal, set the field with a reason:
+From your own terminal, set your scope's value, which replaces any value it held, with a reason:
 
 ```bash
 playground settings set jobs.opsSweep '{"enabled": true}' --reason "<why>" [--scope <scope>]
 ```
 
-Your login's value wins over your org's, as for every setting, so a job you turn on or off holds whatever your org set.
+Your login's value wins over your org's, as for every setting, so a job you turn on or off holds whatever your org set; a field your value leaves out reads Playground's, not your org's.
 Moving a schedule or pausing a job with `pausedFor` is the same kind of write, naming that field.
 
 ## How a change reaches the runner
@@ -48,6 +48,7 @@ playground settings import-jobs <jobs.json> [--launch-agents <dir>] [--scope <sc
 
 Each job the registry knows becomes its `jobs.<name>` setting at your login's scope (or `--scope`), on unless `jobs.json` disabled it, with a launchd job's program and folder read from its plist in `--launch-agents` (`~/Library/LaunchAgents` by default).
 `--dry-run` prints what it would set and writes nothing.
+You run it yourself: a session's run is refused but for `--dry-run`, since it would turn jobs on.
 Every other job is listed as kept, and stays in `jobs.json`.
 
 ## Bring your own scripts in

@@ -370,10 +370,11 @@ Only the first reading moves the folder, sets variables and records files for th
   and `ext score` spelled with quotes or backslashes that shell removes (`s""core`, `'score'`), since a score's author is read from them;
   `ext put <scope> list`; `ext add`, `import`, `init`, `link`, `order`, `remove`, `sync` and `unlink`, but `--dry-run` on `add`, `import` and `init`; `migrate`; `uninstall --purge`;
   and `settings set` or `reset` of a key a guard reads: `ext.links`, `ext.order`, `ext.repos`, `factory.archiveRepo`, `factory.publicRepo`, every `firefighting.start.*` key, `glm.readOnlyLoad5`, `live.branch`, `owner.names`, `paths.codeRoot`, `sessions.aliases`, `sessions.names`, `slack.gatedSends`, every `ticketCard.*` key and `usage.keychainService`, and of every ops job's `jobs.<name>`,
+  and `settings import-jobs` but its `--dry-run`, which writes a `jobs.<name>` for each job its file lists,
   whose refusal names the Inbox guard decision whose Approve writes it.
   A test holds that list to every key a hook names, to `ext.order`, which orders the extensions every guard reads, and to spawn.sh's `paths.codeRoot`; spawn.sh's `gates.*` stay open, as capacity tuning Ops adjusts in normal upkeep.
   A command, verb, kind or key word it cannot read, or any such word among the words of `ext put` or `settings set` or `reset`, counts as the write.
-  `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score` and `reject`, `settings set` of any other key, `settings import-jobs` and writes elsewhere in the data folder (handoffs, the roster) run.
+  `ext put` of a doc, a rule or any other reviewed kind, every read, `ext score` and `reject`, `settings set` of any other key, `settings import-jobs --dry-run` and writes elsewhere in the data folder (handoffs, the roster) run.
   Its refusal names the one route: the owner types the command as a `!` command in the dispatcher's terminal window, which runs without hooks and which the dispatcher hands the owner when a session tells its lead; no flag, environment variable, role or note in a session's own call frees it.
   A `settings set` or `reset` of `owner.names` or `factory.archiveRepo` with no `--scope` names Privacy on the Dashboard's Settings page instead, which saves both at your login's scope: the dispatcher asks the owner to save it there.
   An accept's refusal names its own route: the session posts an `accept` decision with `bun run ask new` (`.agents/dashboard/asks.md`), and the owner's Approve has the Dashboard run the accept with no role.

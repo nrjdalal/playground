@@ -316,7 +316,7 @@ function writeTargets(
   return [...new Set([...targets, ...maybe, ...logs, ...moved])]
 }
 
-// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, ext.repos, which names the repository each scope syncs from, and the ticket card's and ops-firefighting-start's, which turn on what the factory shows and starts; every jobs.<name> is refused beside them (JOB_PREFIX).
+// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, ext.repos, which names the repository each scope syncs from, and the ticket card's and ops-firefighting-start's, which turn on what the factory shows and starts; every jobs.<name> is refused beside them (OWNER_ONLY).
 export const GUARD_KEYS = new Set([
   "ext.links",
   "ext.order",
@@ -351,8 +351,11 @@ export const GUARD_KEYS = new Set([
   "ticketCard.window",
   "usage.keychainService",
 ])
-// An ops job's setting, which turns a job on or moves what it runs: only the owner's Approve of a guard decision, or Settings > Jobs, sets one.
-const JOB_PREFIX = "jobs."
+// The keys only the owner sets, by the Approve of a guard decision or, for an ops job's jobs.<name>, Settings > Jobs: a job's setting turns it on or moves what it runs, so every jobs.<name> is refused, a name the registry lacks included.
+const OWNER_ONLY = ["firefighting.start.", "jobs.", "ticketCard."]
+const ownerOnly = (key: string) => OWNER_ONLY.some((prefix) => key.startsWith(prefix))
+const BY_APPROVE =
+  "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it"
 // ext verbs that change a scope's lists or settings, or which scopes the lists and policy.json render from
 const EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"])
 // the ext verbs whose --dry-run writes nothing
@@ -743,16 +746,18 @@ function cliWrite(words: Word[]): string | undefined {
     } else positional.push(word)
   }
   if (command === "settings") {
+    if (verb === "import-jobs")
+      return dry
+        ? undefined
+        : `playground settings import-jobs, which writes each listed job's jobs.<name>, ${BY_APPROVE}`
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
-    if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX)) return
+    if (!GUARD_KEYS.has(key) && !ownerOnly(key)) return
     return PRIVACY_KEYS.has(key) && !scoped
       ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}`
-      : key.startsWith(JOB_PREFIX) ||
-          key.startsWith("ticketCard.") ||
-          key.startsWith("firefighting.start.")
-        ? `playground settings ${verb} of ${key}, a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it`
+      : ownerOnly(key)
+        ? `playground settings ${verb} of ${key}, ${BY_APPROVE}`
         : `playground settings ${verb} of ${key}, a key a guard reads`
   }
   if (verb === "accept")

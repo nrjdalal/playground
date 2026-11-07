@@ -2889,7 +2889,9 @@ var GUARD_KEYS = new Set([
   "ticketCard.window",
   "usage.keychainService"
 ]);
-var JOB_PREFIX = "jobs.";
+var OWNER_ONLY = ["firefighting.start.", "jobs.", "ticketCard."];
+var ownerOnly = (key) => OWNER_ONLY.some((prefix) => key.startsWith(prefix));
+var BY_APPROVE = "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it";
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
 var SWITCHES = {
@@ -3198,14 +3200,16 @@ function cliWrite(words) {
       positional.push(word);
   }
   if (command === "settings") {
+    if (verb === "import-jobs")
+      return dry ? undefined : `playground settings import-jobs, which writes each listed job's jobs.<name>, ${BY_APPROVE}`;
     if (verb !== "set" && verb !== "reset")
       return;
     const key = positional[0];
     if (unread || key === undefined)
       return `playground settings ${verb} with a word it cannot read`;
-    if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX))
+    if (!GUARD_KEYS.has(key) && !ownerOnly(key))
       return;
-    return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : key.startsWith(JOB_PREFIX) || key.startsWith("ticketCard.") || key.startsWith("firefighting.start.") ? `playground settings ${verb} of ${key}, a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it` : `playground settings ${verb} of ${key}, a key a guard reads`;
+    return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : ownerOnly(key) ? `playground settings ${verb} of ${key}, ${BY_APPROVE}` : `playground settings ${verb} of ${key}, a key a guard reads`;
   }
   if (verb === "accept")
     return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set";
