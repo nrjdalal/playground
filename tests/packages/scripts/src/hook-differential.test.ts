@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -347,6 +348,41 @@ describe("a run under a role", () => {
     const linear = (await import("../../../../scripts/hooks/no-linear-ticket")).check as Check
     expect(await linear(raw, as(real))).toBeString()
     expect(await linear(raw, as(scratchData(real, DIR)))).toBeString()
+  })
+
+  test("a replay of every hook's check() through the scratch folder leaves the real data folder as it was, so no hook writes through a link", async () => {
+    const real = realData("untouched-data")
+    const snapshot = () =>
+      readdirSync(real, { recursive: true })
+        .map(String)
+        .toSorted()
+        .map((entry) => {
+          const stat = lstatSync(join(real, entry))
+          return `${entry} ${stat.isFile() ? readFileSync(join(real, entry), "utf8") : "dir"} ${stat.mtimeMs}`
+        })
+    const before = snapshot()
+    const scratch = scratchData(real, DIR)
+    const env = envOf({ data: scratch, home: DIR, role: "worker" })
+    const list = [
+      `echo x > ${join(real, "ticket-approvals", "a")}`,
+      `cp ${join(DIR, "made-up")} ${join(real, "session-state", "s1.json")}`,
+      `touch ${join(real, "ops", "dashboard", "x")}`,
+      "git commit -m made-up",
+      "ls",
+    ].map((command) => ({ command, cwd: DIR, name: "abc-worker", session: "s1" }))
+    const hooks = join(import.meta.dir, "../../../../scripts/hooks")
+    let checked = 0
+    for (const file of new Bun.Glob("*.ts").scanSync(hooks)) {
+      const check = (await import(join(hooks, file))).check
+      if (typeof check !== "function") continue
+      checked++
+      await replay(check, check, list, DIR, undefined, undefined, env)
+    }
+    expect(checked).toBeGreaterThan(20)
+    expect(snapshot()).toEqual(before)
+    // a write through a link reaches the real folder, so the snapshot would show one a hook made
+    writeFileSync(join(scratch, "ticket-approvals", "probe"), "")
+    expect(snapshot()).not.toEqual(before)
   })
 
   test("a session's role comes from the roster by its transcript name, and its registry entry names it", async () => {
