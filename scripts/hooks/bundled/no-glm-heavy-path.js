@@ -8112,9 +8112,9 @@ async function inspect(raw, environment, load5, limit) {
   const command = toolInput.command;
   const orgs = await guardedOf(environment);
   const roots = new Map;
-  const home = Array.isArray(orgs) && checkoutOf(directory, orgs, roots) !== undefined;
+  const guarding = Array.isArray(orgs) && orgs.length > 0;
   const text = command.replace(/["'\\]/g, "");
-  if (!home && !mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text))
+  if (!guarding && !mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text))
     return;
   const env = {
     cwd: directory,
@@ -8123,7 +8123,14 @@ async function inspect(raw, environment, load5, limit) {
     process: environment,
     vars: new Map
   };
-  return run(lex(command, env.known), env, visitor(load5, limit, orgs, roots));
+  const home = guarding ? checkoutOf(directory, orgs, roots) : undefined;
+  try {
+    return await run(lex(command, env.known), env, visitor(load5, limit, orgs, roots));
+  } catch (error) {
+    if (home)
+      return checkoutRefusal("this call, which the hook could not read,", home);
+    throw error;
+  }
 }
 var mayRefuse = (text, load5, limit) => GIT_CALL.test(text) || ORG_CALL.test(text) || load5 > limit && BUSY_RUN.test(text);
 async function check(raw, environment = process.env, load5 = currentLoad5()) {

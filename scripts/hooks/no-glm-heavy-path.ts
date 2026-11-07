@@ -940,10 +940,10 @@ async function inspect(
   const command = toolInput.command
   const orgs = await guardedOf(environment)
   const roots: Roots = new Map()
-  // a call in a guarded org's checkout is parsed whatever it names, so each command's folder rule reads it
-  const home = Array.isArray(orgs) && checkoutOf(directory, orgs, roots) !== undefined
+  // while an org is guarded every call is parsed, since any bare word can name a path in its checkout
+  const guarding = Array.isArray(orgs) && orgs.length > 0
   const text = command.replace(/["'\\]/g, "")
-  if (!home && !mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text)) return
+  if (!guarding && !mayRefuse(text, load5, limit) && !RUNNER_CALL.test(text)) return
   const env: Env = {
     cwd: directory,
     files: new Map(),
@@ -951,7 +951,13 @@ async function inspect(
     process: environment,
     vars: new Map(),
   }
-  return run(lex(command, env.known), env, visitor(load5, limit, orgs, roots))
+  const home = guarding ? checkoutOf(directory, orgs, roots) : undefined
+  try {
+    return await run(lex(command, env.known), env, visitor(load5, limit, orgs, roots))
+  } catch (error) {
+    if (home) return checkoutRefusal("this call, which the hook could not read,", home)
+    throw error
+  }
 }
 
 // Whether a call may be one the hook refuses: a git commit or push, an org tool, or on a busy machine an install or clone.

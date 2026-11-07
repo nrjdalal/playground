@@ -1019,6 +1019,19 @@ describe("a GLM session's reads of an org's checkout and its database calls", ()
     }
   })
 
+  test("a shell read naming an org's checkout by a bare word, and a call in one the hook cannot parse, are refused on GLM", async () => {
+    for (const raw of [
+      input("rg token read-org-repo", DIR),
+      input("ls read-org-repo", DIR),
+      input(`cat README.md "`, ORG),
+    ]) {
+      const { claude, glm } = await both(raw)
+      expect(claude).toBeUndefined()
+      expect(glm).toContain("acme-blue/demo")
+      expect(glm).toContain("glm rule")
+    }
+  })
+
   test("a read outside any guarded checkout passes on GLM: its own checkout, a folder in no checkout, and a checkout whose remotes git cannot read", async () => {
     for (const raw of [
       call("Read", { file_path: join(REPO, "README.md") }),
