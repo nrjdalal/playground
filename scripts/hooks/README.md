@@ -294,6 +294,8 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   The root shell is looked for under each reading of the wrapper's options (above); once the parse runs out of readings, any sudo, doas, pkexec or su among the command's words counts as a root shell and any shell's name as a shell.
   Every spaced text of every program on such a line, each `\n`-separated part of it and an awk program's strings are read as command lines.
   A root shell's stdin is read as its script, and one the hook cannot read (a download, a file it cannot see, a bare `sudo -s`, one only the shell's own reading reaches, as [the stdin lines at the top](#the-factorys-hooks) set out) is refused: run its commands as calls of their own.
+  An `eval`'s words are its script, so an `eval` is refused the same way, in any folder and any shell and behind `builtin` or `command`, unless each of its words is quoted text or plain characters (letters, digits, `_ . / = - , : @ %`; `unreadWord` in `scripts/hooks/shell.ts`).
+  Any other character can fill a word with code the shell runs: a variable, a substitution, or a glob a shell option makes of it (`*`, zsh's `^x`, a ksh `@(x)`), which a file's name then fills.
   For any program but a reader, each text that holds a space (a word, the value after its `=`, an option's attached value, a variable the call sets or exports) is judged as a command line of its own, a leading `!` dropped, since a program may run it (`watch`, `tmux`, `ssh -o ProxyCommand`, `rsync -e`, a git alias, a pager).
   A value it cannot read (a variable, a substitution) is lexed again with the steady variables the call has set by then, an assignment naming an earlier one included (`S=/tmp/a; T="$S/b"`), and judged as written;
   under a remover (`find`, `mv`, `rm`, `rmdir`, `rsync`, `unlink`) one still unread is refused, so hold it in the same call or write it literally, and git's `-c` takes a literal value alone, refusing any variable or substitution, held or not, but the `HOME`, `TMPDIR` and `PWD` the hook reads from the call's environment.
@@ -610,6 +612,12 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   It refuses a commit whose `git rev-parse --show-toplevel` is the factory's main checkout, the one `~/.playground/ops/run-slot.sh` links into (`scripts/link-skills.sh` makes that link), whatever wrapper, shell or cwd made it, since this hook reads a command's text and the step reads where the commit lands.
   A worktree and every other clone, a person's own included, commit as before.
   A ship's pull is a fast-forward and runs no pre-commit, and the step's test is in `tests/lefthook.test.ts`.
+- The same hook keeps the live Dashboard's checkout to the sessions that own it: a git write there (a commit, a merge, a reset and every other git move above, step 5's fast-forward and the keep reset included, since those two are the main checkout's own) is refused to every factory session but the runner that holds it, by `PLAYGROUND_ROLE` `runner`, and the ops lead,
+  a `lead` whose name in Claude Code's registry has the roster's `ops` kind, naming the route: ask Ops.
+  The live checkout is the worktree of the main checkout's repository on the branch `live.branch` names (`liveCheckout`, read from `.git/worktrees`), judged by the same folder reading as the main checkout: the cwd, `git -C`, `--git-dir`, `--work-tree`, run-slot and a shell's script.
+  Reads there (`status`, `log`, `diff`, `fetch`) run for every session, and so does every write outside it.
+  The ops-dashboard supervisor's roll and `playground update`'s pull are shell processes that no Claude Code hook sees, so they move the checkout as before.
+  Its tests are in `bun run test:file tests/scripts/hooks/no-main-checkout.test.ts`.
 
 ## no-manager-subagent
 

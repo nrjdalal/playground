@@ -2341,3 +2341,19 @@ describe("a held path past any other heredoc or a quote the scan cannot place is
     expect(await bash(command, WORK)).toBeDefined()
   })
 })
+
+// An eval of literal text is followed as the line its words make, so it runs where those commands would; refused-forms/1198.ts holds the forms it refuses
+describe("an eval of literal text runs", () => {
+  test.each([
+    ["an eval of one quoted line", "eval 'echo hi'"],
+    ["an eval of literal words", "eval echo hi"],
+    ["an eval of a chain", "eval 'cd /tmp && ls'"],
+    ["an eval of a heredoc read by a substitution", "eval \"$(cat <<'EOF'\necho hi\nEOF\n)\""],
+    ["an eval of plain words", "eval git status"],
+    ["an eval of each plain character", "eval echo a-b.c/d=e,f:g@h%i"],
+    ["an eval of a quoted glob operator", "eval 'ls ^x'"],
+    ["an eval of an escaped glob operator", "eval echo \\^x"],
+  ])("%s runs from the checkout and the home", async (_, command) => {
+    for (const cwd of [CHECKOUT, HOME]) expect(await bash(command, cwd)).toBeUndefined()
+  })
+})
