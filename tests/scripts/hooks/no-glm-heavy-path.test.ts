@@ -751,6 +751,11 @@ describe("a GLM session's org tools", () => {
   test.each([
     { $label: "a headless claude run", command: "claude -p hi", names: "headless Claude run" },
     {
+      $label: "a headless claude run through npx --package=",
+      command: "npx --package=@anthropic-ai/claude-code claude -p hi",
+      names: "headless Claude run",
+    },
+    {
       $label: "curl to the tracker",
       command: "curl -s https://api.linear.app/graphql",
       names: "linear.app",
@@ -764,11 +769,6 @@ describe("a GLM session's org tools", () => {
       $label: "wget of the docs",
       command: "wget https://api.notion.com/v1/x",
       names: "notion.com",
-    },
-    {
-      $label: "the tracker's script",
-      command: "bun run linear:read MADE-1",
-      names: "Linear script",
     },
     {
       $label: "gh on an org repo",
@@ -792,6 +792,16 @@ describe("a GLM session's org tools", () => {
       names: "--repo <owner>/<name>",
     },
     { $label: "gh search with no scope", command: "gh search prs fix", names: "every org" },
+    {
+      $label: "gh graphql scoped to a repo no org guards",
+      command: `gh api graphql -f query='{ repository(owner: "qzx-labs", name: "x") { pullRequest(number: 1) { id } } }'`,
+      names: "REST",
+    },
+    {
+      $label: "gh graphql mutation",
+      command: `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "PRRT_x"}) { thread { isResolved } } }'`,
+      names: "REST",
+    },
   ])(
     "$label is refused on GLM, naming it and the glm rule, and passes on Claude",
     async ({ command, names }) => {
@@ -802,6 +812,46 @@ describe("a GLM session's org tools", () => {
       expect(glm).toContain("report to your lead")
     },
   )
+
+  test("a runner's call that resolves into an org script's folder is refused on GLM, whatever the runner, and passes on Claude", async () => {
+    const scripts = join(DIR, "scripts-repo")
+    mkdirSync(join(scripts, "packages", "scripts"), { recursive: true })
+    await Bun.write(
+      join(scripts, "package.json"),
+      JSON.stringify({
+        scripts: {
+          build: "turbo build",
+          dm: "bun --no-env-file packages/scripts/src/dm/cli.ts",
+          "linear:read": "bun --no-env-file packages/scripts/src/linear-read/cli.ts",
+        },
+      }),
+    )
+    for (const [command, names] of [
+      ["bun run linear:read MADE-1", "Linear script"],
+      ["bun linear:read MADE-1", "Linear script"],
+      ["pnpm linear:read MADE-1", "Linear script"],
+      ["npm run-script linear:read MADE-1", "Linear script"],
+      ["yarn linear:read MADE-1", "Linear script"],
+      ["bun run --cwd packages/scripts linear:read MADE-1", "Linear script"],
+      ["bun --cwd packages/scripts run linear:read MADE-1", "Linear script"],
+      ["cd packages/scripts && bun src/linear-read/cli.ts MADE-1", "Linear script"],
+      ["bun --cwd packages/scripts src/linear-read/cli.ts MADE-1", "Linear script"],
+      ["bun --cwd=packages/scripts src/linear-read/cli.ts MADE-1", "Linear script"],
+      ["bun dm send x.md", "DM sender"],
+      ["node ./packages/scripts/src/dm/cli.ts send", "DM sender"],
+    ]) {
+      const { claude, glm } = await both(input(command, scripts))
+      expect(claude).toBeUndefined()
+      expect(glm).toContain(names)
+      expect(glm).toContain("glm rule")
+    }
+    for (const command of [
+      "bun run build",
+      "bun run test:file tests/packages/scripts/src/linear-read/cli.test.ts",
+      "cd packages/scripts && git log -1 -- src/linear-read/",
+    ])
+      expect(await refusal(input(command, scripts), ON_GLM, CALM)).toBeUndefined()
+  })
 
   test("a policy it cannot read refuses gh, git and a fetcher on GLM, naming the fix, and passes on Claude", async () => {
     const broken = join(DIR, "broken-data")
@@ -901,9 +951,14 @@ describe("a GLM session's org tools", () => {
     { $label: "the account's own repo list", command: "gh repo list" },
     { $label: "gh api of the signed-in user", command: "gh api user" },
     {
-      $label: "gh graphql of a repo no org guards",
-      command: `gh api graphql -f query='{ repository(owner: "qzx-labs", name: "x") { pullRequest(number: 1) { id } } }'`,
+      $label: "gh api of the checkout's own repo by gh's placeholders",
+      command: "gh api repos/{owner}/{repo}/pulls",
     },
+    {
+      $label: "gh api of a repo no org guards by its full URL",
+      command: "gh api https://api.github.com/repos/qzx-labs/playground/pulls",
+    },
+    { $label: "gh api's markdown render", command: "gh api markdown -f text=hi" },
   ])("$label passes on GLM", async ({ command }) => {
     expect(await refusal(input(command), ON_GLM, CALM)).toBeUndefined()
   })

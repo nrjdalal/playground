@@ -92,6 +92,16 @@ git(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
 mkdirSync(join(GLM_REPO, "web", "next", "src"), { recursive: true })
 writeFileSync(join(GLM_REPO, "web", "next", "src", "x.ts"), "x\n")
 git(GLM_REPO, "add", ".")
+// The package scripts that run the tracker's and the DM's scripts, as the factory's root package.json names them, for the org-script rows.
+writeFileSync(
+  join(GLM_REPO, "package.json"),
+  JSON.stringify({
+    scripts: {
+      dm: "bun --no-env-file packages/scripts/src/dm/cli.ts",
+      "linear:read": "bun --no-env-file packages/scripts/src/linear-read/cli.ts",
+    },
+  }),
+)
 // A checkout of the made-up org acme-blue, which the leak data folder's ext.links guards, for a GLM session's org rows.
 const GLM_ORG_REPO = join(SCRATCH, "glm-org-repo")
 git(SCRATCH, "init", "-q", GLM_ORG_REPO)

@@ -79,6 +79,49 @@ export const groups: Group[] = [
         "pnpm dlx @anthropic-ai/claude-code@latest --print hi",
       ],
       ["wget with its URLs in a file", "wget -i urls.txt"],
+      // round 2: every GraphQL call, an org script reached by its path or its package script whatever the runner, claude-code by npx --package=, a git place held in a variable
+      [
+        "gh graphql scoped to a repo that walks out to its owner's orgs",
+        `gh api graphql -f query='{ repository(owner: "qzx-labs", name: "x") { owner { ... on User { organizations(first: 10) { nodes { login } } } } } }'`,
+      ],
+      [
+        "gh graphql scoped to a repo that walks out through its users",
+        `gh api graphql -f query='{ repository(owner: "qzx-labs", name: "x") { assignableUsers(first: 5) { nodes { issues(first: 5) { nodes { title } } } } } }'`,
+      ],
+      [
+        "gh graphql scoped to a repo that walks out to its owner's repos",
+        `gh api graphql -f query='{ repository(owner: "qzx-labs", name: "x") { owner { repositories(first: 50) { nodes { nameWithOwner } } } } }'`,
+      ],
+      [
+        "gh graphql mutation",
+        `gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "PRRT_x"}) { thread { isResolved } } }'`,
+      ],
+      ["bun's bare package script for the tracker", "bun linear:read MADE-1"],
+      ["bun's bare package script for the DM", "bun dm send x.md"],
+      [
+        "bun run --cwd of the tracker's script",
+        "bun run --cwd packages/scripts linear:read MADE-1",
+      ],
+      [
+        "bun --cwd run of the tracker's script",
+        "bun --cwd packages/scripts run linear:read MADE-1",
+      ],
+      [
+        "bun of the tracker's script by a path from its package",
+        "cd packages/scripts && bun src/linear-read/cli.ts MADE-1",
+      ],
+      [
+        "bun --cwd of the tracker's script by its path",
+        "bun --cwd packages/scripts src/linear-read/cli.ts MADE-1",
+      ],
+      ["pnpm's bare package script for the tracker", "pnpm linear:read MADE-1"],
+      ["npm run-script of the tracker's script", "npm run-script linear:read MADE-1"],
+      ["node of the DM sender by its path", "node ./packages/scripts/src/dm/cli.ts send"],
+      [
+        "a headless claude run through npx --package=",
+        "npx --package=@anthropic-ai/claude-code claude -p hi",
+      ],
+      ["git -C a folder held in a variable", "C=/tmp; git -C $C log -1"],
     ],
   },
   {
