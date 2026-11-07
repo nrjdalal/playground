@@ -69,7 +69,7 @@ export type Kind =
 
 const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 // A list's entries, each standing alone as the leak guard's terms do; none when the list is empty.
-const anyOf = (items: string[], tail = ""): RegExp | undefined =>
+export const anyOf = (items: string[], tail = ""): RegExp | undefined =>
   items.length
     ? new RegExp(`(?<![a-z\\d])(?:${items.map(escape).join("|")})${tail}(?![a-z\\d])`, "gi")
     : undefined

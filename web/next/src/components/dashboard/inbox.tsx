@@ -120,6 +120,7 @@ import { HOLDS_RELOAD } from "@/lib/build-reload"
 import { copyToClipboard } from "@/lib/clipboard"
 import { config } from "@/lib/config"
 import { dispatcherOf, useNow } from "@/lib/dashboard"
+import { cardDraftKey, draftSaver, readDrafts, saveDraft } from "@/lib/drafts"
 import {
   answerItem,
   canDraft,
@@ -157,6 +158,7 @@ import {
   retryable,
   retryItem,
   revealSecret,
+  schedulable,
   scheduleChoices,
   scheduleItem,
   sendFailed,
@@ -923,9 +925,21 @@ export function InboxCard({
   const [error, setError] = useState<string | null>(null)
   // Check it for me sends its note once
   const [asked, setAsked] = useState(false)
-  // a draft's words, editable where they stand
+  // a draft's words, editable where they stand, and kept under the card's own key while they can still change (open, or a reply its poster is not done with), so a list refresh or a shelf move that remounts the card gives back what he typed
   const posted = item.kind === "draft" ? item.preview.text : ""
-  const [draft, setDraft] = useState(posted)
+  const keeps = item.kind === "draft" && schedulable(item)
+  const keptKey = cardDraftKey(item.id)
+  const [kept] = useState(() => (keeps ? readDrafts()[keptKey] : undefined))
+  const [draft, setDraft] = useState(kept?.text ?? posted)
+  const [saveKept] = useState(() => draftSaver(keptKey, kept))
+  const editDraft = (text: string) => {
+    setDraft(text)
+    saveKept({ attachments: [], text: text === posted ? "" : text })
+  }
+  // once it is answered, settled or archived, its kept words go
+  useEffect(() => {
+    if (item.kind === "draft" && !keeps) saveDraft(keptKey, { attachments: [], text: "" })
+  }, [item.kind, keeps, keptKey])
   // the poster's bun run ask edit replaces the words in place, unless he has changed them
   const [synced, setSynced] = useState(posted)
   if (posted !== synced) {
@@ -1117,7 +1131,7 @@ export function InboxCard({
             aria-label={`Message to ${item.preview.to}`}
             className={BOX}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => editDraft(event.target.value)}
           />
         )}
       </div>

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 
@@ -23,6 +23,7 @@ import {
   Questionnaire,
   QuestionnaireItem,
 } from "../../../../../../web/next/src/components/ui/questionnaire"
+import { cardDraftKey, readDrafts, saveDraft } from "../../../../../../web/next/src/lib/drafts"
 import { INBOX_QUERY_KEY, SHELF_LABELS, type Shelf } from "../../../../../../web/next/src/lib/inbox"
 import { tipsOf } from "../../tooltips"
 
@@ -1825,5 +1826,73 @@ describe("one word a meaning: Later, Archive, Reply and Replying (PG-900)", () =
     for (const old of ['"Snoozed"', '"Archived"', "Mark all done as read", "Dismiss all archived"])
       expect(source).not.toContain(old)
     expect(SHELF_LABELS).toMatchObject({ archived: "Archive", snoozed: "Later" })
+  })
+})
+
+// A draft card's changed words outlive a remount (a list refresh, a shelf move), kept in the composer's draft store under the card's own key, and its sent words never take a kept edit.
+describe("a draft card's changed words", () => {
+  const real = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+  const store = new Map<string, string>()
+  beforeAll(() =>
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: (key: string) => store.get(key) ?? null,
+        removeItem: (key: string) => void store.delete(key),
+        setItem: (key: string, value: string) => void store.set(key, value),
+      } as Storage,
+    }),
+  )
+  afterEach(() => {
+    for (const to of Object.keys(readDrafts())) saveDraft(to, { attachments: [], text: "" })
+  })
+  afterAll(() => {
+    if (real) Object.defineProperty(globalThis, "localStorage", real)
+    else delete (globalThis as { localStorage?: Storage }).localStorage
+  })
+
+  const draft = {
+    ...decision,
+    kind: "draft",
+    preview: {
+      link: "https://app.slack.com/client/T0000000000/D0MADEUP11",
+      text: "hi",
+      to: "Merritt DM",
+    },
+  } as InboxItem
+  const box = (html: string) =>
+    html.match(/<textarea[^>]*aria-label="Message to Merritt DM"[^>]*>([^<]*)<\/textarea>/)?.[1]
+  const keep = (text: string) => saveDraft(cardDraftKey(draft.id), { attachments: [], text })
+
+  test("come back in its box when the card mounts again", () => {
+    keep("hi, the ship moves to Friday")
+    expect(box(opened(draft))).toBe("hi, the ship moves to Friday")
+  })
+
+  test("come back in a card a reply collapsed, once it is opened again", () => {
+    keep("hi, the ship moves to Friday")
+    const replied = {
+      ...draft,
+      answer: { at: "2026-10-12T10:05:00.000Z", choice: "replied" },
+    } as InboxItem
+    expect(box(opened(replied))).toBe("hi, the ship moves to Friday")
+  })
+
+  test("never show on a sent card, which reads the words as they went", () => {
+    keep("hi, the ship moves to Friday")
+    const sent = {
+      ...draft,
+      answer: { at: "2026-10-12T10:05:00.000Z", choice: "send", editedText: "hi there" },
+      status: "sent",
+    } as InboxItem
+    const html = opened(sent, "done")
+    expect(box(html)).toBeUndefined()
+    expect(html).toContain("hi there")
+    expect(html).not.toContain("moves to Friday")
+  })
+
+  test("are another card's alone: a card shows its own words when only another's are kept", () => {
+    saveDraft(cardDraftKey("id-42"), { attachments: [], text: "for another card" })
+    expect(box(opened(draft))).toBe("hi")
   })
 })

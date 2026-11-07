@@ -509,7 +509,36 @@ function bodyOf(commands, k) {
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/;
+var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]/;
+var LEADS = new Set([
+  "!",
+  "-",
+  "builtin",
+  "command",
+  "elif",
+  "exec",
+  "if",
+  "nocorrect",
+  "noglob",
+  "time",
+  "until",
+  "while"
+]);
+function sources(line) {
+  let command = true;
+  for (const [raw] of line.replace(/\\\n/g, "").matchAll(/[;&|(){}\n]|(?:\$'(?:[^'\\]|\\[\s\S])*'?|'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]|[^\s;&|(){}'"\\])+/g)) {
+    const word = raw.replace(/\$'/g, "'").replace(/['"\\]/g, "");
+    if (/^[;&|(){}\n]$/.test(raw) || /^(?:\]\]|do|else|then)$/.test(word))
+      command = true;
+    else if (!command)
+      continue;
+    else if (word === "source" || word === "." || word === "eval")
+      return true;
+    else if (!LEADS.has(word) && !/^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(word))
+      command = false;
+  }
+  return false;
+}
 var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
 var zshSplits = (line) => {
   if (ZSH_SPLITS.test(line))
@@ -520,6 +549,8 @@ var zshSplits = (line) => {
       return true;
   }
   const joined = line.replace(/[\\'"]/g, "");
+  if (sources(line) || sources(joined))
+    return true;
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
   const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
   return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
@@ -2513,7 +2544,7 @@ var testsAName = (args, expands) => args.some((w, k) => {
 });
 var OPENS2 = new Set(["case", "for", "if", "select", "until", "while", "{"]);
 var CLOSES2 = new Set(["done", "esac", "fi", "}"]);
-var LEADS = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
+var LEADS2 = new Set(["!", "coproc", "do", "elif", "else", "then", "time"]);
 function steadyNames(named, commands) {
   if (named.blind || named.counts.has("IFS"))
     return () => NONE;
@@ -2535,8 +2566,6 @@ function steadyNames(named, commands) {
     const loop = cmd.words.findIndex((w) => !w.quoted && (w.value === "for" || w.value === "select"));
     if (!NAME_SETTERS.has(name) && loop === -1)
       continue;
-    if (bareExport(parses[at]))
-      continue;
     const vNames = cmd.words.flatMap((w, k) => k > 0 && /^-[^-\s]*v/.test(w.value) ? [{ ...w, value: w.value.slice(w.value.indexOf("v") + 1) }, cmd.words[k + 1]] : []);
     const names = loop !== -1 ? [cmd.words[loop + 1]] : PRINTS.has(name) ? vNames : cmd.words;
     for (const word of names) {
@@ -2551,10 +2580,7 @@ function steadyNames(named, commands) {
     }
   }
   const set = new Map;
-  const exports = new Map;
   const where = new Map;
-  const open = [];
-  const loops = new Map;
   let chain = 0;
   let depth = 0;
   for (const [at, cmd] of commands.entries()) {
@@ -2572,29 +2598,14 @@ function steadyNames(named, commands) {
         depth++;
       else if (CLOSES2.has(value))
         depth--;
-      else if (!LEADS.has(value))
+      else if (!LEADS2.has(value))
         break;
     }
     if (depth < 0)
       return () => NONE;
-    while (open.length > 0 && depth < open.at(-1).depth)
-      open.pop();
-    if (open.length > 0)
-      loops.set(cmd, new Map(open.map((o) => [o.key, o.values])));
-    const head = forList(cmd, named);
-    if (head)
-      open.push({ depth, ...head });
     const always = !cmd.follows || cmd.follows === ";" || cmd.follows === "&";
     if (!top || cmd.detached || !always && cmd.follows !== "&&")
       continue;
-    if (bareExport(parses[at])) {
-      for (const w of parses[at].args) {
-        const key = w.value.slice(0, w.value.indexOf("="));
-        if (holdable(key, named, counts))
-          exports.set(key, always ? { at } : { at, chain });
-      }
-      continue;
-    }
     const [first] = cmd.words;
     if (!first || !ASSIGN.test(first.value) || parses[at].name !== "")
       continue;
@@ -2608,45 +2619,14 @@ function steadyNames(named, commands) {
     const here = where.get(cmd);
     if (!here)
       return NONE;
-    const before = (from) => !!from && from.at < here.at && (from.chain === undefined || from.chain === here.chain);
     return {
-      exported: (key) => before(exports.get(key)),
-      has: (key) => before(set.get(key)),
-      loop: (key) => loops.get(cmd)?.get(key)
+      has: (key) => {
+        const from = set.get(key);
+        return !!from && from.at < here.at && (from.chain === undefined || from.chain === here.chain);
+      }
     };
   };
 }
-var bareExport = ({ args, name }) => name === "export" && args.length > 0 && args.every((w) => !w.quoted && ASSIGN.test(w.value) && PLAIN_NAME.test(w.value.slice(0, w.value.indexOf("="))));
-function forList(cmd, named) {
-  const at = cmd.words.findIndex((w) => w.quoted || !(LEADS.has(w.value) || w.value === "{"));
-  if (at === -1 || cmd.words[at].quoted || cmd.words[at].value !== "for")
-    return;
-  const [key, word, ...values] = cmd.words.slice(at + 1);
-  if (!key || key.quoted || !PLAIN_NAME.test(key.value) || named.counts.get(key.value) !== 1)
-    return;
-  if (!word || word.quoted || word.value !== "in" || values.length === 0)
-    return;
-  if (values.some((w) => marked(w.value) || /[*?[\]{}]/.test(w.value)))
-    return;
-  return { key: key.value, values: values.map((w) => w.value) };
-}
-function heldReadings(word, env, steady) {
-  if (!word.raw || !marked(word.value))
-    return;
-  const known = heldVars(env, { has: (key) => steady.has(key) || !!steady.exported?.(key) });
-  let sets = [known];
-  for (const key of new Set(word.raw.match(/[A-Za-z_]\w*/g) ?? [])) {
-    const values = steady.loop?.(key);
-    if (!values)
-      continue;
-    sets = sets.flatMap((s) => values.map((v) => ({ ...s, [key]: v })));
-    if (sets.length > LOOP_READINGS)
-      return;
-  }
-  const words = sets.map((s) => relexed(word.raw, s));
-  return words.every(Boolean) ? words : undefined;
-}
-var LOOP_READINGS = 64;
 function heldWord(word, env, steady) {
   return word.raw && marked(word.value) ? relexed(word.raw, heldVars(env, steady)) : undefined;
 }
@@ -3453,14 +3433,6 @@ async function inspect(raw, environment, unknown = false) {
       const into = cmd.redirects.find((r) => r.target && writer(r) && (inRoot(pathOf(r.target, here)) || GLOB.test(r.target.value) && !!names(r.target, here, true)));
       if (into?.target)
         return refuse(`a write to ${pathOf(into.target, here)}`);
-      for (const r of cmd.redirects) {
-        if (!r.target || !writer(r) || !marked(r.target.value))
-          continue;
-        const words = heldReadings(r.target, here, steadyAt(cmd)) ?? [];
-        const named = words.map((word) => names(word, here, false)).find(Boolean);
-        if (named)
-          return refuse(`a write to ${named}`);
-      }
     }
     const blind = env.cwdAnywhere ? cmd.redirects.find((r) => r.target && writer(r) && pathOf(r.target, { ...env, cwd: undefined }) === undefined) : undefined;
     if (blind?.target)
