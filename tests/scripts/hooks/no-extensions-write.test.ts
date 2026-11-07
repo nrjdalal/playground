@@ -909,6 +909,12 @@ describe("a quoted argument is read as a command line only where a program runs 
       "busybox running another harmless applet",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | busybox cat",
     ],
+    ["a harmless here-string on a brace group around bash", "{ bash; } <<< 'ls -la'"],
+    ["a harmless here-string on descriptor 3 duplicated onto bash's stdin", "bash 3<<< 'ls' <&3"],
+    [
+      "pkexec running a program of its own",
+      "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | pkexec cat",
+    ],
     [
       "env's lone dash ahead of a harmless program",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - ls",

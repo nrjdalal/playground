@@ -296,6 +296,7 @@ var WRAPPERS = new Map(Object.entries({
   nocorrect: ["", ""],
   noglob: ["", ""],
   nohup: ["", ""],
+  pkexec: ["--disable-internal-agent --help --keep-cwd --version", "--user"],
   repeat: ["", ""],
   stdbuf: ["", "-e -i -o --error --input --output"],
   sudo: [
@@ -334,8 +335,10 @@ function optionValue(word, { flags, values }) {
 }
 var ROOT_SHELLS = new Map([
   ["doas", new Set(["-s"])],
+  ["pkexec", new Set],
   ["sudo", new Set(["--login", "--shell", "-i", "-s"])]
 ]);
+var BARE_ROOT = new Set(["pkexec"]);
 function stdinShell(cmd) {
   cmd = spreadSplit(cmd);
   const parsed = parse(cmd);
@@ -450,6 +453,8 @@ function stdinShellOf(cmd, { args, first, name, xargs }) {
       wrappers.push(program(w.value));
   }
   if (first && wrappers.length)
+    return "root";
+  if (!first && wrappers.some((wrapper) => BARE_ROOT.has(wrapper)))
     return "root";
   return fed && first ? "shell" : undefined;
 }
@@ -580,6 +585,35 @@ function codeFed(commands) {
     }
   }
   return fed;
+}
+function feedBodies(commands) {
+  for (let k = commands.length - 1;k >= 0; k--) {
+    const close = commands[k];
+    const inputs = close.redirects.filter((r) => r.op.startsWith("<") || dupOnto0(r));
+    if (inputs.length === 0)
+      continue;
+    const region = CLOSES.has(markers(close.words)[0] ?? "") ? bodyOf(commands, k) : undefined;
+    const body = close.inner ? close.inner() : region ?? [];
+    const ownPipe = (cmd) => !!cmd.stdin && (region ? region.includes(cmd.stdin) : cmd.stdin.scope > close.scope);
+    const fed = inputs.map((r) => ({ ...r, bodyFed: r.bodyFed ?? r }));
+    const origins = new Set(fed.map((r) => r.bodyFed));
+    for (const cmd of body) {
+      if (cmd === close)
+        continue;
+      const own = cmd.redirects.filter((r) => !r.bodyFed || !origins.has(r.bodyFed));
+      cmd.redirects.splice(0, cmd.redirects.length, ...ownPipe(cmd) ? fed.filter((r) => fdOf(r) !== "0") : fed, ...own);
+    }
+  }
+}
+function bodyOf(commands, k) {
+  let depth = 0;
+  for (let j = k;j >= 0; j--) {
+    for (const m of markers(commands[j].words))
+      depth += CLOSES.has(m) ? 1 : OPENS.has(m) ? -1 : 0;
+    if (depth <= 0)
+      return commands.slice(j, k + 1);
+  }
+  return [];
 }
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
@@ -1344,6 +1378,7 @@ function backtick(lx) {
   list({ ...lx, i: 0, src: inner }, lx.scopes.push(lx.scope) - 1, false);
   return unknown("a command substitution");
 }
+var echoes = false;
 function substituted(inner, known) {
   const [only] = inner;
   if (inner.length !== 1 || only.stdin || only.group)
@@ -1363,6 +1398,11 @@ function substituted(inner, known) {
   if (only.words.length === 0 && only.redirects.length === 1 && input.op === "<" && input.target) {
     return { reads: [input.target], value: READ };
   }
+  const printed = args.map((w) => w.value.replaceAll("\\n", `
+`));
+  const words = args.every((w) => !w.unknown && !w.glob && !marked(w.value)) && printed.every((v) => !v.includes("\\"));
+  if (echoes && first?.value === "echo" && !first.quoted && only.redirects.length === 0 && words && !args[0]?.value.startsWith("-"))
+    return { value: printed.join(" ") };
   return unknown("a command substitution");
 }
 var MKTEMP_FLAGS = new Set(["d", "q"]);
@@ -1520,6 +1560,7 @@ async function runAll(lexed, env, visit, builtins) {
     envs.set(scope, child);
     return child;
   };
+  feedBodies(lexed.commands);
   for (const [producer, { consumer, kind }] of codeFed(lexed.commands)) {
     producer.feedsShell = true;
     consumer.runsStdin = kind !== "code";
@@ -1557,8 +1598,11 @@ async function examine(cmd, env, visit, builtins) {
   }
   if (!cmd.runsStdin || stdinScript(primary))
     return;
-  const script = await stdinOf(cmd, env);
-  return nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins));
+  for (const script of await scriptStdin(cmd, env)) {
+    const verdict = await nested(cmd, env, () => run(lexScript(known(script), env), subshell(env), visit, builtins));
+    if (verdict)
+      return verdict;
+  }
 }
 function stdinScript({ args, name }) {
   if (name === "." || name === "source")
@@ -1660,8 +1704,13 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
   } else if (SHELLS.has(name))
     verdict = await nested(cmd, env, () => shell(name, args, cmd, here, visit, builtins, parsed.xargs));
   else if ((name === "source" || name === ".") && (args[0]?.procs || STDIN_PATHS.has(args[0]?.value ?? ""))) {
-    const script = await scriptOf(args[0], cmd, here);
-    verdict = (script.unknown ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
+    const scripts = await scriptOf(args[0], cmd, here);
+    verdict = scripts[0].unknown ? await visit(cmd, parsed, here) : undefined;
+    for (const script of verdict ? [] : scripts) {
+      verdict = await nested(cmd, env, () => run(again(lexScript(known(script), env), cmd, parsed), here, visit, builtins));
+      if (verdict)
+        break;
+    }
   } else if (name === "eval") {
     verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
@@ -1890,17 +1939,20 @@ async function shell(name, args, cmd, env, visit, builtins, xargs) {
     }
     return run(lexScript(script, env), { ...subshell(env), splits: splits(script) }, visit, builtins);
   }
-  const script = await scriptOf(operand, cmd, env);
-  const text = known(script);
-  return run(lexScript(text, env), { ...subshell(env), splits: splits(text) }, visit, builtins);
+  for (const script of await scriptOf(operand, cmd, env)) {
+    const text = known(script);
+    const verdict = await run(lexScript(text, env), { ...subshell(env), splits: splits(text) }, visit, builtins);
+    if (verdict)
+      return verdict;
+  }
 }
 var known = (script) => script.value.replaceAll(UNKNOWN, `
 `);
 async function scriptOf(operand, cmd, env) {
-  const script = !operand || STDIN_PATHS.has(operand.value) ? await stdinOf(cmd, env) : operand.procs ? await outputs(operand.procs, env) : unknown("a script file");
-  if (deadline !== undefined && script.unknown === LARGE)
+  const scripts = !operand || STDIN_PATHS.has(operand.value) ? await scriptStdin(cmd, env) : [operand.procs ? await outputs(operand.procs, env) : unknown("a script file")];
+  if (deadline !== undefined && scripts.some((s) => s.unknown === LARGE))
     throw new RangeError(LARGE);
-  return script;
+  return scripts;
 }
 async function outputs(cmds, env) {
   return join4(await Promise.all(cmds.map((c) => outputOf(c, env))));
@@ -1992,21 +2044,64 @@ function printf([format = "", ...args]) {
 }
 async function stdinOf(cmd, env) {
   tick();
-  return held2(await stdinText(cmd, env));
+  const input = cmd.redirects.findLast((r) => !r.bodyFed && ownFeed(r));
+  if (!input)
+    return held2(cmd.stdin ? await outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see"));
+  return held2(await redirectText(input, env, false));
 }
-var feedsStdin = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
-var rootFed = (cmd) => cmd.redirects.some(feedsStdin) && stdinShell(cmd) === "root";
+async function scriptStdin(cmd, env) {
+  const own = await stdinOf(cmd, env);
+  tick();
+  const fed = held2(await stdinText(cmd, env));
+  return fed.value === own.value && fed.unknown === own.unknown ? [own] : [own, fed];
+}
+var ownFeed = ({ fd, op }) => (fd === "" || fd === "0") && op.startsWith("<") && op !== "<&";
+function stdinRedirect(cmd) {
+  const fed = new Map;
+  for (const r of cmd.redirects) {
+    const dup = r.op === "<&" || dupOnto0(r);
+    if (!r.op.startsWith("<") && !dup)
+      continue;
+    const from = (r.target?.value ?? "").replace(/^(\d+)-$/, "$1");
+    fed.set(fdOf(r), dup ? /^\d+$/.test(from) ? fed.get(from) : undefined : r);
+  }
+  return fed.get("0");
+}
+var fdOf = (r) => r.fd === "" ? r.op.startsWith(">") ? "1" : "0" : r.fd;
+var dupOnto0 = (r) => r.op === ">&" && r.fd === "0";
+var stdinFed = (cmd) => stdinRedirect(cmd) !== undefined || cmd.redirects.some(ownFeed);
+var rootFed = (cmd) => stdinFed(cmd) && stdinShell(cmd) === "root";
 async function stdinText(cmd, env) {
-  const input = cmd.redirects.findLast(feedsStdin);
-  if (input?.target?.procs)
+  const input = stdinRedirect(cmd);
+  if (!input)
+    return cmd.stdin ? outputOf(cmd.stdin, env) : unknown("stdin the hook cannot see");
+  return redirectText(input, env, true);
+}
+async function redirectText(input, env, shells) {
+  if (input.target?.procs)
     return outputs(input.target.procs, env);
-  if (input?.op === "<" || input?.op === "<>")
+  if (input.op === "<" || input.op === "<>")
     return input.target ? readPath(input.target, env) : unknown("an input redirect");
-  if (input)
-    return input.body ? resolveText(input.body, env) : unknown("a heredoc the hook could not read");
-  if (cmd.stdin)
-    return outputOf(cmd.stdin, env);
-  return unknown("stdin the hook cannot see");
+  if (!input.body)
+    return unknown("a heredoc the hook could not read");
+  const set = shells && input.body.variable ? env.vars.get(input.body.variable) : undefined;
+  if (input.body.unknown && input.body.value === `${UNKNOWN}
+` && set && !set.unknown)
+    return resolveText({ ...set, value: `${set.value}
+` }, env);
+  return resolveText(shells && hereStringEchoed(input, env) || input.body, env);
+}
+function hereStringEchoed(input, env) {
+  const source = input.target?.source;
+  if (input.op !== "<<<" || !input.body?.unknown || !source?.includes("$("))
+    return;
+  echoes = true;
+  try {
+    const outer = lex(`: <<< ${source}`, env.known).commands.at(-1);
+    return outer?.redirects.find((r) => r.op === "<<<")?.body;
+  } finally {
+    echoes = false;
+  }
 }
 async function resolveText(text, env) {
   if (text.unknown || !text.reads?.length)
@@ -3052,47 +3147,6 @@ function awkPrograms(words) {
   }
   return programs.length ? programs : undefined;
 }
-var READ_ONLY_MODULES = /^(?:node:)?(?:assert|buffer|console|crypto|events|node:test|path|punycode|querystring|string_decoder|timers|url|util|zlib)$/;
-var IMPURE = [
-  /\bchild_process\b|\bexec(?:File)?(?:Sync)?\s*\(|\bspawn(?:Sync)?\s*\(|\bBun\s*\.\s*\$|\bBun\s*\.\s*spawn/,
-  /\b(?:rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|write|writeSync|writeFile|writeFileSync|appendFile|appendFileSync|mkdir|mkdirSync|mkdtemp|mkdtempSync|cp|cpSync|copyFile|copyFileSync|symlink|symlinkSync|link|linkSync|truncate|truncateSync|ftruncate|chmod|chmodSync|chown|chownSync|utimes|utimesSync|createWriteStream|open|openSync)\s*\(|\bBun\s*\.\s*write\b/,
-  /\beval\s*\(|\bnew\s+Function\b|\bimport\s*\(|\[[^\]]*\]\s*\(|\bprocess\s*\.\s*binding\b|\bglobalThis\b|\bglobal\s*\[/,
-  /\\x[0-9a-fA-F]|\\u|\\[0-7]/
-];
-function pureCompute(source) {
-  if (IMPURE.some((re) => re.test(source)))
-    return false;
-  const refs = [...source.matchAll(/\b(?:require|import)\s*\(\s*(["'`])([^"'`]*)\1\s*\)/g)];
-  if (refs.some((m) => !READ_ONLY_MODULES.test(m[2])))
-    return false;
-  const statics = [...source.matchAll(/\bimport\b[^;]*?\bfrom\s*(["'`])([^"'`]*)\1/g)];
-  return !statics.some((m) => !READ_ONLY_MODULES.test(m[2]));
-}
-var EVALUATES2 = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"]);
-function evalProgram({ args, name }) {
-  if (name === "agent-browser") {
-    for (let k = 0;k < args.length; k++) {
-      const { value } = args[k];
-      if (value === "eval")
-        return args[k + 1];
-      const option = args[k - 1]?.value ?? "";
-      if (!value.startsWith("-") && !(option.startsWith("--") && !option.includes("=")))
-        return;
-    }
-    return;
-  }
-  if (name !== "bun" && name !== "node")
-    return;
-  for (let k = 0;k < args.length; k++) {
-    const { value } = args[k];
-    if (EVALUATES2.has(value))
-      return args[k + 1];
-    if (/^--(?:eval|print)=/.test(value))
-      return args[k];
-    if (!value.startsWith("-"))
-      return;
-  }
-}
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "")))
     return [];
@@ -3200,7 +3254,6 @@ function narrow(cmd, env) {
     return args.filter(({ value }) => value === "-" || !value.startsWith("-")).length <= 1;
   return false;
 }
-var passes = (cmd, env) => narrow(cmd, env) || reads(parse(cmd), env);
 function rooted(commands) {
   if (codeFed(commands).size > 0)
     return true;
@@ -3392,20 +3445,6 @@ async function inspect(raw, environment, unknown = false) {
     return value.includes(needle) || !!near && value.includes(near);
   };
   const judged = new Map;
-  const consumers = new WeakMap;
-  const lexLine = (line, known) => {
-    const out = lex(line, known);
-    for (const cmd of out.commands)
-      if (cmd.stdin)
-        consumers.set(cmd.stdin, cmd);
-    return out;
-  };
-  const feeds = (cmd, env) => {
-    for (let next = consumers.get(cmd);next; next = consumers.get(next))
-      if (!passes(next, env))
-        return true;
-    return cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
-  };
   const names = (word, env, remover, literal = false) => {
     const quotedGlob = literal && !word.glob;
     const key = `${remover}\x00${quotedGlob}\x00${env.cwd}\x00${word.value}`;
@@ -3494,15 +3533,12 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`a root shell whose script (${text.unknown ?? "a value it cannot read"}) the hook cannot read; run its commands as calls of their own, with no root shell`);
       script.push(text.value);
     }
-    const program = rootLine || cmd.scope !== 0 || feeds(cmd, env) ? undefined : evalProgram(parsed);
-    const opaque = program && !program.glob && !marked(program.value) && pureCompute(program.value) ? program : undefined;
-    const lines = runsOf(opaque ? { ...parsed, args: args.filter((w) => w !== opaque) } : parsed, vars, whole, rootLine);
-    for (const raw of reader ? [] : [...script, ...lines]) {
+    for (const raw of reader ? [] : [...script, ...runsOf(parsed, vars, whole, rootLine)]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
       if (seen.has(line))
         continue;
       seen.add(line);
-      const verdict = await run(lexLine(line, env.known), { ...env, splits: true, vars: new Map }, visit, true);
+      const verdict = await run(lex(line, env.known), { ...env, splits: true, vars: new Map }, visit, true);
       if (verdict)
         return verdict;
     }
@@ -3556,7 +3592,7 @@ async function inspect(raw, environment, unknown = false) {
           return refuse(`${verb} with a variable on ${named}`);
       }
       const literal = !whole && narrow(cmd, here);
-      for (const word of [first, ...args].filter((word) => word !== opaque).map((word) => heldWord(word, here, steady) ?? word)) {
+      for (const word of [first, ...args].map((word) => heldWord(word, here, steady) ?? word)) {
         const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
@@ -3601,7 +3637,7 @@ async function inspect(raw, environment, unknown = false) {
   if (unknown)
     for (const key of steered)
       delete known[key];
-  const lexed = lexLine(command, known);
+  const lexed = lex(command, known);
   steadyAt = steadyNames(named, lexed.commands);
   const env = {
     cwd: directory,
