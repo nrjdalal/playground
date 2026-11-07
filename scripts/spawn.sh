@@ -63,6 +63,7 @@ set -euo pipefail
 #   --model <id>       with any mode but restore or close, anywhere among its words: the Claude model, one of models.claude (claude-opus-5-5, claude-fable-5-1, claude-sonnet-5-5 and claude-haiku-5-5 by default), else models.default (claude-opus-5-5); never on GLM, which maps every model itself, and a reviewer or a tester runs on models.checker (claude-opus-5-5) alone. Nothing records it: a resume takes it afresh, so a resume with no --model runs on models.default.
 #   --effort <level>   with any mode but restore or close, anywhere among its words: the session's effort, one of low, medium, high, xhigh or max, high by default; the resume record keeps one other than high, so a restore runs at the same effort, and a resume with none runs at high.
 #   --title "<title>"  with worker or a reviewer's or tester's column, anywhere among its words: the plain title the sidebar reads the session by, up to 40 characters; a worker needs one, and a checker with none takes "Review: " or "Test: " before its worker's roster title
+#   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PR the checker serves, by its URL or its number alone, or its issue's URL while the PR is not yet opened; on an ended roster row it replaces the row's prs, and its pr with the first pull request named (none for an issue alone), and a checker's start there is refused without it; on a live row, or none, it joins them and gives a row with no pr the first pull request named
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
 #   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
@@ -773,7 +774,7 @@ PY
   esac
 }
 
-# --account, --backend, --model, --effort, --brief, --reports-to, --title, --in, --check and --firefighting may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --model, --effort, --brief, --pr, --reports-to, --title, --in, --check and --firefighting may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -796,6 +797,7 @@ MODELS=$(printf '%s\n' $CLAUDE_MODELS | awk '{ m[NR] = $0 } END { for (i = 1; i 
 CLAUDE_MODEL=
 EFFORT=
 RESUME_BRIEF=
+PR_ARG=
 REPORTS_TO=
 TITLE_ARG=
 IN_DIR=
@@ -825,6 +827,15 @@ while [ $# -gt 0 ]; do
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$EFFORT" ] || usage "--effort takes one of low, medium, high, xhigh or max, once"
     case "$2" in --*) usage "--effort needs a value; \"$2\" starts with --" ;; esac
     EFFORT=$2
+    shift 2
+  elif [ "$1" = --pr ]; then
+    [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$PR_ARG" ] || usage "--pr takes the PR a checker serves, once"
+    pr_form='^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/(pull|issues)/[1-9][0-9]*)$'
+    IFS=, read -ra prs_named <<<"$2"
+    for one in "${prs_named[@]}"; do
+      [[ $one =~ $pr_form ]] || usage "--pr takes a PR's URL or its number alone, or its issue's URL while the PR is not yet opened, comma-separated, not \"$2\""
+    done
+    PR_ARG=$2
     shift 2
   elif [ "$1" = --reports-to ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$REPORTS_TO" ] || usage "--reports-to takes a session name, once"
@@ -911,6 +922,7 @@ MODE=${1:-}
 [ $# -gt 0 ] && shift
 [ -z "$REPORTS_TO" ] || [ "$MODE" = worker ] || usage "--reports-to is for a worker, not ${MODE:-no mode}"
 [ -z "$IN_DIR" ] || [ "$MODE" = worker ] || usage "--in is for a worker, not ${MODE:-no mode}"
+[ -z "$PR_ARG" ] || [[ $MODE =~ ^(column|resume)$ ]] || usage "--pr is for a reviewer's or tester's column or resume, not ${MODE:-no mode}"
 [ -z "$TITLE_ARG" ] || [[ $MODE =~ ^(worker|column|resume)$ ]] || usage "--title is for a worker or a reviewer's or tester's column, not ${MODE:-no mode}"
 # herdr 0.9.5 keeps a resume command only from a source that holds the pane through report-agent, and then shows that source's state in place of its own (measured: a 14s turn read idle throughout), so restore reruns the sessions spawn.sh itself listed, with ops-herdr's resume_agents_on_restore off. Each goes through resume, so the gate and the live-name check judge it, and a live one is left as it is.
 if [ "$MODE" = restore ]; then
@@ -1237,6 +1249,10 @@ elif [ "$MODE" = column ] && [[ $ROLE =~ ^(reviewer|tester)$ ]] && [ -z "$TITLE_
   [ -n "$of" ] || refuse "a $ROLE starts with a title: set its worker's (roster.ts set $TO title=<title>), or pass --title \"Review: <its title>\""
   if [ "$ROLE" = reviewer ]; then TITLE_ARG="Review: $of"; else TITLE_ARG="Test: $of"; fi
 fi
+[ -z "$PR_ARG" ] || [[ $ROLE =~ ^(reviewer|tester)$ ]] || usage "--pr is for a reviewer's or tester's start, not a $ROLE's"
+# A checker's ended row still lists the PRs it last served, which auto-end and the sweep read as done, so they would end it again unseen: its start names the PR it serves now.
+[[ ! $ROLE =~ ^(reviewer|tester)$ ]] || [ -n "$PR_ARG" ] || [ "$(roster_field "$NAME" status)" != ended ] ||
+  refuse "its roster row reads ended and lists the PRs it last served, which auto-end reads as done: name the PR it serves now with --pr <url>, or its issue's URL while the PR is not yet opened"
 if [ "$MODE" != resume ] || [ -n "$BRIEF" ]; then
   # The brief's path under ~/.playground names the same file as its bare name.
   BRIEF=${BRIEF#"$DATA/"}
@@ -1668,6 +1684,23 @@ fi
 set -- set "$NAME" "kind=$KIND"
 # A resume, or a start that reuses an ended name, runs the session again, so a row close ended reads starting once more; a live row keeps its status.
 [ "$(roster_field "$NAME" status)" = ended ] && set -- "$@" "status=starting"
+# A checker's --pr replaces an ended row's prs, the PRs it last served, and its pr, which auto-end's merge check and the checker's write mode read, with the first pull request named (none when it names only an issue); on a live row, or none, it joins prs, as assign does, and gives a row with no pr the first pull request named.
+if [ -n "$PR_ARG" ]; then
+  first_pull=
+  IFS=, read -ra prs_named <<<"$PR_ARG"
+  for one in "${prs_named[@]}"; do
+    if [[ $one =~ ^(#?[1-9][0-9]*|https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/[1-9][0-9]*)$ ]]; then
+      first_pull=$one
+      break
+    fi
+  done
+  if [ "$(roster_field "$NAME" status)" = ended ]; then
+    set -- "$@" "prs=$PR_ARG" "pr=$first_pull"
+  else
+    set -- "$@" "prs+=$PR_ARG"
+    [ -n "$(roster_field "$NAME" pr)" ] || [ -z "$first_pull" ] || set -- "$@" "pr=$first_pull"
+  fi
+fi
 # A second dispatcher started under an <id>-dispatcher name records its slot, which roster.ts who dispatcher 2 reads; a dispatcher's name with -2 holds slot 2 by its name.
 [ "$MODE" = manager ] && [ "$KIND" = dispatcher ] && [ -z "$FIRST" ] && ! second_dispatcher "$NAME" && set -- "$@" "slot=2"
 if [ "$MODE" = column ]; then
