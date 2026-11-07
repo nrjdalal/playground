@@ -29,7 +29,7 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    the higher of load1 and load5 (the third field of `sysctl -n vm.loadavg`), plus the starts of the last 5 minutes (`gates.startsWindow`), its own and each `slots.peers` folder's, each weighing half its item's load units, under the core count (`sysctl hw.ncpu`) times `PLAYGROUND_LOAD_MULT` (default 1.0),
    less a quarter (`gates.smallReserve`) kept for small items unless the start is small (`--size small|medium|big`, else small for a reviewer or tester, else the roster's or plan.json's size, else medium; [rules/slots.md](../../rules/slots.md)), while a small worker keeps an eighth (`gates.reviewReserve`) in its place for the checkers,
    refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores, and the refusal names the load, the starts and the line;
-   a `--priority` start passes it while `priority.json` or a job's own `priority-start.json` stands in the data folder, since priority work comes first (`--firefighting` and the `firefighting-*.json` files are their old names, aliases);
+   a `--priority` start passes it while `priority.json`, an org's own `priority-<name>.json` or a job's own `priority-start.json` stands in the data folder, since priority work comes first (`--firefighting` and the `firefighting-*.json` files are their old names, aliases);
    memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, a run-slot lane free with the load units for a run, or an empty queue (`scripts/ops/run-slot.sh room`), so a new worker never joins a queue it has no room in, while checkers, resumes and moves skip it,
    and a `--priority` start passes a full queue with a priority file standing, as at the load gate; and the launching backend's usage:
    Claude's from `usage.json` (written in the last 15 minutes, the 5-hour window under 90%, the week within its pace, or under 98%, a sanity backup, while `~/.playground/usage-pace-off-until` holds a future ISO 8601 time with its zone,
@@ -112,7 +112,8 @@ Sessions run in bypass-permissions mode, yet some commands still prompt (`rm`, a
    `--backend glm`, with any mode and anywhere among its words, runs the session on Z.ai's GLM through Claude Code, so its hooks, skills and transcript stay as they are: a lead picks it per spawn for the work **glm** gives GLM, and never for a reviewer or a tester, whose verdict gates a merge.
    That work stays off the Opus paths: the factory's `no-glm-heavy-path` hook refuses a GLM session's `git commit` or `git push` that touches `web/next/`, `scripts/hooks/`, `scripts/spawn.sh`, the `pr-merge` or `verify` scripts, `lefthook.yml` or `.github/workflows/`, naming the files, so a worker it stops reports them to its lead, who moves that change to a Claude worker.
    While load5 (the third field of `sysctl -n vm.loadavg`) is over 15 the hook also refuses a GLM session's install, node_modules clone, commit or push whatever the paths, so the session waits for the load to fall.
-   The same hook refuses a GLM session's headless `claude -p` and its calls to an org's tracker, chat, docs and repos, and every MCP tool or resource read, naming the **glm** rule, so the session reports to its lead and the task goes to a Claude worker (`scripts/hooks/README.md`).
+   The same hook refuses a GLM session's headless `claude -p`, its calls to an org's tracker, chat, docs and repos, its shell reads of an org's checkout and its database clients aimed off this machine, every MCP tool or resource read, and a Read, Grep or Glob of an org's checkout once its matcher takes them.
+   Each refusal names the **glm** rule, so the session reports to its lead and the task goes to a Claude worker (`scripts/hooks/README.md`).
    spawn.sh refuses `--backend glm` for a reviewer or tester, as a column or on resume, and for a session in a checkout of an org `ext.links` guards (a folder on its path, or its GitHub origin's owner) or on a brief naming a word of the `glm-refused-sources` guard list ([rules/glm.md](../../rules/glm.md)).
    `tests/guarded-on-glm.test.ts` holds the repo's jobs (`scripts/ops`, `packages/scripts/src`, `api/hono/src` and `skills`) to the same line: it fails on a file that names a refused source and wires GLM, or that starts a headless `claude` on the environment it inherits; a job kept under `~/.playground/ops/`, outside the repo, is outside that scan, so the rule alone holds it.
    Its key is a `usage.accounts` row of provider `glm`: the one `--account <label>` names, else the first; `playground accounts add --provider glm --label <label>` adds one.
@@ -238,9 +239,11 @@ A sweep reads each agent's state from four places:
 ## Message a session
 
 `SendMessage` takes a live session's name.
-When a send by name fails for a session `ListAgents` lists, send the same message again to the `uds:/tmp/cc-socks/<pid>.sock` address that session's newest message came from (its `from`).
+A send that reports `Failed to send` may still arrive, so a sender re-sends it once at most, its first line marked `re-send`, and a receiver drops a `re-send` copy of a message it already holds.
+When the failed send went by name to a session `ListAgents` lists, that one re-send goes to the `uds:/tmp/cc-socks/<pid>.sock` address the session's newest message came from (its `from`).
+The after-resume re-send (Spawn's resume) takes the same `re-send` marker.
 Before you report that a session is acting on your message, read its session-state record as Check a session reads it: a record still holding `stuck` or `usage-limit` holds the message unread.
-Done when the send returns success.
+Done when the send, or its one re-send, returns success.
 
 ## A headless run
 

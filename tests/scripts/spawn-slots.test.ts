@@ -100,16 +100,19 @@ describe("the slots gate admits a new worker only when run-slot has room for its
       expect(r.code).not.toBe(0)
       expect(placing(r)).toEqual([])
       expect(r.err).toContain("--priority starts only while a priority file stands in")
-      expect(r.err).toContain("priority.json or priority-start.json")
+      expect(r.err).toContain("priority.json, priority-start.json or another priority-<name>.json")
     },
   )
 
-  // --priority and its old name, --firefighting, each pass a full queue under every file, the two new ones and the three old names they replace (#1334)
+  // --priority and its old name, --firefighting, each pass a full queue under every file: priority.json, a job's priority-start.json, an org's own priority-<name>.json, and the three old names (#1334)
   test.each(
     ["--priority", "--firefighting"].flatMap((flag) =>
       [
         "priority.json",
         "priority-start.json",
+        "priority-stop.json",
+        "priority-headstart.json",
+        "priority-acme.json",
         "firefighting-stop.json",
         "firefighting-headstart.json",
         "firefighting-start.json",

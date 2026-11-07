@@ -9,7 +9,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
 ## spawn.sh
 
 - While `playground focus` stands (the data folder's `focus.json`, playbook's LIFECYCLE.md), spawn.sh refuses every start, naming focus's session and its end, but two: a reviewer or tester that reports to the focused session (a resume's, the worker its roster row names),
-  and a `--priority` start while `priority.json`, an urgent window, stands in the data folder.
+  and a `--priority` start while a priority file stands in the data folder: `priority.json`, an urgent window, or any `priority-<name>.json`, an org's own urgent window, each writer keeping its own file.
   A job's own `priority-start.json` passes the load and slots gates alone, never focus; with no priority file, a `--priority` start is refused.
   `--firefighting` is `--priority`'s old name, and `firefighting-stop.json` and `firefighting-headstart.json` stand for `priority.json` and ops-firefighting-start's `firefighting-start.json` (below) for `priority-start.json`: aliases until the jobs that write them take the new names.
 - ops-firefighting-start (`bun run ops:firefighting-start`, `jobs.opsFirefightingStart`, off by default) starts the firefighting workers: each minute it reads the relay's `firefighting.json` and runs `spawn.sh worker <name> <brief> --firefighting` for each open ticket whose key `firefighting.start.prefixes` lists,

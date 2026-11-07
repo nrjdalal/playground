@@ -104,7 +104,7 @@ For a focused stretch, such as a timed test, a demo or an hour of deep work, `pl
 While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep and that session's own reviewer and tester keep running.
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
 A priority start (spawn.sh's `--priority`, or its old name `--firefighting`) passes the load gate and a full run-slot queue at the slots gate while a priority file stands, and the memory gate still applies to it.
-It passes focus too on `priority.json`, while a job's own `priority-start.json` never does (the old `firefighting-*.json` names are aliases), and the job itself holds its High, Medium and Low starts while focus stands.
+It passes focus too on `priority.json` or an org's own `priority-<name>.json`, while a job's own `priority-start.json` never does (the old `firefighting-*.json` names are aliases), and the job itself holds its High, Medium and Low starts while focus stands.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.
 `playground focus off` ends it early and says how many runs queued while it stood and how long they waited.
@@ -170,7 +170,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   GLM's unused credits lapse at each reset (`~/.playground/zai-usage.json`, the Usage app), so the lead pulls the next eligible item forward while GLM has room before the reset.
   A GLM session's commit or push that touches the app's pages, the factory's hooks, spawn.sh, the merge and verify scripts, the commit hooks or the CI workflows is refused by the `no-glm-heavy-path` hook, naming the files, so that work goes to a Claude worker.
   While the Mac's 5-minute load is over 15, the same hook also refuses a GLM session's installs, node_modules clones, commits and pushes, so it waits for the load to fall.
-  The same hook refuses a GLM session's headless Claude run and its calls to an org's tracker, chat, docs and repos, and every MCP tool or resource read, so that work goes to a Claude worker.
+  The same hook refuses a GLM session's headless Claude run, its calls to an org's tracker, chat, docs and repos, its shell reads of an org's checkout and its database clients aimed off this machine, every MCP tool or resource read, and a Read, Grep or Glob of an org's checkout once its matcher takes them, so that work goes to a Claude worker.
   A session resumed with `--brief <file>` starts by reading that brief; without one, its first prompt has it act on the after-resume hook's instruction, so it re-arms its background tasks and re-sends its unanswered messages.
   A resumed session restarts any dev stack it served and re-arms its watches, CronList before CronCreate, since the resume kept its crons and dropped its background tasks.
   The factory no longer moves sessions to GLM at 98% usage (retired on Inbox #i827): the account rotation moves it between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
