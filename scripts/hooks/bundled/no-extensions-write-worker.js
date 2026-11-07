@@ -2943,6 +2943,47 @@ function awkPrograms(words) {
   }
   return programs.length ? programs : undefined;
 }
+var READ_ONLY_MODULES = /^(?:node:)?(?:assert|buffer|console|crypto|events|node:test|path|punycode|querystring|string_decoder|timers|url|util|zlib)$/;
+var IMPURE = [
+  /\bchild_process\b|\bexec(?:File)?(?:Sync)?\s*\(|\bspawn(?:Sync)?\s*\(|\bBun\s*\.\s*\$|\bBun\s*\.\s*spawn/,
+  /\b(?:rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|rename|renameSync|write|writeSync|writeFile|writeFileSync|appendFile|appendFileSync|mkdir|mkdirSync|mkdtemp|mkdtempSync|cp|cpSync|copyFile|copyFileSync|symlink|symlinkSync|link|linkSync|truncate|truncateSync|ftruncate|chmod|chmodSync|chown|chownSync|utimes|utimesSync|createWriteStream|open|openSync)\s*\(|\bBun\s*\.\s*write\b/,
+  /\beval\s*\(|\bnew\s+Function\b|\bimport\s*\(|\[[^\]]*\]\s*\(|\bprocess\s*\.\s*binding\b|\bglobalThis\b|\bglobal\s*\[/,
+  /\\x[0-9a-fA-F]|\\u|\\[0-7]/
+];
+function pureCompute(source) {
+  if (IMPURE.some((re) => re.test(source)))
+    return false;
+  const refs = [...source.matchAll(/\b(?:require|import)\s*\(\s*(["'`])([^"'`]*)\1\s*\)/g)];
+  if (refs.some((m) => !READ_ONLY_MODULES.test(m[2])))
+    return false;
+  const statics = [...source.matchAll(/\bimport\b[^;]*?\bfrom\s*(["'`])([^"'`]*)\1/g)];
+  return !statics.some((m) => !READ_ONLY_MODULES.test(m[2]));
+}
+var EVALUATES2 = new Set(["-e", "-ep", "--eval", "-p", "-pe", "--print"]);
+function evalProgram({ args, name }) {
+  if (name === "agent-browser") {
+    for (let k = 0;k < args.length; k++) {
+      const { value } = args[k];
+      if (value === "eval")
+        return args[k + 1];
+      const option = args[k - 1]?.value ?? "";
+      if (!value.startsWith("-") && !(option.startsWith("--") && !option.includes("=")))
+        return;
+    }
+    return;
+  }
+  if (name !== "bun" && name !== "node")
+    return;
+  for (let k = 0;k < args.length; k++) {
+    const { value } = args[k];
+    if (EVALUATES2.has(value))
+      return args[k + 1];
+    if (/^--(?:eval|print)=/.test(value))
+      return args[k];
+    if (!value.startsWith("-"))
+      return;
+  }
+}
 function programLines({ args, first }, rooted) {
   if (!AWKS.has(program(first?.value ?? "")))
     return [];
@@ -3050,6 +3091,7 @@ function narrow(cmd, env) {
     return args.filter(({ value }) => value === "-" || !value.startsWith("-")).length <= 1;
   return false;
 }
+var passes = (cmd, env) => narrow(cmd, env) || reads(parse(cmd), env);
 function rooted(commands) {
   if (codeFed(commands).size > 0)
     return true;
@@ -3241,6 +3283,20 @@ async function inspect(raw, environment, unknown = false) {
     return value.includes(needle) || !!near && value.includes(near);
   };
   const judged = new Map;
+  const consumers = new WeakMap;
+  const lexLine = (line, known) => {
+    const out = lex(line, known);
+    for (const cmd of out.commands)
+      if (cmd.stdin)
+        consumers.set(cmd.stdin, cmd);
+    return out;
+  };
+  const feeds = (cmd, env) => {
+    for (let next = consumers.get(cmd);next; next = consumers.get(next))
+      if (!passes(next, env))
+        return true;
+    return cmd.redirects.some((r) => writer(r) && r.target?.value !== "/dev/null");
+  };
   const names = (word, env, remover, literal = false) => {
     const quotedGlob = literal && !word.glob;
     const key = `${remover}\x00${quotedGlob}\x00${env.cwd}\x00${word.value}`;
@@ -3329,12 +3385,15 @@ async function inspect(raw, environment, unknown = false) {
         return refuse(`a root shell whose script (${text.unknown ?? "a value it cannot read"}) the hook cannot read; run its commands as calls of their own, with no root shell`);
       script.push(text.value);
     }
-    for (const raw of reader ? [] : [...script, ...runsOf(parsed, vars, whole, rootLine)]) {
+    const program = rootLine || cmd.scope !== 0 || feeds(cmd, env) ? undefined : evalProgram(parsed);
+    const opaque = program && !program.glob && !marked(program.value) && pureCompute(program.value) ? program : undefined;
+    const lines = runsOf(opaque ? { ...parsed, args: args.filter((w) => w !== opaque) } : parsed, vars, whole, rootLine);
+    for (const raw of reader ? [] : [...script, ...lines]) {
       const line = xargs?.replace && fed ? filled(raw, xargs.replace, fed.unknown ? UNKNOWN : fed.value) : raw;
       if (seen.has(line))
         continue;
       seen.add(line);
-      const verdict = await run(lex(line, env.known), { ...env, splits: true, vars: new Map }, visit, true);
+      const verdict = await run(lexLine(line, env.known), { ...env, splits: true, vars: new Map }, visit, true);
       if (verdict)
         return verdict;
     }
@@ -3388,7 +3447,7 @@ async function inspect(raw, environment, unknown = false) {
           return refuse(`${verb} with a variable on ${named}`);
       }
       const literal = !whole && narrow(cmd, here);
-      for (const word of [first, ...args].map((word) => heldWord(word, here, steady) ?? word)) {
+      for (const word of [first, ...args].filter((word) => word !== opaque).map((word) => heldWord(word, here, steady) ?? word)) {
         const text = quiet && /\s/.test(word.value) || filters.has(word) && !word.glob;
         if (text && !texts(word).some((t) => holds(t.value, here)))
           continue;
@@ -3433,7 +3492,7 @@ async function inspect(raw, environment, unknown = false) {
   if (unknown)
     for (const key of steered)
       delete known[key];
-  const lexed = lex(command, known);
+  const lexed = lexLine(command, known);
   steadyAt = steadyNames(named, lexed.commands);
   const env = {
     cwd: directory,
