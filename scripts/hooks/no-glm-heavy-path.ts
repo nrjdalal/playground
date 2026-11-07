@@ -437,7 +437,11 @@ const unreadValue = (w: Word) =>
 function ghOrg(parsed: Parsed, env: Env, orgs: string[]): string | undefined {
   const { args } = parsed
   const words = args.filter((a) => !a.value.startsWith("-") && !unreadValue(a)).map((a) => a.value)
-  const what = `this gh ${words[0] === "api" ? "api" : words.slice(0, 2).join(" ")} call`
+  // gh <command> <subcommand>, as typed first
+  const head = args
+    .slice(0, words[0] === "api" ? 1 : 2)
+    .filter((a) => !a.value.startsWith("-") && !unreadValue(a))
+  const what = `this gh ${head.map((a) => a.value).join(" ")} call`
   let placed = false
   for (let i = 0; i < args.length; i++) {
     const v = args[i].value
@@ -507,9 +511,13 @@ function ghOrg(parsed: Parsed, env: Env, orgs: string[]): string | undefined {
 }
 
 // A git call: refused when a word is a guarded org's URL, or the checkout it runs in has a guarded org's remote.
-function gitOrg(args: Word[], dir: string | undefined, orgs: string[]): string | undefined {
-  const sub = args.find((a) => !a.value.startsWith("-"))?.value ?? ""
-  const what = `this git ${sub} call`.replace("  ", " ")
+function gitOrg(
+  args: Word[],
+  dir: string | undefined,
+  sub: string | undefined,
+  orgs: string[],
+): string | undefined {
+  const what = sub ? `this git ${sub} call` : "this git call"
   for (const a of args) {
     const hit = urlOrg(orgs, a.value)
     if (hit) return orgRefusal(what, `it reaches ${hit}, a guarded org's repository`)
@@ -528,6 +536,7 @@ function orgCall(
   parsed: Parsed,
   env: Env,
   dir: string | undefined,
+  sub: string | undefined,
   orgs: Orgs,
 ): string | undefined {
   const { args, name } = parsed
@@ -555,7 +564,7 @@ function orgCall(
       `Fix the policy, or report to your lead.`,
     )
   if (name === "gh") return ghOrg(parsed, env, orgs)
-  if (name === "git") return gitOrg(args, dir, orgs)
+  if (name === "git") return gitOrg(args, dir, sub, orgs)
   for (const a of args) {
     const hit = urlOrg(orgs, a.value)
     if (hit) return orgRefusal(`this ${name} call`, `it reaches ${hit}, a guarded org's repository`)
@@ -591,7 +600,7 @@ const visitor = (load5: number, limit: number, orgs: Orgs): Visit => {
       else if (!v.startsWith("-")) break
     }
     const sub = isGit ? args[k]?.value : undefined
-    const org = orgCall(parsed, env, dir, orgs)
+    const org = orgCall(parsed, env, dir, sub, orgs)
     if (org) return org
     if (
       isGit &&

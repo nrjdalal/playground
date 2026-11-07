@@ -7736,7 +7736,8 @@ var unreadValue = (w) => w.unknown !== undefined || Boolean(w.reads?.length) || 
 function ghOrg(parsed, env, orgs) {
   const { args } = parsed;
   const words = args.filter((a) => !a.value.startsWith("-") && !unreadValue(a)).map((a) => a.value);
-  const what = `this gh ${words[0] === "api" ? "api" : words.slice(0, 2).join(" ")} call`;
+  const head = args.slice(0, words[0] === "api" ? 1 : 2).filter((a) => !a.value.startsWith("-") && !unreadValue(a));
+  const what = `this gh ${head.map((a) => a.value).join(" ")} call`;
   let placed = false;
   for (let i = 0;i < args.length; i++) {
     const v = args[i].value;
@@ -7777,9 +7778,8 @@ function ghOrg(parsed, env, orgs) {
   const fallback = implicit.find((r) => r && isGuarded(orgs, r.owner));
   return fallback ? orgRefusal(what, `it falls back to ${label(fallback.owner, fallback.repo)}, a guarded org's repository`) : undefined;
 }
-function gitOrg(args, dir, orgs) {
-  const sub = args.find((a) => !a.value.startsWith("-"))?.value ?? "";
-  const what = `this git ${sub} call`.replace("  ", " ");
+function gitOrg(args, dir, sub, orgs) {
+  const what = sub ? `this git ${sub} call` : "this git call";
   for (const a of args) {
     const hit = urlOrg(orgs, a.value);
     if (hit)
@@ -7788,7 +7788,7 @@ function gitOrg(args, dir, orgs) {
   const remote = remotes(dir).find((r) => isGuarded(orgs, r.owner));
   return remote ? orgRefusal(what, `it runs in a checkout of ${label(remote.owner, remote.repo)}, a guarded org's repository`) : undefined;
 }
-function orgCall(parsed, env, dir, orgs) {
+function orgCall(parsed, env, dir, sub, orgs) {
   const { args, name } = parsed;
   if (name === "claude" && headless(parsed))
     return orgRefusal("this headless Claude run", "a GLM session starts no Claude run of its own, which would reach what it may not");
@@ -7808,7 +7808,7 @@ function orgCall(parsed, env, dir, orgs) {
   if (name === "gh")
     return ghOrg(parsed, env, orgs);
   if (name === "git")
-    return gitOrg(args, dir, orgs);
+    return gitOrg(args, dir, sub, orgs);
   for (const a of args) {
     const hit = urlOrg(orgs, a.value);
     if (hit)
@@ -7847,7 +7847,7 @@ var visitor = (load5, limit, orgs) => {
         break;
     }
     const sub = isGit ? args[k]?.value : undefined;
-    const org = orgCall(parsed, env, dir, orgs);
+    const org = orgCall(parsed, env, dir, sub, orgs);
     if (org)
       return org;
     if (isGit && !writes(cmd) && BRANCH_READS.has(args.slice(k).map((a) => a.value).join(" "))) {
