@@ -232,12 +232,12 @@ const plistOf = (name: string, job: Job, fill: Fill): string => {
   ].join("\n")
 }
 
-// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, and an enabled launchd job's plist by label. A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands, less an old needsCmux (withoutNeedsCmux); one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it.
+// Pure: the registry's values (policy.json's, over each job's default) and each org's own jobs (orgJobs, each row marked with its org) as jobs.json in the shape every reader parses, and an enabled launchd job's plist by label. A job jobs.json lists that neither knows (a company script kept by hand) is kept as it stands, less an old needsCmux (withoutNeedsCmux); one an org's row rendered before, whose row is now refused or gone, is kept paused, so the runner stops it, and kept as it stands when the orgs could not be read (org null).
 export const renderJobs = (
   values: Record<string, unknown>,
   existing: { name?: unknown }[],
   fill: Fill,
-  org: Record<string, OrgJob> = {},
+  org: Record<string, OrgJob> | null = {},
 ): { jobs: Record<string, unknown>[]; plists: Map<string, string> } => {
   const plists = new Map<string, string>()
   const row = (
@@ -260,14 +260,14 @@ export const renderJobs = (
       const set = jobSchema.safeParse(values[jobKey(name)])
       return row(name, set.success ? set.data : fallback)
     }),
-    ...Object.entries(org).map(([name, job]) => row(name, job)),
+    ...Object.entries(org ?? {}).map(([name, job]) => row(name, job)),
   ]
-  const known = new Set([...Object.keys(JOBS), ...Object.keys(org)])
+  const known = new Set([...Object.keys(JOBS), ...Object.keys(org ?? {})])
   jobs.push(
     ...existing
       .filter((job) => typeof job.name === "string" && !known.has(job.name))
       .map((job) => withoutNeedsCmux(job) as Record<string, unknown>)
-      .map((job) => (typeof job.org === "string" ? { ...job, disabled: true } : job)),
+      .map((job) => (org && typeof job.org === "string" ? { ...job, disabled: true } : job)),
   )
   return { jobs: jobs.sort((a, b) => String(a.name).localeCompare(String(b.name))), plists }
 }
@@ -324,6 +324,30 @@ export type OrgJob = Job & { org: string }
 
 const REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()])
 
+// One scope's row for a job the registry lacks as that org's job, by its name, or why it is refused.
+const orgJob = (
+  key: string,
+  scope: string,
+  value: unknown,
+  login: string,
+  keys: string[],
+): { job: OrgJob; name: string } | { refused: string } => {
+  if (scope === login || scope === CORE)
+    return { refused: "only an org's scope may add a job the registry lacks" }
+  const name = key.slice("jobs.".length).replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)
+  if (!/^[a-z][a-z0-9-]*$/.test(name) || jobKey(name) !== key)
+    return { refused: "its key must be jobs.<camelName>, the job's name in camel case" }
+  const parsed = jobSchema.safeParse(value)
+  if (!parsed.success)
+    return {
+      refused: parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "row"} ${issue.message}`)
+        .join("; "),
+    }
+  const runs = runsFrom(name, parsed.data, keys)
+  return "refused" in runs ? runs : { job: { ...parsed.data, cwd: runs.cwd, org: scope }, name }
+}
+
 // Pure: each org's own jobs from every scope's settings rows: an org scope's jobs.<camelName> row for a job the registry lacks, by its name, which runs a script from a folder that org ships (scripts[org], each <org>/scripts/<key>/), from that folder unless its cwd names one under it. Each row refused is a line naming its scope, its key and why: a login's or core's row for such a job, a row off the job's schema or out of its folder, and a second org's row for a job the first in scope order adds.
 export const orgJobs = (
   rows: { key: string; scope: string; value: unknown }[],
@@ -331,29 +355,16 @@ export const orgJobs = (
   scripts: Record<string, string[]>,
 ): { jobs: Record<string, OrgJob>; refused: string[] } => {
   const jobs: Record<string, OrgJob> = {}
-  const addedBy = new Map<string, string>()
   const refused: string[] = []
   for (const { key, scope, value } of rows) {
     if (!key.startsWith("jobs.") || REGISTRY_KEYS.has(key)) continue
-    const why = (() => {
-      if (scope === login || scope === CORE)
-        return "only an org's scope may add a job the registry lacks"
-      const name = key.slice("jobs.".length).replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)
-      if (!/^[a-z][a-z0-9-]*$/.test(name) || jobKey(name) !== key)
-        return "its key must be jobs.<camelName>, the job's name in camel case"
-      const parsed = jobSchema.safeParse(value)
-      if (!parsed.success)
-        return parsed.error.issues
-          .map((issue) => `${issue.path.join(".") || "row"} ${issue.message}`)
-          .join("; ")
-      const runs = runsFrom(name, parsed.data, scripts[scope] ?? [])
-      if ("refused" in runs) return runs.refused
-      const first = addedBy.get(name)
-      if (first) return `${first} already adds ${name}`
-      addedBy.set(name, scope)
-      jobs[name] = { ...parsed.data, cwd: runs.cwd, org: scope }
-    })()
-    if (why) refused.push(`jobs: refused ${scope} ${key}: ${why}`)
+    const read = orgJob(key, scope, value, login, scripts[scope] ?? [])
+    if ("refused" in read) refused.push(`jobs: refused ${scope} ${key}: ${read.refused}`)
+    else if (jobs[read.name])
+      refused.push(
+        `jobs: refused ${scope} ${key}: ${jobs[read.name]!.org} already adds ${read.name}`,
+      )
+    else jobs[read.name] = read.job
   }
   return { jobs, refused }
 }

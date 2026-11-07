@@ -80,7 +80,7 @@ const installScripts = async (
   return changed
 }
 
-// The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json and each org's own job rows (orgJobs), and each org's script folders installed under ops; each org row refused is a `jobs: refused` line on stderr, the render exiting 1 with everything else written. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job and the usage read on, as does a store with no policy.json yet), and 2 on stderr when policy.json or jobs.json does not parse, so the runner keeps the last jobs.json and logs why. Plists go only into the folder it is handed; one for a job now off moves to the trash through the jobs carve-out, and one the trash refuses stays, named on stderr, the render exiting 1 with everything else written.
+// The ops runner's render, at the top of each pass: jobs.json and each enabled launchd job's plist from the store's policy.json and each org's own job rows (orgJobs), and each org's script folders installed under ops; each org row refused is a `jobs: refused` line on stderr, and when the orgs cannot be read their jobs stay as jobs.json had them, said in a `jobs: kept` line, the render exiting 1 with everything else written. Exits 3 with jobs.json untouched on a machine with no store whose jobs.json is there (a fresh one gets the registry's defaults, the Dashboard's job and the usage read on, as does a store with no policy.json yet), and 2 on stderr when policy.json or jobs.json does not parse, so the runner keeps the last jobs.json and logs why. Plists go only into the folder it is handed; one for a job now off moves to the trash through the jobs carve-out, and one the trash refuses stays, named on stderr, the render exiting 1 with everything else written.
 export const renderJobsFile = async (
   options: { data: string; fill: Fill; jobs: string; launchAgents?: string; roots: Roots },
   out: (line: string) => void,
@@ -99,7 +99,8 @@ export const renderJobsFile = async (
   }
   const listed = Array.isArray(existing.jobs) ? (existing.jobs as { name?: unknown }[]) : []
   let scripts = new Map<string, string[][]>()
-  let org: ReturnType<typeof orgJobs> = { jobs: {}, refused: [] }
+  // null when the orgs cannot be read, so each org's job stays as the last jobs.json had it
+  let org: ReturnType<typeof orgJobs> | null = { jobs: {}, refused: [] }
   if (read.path)
     try {
       const login = loginOf(options.data)
@@ -107,17 +108,20 @@ export const renderJobsFile = async (
       const keys = [...scripts].map(([name, files]) => [name, files.map((parts) => parts[1]!)])
       org = orgJobs(settingRows(options.data), login, Object.fromEntries(keys))
     } catch (error) {
-      err(`jobs: ${(error as Error).message}`)
+      org = null
+      err(
+        `jobs: kept each org's job as jobs.json had it, since the orgs could not be read: ${(error as Error).message}`,
+      )
     }
-  for (const line of org.refused) err(line)
-  const { jobs, plists } = renderJobs(values, listed, options.fill, org.jobs)
+  for (const line of org?.refused ?? []) err(line)
+  const { jobs, plists } = renderJobs(values, listed, options.fill, org?.jobs ?? null)
   const changed = [
     writeIfChanged(options.jobs, `${JSON.stringify({ ...existing, jobs }, null, 2)}\n`)
       ? "jobs.json"
       : "",
     ...(await installScripts(options.data, scripts, err)),
   ]
-  let code = org.refused.length ? 1 : 0
+  let code = !org || org.refused.length ? 1 : 0
   if (options.launchAgents) {
     for (const [label, text] of plists)
       if (writeIfChanged(join(options.launchAgents, `${label}.plist`), text)) changed.push(label)
