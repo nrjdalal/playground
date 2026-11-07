@@ -134,7 +134,7 @@ Sessions that work together share a workspace as full-height columns ([SESSIONS.
   It also stops on a START or RESTART roll begun after the database step that failed on the stack, in the supervisor's own words (`startFailure`); each early stop waits out a 30s grace for the start.
   Every job ops starts in a terminal (`runtime: "herdr"` in `~/.playground/ops/jobs.json`) runs as a pane labelled with its name in the Ops workspace on the factory herdr server, by the binary herdr's `pin.json` names,
   skipped while herdr fails spawn.sh's checks (its pin's sha256, its version, its server's socket and that server running).
-  A job row stored with the old `cmux` or `auto` runtime, or with no runtime and the retired flag that marked a terminal job, reads as `herdr` (`jobSchema` in `packages/settings/src/jobs.ts`), so it starts in herdr on the next pass, from any terminal.
+  A job row an older install stored keeps its job: its runtime, whatever word it holds, reads as `herdr`, and a key the schema does not name is dropped on the read (`fromStored` in `packages/settings/src/jobs.ts`), so it starts in herdr on the next pass, from any terminal.
   A start that fails is logged whole in `up.log` and tried again on the next pass, with no GRACE wait.
   `playground add` starts one session through `spawn.sh` under all its gates, one start at a time (`~/.playground/spawn.lock`), under a name from `bun run name <kind>` or a given name that gives its kind, as spawn.sh asks.
   `playground view` runs ops-herdr's `attach factory`, opening the server the sessions run on, and takes no other word; probes stay on their own server.
