@@ -97,7 +97,7 @@ export type Env = {
   // In a hook that follows ~-, each folder the shell may have left at its last cd, which a word's ~- names; `pathOf` reads ~- only when this holds one folder, and before any cd it is `old.dir` alone
   oldFrom?: string[]
   process: Record<string, string | undefined>
-  // Set where an unquoted plain parameter may split into words (`Word.splits`'s `sh`): a script bash, csh, dash, fish, ksh, sh or tcsh runs, a zsh line or run that may set an option, make an array or name a parameter it expands (`zshSplits`), and every line a runner the hook cannot name may hand to sh
+  // Set where an unquoted plain parameter may split into words (`Word.splits`'s `sh`): a script bash, csh, dash, fish, ksh, sh or tcsh runs, a zsh line or run that may set an option, make an array, run another file or string as code or name a parameter it expands (`zshSplits`), and every line a runner the hook cannot name may hand to sh
   splits?: boolean
   vars: Map<string, Text>
 }
@@ -581,14 +581,45 @@ function bodyOf(commands: Command[], k: number): Command[] {
 // Wrappers that take one positional argument (a count or a duration) before the command.
 export const COUNTED = new Set(["repeat", "timeout"])
 export const SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"])
-// The shells that make an unquoted parameter several words (fish a list's elements, the rest by splitting); zsh keeps one word unless the line may change that (`ZSH_SPLITS`)
+// The shells that make an unquoted parameter several words (fish a list's elements, the rest by splitting); zsh keeps one word unless the line may change that (`zshSplits`)
 const SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"])
-// A zsh line that may make an unquoted plain parameter several words: one that sets an option (setopt, unsetopt, emulate, the options array, set's -o, +o, -y or -A), makes an array (an `X=(` or `X+=(` assignment, mapfile, readarray, zparseopts) or sources a file (`source`, `.`), which may do either
+// A zsh line that may make an unquoted plain parameter several words: one that sets an option (setopt, unsetopt, emulate, the options array, set's -o, +o, -y or -A) or makes an array (an `X=(` or `X+=(` assignment, mapfile, readarray, zparseopts)
 const ZSH_SPLITS =
-  /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/
+  /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]/
+// The words after which zsh reads the next word as a command: a reserved word that opens a condition or a body, `!`, and a precommand modifier (`-` among them)
+const LEADS = new Set([
+  "!",
+  "-",
+  "builtin",
+  "command",
+  "elif",
+  "exec",
+  "if",
+  "nocorrect",
+  "noglob",
+  "time",
+  "until",
+  "while",
+])
+// Whether a line runs another file or string as zsh code, which may set an option or make an array: source, `.` or eval as a command, after a separator, a parenthesis or brace (a case pattern's `)` included), a `]]` (zsh reads then, do or a short body right after one), a then, do or else anywhere (zsh reads do as reserved after `repeat N` and after a for or select with no in), a `LEADS` word or an assignment prefix (`X=`, `X+=`, `X[…]=`); one pass over the line's words, each kept whole across its quotes and escapes, then read with them removed, since zsh runs `'source'`, `$'source'` and `\source` as source
+function sources(line: string): boolean {
+  let command = true
+  for (const [raw] of line
+    .replace(/\\\n/g, "")
+    .matchAll(
+      /[;&|(){}\n]|(?:\$'(?:[^'\\]|\\[\s\S])*'?|'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]|[^\s;&|(){}'"\\])+/g,
+    )) {
+    const word = raw.replace(/\$'/g, "'").replace(/['"\\]/g, "")
+    if (/^[;&|(){}\n]$/.test(raw) || /^(?:\]\]|do|else|then)$/.test(word)) command = true
+    else if (!command) continue
+    else if (word === "source" || word === "." || word === "eval") return true
+    else if (!LEADS.has(word) && !/^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(word)) command = false
+  }
+  return false
+}
 // The builtins whose -a or -A makes an array: read and the declaring builtins
 const ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/
-// Whether a zsh line may make an unquoted plain parameter several words: it may set an option, make an array or source a file (`ZSH_SPLITS`), give read or a declaring builtin -a or -A (`ARRAY_MAKERS`), or name a parameter it expands other than by expanding it, since a builtin neither list names may fill that name as an array; each pass is linear in the line, so a long line costs linear time
+// Whether a zsh line may make an unquoted plain parameter several words: it may set an option or make an array (`ZSH_SPLITS`), run another file or string as code (`sources`), give read or a declaring builtin -a or -A (`ARRAY_MAKERS`), or name a parameter it expands other than by expanding it, since a builtin neither list names may fill that name as an array; each pass is linear in the line, so a long line costs linear time
 export const zshSplits = (line: string): boolean => {
   if (ZSH_SPLITS.test(line)) return true
   for (const command of line.replace(/\\\n/g, "").split(/[;&|\n]/)) {
@@ -596,6 +627,8 @@ export const zshSplits = (line: string): boolean => {
     if (at >= 0 && /\s[-+][A-Za-z]*[aA]/.test(command.slice(at))) return true
   }
   const joined = line.replace(/[\\'"]/g, "")
+  // a quote the walk cannot pair (an apostrophe in a comment or a heredoc) hides the rest of the line, so the stripped text is walked too
+  if (sources(line) || sources(joined)) return true
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g
   const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g))
   return [...joined.matchAll(expansion)].some(([, name]) => named.has(name))
