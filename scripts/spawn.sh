@@ -66,6 +66,7 @@ set -euo pipefail
 #   --pr <url>[,<url>]  with resume or a reviewer's or tester's column, anywhere among its words: the PR the checker serves, by its URL or its number alone, or its issue's URL while the PR is not yet opened; on an ended roster row it replaces the row's prs, and its pr with the first pull request named (none for an issue alone), and a checker's start there is refused without it; on a live row, or none, it joins them and gives a row with no pr the first pull request named
 #   --reports-to <session>  with worker alone, anywhere among its words: the session it reports to, named in its first prompt in place of the builder
 #   --in <dir>         with worker alone, anywhere among its words: the folder the worker runs in, in place of this checkout: an existing folder under the code root (paths.codeRoot) or under ~/<org> for an org ext.links guards, any other refused
+#   --memory <dir>     with any mode but restore or close, anywhere among its words: the launch runs with Claude Code's auto-memory on, writing to <dir>, an absolute folder: its built settings file, one of its own (factory-settings-...-memory-<name>.json), sets autoMemoryEnabled and autoMemoryDirectory, while every other launch's file stays as it is, for the auto-memory trial
 #   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
 #   --runtime cmux     is refused: spawn.sh starts nothing in cmux
 #     With no --runtime, every start and resume opens in herdr, whatever terminal its spawner runs in.
@@ -777,7 +778,7 @@ PY
   esac
 }
 
-# --account, --backend, --model, --effort, --brief, --pr, --reports-to, --title, --in, --check and --priority (or its old name --firefighting) may sit anywhere among the words; the rest are the mode's.
+# --account, --backend, --model, --effort, --brief, --pr, --reports-to, --title, --in, --memory, --check and --priority (or its old name --firefighting) may sit anywhere among the words; the rest are the mode's.
 ACCOUNT=
 PICKED=
 BACKEND=
@@ -804,6 +805,7 @@ PR_ARG=
 REPORTS_TO=
 TITLE_ARG=
 IN_DIR=
+MEMORY_DIR=
 CHECK=
 PRIORITY=
 NAME_PROJECT=
@@ -854,6 +856,10 @@ while [ $# -gt 0 ]; do
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$IN_DIR" ] || usage "--in takes a folder, once"
     case "$2" in --*) usage "--in needs a value; \"$2\" starts with --" ;; esac
     IN_DIR=$2
+    shift 2
+  elif [ "$1" = --memory ]; then
+    [ $# -ge 2 ] && [ -z "$MEMORY_DIR" ] && [[ $2 == /* ]] || usage "--memory takes an absolute folder, once"
+    MEMORY_DIR=$2
     shift 2
   elif [ "$1" = --runtime ]; then
     [ $# -ge 2 ] && [ -n "$2" ] && [ -z "$RUNTIME" ] || usage
@@ -930,7 +936,7 @@ MODE=${1:-}
 # herdr 0.9.5 keeps a resume command only from a source that holds the pane through report-agent, and then shows that source's state in place of its own (measured: a 14s turn read idle throughout), so restore reruns the sessions spawn.sh itself listed, with ops-herdr's resume_agents_on_restore off. Each goes through resume, so the gate and the live-name check judge it, and a live one is left as it is.
 if [ "$MODE" = restore ]; then
   NAME=restore
-  [ $# -eq 0 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "restore takes no other words"
+  [ $# -eq 0 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "restore takes no other words"
   # One restore at a time: ops-herdr's start and its job's next cycle can both run one, and two resumes of a name both pass the live-name check until its claude writes its registry file, so it would start twice. The lock is a symlink naming its holder's pid and start time, so a holder that died, or a pid macOS handed on, frees it.
   LOCK="$RESUME_DIR/.restore.lock"
   ME=$(started $$)
@@ -1029,7 +1035,7 @@ fi
 # A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row once the pane closes, leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
 if [ "$MODE" = close ]; then
   NAME=${1:-close}
-  [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
+  [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$MEMORY_DIR$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
   word "$NAME" || refuse "a name is lowercase words joined by hyphens"
   [ "$(cat "$DATA/runtimes/$NAME" 2>/dev/null)" = herdr ] ||
     refuse "its runtime pin ($SHOWN/runtimes/$NAME) does not read herdr, so spawn.sh did not open it in herdr"
@@ -1444,12 +1450,14 @@ TAG=
 SANDBOX=
 [ "$ROLE" = probe ] && SANDBOX=sandbox-
 BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k.json"
+# A --memory launch builds a file of its own, so the shared one every other session reads stays without the two keys.
+[ -n "$MEMORY_DIR" ] && BUILT="$DATA/factory-settings-$TAG$SANDBOX$((WINDOW / 1000))k-memory-$NAME.json"
 # The folder the session runs in, as the launch below moves to it.
 OWN=${DIR:-$REPO}
 [ "$MODE" = column ] && OWN=$REPO
-python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
+python3 -I - "$SETTINGS" "$BUILT" "$WINDOW" "$BACKEND" "$SANDBOX" "$DATA" "$HERDR_DIR" "$MAIN" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)" "$OWN" "$MEMORY_DIR" <<'PY' || refuse "it cannot build $BUILT from $SETTINGS"
 import json, os, sys
-src, dst, window, backend, sandbox, data, herdr, main, temp, own = sys.argv[1:11]
+src, dst, window, backend, sandbox, data, herdr, main, temp, own, memory = sys.argv[1:12]
 settings = json.load(open(src))
 settings["autoCompactWindow"] = int(window)
 # The home skill set link-skills.sh turns on at user scope stays off here, since the session loads its own set (below) and two plugins that ship one name refuse it at call time.
@@ -1479,6 +1487,9 @@ if sandbox:
         },
         "network": {"allowLocalBinding": True, "allowUnixSockets": sorted({herdr, os.path.join(home, ".agent-browser")})},
     }
+if memory:
+    settings["autoMemoryEnabled"] = True
+    settings["autoMemoryDirectory"] = memory
 tmp = f"{dst}.{os.getpid()}.tmp"
 with open(tmp, "w") as f:
     json.dump(settings, f, indent=2)

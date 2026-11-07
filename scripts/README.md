@@ -83,6 +83,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   Keep a worker's title to 32 characters, so its checkers' titles show whole.
   `--reports-to <session>` names the session a `worker` reports to, in both places its first prompt names it and as the row's `reportsTo`, in place of the builder, whose seat a worker's row records without it, as a runner's records ops'; it is refused for a value that is not a session name and with every other mode.
   `--in <dir>` starts a `worker` in that folder in place of this checkout: an existing folder under the code root (`paths.codeRoot`) or under `~/<org>` for an org `ext.links` guards, the folders whose trust prompt spawn.sh answers; any other folder, and every other mode, is refused.
+  `--memory <dir>` starts or resumes a session with Claude Code's auto-memory on, writing to `<dir>`, for the auto-memory trial.
+  Its launch reads a built settings file of its own, `factory-settings-<...>k-memory-<name>.json`, which adds `autoMemoryEnabled: true` and `autoMemoryDirectory: <dir>`, so the shared file every other launch reads stays as it is.
+  It is refused for a folder that is not absolute, given twice, and with restore or close.
   `spawn.sh column` opens a split right of the herdr pane it names and names a manager once;
   `spawn.sh manager` opens the first dispatcher, `sessions.names`' dispatcher, on this machine's own login, reporting to no session (`playground dispatcher` runs it), the second dispatcher, a dispatcher's name with `-2` (from `sessions.names` or `sessions.aliases`) or an `<id>-dispatcher` it records as `slot=2` (on `--backend glm`, or on Claude with a second account's `--account`),
   the optimizer, `optimizer` (`playground optimizer` runs it) or an `<id>-optimizer` (or a session the roster gives the optimizer kind), or the builder, ops or the planner by `sessions.names` (`playground builder`, `playground ops` and `playground planner` run it),
