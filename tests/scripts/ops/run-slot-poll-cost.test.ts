@@ -71,6 +71,7 @@ const starts = async (
   waits: RegExp,
   poll: number,
   window: number,
+  during: () => Promise<unknown> = async () => {},
 ) => {
   for (const w of waiters) while (!waits.test(w.err)) await Bun.sleep(50)
   for (let quiet = false; !quiet;) {
@@ -84,7 +85,7 @@ const starts = async (
   }
   const from = waiters.map((w) => w.err.length)
   const before = readFileSync(count, "utf8").split("\n").length
-  await Bun.sleep(window * 1000)
+  await Promise.all([Bun.sleep(window * 1000), during()])
   const execs = readFileSync(count, "utf8").split("\n").length - before
   const forks = waiters.reduce((n, w, i) => n + subshells(w.err.slice(from[i])), 0)
   const rate = (execs + forks) / window
@@ -114,7 +115,8 @@ describe("waiters cost close to nothing while they wait", () => {
   })
 
   // a count of polls to look again on (an older copy's 20) sets each waiter looking within the window, about 900 to 2,200 processes a look with ten tickets
-  test("and across 25 polls, with nothing changed, fewer than 20 a poll", async () => {
+  // round 4 of the review: every waiter's mark shared one path, which a read subcommand's exit removed, so each run's end set every waiter looking
+  test("and across 25 polls, with nothing changed but a read of the slots, fewer than 20 a poll", async () => {
     const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
     m.hold("run-slot", 3, "big")
     m.hold("run-slot-2", 3, "big")
@@ -122,7 +124,19 @@ describe("waiters cost close to nothing while they wait", () => {
     const waiters = Array.from({ length: 10 }, (_, i) =>
       waiter(m, path, `worker-${i}`, ["touch"], { RUN_SLOT_POLL: "1" }),
     )
-    expect(await starts(count, waiters, new RegExp(WAITING.source, "m"), 1, 25)).toBeLessThan(20)
+    // a read subcommand, run outside the shims, so only the waiters' own starts count
+    const slots = async () => {
+      await Bun.sleep(5_000)
+      await Bun.spawn(["bash", SCRIPT, "slots"], {
+        cwd: m.root,
+        env: m.env(),
+        stdout: "ignore",
+        stderr: "ignore",
+      }).exited
+    }
+    expect(
+      await starts(count, waiters, new RegExp(WAITING.source, "m"), 1, 25, slots),
+    ).toBeLessThan(20)
   })
 
   test("and so do ten clone waiters behind the load brake", async () => {

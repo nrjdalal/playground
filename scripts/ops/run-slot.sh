@@ -1394,7 +1394,7 @@ reread() {
 # between 30 and 42 on 15 cores with the CPU half idle, so the slots they waited for stayed shut): it reads what its last look read through bash builtins
 # alone (a glob, read, test) and looks again only once one of them has changed. REF is touched at each look, so a file not older than it changed since,
 # or was written in the look's own second, which -nt's whole seconds on bash 3.2 cannot tell apart (one look more at most)
-REF="$OPS/.run-slot-ref-$"
+REF="$OPS/.run-slot-ref-$$"
 # whether this script was written since the last look, a replaced copy included, by its mtime; a copy that kept an older mtime waits for the next look's reread
 self_changed() { ! [ "$SELF" -ot "$REF" ]; }
 # SIG: each run-slot entry of the ops folder and the queue by name, with the line of each holder and of the switches whose line counts, each peer's holder
