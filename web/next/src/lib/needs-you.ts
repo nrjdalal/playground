@@ -432,22 +432,26 @@ export function targetNeedsYou(id: string): void {
 // How a card was asked for: a click (targetNeedsYou, from a row or a chip) or a link (the URL's hash alone, as a page loads with it).
 export type TargetSource = "click" | "link"
 
+export type Target = { anchor: string; source: TargetSource }
+
+// Pure: what a changed URL hash asks for: a card's anchor as a link, but a click's own anchor, which a row's click puts in the hash after its event, stays a click; a hash that names no card keeps what was asked.
+export const hashTarget = (wanted: Target | null, hash: string): Target | null =>
+  isNeedsYouAnchor(hash) && hash !== wanted?.anchor ? { anchor: hash, source: "link" } : wanted
+
 // Brings the card a sidebar row asked for into view once the page is ready (ready: its steps have loaded, so nothing later scrolls it away), by the URL's hash or by targetNeedsYou; any other hash, a footnote's, stays the browser's. scrollTo says whether it reached the card; one that is not on the page yet is tried again on the next render.
 export function useNeedsYouTarget(
   ready: boolean,
   scrollTo: (anchor: string, source: TargetSource) => boolean,
 ): void {
-  const wanted = useRef<string | null>(null)
+  const wanted = useRef<Target | null>(null)
   const done = useRef<string | null>(null)
   const seen = useRef<string | null>(null)
-  const source = useRef<TargetSource>("link")
   const scroll = useEffectEvent(scrollTo)
   useEffect(() => {
     const onTarget = (event: Event) => {
       const anchor = (event as CustomEvent<string>).detail
       if (!isNeedsYouAnchor(anchor)) return
-      wanted.current = anchor
-      source.current = "click"
+      wanted.current = { anchor, source: "click" }
       done.current = null
       if (ready && scroll(anchor, "click")) done.current = anchor
     }
@@ -456,16 +460,13 @@ export function useNeedsYouTarget(
   }, [ready])
   useEffect(() => {
     const hash = hashAnchor(window.location.hash)
-    // a link followed since names the place now, over an earlier row's click; a row's click puts its own anchor in the hash, so it stays a click
+    // a link followed since names the place now, over an earlier row's click
     if (hash !== seen.current) {
       seen.current = hash
-      if (hash && isNeedsYouAnchor(hash) && hash !== wanted.current) {
-        wanted.current = hash
-        source.current = "link"
-      }
+      wanted.current = hashTarget(wanted.current, hash)
     }
     const target = wanted.current
-    if (!ready || !target || done.current === target) return
-    if (scroll(target, source.current)) done.current = target
+    if (!ready || !target || done.current === target.anchor) return
+    if (scroll(target.anchor, target.source)) done.current = target.anchor
   })
 }

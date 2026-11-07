@@ -866,13 +866,13 @@ export const inboxTarget = (anchor: string, items: readonly InboxItem[]): boolea
   return anchor.startsWith(prefix) && items.some((item) => item.id === anchor.slice(prefix.length))
 }
 
-// Pure: the shut shelf (In progress, Later, Archive, Done) an asked-for card waits on, which opens only for a click; a link's hash leaves every shelf as it was, so a page opened on an old link starts with them shut. null for none.
-export const shelfToOpen = <K extends string>(
+// Pure: the shut shelf an asked-for card waits on, opened for a click alone; null for none.
+export const shelfToOpen = (
   anchor: string,
   source: TargetSource,
-  shelves: readonly (readonly [K, unknown, readonly InboxItem[]])[],
+  shelves: readonly (readonly [Shelf, unknown, readonly InboxItem[]])[],
   open: readonly string[],
-): K | null => {
+): Shelf | null => {
   const shelf = shelves.find(([, , list]) =>
     list.some((item) => needsYouAnchor(item.id) === anchor),
   )?.[0]
