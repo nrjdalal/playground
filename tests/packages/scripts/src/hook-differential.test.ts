@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test"
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -18,6 +19,7 @@ import {
   calls,
   canaryTree,
   cwdsOf,
+  envOf,
   keyOf,
   linesOf,
   parse,
@@ -25,6 +27,8 @@ import {
   resultPath,
   ROOT_READS,
   routed,
+  scratchData,
+  sessionRoles,
   store,
   stored,
   sweep,
@@ -249,6 +253,126 @@ describe("sweep and replay", () => {
     ])
     const { counts } = await replay(() => "refused", recorder([]), list, "/h")
     expect(counts).toEqual({ calls: 2, "newly allowed": 2, "newly refused": 0, same: 0 })
+  })
+
+  test("check() gets the caller's PATH beside the home, so a hook that runs a program finds it", async () => {
+    const seen: Record<string, string | undefined>[] = []
+    const record: Check = (_raw, env) => {
+      seen.push(env)
+      return undefined
+    }
+    await replay(record, record, [{ command: "ls", cwd: "/h" }], "/h")
+    await sweep(record, record, [{ command: "ls" }], "/h")
+    expect(seen.length).toBe(8)
+    for (const env of seen) expect(env).toEqual({ HOME: "/h", PATH: process.env.PATH })
+  })
+})
+
+describe("a run under a role", () => {
+  test("--role takes a role for a sweep or a replay, and session for a replay alone", () => {
+    const base = ["--canary", "HEAD", "--hook", "x"]
+    expect(parse(["replay", ...base, "--role", "worker"])?.role).toBe("worker")
+    expect(parse(["replay", ...base, "--role", "session"])?.role).toBe("session")
+    expect(parse(["sweep", "--forms", "f.ts", ...base, "--role", "lead"])?.role).toBe("lead")
+    expect(parse(["replay", ...base])?.role).toBeUndefined()
+    expect(parse(["replay", ...base, "--role"])).toBeUndefined()
+    expect(parse(["replay", ...base, "--role", "--all"])).toBeUndefined()
+    expect(parse(["sweep", "--forms", "f.ts", ...base, "--role", "session"])).toBeUndefined()
+  })
+
+  test("a call's env holds the scratch data folder and --role's role, or with session its own session's role, and a name the roster lacks keeps the default", () => {
+    const call = { command: "ls", cwd: "/h", name: "abc-worker", session: "s1" }
+    const path = process.env.PATH
+    expect(envOf({ data: "/d", home: "/h" })(call)).toEqual({
+      HOME: "/h",
+      PATH: path,
+      PLAYGROUND_DATA_DIR: "/d",
+    })
+    expect(envOf({ data: "/d", home: "/h", role: "worker" })(call)).toMatchObject({
+      PLAYGROUND_ROLE: "worker",
+    })
+    const roles = new Map([
+      ["abc-worker", "worker"],
+      ["stranger", ""],
+    ])
+    const session = envOf({ config: "/c", data: "/d", home: "/h", role: "session", roles })
+    expect(session(call)).toEqual({
+      CLAUDE_CONFIG_DIR: "/c",
+      HOME: "/h",
+      PATH: path,
+      PLAYGROUND_DATA_DIR: "/d",
+      PLAYGROUND_ROLE: "worker",
+    })
+    expect(session({ ...call, name: "stranger" })).not.toHaveProperty("PLAYGROUND_ROLE")
+    expect(session({ ...call, name: undefined })).not.toHaveProperty("PLAYGROUND_ROLE")
+  })
+
+  test("the scratch data folder holds a copy of the roster and a link to the extensions, and nothing else", () => {
+    const real = join(DIR, "real-data")
+    mkdirSync(join(real, "extensions"), { recursive: true })
+    mkdirSync(join(real, "session-state"), { recursive: true })
+    writeFileSync(join(real, "roster.json"), "{}")
+    const data = scratchData(real, DIR)
+    expect(data).not.toBe(real)
+    expect(readFileSync(join(data, "roster.json"), "utf8")).toBe("{}")
+    expect(lstatSync(join(data, "roster.json")).isSymbolicLink()).toBe(false)
+    expect(lstatSync(join(data, "extensions")).isSymbolicLink()).toBe(true)
+    expect(realpathSync(join(data, "extensions"))).toBe(realpathSync(join(real, "extensions")))
+    expect(existsSync(join(data, "session-state"))).toBe(false)
+  })
+
+  test("a session's role comes from the roster by its transcript name, and its registry entry names it", async () => {
+    const real = join(DIR, "roles-data")
+    mkdirSync(real, { recursive: true })
+    writeFileSync(
+      join(real, "roster.json"),
+      JSON.stringify({ agents: [{ kind: "worker", name: "abc-worker", status: "working" }] }),
+    )
+    const { config, roles } = await sessionRoles(
+      [
+        { command: "ls", cwd: "/h", name: "abc-worker", session: "s1" },
+        { command: "ls", cwd: "/h", name: "stranger", session: "s2" },
+        { command: "ls", cwd: "/h", session: "s3" },
+      ],
+      { HOME: DIR, PLAYGROUND_DATA_DIR: real },
+      DIR,
+    )
+    expect([...roles]).toEqual([
+      ["abc-worker", "worker"],
+      ["stranger", ""],
+    ])
+    expect(JSON.parse(readFileSync(join(config, "sessions", "s1.json"), "utf8"))).toEqual({
+      name: "abc-worker",
+      sessionId: "s1",
+    })
+    expect(existsSync(join(config, "sessions", "s3.json"))).toBe(false)
+  })
+
+  test("by session the replay keeps one call per session, each with its session and the name its transcript gave it", async () => {
+    const projects = join(DIR, "named-projects")
+    mkdirSync(join(projects, "p", "s1", "subagents"), { recursive: true })
+    const now = new Date().toISOString()
+    const bash = (session: string) =>
+      JSON.stringify({
+        cwd: "/h",
+        message: { content: [{ input: { command: "ls" }, name: "Bash", type: "tool_use" }] },
+        sessionId: session,
+        timestamp: now,
+      })
+    const named = (session: string, name: string) =>
+      JSON.stringify({ agentName: name, sessionId: session, type: "agent-name" })
+    writeFileSync(
+      join(projects, "p", "s1.jsonl"),
+      [named("s1", "first-name"), bash("s1"), named("s1", "abc-worker")].join("\n"),
+    )
+    writeFileSync(join(projects, "p", "s1", "subagents", "a.jsonl"), bash("s1"))
+    writeFileSync(join(projects, "p", "s2.jsonl"), bash("s2"))
+    expect(await calls(projects, Date.now() - 3600_000)).toEqual([{ command: "ls", cwd: "/h" }])
+    const list = await calls(projects, Date.now() - 3600_000, true)
+    expect(list.toSorted((x, y) => x.session!.localeCompare(y.session!))).toEqual([
+      { command: "ls", cwd: "/h", name: "abc-worker", session: "s1" },
+      { command: "ls", cwd: "/h", session: "s2" },
+    ])
   })
 })
 
@@ -606,6 +730,109 @@ describe("a stored result", () => {
     git(root, "commit", "-qam", "one byte")
     expect(run(at, root, args(forms)).stdout.toString()).not.toContain("reused:")
     expect(readFileSync(join(at, "tickets"), "utf8")).toContain(`-- bun ${SCRIPT} sweep`)
+  })
+
+  // a repo whose canary (HEAD~1) has an allow-all hook z and no hook y; at its head y refuses a call holding REFUSE, and z refuses one only under the worker role and writes into the data folder it is given; with a transcript of that call from two sessions, one a roster worker's and one a name the roster lacks
+  const gated = (name: string) => {
+    const at = home(name)
+    const { root } = repo(`${name}-repo`)
+    const hooks = join(root, "scripts", "hooks")
+    writeFileSync(join(hooks, "z.ts"), `export const check = () => undefined\n`)
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "canary")
+    writeFileSync(
+      join(hooks, "y.ts"),
+      `export const check = (raw: string) => (raw.includes("REFUSE") ? "refused" : undefined)\n`,
+    )
+    writeFileSync(
+      join(hooks, "z.ts"),
+      `import { writeFileSync } from "node:fs"
+export const check = (raw: string, env: Record<string, string | undefined>) => {
+  writeFileSync(\`\${env.PLAYGROUND_DATA_DIR}/wrote\`, "")
+  return env.PLAYGROUND_ROLE === "worker" && raw.includes("REFUSE") ? "refused" : undefined
+}
+`,
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "head")
+    mkdirSync(join(at, ".claude", "projects", "p"), { recursive: true })
+    const now = new Date().toISOString()
+    for (const [session, agent] of [
+      ["s1", "abc-worker"],
+      ["s2", "stranger"],
+    ])
+      writeFileSync(
+        join(at, ".claude", "projects", "p", `${session}.jsonl`),
+        [
+          JSON.stringify({ agentName: agent, sessionId: session, type: "agent-name" }),
+          JSON.stringify({
+            cwd: join(at, "w"),
+            message: {
+              content: [{ input: { command: "ls REFUSE" }, name: "Bash", type: "tool_use" }],
+            },
+            sessionId: session,
+            timestamp: now,
+          }),
+        ].join("\n"),
+      )
+    writeFileSync(
+      join(at, ".playground", "roster.json"),
+      JSON.stringify({ agents: [{ kind: "worker", name: "abc-worker", status: "working" }] }),
+    )
+    const counts = (hook: string, ...more: string[]) => {
+      const done = run(at, root, ["replay", "--canary", "HEAD~1", "--hook", hook, ...more], {
+        RUN_SLOT_NICE: "10",
+      })
+      expect(done.exitCode).toBe(0)
+      return JSON.parse(done.stdout.toString().trim())
+    }
+    return { at, counts }
+  }
+
+  test("a hook canary lacks replays against an allow-all baseline, its refusals count as newly refused, and its report says so", () => {
+    const { counts } = gated("new-hook")
+    expect(counts("y")).toEqual({
+      hook: "y",
+      baseline: "allow-all: canary has no such hook",
+      calls: 1,
+      "newly allowed": 0,
+      "newly refused": 1,
+      same: 0,
+    })
+  })
+
+  test("a role-gated hook finds its refusals under --role, and with --role session each call is judged as its own session, the default counted", () => {
+    const { at, counts } = gated("role-gated")
+    expect(counts("z")).toMatchObject({ calls: 1, "newly refused": 0, same: 1 })
+    expect(counts("z", "--role", "worker")).toEqual({
+      hook: "z",
+      role: "worker",
+      calls: 1,
+      "newly allowed": 0,
+      "newly refused": 1,
+      same: 0,
+    })
+    expect(counts("z", "--role", "session")).toEqual({
+      hook: "z",
+      role: "session",
+      "default role": 1,
+      calls: 2,
+      "newly allowed": 0,
+      "newly refused": 1,
+      same: 1,
+    })
+    expect(existsSync(join(at, ".playground", "wrote"))).toBe(false)
+  })
+
+  test("--role moves the key, so a result is never reused for another role", () => {
+    const { root, sha } = repo("role-key-repo")
+    const replayArgs = ["replay", "--canary", "HEAD", "--hook", "x"]
+    expect(keyAt(root, [...replayArgs, "--role", "worker"], sha)).not.toBe(
+      keyAt(root, replayArgs, sha),
+    )
+    expect(keyAt(root, [...replayArgs, "--role", "worker"], sha)).not.toBe(
+      keyAt(root, [...replayArgs, "--role", "session"], sha),
+    )
   })
 
   test("a run whose worktree changes while it runs stores nothing, so the next run at the clean head runs fresh", () => {
