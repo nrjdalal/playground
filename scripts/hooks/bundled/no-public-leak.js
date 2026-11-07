@@ -10291,5 +10291,6 @@ if (import.meta.main) {
   }
 }
 export {
+  SAID,
   check
 };
