@@ -20,7 +20,7 @@ export function SettingsHome() {
     <>
       <PageHeader
         title="Settings"
-        description="Accounts, templates, extensions, jobs, privacy and how the Dashboard runs."
+        description="Accounts, templates, extensions, privacy, jobs and how the Dashboard runs."
       />
       {allowed && config.hosted ? (
         <div className="flex flex-col gap-6">
@@ -33,8 +33,8 @@ export function SettingsHome() {
           <Accounts />
           <Templates />
           <Extensions />
-          <Jobs />
           <Privacy />
+          <Jobs />
           <Remote />
         </div>
       ) : (
