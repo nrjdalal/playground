@@ -1,7 +1,7 @@
 "use client"
 
 import type { InboxAction, InboxItem, InboxPreview, InboxUpdate } from "@api/hono"
-import type { Choices } from "@packages/config/inbox"
+import { type AskQuestion, type Choices, questionsOf } from "@packages/config/inbox"
 import type { DISPATCHER_SLOT_LABELS } from "@packages/config/kinds"
 import {
   RiAlarmWarningLine,
@@ -106,6 +106,9 @@ import {
   QuestionnaireChoices,
   QuestionnaireDescription,
   QuestionnaireItem,
+  QuestionnaireNext,
+  QuestionnairePrevious,
+  QuestionnaireProgress,
   QuestionnaireSubmit,
   QuestionnaireTitle,
 } from "@/components/ui/questionnaire"
@@ -175,6 +178,7 @@ import {
   verbs,
   waiting,
 } from "@/lib/inbox"
+import { JOBS_QUERY_KEY } from "@/lib/jobs"
 import { needsYouAnchor, useNeedsYouTarget } from "@/lib/needs-you"
 import { insertPaste } from "@/lib/paste"
 import { OPEN_PREVIEW, takePreview } from "@/lib/previews"
@@ -454,6 +458,56 @@ export function AskChoices({
   )
 }
 
+// A signature of an ask's questions, so the card drops its picks and steps back to the first when an in-place edit grows, shrinks, reorders or rewords them, since the picks are held by position and a stale one would land on another question.
+export function picksKey(questions: AskQuestion[]): string {
+  return JSON.stringify(questions.map((q) => [q.question, q.options.map((o) => o.label)]))
+}
+
+// One question of a multi-question ask as the card's choices, numbered for the keys 1 on, with the recommended option badged where it sits; the pick is this question's own, so stepping between questions keeps each. Busy dims them and takes no click, as AskChoices does.
+function QuestionChoices({
+  busy,
+  paused,
+  pick,
+  question,
+  setPick,
+}: {
+  busy: boolean
+  paused: boolean
+  pick: number | null
+  question: AskQuestion
+  setPick: (index: number) => void
+}) {
+  return (
+    <QuestionnaireChoices
+      aria-busy={busy || undefined}
+      className={cn(busy && "pointer-events-none opacity-50")}
+    >
+      {question.options.map((row) => (
+        <Hint key={row.index} content={paused ? PAUSED_WHY : undefined}>
+          <QuestionnaireChoice
+            checked={pick === row.index}
+            className={cn("text-xs", SIDE_TONES.approve)}
+            value={`${row.letter}: ${row.label}`}
+            onChange={() => {
+              if (!busy) setPick(row.index)
+            }}
+          >
+            <span className="flex items-center gap-2 font-medium">
+              <span>
+                {row.letter}. {row.label}
+              </span>
+              {question.recommended === row.index && <Badge variant="secondary">Recommended</Badge>}
+            </span>
+            {row.description && (
+              <QuestionnaireChoiceDescription>{row.description}</QuestionnaireChoiceDescription>
+            )}
+          </QuestionnaireChoice>
+        </Hint>
+      ))}
+    </QuestionnaireChoices>
+  )
+}
+
 // What the other side has said so far, one gist line per message with who said it, above the reply it leads to; each gist renders as transcript text until its renderer lands5's renderer lands.
 function SoFar({ thread }: { thread?: { said: string; who: string }[] }) {
   if (!thread) return null
@@ -562,10 +616,10 @@ function Preview({ item }: { item: Extract<InboxItem, { kind: "decision" }> }) {
   const preview = item.preview
   switch (preview.type) {
     case "ask":
-      // an ask with options says what each one does in its choices, so its text stands alone above them
+      // an ask with options or questions says what each one does in its choices, so its text stands alone above them
       return (
         <>
-          {!preview.options && !preview.approve && (
+          {!preview.options && !preview.approve && !preview.questions && (
             <p>On Approve, {agentLabel(item.from)} does this:</p>
           )}
           <Shown preview={preview} />
@@ -775,7 +829,12 @@ const PICKED_TIME = "09:00"
 // The one question each card's Questionnaire holds, shown from the first render.
 const QUESTION = "item"
 
-type Answer = (action: InboxAction, text?: string, option?: number) => Promise<void>
+type Answer = (
+  action: InboxAction,
+  text?: string,
+  option?: number,
+  options?: number[],
+) => Promise<void>
 
 // Opens a folded card to its full self, a reply's its answers and Later back, or folds it again (a dashboard user: "Maybe add a simple shortcut to be able to re-expand it, just like it automatically compacts"); E does the same with focus in the card, as its tooltip says, the scroll bar's Kbd pattern.
 function Reopen({ open, setOpen }: { open: boolean; setOpen: (open: boolean) => void }) {
@@ -947,6 +1006,18 @@ export function InboxCard({
     if (draft === synced) setDraft(posted)
   }
   const [pick, setPick] = useState<number | null>(null)
+  // a multi-question ask's picks, one option index per question, and the question in sight, held here as the single pick is so the card steps through them before its Submit sends them all at once
+  const questions = item.kind === "decision" ? questionsOf(item.preview) : []
+  const multi = questions.length > 0
+  const [picks, setPicks] = useState<(number | null)[]>(() => questions.map(() => null))
+  const [step, setStep] = useState(0)
+  // an in-place bun run ask edit can change the questions under an open card; when it does, drop the picks and step back to the first, as the draft text resyncs above, so a stale pick never lands on another question
+  const [syncedPicks, setSyncedPicks] = useState(() => picksKey(questions))
+  if (picksKey(questions) !== syncedPicks) {
+    setSyncedPicks(picksKey(questions))
+    setPicks(questions.map(() => null))
+    setStep(0)
+  }
   const [note, setNote] = useState("")
   // a secret ask's value, held only until Submit hands it on, then cleared
   const [secret, setSecret] = useState("")
@@ -972,6 +1043,9 @@ export function InboxCard({
       // an own card's Approve writes usage.accounts, so Settings > Accounts reads its switch again
       if (item.kind === "decision" && item.preview.type === "own")
         await queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY })
+      // a guard card's Approve may turn a job on or off, so Settings > Jobs reads its switches again
+      if (item.kind === "decision" && item.preview.type === "guard")
+        await queryClient.invalidateQueries({ queryKey: JOBS_QUERY_KEY })
       setPending(false)
     }
   }
@@ -1020,9 +1094,9 @@ export function InboxCard({
   // the comment rides an answer as its note where the card still takes one, a secret's Submit aside, so its value travels alone
   const noted = outcome === null && item.kind !== "update" && !secretAsk
   // an answer takes his comment as its note, so the box empties once it is in; Archive and Move back, and any verb on a card that takes no answer, carry none, so his words stay
-  const onAnswer: Answer = async (action, text, option) => {
+  const onAnswer: Answer = async (action, text, option, options) => {
     const sent = await settle(() =>
-      answerItem(item, action, text, note.trim() || undefined, option),
+      answerItem(item, action, text, note.trim() || undefined, option, options),
     )
     if (sent && noted && action !== "archive" && action !== "unarchive") setNote("")
   }
@@ -1068,10 +1142,12 @@ export function InboxCard({
       item.title
     )
 
-  // a decision's rows, but a secret's, which takes a value; its footer sits in the form beside its Send while it is open, and every other card's answers from outside it
-  const choices = decisionChoices(item)
+  // a decision's rows, but a secret's, which takes a value, or a multi-question ask's, which steps through its own questions; its footer sits in the form beside its Send while it is open, and every other card's answers from outside it
+  const choices = multi ? null : decisionChoices(item)
   const picked = pick === null ? null : (choices?.rows[pick] ?? null)
-  const footerInForm = choices !== null && outcome === null && !folded
+  // every question of a multi-question ask answered, so its Submit may send them all at once
+  const allPicked = multi && picks.every((p) => p !== null)
+  const footerInForm = (choices !== null || multi) && outcome === null && !folded
   const draftReady = item.kind === "draft" && outcome === null && !busy && draft.trim() !== ""
   const secretReady = secretAsk && outcome === null && !busy && secret.trim() !== ""
   // what Approve does, the card's description, kept once answered or archived, or what a read-only update shows; a folded card hides it
@@ -1140,10 +1216,11 @@ export function InboxCard({
     </div>
   ) : null
 
-  // an answered or settled card's result is its description, read above the footer row and wrapping freely, so a long line never comes between its buttons
-  const result =
+  // an answered or settled card's result is its description, read above the footer row and wrapping freely, so a long line never comes between its buttons; a multi-question ask shows it as a plain CardDescription, since its header sits outside every QuestionnaireItem and QuestionnaireDescription reads an item's context
+  const resultClass = cn("min-w-0 text-xs", light && iconTone(light))
+  const resultBody =
     outcome === null ? null : (
-      <QuestionnaireDescription className={cn("min-w-0 text-xs", light && iconTone(light))}>
+      <>
         {at < 0 ? (
           outcome
         ) : (
@@ -1182,7 +1259,7 @@ export function InboxCard({
             </a>
           </>
         )}
-      </QuestionnaireDescription>
+      </>
     )
 
   // a folded row keeps the answers that need nothing its body holds: an update's Approve link, Retry and Check it for me, but not a decision's pick, a secret's value or a draft's words
@@ -1387,13 +1464,19 @@ export function InboxCard({
   ) : (
     <CardFooter className="flex-wrap gap-2">
       {footerInForm ? (
-        // shadcn's questionnaire actions in a row that wraps on a narrow card: Submit first, off until an option is picked and saying why on hover and focus, then the card's own buttons
+        // shadcn's questionnaire actions in a row that wraps on a narrow card: Submit first, off until an option is picked (every question of a multi-question ask) and saying why on hover and focus, then a multi-question ask's Previous and Next between its questions, then the card's own buttons
         <QuestionnaireActions className="flex flex-wrap">
-          <Hint content={held ?? sendWhy(picked) ?? undefined}>
+          <Hint
+            content={
+              held ??
+              (multi ? (allPicked ? undefined : "Answer every question first") : sendWhy(picked)) ??
+              undefined
+            }
+          >
             <QuestionnaireSubmit
               // green as a go row, or red once the no-go row is the pick it sends
-              className={SIDE_TONES[picked && !picked.go ? "deny" : "approve"]}
-              disabled={busy || pick === null}
+              className={SIDE_TONES[!multi && picked && !picked.go ? "deny" : "approve"]}
+              disabled={busy || (multi ? !allPicked : pick === null)}
               render={<Button size="sm" variant="outline" {...OFF_FOCUSABLE} />}
               size="sm"
               variant="outline"
@@ -1402,6 +1485,20 @@ export function InboxCard({
               Send
             </QuestionnaireSubmit>
           </Hint>
+          {multi && (
+            <>
+              <QuestionnairePrevious disabled={busy || step === 0} size="sm" variant="outline" />
+              <QuestionnaireNext
+                disabled={busy || step >= questions.length - 1 || picks[step] == null}
+                size="sm"
+                variant="outline"
+                onClick={(event) => {
+                  event.preventDefault()
+                  setStep((s) => Math.min(s + 1, questions.length - 1))
+                }}
+              />
+            </>
+          )}
           {left}
           {right}
         </QuestionnaireActions>
@@ -1484,6 +1581,22 @@ export function InboxCard({
     </CardFooter>
   )
 
+  // the card's last block before its buttons: his comment, the note with whatever he answers, or alone through Reply, which stays on the Mac, so the hosted build draws it only where it rides an answer; shared by the single-question item and the multi-question steps
+  const noteContent =
+    !folded && answers && (noted || !config.hosted) ? (
+      // the same gap-2 above it as between the choices
+      <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
+        {/* a box turned disabled drops focus to the page, so words dictated or typed as a card above leaves land nowhere: it stays enabled while the card is paused and turns read-only while its answer is on its way */}
+        <NoteBox
+          id={commentId}
+          placeholder={noted ? "Add an optional comment" : "Add a comment"}
+          readOnly={pending}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+      </CardContent>
+    ) : null
+
   return (
     <Card
       id={needsYouAnchor(item.id)}
@@ -1528,18 +1641,24 @@ export function InboxCard({
         shortcuts="numbers"
         // an answer unmounts the choices it was checked against, which the Questionnaire then reads as unanswered and marks aria-invalid, so the answered card starts a fresh one
         key={outcome === null ? "open" : "answered"}
-        defaultItem={QUESTION}
+        // a multi-question ask shows one question at a time (step), every other card its one question
+        {...(multi
+          ? { item: `q${step}`, onItemChange: (id: string) => setStep(Number(id.slice(1))) }
+          : { defaultItem: QUESTION })}
         onSubmit={(event) => {
           event.preventDefault()
-          if (picked && !busy)
+          if (busy) return
+          if (multi) {
+            if (allPicked) void onAnswer("approve", undefined, undefined, picks as number[])
+          } else if (picked)
             void (picked.go ? onAnswer("approve", undefined, picked.index) : onAnswer("deny"))
         }}
-        // Cmd or Ctrl+Enter submits the question: a decision's picked row through the Questionnaire's submit, nothing before a pick, and in any other card's box what the box holds, through the button it feeds; read as the key comes down, before the Questionnaire's own handler, so a key on a link or a button reaches the browser alone
+        // Cmd or Ctrl+Enter submits the question: a decision's picked row through the Questionnaire's submit, nothing before a pick (a multi-question ask before its last question is answered), and in any other card's box what the box holds, through the button it feeds; read as the key comes down, before the Questionnaire's own handler, so a key on a link or a button reaches the browser alone
         onKeyDownCapture={(event) => {
           const action = cardKey(keyOf(event), {
             choosing: footerInForm,
             draftReady,
-            picked: pick !== null,
+            picked: multi ? allPicked : pick !== null,
           })
           if (action === null) return
           if (action === "leave") return event.stopPropagation()
@@ -1547,61 +1666,104 @@ export function InboxCard({
           if (action === "send") void onAnswer("send", draft)
         }}
       >
-        <QuestionnaireItem
-          aria-labelledby={titleId}
-          name={QUESTION}
-          className="gap-(--card-spacing)"
-        >
-          {/* one column no wider than the card, so a wide table or drawing in the ask scrolls inside it rather than stretching the card */}
-          <CardHeader className="grid-cols-[minmax(0,1fr)]">
-            <Place item={item} />
-            <QuestionnaireTitle
-              id={titleId}
-              render={<CardTitle />}
-              // the card's own gap spaces the title from what follows, so it takes none of the bare Questionnaire's room below a title with no description
-              className={cn(
-                "flex items-start gap-2 [&:not(:has(~[data-slot=questionnaire-description]))]:mb-0",
-                quiet && "text-muted-foreground font-normal",
-              )}
-            >
-              <span className={LEAD}>
-                {/* the unread dot stands in for an update's light; an ask keeps its light, and its ✓✓ says unread */}
-                {unread && !light && (
-                  <span aria-hidden className="bg-primary size-2 rounded-full" />
+        {multi ? (
+          <>
+            {/* a multi-question ask's title and words stand above its questions, outside any one of them, so they hold while the steps change under them */}
+            <CardHeader className="grid-cols-[minmax(0,1fr)]">
+              <Place item={item} />
+              <CardTitle
+                className={cn(
+                  "flex items-start gap-2",
+                  quiet && "text-muted-foreground font-normal",
                 )}
-                {light && <Light state={light} />}
-              </span>
-              {title}
-              {unread && <span className="sr-only"> (unread)</span>}
-            </QuestionnaireTitle>
-            {preview && (
-              <QuestionnaireDescription
-                render={<CardDescription />}
-                // every ask's words read small, a Slack message's and a ticket's included
-                // its files sit gap-3 below the words, as the choices sit below the files
-                className="flex flex-col gap-1 text-xs [&>[data-slot=attachment-thumbs]]:mt-2"
               >
-                {preview}
-              </QuestionnaireDescription>
+                <span className={LEAD}>
+                  {unread && !light && (
+                    <span aria-hidden className="bg-primary size-2 rounded-full" />
+                  )}
+                  {light && <Light state={light} />}
+                </span>
+                {title}
+                {unread && <span className="sr-only"> (unread)</span>}
+              </CardTitle>
+              {preview && (
+                <CardDescription className="flex flex-col gap-1 text-xs [&>[data-slot=attachment-thumbs]]:mt-2">
+                  {preview}
+                </CardDescription>
+              )}
+              {resultBody && (
+                <CardDescription className={resultClass}>{resultBody}</CardDescription>
+              )}
+            </CardHeader>
+            {outcome === null && !folded && (
+              <CardContent className="grid gap-(--card-spacing)">
+                <QuestionnaireProgress />
+                {questions.map((question, q) => (
+                  <QuestionnaireItem key={q} name={`q${q}`} className="gap-2">
+                    <QuestionnaireTitle className="text-xs">{question.question}</QuestionnaireTitle>
+                    <QuestionChoices
+                      busy={busy}
+                      paused={paused}
+                      pick={picks[q] ?? null}
+                      question={question}
+                      setPick={(index) =>
+                        setPicks((prev) => prev.map((p, i) => (i === q ? index : p)))
+                      }
+                    />
+                  </QuestionnaireItem>
+                ))}
+              </CardContent>
             )}
-            {result}
-          </CardHeader>
-          {body && <CardContent>{body}</CardContent>}
-          {/* the card's last block before its buttons: his comment, the note with whatever he answers, or alone through Reply, which stays on the Mac, so the hosted build draws it only where it rides an answer */}
-          {!folded && answers && (noted || !config.hosted) && (
-            // the same gap-2 above it as between the choices
-            <CardContent className="mt-[calc(--spacing(2)-var(--card-spacing))]">
-              {/* a box turned disabled drops focus to the page, so words dictated or typed as a card above leaves land nowhere: it stays enabled while the card is paused and turns read-only while its answer is on its way */}
-              <NoteBox
-                id={commentId}
-                placeholder={noted ? "Add an optional comment" : "Add a comment"}
-                readOnly={pending}
-                value={note}
-                onChange={(event) => setNote(event.target.value)}
-              />
-            </CardContent>
-          )}
-        </QuestionnaireItem>
+            {noteContent}
+          </>
+        ) : (
+          <QuestionnaireItem
+            aria-labelledby={titleId}
+            name={QUESTION}
+            className="gap-(--card-spacing)"
+          >
+            {/* one column no wider than the card, so a wide table or drawing in the ask scrolls inside it rather than stretching the card */}
+            <CardHeader className="grid-cols-[minmax(0,1fr)]">
+              <Place item={item} />
+              <QuestionnaireTitle
+                id={titleId}
+                render={<CardTitle />}
+                // the card's own gap spaces the title from what follows, so it takes none of the bare Questionnaire's room below a title with no description
+                className={cn(
+                  "flex items-start gap-2 [&:not(:has(~[data-slot=questionnaire-description]))]:mb-0",
+                  quiet && "text-muted-foreground font-normal",
+                )}
+              >
+                <span className={LEAD}>
+                  {/* the unread dot stands in for an update's light; an ask keeps its light, and its ✓✓ says unread */}
+                  {unread && !light && (
+                    <span aria-hidden className="bg-primary size-2 rounded-full" />
+                  )}
+                  {light && <Light state={light} />}
+                </span>
+                {title}
+                {unread && <span className="sr-only"> (unread)</span>}
+              </QuestionnaireTitle>
+              {preview && (
+                <QuestionnaireDescription
+                  render={<CardDescription />}
+                  // every ask's words read small, a Slack message's and a ticket's included
+                  // its files sit gap-3 below the words, as the choices sit below the files
+                  className="flex flex-col gap-1 text-xs [&>[data-slot=attachment-thumbs]]:mt-2"
+                >
+                  {preview}
+                </QuestionnaireDescription>
+              )}
+              {resultBody && (
+                <QuestionnaireDescription className={resultClass}>
+                  {resultBody}
+                </QuestionnaireDescription>
+              )}
+            </CardHeader>
+            {body && <CardContent>{body}</CardContent>}
+            {noteContent}
+          </QuestionnaireItem>
+        )}
         {footerInForm && footer}
       </Questionnaire>
       {!footerInForm && footer}

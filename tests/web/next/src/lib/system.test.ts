@@ -50,9 +50,9 @@ describe("sizeLabel", () => {
 
 describe("checkoutLabel", () => {
   test("a worktree by its name, anything else by its last two folders", () => {
-    expect(checkoutLabel("/Users/n/dispatcher/.claude/worktrees/canary")).toBe("canary")
-    expect(checkoutLabel("/Users/n/dispatcher/.claude/worktrees/canary/api/hono")).toBe("canary")
-    expect(checkoutLabel("/Users/n/acme/archive")).toBe("acme/archive")
+    expect(checkoutLabel("/Users/you/dispatcher/.claude/worktrees/canary")).toBe("canary")
+    expect(checkoutLabel("/Users/you/dispatcher/.claude/worktrees/canary/api/hono")).toBe("canary")
+    expect(checkoutLabel("/Users/you/acme/archive")).toBe("acme/archive")
     expect(checkoutLabel("unknown")).toBe("unknown")
   })
 })

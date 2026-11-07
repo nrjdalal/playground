@@ -69,8 +69,13 @@ export function shapeHints(input: unknown): ShapeHint[] {
   if (ask && !attached && text.length > PROSE_LIMIT && !FENCE.test(text) && !LIST.test(text)) {
     hints.push({ kind: "prose" })
   }
-  // an ask with neither options nor an approve label shows the bare Approve and Deny
-  if (ask && preview.options === undefined && preview.approve === undefined) {
+  // an ask with neither options nor an approve label shows the bare Approve and Deny, but a questions ask, which labels each question's own options
+  if (
+    ask &&
+    preview.options === undefined &&
+    preview.approve === undefined &&
+    preview.questions === undefined
+  ) {
     hints.push({ kind: "unlabelled" })
   }
   const refs = unlinkedRefs(text)
@@ -139,6 +144,28 @@ export const ASK_EXAMPLES = {
       ].join("\n"),
     },
     title: "Delete the old export worktree?",
+  },
+  questions: {
+    from: "builder",
+    preview: {
+      questions: [
+        {
+          options: [
+            { description: "a day of soak before main", label: "Staging first" },
+            { label: "Straight to main" },
+          ],
+          question: "Where should the export fix land first?",
+          recommended: 0,
+        },
+        {
+          options: [{ label: "Now" }, { label: "After the next ship" }],
+          question: "When should it go out?",
+        },
+      ],
+      text: "Two calls on the export fix, one for each.",
+      type: "ask",
+    },
+    title: "How should the export fix roll out?",
   },
   slack: {
     from: "builder",
