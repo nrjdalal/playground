@@ -2147,16 +2147,17 @@ while :; do
   reread
   look_mark
   # HEAD: first in the queue (any slot); S2: first among waiters that can take run-slot-2, so an older copy at the head cannot idle it
-  HEAD=1; S2=1
+  HEAD=1; S2=1; fw= fw2=
   if [ -n "$TICKET" ] && prio_for "$WHO"; then
     [ "$(prio_first)" = "${TICKET##*/}" ] || { HEAD=0; S2=0; }
+    oldest_is_me && { fw=$(first_waiter); fw2=$(first_waiter s2); }
   elif [ -n "$TICKET" ]; then
     fw=$(first_waiter); fw2=$(first_waiter s2)
     [ "$fw" = "${TICKET##*/}" ] || HEAD=0
     [ "$fw2" = "${TICKET##*/}" ] || S2=0
-    # the oldest waiter names who goes next, so a waiter its look passed over looks again at once (its poll reads run-slot.next)
-    if oldest_is_me; then nx=; read -r nx < "$NEXTF" 2>/dev/null; [ "$nx" = "${fw:--} ${fw2:--}" ] || printf '%s\n' "${fw:--} ${fw2:--}" > "$NEXTF" 2>/dev/null; fi
   fi
+  # the oldest waiter names who goes next, the priority pick's included, so a waiter its look passed over looks again at once (its poll reads run-slot.next)
+  if [ -n "$TICKET" ] && oldest_is_me; then nx=; read -r nx < "$NEXTF" 2>/dev/null; [ "$nx" = "${fw:--} ${fw2:--}" ] || printf '%s\n' "${fw:--} ${fw2:--}" > "$NEXTF" 2>/dev/null; fi
   prev=$LOOKER
   LOOKER=0
   { [ -z "$TICKET" ] || [ "$HEAD" = 1 ] || [ "$S2" = 1 ] || oldest_is_me; } && LOOKER=1

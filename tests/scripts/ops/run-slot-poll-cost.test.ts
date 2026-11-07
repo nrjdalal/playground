@@ -154,3 +154,64 @@ describe("a waiter at the head reads the gate that held its last look", () => {
     await stop(w.p)
   })
 })
+
+// round 2 of the review: an oldest waiter under the priority pick wrote no run-slot.next, so a waiter behind it that a freed slot let start never looked
+describe("a waiter behind the head", () => {
+  test("starts within a poll or two of a freed slot when the oldest is the priority pick and still does not fit", async () => {
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+    m.hold("run-slot", 3, "big")
+    m.hold("run-slot-2", 3, "big")
+    writeFileSync(join(m.ops, "run-slot.priority"), "worker-p\n")
+    const path = m.env().PATH
+    const asleep = (w: Waiter) => /^\+0 sleep 1$/m.test(w.err)
+    const pick = waiter(m, path, "worker-p", ["touch"], {
+      RUN_SLOT_POLL: "1",
+      RUN_SLOT_SIZE: "big",
+    })
+    while (!asleep(pick)) await Bun.sleep(50)
+    const next = waiter(m, path, "worker-y", ["touch"], {
+      RUN_SLOT_POLL: "1",
+      RUN_SLOT_SIZE: "small",
+    })
+    while (!asleep(next)) await Bun.sleep(50)
+    m.release("run-slot-2")
+    const from = next.err.length
+    const sleeps = () => next.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
+    while (!existsSync(next.marker) && sleeps() < 10) await Bun.sleep(50)
+    expect(sleeps()).toBeLessThanOrEqual(3)
+    expect(existsSync(pick.marker)).toBe(false)
+    await Promise.all([stop(pick.p), stop(next.p)])
+  })
+
+  // a waiter killed past its trap leaves its ticket, the oldest, at the queue's front; the waiters behind it watch that ticket's pid
+  test("starts within a poll or two of a freed slot when the oldest waiter was killed and left its ticket", async () => {
+    const m = machine({ off: ["run-slot.3-off", "run-slot.4-off"] })
+    m.hold("run-slot", 3, "big")
+    m.hold("run-slot-2", 3, "big")
+    const path = m.env().PATH
+    const asleep = (w: Waiter) => /^\+0 sleep 1$/m.test(w.err)
+    const oldest = waiter(m, path, "worker-x", ["touch"], {
+      RUN_SLOT_POLL: "1",
+      RUN_SLOT_SIZE: "big",
+    })
+    while (!asleep(oldest)) await Bun.sleep(50)
+    const next = waiter(m, path, "worker-y", ["touch"], {
+      RUN_SLOT_POLL: "1",
+      RUN_SLOT_SIZE: "small",
+    })
+    while (!asleep(next)) await Bun.sleep(50)
+    const left = m.tickets().find((t) => t.endsWith("-worker-x"))
+    expect(left).toBeDefined()
+    // the test started this waiter, so it ends it by its own pid, with no trap run
+    oldest.p.kill("SIGKILL")
+    await oldest.p.exited
+    expect(m.tickets()).toContain(left!)
+    const from = next.err.length
+    m.release("run-slot-2")
+    const sleeps = () => next.err.slice(from).match(/^\+0 sleep 1$/gm)?.length ?? 0
+    while (!existsSync(next.marker) && sleeps() < 10) await Bun.sleep(50)
+    expect(sleeps()).toBeLessThanOrEqual(3)
+    expect(m.tickets()).not.toContain(left!)
+    await stop(next.p)
+  })
+})
