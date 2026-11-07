@@ -642,7 +642,7 @@ export function DashboardDispatchers({ rows = 1 }: { rows?: number }) {
         const action =
           i === 0 && !muted && !config.hosted ? (
             <TemplatePicker
-              className={cn("right-1.5", TOGGLE_SHOWN)}
+              className={cn("right-1.5", PLUS_SHOWN)}
               secondRunning={shown.slots.slice(1).some((slot) => slot.worker)}
             />
           ) : undefined
@@ -791,16 +791,23 @@ const TOGGLE_SHOWN =
   "peer-data-active/menu-button:text-sidebar-accent-foreground md:opacity-0 md:group-hover/menu-item:opacity-100 md:group-has-[:focus-visible]/menu-item:opacity-100 group-data-[open]/menu-item:opacity-100"
 const EFFORT_HIDDEN =
   "max-md:invisible md:group-hover/menu-item:invisible md:group-has-[:focus-visible]/menu-item:invisible group-data-[open]/menu-item:invisible group-has-data-[popup-open]/menu-item:invisible"
+// Alpha's plus, by the toggle's rules but for hover, which counts over its own box alone, the effort's place, so with the pointer elsewhere on the row the effort stays in sight; its box takes the pointer while unseen, at opacity 0, and the effort hides on that hover only under a hover-capable pointer, as Tailwind's hover: shows the plus, so a tap leaves no blank place.
+export const PLUS_SHOWN =
+  "peer-data-active/menu-button:text-sidebar-accent-foreground md:opacity-0 md:hover:opacity-100 md:group-has-[:focus-visible]/menu-item:opacity-100 group-data-[open]/menu-item:opacity-100"
+const PLUS_EFFORT_HIDDEN =
+  "max-md:invisible md:[@media(hover:hover)]:group-has-[[data-sidebar=menu-action]:hover]/menu-item:invisible md:group-has-[:focus-visible]/menu-item:invisible group-data-[open]/menu-item:invisible group-has-data-[popup-open]/menu-item:invisible"
 
 const MODEL_ICON = "text-muted-foreground flex shrink-0 group-data-[collapsible=icon]:hidden"
 
 // A row's right end, ZeroSDK's: its provider's logo, naming its model on hover, then its effort's level, naming itself; with toggles, a row that opens, the effort gives way to the toggle (EFFORT_HIDDEN), and with no effort its place stays.
 function ModelIcons({
   effort,
+  effortHidden = EFFORT_HIDDEN,
   model,
   toggles = false,
 }: {
   effort: string | null
+  effortHidden?: string
   model: string | null
   toggles?: boolean
 }) {
@@ -818,7 +825,7 @@ function ModelIcons({
       )}
       {Effort ? (
         <Hint content={effort}>
-          <span className={cn(MODEL_ICON, toggles && EFFORT_HIDDEN)}>
+          <span className={cn(MODEL_ICON, toggles && effortHidden)}>
             <Effort aria-hidden className="size-4" />
           </span>
         </Hint>
@@ -903,7 +910,7 @@ function SessionRowView({
   waitsOn = null,
   worker,
 }: {
-  // a button in its effort's place, shown as a toggle is (Alpha's plus, TemplatePicker)
+  // a button in its effort's place, shown as a toggle is but for hover, which counts over its own place alone (Alpha's plus, TemplatePicker, PLUS_SHOWN)
   action?: React.ReactNode
   agent?: Agent | null
   close: () => void
@@ -1035,6 +1042,7 @@ function SessionRowView({
       {trailing}
       <ModelIcons
         effort={worker.effort}
+        effortHidden={action ? PLUS_EFFORT_HIDDEN : undefined}
         model={worker.model}
         toggles={expandable || Boolean(action)}
       />

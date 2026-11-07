@@ -67,7 +67,7 @@ describe("labelOf", () => {
   })
 
   test("the branch names the ticket before the roster does", () => {
-    const worker = facts("a", { branchTicket: "PG-12", kind: "worker", ticket: "CEDAR-1" })
+    const worker = facts("a", { branchTicket: "PG-12", kind: "worker", ticket: "MADECEDAR-1" })
     expect(labelOf(worker, none)).toBe("PG-12 Worker")
   })
 
