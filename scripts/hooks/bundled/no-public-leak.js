@@ -6013,6 +6013,7 @@ var channelSettings = defineSettings({
 // packages/settings/src/content.ts
 var contentFields = {
   body: string2().nullable(),
+  executable: array(string2()).optional(),
   files: record(string2(), string2()).nullable(),
   meta: record(string2(), unknown()).nullable(),
   value: union([array(unknown()), record(string2(), unknown())]).nullable()

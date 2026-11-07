@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -34,6 +35,8 @@ export type Ref = { key: string; kind: Kind; scope: string }
 export type Content = {
   attachments: { bytes: string; mime: string; name: string }[]
   body: string | null
+  // the files that run directly, written 755 so git stores them 100755: a name in files, or . for the body
+  executable?: string[]
   files: Record<string, string> | null
   value: unknown
 }
@@ -87,6 +90,7 @@ const place = (dir: string, ref: Ref, content: Content) => {
       writeAtomically(join(at, file), text)
   else if (ref.kind === "list") writeAtomically(at, stableJson(content.value))
   else writeAtomically(at, content.body ?? "")
+  for (const name of content.executable ?? []) chmodSync(name === "." ? at : join(at, name), 0o755)
 }
 
 const trailers = (ref: Ref, who: Who, extra: [string, string][] = []): [string, string][] => [
@@ -128,6 +132,13 @@ export const putItem = (
   if (shape) return { message: shape, ok: false, status: 400 }
   if (content.files && !Object.keys(content.files).every(safe))
     return { message: "a file of the item names a path outside its folder", ok: false, status: 400 }
+  const folder = isFolder(ref.kind, content.files)
+  if (
+    !(content.executable ?? []).every((name) =>
+      folder ? Object.hasOwn(content.files ?? {}, name) : name === ".",
+    )
+  )
+    return { message: "executable names a file the item does not hold", ok: false, status: 400 }
   const secret = secretIn({ body: content.body, files: content.files, value: content.value })
   if (secret)
     return {
@@ -330,6 +341,22 @@ export const showItem = (data: string, ref: Ref, rev?: string) => {
   }
   return null
 }
+
+// Each tracked file, as <scope> <path>, that starts with #! but is stored without its executable bit, read and never changed: playground ext check-modes, run once to find what a put wrote at 644 before put kept the bit.
+export const lostModes = (data: string): string[] =>
+  scopesIn(data).flatMap((scope) => {
+    const dir = scopeDir(data, scope)
+    return mustGit(dir, ["ls-files", "-s", "-z"])
+      .split("\0")
+      .filter(Boolean)
+      .flatMap((entry) => {
+        const [info = "", path = ""] = entry.split("\t")
+        const lost =
+          info.startsWith("100644 ") &&
+          readFileSync(join(dir, path)).subarray(0, 2).toString() === "#!"
+        return lost ? [`${scope} ${path}`] : []
+      })
+  })
 
 // Every commit that wrote or judged the item, newest first: playground ext why.
 export const itemHistory = (data: string, ref: Ref) =>
