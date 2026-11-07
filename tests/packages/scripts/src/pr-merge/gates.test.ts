@@ -350,4 +350,3 @@ describe("the parent gate refuses a stacked PR while its parent is unmerged (PG-
     expect(gate?.detail).not.toContain("#12")
   })
 })
-
