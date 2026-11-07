@@ -16,6 +16,12 @@ An option missing from that list is read both as a flag and as taking the next w
 A hook that calls `parse` itself (no-desktop-owner-app's shell scan, no-false-green, no-kill-by-name's xargs read, and `shell.ts`'s read of a substitution's output) takes the first reading, the flag and the one word, as canary read them.
 A command's parse makes at most 16 other readings (`READINGS`), so a call holding many such options is read in bounded time; past them, an option is read as a flag alone, as canary read it.
 Only the first reading moves the folder, sets variables and records files for the commands after it; each other reading runs on its own copy of them, taken before the command.
+Every hook reads a command's stdin through `stdinOf`: the last file, here-string, heredoc or process substitution on fd 0 of its own, else its pipe, else text it cannot read, so a hook that refuses stdin it cannot read keeps that refusal.
+A script a shell reads from stdin (`scriptStdin`: a shell's or a source's, a root shell's in [no-raw-delete](#no-raw-delete), code a pipe feeds) is judged under that reading and, where it differs, the shell's own, each as a script of its own.
+The shell's own reading applies the input redirects left to right, a duplicate onto fd 0 (`<&N`, `0>&N`, `<&N-`) taking whatever last fed descriptor N (`3<<< '…' <&3`), and a brace group's, a subshell's or a loop's input redirects before each body command's own (`{ sh; } <<< '…'`),
+the group's redirect taking the place of a pipe into the group (`<reader> | { sh; } <<< '…'`) while a pipe inside the body stays the command's own.
+It reads a here-string's `$(echo …)` of words it can read as those words, zsh's `\n` a line break and any other backslash unread, and a here-string of one variable the line set earlier (`S='…'; sh <<< "$S"`) as that variable's value.
+It follows no descriptor an `exec` feeds, which it reads as unfed, and no variable set other than by a plain assignment, which it reads as that assignment's value.
 
 ## Registered in both settings files
 
@@ -278,16 +284,16 @@ Only the first reading moves the folder, sets variables and records files for th
   and a loop or group whose body holds one.
   In that reading, every env's split string, a quoted env's and one behind another wrapper's included, is read as the words it runs (`env -S 'sudo -s'`), with a `\_` or a whitespace escape splitting, a quote or another backslash dropped, and a `${…}` read as a word the hook cannot read.
   env's long options are read by any unique prefix (`--split='sudo -s'`, `--u X`), and `-a` and `--argv0` take a value, as GNU env reads them, and a lone `-` is read as the wrapper lines at the top say.
-  A root shell is sudo's `-s`, `-i`, `--shell` or `--login`, or doas's `-s`, alone or in a cluster of the wrapper's flags ahead of its first value-taking letter (`-Es`, `-su root`, `-su#0`; in `-us` the `-u` takes the `s`).
+  A root shell is sudo's `-s`, `-i`, `--shell` or `--login`, doas's `-s`, or pkexec with no program of its own (`<reader> | pkexec`), alone or in a cluster of the wrapper's flags ahead of its first value-taking letter (`-Es`, `-su root`, `-su#0`; in `-us` the `-u` takes the `s`).
   Such an option counts behind any wrapper and quoted or not (`'-s'`, `-su'root'`, `'sudo' -s`), and an option or a program in a variable counts as one.
   `su` not handed a command is a root shell, busybox's `su` applet and one behind any wrapper included (`<reader> | su`, `<reader> | su -s /bin/sh root`, `<reader> | busybox su`).
   `su` reads as handed one only by `-c` or `--command` with its command, after option words of `-f`, `-l`, `-m` and `-` alone, so any other option word, one taking a value included, and any word before the `-c` it cannot read (a variable, a substitution, a glob) reads as a root shell.
   A line that runs its own command after another option (`su -lc <cmd>`) is then read as a root shell on purpose, so an option's value never hides a `-c`.
-  Each word is read as an option of every privilege wrapper before it: the first unquoted word naming one, and any word whose unquoted value is `sudo` or `doas` (`'doas' sudo -i`, `doas sudo -i`); any other word ending in a wrapper's name (a quoted path, or a path after the first wrapper) is read as an option, never as a wrapper.
+  Each word is read as an option of every privilege wrapper before it: the first unquoted word naming one, and any word whose unquoted value is `sudo`, `doas` or `pkexec` (`'doas' sudo -i`, `doas sudo -i`); any other word ending in a wrapper's name (a quoted path, or a path after the first wrapper) is read as an option, never as a wrapper.
   A long option's unambiguous prefix counts as that option, as sudo's getopt_long reads it (`--sh`, `--lo`), while sudo itself refuses the ambiguous `--s` and `--l`.
-  The root shell is looked for under each reading of the wrapper's options (above); once the parse runs out of readings, any sudo, doas or su among the command's words counts as a root shell and any shell's name as a shell.
+  The root shell is looked for under each reading of the wrapper's options (above); once the parse runs out of readings, any sudo, doas, pkexec or su among the command's words counts as a root shell and any shell's name as a shell.
   Every spaced text of every program on such a line, each `\n`-separated part of it and an awk program's strings are read as command lines.
-  A root shell's stdin is read as its script, and one the hook cannot read (a download, a file it cannot see, a bare `sudo -s`) is refused: run its commands as calls of their own.
+  A root shell's stdin is read as its script, and one the hook cannot read (a download, a file it cannot see, a bare `sudo -s`, one only the shell's own reading reaches, as [the stdin lines at the top](#the-factorys-hooks) set out) is refused: run its commands as calls of their own.
   For any program but a reader, each text that holds a space (a word, the value after its `=`, an option's attached value, a variable the call sets or exports) is judged as a command line of its own, a leading `!` dropped, since a program may run it (`watch`, `tmux`, `ssh -o ProxyCommand`, `rsync -e`, a git alias, a pager).
   A value it cannot read (a variable, a substitution) is lexed again with the steady variables the call has set by then, an assignment naming an earlier one included (`S=/tmp/a; T="$S/b"`), and judged as written;
   under a remover (`find`, `mv`, `rm`, `rmdir`, `rsync`, `unlink`) one still unread is refused, so hold it in the same call or write it literally, and git's `-c` takes a literal value alone, refusing any variable or substitution, held or not, but the `HOME`, `TMPDIR` and `PWD` the hook reads from the call's environment.
@@ -590,7 +596,8 @@ Only the first reading moves the folder, sets variables and records files for th
   Where the reader names no one folder ([The folder a hook reads](#the-folder-a-hook-reads)), it judges the command in every folder the shell may be in, and in the folder the line started in when a `cd`'s landing folder is unread: a build, a test run, a commit, a git move, a tool and a write by a path that lands in the main checkout in any of those folders is refused,
   and the refusal names the fix, naming the folder (`git -C <your worktree>`, `bun --cwd <your worktree>`) or a `cd` to a literal path that is there.
   So a line that starts in a worktree is refused too where a `cd` of its own may reach the main checkout, and one that starts in the main checkout runs where every folder its `cd` steps may reach is a worktree.
-  It reads the command a pipeline feeds as code, the set [no-extensions-write](#no-extensions-write) names (`<reader> | sh`, `<reader> | eval "$(cat)"`, `<reader> | while read l; do eval $l; done`, a loop's output piped into one), as the shell's own command line: a script it cannot read is refused where that shell may run in the main checkout.
+  It reads the command a pipeline feeds as code, the set [no-extensions-write](#no-extensions-write) names (`<reader> | sh`, `<reader> | eval "$(cat)"`, `<reader> | while read l; do eval $l; done`, a loop's output piped into one), as the shell's own command line:
+  a script it cannot read, one only the shell's own reading reaches ([the stdin lines at the top](#the-factorys-hooks)) included, is refused where that shell may run in the main checkout.
   It reads the script a here-string, a heredoc, a file or a process substitution feeds a shell (`sudo -s <<< '<command>'`, `sh <<EOF`, `sudo -s < <(<reader>)`) the same way.
   A pipe into an interpreter there is refused from the main checkout whatever it carries, since the hook reads no other language, while one that runs a script file or a module of its own past options its family's table names (`| node x.js`, `| python3 -m json.tool`) runs, that file's text being outside the line.
   For bun and deno that file is a JavaScript or TypeScript name, since they run a bare name off PATH (`| bun run sh`).
@@ -664,7 +671,7 @@ Only the first reading moves the folder, sets variables and records files for th
   the words after run-slot's `--`, each word of `screen` or `tmux` that starts no option as the command it runs, the script `at` or `batch` takes from stdin or `-f`, and every program it judges named among another program's words (`arch -arm64 rm -rf`, `busybox rm`, `npx rimraf`);
   a printer's or a search's words stay text.
   A root shell's here-string, heredoc, input file or process substitution (`sudo -s <<< '…'`, `su <<'EOF'`) is read as its script, as the shared reader runs a piped one, each part it cannot read (an unset variable, a download's output) taken as a line break so the rest is still judged, as a plain shell's script is.
-  A job a redirect, a pipe or `-f` feeds `at` or `batch` that it cannot read is refused, a program's output included (`at now < "$F"`, `ls | at now`), while `at -l` runs.
+  A job a redirect (a duplicate onto fd 0 included), a pipe or `-f` feeds `at` or `batch` that it cannot read is refused, a program's output included (`at now < "$F"`, `ls | at now`), while `at -l` runs.
   A word it cannot read among those words, given `-r` after it (`arch -arm64 $R -rf`), is refused as a program it cannot read; a data program's words stay text (`gh pr checks $N -R <repo>`).
   A plain `rm` met that way is judged for recursion alone, so `docker rm -fv "$ID"` and `bun rm <package>` run.
   It also reads every word holding a space, the text after an `=` and a leading `!` too, as a command line of its own.
