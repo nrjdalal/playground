@@ -1,3 +1,4 @@
+import { reachesConsole } from "@packages/auth/access"
 import { redirect } from "next/navigation"
 
 import { ApiRetry } from "@/components/common/api-retry"
@@ -21,8 +22,13 @@ export default async function YardAppLayout({ children }: { children: React.Reac
   return (
     <SidebarShell
       homeHref="/yard"
-      nav={<YardGroups />}
-      footer={<YardFooter login={session?.user.login ?? session?.user.name ?? ""} />}
+      nav={<YardGroups shell="yard" />}
+      footer={
+        <YardFooter
+          login={session?.user.login ?? session?.user.name ?? ""}
+          owner={Boolean(session?.user && reachesConsole(session.user, "owner"))}
+        />
+      }
     >
       <YardLive />
       {children}

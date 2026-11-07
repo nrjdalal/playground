@@ -121,14 +121,15 @@ describe("the sidebar's rows", () => {
     expect(channelTitle(dm)).toBe("octocat")
   })
 
-  test("a row opens under /yard on the hosted app and in the dashboard's chat pane locally", () => {
-    expect(channelHref(dm, true)).toBe("/yard/c/d1")
-    expect(channelHref(dm, false)).toBe("/dashboard/yard/d1")
+  // the shell, not the build: the owner's hosted dashboard opens a channel beside its sessions, as the local one does
+  test("a row opens in the shell it is drawn in: the dashboard's chat pane, or /yard in Yard's own shell", () => {
+    expect(channelHref(dm, "dashboard")).toBe("/dashboard/yard/d1")
+    expect(channelHref(dm, "yard")).toBe("/yard/c/d1")
   })
 
   test("a channel's id is escaped in its link, as the approve and invite paths escape theirs", () => {
-    expect(channelHref({ id: "../tokens" }, true)).toBe("/yard/c/..%2Ftokens")
-    expect(channelHref({ id: "../tokens" }, false)).toBe("/dashboard/yard/..%2Ftokens")
+    expect(channelHref({ id: "../tokens" }, "yard")).toBe("/yard/c/..%2Ftokens")
+    expect(channelHref({ id: "../tokens" }, "dashboard")).toBe("/dashboard/yard/..%2Ftokens")
   })
 
   test("a pending post links to its approve page on the hosted app alone, since a local stack serves no /yard page", () => {

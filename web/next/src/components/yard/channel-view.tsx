@@ -31,6 +31,7 @@ import {
   upsertMessage,
   type YardChannel,
   type YardMessage,
+  type YardShell,
 } from "@/lib/yard"
 import { CHANNELS_KEY, useYardChannels, useYardMessages, yardApi } from "@/lib/yard-api"
 
@@ -39,7 +40,15 @@ type Kind = (typeof MESSAGE_KINDS)[number]
 const SEND_HINT = "Enter to send, Shift+Enter for a new line"
 
 // A channel or DM in the chat pane: every message is untrusted data, shown through the transcript renderer (links shown, opened only on a click, images from elsewhere left unloaded) behind its from line and kind tag.
-export function ChannelView({ id, role }: { id: string; role: string | null | undefined }) {
+export function ChannelView({
+  id,
+  role,
+  shell,
+}: {
+  id: string
+  role: string | null | undefined
+  shell: YardShell
+}) {
   const { data: channels, isPending } = useYardChannels()
   const channel = channels?.find((row) => row.id === id)
   const { data: messages } = useYardMessages(id)
@@ -92,8 +101,8 @@ export function ChannelView({ id, role }: { id: string; role: string | null | un
           </YardMessageView>
         ))}
       </div>
-      {/* on a hosted phone the shell's floating Menu sits 64 to 96px up the right edge (SidebarFloatingTrigger), so the composer rests 8px above it; the dashboard draws no such button */}
-      <div className={cn("px-4 pb-4", config.hosted && "max-md:pb-26")}>
+      {/* on a phone Yard's own shell's floating Menu sits 64 to 96px up the right edge (SidebarFloatingTrigger), so the composer rests 8px above it; the dashboard's tab bar holds its Menu instead */}
+      <div className={cn("px-4 pb-4", shell === "yard" && "max-md:pb-26")}>
         {canPost(channel, role) ? (
           <YardComposer channel={channel} />
         ) : (
