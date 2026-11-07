@@ -1411,13 +1411,13 @@ cheap_sig() {
     SIG="$SIG|$f"
     p=
     case "$f" in
-      *.holder | */run-slot.priority | */run-slot.load5-cap | */run-slot.focus) l=; read -r l < "$f" 2>/dev/null; SIG="$SIG=$l"; [ "${f%.holder}" = "$f" ] || { p=${l#* }; p=${p%% *}; } ;;
+      *.holder | */run-slot.priority | */run-slot.load5-cap | */run-slot.focus) l=; read -r l 2>/dev/null < "$f"; SIG="$SIG=$l"; [ "${f%.holder}" = "$f" ] || { p=${l#* }; p=${p%% *}; } ;;
       "$QUEUE"/*) p=${f##*/}; p=${p#*-}; p=${p%%-*} ;;
     esac
     case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac
   done
   for d in "$@"; do
-    for f in "$d"/run-slot*.holder; do l=; read -r l < "$f" 2>/dev/null; SIG="$SIG|$f=$l"; p=${l#* }; p=${p%% *}; case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac; done
+    for f in "$d"/run-slot*.holder; do l=; read -r l 2>/dev/null < "$f"; SIG="$SIG|$f=$l"; p=${l#* }; p=${p%% *}; case "$p" in '' | *[!0-9]*) ;; *) alive "$p" || SIG="$SIG!ended" ;; esac; done
   done
 }
 # the load's line, its 1- and 5-minute loads in whole numbers, which a waiter at the head looks again on (two processes, so only the head reads it)
@@ -1425,7 +1425,7 @@ cheap_load() { local l; l=$(loadavg); set -- $l; LOAD="${2%%.*} ${3%%.*}"; }
 # whether this waiter's ticket is the queue's oldest, the one that names who goes next in run-slot.next
 oldest_is_me() { local a=("$QUEUE"/*); [ -n "$TICKET" ] && [ "${a[0]}" = "$TICKET" ]; }
 # the lines a waiter behind the head watches: who the oldest waiter names next, and the lead's pick and focus, which name a session whatever its place
-next_sig() { local f l; NSIG=; for f in "$NEXTF" "$OPS/run-slot.priority" "$OPS/run-slot.focus"; do l=; read -r l < "$f" 2>/dev/null; NSIG="$NSIG|$l"; done; }
+next_sig() { local f l; NSIG=; for f in "$NEXTF" "$OPS/run-slot.priority" "$OPS/run-slot.focus"; do l=; read -r l 2>/dev/null < "$f"; NSIG="$NSIG|$l"; done; }
 # the epoch second the first rule a look reads by the clock alone turns, nothing while none will: a ticket reaching AGED (the queue's order),
 # run-slot.priority's hour, a switch's expiry and a holder line with no pid going stale at 2 hours, so a waiter at the head looks again then
 due_at() {
@@ -1435,7 +1435,7 @@ due_at() {
     [ -e "$f" ] || continue
     case "$f" in
       */run-slot.priority) m=3600 ;;
-      *.holder) l=; read -r _ l _ < "$f" 2>/dev/null; case "$l" in '' | *[!0-9]*) m=7200 ;; *) continue ;; esac ;;
+      *.holder) l=; read -r _ l _ 2>/dev/null < "$f"; case "$l" in '' | *[!0-9]*) m=7200 ;; *) continue ;; esac ;;
       *) m=$AGED ;;
     esac
     e=$(mtime "$f") || continue
@@ -1444,7 +1444,7 @@ due_at() {
   done
   for f in $SWITCHES; do
     [ -e "$OPS/$f" ] || continue
-    l=; read -r l < "$OPS/$f" 2>/dev/null
+    l=; read -r l 2>/dev/null < "$OPS/$f"
     if [[ "$l" =~ ^[^\ ]+\ [0-9-]{10}T[0-9:]{8}Z\ ([0-9-]{10}T[0-9:]{8}Z)\  ]]; then
       e=$(date -u -j -f %Y-%m-%dT%H:%M:%SZ "${BASH_REMATCH[1]}" +%s 2>/dev/null || date -u -d "${BASH_REMATCH[1]}" +%s 2>/dev/null) || continue
     else
@@ -2077,13 +2077,13 @@ if [ -n "$KIND" ]; then
   # the clone's spacing is shared, so one waiter works it out about every 15 to 24 s for all of them (issue 1338): run-slot.clone-verdict holds the CPU slots' and
   # the clone lane's holder lines it was worked out under, then its verdict, and a waiter takes one written no earlier than its own last tick under the same lines, so a verdict serves up to 48 s
   CLONE_VERDICT="$OPS/run-slot.clone-verdict"
-  clone_holders() { local s l; HL=; for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-clone; do l=; [ -d "$OPS/$s" ] && { read -r l < "$OPS/$s.holder" 2>/dev/null; l="held $l"; }; HL="$HL|$l"; done; }
+  clone_holders() { local s l; HL=; for s in run-slot run-slot-2 run-slot-3 run-slot-4 run-slot-clone; do l=; [ -d "$OPS/$s" ] && { read -r l 2>/dev/null < "$OPS/$s.holder"; l="held $l"; }; HL="$HL|$l"; done; }
   clone_verdict() {
     local h v
     clone_holders
     if [ -n "$CT0" ] && [ $((SECONDS - CT0)) -lt "$CTICK" ] && [ "$HL" = "$CHL" ]; then spaced=$CSP; return; fi
     h= v=
-    { read -r h; read -r v; } < "$CLONE_VERDICT" 2>/dev/null
+    { read -r h; read -r v; } 2>/dev/null < "$CLONE_VERDICT"
     if [ -n "$CT0" ] && [ -e "$CLONE_VERDICT" ] && ! [ "$REF" -nt "$CLONE_VERDICT" ] && [ "$h" = "$HL" ]; then
       CSP=$v
     else
@@ -2191,7 +2191,7 @@ while :; do
   # pick's next ticket included once its first has gone, looks again at once (its poll reads run-slot.next)
   if [ -n "$TICKET" ] && oldest_is_me; then
     pf=; [ -e "$OPS/run-slot.priority" ] || [ -e "$OPS/run-slot.focus" ] && pf=$(prio_first)
-    nx=; read -r nx < "$NEXTF" 2>/dev/null
+    nx=; read -r nx 2>/dev/null < "$NEXTF"
     [ "$nx" = "${fw:--} ${fw2:--} ${pf:--}" ] || printf '%s\n' "${fw:--} ${fw2:--} ${pf:--}" > "$NEXTF" 2>/dev/null
   fi
   prev=$LOOKER
