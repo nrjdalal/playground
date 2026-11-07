@@ -4,13 +4,13 @@ import { attachmentUrl, isAttachmentId } from "@/lib/attachments"
 import type { OutboxAttachment } from "@/lib/outbox"
 import { withRef } from "@/lib/reply"
 
-// What the composer holds for a session and has not sent: its words and the files already uploaded for them.
+// What the composer holds for a session and has not sent, its words and the files already uploaded for them, or an Inbox draft card's changed words (cardDraftKey).
 export type Draft = { attachments: OutboxAttachment[]; text: string }
 export type Drafts = Record<string, Draft>
 
 export const DRAFTS_KEY = "dashboard.composer.drafts.v1"
 
-// An Inbox draft card's changed words sit in the same store under its item's own key, which no session name takes, so a list refresh or a shelf move that remounts the card gives them back.
+// An Inbox draft card's changed words sit in the same store under its item's own key, prefixed apart from the session names the composer keys by, so a list refresh or a shelf move that remounts the card gives them back.
 export const cardDraftKey = (id: string) => `inbox:${id}`
 
 const KINDS = new Set(["image", "pdf", "text"])
