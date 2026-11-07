@@ -17,6 +17,7 @@ import {
   program,
   run,
   slotWords,
+  stdinFed,
   stdinOf,
   stdinShell,
   type Text,
@@ -441,10 +442,7 @@ async function fedScript(
   visit: Visit,
 ): Promise<string | undefined> {
   const shell = cmd.bareOf ?? cmd
-  const input = shell.redirects.findLast(
-    (r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<") && r.op !== "<&",
-  )
-  if (input === undefined && shell.stdin === undefined) return
+  if (!stdinFed(shell) && shell.stdin === undefined) return
   const kind = stdinShell(shell)
   if (!kind || kind === "code") return
   const script = await stdinOf(shell, here)
