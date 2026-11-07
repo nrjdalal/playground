@@ -925,9 +925,7 @@ ran_last3() {
 ran_short() { ran_last3 within 10 "$@"; }
 # each of the last 3 ran over 60 s (1 Nov: a two-file test:file line ran 39, 421 and 226 s back to back in the one quick slot, and the quick lane's waiters waited 63 min in the hour from 12:00Z)
 ran_long() { ran_last3 over 60 "$@"; }
-# whether a test file this line names (tests/... or ./tests/..., read as one) ran over 60 s in a run of 1 to 3 test files, in any lane, within that
-# file's last 3 runs, so a new line naming a known-slow file beside others reads that file's history (issue 1242: since 5 Nov 19 quick runs of 188 to 857 s did);
-# a run outside quick that names more than 3 test files adds nothing, so 3 big suite runs cannot push a slow file's long run out of the window (issue 1507)
+# whether a test file this line names (tests/... or ./tests/..., read as one) ran over 60 s within that file's last 3 runs, under any line, so a new line naming a known-slow file beside others reads that file's history (issue 1242: since 5 Nov 19 quick runs of 188 to 857 s did); a quick run counts, and so does a started run of 1 to 3 test files in any other lane, while a run outside quick naming more than 3 test files adds nothing, so 3 big suite runs cannot push a slow file's long run out of the window (issue 1507)
 file_ran_long() {
   local a files=""
   for a in "$@"; do case "$a" in tests/*.test.ts | tests/*.test.tsx | ./tests/*.test.ts | ./tests/*.test.tsx) files="$files ${a#./}" ;; esac; done
@@ -946,7 +944,7 @@ file_ran_long() {
     }
     END { n = split(ENVIRON["FILES"], want, " "); for (i = 1; i <= n; i++) if (index(h[want[i]], "1")) exit 0; exit 1 }'
 }
-# the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue; a line the rule calls quick that ran long its last 3 times goes to the queue, since its file count says nothing of its time, and so does a quick line naming a test file that ran long in a quick run within its own last 3 runs (file_ran_long)
+# the slot a command takes outside the queue: its rule's, else quick when it ran short its last 3 times, so a long run after short ones holds the one quick slot and sends the next back to the queue; a line the rule calls quick that ran long its last 3 times goes to the queue, since its file count says nothing of its time, and so does a quick line naming a test file that ran long within its own last 3 runs (file_ran_long)
 quick_kind() {
   # a read command takes no slot and runs a bare true, so three short true runs in the log would take can-take and head down the quick lane, past their own exits (issue 285)
   [ -n "$CAN_TAKE" ] && return
