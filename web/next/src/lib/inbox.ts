@@ -12,7 +12,7 @@ import { useQuery } from "@tanstack/react-query"
 import { agentLabel } from "@/lib/agent-label"
 import { apiClient, unwrap } from "@/lib/api/client"
 import { isProbe } from "@/lib/dashboard"
-import { needsYouAnchor } from "@/lib/needs-you"
+import { needsYouAnchor, type TargetSource } from "@/lib/needs-you"
 import type { ShownState } from "@/lib/status-icons"
 import { fullTime } from "@/lib/time"
 
@@ -864,6 +864,19 @@ export const inboxPosters = (items: readonly InboxItem[]): Set<string> =>
 export const inboxTarget = (anchor: string, items: readonly InboxItem[]): boolean => {
   const prefix = needsYouAnchor("")
   return anchor.startsWith(prefix) && items.some((item) => item.id === anchor.slice(prefix.length))
+}
+
+// Pure: the shut shelf (In progress, Later, Archive, Done) an asked-for card waits on, which opens only for a click; a link's hash leaves every shelf as it was, so a page opened on an old link starts with them shut. null for none.
+export const shelfToOpen = <K extends string>(
+  anchor: string,
+  source: TargetSource,
+  shelves: readonly (readonly [K, unknown, readonly InboxItem[]])[],
+  open: readonly string[],
+): K | null => {
+  const shelf = shelves.find(([, , list]) =>
+    list.some((item) => needsYouAnchor(item.id) === anchor),
+  )?.[0]
+  return source === "click" && shelf && !open.includes(shelf) ? shelf : null
 }
 
 // Pure: a decision's rows as its card shows them (choicesOf), or null for a secret and any other item.
