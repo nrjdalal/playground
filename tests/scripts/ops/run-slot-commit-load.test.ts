@@ -1,5 +1,5 @@
 import { describe, expect, setDefaultTimeout, test } from "bun:test"
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import { SCRIPT, machine, stop } from "./run-slot-fake"
@@ -48,11 +48,19 @@ describe("a commit-lane start", () => {
     expect(m.lane("worker-c")).toBe("run-slot-commit")
   })
 
-  test("reads the cap at each poll, so a cap raised mid-wait lets it start", async () => {
+  test("reads the cap again when its switch file changes, so a cap raised mid-wait lets it start", async () => {
     const m = loaded(18, 15)
     const run = m.start("worker-c", {}, undefined, ["git", "merge", "--no-edit"])
     expect(await run.saw(WAIT)).toBe(true)
     writeFileSync(join(m.ops, "run-slot.load5-cap"), "20\n")
+    expect(await run.ran()).toBe(true)
+  })
+
+  test("and a switch lifted mid-wait lets it start under load_line's 22", async () => {
+    const m = loaded(18, 15)
+    const run = m.start("worker-c", {}, undefined, ["git", "merge", "--no-edit"])
+    expect(await run.saw(WAIT)).toBe(true)
+    renameSync(join(m.ops, "run-slot.load5-cap"), join(m.ops, "run-slot.load5-cap.lifted-test"))
     expect(await run.ran()).toBe(true)
   })
 

@@ -2050,6 +2050,7 @@ if [ -n "$KIND" ]; then
   clone_held && { echo "run-slot.sh: run-slot.clone-off holds this clone, so $WHO stops" >&2; exit 143; }
   # a commit or quick start waits on load5 under load_line's cap, for LOAD_WAIT s at most (scripts/ops/README.md's run-slot bullets; issue 1385); its idle poll starts its load read and its sleep (issue 1338), so it reads the cap again only when the switch file appears, goes or changes, or once a minute
   if [ "$KIND" != clone ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ] && [ "$WHO" != ops-tick ]; then
+    # LT0 the wait's start, LCAP the cap, LCT when it was read, LCF the switch file, LCE and LE whether it stood then and now, LDONE set on each way out; load5 is parsed inline, not through load5(), so a poll starts one process for it
     LT0=$SECONDS LSAID= LDONE= LCAP=$(load_line) LCT=$SECONDS LCE=
     LCF="$OPS/run-slot.load5-cap"
     [ -e "$LCF" ] && LCE=1
