@@ -157,7 +157,7 @@ const postedId = (out: string): string | undefined =>
     .map((l) => l.trim())
     .find((l) => /^[0-9a-f-]{36}$/.test(l))
 
-// The poster's own Inbox update resolved with bun run ask resolve, its note saying why; an item already gone counts as resolved, and any other failure throws, so the next run tries again.
+// The poster's own Inbox update resolved with bun run ask resolve, its note saying why; an item already gone or already resolved counts as resolved, and any other failure throws, so the next run tries again.
 const resolveOwn = async (ctx: Context, id: string, by: string, note: string) => {
   const done = await ctx.run([
     "bun",
@@ -173,40 +173,25 @@ const resolveOwn = async (ctx: Context, id: string, by: string, note: string) =>
     "--note",
     note,
   ])
-  if (done.code !== 0 && !done.out.includes("no inbox item"))
+  if (done.code !== 0 && !/no inbox item|already resolved/.test(done.out))
     throw new Error(`bun run ask resolve ${id}: ${lines(done.out).at(-1)}`)
 }
 
 type FocusCardKept = { by: string; id: string; since: string; until: string }
 
-// Once focus has ended, by off or at its end, one Inbox update under the ops manager's name names what queued while it stood (focusCard), kept in tick/focus-cards.json; a card kept at an earlier beat resolves once no ask posted while its focus stood is open, since what it pointed at is answered.
+// Once focus has ended, by off or at its end, one Inbox update under the ops manager's name names what queued while it stood (focusCard), kept in tick/focus-cards.json; a card kept at an earlier beat resolves once no ask posted while its focus stood is open, since what it pointed at is answered; a card that fails stays for the next beat, and the first failure throws once the rest are tried and the new card posted.
 const focusCardBeat = async (ctx: Context) => {
   const keptPath = join(ctx.ops, "tick", "focus-cards.json")
   const kept = ((await readJson(keptPath).catch(() => [])) ?? []) as FocusCardKept[]
   const left: FocusCardKept[] = []
+  let failed: Error | undefined
   for (const card of kept) {
-    const open = await ctx.run([
-      "bun",
-      "run",
-      "--silent",
-      "--cwd",
-      ctx.repo,
-      "ask",
-      "open",
-      "--since",
-      card.since,
-      "--until",
-      card.until,
-    ])
-    if (open.code !== 0) throw new Error(`bun run ask open: ${lines(open.out).at(-1)}`)
-    if (lines(open.out).some((line) => /^#i\d+ /.test(line.trim()))) left.push(card)
-    else
-      await resolveOwn(
-        ctx,
-        card.id,
-        card.by,
-        "Everything that came in while focus stood is answered",
-      )
+    try {
+      if (!(await settleFocusCard(ctx, card))) left.push(card)
+    } catch (error) {
+      left.push(card)
+      failed ??= error as Error
+    }
   }
   if (kept.length > 0) await writeAtomic(keptPath, JSON.stringify(left))
   await focusCard(join(ctx.ops, ".."), ctx.now, async (card, focus) => {
@@ -226,6 +211,28 @@ const focusCardBeat = async (ctx: Context) => {
       await writeAtomic(keptPath, JSON.stringify(left))
     }
   })
+  if (failed) throw failed
+}
+
+// One kept focus card resolved, true, once no ask posted in its window is open; false while one is
+const settleFocusCard = async (ctx: Context, card: FocusCardKept): Promise<boolean> => {
+  const open = await ctx.run([
+    "bun",
+    "run",
+    "--silent",
+    "--cwd",
+    ctx.repo,
+    "ask",
+    "open",
+    "--since",
+    card.since,
+    "--until",
+    card.until,
+  ])
+  if (open.code !== 0) throw new Error(`bun run ask open: ${lines(open.out).at(-1)}`)
+  if (lines(open.out).some((line) => /^#i\d+ /.test(line.trim()))) return false
+  await resolveOwn(ctx, card.id, card.by, "Everything that came in while focus stood is answered")
+  return true
 }
 
 type WeekAlert = { account: string; by: string; id: string; mark: number }
@@ -293,7 +300,13 @@ const tick = async (ctx: Context) => {
         await ctx.send("builder", `Inbox alert not posted: ${error.message}`)
         return null
       })
-      if (posted) await keepWeekAlert(ctx, line, posted)
+      if (posted)
+        await keepWeekAlert(ctx, line, posted).catch((error: Error) =>
+          ctx.send(
+            "builder",
+            `Inbox week alert not kept, so it will not resolve itself: ${error.message}`,
+          ),
+        )
     }
     await ctx.send("builder", line)
   }

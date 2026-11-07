@@ -745,7 +745,7 @@ export const saidOf = (text: string): string | undefined => {
   return said.length > SAID_CHARS ? `${said.slice(0, SAID_CHARS - 1)}…` : said
 }
 
-// The poster cleared its own update (`bun run ask resolve`), which had settled: read, so nothing was left for him to dismiss.
+// The poster cleared its own update (`bun run ask resolve`), which had settled: read, so nothing was left for the owner to dismiss.
 export type InboxResolved = {
   at: string
   by: string
