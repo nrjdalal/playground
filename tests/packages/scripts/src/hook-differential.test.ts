@@ -202,6 +202,7 @@ describe("sweep and replay", () => {
       forms.flatMap(({ command }) =>
         cwdsOf("/h").map((cwd) => ({
           cwd,
+          hook_event_name: "PreToolUse",
           tool_input: { command },
           tool_name: "Bash",
         })),
@@ -222,6 +223,14 @@ describe("sweep and replay", () => {
     const { changed, counts } = await sweep(refuseAll, recorder([]), forms, "/h")
     expect(counts["newly allowed"]).toEqual({ inClass: 3, outClass: 0 })
     expect(changed).toEqual([])
+  })
+
+  test("a hook that refuses only in its PreToolUse branch is reached there, as Claude Code's input names the event", async () => {
+    const allowAll: Check = () => undefined
+    const preToolUse: Check = (raw) =>
+      JSON.parse(raw).hook_event_name === "PreToolUse" ? "refused" : undefined
+    const { counts } = await sweep(allowAll, preToolUse, forms, "/h")
+    expect(counts["newly refused"]).toEqual({ inClass: 3, outClass: 3 })
   })
 
   test("the replay reads each made-up Bash call of the day's transcripts once, a sub-agent's included, and only as data", async () => {
@@ -388,6 +397,8 @@ describe("a run under a role", () => {
   test("a session's role comes from the roster by its transcript name, and its registry entry names it", async () => {
     const real = join(DIR, "roles-data")
     mkdirSync(real, { recursive: true })
+    const own = join(DIR, "roles-config")
+    mkdirSync(join(own, "skills"), { recursive: true })
     writeFileSync(
       join(real, "roster.json"),
       JSON.stringify({ agents: [{ kind: "worker", name: "abc-worker", status: "working" }] }),
@@ -398,9 +409,12 @@ describe("a run under a role", () => {
         { command: "ls", cwd: "/h", name: "stranger", session: "s2" },
         { command: "ls", cwd: "/h", session: "s3" },
       ],
-      { HOME: DIR, PLAYGROUND_DATA_DIR: real },
+      { CLAUDE_CONFIG_DIR: own, HOME: DIR, PLAYGROUND_DATA_DIR: real },
       DIR,
     )
+    // the installed skills a hook reads (writing-first's installed()) resolve to the real config's, and an entry it lacks stays absent
+    expect(realpathSync(join(config, "skills"))).toBe(realpathSync(join(own, "skills")))
+    expect(existsSync(join(config, "plugins"))).toBe(false)
     expect([...roles]).toEqual([
       ["abc-worker", "worker"],
       ["stranger", ""],
@@ -410,6 +424,35 @@ describe("a run under a role", () => {
       sessionId: "s1",
     })
     expect(existsSync(join(config, "sessions", "s3.json"))).toBe(false)
+  })
+
+  test("writing-first gives a session's call the same answer under the scratch registry as under the real config, since it reads the real installed skills", async () => {
+    const own = join(DIR, "writing-config")
+    mkdirSync(join(own, "skills", "writing-for-agents"), { recursive: true })
+    writeFileSync(join(own, "skills", "writing-for-agents", "SKILL.md"), "x")
+    const repo = join(DIR, "writing-repo")
+    mkdirSync(join(repo, ".git"), { recursive: true })
+    mkdirSync(join(repo, "extensions", "core", "skills", "playbook"), { recursive: true })
+    writeFileSync(join(repo, "extensions", "core", "skills", "playbook", "SKILL.md"), "x")
+    const data = join(DIR, "writing-data")
+    mkdirSync(data, { recursive: true })
+    const { config } = await sessionRoles(
+      [{ command: "ls", cwd: repo, name: "abc-worker", session: "s1" }],
+      { CLAUDE_CONFIG_DIR: own, HOME: DIR, PLAYGROUND_DATA_DIR: data },
+      DIR,
+    )
+    const writing = (await import("../../../../scripts/hooks/writing-first")).check as Check
+    const raw = JSON.stringify({
+      cwd: repo,
+      hook_event_name: "PreToolUse",
+      session_id: "s1",
+      tool_input: { content: "x", file_path: join(repo, "AGENTS.md") },
+      tool_name: "Write",
+    })
+    const as = (dir: string) => ({ CLAUDE_CONFIG_DIR: dir, HOME: DIR, PLAYGROUND_DATA_DIR: data })
+    const real = await writing(raw, as(own))
+    expect(real).toContain("writing-first hook refuses")
+    expect(await writing(raw, as(config))).toBe(real)
   })
 
   test("by session the replay keeps one call per session, each with its session and the name its transcript gave it", async () => {
