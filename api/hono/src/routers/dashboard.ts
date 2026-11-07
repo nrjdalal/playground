@@ -67,7 +67,7 @@ import {
   pasteReportSchema,
   storePasteReport,
 } from "@/lib/dashboard/paste-report"
-import { restartSession } from "@/lib/dashboard/restart"
+import { restartPrs, restartSession } from "@/lib/dashboard/restart"
 import { readRoster } from "@/lib/dashboard/roster"
 import {
   answerHosted,
@@ -97,6 +97,7 @@ import {
   assistantSeat,
   DISPATCHER,
   DISPATCHERS,
+  kindOf,
   listLive,
   type Live,
 } from "@/lib/dashboard/workers"
@@ -860,7 +861,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ...notFoundErrorResponses,
         409: errorResponse(
           "CONFLICT",
-          "The session cannot take it now: it waits on a picker (ON_PICKER), its input holds something (INPUT_NOT_EMPTY), Claude Code holds the message to take once free (QUEUED), or a held message was lost (LOST)",
+          "The session cannot take it now: it waits on a picker (ON_PICKER), its input holds something (INPUT_NOT_EMPTY), Claude Code has the message or takes it once free (QUEUED), or a held message was lost (LOST)",
         ),
         502: errorResponse(
           "CMUX_FAILED",
@@ -1023,7 +1024,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
     describeRoute({
       tags: ["Dashboard"],
       description:
-        "Restart a live session whose Claude login expired, with no terminal step: spawn.sh closes the pane it opened and resumes the same conversation in its folder, on `account` (a Claude account added in Settings > Accounts, with its token kept) or, with none, on this Mac's own login. A fixture stack runs nothing and clears the session's login block. A refusal names its reason: NOT_FOUND for no such live session or no such kept account, ERROR for spawn.sh's own words.",
+        "Restart a live session whose Claude login expired, with no terminal step: spawn.sh closes the pane it opened and resumes the same conversation in its folder, a reviewer or tester naming the PRs its roster row lists (`--pr`: its prs, else its pr), on `account` (a Claude account added in Settings > Accounts, with its token kept) or, with none, on this Mac's own login. A fixture stack runs nothing and clears the session's login block. A refusal names its reason: NOT_FOUND for no such live session or no such kept account, CONFLICT for a reviewer or tester whose row names no PR, refused before the close since spawn.sh would refuse its resume, ERROR for spawn.sh's own words.",
       responses: {
         200: {
           description: "Restarted: the session runs again on the account named",
@@ -1041,6 +1042,10 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ...authErrorResponses,
         ...forbiddenErrorResponses,
         ...notFoundErrorResponses,
+        409: errorResponse(
+          "CONFLICT",
+          "A reviewer or tester whose roster row names no PR, so its resume after the close would be refused",
+        ),
         502: errorResponse("ERROR", "spawn.sh refused or failed, its reason passed through"),
       },
     }),
@@ -1068,10 +1073,20 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
       )
       if (account && !kept)
         throw new ApiError(404, "NOT_FOUND", `No Claude account ${account} is kept`)
+      // The close ends the row, so a checker's PRs are read before it: its resume names them with --pr, or spawn.sh refuses it.
+      const row = (await readRoster()).roster?.agents.find((a) => a.name === worker.name)
+      const prs = restartPrs(["reviewer", "tester"].includes(kindOf(worker.name, row) ?? ""), row)
+      if (prs === null)
+        throw new ApiError(
+          409,
+          "CONFLICT",
+          `${worker.name} is a reviewer or tester whose roster row names no PR, so spawn.sh would refuse its resume after the close: name the PR it serves with roster.ts set ${worker.name} prs=<url>, then restart it`,
+        )
       const restarted = await restartSession({
         account,
         cwd: worker.cwd,
         name: worker.name,
+        prs,
         sessionId,
       })
       if (restarted.status === "refused") throw new ApiError(502, "ERROR", restarted.detail)

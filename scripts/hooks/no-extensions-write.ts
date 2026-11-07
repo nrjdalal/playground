@@ -40,7 +40,16 @@ import {
   type Word,
   zshSplits,
 } from "./shell"
-import { held, heldWord, namings, NONE, type Steady, steadyNames, unquoted } from "./steady"
+import {
+  held,
+  heldReadings,
+  heldWord,
+  namings,
+  NONE,
+  type Steady,
+  steadyNames,
+  unquoted,
+} from "./steady"
 
 type Environment = Record<string, string | undefined>
 
@@ -317,7 +326,7 @@ function writeTargets(
   return [...new Set([...targets, ...maybe, ...logs, ...moved])]
 }
 
-// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from.
+// The settings keys a guard reads to allow or deny a call, A to Z: the hooks' (no-chat-question, no-glm-heavy-path, no-headless-login, no-playground-leak, no-public-leak, and role.ts, which places a session in the factory), spawn.sh's code root, and ext.repos, which names the repository each scope syncs from; every jobs.<name> is refused beside them (JOB_PREFIX).
 export const GUARD_KEYS = new Set([
   "ext.links",
   "ext.order",
@@ -333,6 +342,10 @@ export const GUARD_KEYS = new Set([
   "slack.gatedSends",
   "usage.keychainService",
 ])
+// An ops job's setting turns it on or moves what it runs, so every jobs.<name> is refused, a name the registry lacks included: only the owner's Approve of a guard decision, or Settings > Jobs, sets one.
+const JOB_PREFIX = "jobs."
+const BY_APPROVE =
+  "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it"
 // ext verbs that change a scope's lists or settings, or which scopes the lists and policy.json render from
 const EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"])
 // the ext verbs whose --dry-run writes nothing
@@ -723,13 +736,19 @@ function cliWrite(words: Word[]): string | undefined {
     } else positional.push(word)
   }
   if (command === "settings") {
+    if (verb === "import-jobs")
+      return dry
+        ? undefined
+        : `playground settings import-jobs, which writes each listed job's jobs.<name>, ${BY_APPROVE}`
     if (verb !== "set" && verb !== "reset") return
     const key = positional[0]
     if (unread || key === undefined) return `playground settings ${verb} with a word it cannot read`
-    if (!GUARD_KEYS.has(key)) return
+    if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX)) return
     return PRIVACY_KEYS.has(key) && !scoped
       ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}`
-      : `playground settings ${verb} of ${key}, a key a guard reads`
+      : key.startsWith(JOB_PREFIX)
+        ? `playground settings ${verb} of ${key}, ${BY_APPROVE}`
+        : `playground settings ${verb} of ${key}, a key a guard reads`
   }
   if (verb === "accept")
     return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set"
@@ -872,6 +891,13 @@ async function inspect(raw: string, environment: Environment, unknown = false) {
             (GLOB.test(r.target.value) && !!names(r.target, here, true))),
       )
       if (into?.target) return refuse(`a write to ${pathOf(into.target, here)}`)
+      // a writing redirect's target through a variable is judged by what the value the hook holds names, a for loop's literal words each in turn; one it holds no value for runs, as it did before
+      for (const r of cmd.redirects) {
+        if (!r.target || !writer(r) || !marked(r.target.value)) continue
+        const words = heldReadings(r.target, here, steadyAt(cmd)) ?? []
+        const named = words.map((word) => names(word, here, false)).find(Boolean)
+        if (named) return refuse(`a write to ${named}`)
+      }
     }
     // past the cap the root may be a folder places() dropped, so a writing redirect whose target leans on the shell's own folder is refused before a reader or an echo lets it run
     const blind = env.cwdAnywhere

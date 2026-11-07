@@ -919,6 +919,8 @@ describe("a quoted argument is read as a command line only where a program runs 
       "env's lone dash ahead of a harmless program",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - ls",
     ],
+    ["a redirect through a variable set to a scratch path", "D=/tmp/scratch-dir; echo x > $D/x"],
+    ["a redirect through a for loop's literal words", "for id in 1 2; do echo x > $id.log; done"],
     [
       "env's lone dash and an unset ahead of a harmless program",
       "echo 'rm -rf ~/.playground/extensions/.no-such-folder' | env - -u X ls",
@@ -1644,6 +1646,19 @@ describe("a read of the root, and writes elsewhere, run", () => {
     ["the roster's writer", "bun scripts/roster.ts set w status=working"],
     ["a write in a worktree", "echo x > notes.txt"],
     ["rm elsewhere", "rm -rf /tmp/scratch-dir"],
+    ["a redirect through a variable set to a scratch path", "D=/tmp/scratch-dir; echo x > $D/x"],
+    [
+      "an append through a variable exported to a scratch path",
+      'export D=/tmp/scratch-dir; echo x >> "$D/x"',
+    ],
+    [
+      "a redirect through a for loop's literal words",
+      "for id in 1 2; do gh run view $id > /tmp/run-$id.log; done",
+    ],
+    [
+      "a redirect through two nested for loops' literal words",
+      "for id in 1 2; do for j in a b; do echo x > /tmp/$id-$j.log; done; done",
+    ],
     ["a glob elsewhere", "rm -rf /tmp/scratch-dir/*"],
     ["a printer naming the root", `echo ${ROOT}`],
     ["tr with a bare slash", "tr / _ < /tmp/x"],
@@ -2137,10 +2152,7 @@ describe("a playground CLI call that no guard reads runs", () => {
     ["settings why", "playground settings why ext.links"],
     ["settings set of a key no guard reads", "playground settings set ui.theme dark --reason x"],
     ["settings reset of a key no guard reads", "playground settings reset ui.theme --reason x"],
-    [
-      "settings import-jobs, which writes jobs.* keys alone",
-      "playground settings import-jobs /tmp/jobs.json",
-    ],
+    ["settings import-jobs --dry-run", "playground settings import-jobs /tmp/jobs.json --dry-run"],
     ["rules", "playground rules voice"],
     ["uninstall without --purge", "playground uninstall"],
     ["status", "playground status"],
@@ -2255,6 +2267,32 @@ describe("a guard decision's keys are the keys the hook gates (PG-1090)", () => 
       )
     },
   )
+})
+
+// PG-1196: the guard decision also sets a job's enabled field, so a session's own write of it stays refused, the owner's Approve or Settings > Jobs the one way in.
+describe("a job's setting is the owner's alone (PG-1196)", () => {
+  test.each(["jobs.opsTicketCard", "jobs.opsSweep", "jobs.opsFirefightingStart"])(
+    "a session's own settings set and reset of %s are refused",
+    async (key) => {
+      expect(await bash(`playground settings set ${key} '{"enabled":true}' --reason r`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+      expect(await bash(`playground settings reset ${key} --reason r`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+    },
+  )
+
+  // import-jobs writes a jobs.<name> for each job its file lists, on unless the file marks it disabled, so a session's run would turn a job on itself
+  test.each([
+    "playground settings import-jobs /tmp/jobs.json",
+    "playground settings import-jobs /tmp/jobs.json --scope acme-test",
+    "playground settings import-jobs /tmp/jobs.json --launch-agents /tmp/agents",
+  ])("a session's own %s is refused, naming the guard decision", async (command) => {
+    const refusal = await bash(command)
+    expect(refusal).toContain("no-extensions-write hook refuses")
+    expect(refusal).toContain("post a guard decision with bun run ask new")
+  })
 })
 
 describe("a refusal for a value the hook does not hold names it in readable text", () => {

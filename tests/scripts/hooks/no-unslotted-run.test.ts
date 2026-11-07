@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -402,5 +402,92 @@ describe("it fails open, and acts for a factory session alone", () => {
       stdin: new Blob(["{not json"]),
     })
     expect(await proc.exited).toBe(0)
+  })
+})
+
+// a checkout with commitlint and the repo's config, as a factory worktree has, where commit-msg would lint the message
+const REPO = mkdtempSync(join(tmpdir(), "no-unslotted-run-repo-"))
+Bun.spawnSync(["git", "init", "-q", REPO])
+await Bun.write(
+  join(REPO, "package.json"),
+  JSON.stringify({ commitlint: { extends: ["@commitlint/config-conventional"] } }),
+)
+symlinkSync(join(root, "node_modules"), join(REPO, "node_modules"))
+const BAD = "fix(scope): ABC keys leave core"
+const GOOD = "fix(scope): keys leave core"
+await Bun.write(join(REPO, "bad.txt"), `${BAD}\n`)
+await Bun.write(join(REPO, "good.txt"), `${GOOD}\n`)
+afterAll(() => rmSync(REPO, { force: true, recursive: true }))
+
+// commitlint --edit asks git for the checkout's top, so the lint runs with the session's PATH
+const commit = (command: string, cwd = REPO) =>
+  check(
+    JSON.stringify({
+      cwd,
+      hook_event_name: "PreToolUse",
+      tool_input: { command },
+      tool_name: "Bash",
+    }),
+    { HOME: "/u", PATH: process.env.PATH },
+    MAIN,
+  )
+
+const forms = (subject: string, file: string): [string, string][] => [
+  ["-m", `git commit -m "${subject}"`],
+  ["--message=", `git commit --message="${subject}"`],
+  ["-F with a path", `git commit -F ${file}`],
+  ["-F with an absolute path", `git commit -F ${join(REPO, file)}`],
+  ["-F - from a heredoc", `git commit -F - <<'EOF'\n${subject}\n\nbody line\nEOF`],
+  [
+    "-m from a heredoc substitution",
+    `git commit -m "$(cat <<'EOF'\n${subject}\n\nbody line\nEOF\n)"`,
+  ],
+  ["several -m", `git commit -m "${subject}" -m "body line" -m "another line"`],
+  ["git -C from another folder", `cd ${OUTSIDE} && git -C ${REPO} commit -m "${subject}"`],
+  ["through run-slot", `${SLOT} git commit -m "${subject}"`],
+  ["-F after a git add, which writes no file", `git add bad.txt good.txt && git commit -F ${file}`],
+  ["-m from a file read by its own cat", `git commit -m "$(cat ${file})"`],
+  ["-F after a cd", `cd ${REPO} && git commit -F ${file}`],
+  ["-F after a builtin that writes no file", `set -e; git commit -F ${file}`],
+  [
+    "-F - from a heredoc after a command that may write a file",
+    `touch x && git commit -F - <<'EOF'\n${subject}\nEOF`,
+  ],
+]
+
+describe("a git commit whose message commitlint refuses is refused before its pre-commit slot wait", () => {
+  test.each(forms(BAD, "bad.txt"))("%s", async (_, command) => {
+    const reason = await commit(command)
+    expect(reason).toContain("no-unslotted-run hook refuses this git commit")
+    expect(reason).toContain("subject-case")
+  })
+})
+
+describe("a git commit whose message commitlint passes, or one the hook cannot read, runs", () => {
+  test.each([
+    ...forms(GOOD, "good.txt"),
+    ["a message from a variable", `git commit -m "$MSG"`],
+    ["a message file the hook cannot name", `git commit -F "$FILE"`],
+    ["an editor commit", "git commit"],
+    ["a merge's own message", "git commit --no-edit"],
+    ["--no-verify, which skips commit-msg too", `git commit --no-verify -m "${BAD}"`],
+    ["-n, which skips commit-msg too", `git commit -n -m "${BAD}"`],
+    ["--edit, whose editor changes the message", `git commit -e -m "${BAD}"`],
+    ["a checkout with no commitlint", `git commit -m "${BAD}"`, OUTSIDE],
+    ["a # line commit-msg reads as a comment", `git commit -m "${GOOD}" -m "# ${"x".repeat(120)}"`],
+    ["-F a file a cp before it may rewrite", `cp good.txt m.txt && git commit -F bad.txt`],
+    [
+      "-F a file a program before it may rewrite",
+      `python3 -c "open('bad.txt','w').write('fix: ok')" && git commit -F bad.txt`,
+    ],
+    [
+      "-m from a file a cp before it may rewrite",
+      `cp good.txt bad.txt; git commit -m "$(cat bad.txt)"`,
+    ],
+    ["-F after a script a shell runs", "sh gen.sh; git commit -F bad.txt"],
+    ["-F after a script named by a variable", `bash "$S"; git commit -F bad.txt`],
+    ["-F after a script a source reads", "source gen.sh; git commit -F bad.txt"],
+  ] as [string, string, string?][])("%s", async (_, command, cwd = REPO) => {
+    expect(await commit(command, cwd)).toBeUndefined()
   })
 })

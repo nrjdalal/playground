@@ -150,6 +150,63 @@ describe("what bun run ask takes", () => {
     )
   })
 
+  describe("an ask holds several questions, each with its own choices (#1250)", () => {
+    const q = (n: number) =>
+      Array.from({ length: n }, (_, at) => ({
+        options: [{ label: "Yes" }, { label: "No" }],
+        question: `Question ${at + 1}?`,
+      }))
+    const asksQ = (over: object) =>
+      inboxInputSchema.safeParse(decision({ ...PREVIEWS.ask, ...over }))
+
+    test("a questions list takes 2 to 20 entries and refuses 1 or 21", () => {
+      expect(asksQ({ questions: q(2) }).success).toBe(true)
+      expect(asksQ({ questions: q(20) }).success).toBe(true)
+      expect(asksQ({ questions: q(1) }).success).toBe(false)
+      expect(asksQ({ questions: q(21) }).success).toBe(false)
+    })
+
+    test("each entry has its own question and 1 to 5 options, recommended within them", () => {
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ description: "soak a day", label: "staging" }], question: "Base?" },
+            { options: [{ label: "now" }, { label: "later" }], question: "When?" },
+          ],
+        }).success,
+      ).toBe(true)
+      const six = Array.from({ length: 6 }, (_, at) => ({ label: `Way ${at + 1}` }))
+      expect(asksQ({ questions: [{ options: six, question: "Q?" }, ...q(1)] }).success).toBe(false)
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ label: "a" }, { label: "b" }], question: "Q?", recommended: 0 },
+            { options: [{ label: "c" }], question: "R?" },
+          ],
+        }).success,
+      ).toBe(true)
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ label: "a" }, { label: "b" }], question: "Q?", recommended: 2 },
+            ...q(1),
+          ],
+        }).success,
+      ).toBe(false)
+    })
+
+    test("a questions list and top-level options, approve or deny are mutually exclusive", () => {
+      expect(asksQ({ options: OPTIONS, questions: q(2) }).success).toBe(false)
+      expect(asksQ({ approve: "Do it", questions: q(2) }).success).toBe(false)
+      expect(asksQ({ deny: "Hold", questions: q(2) }).success).toBe(false)
+    })
+
+    test("an ask with no questions is unchanged", () => {
+      expect(inboxInputSchema.safeParse(decision(PREVIEWS.ask)).success).toBe(true)
+      expect(asksQ({ options: OPTIONS }).success).toBe(true)
+    })
+  })
+
   test("a draft is a recipient and the words, and an update an outcome with an optional link", () => {
     expect(
       inboxInputSchema.safeParse({
@@ -328,7 +385,7 @@ describe("what bun run ask takes", () => {
     })
     for (const token of [
       "<@U0EXAMPLE02>",
-      "<@W0A1HBY26MQ|farley>",
+      "<@W0MADE0001|farley>",
       "<!subteam^S0A1HBY26MQ>",
       "<!subteam^S0A1HBY26MQ|@octo-avery>",
       "<!here>",
@@ -654,6 +711,43 @@ describe("an answer", () => {
     expect(answerInputSchema.safeParse({ action: "approve", option: 5 }).success).toBe(false)
   })
 
+  test("a multi-question ask approves with one pick per question, within its choices (#1250)", () => {
+    const multi = item({
+      kind: "decision",
+      preview: {
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          { options: [{ label: "now" }, { label: "later" }, { label: "soon" }], question: "When?" },
+        ],
+        text: "Pick for each.",
+        type: "ask",
+      } as never,
+    })
+    expect(checkAnswer(multi, { action: "approve", options: [0, 2] })).toEqual({
+      answer: { choice: "approve", options: [0, 2] },
+      status: "approved",
+    })
+    expect(checkAnswer(multi, { action: "deny" })).toEqual({
+      answer: { choice: "deny" },
+      status: "denied",
+    })
+    const invalid: Parameters<typeof checkAnswer>[1][] = [
+      { action: "approve" },
+      { action: "approve", option: 0 },
+      { action: "approve", options: [0] },
+      { action: "approve", options: [0, 1, 2] },
+      { action: "approve", options: [0, 3] },
+      { action: "approve", options: [2, 0] },
+    ]
+    for (const input of invalid) {
+      expect(checkAnswer(multi, input)).toHaveProperty("message")
+    }
+    // a stray single option beside the per-question picks is refused, not silently ignored
+    expect(checkAnswer(multi, { action: "approve", options: [0, 2], option: 0 })).toEqual({
+      message: "A multi-question ask's approve names a pick for each question, not a single option",
+    })
+  })
+
   test("sends a draft as written or as changed, or discards it", () => {
     const draft = item({ kind: "draft" })
     expect(checkAnswer(draft, { action: "send", text: "hi" })).toEqual({
@@ -839,6 +933,19 @@ describe("an answer", () => {
       ref: 47,
       title: "Which way?",
     })
+    const several = item({
+      id: "vwx",
+      kind: "decision",
+      preview: {
+        ...PREVIEWS.ask,
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          { options: [{ label: "now" }, { label: "later" }, { label: "soon" }], question: "When?" },
+        ],
+      } as never,
+      ref: 48,
+      title: "Pick for each?",
+    })
     const cases: [InboxItem, Parameters<typeof answerPayload>[1], Record<string, unknown>][] = [
       [
         decided,
@@ -882,6 +989,22 @@ describe("an answer", () => {
         lettered,
         { at: AT, choice: "deny" },
         { go: false, option: { index: 3, label: "None of these", letter: "D" }, verb: "pick" },
+      ],
+      // a multi-question ask's approve names one pick per question, each by its letter and label, and reads its note back
+      [
+        several,
+        { at: AT, choice: "approve", note: "both fine", options: [0, 2] },
+        {
+          comment: "both fine",
+          go: true,
+          next: "carry-out",
+          picks: [
+            { index: 0, label: "staging", letter: "A", question: "Base?" },
+            { index: 2, label: "soon", letter: "C", question: "When?" },
+          ],
+          type: "ask",
+          verb: "pick",
+        },
       ],
       [
         decided,
@@ -1420,6 +1543,30 @@ describe("a guard decision (PG-1090)", () => {
   })
 })
 
+// PG-1196: the guard decision also sets a job's enabled field, which no session may write either.
+describe("a guard decision for a job (PG-1196)", () => {
+  const takes = (change: object) =>
+    inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
+
+  test("takes a registry job's enabled field alone, or no value", () => {
+    expect(takes({ key: "jobs.opsTicketCard", value: { enabled: true } })).toBe(true)
+    expect(takes({ key: "jobs.opsSweep", value: { enabled: false } })).toBe(true)
+    expect(takes({ key: "jobs.opsTicketCard", value: undefined })).toBe(true)
+  })
+
+  test("refuses a job decision carrying any field but enabled, and a job the registry does not name", () => {
+    for (const change of [
+      { key: "jobs.opsTicketCard", value: { command: "made-up", enabled: true } },
+      { key: "jobs.opsTicketCard", value: { enabled: true, schedule: { every: 5 } } },
+      { key: "jobs.opsTicketCard", value: {} },
+      { key: "jobs.opsTicketCard", value: true },
+      { key: "jobs.opsMadeUp", value: { enabled: true } },
+    ]) {
+      expect(takes(change), JSON.stringify(change)).toBe(false)
+    }
+  })
+})
+
 // Made-up accounts: two Claude rows, one of them own, and a GLM row whose label is no Claude email.
 const ACCOUNTS = [
   { email: "pat@example.com", label: "work", renews: 17 },
@@ -1500,7 +1647,7 @@ describe("slackPlace", () => {
   test("is null for a thread part that does not parse, so the files never land outside the reply's thread", () => {
     for (const bad of [
       `${CHANNEL}/thread/C0MADEUP01-notats`,
-      `${CHANNEL}/thread/C0OTHER001-1700000000.000100`,
+      `${CHANNEL}/thread/C0MADE0101-1700000000.000100`,
       `${CHANNEL}/thread`,
       `${CHANNEL}/thread/C0MADEUP01-1700000000.000100/more`,
       `${CHANNEL}/files/F0MADEUP01`,
@@ -1702,6 +1849,53 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       to: "ops",
       via: "session",
     })
+  })
+
+  test("a multi-question ask stores one pick per question and tells its poster each, with the Note (#1250)", async () => {
+    const posted = await post(
+      decision({
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          {
+            options: [{ label: "now" }, { label: "later" }, { label: "soon" }],
+            question: "When?",
+          },
+        ],
+        text: "Pick for each.",
+        type: "ask",
+      }),
+    )
+    const sent: Delivery[] = []
+    const answered = await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve", note: "both fine", options: [0, 2] },
+      {
+        actor,
+        deliver: async (delivery) => {
+          sent.push(delivery)
+          return { at: "2026-10-07T12:00:00.000Z", ok: true, sessionId: "s1" }
+        },
+      },
+    )
+    expect(answered.ok).toBe(true)
+    if (!answered.ok) return
+    expect(answered.item.status).toBe("approved")
+    expect(answered.item.answer).toMatchObject({
+      choice: "approve",
+      note: "both fine",
+      options: [0, 2],
+    })
+    // read the stored answer back: one index per question, and the Note
+    const got = await store.getItem(db, posted.id)
+    expect(got?.answer).toMatchObject({ choice: "approve", note: "both fine", options: [0, 2] })
+    // the poster is told each pick by its letter and label, and the Note as a comment
+    const payload = payloadOf(sent[0]?.text ?? "")
+    expect(payload?.picks).toEqual([
+      { index: 0, label: "staging", letter: "A", question: "Base?" },
+      { index: 2, label: "soon", letter: "C", question: "When?" },
+    ])
+    expect(payload?.comment).toBe("both fine")
   })
 
   describe("a Slack send's files (PG-649)", () => {
@@ -5252,6 +5446,42 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       const set = await post(decision(GUARD))
       await store.answerItem(db, set.id, { action: "clear" }, { actor, settingsData: data })
       expect(atOrg(data)).toEqual([])
+    })
+
+    test("a job's Approve stores its enabled field alone at its scope, so every other field still reads the registry's (PG-1196)", async () => {
+      const data = folder()
+      const key = "jobs.opsTicketCard"
+      const card = { ...GUARD, key, scope: "made-up-me", value: { enabled: true } }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      const read = readSetting(data, key)!
+      expect(read.rows).toEqual([{ key, scope: "made-up-me", value: { enabled: true } }])
+      expect(read.value).toEqual({ ...(read.default as object), enabled: true })
+      expect((await store.getItem(db, posted.id))?.answer).toMatchObject({
+        set: { exitCode: 0, line: `set ${key} at made-up-me to {"enabled":true}` },
+      })
+      const again = await post(decision(card))
+      expect((await approve(again.id, again.updatedAt, data)).ok).toBe(true)
+      expect((await store.getItem(db, again.id))?.answer).toMatchObject({
+        set: {
+          exitCode: 0,
+          line: `${key} at made-up-me is already {"enabled":true}, so nothing changed`,
+        },
+      })
+    })
+
+    test("a job's Approve keeps the other fields its scope's row holds, and stores no registry field (PG-1196)", async () => {
+      const data = folder()
+      const key = "jobs.opsTicketCard"
+      const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
+      const row = { enabled: false, schedule: { every: 7 } }
+      expect(setSetting(data, { key, scope: "made-up-me", value: row }, who).ok).toBe(true)
+      const card = { ...GUARD, key, scope: "made-up-me", value: { enabled: true } }
+      const posted = await post(decision(card))
+      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
+      expect(readSetting(data, key)!.rows).toEqual([
+        { key, scope: "made-up-me", value: { enabled: true, schedule: { every: 7 } } },
+      ])
     })
 
     test("with no data folder its Approve is refused and the item stays open", async () => {

@@ -57,14 +57,27 @@ function line(
   return `- ${scope ? `**${scope}:** ` : ""}${breaking ? "⚠️  " : ""}${text} (${refs})`
 }
 
+// The Contributors section's heading, which the leak guard reads the owner's line under.
+export const CONTRIBUTORS_HEADING = "### ❤️ Contributors"
+
+// The words of a contributor's name its line carries: those owner.names lists, when it lists the login too, else none; the leak guard reads past a ship's Contributors line by the same rule.
+export function ownerWords(name: string, login: string, owner: string[]): string[] {
+  const own = new Set(owner.map((word) => word.toLowerCase()))
+  if (!own.has(login.toLowerCase())) return []
+  return name.split(/\s+/).filter((word) => own.has(word.toLowerCase()))
+}
+
+// owner: owner.names, the owner's first name and handles. A contributor whose login it lists reads as `- <name> @<login>`, the name being the author name's words it lists, and every other contributor as the login alone, since the public repo's leak guard passes the owner's own names on that line alone.
 export function renderNotes({
   commits,
   from,
+  owner = [],
   repo,
   to,
 }: {
   commits: NoteCommit[]
   from: string
+  owner?: string[]
   repo: string
   to: string
 }): string {
@@ -91,8 +104,11 @@ export function renderNotes({
     .filter((title) => groups.has(title))
     .map((title) => `### ${title}\n\n${groups.get(title)!.join("\n")}`)
   if (breakingLines.length) sections.push(`#### ⚠️ Breaking Changes\n\n${breakingLines.join("\n")}`)
-  const contributors = [...authors].map(([login, name]) => `- ${name ? `${name} ` : ""}@${login}`)
-  if (contributors.length) sections.push(`### ❤️ Contributors\n\n${contributors.join("\n")}`)
+  const contributors = [...authors].map(([login, name]) => {
+    const words = ownerWords(name ?? "", login, owner)
+    return `- ${words.length ? `${words.join(" ")} ` : ""}@${login}`
+  })
+  if (contributors.length) sections.push(`${CONTRIBUTORS_HEADING}\n\n${contributors.join("\n")}`)
   return (
     [`[compare changes](https://github.com/${repo}/compare/${from}...${to})`, ...sections].join(
       "\n\n",

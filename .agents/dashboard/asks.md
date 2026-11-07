@@ -90,8 +90,10 @@
   Its options are `choicesOf` in `@packages/config/inbox`, in one of two shapes.
   A yes or no is two rows, Approve and Deny, each over its own label: an ask's one `options` row (or its older `approve`) and its `deny`, a typed decision's default labels from the one map there, or an unlabelled ask's bare Approve and Deny under its On Approve line.
   Real alternatives are lettered rows, A to E, each its label over its `description`, then None of these, or the ask's `deny`.
+  A multi-question ask steps instead of choosing once: its 2 to 20 `questions`, each its own lettered rows (`questionsOf`, not `choicesOf`), shown one at a time with the recommended one (`recommended`) badged where it sits.
   The number keys pick a row, 1 for the first, and the card's footer sits inside its form, Send first, the form's Submit, which sends the picked option,
   off until one is picked and saying `Pick an option first` on hover and to a screen reader (`sendWhy` in `web/next/src/lib/inbox.ts`, the submit disabled while no option stands and placed on the left), then its verbs (`verbs()`), the chevron and Reply;
+  a multi-question ask adds Progress, Previous and Next between its questions, and its Send posts one pick per question once every one is answered, saying `Answer every question first` until then;
   a draft is its Slack message or Linear comment, named so from its `link`'s host (`linear.app` is a Linear comment, anything else a Slack draft) with an Open thread link to it in its place line, editable in place, then Send, Draft for a Slack draft alone and Discard (for the apps whose drafts a person sends themselves):
   Draft saves it in Slack's Drafts & Sent for the owner to finish and send, which its poster does with Slack's MCP tool `slack_send_message_draft` and acks with the `channel_link` it returns,
   rewritten to the app form by the command `slack.linkConverter` names (the archives refusal, below) since `ack` refuses its archives form,
@@ -135,7 +137,7 @@
   An update whose `approve` holds a web link, a Yard post Yard holds for the owner (`pendingCard` in `api/hono/src/lib/yard/inbound.ts`), shows Approve first, a link button that opens that page in a new tab, since only the owner's signed-in browser approves on Yard; the card records no answer of its own.
   Its poster clears an alert update that has fixed itself with `bun run ask resolve <id|#iN> --by <your session name>` (`resolveItem()` in `api/hono/src/lib/dashboard/inbox.ts`), which marks it read and merges its keys into the answer, so a resolve after the owner's Dismiss leaves the item dismissed; only the posting session's own alert resolves.
   An answered card's result line names what was picked, in the card's own words (`outcomeLine` in `web/next/src/lib/inbox.ts`):
-  `B · Hotfix main` for a lettered pick, `Approve · Ship 3f9a2c1 to main` for a yes or no, a bare `Approve` or `Deny` for an unlabelled ask, `Sent`, `Saved as a Slack draft`, `Discarded` or `Archived <time>`,
+  `B · Hotfix main` for a lettered pick, `A. staging · C. soon` for a multi-question ask's one pick per question, `Approve · Ship 3f9a2c1 to main` for a yes or no, a bare `Approve` or `Deny` for an unlabelled ask, `Sent`, `Saved as a Slack draft`, `Discarded` or `Archived <time>`,
   then a state only where the answer did not simply go through (`Queued for <taker>`, `Send failed: <why>`, `No link: <why>`), never a word typed for its poster, since its light says the rest.
   A go's light stays blue while its poster carries it out (an accept, an apps change, a guard setting or an own account change the Dashboard ran, or a grant whose pane failed to open, reads its result after the pick, and a grant whose pane opened reads that line, below),
   until its poster closes it, even once typed into its session,
@@ -215,7 +217,7 @@
   EOF
   bun run ask new --thread <id> < item.json   # routes the item to that thread (bun run thread), refused when no thread has the id
   bun run ask open --from builder   # each open item, oldest first, one line each: its #iN, kind, sender and title; --from keeps one sender's
-  bun run ask get <id|#i41> --ack   # the item, with answer {at, choice, option?, editedText?, link?, linkLabel?, noLink?, ackedAt?} once the owner answers (the picked option's letter and label on stderr, `ask: picked B: Hotfix main`), marked read (which closes a deny, a clear, a discard or a provided secret, not a go)
+  bun run ask get <id|#i41> --ack   # the item, with answer {at, choice, option?, options?, editedText?, link?, linkLabel?, noLink?, ackedAt?} once the owner answers (options is one index per question for a multi-question ask; the picked option's letter and label on stderr, each question's pick for a multi-question answer, `ask: picked A: Staging first · B: After the next ship`), marked read (which closes a deny, a clear, a discard or a provided secret, not a go)
   bun run ask ack <id|#i41> --link https://app.slack.com/client/<team>/<channel>/thread/<channel>-1700000000.000100   # once carried out, a go closes with where (a Slack link in its app.slack.com/client form, which reads Open thread, so no --label), which its card links to by the label, or --no-link "<why>" when it has no page or Slack refused a Draft
   bun run ask edit <id|#i41> < item.json   # the poster replaces its own item's title and preview in place, until it closes, checked and its files copied as new does; the card redraws on the next 5s poll
   bun run ask settle <id|#i41> --note "Shipped by hand"   # the poster closes its own open decision or draft, decided another way; an update asks nothing, so settle refuses it
@@ -228,6 +230,7 @@
   a production port, a work request from outside the chain, its text naming the session asking and the work it wants, or a step only the owner can take, its text the step,
   Approve meaning done and Deny meaning the owner can't, or a grilling batch, its text each open question numbered with its recommended answer, Approve taking them all and the owner's Note giving his own by number;
   with its options labelled one line each, `options`, 1 to 5 rows of `{label, description?}`, one row for a yes or no and 2 or more for lettered choices, or the older `approve` alone, never both, and an optional `deny` naming the no-go row (Deny, or None of these past one option),
+  or a `questions` list of 2 to 20 entries for a card that asks one question at a time, each `{question, options, recommended?}` with its own 1 to 5 `options` and an optional `recommended` index into them, never beside `options`, `approve` or `deny`,
   and optional `attachments`, below), `slack` (`to`, `text`, optional `attachments`),
   `ship` (`sha`, `prs` of `{number, title, url?}`, where `bun run ask new` and `edit` fill each `url` into the factory's repo, `factory.repo` else the checkout's origin, so the card links each PR),
   `ticket` (`team`, `title`, `body`), `delete` (`what`, `why`), `schema` (`shape`), `budget` (`amount`, `why`), `grant` (`permission`, `why`, below), `guard` (`key`, `scope`, optional `value`, `why`, below), `own` (`key`, `own`, `scope`, `why`, below), `secret` (`key`, `sink`) or `reveal` (`service`, `why`); a decision with none is refused.
@@ -308,7 +311,7 @@
   A raw Slack mention token anywhere in an item (`<@U...>`, `<!subteam^...>`, `<!here>`, `<!channel>`, `<!everyone>`, `<#C...>`) is refused too, since a raw token shows the reader an ID, not who is tagged: mentions read as names (@teammate), and the poster resolves each ID by name when it posts.
   A draft, or a `slack` decision, speaking as we, us, our, ours or ourselves is refused too: it speaks in the owner's voice, first person singular, code, quoted words and links aside, and the all-caps `US` and a hyphenated name (`us-east-1`) passing, a bare URL or Slack's `<url|label>` form being an address, not a voice.
   `status` reads `open` until the owner answers or its poster settles it (`done`, answer `{at, by, choice: "settled", link?, linkLabel?, note?}`, its card reading Decided by the poster with no buttons, nothing delivered, and one the owner answered refused,
-  a reply included once its poster acked it, since a settle replaces the whole answer; a reply not yet acked still settles), then `approved` (Approve, with `answer.option`, the go row's index from 0, which a lettered decision's Approve requires and its Edit has none of, or Edit with `answer.editedText`), `denied`,
+  a reply included once its poster acked it, since a settle replaces the whole answer; a reply not yet acked still settles), then `approved` (Approve, with `answer.option`, the go row's index from 0, which a lettered decision's Approve requires and its Edit has none of, or `answer.options`, one index per question a multi-question ask's Approve requires, or Edit with `answer.editedText`), `denied`,
   `sent` or `drafted` (Draft; each with `editedText` when the owner changed the draft), `discarded`, `cleared` (a decision's or draft's set-aside, by a Dismiss while it waited or the old `clear`, neither yes nor no), or `provided` (a secret ask's Submit, below); an update is `done` from the start, read once `readAt` is set, and its answer is `{dismissedAt}` once the owner dismisses it.
   Delivery is `pending`, then `delivered` (`via: "session"` with `to`, the session that took it), `queued` (Claude Code holds it, above) or `failed` with the adapter's code; when it fails, or to collect the answer without waiting, the poster polls `bun run ask get <id> --ack` until `status` is not `open`, and `--ack` records `{at, status: "delivered", via: "cli"}` (`readAnswer`),
   the first delivery recorded standing.
@@ -423,11 +426,14 @@
   ```
 
 - A `guard` decision asks the owner to set a guard setting, a key a guard reads to allow or deny a call, since no session can write one (`no-extensions-write` refuses it, `scripts/hooks/README.md`): any session posts the card, and only the owner's Approve writes the setting.
-  Its `key` is one of `GUARD_SETTING_KEYS` (`packages/settings/src/guard-keys.ts`, which the hook's `GUARD_KEYS` matches), `scope` is the owner's login or an org (core changes by a pull request), `value` is what the key's schema takes, checked as it is posted, or left out to take the setting back to its default, and `why` says why (`guardSchema` in `api/hono/src/lib/dashboard/inbox.ts`);
+  Its `key` is one of `GUARD_SETTING_KEYS` (`packages/settings/src/guard-keys.ts`, which the hook's `GUARD_KEYS` matches) or a registry job's `jobs.<name>`, `scope` is the owner's login or an org (core changes by a pull request), `value` is what the key's schema takes,
+  checked as it is posted (a job takes `{"enabled": true|false}` alone),
+  or left out to take the setting back to its default, and `why` says why (`guardSchema` in `api/hono/src/lib/dashboard/inbox.ts`);
   Edit is refused.
   The card shows the key, the scope and the value as its JSON, exactly as Approve writes them.
   Approve takes `seen`, the `updatedAt` of the card the owner read, so an Approve with no `seen`, or one read before the poster's `bun run ask edit`, is refused and writes nothing.
-  It is claimed as an accept's is, then writes the setting at its scope in the stack's own extensions, a fixture stack's own, through `setSetting` (or `resetSetting` for no value) in `@packages/settings`, its commit's reason `the owner approved it in the Inbox (#iN)`.
+  It is claimed as an accept's is, then writes the setting at its scope in the stack's own extensions, a fixture stack's own, through `setSetting` (or `resetSetting` for no value) in `@packages/settings`, its commit's reason `the owner approved it in the Inbox (#iN)`;
+  a job's `enabled` goes over the row its scope holds, never the registry's fields, so the job keeps the registry's command and schedule (`settingsFor`'s merge, `.agents/dashboard/dashboard.md`'s Jobs), and a value its scope already holds writes nothing and reads `<key> at <scope> is already <value>, so nothing changed`.
   The answer keeps `set: {exitCode, line}`, and the card reads `Guard setting: <line>` green or `Guard setting failed (exit N): <line>` red; the poster closes it with `bun run ask ack #iN --no-link "<why>"`, and after a failed one tells its lead.
 
   ```bash
@@ -461,15 +467,16 @@
   2. Short bullets, one fact each, an emoji as each one's marker.
   3. The options: for a true yes or no, one `options` row saying what Approve does, with `deny` beside it; for real alternatives, 2 to 5 rows, A to E, each a `label` and an optional `description`.
      The card shows them as its choices under the text, in place of its On Approve line.
+     For several calls at once, a `questions` list in place of `options`: 2 to 20 questions, each its own 1 to 5 `options` and an optional `recommended` index, which the card asks one at a time and sends together.
 
   A factory session writes each item's words and pictures by the `to-inbox` skill (`extensions/core/skills/to-inbox/SKILL.md`), loaded before `bun run ask new`.
   A job of several steps leads with to-inbox's work status block, a read-only update its poster edits in place as each step lands (`extensions/core/skills/to-inbox/references/PROGRESS.md`).
 
-  `bun run ask example code|decision|delete|slack|ui` prints each worked example as an item to fill in, the three asks below and the delete and slack decisions above.
+  `bun run ask example code|decision|delete|questions|slack|ui` prints each worked example as an item to fill in, the asks below and the delete and slack decisions above.
   `bun run ask new` prints a hint on stderr, and posts the item all the same, when an ask's text runs past 300 characters with no list, code block or attachment, an ask labels no options,
   a line of an ask's or a read-only update's text outside a code block names a PR (a number after a `#` or after `PR`), a tracker ID (`ABC-123`) or a commit sha with no link on that line (an Inbox ref, `#iN`, needs none),
   or a code block other than a `diff` one in an ask's or a read-only update's text holds a line past `ASK_CODE_COLUMNS` (`shapeHints`).
-  The three, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
+  The four, as their card shows the text (`tests/api/hono/src/lib/dashboard/ask-shape.test.ts` holds this file to the templates):
 
   ````markdown
   ```diff
@@ -511,6 +518,17 @@
   ````
 
   Options: `Build the row as the after picture shows`; Deny: `Keep the card as it is`.
+
+  The multi-question ask leads with its text, then asks each question in turn, one pick per question:
+
+  ````markdown
+  Two calls on the export fix, one for each.
+  ````
+
+  Where should the export fix land first?
+  `Staging first` (recommended), `Straight to main`.
+  When should it go out?
+  `Now`, `After the next ship`.
 
 - Threads group the owner's asks: a thread is one thing they asked about, followed up until it is done, and it is theirs, not a session's ([ADR 0013](../adr/0013-threads-are-the-owners-and-live-in-the-dashboards-database.md)).
   It is one table, `thread` (`packages/db/src/schema/thread.ts`), in the dashboard's local Postgres beside the transcripts: a transcript line joins a thread through `claude_entry.thread_id` and `thread_seq`, its place there, and an Inbox item through `inbox_item.thread_id`.
