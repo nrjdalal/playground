@@ -2,10 +2,9 @@ import { z } from "zod"
 
 import type { Kind } from "./settings"
 
-// A revision's content, one shape for a write through the API and a revision in an export: every kind may carry each part, and its own part must hold something (a list its value, a skill its folder's files, a script its body or its folder's files, every other kind its body); executable names the files that run directly, a name in files or . for the body.
+// A revision's content, one shape for a write through the API and a revision in an export: every kind may carry each part, and its own part must hold something (a list its value, a skill its folder's files, a script its body or its folder's files, every other kind its body).
 export const contentFields = {
   body: z.string().nullable(),
-  executable: z.array(z.string()).optional(),
   files: z.record(z.string(), z.string()).nullable(),
   meta: z.record(z.string(), z.unknown()).nullable(),
   value: z.union([z.array(z.unknown()), z.record(z.string(), z.unknown())]).nullable(),

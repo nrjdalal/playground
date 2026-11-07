@@ -342,7 +342,7 @@ export const showItem = (data: string, ref: Ref, rev?: string) => {
   return null
 }
 
-// Each tracked file, as <scope> <path>, that starts with #! but is stored without its executable bit, read and never changed: playground ext check-modes, run once to find what a put wrote at 644 before put kept the bit.
+// Each script's or skill's tracked file, as <scope> <path>, that starts with #! but is stored without its executable bit, read and never changed: playground ext check-modes, run once to find what a put wrote at 644 before put kept the bit.
 export const lostModes = (data: string): string[] =>
   scopesIn(data).flatMap((scope) => {
     const dir = scopeDir(data, scope)
@@ -353,6 +353,7 @@ export const lostModes = (data: string): string[] =>
         const [info = "", path = ""] = entry.split("\t")
         const lost =
           info.startsWith("100644 ") &&
+          /^(?:proposed\/)?(?:scripts|skills)\//.test(path) &&
           readFileSync(join(dir, path)).subarray(0, 2).toString() === "#!"
         return lost ? [`${scope} ${path}`] : []
       })
