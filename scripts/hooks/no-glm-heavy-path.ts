@@ -1,4 +1,4 @@
-// PreToolUse hook, acting for a factory session (role.ts) that runs on GLM alone: refuses a git commit whose staged files, or a git push whose commits the remote does not hold, touch a path that is Opus work (GLM was handed UI work three times, against "truly tiny" mechanical work only), and while load5 is over glm.readOnlyLoad5 (15 by default) any install, node_modules clone, commit or push (a GLM worker pushed twice at load5 20 to 30). It fails closed on a commit or push whose file list it cannot read, and passes every other call.
+// PreToolUse hook, acting for a factory session (role.ts) that runs on GLM alone: refuses a git commit whose staged files, or a git push whose commits the remote does not hold, touch a path that is Opus work (GLM was handed UI work three times, against "truly tiny" mechanical work only), and while load5 is over glm.readOnlyLoad5 (15 by default) any install, node_modules clone, commit or push (a GLM worker pushed twice at load5 20 to 30), and, by the glm rule, a headless Claude run and every org tool. It fails closed on a commit or push whose file list it cannot read and on an org tool whose repository or policy it cannot read, and passes every other call.
 
 import { loadavg } from "node:os"
 import { join, resolve } from "node:path"
@@ -28,6 +28,7 @@ import {
   UV_TAKES,
   unknown,
   unreadable,
+  type Text,
   type Visit,
   type Word,
 } from "./shell"
@@ -106,7 +107,7 @@ const BUSY_RUN = /\b(?:bun|cp|ditto|npm|pip[\d.]*|pipx|pnpm|python[\d.]*|rsync|u
 // in any case, since macOS's filesystem runs GIT as git
 const GIT_CALL = /\bgit\b[\s\S]*\b(?:commit|push)\b/i
 // what an org tool's refusal can match, read before the call is parsed
-const ORG_CALL = /\b(?:claude|curl|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i
+const ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i
 
 export const heavy = (path: string): boolean =>
   OPUS_PATHS.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p))
@@ -406,10 +407,46 @@ const GH_API_TAKES = new Set([
   "-X",
   "--method",
 ])
-// a Linear script, by its package script's name or its path
-const LINEAR_SCRIPT = /^linear:|(?:^|\/)packages\/scripts\/src\/linear-[\w-]+\//
-// a GitHub repository a word names: a github.com URL in any of git's forms, an API URL's repos/, orgs/ or users/ path included, or a REST path
-const GITHUB_URL = /github\.com[/:](?:(?:repos|orgs|users)\/)?([\w.-]+)(?:\/([\w.-]+))?/i
+// The factory's own scripts that reach an org service, by the package script a runner's run names or the path a runtime runs, each with what it is to the org: the Linear readers and writers, and the DM sender, which posts to the owner's chat
+const ORG_SCRIPTS: [RegExp, RegExp, string][] = [
+  [
+    /^linear:/,
+    /(?:^|\/)packages\/scripts\/src\/linear-[\w-]+\//,
+    "a Linear script, which reads or writes an org's tracker",
+  ],
+  [
+    /^dm$/,
+    /(?:^|\/)packages\/scripts\/src\/dm\//,
+    "the DM sender, which posts to the owner's chat",
+  ],
+]
+const RUNTIMES = new Set(["bun", "deno", "node", "tsx"])
+const PACKAGE_RUNNERS = new Set(["bun", "npm", "pnpm", "yarn"])
+// What org script a call runs: a runner's `run <script>` (yarn's bare `<script>` too), a runtime's script path (bun's `run <path>` too), or the playground CLI's dm command
+function orgScript(name: string, args: Word[]): string | undefined {
+  const [first, second] = args.filter((a) => !a.value.startsWith("-")).map((a) => a.value)
+  if (name === "playground" && first === "dm") return ORG_SCRIPTS[1][2]
+  const script =
+    PACKAGE_RUNNERS.has(name) && first === "run" ? second : name === "yarn" ? first : undefined
+  const path = RUNTIMES.has(name) ? (name === "bun" && first === "run" ? second : first) : undefined
+  return ORG_SCRIPTS.find(
+    ([key, at]) =>
+      (script !== undefined && key.test(script)) || (path !== undefined && at.test(path)),
+  )?.[2]
+}
+// Claude Code's npm package, which a package runner runs as claude
+const CLAUDE_PACKAGE = /^@anthropic-ai\/claude-code(?:@\S*)?$/
+// a fetcher's option that reads its URLs from a file: curl's -K or --config, wget's -i or --input-file
+const URL_FILE = /^(?:-[A-Za-z]*K|--config(?:=|$))/
+const WGET_URL_FILE = /^(?:-[A-Za-z]*i|--input-file(?:=|$))/
+// gh commands whose reach is the whole account, and the api endpoints outside a repository, an owner or a search that read no org's data
+const ACCOUNT_WIDE = new Set(["org", "status"])
+const PLAIN_ENDPOINTS = new Set(["rate_limit", "user"])
+// a GraphQL query reaches past one repository when it reads the viewer, a search, an owner or a node by its id
+const GRAPHQL_WIDE = /\bviewer\b|\b(?:node|nodes|organization|search|user)\s*\(/
+// a GitHub repository a word names: a github.com URL in any of git's forms, an API URL's repos/, orgs/ or users/ path included, a raw or archive host's (raw.githubusercontent.com, codeload.github.com), or a REST path
+const GITHUB_URL =
+  /(?:github\.com|githubusercontent\.com)[/:](?:(?:repos|orgs|users)\/)?([\w.-]+)(?:\/([\w.-]+))?/i
 const REST_PATH = /^\/?(?:repos|orgs|users)\/([\w.-]+)(?:\/([\w.-]+))?/i
 // a search's scope: an owner or a repository named by flag or by qualifier
 const SCOPED = /^(?:--owner|--repo|-R)(?:=|$)|(?:^|\s)(?:org|owner|repo|user):\S/
@@ -433,6 +470,30 @@ const urlOrg = (orgs: string[], value: string, rest = false) => {
 const unreadValue = (w: Word) =>
   w.unknown !== undefined || Boolean(w.reads?.length) || marked(w.value)
 
+const GRAPHQL_FIX = `Write the query literally, scoped to one repository (repository(owner: "<owner>", name: "<name>")), or use a REST endpoint under repos/<owner>/<name>/, or report to your lead.`
+// Why a gh api graphql call reaches past one repository: a query the hook cannot read (a file, a value), none at all, or one that is not scoped to a named repository or reads the viewer, a search, an owner or a node
+function graphqlReach(args: Word[]): string | undefined {
+  const { flags } = parseFlags(args.slice(1), GH_API_TAKES)
+  const queries = flags.filter(
+    (f) =>
+      ["-F", "-f", "--field", "--raw-field"].includes(f.name) &&
+      f.value?.value.startsWith("query="),
+  )
+  if (flags.some((f) => f.name === "--input"))
+    return "the hook cannot read the query it sends, held in a file"
+  if (queries.length === 0) return "it sends no query the hook can read"
+  for (const q of queries) {
+    const text = q.value!.value.slice(6)
+    if (
+      unreadValue(q.value!) ||
+      (q.name !== "-f" && q.name !== "--raw-field" && text.startsWith("@"))
+    )
+      return "the hook cannot read the query it sends, held in a file or a value"
+    if (!/\brepository\s*\(/.test(text) || GRAPHQL_WIDE.test(text))
+      return "its query is not scoped to one named repository, so it may read every org the account can"
+  }
+}
+
 // A gh call: refused when it names a guarded org (by -R, a URL, a REST path or any word), names its repository through a value the hook cannot read, searches with no scope, or falls back to a guarded org's repository (GH_REPO, the checkout's remotes).
 function ghOrg(parsed: Parsed, env: Env, orgs: string[]): string | undefined {
   const { args } = parsed
@@ -445,14 +506,14 @@ function ghOrg(parsed: Parsed, env: Env, orgs: string[]): string | undefined {
   let placed = false
   for (let i = 0; i < args.length; i++) {
     const v = args[i].value
-    const repo =
-      v === "-R" || v === "--repo"
-        ? args[++i]
-        : v.startsWith("--repo=")
-          ? { ...args[i], value: v.slice(7) }
-          : undefined
-    if (!repo) continue
-    if (unreadValue(repo))
+    const flag = v === "-R" || v === "--repo"
+    const repo = flag
+      ? args[++i]
+      : v.startsWith("--repo=")
+        ? { ...args[i], value: v.slice(7) }
+        : undefined
+    if (!repo && !flag) continue
+    if (!repo || unreadValue(repo))
       return orgRefusal(
         what,
         "the hook cannot tell which repository it reaches, since a value it cannot read names it",
@@ -466,12 +527,29 @@ function ghOrg(parsed: Parsed, env: Env, orgs: string[]): string | undefined {
       )
     placed = true
   }
+  if (ACCOUNT_WIDE.has(words[0] ?? ""))
+    return orgRefusal(what, "its reach is the whole account, every org it can read included")
   const api = words[0] === "api"
   const endpoint = api ? parseFlags(args.slice(1), GH_API_TAKES).positionals[0] : undefined
   if (endpoint && unreadValue(endpoint))
     return orgRefusal(
       what,
       "the hook cannot tell which repository it reaches, since a value it cannot read names its endpoint",
+      PLACE_FIX,
+    )
+  const path = endpoint?.value.replace(/^\//, "").replace(/[?#].*$/, "")
+  if (path === "graphql") {
+    const wide = graphqlReach(args)
+    if (wide) return orgRefusal(what, wide, GRAPHQL_FIX)
+  } else if (
+    path !== undefined &&
+    !REST_PATH.test(path) &&
+    !path.startsWith("search/") &&
+    !PLAIN_ENDPOINTS.has(path)
+  )
+    return orgRefusal(
+      what,
+      `its endpoint ${path} reaches across the account, every org it can read included`,
       PLACE_FIX,
     )
   for (const a of args) {
@@ -510,19 +588,52 @@ function ghOrg(parsed: Parsed, env: Env, orgs: string[]): string | undefined {
     : undefined
 }
 
+// The folders git reads a repository from: the call's own (its cwd or -C), each --git-dir or --work-tree before the subcommand, and GIT_DIR or GIT_WORK_TREE as the call sets or inherits them; undefined for one the hook cannot read.
+function gitPlaces(parsed: Parsed, env: Env, dir: string | undefined): (string | undefined)[] {
+  const places: (string | undefined)[] = [dir]
+  const at = (w: Text) => (unreadValue(w as Word) ? undefined : pathOf(w, { ...env, cwd: dir }))
+  const { args, local } = parsed
+  for (let i = 0; i < args.length; i++) {
+    const v = args[i].value
+    const joined = /^--(?:git-dir|work-tree)=/.exec(v)
+    if (joined) places.push(at({ ...args[i], value: v.slice(joined[0].length) }))
+    else if (v === "--git-dir" || v === "--work-tree")
+      places.push(args[i + 1] ? at(args[++i]) : undefined)
+    else if (GIT_TAKES.has(v)) i++
+    else if (!v.startsWith("-")) break
+  }
+  for (const key of ["GIT_DIR", "GIT_WORK_TREE"]) {
+    const set =
+      local.get(key) ??
+      env.vars.get(key) ??
+      (env.process[key] ? { value: env.process[key] as string } : undefined)
+    if (set && set.value !== "") places.push(at(set))
+  }
+  return places
+}
+
 // A git call: refused when a word is a guarded org's URL, or the checkout it runs in has a guarded org's remote.
 function gitOrg(
-  args: Word[],
+  parsed: Parsed,
+  env: Env,
   dir: string | undefined,
   sub: string | undefined,
   orgs: string[],
 ): string | undefined {
+  const { args } = parsed
   const what = sub ? `this git ${sub} call` : "this git call"
   for (const a of args) {
     const hit = urlOrg(orgs, a.value)
     if (hit) return orgRefusal(what, `it reaches ${hit}, a guarded org's repository`)
   }
-  const remote = remotes(dir).find((r) => isGuarded(orgs, r.owner))
+  const places = gitPlaces(parsed, env, dir)
+  if (places.includes(undefined))
+    return orgRefusal(
+      what,
+      "the hook cannot tell which repository it reads, since a value it cannot read names it",
+      "Name the checkout by its literal path, in a call of its own, or report to your lead.",
+    )
+  const remote = places.flatMap((place) => remotes(place)).find((r) => isGuarded(orgs, r.owner))
   return remote
     ? orgRefusal(
         what,
@@ -540,7 +651,11 @@ function orgCall(
   orgs: Orgs,
 ): string | undefined {
   const { args, name } = parsed
-  if (name === "claude" && headless(parsed))
+  const runs = args.findIndex((a) => CLAUDE_PACKAGE.test(a.value))
+  if (
+    (name === "claude" && headless(parsed)) ||
+    (runs >= 0 && headless({ ...parsed, args: args.slice(runs + 1) }))
+  )
     return orgRefusal(
       "this headless Claude run",
       "a GLM session starts no Claude run of its own, which would reach what it may not",
@@ -551,11 +666,17 @@ function orgCall(
         const m = host.exec(a.value)
         if (m) return orgRefusal(`this ${name} call`, `it reaches ${m[1]}, an org's ${kind}`)
       }
-  if (args.some((a) => LINEAR_SCRIPT.test(a.value)))
+  if (
+    FETCHERS.has(name) &&
+    args.some((a) => (name === "wget" ? WGET_URL_FILE : URL_FILE).test(a.value))
+  )
     return orgRefusal(
       `this ${name} call`,
-      "it runs a Linear script, which reads or writes an org's tracker",
+      "it reads its URL from a file the hook cannot read",
+      "Give the URL literally, in a call of its own, or report to your lead.",
     )
+  const script = orgScript(name, args)
+  if (script) return orgRefusal(`this ${name} call`, `it runs ${script}`)
   if (name !== "gh" && name !== "git" && !FETCHERS.has(name)) return
   if (!Array.isArray(orgs))
     return orgRefusal(
@@ -564,7 +685,7 @@ function orgCall(
       `Fix the policy, or report to your lead.`,
     )
   if (name === "gh") return ghOrg(parsed, env, orgs)
-  if (name === "git") return gitOrg(args, dir, sub, orgs)
+  if (name === "git") return gitOrg(parsed, env, dir, sub, orgs)
   for (const a of args) {
     const hit = urlOrg(orgs, a.value)
     if (hit) return orgRefusal(`this ${name} call`, `it reaches ${hit}, a guarded org's repository`)
@@ -679,7 +800,7 @@ export async function check(
     return await inspect(raw, environment, load5, limit)
   } catch (error) {
     if (!mayRefuse(raw, load5, limit)) return
-    return `no-glm-heavy-path hook could not read this call (${error}), which reads as a git commit or push, an org tool, or an install or clone on a busy machine, from a GLM session, so it refuses it. Run it as one plain command, or report to your lead.`
+    return `no-glm-heavy-path hook could not read this call (${error}), which reads as a git commit or push, an org tool, or an install or clone on a busy machine, from a GLM session, so it refuses it, as the glm rule (playground rules glm) asks of an org tool it cannot read. Run it as one plain command, or report to your lead.`
   }
 }
 
