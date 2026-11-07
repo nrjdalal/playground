@@ -141,6 +141,8 @@ export const groups: Group[] = [
         "cd $D && bun linear:read MADE-1",
       ],
       ["any runner after cd to a folder held in a variable", "cd $D && bun run build"],
+      ["a program named by a path in a folder held in a variable", "cd $D && ./cli.ts MADE-1"],
+      ["a program whose path a variable holds", "$P/cli.ts MADE-1"],
     ],
   },
   {

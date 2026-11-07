@@ -470,7 +470,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   It refuses a `curl`, `wget`, `http`, `https` or `xh` naming a host under `linear.app`, `slack.com`, `notion.com`, `notion.so` or `notion.site`, and a fetcher that reads its URL from a file (curl's `-K`, wget's `-i`).
   It refuses a run of the factory's own org scripts, the Linear readers and writers under `packages/scripts/src/linear-*/` and the DM sender under `packages/scripts/src/dm/`, which posts to the owner's chat, and `playground dm`.
   A run is a program word that resolves into either folder (the Linear CLIs carry a bun shebang), or a runner's word (bun, deno, node, npm, npx, pnpm, tsx, yarn or a shell) that resolves into either folder from where the runner runs (its `--cwd`, `--dir`, `--prefix` or `-C`, and the shell's `cd`), or names a package script whose command does, from the `package.json` there or in a folder above.
-  A runner given one of their files is refused whatever it does with it, a formatter or linter included, and a runner in a folder a value the hook cannot read names (`--cwd $D`, `cd $D`) is refused whatever it runs, failing closed as git's rule does.
+  A runner given one of their files is refused whatever it does with it, a formatter or linter included, and a runner in a folder a value the hook cannot read names (`--cwd $D`, `cd $D`), or a program path it cannot place (`cd $D && ./cli.ts`, `$P/cli.ts`), is refused whatever it runs, failing closed as git's rule does.
   A read, test, staging or commit of their files runs, and so does a run of their tests' mirror under `tests/`.
   It refuses every MCP tool, since each MCP server here is an org's or an outside service's connector; both settings files register the hook on `^Bash$` alone, so that check acts once a matcher takes `mcp__` tools.
   A `gh` call is refused when a word names a guarded org (one `ext.links` links, `guardedOrgs`, as [no-playground-leak](#no-playground-leak) reads them): by `-R` or `--repo`, a GitHub URL (`raw.githubusercontent.com` and `codeload.github.com` included), a `repos/`, `orgs/` or `users/` endpoint, or as a whole word anywhere, a GraphQL query's included.
@@ -480,7 +480,7 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   `gh repo list` with no owner lists the account's own repositories and runs.
   A `git` call is refused when a word is a guarded org's GitHub URL, or when a folder git reads its repository from has a guarded org's remote: its own (`-C` included), a `--git-dir` or `--work-tree`, and `GIT_DIR` or `GIT_WORK_TREE`, one the hook cannot read refused too.
   A fetcher naming a guarded org's URL is refused, and a policy the hook cannot read refuses every `gh`, `git` and fetcher call with the fix.
-  Out of its reach, as residual risk: a URL held in a variable, a program named through one (`G="git -C <dir>"; $G log`) and a program that fetches by itself (`bun -e`, Python's urllib), and a `Read` of an org's checkout and an org's database, each tracked as its own follow-up issue.
+  Out of its reach, as residual risk: a URL held in a variable, a program named through one (`G="git -C <dir>"; $G log`), a program that fetches by itself (`bun -e`, Python's urllib), an org script found through a `PATH` the call sets or run through a link the call makes, and a `Read` of an org's checkout and an org's database, each tracked as its own follow-up issue.
 
 ## no-headless-login
 

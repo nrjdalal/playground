@@ -109,8 +109,8 @@ const BUSY_RUN = /\b(?:bun|cp|ditto|npm|pip[\d.]*|pipx|pnpm|python[\d.]*|rsync|u
 const GIT_CALL = /\bgit\b[\s\S]*\b(?:commit|push)\b/i
 // what an org tool's refusal can match, read before the call is parsed
 const ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i
-// a runner, which an org script's folder rule reads once the call parses
-const RUNNER_CALL = /\b(?:bash|bun|bunx|deno|node|npm|npx|pnpm|sh|tsx|yarn|zsh)\b/i
+// a runner or a path, either of which may run an org script, which its folder rule reads once the call parses
+const RUNNER_CALL = /\b(?:bash|bun|bunx|deno|node|npm|npx|pnpm|sh|tsx|yarn|zsh)\b|\//i
 
 export const heavy = (path: string): boolean =>
   OPUS_PATHS.some((p) => (p.endsWith("/") ? path.startsWith(p) : path === p))
@@ -452,11 +452,19 @@ function packageScripts(dir: string): Map<string, { at: string; command: string 
   }
 }
 const FOLDER_FIX = "Name the folder literally, in a call of its own, or report to your lead."
-// Why a call runs an org script: its program word is the script (each has a shebang), the playground CLI's dm command, or a runner's word that resolves into an org script's folder from the folder it runs in, or names a package script whose command does, whatever the runner; a runner in a folder the hook cannot read is refused, failing closed as git's is
+// Why a call runs an org script: its program word is the script (each has a shebang), or a path the hook cannot place, the playground CLI's dm command, or a runner's word that resolves into an org script's folder from the folder it runs in, or names a package script whose command does, whatever the runner; a runner in a folder the hook cannot read is refused, failing closed as git's is
 function orgScript(parsed: Parsed, env: Env): { fix?: string; why: string } | undefined {
   const { args, first, name } = parsed
-  const own = first?.value.includes("/") ? scriptDir(pathOf(first, env)) : undefined
-  if (own) return { why: `it runs ${own}` }
+  if (first?.value.includes("/")) {
+    const program = pathOf(first, env)
+    if (!program)
+      return {
+        fix: FOLDER_FIX,
+        why: "the hook cannot tell which script it runs, since a value or folder it cannot read names its program",
+      }
+    const own = scriptDir(program)
+    if (own) return { why: `it runs ${own}` }
+  }
   if (name === "playground" && args.find((a) => !a.value.startsWith("-"))?.value === "dm")
     return { why: `it runs ${ORG_SCRIPT_DIRS[1][1]}` }
   if (!RUNNERS.has(name)) return
