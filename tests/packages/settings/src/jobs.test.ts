@@ -342,7 +342,8 @@ describe("an org's own job row (PG-1335)", () => {
   })
 
   test("an org's job replaces a hand-kept jobs.json row of its name", () => {
-    const { jobs } = renderJobs({}, [{ command: "old", name: "ops-watch" }], fill, one(watch).jobs)
+    const kept = { command: "old", name: "ops-watch" }
+    const { jobs } = renderJobs({}, [kept], fill, one(watch).jobs)
     expect(jobs.filter((job) => job.name === "ops-watch")).toHaveLength(1)
     expect(jobs.find((job) => job.name === "ops-watch")?.command).not.toBe("old")
   })
