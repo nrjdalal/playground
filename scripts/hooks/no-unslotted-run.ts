@@ -73,6 +73,7 @@ const QUIET = new Set([":", "cd", "export", "popd", "pushd", "set", "true", "uns
 const mayWrite = (cmd: Command, name: string, args: Word[]) =>
   cmd.redirects.some((r) => r.op.includes(">")) ||
   (name !== "cat" &&
+    !QUIET.has(name) &&
     (name !== "git" || !NO_WRITE.has(args.find((a) => !a.value.startsWith("-"))?.value ?? "")))
 
 // The message of a git commit as commit-msg would get it: its -m values joined as paragraphs, or the file or stdin -F names; undefined when the commit skips commit-msg, opens an editor, reuses another commit's message, holds a message the hook cannot read, or reads it from a file an earlier command on the line may have written.
@@ -344,7 +345,7 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     const at = line.indexOf(line.includes(cmd) ? cmd : (outer ?? cmd))
     return line.slice(0, Math.max(at, 0)).some((earlier) => {
       const { args, name } = parse(earlier)
-      return !QUIET.has(name) && mayWrite(earlier, name, args)
+      return mayWrite(earlier, name, args)
     })
   }
   // a commit run-slot queues waits for its slot all the same, so its message is linted there too

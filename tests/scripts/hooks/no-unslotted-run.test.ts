@@ -448,6 +448,7 @@ const forms = (subject: string, file: string): [string, string][] => [
   ["-F after a git add, which writes no file", `git add bad.txt good.txt && git commit -F ${file}`],
   ["-m from a file read by its own cat", `git commit -m "$(cat ${file})"`],
   ["-F after a cd", `cd ${REPO} && git commit -F ${file}`],
+  ["-F after a builtin that writes no file", `set -e; git commit -F ${file}`],
   [
     "-F - from a heredoc after a command that may write a file",
     `touch x && git commit -F - <<'EOF'\n${subject}\nEOF`,

@@ -7354,7 +7354,7 @@ var REUSED = new Set(["-c", "-C", "--fixup", "--reedit-message", "--reuse-messag
 var LINT_BUDGET = 8000;
 var NO_WRITE = new Set(["add", "diff", "fetch", "log", "show", "status"]);
 var QUIET = new Set([":", "cd", "export", "popd", "pushd", "set", "true", "unset"]);
-var mayWrite = (cmd, name, args) => cmd.redirects.some((r) => r.op.includes(">")) || name !== "cat" && (name !== "git" || !NO_WRITE.has(args.find((a) => !a.value.startsWith("-"))?.value ?? ""));
+var mayWrite = (cmd, name, args) => cmd.redirects.some((r) => r.op.includes(">")) || name !== "cat" && !QUIET.has(name) && (name !== "git" || !NO_WRITE.has(args.find((a) => !a.value.startsWith("-"))?.value ?? ""));
 async function message(cmd, rest, env, wrote) {
   const { flags } = parseFlags(rest, COMMIT_TAKES);
   const last = (names) => flags.findLast((f) => names.includes(f.name))?.name;
@@ -7586,7 +7586,7 @@ function inspect(raw, environment, main) {
     const at = line.indexOf(line.includes(cmd) ? cmd : outer ?? cmd);
     return line.slice(0, Math.max(at, 0)).some((earlier) => {
       const { args, name } = parse(earlier);
-      return !QUIET.has(name) && mayWrite(earlier, name, args);
+      return mayWrite(earlier, name, args);
     });
   };
   const commits = async (cmd, { args, name }, env) => {
