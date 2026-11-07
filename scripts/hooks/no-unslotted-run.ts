@@ -1,5 +1,6 @@
 // PreToolUse hook: refuses a worktree install, node_modules clone, build, type check or whole suite outside run-slot, since five worktree installs at once drove load1 to 66.8 on 18 Oct, a docker build from any folder, since one fills the Docker VM the live dashboard's Postgres shares, and a git commit whose message commitlint refuses, since commit-msg finds it only after pre-commit's slot wait.
-import { existsSync } from "node:fs"
+import { existsSync, mkdtempSync, rmdirSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join, resolve, sep } from "node:path"
 
 import { atOnce, buildName, DOCKERS, dockerBuild, portlessCompose } from "./docker-build"
@@ -59,12 +60,25 @@ const COMMIT_TAKES = new Set([
   "--trailer",
 ])
 // The options that take the message from another commit, whose text the hook does not read
-const REUSED = new Set(["-C", "-c", "--fixup", "--reedit-message", "--reuse-message", "--squash"])
+const REUSED = new Set(["-c", "-C", "--fixup", "--reedit-message", "--reuse-message", "--squash"])
 // commitlint's run is cut off past this, well inside the hook's 15 s timeout, and the commit then runs as before
 const LINT_BUDGET = 8000
 
-// The message of a git commit as commit-msg would get it: its -m values joined as paragraphs, or the file or stdin -F names; undefined when the commit skips commit-msg, opens an editor, reuses another commit's message, or holds a message the hook cannot read.
-async function message(cmd: Command, rest: Word[], env: Env): Promise<string | undefined> {
+// git subcommands that write no file a later commit's message could be read from, unless a redirect writes one
+const NO_WRITE = new Set(["add", "diff", "fetch", "log", "show", "status"])
+// Whether a command may write a file, which a later commit on the line may read its message from
+const mayWrite = (cmd: Command, name: string, args: Word[]) =>
+  cmd.redirects.some((r) => r.op.includes(">")) ||
+  name !== "git" ||
+  !NO_WRITE.has(args.find((a) => !a.value.startsWith("-"))?.value ?? "")
+
+// The message of a git commit as commit-msg would get it: its -m values joined as paragraphs, or the file or stdin -F names; undefined when the commit skips commit-msg, opens an editor, reuses another commit's message, holds a message the hook cannot read, or reads it from a file an earlier command on the line may have written.
+async function message(
+  cmd: Command,
+  rest: Word[],
+  env: Env,
+  wrote: boolean,
+): Promise<string | undefined> {
   const { flags } = parseFlags(rest, COMMIT_TAKES)
   const last = (names: string[]) => flags.findLast((f) => names.includes(f.name))?.name
   if (["-n", "--no-verify"].includes(last(["-n", "--no-verify", "--verify"]) ?? "")) return
@@ -77,6 +91,13 @@ async function message(cmd: Command, rest: Word[], env: Env): Promise<string | u
   const texts: Text[] = []
   for (const { value } of [...notes, ...files.slice(-1)]) {
     if (!value) return
+    // a heredoc or here-string is the line's own text, while a file, a pipe or a $(cat …) read is what is on disk when git runs
+    const literal = files.length
+      ? value.value === "-" &&
+        !cmd.stdin &&
+        Boolean(cmd.redirects.findLast((r) => r.op.startsWith("<"))?.op.startsWith("<<"))
+      : !value.reads?.length
+    if (wrote && !literal) return
     const text = files.length
       ? value.value === "-" && !value.unknown
         ? await stdinOf(cmd, env)
@@ -89,7 +110,12 @@ async function message(cmd: Command, rest: Word[], env: Env): Promise<string | u
 }
 
 // A git commit's message linted by its checkout's own commitlint, which reads the checkout's config; the refusal with commitlint's problem lines, or undefined when the hook cannot read the message, the checkout holds no commitlint, or the lint passes or runs past its budget.
-async function commitLint(cmd: Command, args: Word[], env: Env): Promise<string | undefined> {
+async function commitLint(
+  cmd: Command,
+  args: Word[],
+  env: Env,
+  wrote: boolean,
+): Promise<string | undefined> {
   let dir = env.cwd
   let k = 0
   for (; k < args.length; k++) {
@@ -101,7 +127,7 @@ async function commitLint(cmd: Command, args: Word[], env: Env): Promise<string 
     else if (!v.startsWith("-")) break
   }
   if (args[k]?.value !== "commit" || !dir) return
-  const text = await message(cmd, args.slice(k + 1), { ...env, cwd: dir })
+  const text = await message(cmd, args.slice(k + 1), { ...env, cwd: dir }, wrote)
   if (text === undefined) return
   const top = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--show-toplevel"], {
     stderr: "ignore",
@@ -109,20 +135,34 @@ async function commitLint(cmd: Command, args: Word[], env: Env): Promise<string 
   const root = top.success ? top.stdout.toString().trim() : ""
   const lint = join(root, "node_modules", ".bin", "commitlint")
   if (!root || !existsSync(lint)) return
-  const proc = Bun.spawn([process.execPath, lint], {
-    cwd: root,
-    env: env.process,
-    stderr: "pipe",
-    stdin: new Blob([text]),
-    stdout: "pipe",
-    timeout: LINT_BUDGET,
-  })
-  const [out, err, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ])
-  if (code === 0 || proc.signalCode) return
+  // commit-msg runs commitlint --edit on git's message file, which reads a # line as a comment, so the message is linted from a file the same way
+  const folder = mkdtempSync(join(tmpdir(), "commit-msg-"))
+  const file = join(folder, "COMMIT_EDITMSG")
+  let out = ""
+  let err = ""
+  let code: number
+  let signal: string | null
+  try {
+    await Bun.write(file, text)
+    const proc = Bun.spawn([process.execPath, lint, "--edit", file], {
+      cwd: root,
+      env: env.process,
+      stderr: "pipe",
+      stdin: "ignore",
+      stdout: "pipe",
+      timeout: LINT_BUDGET,
+    })
+    ;[out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
+    signal = proc.signalCode
+  } finally {
+    rmSync(file, { force: true })
+    rmdirSync(folder)
+  }
+  if (code === 0 || signal) return
   const problems = `${out}\n${err}`.split("\n").filter((l) => /^\s*[✖⚠]/.test(l))
   if (problems.length === 0) return
   return `no-unslotted-run hook refuses this git commit: commitlint, which commit-msg runs only after pre-commit's build has waited for its slot, refuses its message:\n${problems.join("\n")}\nFix the message by the gh-commit skill's Commit step, then commit again.`
@@ -293,8 +333,13 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
     dir !== undefined && resolve(dir).startsWith(worktrees)
   const directory = typeof cwd === "string" ? cwd : undefined
   // a commit run-slot queues waits for its slot all the same, so its message is linted there too
-  const commits: Visit = async (cmd, { args, name }, env) =>
-    name === "git" ? commitLint(cmd, args, env) : undefined
+  // whether an earlier command on the line may have written a file a commit reads its message from
+  let wrote = false
+  const commits: Visit = async (cmd, { args, name }, env) => {
+    const refused = name === "git" ? await commitLint(cmd, args, env, wrote) : undefined
+    wrote ||= mayWrite(cmd, name, args)
+    return refused
+  }
   const visit: Visit = async (cmd, parsed, env) => {
     const { args, first, name } = parsed
     const slot = slotWords(parsed)
@@ -308,10 +353,9 @@ function inspect(raw: string, environment: Record<string, string | undefined>, m
             false,
           )
         : undefined
-    if (name === "git") {
-      const refused = await commitLint(cmd, args, env)
-      if (refused) return refused
-    }
+    const refused = name === "git" ? await commitLint(cmd, args, env, wrote) : undefined
+    wrote ||= mayWrite(cmd, name, args)
+    if (refused) return refused
     const words = () => {
       const at = first ? cmd.words.indexOf(first) : -1
       if (at < 0) return undefined

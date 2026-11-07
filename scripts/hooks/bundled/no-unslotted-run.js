@@ -2,7 +2,8 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-unslotted-run.ts
-import { existsSync } from "fs";
+import { existsSync, mkdtempSync, rmdirSync, rmSync } from "fs";
+import { tmpdir } from "os";
 import { join as join5, resolve as resolve4, sep as sep2 } from "path";
 
 // scripts/hooks/shell.ts
@@ -2716,9 +2717,11 @@ var COMMIT_TAKES = new Set([
   "--template",
   "--trailer"
 ]);
-var REUSED = new Set(["-C", "-c", "--fixup", "--reedit-message", "--reuse-message", "--squash"]);
+var REUSED = new Set(["-c", "-C", "--fixup", "--reedit-message", "--reuse-message", "--squash"]);
 var LINT_BUDGET = 8000;
-async function message(cmd, rest, env) {
+var NO_WRITE = new Set(["add", "diff", "fetch", "log", "show", "status"]);
+var mayWrite = (cmd, name, args) => cmd.redirects.some((r) => r.op.includes(">")) || name !== "git" || !NO_WRITE.has(args.find((a) => !a.value.startsWith("-"))?.value ?? "");
+async function message(cmd, rest, env, wrote) {
   const { flags } = parseFlags(rest, COMMIT_TAKES);
   const last = (names) => flags.findLast((f) => names.includes(f.name))?.name;
   if (["-n", "--no-verify"].includes(last(["-n", "--no-verify", "--verify"]) ?? ""))
@@ -2735,6 +2738,9 @@ async function message(cmd, rest, env) {
   for (const { value } of [...notes, ...files.slice(-1)]) {
     if (!value)
       return;
+    const literal = files.length ? value.value === "-" && !cmd.stdin && Boolean(cmd.redirects.findLast((r) => r.op.startsWith("<"))?.op.startsWith("<<")) : !value.reads?.length;
+    if (wrote && !literal)
+      return;
     const text = files.length ? value.value === "-" && !value.unknown ? await stdinOf(cmd, env) : await readPath(value, env) : await resolveText(value, env);
     if (unreadable(text))
       return;
@@ -2744,7 +2750,7 @@ async function message(cmd, rest, env) {
 
 `);
 }
-async function commitLint(cmd, args, env) {
+async function commitLint(cmd, args, env, wrote) {
   let dir = env.cwd;
   let k = 0;
   for (;k < args.length; k++) {
@@ -2759,7 +2765,7 @@ async function commitLint(cmd, args, env) {
   }
   if (args[k]?.value !== "commit" || !dir)
     return;
-  const text = await message(cmd, args.slice(k + 1), { ...env, cwd: dir });
+  const text = await message(cmd, args.slice(k + 1), { ...env, cwd: dir }, wrote);
   if (text === undefined)
     return;
   const top = Bun.spawnSync(["git", "-C", dir, "rev-parse", "--show-toplevel"], {
@@ -2769,20 +2775,33 @@ async function commitLint(cmd, args, env) {
   const lint = join5(root, "node_modules", ".bin", "commitlint");
   if (!root || !existsSync(lint))
     return;
-  const proc = Bun.spawn([process.execPath, lint], {
-    cwd: root,
-    env: env.process,
-    stderr: "pipe",
-    stdin: new Blob([text]),
-    stdout: "pipe",
-    timeout: LINT_BUDGET
-  });
-  const [out, err, code] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited
-  ]);
-  if (code === 0 || proc.signalCode)
+  const folder = mkdtempSync(join5(tmpdir(), "commit-msg-"));
+  const file = join5(folder, "COMMIT_EDITMSG");
+  let out = "";
+  let err = "";
+  let code;
+  let signal;
+  try {
+    await Bun.write(file, text);
+    const proc = Bun.spawn([process.execPath, lint, "--edit", file], {
+      cwd: root,
+      env: env.process,
+      stderr: "pipe",
+      stdin: "ignore",
+      stdout: "pipe",
+      timeout: LINT_BUDGET
+    });
+    [out, err, code] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited
+    ]);
+    signal = proc.signalCode;
+  } finally {
+    rmSync(file, { force: true });
+    rmdirSync(folder);
+  }
+  if (code === 0 || signal)
     return;
   const problems = `${out}
 ${err}`.split(`
@@ -2926,17 +2945,21 @@ function inspect(raw, environment, main) {
   const worktrees = join5(main, ".claude", "worktrees") + sep2;
   const inWorktree = (dir) => dir !== undefined && resolve4(dir).startsWith(worktrees);
   const directory = typeof cwd === "string" ? cwd : undefined;
-  const commits = async (cmd, { args, name }, env) => name === "git" ? commitLint(cmd, args, env) : undefined;
+  let wrote = false;
+  const commits = async (cmd, { args, name }, env) => {
+    const refused = name === "git" ? await commitLint(cmd, args, env, wrote) : undefined;
+    wrote ||= mayWrite(cmd, name, args);
+    return refused;
+  };
   const visit = async (cmd, parsed, env) => {
     const { args, first, name } = parsed;
     const slot = slotWords(parsed);
     if (slot)
       return slot.length ? examine({ ...cmd, words: slot }, { ...env, files: new Map(env.files), vars: new Map(env.vars) }, commits, false) : undefined;
-    if (name === "git") {
-      const refused = await commitLint(cmd, args, env);
-      if (refused)
-        return refused;
-    }
+    const refused = name === "git" ? await commitLint(cmd, args, env, wrote) : undefined;
+    wrote ||= mayWrite(cmd, name, args);
+    if (refused)
+      return refused;
     const words = () => {
       const at = first ? cmd.words.indexOf(first) : -1;
       if (at < 0)
