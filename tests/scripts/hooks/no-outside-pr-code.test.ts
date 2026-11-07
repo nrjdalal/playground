@@ -180,6 +180,14 @@ describe("no-outside-pr-code keeps a checker of an outside author's PR in read m
     ["a fetch from an absolute path", call(`git -C ${OUTSIDE} fetch /abs/evil pull/1/head`)],
     ["a remote added at a path", call(`git -C ${OUTSIDE} remote add x ./evil`)],
     [
+      "a fetch whose upload pack runs a program",
+      call(`git -C ${OUTSIDE} fetch --upload-pack=/x origin`),
+    ],
+    [
+      "a fetch that follows the PR's submodules",
+      call(`git -C ${OUTSIDE} fetch --recurse-submodules origin`),
+    ],
+    [
       "a detached checkout from below an installed clone's root",
       call(`git -C ${INSTALLED}/src checkout --detach abc`),
     ],
@@ -262,6 +270,14 @@ describe("no-outside-pr-code lets read mode read, fetch and post", () => {
     ["playground's skill lookup", call("playground ext which triage-and-implement")],
     ["a git read in the clone's own folder", call("git diff HEAD~1 HEAD", OUTSIDE)],
     ["git log's one-line form", call(`git -C ${OUTSIDE} log --oneline -5`)],
+    ["git diff's --text", call(`git -C ${OUTSIDE} diff --text HEAD~1 HEAD`)],
+    ["git log's pickaxe holding an O", call(`git -C ${OUTSIDE} log -SfOo`)],
+    ["git grep's pattern holding an O", call(`git -C ${OUTSIDE} grep -eFOO`)],
+    ["a fetch of every remote, pruned", call(`git -C ${OUTSIDE} fetch --all -p`)],
+    [
+      "a fetch with -p, a depth and the PR's ref",
+      call(`git -C ${OUTSIDE} fetch -p --depth=50 origin pull/501/head`),
+    ],
     ["a remote's URL", call(`git -C ${OUTSIDE} remote get-url origin`)],
     [
       "a fetch from the PR's GitHub URL",

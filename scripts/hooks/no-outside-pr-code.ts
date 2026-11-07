@@ -98,15 +98,33 @@ const GIT_READS = new Set([
   "show",
   "status",
 ])
-// git's options that start a program or write a file, by their full names, since git takes any unambiguous start of one (`--open=`, `--out=`); -O takes its pager inside a cluster of short flags too.
+// git's options that start a program or write a file, by their full names, since git takes any unambiguous start of one (`--open=`, `--out=`); `--text` is git's own option, not a start of `--textconv`.
 const GIT_RUN_NAMES = ["ext-diff", "open-files-in-pager", "output", "textconv"]
-const gitRuns = (w: string) => {
-  if (/^-[^-]*O/.test(w)) return true
+// git grep's short options that take the rest of their word as a value, so an O after one is that value's, not the pager
+const GREP_VALUED = "ABCefm"
+const gitRuns = (w: string, sub: string) => {
+  if (sub === "grep" && /^-[^-]/.test(w))
+    for (const c of w.slice(1)) {
+      if (c === "O") return true
+      if (GREP_VALUED.includes(c)) break
+    }
   const long = /^--([^=]+)/.exec(w)?.[1]
-  return long !== undefined && GIT_RUN_NAMES.some((name) => name.startsWith(long))
+  return long !== undefined && long !== "text" && GIT_RUN_NAMES.some((n) => n.startsWith(long))
 }
-// A remote's name, which a fetch takes from the clone's own config; a path would fetch from a repository the PR ships, whose config runs on the upload side.
+// A remote's name, which a fetch takes from the clone's own config, so git reads only the clone's repository; a path names a repository the PR can ship.
 const REMOTE = /^[A-Za-z0-9_][\w.-]*$/
+// fetch's options that name no program and no source, A to Z
+const FETCH_OPTIONS = new Set([
+  "--all",
+  "--force",
+  "--no-tags",
+  "--prune",
+  "--tags",
+  "--unshallow",
+  "-f",
+  "-p",
+  "-t",
+])
 const QUIET = new Set(["-q", "--quiet"])
 // sed's scripts that run and write nothing: `-n` printing a range of lines or patterns, or one substitution whose flags write no file
 const SED_ADDRESS = String.raw`(?:\d+|\$|/(?:[^/\\]|\\.)*/)`
@@ -122,7 +140,7 @@ const unread = (repo: string, n: number) =>
 const REASONS = {
   none: "its roster row names no PR, so the hook cannot rule out an outside author's code. A checker spawn.sh started without --pr has none; its worker or lead names the PR it serves from the main checkout: bun scripts/roster.ts set <this session's name> pr=<pull url>.",
   outside:
-    "it serves an outside author's PR, whose tests, scripts and installs run that author's code on this machine. Read the PR instead: the Read, Grep and Glob tools, gh pr diff, git diff and git show <rev> in the clone, and move the clone with git fetch and git checkout --detach. Score on the PR's own GitHub checks, and say in the verdict that its code was read, not run.",
+    "it serves an outside author's PR, whose tests, scripts and installs run that author's code on this machine. Read the PR instead: the Read, Grep and Glob tools, gh pr diff, git diff and git show <rev> in the clone, and move a clone with no node_modules (a fresh one, never an installed one, whose git hooks would run) with git fetch and git checkout --detach. Score on the PR's own GitHub checks, and say in the verdict that its code was read, not run.",
 }
 
 // A path with its symlinks and .. steps resolved in order, as the system resolves them, so a climb out of a folder is judged where it lands; the native call, since node's own resolves .. before it follows a link.
@@ -171,7 +189,7 @@ function gitAllows(
   const written =
     dashC && folder ? (isAbsolute(words[2]) ? words[2] : `${folder}/${words[2]}`) : folder
   const at = written === undefined ? undefined : real(written)
-  if (at === undefined || bareAt(at, lookup) || all.some(gitRuns)) return false
+  if (at === undefined || bareAt(at, lookup) || all.some((w) => gitRuns(w, sub))) return false
   const rest = all.filter((w) => !QUIET.has(w))
   const plain = (w: string) => !w.startsWith("-") && !w.includes("::")
   // a remote takes no verb but the two that read it, since `remote add` names a source a fetch then reads
@@ -179,9 +197,12 @@ function gitAllows(
   if (sub === "remote" && verb !== undefined && verb !== "get-url" && verb !== "show") return false
   if (readsWords(words) || GIT_READS.has(sub)) return true
   if (sub === "fetch") {
-    const [source, ...refs] = rest.filter((w) => w !== "--no-tags" && w !== "--prune")
+    const options = rest.filter((w) => w.startsWith("-"))
+    const [source, ...refs] = rest.filter((w) => !w.startsWith("-"))
     return (
-      (source === undefined || REMOTE.test(source) || GITHUB_URL.test(source)) && refs.every(plain)
+      options.every((w) => FETCH_OPTIONS.has(w) || /^--depth=\d+$/.test(w)) &&
+      (source === undefined || REMOTE.test(source) || GITHUB_URL.test(source)) &&
+      refs.every(plain)
     )
   }
   if (sub === "clone") return rest.length === 2 && GITHUB_URL.test(rest[0]) && plain(rest[1])
