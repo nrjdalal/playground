@@ -17,6 +17,7 @@ Settings > Jobs on the Dashboard lists every job with what it does, when it runs
 Its switch saves the job's `enabled` field alone at your login's scope, with a reason, over any other field your scope's value holds.
 
 A session cannot write a job's setting (the `no-extensions-write` hook refuses `playground settings set` and `reset` of every `jobs.<name>`, and `settings import-jobs` but its `--dry-run`), so it asks you with an Inbox guard decision whose value is `{"enabled": true}` or `{"enabled": false}` alone; your Approve writes it the same way ([Inbox](/docs/inbox)).
+The one exception is how often a job runs: the Ops lead may set a job's row whose only change from the row it holds is `schedule.every`, its interval.
 
 From your own terminal, set your scope's value, which replaces any value it held, with a reason:
 

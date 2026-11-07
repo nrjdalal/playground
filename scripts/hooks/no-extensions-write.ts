@@ -342,7 +342,7 @@ export const GUARD_KEYS = new Set([
   "slack.gatedSends",
   "usage.keychainService",
 ])
-// An ops job's setting turns it on or moves what it runs, so every jobs.<name> is refused, a name the registry lacks included: only the owner's Approve of a guard decision, or Settings > Jobs, sets one.
+// An ops job's setting turns it on or moves what it runs, so every jobs.<name> is refused, a name the registry lacks included, but the Ops lead's change of its interval alone (tunes()): only the owner's Approve of a guard decision, or Settings > Jobs, sets any other.
 const JOB_PREFIX = "jobs."
 // Whether a settings set the Ops lead makes only tunes a number, so it runs; a key that widens or names what a guard allows stays the owner's
 type Tuning = (key: string, value: string, scoped: boolean) => boolean
