@@ -104,6 +104,7 @@ For a focused stretch, such as a timed test, a demo or an hour of deep work, `pl
 While it stands, every merge waits, every other session's heavy run waits in the queue, and no new session starts, while the factory's own upkeep and that session's own reviewer and tester keep running.
 For an urgent ticket, `run-slot.sh preempt` also stops the runs other sessions already hold, and each says to run it again once focus ends.
 A priority start (spawn.sh's `--priority`) passes the load gate and a full run-slot queue at the slots gate while a priority file stands, and the memory gate still applies to it.
+A resume within 15 minutes of `spawn.sh close` ending a row that read live passes the load gate too, as a Claude Code update's close and resume do, and the memory gate still applies to it.
 It passes focus too on `priority.json` or an org's own `priority-<name>.json`, while a job's own `priority-start.json` never does.
 What comes into the Inbox meanwhile stays quiet, out of its counts and the tab's dot, but an alert such as the 5% battery one.
 Everything ends by itself at the focus end, so a forgotten focus holds nothing past its time.

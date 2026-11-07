@@ -15,7 +15,9 @@ set -euo pipefail
 #      and a quarter of that cap kept for small items, so a big plan never blocks a small one,
 #      a small worker keeping an eighth in its place for the reviewers and testers; a load at or over
 #      that line refuses whatever the CPU's idle share, so the load stays under the cores, but for a
-#      --priority start while a priority file stands (PRIORITY_FILE), logged as readings.priority
+#      --priority start while a priority file stands (PRIORITY_FILE), logged as readings.priority,
+#      and a resume within 15 minutes of close ending a row that read live (JUST_CLOSED), logged as
+#      readings.just_closed
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
 #      free at 8% or more (kern.memorystatus_level)
 #   A GLM session takes its own load and memory gate in place of both:
@@ -272,7 +274,7 @@ gate_capacity() {
     [ -n "$room" ] || room=unread
   fi
   verdict=$(
-    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" <<'PY'
+    python3 -I - "$DATA" "$ACCOUNT" "$BACKEND" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$(own_config)" "${CHECK:+check}" "$GATES" $ITEM "$ROLE" "$room" "${FIRST:+first}" "${PRIORITY_FILE:-}" "${JUST_CLOSED:-}" <<'PY'
 import datetime as dt
 import glob
 import json
@@ -282,7 +284,7 @@ import re
 import subprocess
 import sys
 
-data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority = sys.argv[1:14]
+data_dir, account, backend, config_dir, own_config, check, gates, size, units, role, room, first, priority, just_closed = sys.argv[1:15]
 log_path = os.path.join(data_dir, "ops", "capacity.jsonl")
 units = int(units)
 gates = json.loads(gates)
@@ -377,7 +379,9 @@ if backend == "glm":
         if loads is None:
             refuse("load", "it cannot read the load average (sysctl vm.loadavg or uptime)")
         readings["load5"] = loads[1]
-        if readings["load5"] >= gates["glmLoad5Max"]:
+        if just_closed:
+            readings["just_closed"] = just_closed
+        elif readings["load5"] >= gates["glmLoad5Max"]:
             refuse("load", f"load5 is {readings['load5']:.2f} (sysctl vm.loadavg), and a GLM session starts under {fmt(gates['glmLoad5Max'])}")
         readings["pressure"] = sysctl_int("kern.memorystatus_vm_pressure_level")
         if readings["pressure"] is None and sandbox_refuses("kern.memorystatus_vm_pressure_level"):
@@ -444,9 +448,11 @@ else:
         share = (gates["reviewReserve"] if role == "worker" else 0) if size == "small" else gates["smallReserve"]
         keep = cap * share
         readings["reserve"] = keep
-        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --priority start passes while a priority file stands (PRIORITY_FILE), since priority work comes first, and the memory gate still reads it
+        # the owner's rule keeps the load under the cores, so a worker or two can be closed to make room: a load at or over the line refuses whatever the CPU's idle share, but a --priority start passes while a priority file stands (PRIORITY_FILE), since priority work comes first, and a resume of a row spawn.sh closed live in the last 15 minutes passes (JUST_CLOSED), since that session already counts in the load; the memory gate still reads both
         if priority:
             readings["priority"] = priority
+        elif just_closed:
+            readings["just_closed"] = just_closed
         elif readings["load5"] + starts >= cap - keep:
             at = (
                 f"{cap:g}, the {cores} cores at PLAYGROUND_LOAD_MULT {mult:g}"
@@ -1024,7 +1030,7 @@ PY
   done <<<"$lines"
   exit "$failed"
 fi
-# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row once the pane closes, leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
+# A factory session closes a herdr session's pane only here, since the no-raw-spawn hook refuses herdr's own pane close: herdr's socket has no access control. It closes only a pane spawn.sh opened, by the label it set, on the server the session's resume record names, and ends the session's roster row once the pane closes, keeping its time and the row's status in $DATA/closes/<name> for the load gate (JUST_CLOSED) and leaving the pins and the record as they are, so a resume, which sets the row back to starting, can reopen it.
 if [ "$MODE" = close ]; then
   NAME=${1:-close}
   [ $# -eq 1 ] && [ -z "$CHECK$ACCOUNT$BACKEND$CLAUDE_MODEL$EFFORT$RESUME_BRIEF$RUNTIME$SIZE" ] || usage "close takes a session's name alone"
@@ -1055,6 +1061,9 @@ except (ValueError, KeyError, TypeError):
     refuse "herdr would not close pane $panes (${said:-no answer from herdr})"
   fi
   echo "closed $NAME (pane $panes on $server)"
+  # The close keeps its time and the row's status before it ends it, for the load gate's pass of a resume within 15 minutes (JUST_CLOSED, below).
+  was=$(roster_field "$NAME" status)
+  { mkdir -p "$DATA/closes" && echo "$(date -u +%s) $(date -u +%FT%TZ) ${was:-none}" > "$DATA/closes/$NAME"; } 2>/dev/null || true
   if ! said=$(env $UNSET "$BUN" "$ROSTER" set "$NAME" status=ended 2>&1 >/dev/null); then
     [ -n "$said" ] && echo "roster.ts says: $said" >&2
     echo "spawn.sh: $NAME closed, but its roster write failed; record it with $BUN $ROSTER set $NAME status=ended, adding task=<what it does> for a name the roster lacks" >&2
@@ -1378,6 +1387,14 @@ case "$ITEM" in "small 1" | "medium 2" | "big 3") ;; *) ITEM="medium 2" ;; esac
 PRIORITY_FILE=
 if [ -n "$PRIORITY" ]; then
   PRIORITY_FILE=$(priority_file) || refuse "--priority starts only while a priority file stands in $DATA (priority.json, priority-start.json or another priority-<name>.json), and none does"
+fi
+# A resume within 15 minutes of spawn.sh closing its row while it read live (not ended, parked, paused or done) passes the load gate, as a Claude Code update's close and resume do, since that session already counts in the load it comes back into; a new start, an older close and a close of a row that read otherwise meet it.
+JUST_CLOSED=
+if [ "$MODE" = resume ] && [ -f "$DATA/closes/$NAME" ] && read -r closed_at closed_iso closed_was < "$DATA/closes/$NAME"; then
+  case "${closed_was:-none}" in
+    none | ended | parked | paused | done) ;;
+    *) if [[ $closed_at =~ ^[0-9]+$ ]] && [ $(($(date -u +%s) - closed_at)) -le 900 ]; then JUST_CLOSED="its $closed_was row closed at $closed_iso"; fi ;;
+  esac
 fi
 # While focus stands (playground focus), one session has the Mac, so a start waits for its end, but for that session's own reviewer and tester and a --priority start on any priority file but a job's start file (below).
 if FOCUS=$(python3 -I - "$DATA/focus.json" <<'PY' 2>/dev/null
