@@ -10,8 +10,8 @@ import {
   watch,
 } from "../../../../../packages/scripts/src/ops-channel-watch/watch"
 
-const CHANNEL = "C0FIXTURE"
-const SKIP = "U0FIXTURE"
+const CHANNEL = "C0MADE0302"
+const SKIP = "U0MADE0303"
 const dirs: string[] = []
 afterAll(() => {
   for (const dir of dirs) rmSync(dir, { force: true, recursive: true })

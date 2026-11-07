@@ -35,6 +35,7 @@ Group the hits by kind, each as `file:line` and where it belongs:
 | A list term in a test or a fixture   | a made-up value in core (`MADE`, `acme`) |
 | A list term anywhere else            | the org's extension                      |
 | A Slack id or a home path            | config with a sensible default           |
+| The same in a test or a fixture      | a placeholder id or home                 |
 | A tracker key (leg 2)                | a placeholder key such as `PG-1`         |
 | A one-org skill, rule, script or job | the org's extension                      |
 
@@ -56,7 +57,7 @@ Write the report of step 3, counts and `file:line` alone, as a file at mode 600 
 
 ## Limits
 
-- Leg 2 reads no `tests/` yet: a test's made-up ids and homes do not hold a placeholder shape today, so a real id in a test is found only by leg 1's list.
+- Leg 2's tracker key reads no `tests/` or fixture yet: 186 lines in 40 test files hold a made-up key off its placeholder list, which [PG-1319](https://github.com/nrjdalal/playground/issues/1319) takes, so a real key in a test is found only by leg 1's list.
 - Leg 2 has no shape for a company or a person's name, since a made-up one reads like a real one without a list: leg 1 covers those once an org is linked.
 - Leg 2's tracker key is a shape alone: a real key whose team is on its placeholder list passes it, and leg 1's list finds that one.
 - Leg 1's bare tracker key also hits a word or an abbreviation spelled the same, which step 3's verdict sorts out.

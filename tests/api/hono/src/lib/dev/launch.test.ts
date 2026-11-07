@@ -54,12 +54,12 @@ const ROOT = join(import.meta.dir, "../../../../../..")
 describe("devEnv", () => {
   test("drops the NODE_ENV and SKIP_ENV_VALIDATION a commit recipe exported, and says so", () => {
     const { env, notes } = devEnv(
-      { HOME: "/Users/a", NODE_ENV: "production", SKIP_ENV_VALIDATION: "true" },
+      { HOME: "/Users/me", NODE_ENV: "production", SKIP_ENV_VALIDATION: "true" },
       "abc1234",
     )
     expect(env.NODE_ENV).toBeUndefined()
     expect(env.SKIP_ENV_VALIDATION).toBeUndefined()
-    expect(env.HOME).toBe("/Users/a")
+    expect(env.HOME).toBe("/Users/me")
     expect(notes).toEqual([
       "ignoring NODE_ENV=production from the shell, so the stage comes from .env",
       "ignoring SKIP_ENV_VALIDATION=true from the shell, so .env is validated",
@@ -67,7 +67,7 @@ describe("devEnv", () => {
   })
 
   test("says nothing when the shell exported neither", () => {
-    expect(devEnv({ HOME: "/Users/a" }, "abc1234").notes).toEqual([])
+    expect(devEnv({ HOME: "/Users/me" }, "abc1234").notes).toEqual([])
   })
 
   test("hands the stack HEAD's sha as GIT_SHA, over one the shell exported", () => {

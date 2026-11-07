@@ -103,8 +103,8 @@ describe("serverEnv", () => {
       dscl,
       [
         "#!/bin/sh",
-        `[ "$1 $2 $3 $4 $5" = ". -search /Users UniqueID ${process.getuid?.()}" ] && printf 'made-up-name\\t\\tUniqueID = (\\n    1\\n)\\n'`,
-        '[ "$1 $2 $3 $4" = ". -read /Users/made-up-name UserShell" ] && echo "UserShell: /bin/made-up-sh"',
+        `[ "$1 $2 $3 $4 $5" = ". -search /Users UniqueID ${process.getuid?.()}" ] && printf 'someone\\t\\tUniqueID = (\\n    1\\n)\\n'`,
+        '[ "$1 $2 $3 $4" = ". -read /Users/someone UserShell" ] && echo "UserShell: /bin/made-up-sh"',
         "exit 0",
       ].join("\n"),
     )
@@ -114,8 +114,8 @@ describe("serverEnv", () => {
     const found = serverEnv({ ...sandbox, PLAYGROUND_DSCL: dscl }, "/d", "factory")
     expect([found.SHELL, found.USER, found.LOGNAME]).toEqual([
       "/bin/made-up-sh",
-      "made-up-name",
-      "made-up-name",
+      "someone",
+      "someone",
     ])
     expect(
       serverEnv({ ...sandbox, PLAYGROUND_DSCL: join(dir, "no-dscl") }, "/d", "factory").SHELL,
@@ -131,7 +131,7 @@ describe("serverEnv", () => {
     const outside = serverEnv({ ...bare, PLAYGROUND_DSCL: dscl }, "/d", "factory")
     expect(outside.SHELL).not.toBe("/bin/made-up-sh")
     expect(outside.SHELL).toStartWith("/")
-    expect(outside.USER).not.toBe("made-up-name")
+    expect(outside.USER).not.toBe("someone")
   })
 })
 
