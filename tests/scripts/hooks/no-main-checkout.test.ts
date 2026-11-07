@@ -894,3 +894,128 @@ describe("mainCheckout", () => {
     expect(mainCheckout(worktree)).toBe(MAIN)
   })
 })
+
+describe("a git write in the live Dashboard's checkout is refused to every session but its runner and the ops lead", () => {
+  // a main checkout whose .git lists the live Dashboard's worktree on live.branch's default branch, and a data folder and registry that name the ops lead
+  const LMAIN = mkdtempSync(join(tmpdir(), "no-main-checkout-live-"))
+  const LIVE = join(LMAIN, ".claude", "worktrees", "desk")
+  const OTHER = join(LMAIN, ".claude", "worktrees", "b")
+  const DATA_DIR = join(LMAIN, "data")
+  const CONFIG = join(LMAIN, "config")
+  for (const dir of [LIVE, OTHER, DATA_DIR, join(CONFIG, "sessions")])
+    mkdirSync(dir, { recursive: true })
+  for (const [name, branch] of [
+    ["desk", "live/dashboard"],
+    ["b", "PG-1-b"],
+  ]) {
+    mkdirSync(join(LMAIN, ".git", "worktrees", name), { recursive: true })
+    writeFileSync(join(LMAIN, ".git", "worktrees", name, "HEAD"), `ref: refs/heads/${branch}\n`)
+    writeFileSync(
+      join(LMAIN, ".git", "worktrees", name, "gitdir"),
+      `${join(LMAIN, ".claude", "worktrees", name)}/.git\n`,
+    )
+  }
+  writeFileSync(
+    join(DATA_DIR, "roster.json"),
+    JSON.stringify({
+      agents: [
+        { kind: "ops", name: "ops" },
+        { kind: "builder", name: "builder" },
+      ],
+    }),
+  )
+  writeFileSync(
+    join(CONFIG, "sessions", "1.json"),
+    JSON.stringify({ name: "ops", sessionId: "s-ops" }),
+  )
+  writeFileSync(
+    join(CONFIG, "sessions", "2.json"),
+    JSON.stringify({ name: "builder", sessionId: "s-builder" }),
+  )
+  afterAll(() => rmSync(LMAIN, { force: true, recursive: true }))
+
+  const live = (command: string, role: string, cwd = LIVE, session = "s-other") =>
+    check(
+      JSON.stringify({
+        cwd,
+        hook_event_name: "PreToolUse",
+        session_id: session,
+        tool_input: { command },
+        tool_name: "Bash",
+      }),
+      {
+        CLAUDE_CONFIG_DIR: CONFIG,
+        HOME: "/u",
+        PLAYGROUND_DATA_DIR: DATA_DIR,
+        PLAYGROUND_ROLE: role,
+      },
+      LMAIN,
+    )
+
+  test.each([
+    ["a commit", "git commit -m x"],
+    ["a merge", "git merge origin/canary"],
+    [
+      "step 5's fast-forward, which only the main checkout takes",
+      "git merge --ff-only origin/main",
+    ],
+    ["a checkout", "git checkout canary"],
+    ["a hard reset", "git reset --hard origin/canary"],
+    ["the keep reset, which only the main checkout takes", "git reset --keep origin/main"],
+    ["a pull", "git pull"],
+    ["a rebase", "git rebase origin/canary"],
+    ["a switch", "git switch canary"],
+    ["a stash", "git stash"],
+    ["a restore", "git restore ."],
+    ["a commit through run-slot", "~/.playground/ops/run-slot.sh w -- git commit -m x"],
+    ["a pull in a shell's script", "bash -c 'git pull'"],
+  ])("%s, from a worker", async (_, command) => {
+    const reason = await live(command, "worker")
+    expect(reason).toContain("the live Dashboard's checkout")
+    expect(reason).toContain("Ops")
+  })
+
+  test.each([
+    ["git -C", `git -C ${LIVE} reset --hard`],
+    ["--git-dir", `git --git-dir=${LIVE}/.git checkout canary`],
+    ["--work-tree", `git --work-tree=${LIVE} checkout canary`],
+    ["a cd", `cd ${LIVE} && git commit -m x`],
+  ])(
+    "a git write that names the live checkout from another worktree by %s, from a worker",
+    async (_, command) => {
+      expect(await live(command, "worker", OTHER)).toContain("the live Dashboard's checkout")
+    },
+  )
+
+  test.each([
+    ["a builder lead", "lead", "s-builder"],
+    ["a reviewer", "reviewer", "s-other"],
+    ["a lead the registry does not name", "lead", "s-unknown"],
+  ])("from %s", async (_, role, session) => {
+    expect(await live("git reset --hard origin/canary", role, LIVE, session)).toContain(
+      "the live Dashboard's checkout",
+    )
+  })
+
+  test.each([
+    ["its runner", "runner", "s-other"],
+    ["the ops lead", "lead", "s-ops"],
+  ])("runs from %s", async (_, role, session) => {
+    for (const command of ["git reset --hard origin/canary", "git commit -m x", "git pull"])
+      expect(await live(command, role, LIVE, session)).toBeUndefined()
+  })
+
+  test.each([
+    ["git status", "git status"],
+    ["git log", "git log --oneline -3"],
+    ["git fetch", "git fetch -q origin canary"],
+    ["git diff", "git diff HEAD~1"],
+    ["a dry-run add", "git add -n ."],
+  ])("a read there runs from a worker: %s", async (_, command) => {
+    expect(await live(command, "worker")).toBeUndefined()
+  })
+
+  test("a git write in another worktree runs", async () => {
+    expect(await live("git commit -m x", "worker", OTHER)).toBeUndefined()
+  })
+})
