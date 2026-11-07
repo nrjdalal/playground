@@ -30,8 +30,8 @@ In chat the picture is a fenced block, since a table or a list of three or more 
 
 The kind also decides how the card closes.
 A decision or a draft the session decided another way is settled.
-An alert update that fixed itself is resolved.
-Any other update stays editable until you dismiss it, so a card the session will replace, such as a mock's first version, is edited in place before then.
+An update its session has settled is resolved by that session: an alert that fixed itself, a progress card whose last step is done.
+Until then an update stays editable, unless you dismiss it, so a card the session will replace, such as a mock's first version, is edited in place before then.
 
 ## The card it writes for
 

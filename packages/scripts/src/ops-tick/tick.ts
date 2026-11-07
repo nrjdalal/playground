@@ -146,26 +146,141 @@ const postAlert = async (
     120_000,
     JSON.stringify({ from: by, kind: "update", preview: { outcome: "alert", text }, title }),
   )
-  const id = lines(posted.out)
-    .map((l) => l.trim())
-    .find((l) => /^[0-9a-f-]{36}$/.test(l))
+  const id = postedId(posted.out)
   if (posted.code !== 0 || !id) throw new Error(`bun run ask new: ${lines(posted.out).at(-1)}`)
   return { by, id }
 }
 
-// Once focus has ended, by off or at its end, one Inbox update under the ops manager's name names what queued while it stood (focusCard)
+// The item id bun run ask new printed, the one line that is a uuid
+const postedId = (out: string): string | undefined =>
+  lines(out)
+    .map((l) => l.trim())
+    .find((l) => /^[0-9a-f-]{36}$/.test(l))
+
+// The poster's own Inbox update resolved with bun run ask resolve, its note saying why; an item already gone counts as resolved, and any other failure throws, so the next run tries again.
+const resolveOwn = async (ctx: Context, id: string, by: string, note: string) => {
+  const done = await ctx.run([
+    "bun",
+    "run",
+    "--silent",
+    "--cwd",
+    ctx.repo,
+    "ask",
+    "resolve",
+    id,
+    "--by",
+    by,
+    "--note",
+    note,
+  ])
+  if (done.code !== 0 && !done.out.includes("no inbox item"))
+    throw new Error(`bun run ask resolve ${id}: ${lines(done.out).at(-1)}`)
+}
+
+type FocusCardKept = { by: string; id: string; since: string; until: string }
+
+// Once focus has ended, by off or at its end, one Inbox update under the ops manager's name names what queued while it stood (focusCard), kept in tick/focus-cards.json; a card kept at an earlier beat resolves once no ask posted while its focus stood is open, since what it pointed at is answered.
 const focusCardBeat = async (ctx: Context) => {
-  await focusCard(join(ctx.ops, ".."), ctx.now, async (card) => {
+  const keptPath = join(ctx.ops, "tick", "focus-cards.json")
+  const kept = ((await readJson(keptPath).catch(() => [])) ?? []) as FocusCardKept[]
+  const left: FocusCardKept[] = []
+  for (const card of kept) {
+    const open = await ctx.run([
+      "bun",
+      "run",
+      "--silent",
+      "--cwd",
+      ctx.repo,
+      "ask",
+      "open",
+      "--since",
+      card.since,
+      "--until",
+      card.until,
+    ])
+    if (open.code !== 0) throw new Error(`bun run ask open: ${lines(open.out).at(-1)}`)
+    if (lines(open.out).some((line) => /^#i\d+ /.test(line.trim()))) left.push(card)
+    else
+      await resolveOwn(
+        ctx,
+        card.id,
+        card.by,
+        "Everything that came in while focus stood is answered",
+      )
+  }
+  if (kept.length > 0) await writeAtomic(keptPath, JSON.stringify(left))
+  await focusCard(join(ctx.ops, ".."), ctx.now, async (card, focus) => {
     const roster = (await readJson(join(ctx.ops, "..", "roster.json")).catch(() => null)) as {
       agents?: unknown
     } | null
+    const by = managerOf(roster?.agents, "ops")
     const posted = await ctx.run(
       ["bun", "run", "--silent", "--cwd", ctx.repo, "ask", "new"],
       120_000,
-      JSON.stringify({ from: managerOf(roster?.agents, "ops"), ...card }),
+      JSON.stringify({ from: by, ...card }),
     )
     if (posted.code !== 0) throw new Error(`bun run ask new: ${lines(posted.out).at(-1)}`)
+    const id = postedId(posted.out)
+    if (id) {
+      left.push({ by, id, since: focus.since, until: focus.until })
+      await writeAtomic(keptPath, JSON.stringify(left))
+    }
   })
+}
+
+type WeekAlert = { account: string; by: string; id: string; mark: number }
+
+// An account's week as usage.json reads it: the login's own reading, else its row among the other accounts, undefined when it holds none
+const weekOf = (usage: unknown, account: string): number | undefined => {
+  const u = usage as {
+    account?: string
+    accounts?: Record<string, { week?: number }>
+    rate_limits?: { seven_day?: { used_percentage?: number } }
+  } | null
+  const week =
+    u?.account === account
+      ? u.rate_limits?.seven_day?.used_percentage
+      : u?.accounts?.[account]?.week
+  return typeof week === "number" ? week : undefined
+}
+
+// Each week alert the tick posted, kept in tick/week-alerts.json, resolves once usage.json reads its account's week back under its mark, which its reset does; one whose resolve fails stays for the next tick, and the first failure throws after the rest are tried.
+const settleWeekAlerts = async (ctx: Context) => {
+  const path = join(ctx.ops, "tick", "week-alerts.json")
+  const alerts = ((await readJson(path).catch(() => [])) ?? []) as WeekAlert[]
+  if (alerts.length === 0) return
+  const usage = await readJson(join(ctx.ops, "..", "usage.json")).catch(() => null)
+  const left: WeekAlert[] = []
+  let failed: Error | undefined
+  for (const alert of alerts) {
+    const week = weekOf(usage, alert.account)
+    if (week === undefined || week >= alert.mark) {
+      left.push(alert)
+      continue
+    }
+    try {
+      await resolveOwn(
+        ctx,
+        alert.id,
+        alert.by,
+        `${alert.account}'s week reset: now ${Math.round(week)}%`,
+      )
+    } catch (error) {
+      left.push(alert)
+      failed ??= error as Error
+    }
+  }
+  await writeAtomic(path, JSON.stringify(left))
+  if (failed) throw failed
+}
+
+// A posted week alert kept by its account and mark, read from its line, so settleWeekAlerts can resolve it
+const keepWeekAlert = async (ctx: Context, line: string, posted: { by: string; id: string }) => {
+  const [, mark, account] = /^ALERT (9[78]) (\S+):/.exec(line) ?? []
+  if (!mark || !account) return
+  const path = join(ctx.ops, "tick", "week-alerts.json")
+  const alerts = ((await readJson(path).catch(() => [])) ?? []) as WeekAlert[]
+  await writeAtomic(path, JSON.stringify([...alerts, { account, mark: Number(mark), ...posted }]))
 }
 
 // The usage marks, the login flip, the load, the train's slot wait and the near-limit marks, each routed as the old tick routed it.
@@ -173,10 +288,13 @@ const tick = async (ctx: Context) => {
   const marks = lines((await python(ctx, "usage/week-marks.py", false)).out)
   for (const line of marks.filter((l) => l.includes("ALERT"))) {
     // an alert that fails to post is named to the builder beside its line, which prints once a week and so goes out either way
-    if (/ALERT 9[78]\b/.test(line))
-      await postAlert(ctx, line, USAGE_LINK).catch((error: Error) =>
-        ctx.send("builder", `Inbox alert not posted: ${error.message}`),
-      )
+    if (/ALERT 9[78]\b/.test(line)) {
+      const posted = await postAlert(ctx, line, USAGE_LINK).catch(async (error: Error) => {
+        await ctx.send("builder", `Inbox alert not posted: ${error.message}`)
+        return null
+      })
+      if (posted) await keepWeekAlert(ctx, line, posted)
+    }
     await ctx.send("builder", line)
   }
   if (ctx.now.getMinutes() === 3 && marks[0]) await ctx.send("builder", `usage: ${marks[0]}`, true)
@@ -189,6 +307,7 @@ const tick = async (ctx: Context) => {
   for (const line of lines((await python(ctx, "usage/near-limit.py")).out))
     await ctx.send(line.includes("ALERT") ? "builder" : "dispatcher", line)
   await switchWatch(ctx)
+  await settleWeekAlerts(ctx)
 }
 
 // The account the switch watch reads, the one the factory moves off at a full week: usage.switchAccount in the data folder's policy, none while it is unset or the policy cannot be read.
@@ -663,22 +782,12 @@ const relayWatch = async (ctx: Context) => {
   const start = await neverRanSince(ctx, outbox)
   if (state?.id && state.by) {
     if (moved <= Date.parse(state.at ?? "")) return
-    const done = await ctx.run([
-      "bun",
-      "run",
-      "--silent",
-      "--cwd",
-      ctx.repo,
-      "ask",
-      "resolve",
+    await resolveOwn(
+      ctx,
       state.id,
-      "--by",
       state.by,
-      "--note",
       `The relay moved its cursor again at ${isoSeconds(new Date(moved))}`,
-    ])
-    if (done.code !== 0 && !done.out.includes("no inbox item"))
-      throw new Error(`bun run ask resolve ${state.id}: ${lines(done.out).at(-1)}`)
+    )
     await unlink(statePath)
     return
   }

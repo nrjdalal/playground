@@ -65,10 +65,11 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 then what Approve does (.agents/dashboard/asks.md, The ask's shape),
                                                 a delete decision naming its worktree by its full path,
                                                 or a Slack message led by its thread so far
-       bun run ask open [--from <session>]
+       bun run ask open [--from <session>] [--since <iso time>] [--until <iso time>]
                                                 lists each open item, oldest first: its #iN, kind, sender and title;
                                                 run it before new, and name an open item on the same thing
-                                                rather than posting it again; --from keeps one sender's
+                                                rather than posting it again; --from keeps one sender's,
+                                                --since and --until those posted in that window
        bun run ask get <id|#iN> [--ack]    prints the item, answer included; --ack marks an answer read
                                                 a picked option's letter and label print on stderr
                                                 (and closes a deny, a clear, a discard or a provided secret, which reading carries out)
@@ -80,7 +81,8 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
        bun run ask settle <id|#iN> [--note "<one line>"] [--link <https url> [--label "<one line>"]]
                                                 closes your own open item, decided another way
        bun run ask resolve <id|#iN> --by <your session name> [--note "<one line>"]
-                                                closes your own alert update, once it has resolved itself
+                                                closes your own update once it has settled: an alert whose
+                                                cause cleared, a progress card whose last step is done
        bun run ask stale [--minutes 15] [--since <iso time>]
                                                 lists each answer given since --since (default 24h ago)
                                                 that its poster has not acked within --minutes`
@@ -133,7 +135,7 @@ const flags =
       : command === "settle"
         ? flagsOf(rest, ["label", "link", "note"])
         : command === "open"
-          ? flagsOf(key === undefined ? [] : [key, ...rest], ["from"])
+          ? flagsOf(key === undefined ? [] : [key, ...rest], ["from", "since", "until"])
           : command === "stale" || command === "new"
             ? flagsOf(
                 key === undefined ? [] : [key, ...rest],
@@ -266,7 +268,18 @@ if (command === "new" || command === "edit") {
   const picked = item && pickOf(item)
   if (picked) console.error(`ask: picked ${picked.letter}: ${picked.label}`)
 } else if (command === "open") {
-  for (const item of await openItems(db, flags?.from))
+  const at = (flag: "since" | "until") => {
+    const value = flags?.[flag]
+    if (value === undefined) return undefined
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) fail(`--${flag} takes an ISO time`)
+    return date
+  }
+  for (const item of await openItems(db, {
+    from: flags?.from,
+    since: at("since"),
+    until: at("until"),
+  }))
     console.log(`${itemTag(item.ref)} ${item.kind} from ${item.from} · ${item.title}`)
 } else if (command === "stale") {
   const minutes = Number(flags?.minutes ?? 15)

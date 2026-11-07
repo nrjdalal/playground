@@ -183,7 +183,7 @@ export type FocusCard = {
 export async function focusCard(
   data: string,
   now: Date,
-  post: (card: FocusCard) => Promise<void>,
+  post: (card: FocusCard, focus: Focus) => Promise<void>,
 ): Promise<"none" | "posted" | "standing"> {
   const names = (await readdir(data).catch(() => [] as string[])).filter(
     (name) => name === "focus.json" || name.startsWith("focus.json.uncarded-"),
@@ -212,15 +212,22 @@ export async function focusCard(
   return result
 }
 
-const postCard = async (focus: Focus, data: string, post: (card: FocusCard) => Promise<void>) =>
-  post({
-    kind: "update",
-    preview: {
-      outcome: "finding",
-      text: `Focus was for: ${focus.reason}\nMeasured from run-slot.runs.log.\nWhat came into the Inbox while it stood counts again.`,
+const postCard = async (
+  focus: Focus,
+  data: string,
+  post: (card: FocusCard, focus: Focus) => Promise<void>,
+) =>
+  post(
+    {
+      kind: "update",
+      preview: {
+        outcome: "finding",
+        text: `Focus was for: ${focus.reason}\nMeasured from run-slot.runs.log.\nWhat came into the Inbox while it stood counts again.`,
+      },
+      title: `Focus for ${focus.session} ended: ${await summary(data, focus, new Date(focus.until))}`,
     },
-    title: `Focus for ${focus.session} ended: ${await summary(data, focus, new Date(focus.until))}`,
-  })
+    focus,
+  )
 
 const fail = (why: string, code = 2) => {
   console.error(`playground: ${why}`)
