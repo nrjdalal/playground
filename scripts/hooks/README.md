@@ -486,9 +486,15 @@ It follows no descriptor an `exec` feeds, which it reads as unfed, and no variab
   `gh repo list` with no owner lists the account's own repositories and runs.
   A `git` call is refused when a word is a guarded org's GitHub URL, or when a folder git reads its repository from has a guarded org's remote: its own (`-C` included), a `--git-dir` or `--work-tree`, and `GIT_DIR` or `GIT_WORK_TREE`, one the hook cannot read refused too.
   A fetcher naming a guarded org's URL is refused, and a policy the hook cannot read refuses every `gh`, `git` and fetcher call with the fix.
+  It refuses a read of a guarded org's checkout: a `Read` of a file in one, a `Grep` or `Glob` of a path in one (the session's folder when the call gives none), and a shell call whose folder or any argument lies in one, `cd` included.
+  A checkout is the nearest folder at or above the path holding `.git`, read once a call through `git config` for its remotes; a path in no checkout, or in one whose remotes git cannot read, runs, since only an owner the policy guards refuses.
+  While the policy guards an org, the hook parses every shell call, since a bare word (`ls <checkout>`) can name a checkout, and refuses a call it cannot parse in a guarded checkout; `date`, `echo`, `printf`, `pwd` and `true` read no file and run there.
+  It refuses a database client (`psql`, `pg_dump`, `pg_dumpall`, `pg_restore`, `mysql`, `mysqldump`, `mongo`, `mongosh`, `redis-cli`) aimed off this machine by `-h`, `--host`, a conninfo `host=`, a database URL or `PGHOST`, and any command but a pure one given such a URL.
+  This machine is loopback, a socket's folder or no host, since the factory's own databases are loopback containers and settings name no org's database host; a client given a value the hook cannot read is refused, failing closed.
+  The read tools' check acts once both settings files' matcher takes `Read`, `Grep` and `Glob`, in a ship after the one that carries this script (the ship rule above).
   Its prefilter (`mayRefuse`, with `RUNNER_CALL` for the runners and paths the folder rules read) and its catch path stay apart: a call the parse cannot read is refused only when it reads as a call the hook refuses, so widening what reaches the parse is tested against what the catch path refuses (`a runner the prefilter lets through to the parse runs when the parse fails` in its test).
   A replay of its verdicts tells a GLM session's calls apart by each transcript entry's `message.model` (`glm-5.3`, `glm-5.3-flash`), not the session's name, and reads every GLM transcript on disk, since a day's window can hold none.
-  Out of its reach, as residual risk: a URL held in a variable, a program named through one (`G="git -C <dir>"; $G log`), a program that fetches by itself (`bun -e`, Python's urllib), an org script found through a `PATH` the call sets or run through a link the call makes, and a `Read` of an org's checkout and an org's database, each tracked as its own follow-up issue.
+  Out of its reach, as residual risk: a URL held in a variable, a program named through one (`G="git -C <dir>"; $G log`), a program that fetches by itself (`bun -e`, Python's urllib), and an org script found through a `PATH` the call sets or run through a link the call makes, each tracked as its own follow-up issue.
 
 ## no-headless-login
 
