@@ -1,13 +1,13 @@
 import { existsSync } from "node:fs"
-import { mkdir, unlink } from "node:fs/promises"
-import { join } from "node:path"
+import { mkdir } from "node:fs/promises"
+import { dirname, join } from "node:path"
 
 import { opsDir, REPO, scheduled } from "../ops-job/job"
 import { preToolUseGuards } from "../ops-tick/guard-probe"
 import type { Beat, Context } from "../ops-tick/tick"
 import { writeAtomic } from "../write-atomic"
 
-// ops-restore: puts a lost main checkout back by the playbook's restore steps (LIFECYCLE.md, Restoring the main checkout), from the Dashboard's checkout, which a wiped main checkout leaves standing, and with no hook, since every guard runs from the main checkout and fails closed once it is gone.
+// ops-restore: puts a lost main checkout back by the playbook's restore steps (LIFECYCLE.md, Restoring the main checkout), from the Dashboard's checkout, which a loss of the main checkout's tracked files leaves standing, and with no hook, since every guard runs from the main checkout and fails closed once it is gone.
 
 // Two looks this far apart, each finding a guard gone, before it acts: a pull or an install can leave a bundle missing for a moment.
 export const SECOND_LOOK_MS = 290_000
@@ -65,11 +65,18 @@ export const restoreBeat =
       .json()
       .catch(() => null)) as State | null
     const now = ctx.now.toISOString()
+    // with its .git gone or broken, git walks up to a parent repository the checkout sits in, so every git call stops at the checkout's own folder
+    const inMain = (...args: string[]) => [
+      "env",
+      `GIT_CEILING_DIRECTORIES=${dirname(main)}`,
+      "git",
+      "-C",
+      main,
+      ...args,
+    ]
     if (!missing.length) {
-      if (state) await unlink(statePath)
-      // with its .git gone, git would answer for a parent repository the checkout sits in, so the URL is read only from the checkout's own
-      if (!existsSync(join(main, ".git"))) return
-      const url = await ctx.run(["git", "-C", main, "remote", "get-url", "origin"], 30_000)
+      if (state) await Bun.file(statePath).delete()
+      const url = await ctx.run(inMain("remote", "get-url", "origin"), 30_000)
       const kept = await Bun.file(originPath(ctx.ops))
         .text()
         .catch(() => "")
@@ -106,7 +113,7 @@ export const restoreBeat =
         `ops-restore: ${gone}, and its restore stopped at ${step}${why ? `: ${why}` : ""}.${statusFile ? ` Its git status before it began is in ${statusFile}.` : ""} ${next}`,
       )
     }
-    const git = (...args: string[]) => ctx.run(["git", "-C", main, ...args], 300_000)
+    const git = (...args: string[]) => ctx.run(inMain(...args), 300_000)
     // what the checkout held before a checkout throws it away, kept whole in a file and named in the report, since the main checkout stays clean and anything but the loss is news
     const keep = async (lines: string[]) => {
       const other = lines.filter((line) => line[0] !== "D" && line[1] !== "D")
@@ -156,7 +163,7 @@ export const restoreBeat =
     if (link.code !== 0) return fail("link-skills.sh", link.out)
     const left = missingGuards(main, registered)
     if (left.length) return fail("the check after it", `still gone: ${left.join(", ")}`)
-    await unlink(statePath)
+    await Bun.file(statePath).delete()
     await tell(
       `ops-restore: ${gone} on looks ${Math.round(apart / 60_000)} minutes from the first to the last; it restored the checkout by LIFECYCLE.md's steps, installed and ran link-skills.sh, and every guard's script is back. The checkout ${held}.`,
     )

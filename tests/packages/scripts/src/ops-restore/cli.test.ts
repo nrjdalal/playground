@@ -50,7 +50,7 @@ const machine = async (answers: Record<string, { code: number; out?: string }> =
       runs.push(argv.join(" "))
       const key = Object.keys(answers).find((k) => argv.join(" ").includes(k))
       if (key) return { code: answers[key]!.code, out: answers[key]!.out ?? "" }
-      if (argv[0] === "git") return realRun(argv, timeout, stdin)
+      if (argv[0] === "git" || argv[0] === "env") return realRun(argv, timeout, stdin)
       return { code: 0, out: "" }
     },
     send: async (to, text) => {
@@ -73,7 +73,9 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
   test("a checkout with every guard keeps origin's URL and does nothing else", async () => {
     const m = await machine()
     await restoreBeat({ guards: GUARDS, main: m.main, upkeep: noUpkeep })(m.ctx(T0))
-    expect(m.runs).toEqual([`git -C ${m.main} remote get-url origin`])
+    expect(m.runs).toEqual([
+      `env GIT_CEILING_DIRECTORIES=${m.root} git -C ${m.main} remote get-url origin`,
+    ])
     expect((await Bun.file(originPath(m.ops)).text()).trim()).toBe(join(m.root, "origin"))
     expect(existsSync(join(m.ops, "restore", "state.json"))).toBe(false)
   })
@@ -85,6 +87,20 @@ describe("ops-restore puts a lost main checkout back (#1354)", () => {
     await git(m.root, "init", "-q")
     await git(m.root, "remote", "add", "origin", "https://example.invalid/dotfiles.git")
     rmSync(join(m.main, ".git"), { force: true, recursive: true })
+    expect((await git(m.main, "remote", "get-url", "origin")).trim()).toBe(
+      "https://example.invalid/dotfiles.git",
+    )
+    await beat(m.ctx(later(300_000)))
+    expect((await Bun.file(originPath(m.ops)).text()).trim()).toBe(join(m.root, "origin"))
+  })
+
+  test("with its .git broken but the guards present, it keeps the URL it had, never a parent repository's", async () => {
+    const m = await machine()
+    const beat = restoreBeat({ guards: GUARDS, main: m.main, upkeep: noUpkeep })
+    await beat(m.ctx(T0))
+    await git(m.root, "init", "-q")
+    await git(m.root, "remote", "add", "origin", "https://example.invalid/dotfiles.git")
+    rmSync(join(m.main, ".git", "HEAD"))
     expect((await git(m.main, "remote", "get-url", "origin")).trim()).toBe(
       "https://example.invalid/dotfiles.git",
     )
