@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  checkSetting,
   importedJob,
   JOBS,
   jobKey,
@@ -125,7 +126,8 @@ describe("the job registry", () => {
       [{ ...sweep, needsCmux: true }, "herdr"],
       [{ ...sweep, needsCmux: false, runtime: "cmux" }, "herdr"],
       [{ ...noRuntime, needsCmux: true }, "herdr"],
-      [{ ...noRuntime, needsCmux: false }, undefined],
+      // a field the row leaves out reads the registry's, ops-sweep's herdr (PG-1196)
+      [{ ...noRuntime, needsCmux: false }, "herdr"],
     ] as const) {
       const job = stored("ops-sweep", row)
       expect(job.disabled).toBeUndefined()
@@ -189,5 +191,56 @@ describe("the job registry", () => {
       "<key>ProgramArguments</key>\n<array>\n<string>/b/bun</string><string>a &amp; b</string></array><key>WorkingDirectory</key><string>/r</string>"
     expect(plistProgram(xml)).toEqual({ cwd: "/r", program: ["/b/bun", "a & b"] })
     expect(plistProgram("bplist00")).toBeNull()
+  })
+})
+
+// PG-1196: a job's row may hold its enabled field alone, which every reader sees over the registry's entry, so a later change to the registry still reaches a job the owner turned on.
+describe("a job's row holding some of its fields (PG-1196)", () => {
+  const sweep = jobKey("ops-sweep")
+  const on = (value: object) => settingsFor([{ key: sweep, scope: "me", value }], "me").values
+
+  test("its setting takes some of a job's fields, refuses a field no job has, and no job the registry does not name", () => {
+    expect(checkSetting(sweep, { enabled: true })).toEqual({
+      key: sweep,
+      ok: true,
+      value: { enabled: true },
+    })
+    expect(checkSetting(sweep, { enabled: true, madeUp: 1 }).ok).toBe(false)
+    expect(checkSetting(sweep, { enabled: "yes" }).ok).toBe(false)
+    expect(checkSetting("jobs.notAJob", { enabled: true }).ok).toBe(false)
+  })
+
+  test("a row holding enabled alone reads as the registry's job turned on, and a registry change after it reaches the job", () => {
+    expect(on({ enabled: true })[sweep]).toEqual({ ...JOBS["ops-sweep"], enabled: true })
+    const job = JOBS["ops-sweep"]!
+    const before = job.description
+    try {
+      job.description = "A made-up description the registry moved to."
+      expect(on({ enabled: true })[sweep]).toMatchObject({
+        description: "A made-up description the registry moved to.",
+        enabled: true,
+      })
+    } finally {
+      job.description = before
+    }
+  })
+
+  test("a launchd job turned on by enabled alone renders its plist from the registry's label and program", () => {
+    const tick = jobKey("ops-tick")
+    const values = settingsFor([{ key: tick, scope: "me", value: { enabled: true } }], "me").values
+    expect([...renderJobs(values, [], fill).plists.keys()]).toEqual(["com.playground.ops-tick"])
+    expect(renderJobs(values, [], fill).jobs.find((job) => job.name === "ops-tick")).toMatchObject({
+      launchd: "com.playground.ops-tick",
+    })
+  })
+
+  test("a row's own fields win over the registry's, so a whole row stored before reads as it did", () => {
+    expect(on({ enabled: true, schedule: { every: 7 } })[sweep]).toMatchObject({
+      enabled: true,
+      heartbeat: "ops-sweep",
+      schedule: { every: 7 },
+    })
+    const whole = { ...JOBS["ops-sweep"]!, enabled: true, pausedFor: "made-up" }
+    expect(on(whole)[sweep]).toEqual(whole)
   })
 })

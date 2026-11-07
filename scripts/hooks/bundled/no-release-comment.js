@@ -553,7 +553,36 @@ function bodyOf(commands, k) {
 var COUNTED = new Set(["repeat", "timeout"]);
 var SHELLS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh", "zsh"]);
 var SPLITTERS = new Set(["bash", "csh", "dash", "fish", "ksh", "sh", "tcsh"]);
-var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]|(?:^|[;&|({\n]|\b(?:then|do|else)\s)[ \t]*(?:(?:builtin|command)\s+)?(?:source|\.)\s/;
+var ZSH_SPLITS = /\b(?:setopt|unsetopt|emulate|mapfile|readarray|zparseopts)\b|\boptions\[|[\w\]]\+?=\(|\bset\s+[-+][A-Za-z]*[oyA]/;
+var LEADS = new Set([
+  "!",
+  "-",
+  "builtin",
+  "command",
+  "elif",
+  "exec",
+  "if",
+  "nocorrect",
+  "noglob",
+  "time",
+  "until",
+  "while"
+]);
+function sources(line) {
+  let command = true;
+  for (const [raw] of line.replace(/\\\n/g, "").matchAll(/[;&|(){}\n]|(?:\$'(?:[^'\\]|\\[\s\S])*'?|'[^']*'?|"(?:[^"\\]|\\[\s\S])*"?|\\[\s\S]|[^\s;&|(){}'"\\])+/g)) {
+    const word = raw.replace(/\$'/g, "'").replace(/['"\\]/g, "");
+    if (/^[;&|(){}\n]$/.test(raw) || /^(?:\]\]|do|else|then)$/.test(word))
+      command = true;
+    else if (!command)
+      continue;
+    else if (word === "source" || word === "." || word === "eval")
+      return true;
+    else if (!LEADS.has(word) && !/^[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=/.test(word))
+      command = false;
+  }
+  return false;
+}
 var ARRAY_MAKERS = /\b(?:declare|export|float|integer|local|read|readonly|typeset)\b/;
 var zshSplits = (line) => {
   if (ZSH_SPLITS.test(line))
@@ -564,6 +593,8 @@ var zshSplits = (line) => {
       return true;
   }
   const joined = line.replace(/[\\'"]/g, "");
+  if (sources(line) || sources(joined))
+    return true;
   const expansion = /\$\{?[=~^]?([A-Za-z_]\w*)/g;
   const named = new Set(joined.replace(expansion, " ").match(/(?<![\w$])[A-Za-z_]\w*/g));
   return [...joined.matchAll(expansion)].some(([, name]) => named.has(name));
@@ -770,6 +801,36 @@ var slice = (word, from) => {
 };
 var visible = (value) => value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ");
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
+var PLAIN = /^[\w./=,:@%-]$/;
+var unreadWord = (word) => {
+  if (word.unknown !== undefined || marked(word.value))
+    return true;
+  const src = word.source;
+  if (src === undefined)
+    return ![...word.value].every((c) => PLAIN.test(c));
+  for (let i = 0;i < src.length; i++) {
+    const c = src[i];
+    if (c === "\\")
+      i++;
+    else if (c === "'") {
+      i = src.indexOf("'", i + 1);
+      if (i === -1)
+        return true;
+    } else if (c === '"') {
+      for (i++;i < src.length && src[i] !== '"'; i++)
+        if (src[i] === "\\")
+          i++;
+        else if (src[i] === "$" && src[i + 1] === "(")
+          i = balanced(src, i + 1, "(", ")") - 1;
+        else if (src[i] === "`")
+          i = src.indexOf("`", i + 1);
+      if (i === -1 || i >= src.length)
+        return true;
+    } else if (!PLAIN.test(c))
+      return true;
+  }
+  return false;
+};
 var SHELL_OWN = new Set([
   ".",
   "alias",
@@ -1638,7 +1699,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
         break;
     }
   } else if (name === "eval") {
-    verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record(cmd, name, args, here);

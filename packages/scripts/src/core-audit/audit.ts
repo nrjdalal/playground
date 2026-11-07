@@ -71,10 +71,13 @@ export async function orgTerms(env: Environment): Promise<Terms | { refusal: str
 const counted = (path: string) => ![...LEFT_OUT, ...LOCKFILES].some((re) => re.test(path))
 const madeUp = (path: string) => MADE_UP_DATA.some((re) => re.test(path))
 
+// A kind: its name, its pattern, whether a match is real, and the paths it skips.
+type Kind = [string, RegExp, (value: string) => boolean, ((path: string) => boolean)?]
+
 // Each line of each counted file that holds a hit of a kind, in file, line and kind order, each line read as read gives it.
 function scan(
   files: File[],
-  kinds: [string, RegExp, (value: string) => boolean][],
+  kinds: Kind[],
   leg: 1 | 2,
   where: (path: string, kind: string) => string,
   read: (line: string) => string = (line) => line,
@@ -86,7 +89,10 @@ function scan(
           .map(read)
           .flatMap((said, i) =>
             kinds
-              .filter(([, re, real]) => [...said.matchAll(re)].some(([value]) => real(value)))
+              .filter(
+                ([, re, real, skips]) =>
+                  !skips?.(path) && [...said.matchAll(re)].some(([value]) => real(value)),
+              )
               .map(([kind]) => ({ kind, leg, line: i + 1, path, where: where(path, kind) })),
           )
       : [],
@@ -98,7 +104,7 @@ const always = () => true
 // Leg 1: the list kinds as trace-count reads them, each tracker key written bare, an org's own name and its GitHub orgs and repositories; a test's hit takes a made-up value in core, any other the org's extension.
 export function leg1(files: File[], terms: Terms): Hit[] {
   const listed = new Set<string>(LIST_KEYS)
-  const kinds: [string, RegExp, (value: string) => boolean][] = patterns(terms.list, terms.repos)
+  const kinds: Kind[] = patterns(terms.list, terms.repos)
     .filter(([kind]) => listed.has(kind))
     .map(([kind, re]): [string, RegExp, typeof always] => [kind, re, always])
   const keys = anyOf(terms.keys, "(?!-\\d)")
@@ -121,10 +127,10 @@ const PLACEHOLDER_ID = /EXAMPLE|MADE/
 const PLACEHOLDER_HOMES = new Set(["me", "owner", "runner", "someone", "x", "you"])
 const PLACEHOLDER_KEYS = new Set(["AB", "ABC", "ACME", "FIX", "MADE", "PG", "SHA", "UTF"])
 
-// Leg 2, needing no list: a Slack id or a person's home path written into the tree outside the tests and the fixtures, whose values are made up, belongs in config with a sensible default, and a tracker key takes a placeholder.
+// Leg 2, needing no list: a Slack id or a person's home path written into the tree belongs in config with a sensible default, or in a test or a fixture a placeholder, and a tracker key outside them takes a placeholder.
 export function leg2(files: File[]): Hit[] {
   return scan(
-    files.filter(({ path }) => !madeUp(path)),
+    files,
     [
       [
         "slackId",
@@ -140,11 +146,16 @@ export function leg2(files: File[]): Hit[] {
         "trackerKey",
         /(?<![A-Za-z0-9_-])[A-Z][A-Z0-9]{1,9}-\d+(?![A-Za-z0-9])/g,
         (key) => !PLACEHOLDER_KEYS.has(key.slice(0, key.indexOf("-"))),
+        madeUp,
       ],
     ],
     2,
-    (_, kind) =>
-      kind === "trackerKey" ? "a placeholder key such as PG-1" : "config with a sensible default",
+    (path, kind) =>
+      kind === "trackerKey"
+        ? "a placeholder key such as PG-1"
+        : madeUp(path)
+          ? "a placeholder id or home"
+          : "config with a sensible default",
   )
 }
 

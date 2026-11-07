@@ -335,7 +335,7 @@ A finished worker, reviewer or tester ends automatically (`scripts/ops/optimizer
   Then it goes to the 7-day trash through `playground rm --worktree` (`--pr <url>` at a merge), which keeps one a process holds, and then loses its `playground-<worktree>-db` and `-redis` containers (`docker rm -fv`, each name matched whole, never the live dashboard's database) and its local branch.
   Another repo's worktree goes through `git -C <repo> worktree remove <path>` with no force flag, then `git worktree prune` and `git branch -D`; the main checkout is never one.
 - Guards: only a worker, reviewer or tester, not busy for 10+ minutes, with no uncommitted or unpushed work in a worktree it used (the main checkout, where every session starts, is not one, nor a Playground worktree whose PR `playground rm` confirms merged or closed, which the cleanup discards); otherwise its lead gets a `Not ended` line saying why, and the session waits.
-- A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir>`; its `Ended` line goes to its worker too.
+- A reviewer ended idle is resumed by its worker on the next push, under the same name (**rounds**): `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir> --pr <its PR's URL>`, since spawn.sh refuses a checker's start on an ended row that names no PR; its `Ended` line goes to its worker too.
 
 A session ends by closing its pane, so the workspace's other sessions live on, by the one it reports to, through spawn.sh, since the `no-raw-spawn` hook refuses `herdr pane close` to every factory session (herdr's socket has no access control):
 
@@ -347,10 +347,11 @@ A session does not close its own pane, since that kills its claude mid-call: it 
 Before you close a checker by hand, read its roster entry and ask it which rounds it still holds, since it may be serving another PR (on one PR a reviewer closed mid-round).
 It closes the one pane spawn.sh opened for that name, found by the label it set, on the server the session's resume record names (the factory's when the record has no `# server:` line), and prints `closed <name> (pane <id> on <server>)`.
 It refuses a session whose runtime pin does not read herdr or that has no resume record, a server that is down or a herdr that is not the pinned one, no pane or two panes carrying the label, and your own pane, quoting herdr's words when herdr refuses the close.
-Once the pane closes it sets the session's roster row to `ended` itself, and leaves the pins and the resume record in place, so `spawn.sh resume` can reopen the session, setting the row back to `starting`, as any new start of that name does.
+Once the pane closes it sets the session's roster row to `ended` itself, and leaves the pins and the resume record in place, so `spawn.sh resume` can reopen the session, setting the row back to `starting`, as any new start of that name does; a reviewer or tester comes back with `--pr <the PR it serves now>`, which replaces the PRs its row lists (scripts/README.md, spawn.sh).
 
 Record why it ended with `report <name> "<why it ended>"` (ROSTER.md, It ends).
 `"${PLAYGROUND_REPO:?}/scripts/spawn.sh" resume <name> <dir>` reopens the session later if it is needed, in the folder it ran in, or anywhere with its session id after `<dir>`: a resume by name alone refuses a folder whose transcripts hold no session of that name.
+A reviewer or tester adds `--pr <the PR it serves now>`, since its row reads ended.
 A herdr session's end is its roster `ended`: with any status but done, ended, parked or paused, `spawn.sh restore` brings it back after the server's next restart.
 Done for a herdr session when `bun run --cwd <dashboard checkout> verify ended <name>`, read-only against the live dashboard, which it finds through portless from that checkout (`.agents/dashboard/writes.md`), passes:
 it reads the session Ended as the Dashboard does, the roster showing `ended` and no live session holding its name, and fails while live sessions or a herdr server could not be read.

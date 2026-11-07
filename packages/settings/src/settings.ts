@@ -48,6 +48,8 @@ export type Field<S extends z.ZodType = z.ZodType> = {
   against?(value: z.output<S>, read: (key: string) => unknown): Refusal[]
   default: z.output<S>
   description: string
+  // A row holding some of the value's fields, read over the default, so the rest still follow the default as it changes (a job's row, which may hold its enabled field alone).
+  merge?: boolean
   schema: S
 }
 
@@ -157,6 +159,12 @@ export const extChain = (
   return [...names.filter(linked), CORE]
 }
 
+// A merge field's row over its default, so every reader sees the whole value; any other row as it is.
+const mergedValue = (key: string, value: unknown): unknown => {
+  const field = fields.get(key)!
+  return field.merge ? { ...(field.default as object), ...(value as object) } : value
+}
+
 // The settings a session in a repo of owner reads (the home set with none): a value at an extension earlier in extChain's order beats a later one's, core's comes last before the default; a key set under its current name beats one set under an alias at the same scope, and a row whose key no piece defines, at a scope the chain leaves out, or of an ext.* key at a scope but the login's and core's, is left out.
 export const settingsFor = (
   rows: { key: string; scope: string; value: unknown }[],
@@ -185,6 +193,8 @@ export const settingsFor = (
   }
   return {
     schemaVersion: SCHEMA_VERSION,
-    values: Object.fromEntries([...best.entries()].map(([key, { value }]) => [key, value])),
+    values: Object.fromEntries(
+      [...best.entries()].map(([key, { value }]) => [key, mergedValue(key, value)]),
+    ),
   }
 }
