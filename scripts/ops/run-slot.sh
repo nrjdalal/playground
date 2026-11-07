@@ -1125,9 +1125,9 @@ heavy_build() {
 }
 # packages/scripts/src/docker-build.ts, the docker build reader run-slot shares with the hooks
 docker_reader() { "$BUN" "$(checkout_root)/packages/scripts/src/docker-build.ts" "$@" </dev/null; }
-# A docker build, as docker_reader reads it past the hooks' wrappers: run (one image), each (a compose build of no service or several, built one at a time), refuse <why>, or nothing; a chain with a docker build in any step is refused, so each build is a run of its own, and so is a chain whose words name docker or portless and whose steps chain_steps cannot read
 # the pieces of a command's words that hold a glob or brace character, one a line, each word split at blanks, quotes, backquotes and the shell's ; | & ( ) < >, its backslashes dropped as an outer shell's quote removal drops them
 glob_pieces() { printf '%s\n' "$@" | tr -d '\\' | tr -s "[:space:];|&()<>\"'\`" '\n' | grep -E '[*?[]|[{].*(,|[.][.])'; }
+# A docker build, as docker_reader reads it past the hooks' wrappers: run (one image), each (a compose build of no service or several, built one at a time), refuse <why>, or nothing; a chain with a docker build in any step is refused, so each build is a run of its own, and so is a chain whose words name docker or portless and whose steps chain_steps cannot read
 docker_kind() {
   local found line words steps pieces rc=0 fix="run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"
   local glob="refuse run-slot.sh refuses a chain with a program word written as a glob or a brace that can expand to docker or podman: $fix"
