@@ -1088,9 +1088,9 @@ describe("the herdr answer route", () => {
 
 describe("deliver to a herdr session", () => {
   const HERDR = "herdr:factory:w1:p1"
-  // A herdr session's board and a terminal that takes its message as one agent.prompt, which `fail` refuses as herdr would.
-  function herdr(fail?: unknown) {
-    const state = live([worker()], { "s-dispatcher": HERDR })
+  // A herdr session's board and a terminal that takes its message as one agent.prompt, which `fail` refuses as herdr would; a test whose message is left unproven names a session of its own, since deliver() then holds that session's next message.
+  function herdr(fail?: unknown, sessionId = "s-dispatcher") {
+    const state = live([worker({ sessionId })], { [sessionId]: HERDR })
     const sent: { surface: string; text: string }[] = []
     const recorded: string[] = []
     const { deps, took } = fakes(state)
@@ -1648,7 +1648,7 @@ describe("deliver to a herdr session", () => {
     })
 
     test("a later message waits, typing nothing, while an earlier paste of the dashboard's stays in the box after its Enter", async () => {
-      const { deps, recorded, sent, stays } = herdr()
+      const { deps, recorded, sent, stays } = herdr(undefined, "s-stuck")
       stays.add("the first, still stuck")
       const enters: string[] = []
       let drawn = false
@@ -1704,7 +1704,7 @@ describe("deliver to a herdr session", () => {
 
     // a reviewer: a transcript read that does not reach back to the paste cannot show it did not go, so the box holds
     test("a remembered paste the transcript read does not reach back to holds with no Enter", async () => {
-      const { deps, sent } = herdr()
+      const { deps, sent } = herdr(undefined, "s-out-of-reach")
       const enters: string[] = []
       let drawn = false
       deps.pressEnter = async (surface) => {
