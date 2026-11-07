@@ -57,6 +57,7 @@ The steps to spawn and brief a session are in [SESSIONS.md](SESSIONS.md#spawn), 
   then hands the fix to the PR that already holds it, or drops it, since two PRs once fixed one row in parallel and the later one took a 9-file conflict.
   A PR at 5/5, or riding a train, finishes as it is; a draft folds into a bundle only when that saves a review round.
   Two pieces of work that depend on each other in meaning can stack instead: a stack (a child branched off its parent, base still `canary`, a `Stacked on #N` line in the child's PR body and a compare link from the parent's branch) is for no line overlap alone.
+  pr:merge and merge-on-ready refuse the child while its parent is unmerged, reading that line (the `parent` gate in [pr-merge's README](../../../../packages/scripts/src/pr-merge/README.md)).
   The worker cutting the child runs the stack test before the child's PR opens: `git merge-tree --write-tree --merge-base <the parent's merge base with canary> <parent> <child>` coming back clean, since the bare two-head form takes the child's descent from the parent as its merge base and so can never conflict,
   while the two heads' adjacent hunks still conflict once the parent squash-merges onto `canary`.
   A stack holds the child behind its parent: the lead sends Ops the hold line **gate**'s hold paragraph names, for the child's PR, and Ops removes it on the lead's word once the parent has merged, so a ready child never lands its parent's lines first.

@@ -293,3 +293,60 @@ describe("a head with no finished GitGuardian check", () => {
     expect(gates.filter((g) => !g.ok).map((g) => g.name)).toEqual(["ci"])
   })
 })
+
+describe("the parent gate refuses a stacked PR while its parent is unmerged (PG-1274)", () => {
+  const stacked = (line: string) => `${SKILL_BODY}\n- ${line}`
+  const parent = (patch: Partial<PrFacts>) =>
+    gatesOf(facts(patch)).find((gate) => gate.name === "parent")
+
+  test("an open parent refuses, naming it", () => {
+    const gate = parent({ body: stacked("Stacked on #12"), parents: [{ n: 12, state: "OPEN" }] })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("#12")
+    expect(gate?.detail).toContain("still open")
+  })
+
+  test("a parent closed without merging refuses, saying how to clear it", () => {
+    const gate = parent({ body: stacked("Stacked on #12"), parents: [{ n: 12, state: "CLOSED" }] })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("closed without merging")
+    expect(gate?.detail).toContain("remove the `Stacked on #12` line")
+  })
+
+  test("a parent whose state did not read refuses, so the gate fails closed", () => {
+    const parents = [{ n: 12, state: "unreadable: gh exited 1" }]
+    const gate = parent({ body: stacked("Stacked on #12"), parents })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("could not be read")
+  })
+
+  test("a body with a Stacked on line never reaches the gates with its parents unread", () => {
+    const gate = parent({ body: `${stacked("stacked on #12")}\nSTACKED ON #12` })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("#12")
+  })
+
+  test("every parent merged, or none declared, passes as today", () => {
+    const merged = [
+      { n: 12, state: "MERGED" },
+      { n: 13, state: "MERGED" },
+    ]
+    expect(parent({ body: stacked("Stacked on #12, Stacked on #13"), parents: merged })?.ok).toBe(
+      true,
+    )
+    expect(parent({ body: SKILL_BODY, parents: [] })?.ok).toBe(true)
+    expect(parent({ body: SKILL_BODY })).toBeUndefined()
+    expect(parent({})).toBeUndefined()
+  })
+
+  test("one unmerged parent among merged ones refuses, naming that one alone", () => {
+    const parents = [
+      { n: 12, state: "MERGED" },
+      { n: 13, state: "OPEN" },
+    ]
+    const gate = parent({ body: stacked("Stacked on #12, Stacked on #13"), parents })
+    expect(gate?.ok).toBe(false)
+    expect(gate?.detail).toContain("#13")
+    expect(gate?.detail).not.toContain("#12")
+  })
+})

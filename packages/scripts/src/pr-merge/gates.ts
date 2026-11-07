@@ -52,6 +52,8 @@ export type PrFacts = {
   // The PR's number.
   n: number
   owner: string
+  // Each PR the body says it is stacked on (parentsOf) with its GitHub state, or why the state did not read; set wherever the body is read, [] for none.
+  parents?: { n: number; state: string }[]
   state: string
 }
 
@@ -226,6 +228,38 @@ export const withReadyDraft = (facts: PrFacts, gates: Gate[], detail: string): G
     ? gates.map((gate) => (gate.name === "ready" ? { ...gate, detail, ok: true } : gate))
     : gates
 
+// Pure: the PRs a body says it is stacked on, each `Stacked on #N` (playbook DISPATCH.md's stack line) in any case, once each, in order.
+export const parentsOf = (body: string): number[] => [
+  ...new Set([...body.matchAll(/\bstacked on #(\d+)\b/gi)].map((match) => Number(match[1]))),
+]
+
+// Pure: the parent gate, since a review scores a stacked PR's own lines alone and its squash would land an unmerged parent's: every parent the body names must read MERGED; a parent open, closed unmerged or unread refuses, and none is no gate.
+function parentGate(facts: PrFacts): Gate | undefined {
+  const declared = parentsOf(facts.body ?? "")
+  const parents = facts.parents ?? declared.map((n) => ({ n, state: "never read" }))
+  if (facts.parents === undefined && declared.length === 0) return undefined
+  const why = parents.flatMap(({ n, state }) =>
+    state === "MERGED"
+      ? []
+      : state === "OPEN"
+        ? [`stacked on #${n}, still open: merge #${n} first`]
+        : state === "CLOSED"
+          ? [
+              `stacked on #${n}, closed without merging: once its lines land another way, remove the \`Stacked on #${n}\` line from the body (no push)`,
+            ]
+          : [`stacked on #${n}, whose state could not be read (${state})`],
+  )
+  if (why.length > 0) return { detail: why.join("; "), name: "parent", ok: false }
+  return {
+    detail:
+      parents.length === 0
+        ? "stacked on no PR"
+        : `stacked on ${parents.map(({ n }) => `#${n}`).join(", ")}, merged`,
+    name: "parent",
+    ok: true,
+  }
+}
+
 // Pure: the newest review on the head.
 function reviewGate(facts: PrFacts): Gate {
   const review = verdictsAt(facts).get("review")
@@ -269,9 +303,10 @@ export function gatesOf(facts: PrFacts, { gitGuardian, outsideAuthor }: GateOpti
       name: "base",
       ok: facts.base === BASE,
     },
-    upToDate(facts),
-    keepsCanary(facts.lost),
   ]
+  const parent = parentGate(facts)
+  if (parent) gates.push(parent)
+  gates.push(upToDate(facts), keepsCanary(facts.lost))
   gates.push(ciGate(facts.checks, { gitGuardian, required: REQUIRED_CHECKS }))
   if (facts.body !== undefined) {
     const why = bodyRefusal(facts.body, facts.files)
