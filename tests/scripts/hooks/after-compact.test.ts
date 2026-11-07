@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { check, REREAD } from "../../../scripts/hooks/after-compact"
+import { check, REREAD, WAITER } from "../../../scripts/hooks/after-compact"
 
 const input = JSON.stringify({
   hook_event_name: "SessionStart",
@@ -9,13 +9,27 @@ const input = JSON.stringify({
 })
 
 describe("after a compaction, a factory session gets what to reread", () => {
-  test.each(["dispatcher", "lead", "worker", "reviewer", "tester", "runner", "probe"])(
+  test.each(["worker", "reviewer", "tester", "runner", "probe"])(
     "a %s gets the instruction as SessionStart context",
     async (role) => {
       const out = await check(input, { PLAYGROUND_ROLE: role })
       expect(JSON.parse(out ?? "null")).toEqual({
         hookSpecificOutput: { additionalContext: REREAD, hookEventName: "SessionStart" },
       })
+    },
+  )
+
+  test.each(["dispatcher", "lead"])(
+    "a %s also checks its alerts-wait task, since a manager with none heard a stuck alert minutes late",
+    async (role) => {
+      const out = await check(input, { PLAYGROUND_ROLE: role })
+      expect(JSON.parse(out ?? "null")).toEqual({
+        hookSpecificOutput: {
+          additionalContext: `${REREAD} ${WAITER}`,
+          hookEventName: "SessionStart",
+        },
+      })
+      expect(WAITER).toContain("playground alerts-wait <your name>")
     },
   )
 

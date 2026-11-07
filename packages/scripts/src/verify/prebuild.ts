@@ -1,11 +1,11 @@
 import "@packages/env/aliases"
 import { existsSync, readFileSync, realpathSync, statSync, utimesSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 
 import { stackIn } from "../../../../api/hono/src/lib/dev/stop"
 import { withoutShebang } from "../shebang"
 
-// verify, pr:merge, the dev launcher, ask, thread, test:file and check-types:tests reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists counts as unbuilt when a file under its package's `src` is newer than it while no stack runs in this worktree (since `bun run verify` runs beside this worktree's stack, and a rebuild under it hangs it), or when it lacks a name the target's sources import from it, those it reaches through relative and `@/` imports included.
+// verify, pr:merge, the dev launcher, ask, thread, test:file and check-types:tests reach each workspace package through its built dist, which a fresh worktree lacks, and which a pulled change can outgrow; it builds them only then, since a rebuild cleans the dist a running stack in this worktree imports (`bun run dev` refuses before this runs while one does). A dist that exists counts as unbuilt when a file under its package's `src` is newer than it while no stack runs in this worktree (since `bun run verify` runs beside this worktree's stack, and a rebuild under it hangs it), or when it lacks a name the target's sources import from it, those it reaches through relative, `@/` and absolute imports into this checkout included.
 const VERIFY = import.meta.dir
 const SRC = join(VERIFY, "..")
 const ROOT = join(VERIFY, "../../../..")
@@ -154,7 +154,7 @@ export const unbuilt = (
     return wanted.some((name) => !exported.has(name))
   })
 
-// Every source the given files run: each file, and each `.ts` or `.tsx` file it reaches through a relative or `@/` import, outside its folder too.
+// Every source the given files run: each file, and each `.ts` or `.tsx` file it reaches through a relative or `@/` import, outside its folder too, or through an absolute import into this checkout, so a scratch test outside it that imports its modules by absolute path builds what they import, while another clone's file or a system one stays unread.
 export const reach = async (files: string[]): Promise<string[]> => {
   const queue = [...files]
   const seen = new Set<string>()
@@ -169,9 +169,10 @@ export const reach = async (files: string[]): Promise<string[]> => {
       imports = scannerOf(file).scanImports(withoutShebang(source))
     } catch {}
     for (const { path } of imports) {
-      if (!path.startsWith(".") && !path.startsWith("@/")) continue
+      if (!path.startsWith(".") && !path.startsWith("@/") && !isAbsolute(path)) continue
       try {
         const next = Bun.resolveSync(path, dirname(file))
+        if (isAbsolute(path) && !next.startsWith(`${ROOT}/`)) continue
         if (/\.tsx?$/.test(next) && !next.includes("/node_modules/")) queue.push(next)
       } catch {}
     }
