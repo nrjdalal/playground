@@ -49,6 +49,9 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 an accept decision names one proposal (scope, kind, key, rev), and
                                                 more lists up to 20 further ones, accepted after it in that order;
                                                 Approve stops at the first that fails
+                                                a guard decision names a key a guard reads, or an ops job's
+                                                jobs.<name>, whose value is {"enabled": true|false} alone;
+                                                Approve writes it at its scope, and Settings > Jobs toggles a job too
                                                 --thread files it under that thread (bun run thread)
                                                 write {now} for a now-time, which new and edit fill with the time
                                                 they post at; a "measured" or "now" time ahead of the clock is refused

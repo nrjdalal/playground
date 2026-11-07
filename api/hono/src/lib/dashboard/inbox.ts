@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
 import { extname, join } from "node:path"
+import { isDeepStrictEqual } from "node:util"
 
 import { withOwn } from "@packages/config/accounts"
 import {
@@ -20,6 +21,8 @@ import {
   extScopeSchema,
   GUARD_SETTING_KEYS,
   itemKeySchema,
+  JOBS,
+  jobKey,
   KINDS,
   readSetting,
   resetSetting,
@@ -357,10 +360,14 @@ export const appsChange = (list: string[], preview: InboxApps): { list: string[]
 // The owner's own apps list and the CLI that writes it: the login's scope, its list as accepted (empty when it has none, null when it is not a list of names), and `playground ext`. store/extensions.ts's ownerApps is the real one.
 export type OwnerApps = { login: string; read: () => string[] | null; run: ExtRun }
 
-// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS), the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes, or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
+// A registry job's setting key, which a guard decision turns on or off by its enabled field alone, so its command, schedule and runtime still come from the registry.
+const JOB_KEYS = Object.keys(JOBS).map(jobKey)
+const jobSwitch = z.strictObject({ enabled: z.boolean() })
+
+// A guard setting the owner sets from the Inbox in place of a terminal: a key a guard reads (GUARD_SETTING_KEYS) or a registry job's, the scope it is written at (the owner's login or an org; core changes by a pull request), and the value its key's schema takes (a job's enabled field alone), or none to take it back to its default. The card shows all three as Approve writes them, so a value its key refuses is refused when it is posted.
 const guardSchema = z
   .strictObject({
-    key: z.enum(GUARD_SETTING_KEYS),
+    key: z.union([z.enum(GUARD_SETTING_KEYS), z.enum(JOB_KEYS)]),
     scope: extScopeSchema,
     type: z.literal("guard"),
     value: z.unknown().optional(),
@@ -368,6 +375,11 @@ const guardSchema = z
   })
   .superRefine((preview, ctx) => {
     if (preview.value === undefined) return
+    if (JOB_KEYS.includes(preview.key) && !jobSwitch.safeParse(preview.value).success) {
+      const message = `${preview.key} takes its enabled field alone, {"enabled": true} or {"enabled": false}: its command, schedule and runtime come from the registry`
+      ctx.addIssue({ code: "custom", message, path: ["value"] })
+      return
+    }
     const checked = checkSetting(preview.key, preview.value)
     if (!checked.ok) ctx.addIssue({ code: "custom", message: checked.message, path: ["value"] })
   })
@@ -1770,7 +1782,17 @@ function guardWrite(data: string, preview: InboxGuard, ref: number, actor: strin
       ? { exitCode: 0, line: `took ${key} at ${scope} back to its default` }
       : { exitCode: 1, line: reset.message }
   }
-  const set = setSetting(data, { key, scope, value }, who)
+  // a job's enabled field goes over the row its scope holds, never the registry's fields, so the rest still follow the registry
+  const held = readSetting(data, key)?.rows.find((row) => row.scope === scope)?.value
+  const next = JOB_KEYS.includes(key)
+    ? { ...(held as object | undefined), ...(value as object) }
+    : value
+  if (held !== undefined && isDeepStrictEqual(held, next))
+    return {
+      exitCode: 0,
+      line: `${key} at ${scope} is already ${JSON.stringify(held)}, so nothing changed`,
+    }
+  const set = setSetting(data, { key, scope, value: next }, who)
   return set.ok
     ? { exitCode: 0, line: `set ${key} at ${scope} to ${JSON.stringify(set.value)}` }
     : { exitCode: 1, line: set.message }
