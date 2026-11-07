@@ -650,6 +650,12 @@ describe("a GLM session while load5 is over 15", () => {
     expect(await check("{not json: bun install", GLM, 20)).toContain("could not read this call")
     expect(await check("{not json: bun install", GLM, 10)).toBeUndefined()
   })
+
+  test("a runner the prefilter lets through to the parse runs when the parse fails, since the catch path reads its own prefilter", async () => {
+    expect(await check("{not json: bun run build", GLM, CALM)).toBeUndefined()
+    expect(await check("{not json: cd $D && ./cli.ts", GLM, CALM)).toBeUndefined()
+    expect(await check("{not json: gh pr list", GLM, CALM)).toContain("glm rule")
+  })
 })
 
 describe("which sessions it acts for", () => {
@@ -967,5 +973,46 @@ describe("a GLM session's org tools", () => {
     { $label: "gh api's markdown render", command: "gh api markdown -f text=hi" },
   ])("$label passes on GLM", async ({ command }) => {
     expect(await refusal(input(command), ON_GLM, CALM)).toBeUndefined()
+  })
+})
+
+describe("its registration", () => {
+  // the matcher each settings file registers the hook under, read from the file a session loads
+  const matchers = async () =>
+    Promise.all(
+      [".claude/settings.json", "scripts/factory-settings.json"].map(async (file) => {
+        const { hooks } = (await Bun.file(join(root, file)).json()) as {
+          hooks: { PreToolUse: { hooks: { command: string }[]; matcher: string }[] }
+        }
+        const entry = hooks.PreToolUse.find((e) =>
+          e.hooks.some((h) => h.command.includes("no-glm-heavy-path")),
+        )
+        return { file, matcher: new RegExp(entry?.matcher ?? "(?!)") }
+      }),
+    )
+
+  test("both settings files send it every Bash and MCP call, and no other tool", async () => {
+    for (const { file, matcher } of await matchers()) {
+      for (const tool of [
+        "Bash",
+        "mcp__linear-shared__list_issues",
+        "mcp__slack-shared__conversations_history",
+      ])
+        expect({ file, tool, sent: matcher.test(tool) }).toEqual({ file, tool, sent: true })
+      for (const tool of ["Edit", "Write", "WebFetch", "Agent", "xBash", "Bashful"])
+        expect({ file, tool, sent: matcher.test(tool) }).toEqual({ file, tool, sent: false })
+    }
+  })
+
+  test("an MCP call it is sent is refused on GLM and runs on Claude", async () => {
+    const raw = JSON.stringify({
+      cwd: REPO,
+      hook_event_name: "PreToolUse",
+      session_id: "s-none",
+      tool_input: {},
+      tool_name: "mcp__linear-shared__list_issues",
+    })
+    expect(await refusal(raw, {}, CALM)).toBeUndefined()
+    expect(await refusal(raw, GLM, CALM)).toContain("glm rule")
   })
 })
