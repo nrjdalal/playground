@@ -219,7 +219,7 @@
         ]
       },
       {
-        "matcher": "^(Bash|ListMcpResourcesTool|ReadMcpResourceTool|mcp__.+)$",
+        "matcher": "^(Bash|ListMcpResourcesTool|ReadMcpResourceDirTool|ReadMcpResourceTool|mcp__.+)$",
         "hooks": [
           {
             "type": "command",
