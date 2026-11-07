@@ -1,6 +1,6 @@
 import "@packages/env/aliases"
 import { existsSync, readFileSync, realpathSync, statSync, utimesSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { dirname, isAbsolute, join, resolve } from "node:path"
 
 import { stackIn } from "../../../../api/hono/src/lib/dev/stop"
 import { withoutShebang } from "../shebang"
@@ -154,7 +154,7 @@ export const unbuilt = (
     return wanted.some((name) => !exported.has(name))
   })
 
-// Every source the given files run: each file, and each `.ts` or `.tsx` file it reaches through a relative or `@/` import, outside its folder too.
+// Every source the given files run: each file, and each `.ts` or `.tsx` file it reaches through a relative or `@/` import, outside its folder too, or through an absolute import into this checkout, so a scratch test outside it that imports its modules by absolute path builds what they import, while another clone's file or a system one stays unread.
 export const reach = async (files: string[]): Promise<string[]> => {
   const queue = [...files]
   const seen = new Set<string>()
@@ -169,9 +169,10 @@ export const reach = async (files: string[]): Promise<string[]> => {
       imports = scannerOf(file).scanImports(withoutShebang(source))
     } catch {}
     for (const { path } of imports) {
-      if (!path.startsWith(".") && !path.startsWith("@/")) continue
+      if (!path.startsWith(".") && !path.startsWith("@/") && !isAbsolute(path)) continue
       try {
         const next = Bun.resolveSync(path, dirname(file))
+        if (isAbsolute(path) && !next.startsWith(`${ROOT}/`)) continue
         if (/\.tsx?$/.test(next) && !next.includes("/node_modules/")) queue.push(next)
       } catch {}
     }
