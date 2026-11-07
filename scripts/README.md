@@ -2,7 +2,7 @@
 
 The factory's own scripts: `spawn.sh`, which starts and resumes every factory session, `link-skills.sh`, which installs the skills, the herdr servers' ops job, a worktree's `node_modules` clone and `bun run test:skills`.
 AGENTS.md keeps one line for each, and this file holds the text that line stands for.
-It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes.
+It also holds `bun run hooks:differential`, the sweep and replay a hook PR's Evidence quotes, and the rule for an edit script's replacements.
 Read a section before you change its script or its tests, or when it refuses a start you did not expect.
 The factory's hooks are in [hooks/README.md](./hooks/README.md).
 
@@ -233,3 +233,8 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   A worktree with any modified or untracked file, any changed part of the key, `--fresh`, or a result 24 hours old runs fresh; a replay's key moves with every new transcript line, so a replay mostly runs fresh.
 - Started bare with no stored result to reuse, it queues itself through `run-slot.sh`, as `commit-slot.ts` queues a commit's build, and says so on stderr with the queue's depth; inside a ticket, or where `run-slot.sh` is not executable, it runs as it is.
   Tests: `bun run test:file tests/packages/scripts/src/hook-differential.test.ts`.
+
+## An edit script's replacements
+
+An edit script that writes code or text with JavaScript passes each replacement that may hold `$` through a replacer function, `s.replace(a, () => b)`, or `split(a).join(b)`, since a string replacement reads `$$`, `$&`, `` $` ``, `$'` and `$1` as patterns: `"a".replace("a", "echo $$")` gives `echo $`, and an edit script once turned `$$` into `$` in `run-slot.sh` with no error.
+In the repo's TypeScript, `tests/packages/scripts/src/replace-dollar.test.ts` fails on a literal replacement holding `$$`, `` $` `` or `$'`, or `$&` after a string search, naming the file, the line and the fix.
