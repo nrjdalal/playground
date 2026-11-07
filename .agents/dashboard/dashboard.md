@@ -49,7 +49,7 @@
   a manager reads its role word and a dispatcher Alpha or Bravo (`roleLabel`: `builder` Builder, `ops` Ops, `planner` Planner, any other manager kind its kind's word (`assistant` Assistant), an `orchestrator` that word with its id, so several read apart (`c8m3nr-orchestrator` Orchestrator C8m3nr), `dispatcher` Alpha, `dispatcher-2` Bravo);
   `site.name` keeps its own spelling (Playground) and any other name has its first letter capitalised),
   through `AgentLink` (`components/dashboard/agent-link.tsx`), which links it to its view while its session is live, resolves a peer address to its session's name, and keeps the raw name on hover; message bodies stay as written.
-  An agent the board holds reads by its label in `AgentLink` and the System page's Agent column (`labelOf`: `ENG-262#73 Worker`, `ENG-262#73 Reviewer`, Builder, the sidebar's rule in `.agents/dashboard/sidebar.md`), whose search matches the label and the name.
+  An agent the board holds reads by its label in `AgentLink` and the System page's Agent column (`labelOf`: `AB-262#73 Worker`, `AB-262#73 Reviewer`, Builder, the sidebar's rule in `.agents/dashboard/sidebar.md`), whose search matches the label and the name.
   A live dispatcher reads as its chat names it, Alpha or Bravo (`chatLabel`), and a place that has only a name (the Inbox's sender, a Feed card) keeps `agentLabel`.
   `agentLabel` reads a name by its roster kind once the agents read has given one (`setRosterKinds`, from `fetchAgents`), so an `assistant` row under a worker's name reads Assistant in its chat's heading, its composer and the Inbox.
   A cell too narrow for a label passes `AgentLink` its `truncate`, which cuts a title or first ask and keeps the kind after it whole (`labelSplit`: `Review the pull… · reviewer`).

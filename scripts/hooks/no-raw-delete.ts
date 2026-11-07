@@ -20,7 +20,9 @@ import {
   readPath,
   rootFed,
   run,
+  scriptStdin,
   slotWords,
+  stdinFed,
   stdinOf,
   UNKNOWN,
   unreadable,
@@ -261,8 +263,10 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       if (verdict) return verdict
       // a root shell's here-string, heredoc, input file or process substitution is its script, which run() leaves to each hook; each part it cannot read is taken as a line break, so the rest is still judged, as the shared reader reads a plain shell's script
       if (rootFed(cmd)) {
-        const found = await line(known(await stdinOf(cmd, at)), at)
-        if (found) return found
+        for (const script of await scriptStdin(cmd, at)) {
+          const found = await line(known(script), at)
+          if (found) return found
+        }
       }
       const pkg = packageOf(name, args)
       // a judged program named among another's words runs as that program, behind any runner
@@ -388,7 +392,8 @@ async function inspect(raw: string, environment: Record<string, string | undefin
       const fed =
         file !== -1 ||
         cmd.stdin !== undefined ||
-        cmd.redirects.some((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<"))
+        cmd.redirects.some((r) => (r.fd === "" || r.fd === "0") && r.op.startsWith("<")) ||
+        stdinFed(cmd)
       if (fed) {
         const script = await (
           file === -1 ? stdinOf(cmd, at) : readPath(args[file + 1] ?? { value: "" }, at)
