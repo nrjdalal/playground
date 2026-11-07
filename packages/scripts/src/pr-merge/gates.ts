@@ -228,16 +228,23 @@ export const withReadyDraft = (facts: PrFacts, gates: Gate[], detail: string): G
     ? gates.map((gate) => (gate.name === "ready" ? { ...gate, detail, ok: true } : gate))
     : gates
 
-// Pure: the PRs a body says it is stacked on, each `Stacked on #N` (playbook DISPATCH.md's stack line) in any case, once each, in order.
+// Pure: the PRs a body says it is stacked on, each `Stacked on #N` (playbook DISPATCH.md's stack line) in any case, a list of them on one line (`#N and #M`, `#N, #M`) included, once each, in order.
 export const parentsOf = (body: string): number[] => [
-  ...new Set([...body.matchAll(/\bstacked on #(\d+)\b/gi)].map((match) => Number(match[1]))),
+  ...new Set(
+    [...body.matchAll(/\bstacked on (#\d+(?:\s*(?:,|&|\band\b)?\s*#\d+)*)/gi)].flatMap((match) =>
+      [...(match[1] ?? "").matchAll(/#(\d+)/g)].map((number) => Number(number[1])),
+    ),
+  ),
 ]
 
-// Pure: the parent gate, since a review scores a stacked PR's own lines alone and its squash would land an unmerged parent's: every parent the body names must read MERGED; a parent open, closed unmerged or unread refuses, and none is no gate.
+// Pure: the parent gate, since a review scores a stacked PR's own lines alone and its squash would land an unmerged parent's: every parent the body names must read MERGED in facts.parents; a parent open, closed unmerged or never read refuses, and a body naming none meets no gate.
 function parentGate(facts: PrFacts): Gate | undefined {
   const declared = parentsOf(facts.body ?? "")
-  const parents = facts.parents ?? declared.map((n) => ({ n, state: "never read" }))
-  if (facts.parents === undefined && declared.length === 0) return undefined
+  if (declared.length === 0) return undefined
+  const parents = declared.map((n) => ({
+    n,
+    state: facts.parents?.find((parent) => parent.n === n)?.state ?? "never read",
+  }))
   const why = parents.flatMap(({ n, state }) =>
     state === "MERGED"
       ? []
@@ -251,10 +258,7 @@ function parentGate(facts: PrFacts): Gate | undefined {
   )
   if (why.length > 0) return { detail: why.join("; "), name: "parent", ok: false }
   return {
-    detail:
-      parents.length === 0
-        ? "stacked on no PR"
-        : `stacked on ${parents.map(({ n }) => `#${n}`).join(", ")}, merged`,
+    detail: `stacked on ${declared.map((n) => `#${n}`).join(", ")}, merged`,
     name: "parent",
     ok: true,
   }
