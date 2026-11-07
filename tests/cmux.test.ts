@@ -5,14 +5,17 @@ const ROOT = join(import.meta.dir, "..")
 
 const HISTORY = "dated history"
 const ALIAS = "the one-ship alias of the sessions read's old codes, which #1447 drops"
-const GUARD = "a guard, or a proof, against the cmux app, live while cmux.app is installed"
+const GUARD =
+  "one of the three guards against the cmux app (no-raw-spawn's cmux branch, the PATH shim filter, the CMUX_* env strip), or a doc stating it, live while cmux.app is installed (#1478)"
+const PROOF =
+  "a doc stating a test that nothing calls, opens or types through the cmux app (herdr.test.ts's pane typing, fixture.test.ts, unstick's run.test.ts, cmux-open.test.ts), live while cmux.app is installed (#1478)"
 
-// Every line outside tests/ that names cmux (#414), counted per file: each count holds one class or more, and a file not listed names it nowhere.
+// Every line outside tests/ that names cmux (#414), counted per file; a file not listed names it nowhere. The test checks each file's count, and each class records for its reader why those lines stay.
 const ALLOWED: Record<string, [number, string]> = {
-  ".agents/adr/0010-ops-alerts-go-through-a-relay.md": [2, HISTORY],
-  ".agents/dashboard/herdr.md": [1, GUARD],
-  ".agents/dashboard/messages.md": [2, GUARD],
-  ".agents/dashboard/stack.md": [1, GUARD],
+  ".agents/adr/0010-ops-alerts-go-through-a-relay.md": [1, HISTORY],
+  ".agents/dashboard/herdr.md": [1, PROOF],
+  ".agents/dashboard/messages.md": [2, `${PROOF}; ${GUARD}`],
+  ".agents/dashboard/stack.md": [1, PROOF],
   "AGENTS.md": [1, GUARD],
   "api/hono/src/lib/claude-binary.ts": [2, GUARD],
   "api/hono/src/lib/dashboard/inbox.ts": [2, ALIAS],
@@ -26,7 +29,7 @@ const ALLOWED: Record<string, [number, string]> = {
   "scripts/README.md": [4, `${HISTORY}; ${GUARD}`],
   "scripts/hooks/bundled/no-raw-spawn.js": [10, GUARD],
   "scripts/hooks/no-raw-spawn.ts": [17, GUARD],
-  "scripts/ops/README.md": [2, GUARD],
+  "scripts/ops/README.md": [2, PROOF],
 }
 
 test("no line outside tests/ names cmux but dated history, the alias and the guards against the installed app (#414)", () => {
