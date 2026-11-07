@@ -160,6 +160,25 @@ describe("a multi-question ask (#1250)", () => {
     expect(named(html, "Next")).not.toBe("")
     expect(named(html, "Send")).not.toBe("")
   })
+
+  // once answered the stepper is gone and its result reads one pick per question and the note; the header sits outside every QuestionnaireItem, so the result renders as a plain description, not a QuestionnaireDescription, which throws there
+  test("renders its answer as one pick per question and the note once answered", () => {
+    const answered = {
+      ...multi,
+      answer: {
+        at: "2026-10-12T10:05:00.000Z",
+        choice: "approve",
+        note: "Soak it.",
+        options: [0, 1],
+      },
+      status: "approved",
+    } as InboxItem
+    const html = opened(answered)
+    expect(html).toContain("A. staging · B. later")
+    expect(html).toContain("You: ")
+    expect(html).toContain("Soak it.")
+    expect(html).not.toContain("When?")
+  })
 })
 
 describe("a card that just moved under him", () => {

@@ -1186,10 +1186,11 @@ export function InboxCard({
     </div>
   ) : null
 
-  // an answered or settled card's result is its description, read above the footer row and wrapping freely, so a long line never comes between its buttons
-  const result =
+  // an answered or settled card's result is its description, read above the footer row and wrapping freely, so a long line never comes between its buttons; a multi-question ask shows it as a plain CardDescription, since its header sits outside every QuestionnaireItem and QuestionnaireDescription reads an item's context
+  const resultClass = cn("min-w-0 text-xs", light && iconTone(light))
+  const resultBody =
     outcome === null ? null : (
-      <QuestionnaireDescription className={cn("min-w-0 text-xs", light && iconTone(light))}>
+      <>
         {at < 0 ? (
           outcome
         ) : (
@@ -1228,7 +1229,7 @@ export function InboxCard({
             </a>
           </>
         )}
-      </QuestionnaireDescription>
+      </>
     )
 
   // a folded row keeps the answers that need nothing its body holds: an update's Approve link, Retry and Check it for me, but not a decision's pick, a secret's value or a draft's words
@@ -1660,9 +1661,11 @@ export function InboxCard({
                   {preview}
                 </CardDescription>
               )}
-              {result}
+              {resultBody && (
+                <CardDescription className={resultClass}>{resultBody}</CardDescription>
+              )}
             </CardHeader>
-            {!folded && (
+            {outcome === null && !folded && (
               <CardContent className="grid gap-(--card-spacing)">
                 {questions.length > 1 && <QuestionnaireProgress />}
                 {questions.map((question, q) => (
@@ -1721,7 +1724,11 @@ export function InboxCard({
                   {preview}
                 </QuestionnaireDescription>
               )}
-              {result}
+              {resultBody && (
+                <QuestionnaireDescription className={resultClass}>
+                  {resultBody}
+                </QuestionnaireDescription>
+              )}
             </CardHeader>
             {body && <CardContent>{body}</CardContent>}
             {noteContent}
