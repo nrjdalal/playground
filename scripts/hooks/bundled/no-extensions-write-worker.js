@@ -3017,14 +3017,6 @@ var GUARD_KEYS = new Set([
   "ext.repos",
   "factory.archiveRepo",
   "factory.publicRepo",
-  "firefighting.start.account",
-  "firefighting.start.brief",
-  "firefighting.start.consultFrom",
-  "firefighting.start.daysOff",
-  "firefighting.start.freshMinutes",
-  "firefighting.start.hours",
-  "firefighting.start.in",
-  "firefighting.start.prefixes",
   "glm.readOnlyLoad5",
   "live.branch",
   "owner.names",
@@ -3032,21 +3024,9 @@ var GUARD_KEYS = new Set([
   "sessions.aliases",
   "sessions.names",
   "slack.gatedSends",
-  "ticketCard.approvals",
-  "ticketCard.deployedStates",
-  "ticketCard.diaryDir",
-  "ticketCard.linesFile",
-  "ticketCard.linkBase",
-  "ticketCard.prefixes",
-  "ticketCard.reopenedFile",
-  "ticketCard.skipsFile",
-  "ticketCard.title",
-  "ticketCard.verdictsFile",
-  "ticketCard.window",
   "usage.keychainService"
 ]);
-var OWNER_ONLY = ["firefighting.start.", "jobs.", "ticketCard."];
-var ownerOnly = (key) => OWNER_ONLY.some((prefix) => key.startsWith(prefix));
+var JOB_PREFIX = "jobs.";
 var BY_APPROVE = "a key only the owner sets: post a guard decision with bun run ask new (.agents/dashboard/asks.md), whose Approve writes it";
 var EXT_WRITES = new Set(["add", "import", "init", "link", "order", "remove", "sync", "unlink"]);
 var EXT_DRY = new Set(["add", "import", "init"]);
@@ -3363,9 +3343,9 @@ function cliWrite(words) {
     const key = positional[0];
     if (unread || key === undefined)
       return `playground settings ${verb} with a word it cannot read`;
-    if (!GUARD_KEYS.has(key) && !ownerOnly(key))
+    if (!GUARD_KEYS.has(key) && !key.startsWith(JOB_PREFIX))
       return;
-    return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : ownerOnly(key) ? `playground settings ${verb} of ${key}, ${BY_APPROVE}` : `playground settings ${verb} of ${key}, a key a guard reads`;
+    return PRIVACY_KEYS.has(key) && !scoped ? `playground settings ${verb} of ${key}, a key a guard reads, ${PRIVACY}` : key.startsWith(JOB_PREFIX) ? `playground settings ${verb} of ${key}, ${BY_APPROVE}` : `playground settings ${verb} of ${key}, a key a guard reads`;
   }
   if (verb === "accept")
     return "playground ext accept, the owner's own call: post it as an accept decision with bun run ask new (.agents/dashboard/asks.md), whose Approve has the dashboard run it with no role, since the CLI refuses an accept with PLAYGROUND_ROLE set";

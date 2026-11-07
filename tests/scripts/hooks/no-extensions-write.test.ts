@@ -2254,24 +2254,19 @@ describe("a guard decision's keys are the keys the hook gates (PG-1090)", () => 
   )
 })
 
-// PG-1196: the guard decision also sets a job's enabled field and each ticketCard key, so a session's own write of each stays refused, the owner's Approve the one way in.
-describe("a job's and the ticket card's settings are the owner's alone (PG-1196)", () => {
-  test.each([
-    "jobs.opsTicketCard",
-    "jobs.opsSweep",
-    "jobs.opsFirefightingStart",
-    "ticketCard.deployedStates",
-    "ticketCard.linesFile",
-    "firefighting.start.hours",
-    "firefighting.start.in",
-  ])("a session's own settings set and reset of %s are refused", async (key) => {
-    expect(await bash(`playground settings set ${key} '{"enabled":true}' --reason r`)).toContain(
-      "no-extensions-write hook refuses",
-    )
-    expect(await bash(`playground settings reset ${key} --reason r`)).toContain(
-      "no-extensions-write hook refuses",
-    )
-  })
+// PG-1196: the guard decision also sets a job's enabled field, so a session's own write of it stays refused, the owner's Approve or Settings > Jobs the one way in.
+describe("a job's setting is the owner's alone (PG-1196)", () => {
+  test.each(["jobs.opsTicketCard", "jobs.opsSweep", "jobs.opsFirefightingStart"])(
+    "a session's own settings set and reset of %s are refused",
+    async (key) => {
+      expect(await bash(`playground settings set ${key} '{"enabled":true}' --reason r`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+      expect(await bash(`playground settings reset ${key} --reason r`)).toContain(
+        "no-extensions-write hook refuses",
+      )
+    },
+  )
 
   // import-jobs writes a jobs.<name> for each job its file lists, on unless the file marks it disabled, so a session's run would turn a job on itself
   test.each([

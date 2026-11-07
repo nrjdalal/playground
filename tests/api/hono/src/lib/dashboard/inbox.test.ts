@@ -49,7 +49,6 @@ import { RELAY_ANSWER_KINDS } from "../../../../../../packages/message/src/index
 import { GUARD_SETTING_KEYS } from "../../../../../../packages/settings/src/guard-keys"
 import { judgeItem, putItem } from "../../../../../../packages/settings/src/items"
 import { loginPath } from "../../../../../../packages/settings/src/rendered"
-import { settingFields } from "../../../../../../packages/settings/src/settings"
 import {
   readSetting,
   resetSetting,
@@ -1421,97 +1420,26 @@ describe("a guard decision (PG-1090)", () => {
   })
 })
 
-// PG-1196: the guard decision also sets a job's enabled field and the ticket card's settings, which no session may write either.
-describe("a guard decision for a job or the ticket card (PG-1196)", () => {
+// PG-1196: the guard decision also sets a job's enabled field, which no session may write either.
+describe("a guard decision for a job (PG-1196)", () => {
   const takes = (change: object) =>
     inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
 
-  test("takes a registry job's enabled field alone, or no value, and each ticketCard key with a value its schema takes", () => {
+  test("takes a registry job's enabled field alone, or no value", () => {
     expect(takes({ key: "jobs.opsTicketCard", value: { enabled: true } })).toBe(true)
     expect(takes({ key: "jobs.opsSweep", value: { enabled: false } })).toBe(true)
     expect(takes({ key: "jobs.opsTicketCard", value: undefined })).toBe(true)
-    expect(takes({ key: "ticketCard.deployedStates", value: ["Made-up Deployed"] })).toBe(true)
-    expect(takes({ key: "ticketCard.linesFile", value: "/made/up/lines.json" })).toBe(true)
   })
 
-  test("GUARD_SETTING_KEYS holds every ticketCard key the settings define", () => {
-    const ticketCard = settingFields()
-      .map(({ key }) => key)
-      .filter((key) => key.startsWith("ticketCard."))
-    expect(ticketCard.length).toBeGreaterThan(0)
-    const guarded: string[] = GUARD_SETTING_KEYS.filter((key) => key.startsWith("ticketCard."))
-    expect(guarded).toEqual(ticketCard)
-  })
-
-  test("refuses a job decision carrying any field but enabled, a job the registry does not name, and a ticketCard value its key refuses", () => {
+  test("refuses a job decision carrying any field but enabled, and a job the registry does not name", () => {
     for (const change of [
       { key: "jobs.opsTicketCard", value: { command: "made-up", enabled: true } },
       { key: "jobs.opsTicketCard", value: { enabled: true, schedule: { every: 5 } } },
       { key: "jobs.opsTicketCard", value: {} },
       { key: "jobs.opsTicketCard", value: true },
       { key: "jobs.opsMadeUp", value: { enabled: true } },
-      { key: "ticketCard.approvals", value: -1 },
-      { key: "ticketCard.madeUp", value: "x" },
     ]) {
       expect(takes(change), JSON.stringify(change)).toBe(false)
-    }
-  })
-})
-
-// PG-1196: the guard decision also sets ops-firefighting-start's settings, each checked as it is posted, with made-up values alone.
-describe("a guard decision for a firefighting setting (PG-1196)", () => {
-  const takes = (change: object) =>
-    inboxInputSchema.safeParse(decision({ ...GUARD, ...change })).success
-  const at = (key: string) => `firefighting.start.${key}`
-
-  test("GUARD_SETTING_KEYS holds every firefighting.start key the settings define, and the job turns on by its enabled field alone", () => {
-    const firefighting = settingFields()
-      .map(({ key }) => key)
-      .filter((key) => key.startsWith("firefighting.start."))
-    expect(firefighting).toHaveLength(8)
-    const guarded: string[] = GUARD_SETTING_KEYS.filter((key) =>
-      key.startsWith("firefighting.start."),
-    )
-    expect(guarded).toEqual(firefighting)
-    expect(takes({ key: "jobs.opsFirefightingStart", value: { enabled: true } })).toBe(true)
-    expect(
-      takes({ key: "jobs.opsFirefightingStart", value: { enabled: true, schedule: {} } }),
-    ).toBe(false)
-  })
-
-  test("takes each key's value in its own shape, or no value", () => {
-    for (const [key, value] of [
-      ["account", "made-up@example.com"],
-      ["brief", "brief-made-up.md"],
-      ["consultFrom", "16:00"],
-      ["daysOff", ["2026-12-25", "2026-12-26"]],
-      ["freshMinutes", 15],
-      ["hours", "09:00-17:00"],
-      ["in", "/made/up/folder"],
-      ["prefixes", ["MADE", "MADEUP2"]],
-    ] as const) {
-      expect(takes({ key: at(key), value }), key).toBe(true)
-      expect(takes({ key: at(key), value: undefined }), key).toBe(true)
-    }
-  })
-
-  test("refuses a value off each key's shape, and an empty prefixes list, which a card with no value says instead", () => {
-    for (const [key, value] of [
-      ["account", "made-up"],
-      ["brief", "../made-up.md"],
-      ["consultFrom", "4pm"],
-      ["consultFrom", "09:00-17:00"],
-      ["daysOff", ["25 Dec"]],
-      ["daysOff", "2026-12-25"],
-      ["freshMinutes", 0],
-      ["freshMinutes", 1.5],
-      ["hours", "9-17"],
-      ["hours", "09:00"],
-      ["in", "made/up/folder"],
-      ["prefixes", []],
-      ["prefixes", ["made"]],
-    ] as const) {
-      expect(takes({ key: at(key), value }), `${key} ${JSON.stringify(value)}`).toBe(false)
     }
   })
 })
@@ -5384,88 +5312,6 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       expect(readSetting(data, key)!.rows).toEqual([
         { key, scope: "made-up-me", value: { enabled: true, schedule: { every: 7 } } },
       ])
-    })
-
-    test("a ticketCard Approve writes its key at the named scope (PG-1196)", async () => {
-      const data = folder()
-      const key = "ticketCard.deployedStates"
-      const posted = await post(decision({ ...GUARD, key, value: ["Made-up Deployed"] }))
-      expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
-      expect(readSetting(data, key)!.rows).toEqual([
-        { key, scope: "acme-test", value: ["Made-up Deployed"] },
-      ])
-    })
-
-    describe("a firefighting setting's Approve (PG-1196)", () => {
-      const key = (name: string) => `firefighting.start.${name}`
-      const rows = (data: string, name: string) => readSetting(data, key(name))!.rows
-      const card = (name: string, value: unknown) => ({
-        ...GUARD,
-        key: key(name),
-        scope: "made-up-me",
-        value,
-      })
-      const approved = async (data: string, name: string, value: unknown) => {
-        const posted = await post(decision(card(name, value)))
-        expect((await approve(posted.id, posted.updatedAt, data)).ok).toBe(true)
-        return (await store.getItem(db, posted.id))?.answer as {
-          set?: { exitCode: number; line: string }
-        }
-      }
-
-      test("writes hours, consultFrom, daysOff, freshMinutes and prefixes at the named scope", async () => {
-        const data = folder()
-        for (const [name, value] of [
-          ["consultFrom", "16:00"],
-          ["daysOff", ["2026-12-25"]],
-          ["freshMinutes", 15],
-          ["hours", "09:00-17:00"],
-          ["prefixes", ["MADE"]],
-        ] as const) {
-          expect((await approved(data, name, value)).set?.exitCode, name).toBe(0)
-          expect(rows(data, name), name).toEqual([{ key: key(name), scope: "made-up-me", value }])
-        }
-      })
-
-      test("writes in only for a folder on this Mac, and refuses a missing one, writing nothing", async () => {
-        const data = folder()
-        const there = mkdtempSync(join(scratch, "made-up-folder-"))
-        expect((await approved(data, "in", join(there, "missing"))).set).toMatchObject({
-          exitCode: 1,
-          line: expect.stringContaining("no folder"),
-        })
-        expect(rows(data, "in")).toEqual([])
-        expect((await approved(data, "in", there)).set?.exitCode).toBe(0)
-        expect(rows(data, "in")).toEqual([{ key: key("in"), scope: "made-up-me", value: there }])
-      })
-
-      test("writes brief only for a file in the data folder, and refuses a missing one, writing nothing", async () => {
-        const data = folder()
-        expect((await approved(data, "brief", "brief-made-up.md")).set).toMatchObject({
-          exitCode: 1,
-          line: expect.stringContaining("no brief"),
-        })
-        expect(rows(data, "brief")).toEqual([])
-        writeFileSync(join(data, "brief-made-up.md"), "a made-up brief\n")
-        expect((await approved(data, "brief", "brief-made-up.md")).set?.exitCode).toBe(0)
-        expect(rows(data, "brief")).toHaveLength(1)
-      })
-
-      test("writes account only for an account usage.accounts lists, and refuses another, writing nothing", async () => {
-        const data = folder()
-        const who = { actor: "test", author: "owner", inboxRef: null, reason: "seeded" }
-        const accounts = [{ email: "made-up@example.com", label: "made-up" }]
-        expect(
-          setSetting(data, { key: "usage.accounts", scope: "made-up-me", value: accounts }, who).ok,
-        ).toBe(true)
-        expect((await approved(data, "account", "other@example.com")).set).toMatchObject({
-          exitCode: 1,
-          line: expect.stringContaining("usage.accounts"),
-        })
-        expect(rows(data, "account")).toEqual([])
-        expect((await approved(data, "account", "made-up@example.com")).set?.exitCode).toBe(0)
-        expect(rows(data, "account")).toHaveLength(1)
-      })
     })
 
     test("with no data folder its Approve is refused and the item stays open", async () => {

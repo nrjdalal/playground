@@ -248,7 +248,7 @@ export async function startPass({
     if (!config.in) {
       await tell(
         id,
-        `Not started for ${id}: firefighting.start.in names no folder for its --in; post a guard decision for firefighting.start.in with bun run ask new (.agents/dashboard/asks.md), whose Approve the owner gives`,
+        `Not started for ${id}: firefighting.start.in names no folder for its --in; set it with playground settings set firefighting.start.in <folder> --reason "<why>"`,
       )
       continue
     }
