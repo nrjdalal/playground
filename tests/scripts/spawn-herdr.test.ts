@@ -262,7 +262,7 @@ describe("--runtime herdr opens the session in herdr (#909)", () => {
     expect(r.roster?.some((w) => /^(?:surface|workspace)=./.test(w))).toBe(false)
     const bad = await spawn(col.with(4, "surface:3"), [], {}, undefined, undefined, herdrPin())
     expect(bad.code).toBe(1)
-    expect(bad.err).toContain("surface:3 is a cmux surface, and spawn.sh starts nothing in cmux")
+    expect(bad.err).toContain("surface:3 is not a herdr pane id (w1:p2)")
     expect(placing(bad)).toEqual([])
   })
 
