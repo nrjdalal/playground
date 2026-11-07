@@ -112,6 +112,7 @@ describe("the slots gate admits a new worker only when run-slot has room for its
         "priority-start.json",
         "priority-stop.json",
         "priority-headstart.json",
+        "priority-acme.json",
         "firefighting-stop.json",
         "firefighting-headstart.json",
         "firefighting-start.json",
