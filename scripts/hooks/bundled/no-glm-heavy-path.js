@@ -2,8 +2,9 @@
 const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/scripts/hooks/bundled"));
 
 // scripts/hooks/no-glm-heavy-path.ts
+import { readFileSync as readFileSync2 } from "fs";
 import { loadavg } from "os";
-import { join as join5, resolve as resolve3 } from "path";
+import { dirname as dirname2, join as join5, resolve as resolve3 } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -7725,34 +7726,80 @@ var GH_API_TAKES = new Set([
   "-X",
   "--method"
 ]);
-var ORG_SCRIPTS = [
+var ORG_SCRIPT_DIRS = [
   [
-    /^linear:/,
-    /(?:^|\/)packages\/scripts\/src\/linear-[\w-]+\//,
+    /(?<!\/tests)\/packages\/scripts\/src\/linear-[\w-]+(?:\/|$)/,
     "a Linear script, which reads or writes an org's tracker"
   ],
   [
-    /^dm$/,
-    /(?:^|\/)packages\/scripts\/src\/dm\//,
+    /(?<!\/tests)\/packages\/scripts\/src\/dm(?:\/|$)/,
     "the DM sender, which posts to the owner's chat"
   ]
 ];
-var RUNTIMES = new Set(["bun", "deno", "node", "tsx"]);
-var PACKAGE_RUNNERS = new Set(["bun", "npm", "pnpm", "yarn"]);
-function orgScript(name, args) {
-  const [first, second] = args.filter((a) => !a.value.startsWith("-")).map((a) => a.value);
-  if (name === "playground" && first === "dm")
-    return ORG_SCRIPTS[1][2];
-  const script = PACKAGE_RUNNERS.has(name) && first === "run" ? second : name === "yarn" ? first : undefined;
-  const path = RUNTIMES.has(name) ? name === "bun" && first === "run" ? second : first : undefined;
-  return ORG_SCRIPTS.find(([key, at]) => script !== undefined && key.test(script) || path !== undefined && at.test(path))?.[2];
+var RUNNERS = new Set([
+  "bash",
+  "bun",
+  "bunx",
+  "deno",
+  "node",
+  "npm",
+  "npx",
+  "pnpm",
+  "sh",
+  "tsx",
+  "yarn",
+  "zsh"
+]);
+var RUNNER_DIR = /^(?:--cwd|--dir|--prefix|-C)(?:=|$)/;
+var scriptDir = (path) => path === undefined ? undefined : ORG_SCRIPT_DIRS.find(([at]) => at.test(path))?.[1];
+function packageScripts(dir) {
+  const found = new Map;
+  for (let at = dir;; at = dirname2(at)) {
+    try {
+      const { scripts } = JSON.parse(readFileSync2(join5(at, "package.json"), "utf8"));
+      for (const [name, command] of Object.entries(scripts ?? {}))
+        if (!found.has(name) && typeof command === "string")
+          found.set(name, { at, command });
+    } catch {}
+    if (dirname2(at) === at)
+      return found;
+  }
+}
+function orgScript(parsed, env) {
+  const { args, name } = parsed;
+  if (name === "playground" && args.find((a) => !a.value.startsWith("-"))?.value === "dm")
+    return ORG_SCRIPT_DIRS[1][1];
+  if (!RUNNERS.has(name))
+    return;
+  let at = env.cwd;
+  for (let i = 0;i < args.length; i++) {
+    const flag = RUNNER_DIR.exec(args[i].value);
+    if (!flag)
+      continue;
+    const value = flag[0].endsWith("=") ? { ...args[i], value: args[i].value.slice(flag[0].length) } : args[++i];
+    at = value ? pathOf(value, { ...env, cwd: at }) : undefined;
+  }
+  if (!at)
+    return;
+  const scripts = packageScripts(at);
+  for (const a of args) {
+    if (a.value.startsWith("-") || unreadValue(a))
+      continue;
+    const hit = scriptDir(pathOf(a, { ...env, cwd: at }));
+    if (hit)
+      return hit;
+    const script = scripts.get(a.value);
+    const ran = script?.command.split(/\s+/).map((word) => scriptDir(resolve3(script.at, word))).find(Boolean);
+    if (ran)
+      return ran;
+  }
 }
 var CLAUDE_PACKAGE = /^@anthropic-ai\/claude-code(?:@\S*)?$/;
 var URL_FILE = /^(?:-[A-Za-z]*K|--config(?:=|$))/;
 var WGET_URL_FILE = /^(?:-[A-Za-z]*i|--input-file(?:=|$))/;
 var ACCOUNT_WIDE = new Set(["org", "status"]);
-var PLAIN_ENDPOINTS = new Set(["rate_limit", "user"]);
-var GRAPHQL_WIDE = /\bviewer\b|\b(?:node|nodes|organization|search|user)\s*\(/;
+var PLAIN_ENDPOINTS = new Set(["markdown", "rate_limit", "user"]);
+var GH_PLACEHOLDERS = /^repos\/\{owner\}\/\{repo\}(?:\/|$)/;
 var GITHUB_URL = /(?:github\.com|githubusercontent\.com)[/:](?:(?:repos|orgs|users)\/)?([\w.-]+)(?:\/([\w.-]+))?/i;
 var REST_PATH = /^\/?(?:repos|orgs|users)\/([\w.-]+)(?:\/([\w.-]+))?/i;
 var SCOPED = /^(?:--owner|--repo|-R)(?:=|$)|(?:^|\s)(?:org|owner|repo|user):\S/;
@@ -7764,22 +7811,7 @@ var urlOrg = (orgs, value, rest = false) => {
   return m && isGuarded(orgs, m[1]) ? label(m[1], m[2]) : undefined;
 };
 var unreadValue = (w) => w.unknown !== undefined || Boolean(w.reads?.length) || marked(w.value);
-var GRAPHQL_FIX = `Write the query literally, scoped to one repository (repository(owner: "<owner>", name: "<name>")), or use a REST endpoint under repos/<owner>/<name>/, or report to your lead.`;
-function graphqlReach(args) {
-  const { flags } = parseFlags(args.slice(1), GH_API_TAKES);
-  const queries = flags.filter((f) => ["-F", "-f", "--field", "--raw-field"].includes(f.name) && f.value?.value.startsWith("query="));
-  if (flags.some((f) => f.name === "--input"))
-    return "the hook cannot read the query it sends, held in a file";
-  if (queries.length === 0)
-    return "it sends no query the hook can read";
-  for (const q of queries) {
-    const text = q.value.value.slice(6);
-    if (unreadValue(q.value) || q.name !== "-f" && q.name !== "--raw-field" && text.startsWith("@"))
-      return "the hook cannot read the query it sends, held in a file or a value";
-    if (!/\brepository\s*\(/.test(text) || GRAPHQL_WIDE.test(text))
-      return "its query is not scoped to one named repository, so it may read every org the account can";
-  }
-}
+var GRAPHQL_FIX = `Use a REST endpoint under repos/<owner>/<name>/ (gh api repos/<owner>/<name>/..., gh pr, gh issue), and reply to a review thread by REST, or report to your lead.`;
 function ghOrg(parsed, env, orgs) {
   const { args } = parsed;
   const words = args.filter((a) => !a.value.startsWith("-") && !unreadValue(a)).map((a) => a.value);
@@ -7805,12 +7837,10 @@ function ghOrg(parsed, env, orgs) {
   const endpoint = api ? parseFlags(args.slice(1), GH_API_TAKES).positionals[0] : undefined;
   if (endpoint && unreadValue(endpoint))
     return orgRefusal(what, "the hook cannot tell which repository it reaches, since a value it cannot read names its endpoint", PLACE_FIX);
-  const path = endpoint?.value.replace(/^\//, "").replace(/[?#].*$/, "");
-  if (path === "graphql") {
-    const wide = graphqlReach(args);
-    if (wide)
-      return orgRefusal(what, wide, GRAPHQL_FIX);
-  } else if (path !== undefined && !REST_PATH.test(path) && !path.startsWith("search/") && !PLAIN_ENDPOINTS.has(path))
+  const path = endpoint?.value.replace(/^https?:\/\/api\.github\.com\//i, "").replace(/^\//, "").replace(/[?#].*$/, "");
+  if (path === "graphql")
+    return orgRefusal(what, "a GraphQL query can walk from any repository to every org the account can read", GRAPHQL_FIX);
+  if (path !== undefined && !REST_PATH.test(path) && !GH_PLACEHOLDERS.test(path) && !path.startsWith("search/") && !PLAIN_ENDPOINTS.has(path))
     return orgRefusal(what, `its endpoint ${path} reaches across the account, every org it can read included`, PLACE_FIX);
   for (const a of args) {
     const hit = urlOrg(orgs, a.value, a === endpoint);
@@ -7827,7 +7857,7 @@ function ghOrg(parsed, env, orgs) {
   const search = words[0] === "search" || api && /^\/?search\//.test(endpoint?.value ?? "");
   if (search && !args.some((a) => SCOPED.test(a.value)))
     return orgRefusal(what, "a search with no owner or repository reaches every org the account can read", `Scope it with --repo <owner>/<name> or --owner <owner>, or report to your lead.`);
-  if (search || endpoint?.value === "graphql")
+  if (search)
     return;
   const implicit = implicitRepos(env, parsed.local);
   if (implicit.some((r) => r === undefined) || !env.cwd && implicit.length === 0)
@@ -7874,7 +7904,7 @@ function gitOrg(parsed, env, dir, sub, orgs) {
 }
 function orgCall(parsed, env, dir, sub, orgs) {
   const { args, name } = parsed;
-  const runs = args.findIndex((a) => CLAUDE_PACKAGE.test(a.value));
+  const runs = args.findIndex((a) => CLAUDE_PACKAGE.test(a.value.replace(/^--package=/, "")));
   if (name === "claude" && headless(parsed) || runs >= 0 && headless({ ...parsed, args: args.slice(runs + 1) }))
     return orgRefusal("this headless Claude run", "a GLM session starts no Claude run of its own, which would reach what it may not");
   if (FETCHERS.has(name))
@@ -7886,7 +7916,7 @@ function orgCall(parsed, env, dir, sub, orgs) {
       }
   if (FETCHERS.has(name) && args.some((a) => (name === "wget" ? WGET_URL_FILE : URL_FILE).test(a.value)))
     return orgRefusal(`this ${name} call`, "it reads its URL from a file the hook cannot read", "Give the URL literally, in a call of its own, or report to your lead.");
-  const script = orgScript(name, args);
+  const script = orgScript(parsed, env);
   if (script)
     return orgRefusal(`this ${name} call`, `it runs ${script}`);
   if (name !== "gh" && name !== "git" && !FETCHERS.has(name))

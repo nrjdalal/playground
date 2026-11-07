@@ -92,7 +92,8 @@ git(GLM_REPO, "commit", "-q", "--allow-empty", "-m", "base")
 mkdirSync(join(GLM_REPO, "web", "next", "src"), { recursive: true })
 writeFileSync(join(GLM_REPO, "web", "next", "src", "x.ts"), "x\n")
 git(GLM_REPO, "add", ".")
-// The package scripts that run the tracker's and the DM's scripts, as the factory's root package.json names them, for the org-script rows.
+// The package scripts that run the tracker's and the DM's scripts, as the factory's root package.json names them, and their package's folder, for the org-script rows.
+mkdirSync(join(GLM_REPO, "packages", "scripts"), { recursive: true })
 writeFileSync(
   join(GLM_REPO, "package.json"),
   JSON.stringify({

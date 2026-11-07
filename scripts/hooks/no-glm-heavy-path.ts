@@ -1,7 +1,8 @@
 // PreToolUse hook, acting for a factory session (role.ts) that runs on GLM alone: refuses a git commit whose staged files, or a git push whose commits the remote does not hold, touch a path that is Opus work (GLM was handed UI work three times, against "truly tiny" mechanical work only), and while load5 is over glm.readOnlyLoad5 (15 by default) any install, node_modules clone, commit or push (a GLM worker pushed twice at load5 20 to 30), and, by the glm rule, a headless Claude run and every org tool. It fails closed on a commit or push whose file list it cannot read and on an org tool whose repository or policy it cannot read, and passes every other call.
 
+import { readFileSync } from "node:fs"
 import { loadavg } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 
 import { dataDir } from "../../packages/env/src/data-dir"
 import { guardedOrgs } from "../../packages/settings/src/ext"
@@ -407,32 +408,75 @@ const GH_API_TAKES = new Set([
   "-X",
   "--method",
 ])
-// The factory's own scripts that reach an org service, by the package script a runner's run names or the path a runtime runs, each with what it is to the org: the Linear readers and writers, and the DM sender, which posts to the owner's chat
-const ORG_SCRIPTS: [RegExp, RegExp, string][] = [
+// The folders of the factory's scripts that reach an org service, outside the tests' mirror of them, each with what it is to the org: the Linear readers and writers, and the DM sender, which posts to the owner's chat
+const ORG_SCRIPT_DIRS: [RegExp, string][] = [
   [
-    /^linear:/,
-    /(?:^|\/)packages\/scripts\/src\/linear-[\w-]+\//,
+    /(?<!\/tests)\/packages\/scripts\/src\/linear-[\w-]+(?:\/|$)/,
     "a Linear script, which reads or writes an org's tracker",
   ],
   [
-    /^dm$/,
-    /(?:^|\/)packages\/scripts\/src\/dm\//,
+    /(?<!\/tests)\/packages\/scripts\/src\/dm(?:\/|$)/,
     "the DM sender, which posts to the owner's chat",
   ],
 ]
-const RUNTIMES = new Set(["bun", "deno", "node", "tsx"])
-const PACKAGE_RUNNERS = new Set(["bun", "npm", "pnpm", "yarn"])
-// What org script a call runs: a runner's `run <script>` (yarn's bare `<script>` too), a runtime's script path (bun's `run <path>` too), or the playground CLI's dm command
-function orgScript(name: string, args: Word[]): string | undefined {
-  const [first, second] = args.filter((a) => !a.value.startsWith("-")).map((a) => a.value)
-  if (name === "playground" && first === "dm") return ORG_SCRIPTS[1][2]
-  const script =
-    PACKAGE_RUNNERS.has(name) && first === "run" ? second : name === "yarn" ? first : undefined
-  const path = RUNTIMES.has(name) ? (name === "bun" && first === "run" ? second : first) : undefined
-  return ORG_SCRIPTS.find(
-    ([key, at]) =>
-      (script !== undefined && key.test(script)) || (path !== undefined && at.test(path)),
-  )?.[2]
+// The programs that run a script, and their options that name the folder they run in
+const RUNNERS = new Set([
+  "bash",
+  "bun",
+  "bunx",
+  "deno",
+  "node",
+  "npm",
+  "npx",
+  "pnpm",
+  "sh",
+  "tsx",
+  "yarn",
+  "zsh",
+])
+const RUNNER_DIR = /^(?:--cwd|--dir|--prefix|-C)(?:=|$)/
+const scriptDir = (path: string | undefined) =>
+  path === undefined ? undefined : ORG_SCRIPT_DIRS.find(([at]) => at.test(path))?.[1]
+// The package scripts the package.json of a folder and of each folder above it names, the nearest first, each with the folder it runs in
+function packageScripts(dir: string): Map<string, { at: string; command: string }> {
+  const found = new Map<string, { at: string; command: string }>()
+  for (let at = dir; ; at = dirname(at)) {
+    try {
+      const { scripts } = JSON.parse(readFileSync(join(at, "package.json"), "utf8"))
+      for (const [name, command] of Object.entries(scripts ?? {}))
+        if (!found.has(name) && typeof command === "string") found.set(name, { at, command })
+    } catch {}
+    if (dirname(at) === at) return found
+  }
+}
+// What org script a call runs: a runner's word that resolves into an org script's folder from the folder it runs in, or names a package script whose command does, whatever the runner; or the playground CLI's dm command
+function orgScript(parsed: Parsed, env: Env): string | undefined {
+  const { args, name } = parsed
+  if (name === "playground" && args.find((a) => !a.value.startsWith("-"))?.value === "dm")
+    return ORG_SCRIPT_DIRS[1][1]
+  if (!RUNNERS.has(name)) return
+  let at = env.cwd
+  for (let i = 0; i < args.length; i++) {
+    const flag = RUNNER_DIR.exec(args[i].value)
+    if (!flag) continue
+    const value = flag[0].endsWith("=")
+      ? { ...args[i], value: args[i].value.slice(flag[0].length) }
+      : args[++i]
+    at = value ? pathOf(value, { ...env, cwd: at }) : undefined
+  }
+  if (!at) return
+  const scripts = packageScripts(at)
+  for (const a of args) {
+    if (a.value.startsWith("-") || unreadValue(a)) continue
+    const hit = scriptDir(pathOf(a, { ...env, cwd: at }))
+    if (hit) return hit
+    const script = scripts.get(a.value)
+    const ran = script?.command
+      .split(/\s+/)
+      .map((word) => scriptDir(resolve(script.at, word)))
+      .find(Boolean)
+    if (ran) return ran
+  }
 }
 // Claude Code's npm package, which a package runner runs as claude
 const CLAUDE_PACKAGE = /^@anthropic-ai\/claude-code(?:@\S*)?$/
@@ -441,9 +485,9 @@ const URL_FILE = /^(?:-[A-Za-z]*K|--config(?:=|$))/
 const WGET_URL_FILE = /^(?:-[A-Za-z]*i|--input-file(?:=|$))/
 // gh commands whose reach is the whole account, and the api endpoints outside a repository, an owner or a search that read no org's data
 const ACCOUNT_WIDE = new Set(["org", "status"])
-const PLAIN_ENDPOINTS = new Set(["rate_limit", "user"])
-// a GraphQL query reaches past one repository when it reads the viewer, a search, an owner or a node by its id
-const GRAPHQL_WIDE = /\bviewer\b|\b(?:node|nodes|organization|search|user)\s*\(/
+const PLAIN_ENDPOINTS = new Set(["markdown", "rate_limit", "user"])
+// gh's own placeholders for the checkout's repository, which gh fills from the checkout as it falls back
+const GH_PLACEHOLDERS = /^repos\/\{owner\}\/\{repo\}(?:\/|$)/
 // a GitHub repository a word names: a github.com URL in any of git's forms, an API URL's repos/, orgs/ or users/ path included, a raw or archive host's (raw.githubusercontent.com, codeload.github.com), or a REST path
 const GITHUB_URL =
   /(?:github\.com|githubusercontent\.com)[/:](?:(?:repos|orgs|users)\/)?([\w.-]+)(?:\/([\w.-]+))?/i
@@ -470,29 +514,7 @@ const urlOrg = (orgs: string[], value: string, rest = false) => {
 const unreadValue = (w: Word) =>
   w.unknown !== undefined || Boolean(w.reads?.length) || marked(w.value)
 
-const GRAPHQL_FIX = `Write the query literally, scoped to one repository (repository(owner: "<owner>", name: "<name>")), or use a REST endpoint under repos/<owner>/<name>/, or report to your lead.`
-// Why a gh api graphql call reaches past one repository: a query the hook cannot read (a file, a value), none at all, or one that is not scoped to a named repository or reads the viewer, a search, an owner or a node
-function graphqlReach(args: Word[]): string | undefined {
-  const { flags } = parseFlags(args.slice(1), GH_API_TAKES)
-  const queries = flags.filter(
-    (f) =>
-      ["-F", "-f", "--field", "--raw-field"].includes(f.name) &&
-      f.value?.value.startsWith("query="),
-  )
-  if (flags.some((f) => f.name === "--input"))
-    return "the hook cannot read the query it sends, held in a file"
-  if (queries.length === 0) return "it sends no query the hook can read"
-  for (const q of queries) {
-    const text = q.value!.value.slice(6)
-    if (
-      unreadValue(q.value!) ||
-      (q.name !== "-f" && q.name !== "--raw-field" && text.startsWith("@"))
-    )
-      return "the hook cannot read the query it sends, held in a file or a value"
-    if (!/\brepository\s*\(/.test(text) || GRAPHQL_WIDE.test(text))
-      return "its query is not scoped to one named repository, so it may read every org the account can"
-  }
-}
+const GRAPHQL_FIX = `Use a REST endpoint under repos/<owner>/<name>/ (gh api repos/<owner>/<name>/..., gh pr, gh issue), and reply to a review thread by REST, or report to your lead.`
 
 // A gh call: refused when it names a guarded org (by -R, a URL, a REST path or any word), names its repository through a value the hook cannot read, searches with no scope, or falls back to a guarded org's repository (GH_REPO, the checkout's remotes).
 function ghOrg(parsed: Parsed, env: Env, orgs: string[]): string | undefined {
@@ -537,13 +559,20 @@ function ghOrg(parsed: Parsed, env: Env, orgs: string[]): string | undefined {
       "the hook cannot tell which repository it reaches, since a value it cannot read names its endpoint",
       PLACE_FIX,
     )
-  const path = endpoint?.value.replace(/^\//, "").replace(/[?#].*$/, "")
-  if (path === "graphql") {
-    const wide = graphqlReach(args)
-    if (wide) return orgRefusal(what, wide, GRAPHQL_FIX)
-  } else if (
+  const path = endpoint?.value
+    .replace(/^https?:\/\/api\.github\.com\//i, "")
+    .replace(/^\//, "")
+    .replace(/[?#].*$/, "")
+  if (path === "graphql")
+    return orgRefusal(
+      what,
+      "a GraphQL query can walk from any repository to every org the account can read",
+      GRAPHQL_FIX,
+    )
+  if (
     path !== undefined &&
     !REST_PATH.test(path) &&
+    !GH_PLACEHOLDERS.test(path) &&
     !path.startsWith("search/") &&
     !PLAIN_ENDPOINTS.has(path)
   )
@@ -571,7 +600,7 @@ function ghOrg(parsed: Parsed, env: Env, orgs: string[]): string | undefined {
       "a search with no owner or repository reaches every org the account can read",
       `Scope it with --repo <owner>/<name> or --owner <owner>, or report to your lead.`,
     )
-  if (search || endpoint?.value === "graphql") return
+  if (search) return
   const implicit = implicitRepos(env, parsed.local)
   if (implicit.some((r) => r === undefined) || (!env.cwd && implicit.length === 0))
     return orgRefusal(
@@ -651,7 +680,7 @@ function orgCall(
   orgs: Orgs,
 ): string | undefined {
   const { args, name } = parsed
-  const runs = args.findIndex((a) => CLAUDE_PACKAGE.test(a.value))
+  const runs = args.findIndex((a) => CLAUDE_PACKAGE.test(a.value.replace(/^--package=/, "")))
   if (
     (name === "claude" && headless(parsed)) ||
     (runs >= 0 && headless({ ...parsed, args: args.slice(runs + 1) }))
@@ -675,7 +704,7 @@ function orgCall(
       "it reads its URL from a file the hook cannot read",
       "Give the URL literally, in a call of its own, or report to your lead.",
     )
-  const script = orgScript(name, args)
+  const script = orgScript(parsed, env)
   if (script) return orgRefusal(`this ${name} call`, `it runs ${script}`)
   if (name !== "gh" && name !== "git" && !FETCHERS.has(name)) return
   if (!Array.isArray(orgs))
