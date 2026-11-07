@@ -7988,5 +7988,6 @@ export {
   liveCheckout,
   mainCheckout,
   real,
-  turboWords
+  turboWords,
+  writeTargets
 };

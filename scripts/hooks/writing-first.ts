@@ -1,11 +1,24 @@
-// Hook on PreToolUse (Edit, MultiEdit, Skill, Write), UserPromptSubmit and SessionStart: refuses a write to an agent-facing doc until the session has loaded writing-for-agents (playbook's **writing** rule).
+// Hook on PreToolUse (Bash, Edit, MultiEdit, Skill, Write), UserPromptSubmit and SessionStart: refuses a write to an agent-facing doc, a Bash call's direct one included, until the session has loaded writing-for-agents (playbook's **writing** rule).
 import { existsSync, readdirSync, realpathSync, unlinkSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
 import { dataDirOf } from "../../packages/env/src/data-dir"
 import { UPSTREAM_SKILLS } from "../../packages/scripts/src/vendor-upstream/stage"
+import { writeTargets } from "./no-main-checkout"
 import { fromFactory } from "./role"
+import {
+  type Env,
+  knownVariables,
+  lex,
+  pathOf,
+  places,
+  run,
+  stdinOf,
+  type Visit,
+  type Word,
+  withDeadline,
+} from "./shell"
 
 export const SKILL = "writing-for-agents"
 
@@ -17,7 +30,7 @@ type Input = {
   prompt?: unknown
   session_id?: unknown
   source?: unknown
-  tool_input?: { file_path?: unknown; skill?: unknown } | null
+  tool_input?: { command?: unknown; file_path?: unknown; skill?: unknown } | null
   tool_name?: unknown
 }
 
@@ -153,17 +166,99 @@ function clear(input: Input, env: Environment) {
     if (name === session || name.startsWith(`${session}.`)) unlinkSync(join(marks(env), name))
 }
 
-async function judge(input: Input, env: Environment): Promise<string | undefined> {
-  const target = input.tool_input?.file_path
+// The refusal when the session has no mark and the skill is installed, else undefined.
+async function refusal(
+  input: Input,
+  env: Environment,
+  target: string,
+): Promise<string | undefined> {
   const file = markOf(input, env)
-  if (typeof target !== "string" || !file) return
+  if (!file || existsSync(file)) return
   const cwd = typeof input.cwd === "string" ? input.cwd : undefined
-  const path = real(resolve(cwd ?? "/", target))
-  if (!(await scoped(path, env)) || existsSync(file)) return
   if (!(await installed(env, cwd))) return
   const who =
     typeof input.agent_id === "string" && input.agent_id ? "this subagent" : "this session"
   return `writing-first hook refuses this ${String(input.tool_name)} to ${target}: it is an agent-facing doc, and ${who} has not loaded ${SKILL} since its last compaction. Call the Skill tool with skill "${SKILL}", or the scoped name your skill list shows for it (such as "ws-home:${SKILL}"), follow it, then retry this write (playbook's **writing** rule).`
+}
+
+async function judge(input: Input, env: Environment): Promise<string | undefined> {
+  const target = input.tool_input?.file_path
+  if (typeof target !== "string" || !markOf(input, env)) return
+  const cwd = typeof input.cwd === "string" ? input.cwd : undefined
+  if (!(await scoped(real(resolve(cwd ?? "/", target)), env))) return
+  return refusal(input, env, target)
+}
+
+// An interpreter of another language, by its name through a version suffix (python3.12, node18)
+const INTERPRETER = /^(bun|deno|node|nodejs|perl|python|ruby)[\d.]*$/
+// the options whose next word is inline code
+const CODE_FLAGS = new Set(["-c", "-e", "-E", "-p", "--eval", "--print"])
+// a word of code text that may name a file: one holding a slash, or a .md file's name
+const PATHLIKE = /[^\s'"`()[\]{},;:=<>|&$*?!]+/g
+
+// The words an inline interpreter script may write to: each path-like word of its code (an inline -c or -e program, or a heredoc or here-string it reads as its script) and of its arguments; none for a script run by name, which is the repo's own or the caller's file.
+async function inlineTargets(
+  name: string,
+  args: Word[],
+  cmd: Parameters<Visit>[0],
+  here: Env,
+): Promise<string[]> {
+  if (!INTERPRETER.test(name)) return []
+  const code: string[] = []
+  let k = 0
+  for (; k < args.length; k++) {
+    const v = args[k]!.value
+    if (CODE_FLAGS.has(v) && args[k + 1]) code.push(args[++k]!.value)
+    else if (!v.startsWith("-") || v === "-") break
+  }
+  const operand = args[k]?.value
+  if (code.length === 0) {
+    // a script file or a subcommand by name runs no inline code
+    if (operand !== undefined && operand !== "-") return []
+    const fed = await stdinOf(cmd, here)
+    if (fed.unknown) return []
+    code.push(fed.value)
+  }
+  const words = [
+    ...code.flatMap((text) => text.match(PATHLIKE) ?? []),
+    ...args.slice(k).map((a) => a.value),
+  ]
+  return words.filter((w) => w.includes("/") || w.endsWith(".md"))
+}
+
+// The first agent-facing doc a Bash call writes directly, as the call names it: a redirect's, tee's, cp's, mv's, install's or an in-place sed's or perl's target, or a path an inline interpreter script names; a target the reader cannot place is passed, since the hook nudges and fails open.
+async function bashTarget(input: Input, env: Environment): Promise<string | undefined> {
+  const command = input.tool_input?.command
+  if (typeof command !== "string") return
+  const directory = typeof input.cwd === "string" ? input.cwd : undefined
+  const home = env.HOME || homedir()
+  const known = knownVariables(command, env, directory)
+  const visit: Visit = async (cmd, parsed, at) => {
+    const { args, name } = parsed
+    for (const here of places(at, directory)) {
+      const named = writeTargets(cmd, name, args)
+      if (name === "install") named.push(...args.filter((a) => !a.value.startsWith("-")).slice(-1))
+      for (const word of named) {
+        const path = pathOf(word, here)
+        if (path && (await scoped(real(path), env))) return word.value
+      }
+      if (!here.cwd) continue
+      for (const word of await inlineTargets(name, args, cmd, here)) {
+        const path = resolve(here.cwd, word.replace(/^~(?=\/)/, home))
+        if (await scoped(real(path), env)) return word
+      }
+    }
+  }
+  const at: Env = {
+    cwd: directory,
+    cwdSure: directory,
+    files: new Map(),
+    known,
+    old: { dir: directory },
+    process: env,
+    vars: new Map(),
+  }
+  return run(lex(command, known), at, visit, true)
 }
 
 // Fails open: input it cannot read, or an error, lets the call run, so a fault here never blocks every write.
@@ -190,6 +285,13 @@ export async function check(
     }
     if (event === "PreToolUse" && WRITES.has(String(input.tool_name)))
       return await judge(input, env)
+    if (event === "PreToolUse" && input.tool_name === "Bash") {
+      const file = markOf(input, env)
+      if (!file || existsSync(file)) return
+      // past the walk's deadline the call runs, inside the hook's 15s timeout
+      const target = await withDeadline(8_000, () => bashTarget(input, env))
+      return target === undefined ? undefined : await refusal(input, env, target)
+    }
   } catch {
     return
   }
