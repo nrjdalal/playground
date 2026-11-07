@@ -29,7 +29,11 @@ import {
   HerdrRefused,
   HerdrTimedOut,
 } from "../../../../../../api/hono/src/lib/dashboard/herdr"
-import { clip, type Entry } from "../../../../../../api/hono/src/lib/dashboard/transcript"
+import {
+  clip,
+  TEXT_LIMIT,
+  type Entry,
+} from "../../../../../../api/hono/src/lib/dashboard/transcript"
 import type { Live, Worker } from "../../../../../../api/hono/src/lib/dashboard/workers"
 import {
   MESSAGE_MAX_CHARS,
@@ -1732,8 +1736,8 @@ describe("deliver to a herdr session", () => {
     test("a one-line message past the transcript's clip is proven by its clipped line", async () => {
       const { deps } = herdr(undefined, "s-long")
       const text = "long ".repeat(1000).trim()
-      deps.said = async () => [OLDER, tookLine(clip(text, 4000), deps.now(), 0)]
-      const id = "11111111-2222-4333-8444-00000000000e"
+      deps.said = async () => [OLDER, tookLine(clip(text, TEXT_LIMIT), deps.now(), 0)]
+      const id = "11111111-2222-4333-8444-000000001331"
       expect(await deliver({ actor, id, text, to: "dispatcher" }, deps)).toMatchObject({ ok: true })
     })
 

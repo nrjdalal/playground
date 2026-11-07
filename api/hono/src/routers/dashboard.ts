@@ -860,7 +860,7 @@ const dashboardRoutes = new Hono<{ Variables: Session }>()
         ...notFoundErrorResponses,
         409: errorResponse(
           "CONFLICT",
-          "The session cannot take it now: it waits on a picker (ON_PICKER), its input holds something (INPUT_NOT_EMPTY), Claude Code holds the message to take once free (QUEUED), or a held message was lost (LOST)",
+          "The session cannot take it now: it waits on a picker (ON_PICKER), its input holds something (INPUT_NOT_EMPTY), Claude Code has the message or takes it once free (QUEUED), or a held message was lost (LOST)",
         ),
         502: errorResponse(
           "CMUX_FAILED",

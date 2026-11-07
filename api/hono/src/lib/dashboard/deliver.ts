@@ -23,7 +23,7 @@ import { configDir, readsLive } from "@/lib/dashboard/fixture"
 import { pressEnter, prompt, promptOutcome } from "@/lib/dashboard/herdr"
 import { settingCommand, settingSummary, type SessionSetting } from "@/lib/dashboard/setting"
 import { readScreen } from "@/lib/dashboard/terminal"
-import { readTail, type Entry } from "@/lib/dashboard/transcript"
+import { readTail, TEXT_LIMIT, type Entry } from "@/lib/dashboard/transcript"
 import { listLive, type Live, type Worker } from "@/lib/dashboard/workers"
 import type { ErrorCode } from "@/lib/error"
 
@@ -418,19 +418,22 @@ export type Paste = { at: number; id?: string; images: string[]; text: string }
 // A transcript's clock and the API's can differ by a moment.
 const SAID_SLACK_MS = 5000
 
-// Pure: whether the session's transcript shows the paste went, a person's message since it opening on its first line of words (or, for files alone, carrying files): true, and a box holding it again is the owner's recall (Up brings an earlier message back), never the dashboard's unsent paste; false only when the entries read reach back past the paste and none is it; null when they do not reach back that far, so whether it went is not known.
+// Pure: whether the session's transcript shows the paste went, a person's message since it opening on its first line of words, or holding that line's start where the transcript clipped it at TEXT_LIMIT (or, for files alone, carrying files): true, and a box holding it again is the owner's recall (Up brings an earlier message back), never the dashboard's unsent paste; false only when the entries read reach back past the paste and none is it; null when they do not reach back that far, so whether it went is not known.
 export const wentIn = (entries: Entry[], paste: Paste): boolean | null => {
   const since = paste.at - SAID_SLACK_MS
   const first = flat(
     paste.text.split("\n").find((line) => line.trim() && !line.startsWith(ATTACHED_LABEL)) ?? "",
   )
+  const opens = (said: string): boolean =>
+    flat(said.replace(IMAGE_MARK, " ")).startsWith(first) ||
+    (said.length === TEXT_LIMIT &&
+      said.endsWith("…") &&
+      first.startsWith(flat(said.slice(0, -1).replace(IMAGE_MARK, " "))))
   const went = entries.some(
     (entry) =>
       entry.kind === "human" &&
       Date.parse(entry.at) >= since &&
-      (first
-        ? flat(entry.text.replace(IMAGE_MARK, " ")).startsWith(first)
-        : (entry.attachments?.length ?? 0) > 0),
+      (first ? opens(entry.text) : (entry.attachments?.length ?? 0) > 0),
   )
   if (went) return true
   const oldest = entries[0]
@@ -568,7 +571,7 @@ export async function deliver(
       const stillQueued = (at: number): Refusal => ({
         ...refused(
           "QUEUED",
-          `${worker.name} holds the message and takes it once it is free, after a compaction or its turn: it reads Delivered once its transcript shows it.`,
+          `${worker.name} has the message or takes it once it is free, after a compaction or its turn: it reads Delivered once its transcript shows it.`,
         ),
         pasted: true,
         queuedAt: new Date(at).toISOString(),

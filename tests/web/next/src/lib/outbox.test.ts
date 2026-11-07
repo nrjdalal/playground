@@ -948,7 +948,7 @@ test("a message Claude Code holds lands the moment its line is read, so it shows
 describe("a message Claude Code holds", () => {
   const QUEUED = {
     code: "QUEUED",
-    message: "dispatcher holds the message and takes it once it is free",
+    message: "dispatcher has the message or takes it once it is free",
   }
   const T1 = "2026-10-06T00:01:00.000Z"
 
@@ -967,7 +967,7 @@ describe("a message Claude Code holds", () => {
     expect(canRetry(held.code) && held.state === "failed").toBe(false)
     expect(retryNote(held)).toBeNull()
     expect(statusLine(held, { busy: true, label: "dispatcher", next: true })).toContain(
-      "holds it, to take once free",
+      "has it, or takes it once free",
     )
     // a compaction can run for minutes, so its tries are uncounted
     const later = onRefusal({ ...held, attempts: MAX_ATTEMPTS + 5 }, QUEUED, "dispatcher", 0)

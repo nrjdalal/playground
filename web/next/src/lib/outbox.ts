@@ -102,7 +102,7 @@ export const waitWhy = (code: string, label: string, limited = false): string | 
     case "ON_PICKER":
       return limited ? `${label} is at its usage limit` : `${label} is on a prompt`
     case QUEUED:
-      return `${label} holds it, to take once free`
+      return `${label} has it, or takes it once free`
     case "TOO_MANY_REQUESTS":
       return "too many messages this minute"
     case "UNKNOWN_ERROR":
