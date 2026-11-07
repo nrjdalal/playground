@@ -220,7 +220,7 @@
         ]
       },
       {
-        "matcher": "^(Bash|mcp__.+)$",
+        "matcher": "^(Bash|ListMcpResourcesTool|ReadMcpResourceTool|mcp__.+)$",
         "hooks": [
           {
             "type": "command",

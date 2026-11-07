@@ -7481,6 +7481,7 @@ var RUNNER_TAKES = new Set([
 var COPIERS = new Set(["cp", "ditto", "rsync"]);
 var BUSY_RUN = /\b(?:bun|cp|ditto|npm|pip[\d.]*|pipx|pnpm|python[\d.]*|rsync|uv|yarn)\b/i;
 var GIT_CALL = /\bgit\b[\s\S]*\b(?:commit|push)\b/i;
+var MCP_RESOURCE_TOOLS = new Set(["ListMcpResourcesTool", "ReadMcpResourceTool"]);
 var ORG_CALL = /\b(?:claude|curl|dm|gh|git|https?|wget|xh)\b|linear[-:]|mcp__/i;
 var RUNNER_CALL = /\b(?:bash|bun|bunx|deno|node|npm|npx|pnpm|sh|tsx|yarn|zsh)\b|\//i;
 var heavy = (path) => OPUS_PATHS.some((p) => p.endsWith("/") ? path.startsWith(p) : path === p);
@@ -8008,7 +8009,7 @@ async function inspect(raw, environment, load5, limit) {
     tool_input: toolInput,
     tool_name: tool
   } = JSON.parse(raw);
-  if (typeof tool === "string" && tool.startsWith("mcp__"))
+  if (typeof tool === "string" && (tool.startsWith("mcp__") || MCP_RESOURCE_TOOLS.has(tool)))
     return orgRefusal(`this ${tool} call`, "an MCP tool reaches an org's or an outside service's data");
   if (tool !== "Bash" || typeof toolInput?.command !== "string")
     return;

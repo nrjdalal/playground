@@ -169,7 +169,7 @@ Like the ticket guard, a hook that cannot start refuses the call, and one that t
   GLM's unused credits lapse at each reset (`~/.playground/zai-usage.json`, the Usage app), so the lead pulls the next eligible item forward while GLM has room before the reset.
   A GLM session's commit or push that touches the app's pages, the factory's hooks, spawn.sh, the merge and verify scripts, the commit hooks or the CI workflows is refused by the `no-glm-heavy-path` hook, naming the files, so that work goes to a Claude worker.
   While the Mac's 5-minute load is over 15, the same hook also refuses a GLM session's installs, node_modules clones, commits and pushes, so it waits for the load to fall.
-  The same hook refuses a GLM session's headless Claude run and its calls to an org's tracker, chat, docs and repos, and every MCP tool, so that work goes to a Claude worker.
+  The same hook refuses a GLM session's headless Claude run and its calls to an org's tracker, chat, docs and repos, and every MCP tool or resource read, so that work goes to a Claude worker.
   A session resumed with `--brief <file>` starts by reading that brief; without one, its first prompt has it act on the after-resume hook's instruction, so it re-arms its background tasks and re-sends its unanswered messages.
   A resumed session restarts any dev stack it served and re-arms its watches, CronList before CronCreate, since the resume kept its crons and dropped its background tasks.
   The factory no longer moves sessions to GLM at 98% usage (retired on Inbox #i827): the account rotation moves it between Claude accounts in its place (`scripts/ops/usage/login-flip.py`).
