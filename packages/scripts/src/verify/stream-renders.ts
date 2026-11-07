@@ -33,7 +33,7 @@ export const streamRendersResult = (
   }
 }
 
-// Runs before the page's own scripts: counts each component's renders through the DevTools hook React reports every commit to, and keeps the socket's first workers frame, which names Playground's own session. A fiber rendered when it carries the flag React sets on one it rendered (PerformedWork) and is not the object the last commit's tree held, since a subtree React skipped keeps its old fibers, flags and all.
+// Runs before the page's own scripts: counts each component's renders through the DevTools hook React reports every commit to, and keeps the socket's first workers frame, which names Playground's own session. A fiber rendered when it carries the flag React sets on one it rendered (PerformedWork) and is not the object its root's last commit held, since a subtree React skipped keeps its old fibers, flags and all; each root keeps its own, since the development build's overlay commits a root of its own between the app's.
 export const STREAM_RENDERS_SCRIPT = `(() => {
   const PerformedWork = 1
   const counts = new Map()
@@ -42,10 +42,11 @@ export const STREAM_RENDERS_SCRIPT = `(() => {
     if (typeof type === "function") return type.displayName || type.name || null
     return null
   }
-  let held = new WeakSet()
+  const heldOf = new WeakMap()
   const walk = (root) => {
+    const held = heldOf.get(root) ?? new WeakSet()
     const seen = new WeakSet()
-    const stack = [root]
+    const stack = [root.current]
     while (stack.length) {
       const fiber = stack.pop()
       seen.add(fiber)
@@ -57,7 +58,7 @@ export const STREAM_RENDERS_SCRIPT = `(() => {
       }
       for (let child = fiber.child; child; child = child.sibling) stack.push(child)
     }
-    held = seen
+    heldOf.set(root, seen)
   }
   const markHeld = (top, seen) => {
     const stack = [top.child]
@@ -77,7 +78,7 @@ export const STREAM_RENDERS_SCRIPT = `(() => {
     listeners: {},
     off: () => {},
     on: () => {},
-    onCommitFiberRoot: (id, root) => { walk(root.current) },
+    onCommitFiberRoot: (id, root) => { walk(root) },
     onCommitFiberUnmount: () => {},
     onPostCommitFiberRoot: () => {},
     renderers,

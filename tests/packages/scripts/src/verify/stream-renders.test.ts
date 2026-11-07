@@ -51,12 +51,17 @@ describe("STREAM_RENDERS_SCRIPT", () => {
   })
 
   // a subtree React skipped keeps the fibers it had, PerformedWork flag and all, so only a fiber new since the last commit counts
-  test("counts a fiber React rendered this commit, and none in a subtree it skipped", () => {
+  test("counts a fiber React rendered this commit, and none in a subtree it skipped, whatever another root commits between", () => {
     const hook = installed()
     const leaf = { child: null, flags: 1, sibling: null, type: StepRow }
     const skipped = { child: leaf, flags: 1, sibling: null, type: Stream }
-    hook.onCommitFiberRoot(1, { current: { child: skipped, flags: 0, sibling: null, type: null } })
+    const app: { current: object } = {
+      current: { child: skipped, flags: 0, sibling: null, type: null },
+    }
+    hook.onCommitFiberRoot(1, app)
     expect(counts()).toEqual({ StepRow: 1, Stream: 1 })
+    // the development build's overlay is a root of its own, committing between the app's
+    hook.onCommitFiberRoot(1, { current: { child: null, flags: 0, sibling: null, type: null } })
     const redrawn = { child: null, flags: 1, sibling: null, type: StepRow }
     // the next commit: a bailed-out parent holds the skipped subtree as it was, beside a new row that drew
     const parent = {
@@ -65,7 +70,8 @@ describe("STREAM_RENDERS_SCRIPT", () => {
       sibling: { child: redrawn, flags: 1, sibling: null, type: Stream },
       type: null,
     }
-    hook.onCommitFiberRoot(1, { current: { child: parent, flags: 0, sibling: null, type: null } })
+    app.current = { child: parent, flags: 0, sibling: null, type: null }
+    hook.onCommitFiberRoot(1, app)
     expect(counts()).toEqual({ StepRow: 2, Stream: 2 })
   })
 })
