@@ -33,7 +33,7 @@ export const streamRendersResult = (
   }
 }
 
-// Runs before the page's own scripts: counts each component's renders through the DevTools hook React reports every commit to, by the flag React sets on a fiber it rendered (PerformedWork), and keeps the socket's first workers frame, which names Playground's own session.
+// Runs before the page's own scripts: counts each component's renders through the DevTools hook React reports every commit to, and keeps the socket's first workers frame, which names Playground's own session. A fiber rendered when it carries the flag React sets on one it rendered (PerformedWork) and is not the object the last commit's tree held, since a subtree React skipped keeps its old fibers, flags and all.
 export const STREAM_RENDERS_SCRIPT = `(() => {
   const PerformedWork = 1
   const counts = new Map()
@@ -42,16 +42,30 @@ export const STREAM_RENDERS_SCRIPT = `(() => {
     if (typeof type === "function") return type.displayName || type.name || null
     return null
   }
+  let held = new WeakSet()
   const walk = (root) => {
-    let fiber = root
-    while (fiber) {
+    const seen = new WeakSet()
+    const stack = [root]
+    while (stack.length) {
+      const fiber = stack.pop()
+      seen.add(fiber)
+      // the same object as last commit: React skipped it and everything under it
+      if (held.has(fiber)) { markHeld(fiber, seen); continue }
       if ((fiber.flags & PerformedWork) === PerformedWork) {
         const name = nameOf(fiber)
         if (name) counts.set(name, (counts.get(name) || 0) + 1)
       }
-      if (fiber.child) { fiber = fiber.child; continue }
-      while (fiber && !fiber.sibling) { fiber = fiber.return; if (!fiber || fiber === root.return) return }
-      fiber = fiber.sibling
+      for (let child = fiber.child; child; child = child.sibling) stack.push(child)
+    }
+    held = seen
+  }
+  const markHeld = (top, seen) => {
+    const stack = [top.child]
+    while (stack.length) {
+      const fiber = stack.pop()
+      if (!fiber) continue
+      seen.add(fiber)
+      stack.push(fiber.child, fiber.sibling)
     }
   }
   const renderers = new Map()
