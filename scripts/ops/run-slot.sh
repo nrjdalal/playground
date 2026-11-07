@@ -1259,6 +1259,8 @@ DOCKER_SLOT=""
 CHILD=""
 # seconds between a waiter's looks, and a held clone's (the tests shorten both)
 POLL=${RUN_SLOT_POLL:-15}
+# the longest a commit or quick start waits on load5 (issue 1385)
+LOAD_WAIT=${RUN_SLOT_LOAD_WAIT:-300}
 CLONE_POLL=${RUN_SLOT_POLL:-5}
 # the seconds a clone waits after the last clone's end, so fseventsd settles between two clones, and the load5 under the brake (clone_brake) it waits within, since a clone lifts load1 by about 15 for a minute or two, about 4 on load5 (estimated)
 CLONE_GAP=180
@@ -2046,7 +2048,16 @@ if [ -n "$KIND" ]; then
   # bash 5.2 can fail to parse the TERM trap while it expands a "$(...)" and then drop the loop it was in (measured on the runner host:
   # the waiter ran its command with no slot), so each wait checks it ended as it should, and the waiter stops when it did not
   clone_held && { echo "run-slot.sh: run-slot.clone-off holds this clone, so $WHO stops" >&2; exit 143; }
-  # the quick slot takes no load wait: its load comes mostly from outside run-slot and one slot adds about a core at most, so a hold kept 44 quick runs waiting 201 min for 8 min of work (issue 547); ran_long sends a line that runs long to the queue
+  # a commit or quick start waits, holding no slot, while load5 is at or over load_line's cap, read at each poll, for LOAD_WAIT s at most, so the owner's cap holds with no pause by hand and no commit waits for ever (issue 1385, 7 Nov: 7 such starts at load5 17 to 19 against a cap of 15; issue 547's unbounded hold kept 44 quick runs waiting 201 min for 8 min of work); the merge train and the dashboard go on, as slot_open lets them, and ran_long sends a quick line that runs long to the queue
+  if [ "$KIND" != clone ] && [ "$WHO" != ops-dashboard ] && [ "$WHO" != ops-merge-train ]; then
+    LT0=$SECONDS LSAID=
+    while LCAP=$(load_line) && L5=$(load5) && [ -n "$L5" ] && [ "$L5" -ge "$LCAP" ]; do
+      [ $((SECONDS - LT0)) -ge "$LOAD_WAIT" ] && { echo "run-slot.sh: load5 $L5 is still at or over $LCAP after $((SECONDS - LT0))s, so this $KIND run starts" >&2; break; }
+      [ -z "$LSAID" ] && { echo "run-slot.sh: waiting for load5 under $LCAP (now $L5) before the $KIND slot, ${LOAD_WAIT}s at most" >&2; LSAID=1; }
+      reread
+      sleep "$POLL"
+    done
+  fi
   # the clone's spacing is shared, so one waiter works it out about every 15 to 24 s for all of them (issue 1338): run-slot.clone-verdict holds the CPU slots' and
   # the clone lane's holder lines it was worked out under, then its verdict, and a waiter takes one written no earlier than its own last tick under the same lines, so a verdict serves up to 48 s
   CLONE_VERDICT="$OPS/run-slot.clone-verdict"
