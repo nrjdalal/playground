@@ -5,3 +5,4 @@ One line per finalized decision, the decision in one sentence, then `->` and its
 - Slack links go in messages as link chips in their full shape, never bare URLs; the `no-bare-slack-link` hook refuses a bare one -> #761
 - An org's scope is its ticket and its product team's decisions; creative liberty is Playground's alone, since an org has its own process -> #714
 - Labs is the spec for behaviour and the Product team answers its product questions, as triage-and-implement's Labs line holds -> #714
+- An idle worker or runner of 200k+ tokens gets `/compact` 50 to 58 minutes after its last turn, a trial on the owner's standing yes that keeps or reverts on its A/B -> .agents/adr/0020-an-idle-session-compacts-before-its-cache-expires.md
