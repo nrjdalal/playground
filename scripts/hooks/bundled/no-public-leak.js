@@ -2920,9 +2920,6 @@ function handlePipeResult(left, next, ctx) {
   }
   return next._zod.run({ value: left.value, issues: left.issues }, ctx);
 }
-var $ZodPreprocess = /* @__PURE__ */ $constructor("$ZodPreprocess", (inst, def) => {
-  $ZodPipe.init(inst, def);
-});
 var $ZodReadonly = /* @__PURE__ */ $constructor("$ZodReadonly", (inst, def) => {
   $ZodType.init(inst, def);
   defineLazyInternal(inst, "propValues", (zod) => zod.def.innerType._zod.propValues);
@@ -5844,10 +5841,6 @@ function pipe(in_, out) {
     out
   });
 }
-var ZodPreprocess = /* @__PURE__ */ $constructor("ZodPreprocess", (inst, def) => {
-  ZodPipe.init(inst, def);
-  $ZodPreprocess.init(inst, def);
-});
 var ZodReadonly = /* @__PURE__ */ $constructor("ZodReadonly", (inst, def) => {
   $ZodReadonly.init(inst, def);
   ZodType.init(inst, def);
@@ -5870,13 +5863,6 @@ function refine(fn, _params = {}) {
 }
 function superRefine(fn, params) {
   return _superRefine(fn, params);
-}
-function preprocess(fn, schema) {
-  return new ZodPreprocess({
-    type: "pipe",
-    in: transform(fn),
-    out: schema
-  });
 }
 // packages/settings/src/rendered.ts
 import { existsSync, readFileSync } from "fs";
@@ -6059,13 +6045,7 @@ var STALE_MS = 5 * 60000;
 var ATTACHMENT_LIMIT = 50 * 1024 * 1024;
 
 // packages/settings/src/jobs.ts
-var withoutNeedsCmux = (row) => {
-  if (!row || typeof row !== "object" || !("needsCmux" in row))
-    return row;
-  const { needsCmux, ...rest } = row;
-  return needsCmux === true && rest.runtime === undefined ? { ...rest, runtime: "herdr" } : rest;
-};
-var jobFields = strictObject({
+var jobSchema = strictObject({
   callsModel: boolean2(),
   command: string2().min(1).optional(),
   config: record(string2(), unknown()).optional(),
@@ -6079,15 +6059,20 @@ var jobFields = strictObject({
   neverPause: boolean2().optional(),
   pausedFor: string2().optional(),
   program: array(string2().min(1)).min(1).optional(),
-  runtime: preprocess((runtime) => runtime === "cmux" || runtime === "auto" ? "herdr" : runtime, _enum(["herdr"])).optional(),
+  runtime: _enum(["herdr"]).optional(),
   schedule: union([
     strictObject({ always: literal(true) }),
     strictObject({ every: number2().int().positive() })
   ]),
   stop: string2().min(1).optional()
 });
-var jobSchema = preprocess(withoutNeedsCmux, jobFields);
-var jobRowSchema = preprocess(withoutNeedsCmux, jobFields.partial());
+var fromStored = (row) => {
+  if (!row || typeof row !== "object" || Array.isArray(row))
+    return row;
+  const kept = Object.fromEntries(Object.entries(row).filter(([key]) => Object.hasOwn(jobSchema.shape, key)));
+  return kept.runtime === undefined ? kept : { ...kept, runtime: "herdr" };
+};
+var jobRowSchema = jobSchema.partial();
 var jobKey = (name) => `jobs.${name.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase())}`;
 var terminal = (name, command, job) => ({
   callsModel: false,
@@ -6208,7 +6193,8 @@ var jobSettings = defineSettings(Object.fromEntries(Object.entries(JOBS).map(([n
     default: job,
     description: `The ${name} ops job: ${job.description}`,
     merge: true,
-    schema: jobRowSchema
+    schema: jobRowSchema,
+    stored: fromStored
   }
 ])));
 var REGISTRY_KEYS = new Set([...Object.keys(JOBS).map(jobKey), ...Object.values(OLD_KEYS).flat()]);

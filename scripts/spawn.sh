@@ -69,7 +69,7 @@ set -euo pipefail
 #   --runtime herdr    with any mode but restore or close, anywhere among its words: the session opens in herdr, on the playground server of ~/.playground/herdr (PLAYGROUND_HERDR_DIR and PLAYGROUND_HERDR_SESSION move it), by the binary its pin.json names alone; a column's anchor is then a herdr pane id (w1:p2, or lettered as wN:p1A), its spawner's own being $HERDR_PANE_ID. The session's name is at most 32 characters, herdr's limit for an agent's name.
 #   --runtime cmux     is refused: spawn.sh starts nothing in cmux
 #     With no --runtime, every start and resume opens in herdr, whatever terminal its spawner runs in.
-#     The runtime is recorded at the start in ~/.playground/runtimes/<name>; a resume whose pin reads cmux opens in herdr and rewrites the pin.
+#     The runtime is recorded at every start and resume in ~/.playground/runtimes/<name>, a resume rewriting whatever word the pin held.
 #
 # <name> is lowercase words joined by hyphens that give its kind: a new one from `bun run name <kind>` (<id>-<kind>), an old `<kind>-<words>` one, or a manager's own; the mode gives the kind, and a name that gives none or another is refused, but on a resume.
 # <brief> is a file under ~/.playground. Every session runs at high effort unless --effort names another,
@@ -985,14 +985,6 @@ for file in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
     except ValueError:
         skip(name, "its exec line does not parse")
         continue
-    try:
-        runtime = open(os.path.join(lw, "runtimes", name)).read().strip()
-    except (OSError, ValueError):
-        skip(name, "it has no runtime pin")
-        continue
-    if runtime != "herdr":
-        skip(name, "it runs in " + (runtime if runtime.isalnum() else "another runtime") + ", not herdr")
-        continue
     extras = words[6:]
     keys = extras[::2]
     if (
@@ -1286,16 +1278,8 @@ if [ "$MODE" = resume ]; then
     refuse "no backend pin for $NAME: it cannot know how $NAME ran. Resume it with --backend glm or --backend claude, whichever it ran on, which records the pin."
   fi
 fi
-# A resume runs in herdr: a pin that reads cmux, from a session that started there, opens in herdr and is rewritten below.
+# Every start and resume runs in herdr, the one runtime: a resume reads no pin, and the write below rewrites it whatever word it held.
 RUNTIMES="$DATA/runtimes"
-if [ "$MODE" = resume ] && [ -z "$RUNTIME" ] && [ -e "$RUNTIMES/$NAME" ]; then
-  RUNTIME=$(cat "$RUNTIMES/$NAME") || refuse "it cannot read the runtime pin for $NAME"
-  case "$RUNTIME" in
-    cmux) RUNTIME=herdr ;;
-    herdr) ;;
-    *) refuse "the runtime pin for $NAME reads neither cmux nor herdr. Fix or remove $SHOWN/runtimes/$NAME, or resume with --runtime herdr." ;;
-  esac
-fi
 case "${RUNTIME:=herdr}" in
   herdr) ;;
   *) refuse "--runtime takes herdr, not $RUNTIME" ;;
