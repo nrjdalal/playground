@@ -258,14 +258,14 @@ describe("the card", () => {
     const text = cardOf(
       inputs({
         lines: [
-          line("ABCDEFG-123456", { mine: true, urgency: "Urgent" }),
+          line("MADEXYZ-123456", { mine: true, urgency: "Urgent" }),
           line("ABC-2"),
           line("ABC-3", { theirs: true }),
-          line("ABCDEFG-654321", { urgency: undefined }),
+          line("MADEXYZ-654321", { urgency: undefined }),
           line("ABC-4"),
         ],
-        prs: { "ABCDEFG-123456": pr },
-        reopened: { "ABCDEFG-123456": "2026-11-05T09:40:00Z" },
+        prs: { "MADEXYZ-123456": pr },
+        reopened: { "MADEXYZ-123456": "2026-11-05T09:40:00Z" },
         skips: { "ABC-2": "devops", "ABC-4": "a made-up area with a long name" },
       }),
       {},
@@ -278,7 +278,7 @@ describe("the card", () => {
     for (const row of code) expect([row, row.length <= ASK_CODE_COLUMNS]).toEqual([row, true])
     expect(code.filter((row) => row.endsWith("…"))).toEqual([
       "ABC-4 · skipped, a made-up area with…",
-      "ABCDEFG-654321 · no urgency · not ta…",
+      "MADEXYZ-654321 · no urgency · not ta…",
     ])
   })
 })

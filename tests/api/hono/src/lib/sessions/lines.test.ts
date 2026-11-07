@@ -250,10 +250,10 @@ describe("toEntry", () => {
       message: {
         role: "user",
         content:
-          "<command-name>/claim</command-name>\n<command-args>CEDAR-1109 if a < b</command-args>",
+          "<command-name>/claim</command-name>\n<command-args>MADECEDAR-1109 if a < b</command-args>",
       },
     })
-    expect(entry.text).toBe("/claim CEDAR-1109 if a < b")
+    expect(entry.text).toBe("/claim MADECEDAR-1109 if a < b")
   })
 
   test("a prompt that quotes a command tag partway through stays the whole prompt", () => {
@@ -626,11 +626,11 @@ describe("addFacts", () => {
         type: "user",
         uuid: "p",
         entrypoint: "sdk-cli",
-        message: { content: "/claim DUNE-2045 dry run\nmore" },
+        message: { content: "/claim MADEDUNE-2045 dry run\nmore" },
       },
       { type: "user", uuid: "h", origin: { kind: "human" }, message: { content: "later ask" } },
     ])
-    expect(facts.task).toBe("/claim DUNE-2045 dry run")
+    expect(facts.task).toBe("/claim MADEDUNE-2045 dry run")
     expect(fold([{ type: "agent-name", agentName: "x" }]).task).toBeNull()
   })
 

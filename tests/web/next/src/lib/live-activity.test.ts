@@ -66,7 +66,7 @@ describe("stepSummary", () => {
   })
 
   test("an unknown tool reads as its label and its summary", () => {
-    const mcp = call("m", "mcp__linear__get_issue", { id: "CEDAR-1" }, "")
+    const mcp = call("m", "mcp__linear__get_issue", { id: "MADECEDAR-1" }, "")
     expect(summaryOf(mcp)).toBe("linear · get_issue")
     const other = call("o", "Frobnicate", { query: "x" }, "the widgets")
     expect(summaryOf(other)).toBe("Frobnicate the widgets")
