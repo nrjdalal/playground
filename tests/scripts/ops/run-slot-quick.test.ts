@@ -390,9 +390,10 @@ describe("a quick run takes its own slot past a full queue", () => {
     expect(took).toBe("run-slot-quick")
   })
 
-  // a bare --cwd before install is no install: bun 1.4.4 runs that shape as package.json's install script (Script not found "install"), as it misreads one before test
-  test("but not a bun --cwd <dir> install, which bun runs as package.json's install script", async () => {
-    expect(await quick(["bun", "--cwd", "/x/worktrees/a", "install"])).toBe(false)
+  // a bare --cwd before install is no install: bun 1.4.4 runs that shape as package.json's install script (Script not found "install"), as it misreads one before test; it still runs as a light run, on the queue's small share
+  test("but a bun --cwd <dir> install, which bun runs as package.json's install script, takes the queue", async () => {
+    expect(await quick(["bun", "--cwd", "/x/worktrees/a", "install"])).toBe(true)
+    expect(took).toBe("run-slot-2")
   })
 
   test("git push", async () => {
