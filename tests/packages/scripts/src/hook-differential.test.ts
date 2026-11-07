@@ -21,6 +21,7 @@ import {
   canaryTree,
   cwdsOf,
   envOf,
+  GLM_BASE_URL,
   keyOf,
   linesOf,
   parse,
@@ -621,6 +622,51 @@ describe("a replay of a mark-reading hook", () => {
   })
 })
 
+describe("a GLM replay", () => {
+  test("--glm takes a replay alone, and its env points ANTHROPIC_BASE_URL where no-glm-heavy-path reads a GLM session", async () => {
+    const base = ["--canary", "HEAD", "--hook", "x"]
+    expect(parse(["replay", ...base, "--glm"])?.glm).toBe(true)
+    expect(parse(["replay", ...base])?.glm).toBe(false)
+    expect(parse(["sweep", "--forms", "f.ts", ...base, "--glm"])).toBeUndefined()
+    const call = { command: "ls", cwd: "/h" }
+    const glm = envOf({ data: "/d", glm: true, home: "/h" })(call)
+    expect(glm).toEqual({
+      ANTHROPIC_BASE_URL: GLM_BASE_URL,
+      HOME: "/h",
+      PATH: process.env.PATH,
+      PLAYGROUND_DATA_DIR: "/d",
+    })
+    const { onGlm } = await import("../../../../scripts/hooks/no-glm-heavy-path")
+    const raw = JSON.stringify({ session_id: "s1" })
+    expect(await onGlm(raw, glm)).toBe(true)
+    expect(await onGlm(raw, envOf({ data: "/d", home: "/h" })(call))).toBe(false)
+  })
+
+  test("--glm keeps each Bash call a GLM model made, by the call's own model, from every transcript on disk whatever its age", async () => {
+    const projects = join(DIR, "glm-projects")
+    mkdirSync(join(projects, "p"), { recursive: true })
+    const modelLine = (command: string, model: string, timestamp = new Date().toISOString()) =>
+      JSON.stringify({
+        cwd: "/h",
+        message: { content: [{ input: { command }, name: "Bash", type: "tool_use" }], model },
+        timestamp,
+        type: "assistant",
+      })
+    writeFileSync(join(projects, "p", "claude.jsonl"), modelLine("echo a", "claude-opus-5-5"))
+    const old = join(projects, "p", "old-glm.jsonl")
+    writeFileSync(old, modelLine("echo b", "glm-5.3", "2000-01-01T00:00:00Z"))
+    utimesSync(old, 1_000, 1_000)
+    writeFileSync(
+      join(projects, "p", "mixed.jsonl"),
+      [modelLine("echo c", "glm-5.3-flash"), modelLine("echo d", "claude-sonnet-5-5")].join("\n"),
+    )
+    const since = Date.now() - 3600_000
+    const commands = (list: { command: string }[]) => list.map((c) => c.command).toSorted()
+    expect(commands(await calls(projects, since, false, true))).toEqual(["echo b", "echo c"])
+    expect(commands(await calls(projects, since))).toEqual(["echo a", "echo c", "echo d"])
+  })
+})
+
 // A hook whose check() takes the main checkout reads it from its own folder when none is given, and canary's unpacked tree is no git checkout, so the differential hands both sides the head's (PG-996)
 describe("a hook that takes the main checkout", () => {
   // refuses a command that names its main checkout; with none given, main is the folder it would read from its own tree
@@ -1121,6 +1167,59 @@ export const check = (raw: string, env: Record<string, string | undefined>) =>
     )
     expect(done.stderr.toString()).toContain("refused")
     expect(readdirSync(join(at, ".playground", "writing-first"))).toEqual(["s1"])
+  })
+
+  test("a --glm replay reads a GLM session's call from before the window as a GLM session's, and its counts line says so", () => {
+    const at = home("glm")
+    const { root } = repo("glm-repo")
+    // refuses a call holding REFUSE from a session on the GLM endpoint
+    writeFileSync(
+      join(root, "scripts", "hooks", "g.ts"),
+      `export const check = (raw: string, env: Record<string, string | undefined>) =>
+  raw.includes("REFUSE") && /api\\.z\\.ai/.test(env.ANTHROPIC_BASE_URL ?? "") ? "refused" : undefined
+`,
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "head")
+    mkdirSync(join(at, ".claude", "projects", "p"), { recursive: true })
+    const transcript = join(at, ".claude", "projects", "p", "s1.jsonl")
+    writeFileSync(
+      transcript,
+      JSON.stringify({
+        cwd: join(at, "w"),
+        message: {
+          content: [{ input: { command: "ls REFUSE" }, name: "Bash", type: "tool_use" }],
+          model: "glm-5.3",
+        },
+        sessionId: "s1",
+        timestamp: "2000-01-01T00:00:00Z",
+        type: "assistant",
+      }),
+    )
+    utimesSync(transcript, 1_000, 1_000)
+    const counts = (...more: string[]) => {
+      const done = run(at, root, ["replay", "--canary", "HEAD~1", "--hook", "g", ...more], {
+        RUN_SLOT_NICE: "10",
+      })
+      expect(done.exitCode).toBe(0)
+      return JSON.parse(done.stdout.toString().trim())
+    }
+    expect(counts()).toMatchObject({ calls: 0 })
+    expect(counts("--glm")).toEqual({
+      hook: "g",
+      baseline: "allow-all: canary has no such hook",
+      glm: true,
+      calls: 1,
+      "newly allowed": 0,
+      "newly refused": 1,
+      same: 0,
+    })
+  })
+
+  test("--glm moves the key, so a result is never reused for the other read", () => {
+    const { root, sha } = repo("glm-key-repo")
+    const replayArgs = ["replay", "--canary", "HEAD", "--hook", "x"]
+    expect(keyAt(root, [...replayArgs, "--glm"], sha)).not.toBe(keyAt(root, replayArgs, sha))
   })
 
   test("--role moves the key, so a result is never reused for another role", () => {
