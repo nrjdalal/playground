@@ -76,20 +76,23 @@ test("bun run ask example prints each template, and the usage for a kind it has 
     ])
     return { code, stderr, stdout }
   }
-  for (const kind of ["code", "decision", "delete", "slack", "ui"] as const) {
+  for (const kind of ["code", "decision", "delete", "questions", "slack", "ui"] as const) {
     const printed = await example(kind)
     expect(printed.code).toBe(0)
     expect(JSON.parse(printed.stdout)).toEqual(ASK_EXAMPLES[kind])
   }
   const unknown = await example("poem")
   expect(unknown.code).toBe(2)
-  expect(unknown.stderr).toContain("bun run ask example <code|decision|delete|slack|ui>")
+  expect(unknown.stderr).toContain("bun run ask example <code|decision|delete|questions|slack|ui>")
 })
 
 describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
   let container = ""
   let url = ""
-  let answer: (id: string, input?: { action: "approve" | "deny"; option?: number }) => Promise<void>
+  let answer: (
+    id: string,
+    input?: { action: "approve" | "deny"; option?: number; options?: number[] },
+  ) => Promise<void>
   let dismiss: (id: string) => Promise<void>
   let answerRelayed: (id: string) => Promise<{ delivery: unknown }>
   let reply: (tag: string) => Promise<void>
@@ -370,6 +373,30 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect((await cli(["get", none.id])).stderr).toContain("ask: picked C: None of these")
   })
 
+  test("get prints each question's pick for a multi-question answer (#1250)", async () => {
+    const multi = {
+      from: "worker-envy",
+      preview: {
+        questions: [
+          {
+            options: [{ label: "Staging first" }, { label: "Straight to main" }],
+            question: "Where first?",
+          },
+          { options: [{ label: "Now" }, { label: "After the next ship" }], question: "When?" },
+        ],
+        text: "Pick for each.",
+        type: "ask",
+      },
+      title: "How should it roll out?",
+    }
+    const posted = await post(multi)
+    expect((await cli(["get", posted.id])).stderr).not.toContain("ask: picked")
+    await answer(posted.id, { action: "approve", options: [0, 1] })
+    const got = await cli(["get", posted.tag])
+    expect(got.stderr).toContain("ask: picked A: Staging first · B: After the next ship")
+    expect(JSON.parse(got.stdout).answer).toMatchObject({ choice: "approve", options: [0, 1] })
+  })
+
   test("get --ack prints a dismissed update as it is, since an update takes no answer to mark read", async () => {
     const { id } = await post({
       from: "builder",
@@ -534,6 +561,47 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(await listed(["--from", "worker-nobody"])).toBe("")
   })
 
+  // PG-1349: ops-tick's focus card resolves once no ask that came in while focus stood is open, so open reads a window of posting times
+  test("open --since and --until keep the items posted in that window alone, and refuse a time they cannot read", async () => {
+    // the database stamps createdAt, so the window is read from the items themselves
+    const postedAt = async (id: string) =>
+      Date.parse(JSON.parse((await cli(["get", id])).stdout).createdAt)
+    const before = await post({
+      ...DECISION,
+      from: "worker-open-w",
+      title: "Ship the one before the window?",
+    })
+    const since = new Date((await postedAt(before.id)) + 1).toISOString()
+    await Bun.sleep(5)
+    const inside = await post({
+      ...DECISION,
+      from: "worker-open-w",
+      title: "Ship the one in the window?",
+    })
+    const until = new Date((await postedAt(inside.id)) + 1).toISOString()
+    await Bun.sleep(5)
+    const after = await post({
+      ...DECISION,
+      from: "worker-open-w",
+      title: "Ship the one after the window?",
+    })
+    const listed = await cli([
+      "open",
+      "--from",
+      "worker-open-w",
+      "--since",
+      since,
+      "--until",
+      until,
+    ])
+    expect(listed.code).toBe(0)
+    expect(listed.stdout).toContain(`${inside.tag} decision from worker-open-w`)
+    expect(listed.stdout).not.toContain(`${before.tag} `)
+    expect(listed.stdout).not.toContain(`${after.tag} `)
+    expect((await cli(["open", "--since", "soon"])).stderr).toContain("--since takes an ISO time")
+    expect((await cli(["open", "--until", "later"])).stderr).toContain("--until takes an ISO time")
+  })
+
   // a chat-replied item the owner had moved to Done kept its open status, so it still listed as open
   test("open lists an item put away with Later and one replied to in chat until it moves to Done, and never an update", async () => {
     const snoozed = await post({
@@ -565,7 +633,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(after).not.toContain(`${replied.tag} `)
   })
 
-  test("resolve closes the poster's own alert update; another session, a non-alert item and an unknown id are refused (#658)", async () => {
+  test("resolve closes the poster's own alert update; another session, a decision and an unknown id are refused (#658)", async () => {
     const alertPost = {
       from: "worker-envy",
       kind: "update",
@@ -588,7 +656,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
     expect(refused.stderr).toContain("Only worker-envy")
     // a decision settles, it does not resolve; an unknown id is unknown; no --by is usage
     expect((await cli(["resolve", (await post()).id, "--by", "worker-envy"])).stderr).toContain(
-      "Only an alert update resolves",
+      "Only an update resolves",
     )
     expect((await cli(["resolve", "#i999999", "--by", "worker-envy"])).stderr).toContain(
       "no inbox item",
@@ -733,7 +801,7 @@ describe.skipIf(!dockerUp())("the bun run ask CLI", () => {
       ["new", "--thread"],
       ["new", "--board", "t4sk"],
       ["open", "--from"],
-      ["open", "--since", "x"],
+      ["open", "--until"],
     ]) {
       const result = await cli(args)
       expect(result.code).toBe(2)

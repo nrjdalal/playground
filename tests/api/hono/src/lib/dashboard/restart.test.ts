@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
-const { fixtureRestart, restartArgv, restartSession } =
+const { fixtureRestart, restartArgv, restartPrs, restartSession } =
   await import("../../../../../../api/hono/src/lib/dashboard/restart")
 type Run = import("../../../../../../api/hono/src/lib/dashboard/restart").Run
 
@@ -27,6 +27,18 @@ const spawn = (...answers: { code: number; stderr?: string }[]) => {
 }
 
 describe("a restart after a login expires", () => {
+  test("a checker's resume names its pr first, then the rest of its prs, and one with neither reads null, which the route refuses before the close; a session that is no checker or has no row names none (#1135)", () => {
+    const A = "https://github.com/acme/factory/pull/1"
+    const B = "https://github.com/acme/factory/pull/2"
+    expect(restartPrs(true, { pr: A, prs: [A, B] })).toEqual([A, B])
+    expect(restartPrs(true, { pr: B, prs: [A, B] })).toEqual([B, A])
+    expect(restartPrs(true, { prs: [A, B] })).toEqual([A, B])
+    expect(restartPrs(true, { pr: B })).toEqual([B])
+    expect(restartPrs(true, {})).toBeNull()
+    expect(restartPrs(true, undefined)).toBeUndefined()
+    expect(restartPrs(false, { pr: A, prs: [A] })).toBeUndefined()
+  })
+
   test("closes the pane spawn.sh opened, then resumes the same session on the account added", async () => {
     const { calls, run } = spawn({ code: 0 }, { code: 0 })
     const done = await restartSession(
@@ -55,6 +67,27 @@ describe("a restart after a login expires", () => {
       "dispatcher",
       SESSION.cwd,
       SESSION.sessionId,
+    ])
+  })
+
+  test("a checker's restart names the PRs its row lists, so its resume on the row close ended starts again (#1135)", async () => {
+    const { calls, run } = spawn({ code: 0 }, { code: 0 })
+    const prs = [
+      "https://github.com/acme/factory/pull/1",
+      "https://github.com/acme/factory/issues/2",
+    ]
+    const checker = { ...SESSION, name: "reviewer-brave-otter", prs }
+    expect(await restartSession(checker, { live: true, root: "/p", run })).toEqual({
+      status: "restarted",
+    })
+    expect(calls[1]).toEqual([
+      "/p/scripts/spawn.sh",
+      "resume",
+      "reviewer-brave-otter",
+      SESSION.cwd,
+      SESSION.sessionId,
+      "--pr",
+      prs.join(","),
     ])
   })
 

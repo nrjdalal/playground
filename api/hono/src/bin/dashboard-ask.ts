@@ -16,9 +16,9 @@ import {
   ackItem,
   editItem,
   getItem,
+  getPickLine,
   itemTag,
   openItems,
-  pickOf,
   postItem,
   readAnswer,
   resolveItem,
@@ -31,7 +31,7 @@ import { livePair, mainCheckoutOf, othersLiveDashboard } from "@/lib/dev/launch"
 import { checkoutMismatch, locate, prove } from "@/lib/sessions/guard"
 import { dataDir } from "@/lib/sessions/paths"
 
-// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr); `edit <id|#iN> < item.json` replaces the poster's own item's title and preview in place until it closes, checked as new checks it; both fill `{now}` with the time they post at and refuse a measured or now time ahead of the clock; `open [--from <session>]` lists the open items, oldest first, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer included once given, and the option the owner picked on stderr, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own alert update once it has resolved itself; `stale` lists the answers no poster has closed, for ops-sweep; `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose, labels no options, names a PR, a tracker ID or a commit with no link on its line, or holds a code line too wide for the card. See `.agents/dashboard/asks.md` for the fields.
+// The one way into Playground's Inbox: `bun run ask new < item.json` posts a decision, a draft or an update and prints its id (its #iN tag on stderr); `edit <id|#iN> < item.json` replaces the poster's own item's title and preview in place until it closes, checked as new checks it; both fill `{now}` with the time they post at and refuse a measured or now time ahead of the clock; `open [--from <session>] [--since <iso time>] [--until <iso time>]` lists the open items, oldest first, those posted in that window alone when given, so a poster names one on the same thing rather than posting it twice; `get <id|#iN>` prints the item, the owner's answer included once given, and the option the owner picked on stderr, and `--ack` marks that answer read, so the Dashboard shows it reached the poster, closing a deny, a clear, a discard or a provided secret; `ack <id>` closes it once carried out, a go with `--link` (where it landed) or `--no-link "<why>"`; `settle <id>` closes the poster's own open item once it is decided another way; `resolve <id> --by <you>` closes the poster's own update once it has settled; `stale` lists the answers no poster has closed, for ops-sweep; `example <kind>` prints an ask to start from, and `new` hints at that shape when an ask is one block of prose, labels no options, names a PR, a tracker ID or a commit with no link on its line, or holds a code line too wide for the card. See `.agents/dashboard/asks.md` for the fields.
 const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 posts an inbox item from JSON on stdin, prints its id
                                                 options and approve/deny labels go in plain words (ELI5, ASD-STE100)
@@ -49,6 +49,9 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 an accept decision names one proposal (scope, kind, key, rev), and
                                                 more lists up to 20 further ones, accepted after it in that order;
                                                 Approve stops at the first that fails
+                                                a guard decision names a key a guard reads, or an ops job's
+                                                jobs.<name>, whose value is {"enabled": true|false} alone;
+                                                Approve writes it at its scope, and Settings > Jobs toggles a job too
                                                 --thread files it under that thread (bun run thread)
                                                 write {now} for a now-time, which new and edit fill with the time
                                                 they post at; a "measured" or "now" time ahead of the clock is refused
@@ -57,17 +60,18 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
                                                 in place, checked as new checks it, so one card carries a
                                                 progress to its end: an update until it is Done or dismissed,
                                                 an ask, answered or not, until it closes; one put away with Later stays put away
-       bun run ask example <code|decision|delete|slack|ui>
+       bun run ask example <code|decision|delete|questions|slack|ui>
                                                 prints an item to start from: an ask's picture of the point, bullets,
                                                 then what Approve does (.agents/dashboard/asks.md, The ask's shape),
                                                 a delete decision naming its worktree by its full path,
                                                 or a Slack message led by its thread so far
-       bun run ask open [--from <session>]
+       bun run ask open [--from <session>] [--since <iso time>] [--until <iso time>]
                                                 lists each open item, oldest first: its #iN, kind, sender and title;
                                                 run it before new, and name an open item on the same thing
-                                                rather than posting it again; --from keeps one sender's
+                                                rather than posting it again; --from keeps one sender's,
+                                                --since and --until those posted in that window
        bun run ask get <id|#iN> [--ack]    prints the item, answer included; --ack marks an answer read
-                                                a picked option's letter and label print on stderr
+                                                a picked option's letter and label print on stderr, each question's pick for a multi-question answer
                                                 (and closes a deny, a clear, a discard or a provided secret, which reading carries out)
        bun run ask ack <id|#iN> [--link <https url> [--label "Filed ABC-123"] | --no-link "<why>"]
                                                 closes the answer once carried out; a go (approve, draft, edit, send)
@@ -77,7 +81,8 @@ const USAGE = `usage: bun run ask new [--thread <id>] < item.json
        bun run ask settle <id|#iN> [--note "<one line>"] [--link <https url> [--label "<one line>"]]
                                                 closes your own open item, decided another way
        bun run ask resolve <id|#iN> --by <your session name> [--note "<one line>"]
-                                                closes your own alert update, once it has resolved itself
+                                                closes your own update once it has settled: an alert whose
+                                                cause cleared, a progress card whose last step is done
        bun run ask stale [--minutes 15] [--since <iso time>]
                                                 lists each answer given since --since (default 24h ago)
                                                 that its poster has not acked within --minutes`
@@ -130,7 +135,7 @@ const flags =
       : command === "settle"
         ? flagsOf(rest, ["label", "link", "note"])
         : command === "open"
-          ? flagsOf(key === undefined ? [] : [key, ...rest], ["from"])
+          ? flagsOf(key === undefined ? [] : [key, ...rest], ["from", "since", "until"])
           : command === "stale" || command === "new"
             ? flagsOf(
                 key === undefined ? [] : [key, ...rest],
@@ -260,10 +265,21 @@ if (command === "new" || command === "edit") {
   // An open item is printed as it is, so a poll with --ack only marks the answer once there is one; an update takes none, though a dismissed one records when in its answer.
   if (acking && item) item = await readAnswer(db, item)
   console.log(JSON.stringify(item, null, 2))
-  const picked = item && pickOf(item)
-  if (picked) console.error(`ask: picked ${picked.letter}: ${picked.label}`)
+  const picked = item && getPickLine(item)
+  if (picked) console.error(`ask: picked ${picked}`)
 } else if (command === "open") {
-  for (const item of await openItems(db, flags?.from))
+  const at = (flag: "since" | "until") => {
+    const value = flags?.[flag]
+    if (value === undefined) return undefined
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) fail(`--${flag} takes an ISO time`)
+    return date
+  }
+  for (const item of await openItems(db, {
+    from: flags?.from,
+    since: at("since"),
+    until: at("until"),
+  }))
     console.log(`${itemTag(item.ref)} ${item.kind} from ${item.from} · ${item.title}`)
 } else if (command === "stale") {
   const minutes = Number(flags?.minutes ?? 15)
