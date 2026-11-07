@@ -19,7 +19,7 @@ const { renderToStaticMarkup } = (await import(Bun.resolveSync("react-dom/server
   renderToStaticMarkup: (node: Node) => string
 }
 
-const render = (mark: "delivered" | "failed" | "queued" | "sending" | "sent", label: string) =>
+const render = (mark: "delivered" | "failed" | "sending", label: string) =>
   renderToStaticMarkup(createElement(StatusMark, { label, mark }))
 
 // the opening tag of the live region the mark sits in
@@ -28,7 +28,6 @@ const slotClass = (html: string): string => /class="([^"]*)"/.exec(slot(html))?.
 
 const MARKS = [
   ["sending", "Sending…"],
-  ["sent", "Sent, waiting for @Playground"],
   ["delivered", "Delivered"],
   ["failed", "Failed: too long"],
 ] as const
@@ -73,31 +72,33 @@ describe("the sent message's state as one mark", () => {
     }
   })
 
-  test("a spinner while on its way, turning only where motion is allowed; one tick once typed, two once delivered; red when it failed", () => {
+  test("a spinner until delivered, turning only where motion is allowed; then one tick; red when it failed", () => {
     const icons = Object.fromEntries(MARKS.map(([mark, label]) => [mark, render(mark, label)]))
     expect(icons.sending).toContain("motion-safe:animate-spin")
-    for (const mark of ["sent", "delivered", "failed"]) {
+    for (const mark of ["delivered", "failed"]) {
       expect(icons[mark], mark).not.toContain("animate-spin")
     }
     expect(icons.failed).toContain("text-destructive")
-    for (const mark of ["sending", "sent", "delivered"]) {
+    for (const mark of ["sending", "delivered"]) {
       expect(icons[mark], mark).not.toContain("text-destructive")
     }
     const svgs = MARKS.map(
       ([mark, label]) => /<svg[^>]*>[\s\S]*?<\/svg>/.exec(render(mark, label))?.[0],
     )
-    expect(new Set(svgs).size).toBe(4)
+    expect(new Set(svgs).size).toBe(3)
   })
 
-  test("queued is sent's single check at half strength, in the muted colour, keeping its words, so no clock shows", () => {
-    const svg = (html: string) => /<svg[^>]*>[\s\S]*?<\/svg>/.exec(html)?.[0] ?? ""
-    const shape = (html: string) => svg(html).replace(/class="[^"]*"/, "")
-    const queued = render("queued", "Queued: waiting its turn")
-    expect(shape(queued)).toBe(shape(render("sent", "Sent, waiting for @Playground")))
-    expect(svg(queued)).toContain("text-muted-foreground")
-    expect(svg(queued)).toContain("opacity-50")
-    expect(svg(render("sent", "Sent"))).not.toContain("opacity-50")
-    expect(queued).toContain('<span class="sr-only">Queued: waiting its turn</span>')
+  test("delivered is one tick, never two", async () => {
+    const icons = (await import(Bun.resolveSync("@remixicon/react", web))) as Record<
+      string,
+      (props: Record<string, unknown>) => Node
+    >
+    const shape = (html: string) =>
+      (/<svg[^>]*>([\s\S]*?)<\/svg>/.exec(html)?.[1] ?? "").replace(/class="[^"]*"/g, "")
+    const of = (name: string) => shape(renderToStaticMarkup(createElement(icons[name], {})))
+    const delivered = shape(render("delivered", "Delivered"))
+    expect(delivered).toBe(of("RiCheckLine"))
+    expect(delivered).not.toBe(of("RiCheckDoubleLine"))
   })
 })
 

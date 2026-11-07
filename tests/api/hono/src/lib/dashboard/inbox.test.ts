@@ -150,6 +150,63 @@ describe("what bun run ask takes", () => {
     )
   })
 
+  describe("an ask holds several questions, each with its own choices (#1250)", () => {
+    const q = (n: number) =>
+      Array.from({ length: n }, (_, at) => ({
+        options: [{ label: "Yes" }, { label: "No" }],
+        question: `Question ${at + 1}?`,
+      }))
+    const asksQ = (over: object) =>
+      inboxInputSchema.safeParse(decision({ ...PREVIEWS.ask, ...over }))
+
+    test("a questions list takes 2 to 20 entries and refuses 1 or 21", () => {
+      expect(asksQ({ questions: q(2) }).success).toBe(true)
+      expect(asksQ({ questions: q(20) }).success).toBe(true)
+      expect(asksQ({ questions: q(1) }).success).toBe(false)
+      expect(asksQ({ questions: q(21) }).success).toBe(false)
+    })
+
+    test("each entry has its own question and 1 to 5 options, recommended within them", () => {
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ description: "soak a day", label: "staging" }], question: "Base?" },
+            { options: [{ label: "now" }, { label: "later" }], question: "When?" },
+          ],
+        }).success,
+      ).toBe(true)
+      const six = Array.from({ length: 6 }, (_, at) => ({ label: `Way ${at + 1}` }))
+      expect(asksQ({ questions: [{ options: six, question: "Q?" }, ...q(1)] }).success).toBe(false)
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ label: "a" }, { label: "b" }], question: "Q?", recommended: 0 },
+            { options: [{ label: "c" }], question: "R?" },
+          ],
+        }).success,
+      ).toBe(true)
+      expect(
+        asksQ({
+          questions: [
+            { options: [{ label: "a" }, { label: "b" }], question: "Q?", recommended: 2 },
+            ...q(1),
+          ],
+        }).success,
+      ).toBe(false)
+    })
+
+    test("a questions list and top-level options, approve or deny are mutually exclusive", () => {
+      expect(asksQ({ options: OPTIONS, questions: q(2) }).success).toBe(false)
+      expect(asksQ({ approve: "Do it", questions: q(2) }).success).toBe(false)
+      expect(asksQ({ deny: "Hold", questions: q(2) }).success).toBe(false)
+    })
+
+    test("an ask with no questions is unchanged", () => {
+      expect(inboxInputSchema.safeParse(decision(PREVIEWS.ask)).success).toBe(true)
+      expect(asksQ({ options: OPTIONS }).success).toBe(true)
+    })
+  })
+
   test("a draft is a recipient and the words, and an update an outcome with an optional link", () => {
     expect(
       inboxInputSchema.safeParse({
@@ -654,6 +711,43 @@ describe("an answer", () => {
     expect(answerInputSchema.safeParse({ action: "approve", option: 5 }).success).toBe(false)
   })
 
+  test("a multi-question ask approves with one pick per question, within its choices (#1250)", () => {
+    const multi = item({
+      kind: "decision",
+      preview: {
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          { options: [{ label: "now" }, { label: "later" }, { label: "soon" }], question: "When?" },
+        ],
+        text: "Pick for each.",
+        type: "ask",
+      } as never,
+    })
+    expect(checkAnswer(multi, { action: "approve", options: [0, 2] })).toEqual({
+      answer: { choice: "approve", options: [0, 2] },
+      status: "approved",
+    })
+    expect(checkAnswer(multi, { action: "deny" })).toEqual({
+      answer: { choice: "deny" },
+      status: "denied",
+    })
+    const invalid: Parameters<typeof checkAnswer>[1][] = [
+      { action: "approve" },
+      { action: "approve", option: 0 },
+      { action: "approve", options: [0] },
+      { action: "approve", options: [0, 1, 2] },
+      { action: "approve", options: [0, 3] },
+      { action: "approve", options: [2, 0] },
+    ]
+    for (const input of invalid) {
+      expect(checkAnswer(multi, input)).toHaveProperty("message")
+    }
+    // a stray single option beside the per-question picks is refused, not silently ignored
+    expect(checkAnswer(multi, { action: "approve", options: [0, 2], option: 0 })).toEqual({
+      message: "A multi-question ask's approve names a pick for each question, not a single option",
+    })
+  })
+
   test("sends a draft as written or as changed, or discards it", () => {
     const draft = item({ kind: "draft" })
     expect(checkAnswer(draft, { action: "send", text: "hi" })).toEqual({
@@ -839,6 +933,19 @@ describe("an answer", () => {
       ref: 47,
       title: "Which way?",
     })
+    const several = item({
+      id: "vwx",
+      kind: "decision",
+      preview: {
+        ...PREVIEWS.ask,
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          { options: [{ label: "now" }, { label: "later" }, { label: "soon" }], question: "When?" },
+        ],
+      } as never,
+      ref: 48,
+      title: "Pick for each?",
+    })
     const cases: [InboxItem, Parameters<typeof answerPayload>[1], Record<string, unknown>][] = [
       [
         decided,
@@ -882,6 +989,22 @@ describe("an answer", () => {
         lettered,
         { at: AT, choice: "deny" },
         { go: false, option: { index: 3, label: "None of these", letter: "D" }, verb: "pick" },
+      ],
+      // a multi-question ask's approve names one pick per question, each by its letter and label, and reads its note back
+      [
+        several,
+        { at: AT, choice: "approve", note: "both fine", options: [0, 2] },
+        {
+          comment: "both fine",
+          go: true,
+          next: "carry-out",
+          picks: [
+            { index: 0, label: "staging", letter: "A", question: "Base?" },
+            { index: 2, label: "soon", letter: "C", question: "When?" },
+          ],
+          type: "ask",
+          verb: "pick",
+        },
       ],
       [
         decided,
@@ -1726,6 +1849,53 @@ describe.skipIf(!dockerUp())("the inbox store", () => {
       to: "ops",
       via: "session",
     })
+  })
+
+  test("a multi-question ask stores one pick per question and tells its poster each, with the Note (#1250)", async () => {
+    const posted = await post(
+      decision({
+        questions: [
+          { options: [{ label: "staging" }, { label: "main" }], question: "Base?" },
+          {
+            options: [{ label: "now" }, { label: "later" }, { label: "soon" }],
+            question: "When?",
+          },
+        ],
+        text: "Pick for each.",
+        type: "ask",
+      }),
+    )
+    const sent: Delivery[] = []
+    const answered = await store.answerItem(
+      db,
+      posted.id,
+      { action: "approve", note: "both fine", options: [0, 2] },
+      {
+        actor,
+        deliver: async (delivery) => {
+          sent.push(delivery)
+          return { at: "2026-10-07T12:00:00.000Z", ok: true, sessionId: "s1" }
+        },
+      },
+    )
+    expect(answered.ok).toBe(true)
+    if (!answered.ok) return
+    expect(answered.item.status).toBe("approved")
+    expect(answered.item.answer).toMatchObject({
+      choice: "approve",
+      note: "both fine",
+      options: [0, 2],
+    })
+    // read the stored answer back: one index per question, and the Note
+    const got = await store.getItem(db, posted.id)
+    expect(got?.answer).toMatchObject({ choice: "approve", note: "both fine", options: [0, 2] })
+    // the poster is told each pick by its letter and label, and the Note as a comment
+    const payload = payloadOf(sent[0]?.text ?? "")
+    expect(payload?.picks).toEqual([
+      { index: 0, label: "staging", letter: "A", question: "Base?" },
+      { index: 2, label: "soon", letter: "C", question: "When?" },
+    ])
+    expect(payload?.comment).toBe("both fine")
   })
 
   describe("a Slack send's files (PG-649)", () => {

@@ -200,6 +200,17 @@ describe("parseRoster", () => {
     expect(read.problem).toContain("agents.0.worker")
   })
 
+  test("a checker's prs list reads, so a restart can name every PR it serves (#1135)", () => {
+    const prs = [
+      "https://github.com/acme/archive/pull/34",
+      "https://github.com/acme/archive/issues/35",
+    ]
+    const checker = { ...AGENTS[1], name: "reviewer-lust-2-fix", prs, worker: "worker-lust-2" }
+    expect(
+      parseRoster(JSON.stringify({ ...ROSTER, agents: [checker] })).roster?.agents[0],
+    ).toMatchObject({ prs })
+  })
+
   test("a surface names the pane a session runs on (surface:<n>); anything else is ignored and named", () => {
     const good = parseRoster(
       JSON.stringify({ ...ROSTER, agents: [{ ...AGENTS[1], surface: "surface:7" }] }),

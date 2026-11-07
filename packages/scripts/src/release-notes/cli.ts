@@ -1,4 +1,7 @@
 // `bun run release:notes <from-tag> <to-tag>` prints a ship's GitHub release notes in ZeroStarter's shape (notes.ts) from GitHub's compare of the two tags, for the release skill's step 4 to pass as `gh release create --notes-file`; it writes nothing.
+import { dataDir } from "../../../env/src/data-dir"
+import { ownerSettings } from "../../../settings/src/owner"
+import { readPolicy } from "../../../settings/src/rendered"
 import { renderNotes, type NoteCommit } from "./notes"
 
 type Compared = {
@@ -41,4 +44,7 @@ for (let page = 1; ; page++) {
     })
   if (compared.commits.length < 100 || commits.length >= compared.total_commits) break
 }
-process.stdout.write(renderNotes({ commits, from, repo, to }))
+// a settings store it cannot read names no owner, so every contributor reads as the login alone
+const { settings } = await readPolicy(dataDir())
+const owner = settings ? ownerSettings.get(settings, "owner.names") : []
+process.stdout.write(renderNotes({ commits, from, owner, repo, to }))

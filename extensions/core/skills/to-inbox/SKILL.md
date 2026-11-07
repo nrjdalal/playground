@@ -57,7 +57,7 @@ On an update, Done types you `done` and Dismiss `dismiss`: post a new card for m
    | ⏱️    | how long it takes                 |
    | 💰    | a cost or a usage figure          |
 
-   A decision that needs more than one answer asks them as numbered questions, the most important first, one idea each, with a one-line why only where a question could be misread.
+   A decision that needs more than one answer asks them as a `questions` list the card collects one pick at a time (step 7), where each answer is a choice; or, where the answers are freeform, as numbered questions in the text, the most important first, one idea each, with a one-line why only where a question could be misread.
 
 4. **Links.** Link each PR, ticket, commit, chat thread, doc and page the item names, in markdown, so the owner opens it from the card; an Inbox ref (`#iN`) stays as written, since the owner finds that item in the same Inbox. Done when each one the item names is a link.
 
@@ -87,7 +87,7 @@ On an update, Done types you `done` and Dismiss `dismiss`: post a new card for m
    | `> [!NOTE]`      | context the choice depends on             |
    | `> [!TIP]`       | a faster way the owner may like           |
 
-7. **Choices.** Pick the shape, then label each option in the same plain words (asks.md's `options` and `deny`). A true yes or no takes one `options` row, what Approve does, and `deny`, what Deny means; a choice between real alternatives takes 2 to 5 rows, lettered A to E on the card, each a `label` and an optional `description`, with None of these after them. Done when the shape fits the question and each label starts with a verb.
+7. **Choices.** Pick the shape, then label each option in the same plain words (asks.md's `options` and `deny`). A true yes or no takes one `options` row, what Approve does, and `deny`, what Deny means; a choice between real alternatives takes 2 to 5 rows, lettered A to E on the card, each a `label` and an optional `description`, with None of these after them. For several independent calls at once, a `questions` list in place of `options`: 2 to 20 questions, each its own 1 to 5 labelled options and an optional `recommended` index, which the card asks one at a time and sends together. Done when the shape fits the question and each label starts with a verb.
 
 8. **Fake data.** Read the text and every attachment once more. Done when no part holds a token, a customer detail or a real database row, and a demo's or screenshot's names and rows are made up.
 
