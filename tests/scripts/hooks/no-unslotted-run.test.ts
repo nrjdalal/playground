@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
@@ -402,5 +402,55 @@ describe("it fails open, and acts for a factory session alone", () => {
       stdin: new Blob(["{not json"]),
     })
     expect(await proc.exited).toBe(0)
+  })
+})
+
+// a checkout with commitlint and the repo's config, as a factory worktree has, where commit-msg would lint the message
+const REPO = mkdtempSync(join(tmpdir(), "no-unslotted-run-repo-"))
+Bun.spawnSync(["git", "init", "-q", REPO])
+await Bun.write(
+  join(REPO, "package.json"),
+  JSON.stringify({ commitlint: { extends: ["@commitlint/config-conventional"] } }),
+)
+symlinkSync(join(root, "node_modules"), join(REPO, "node_modules"))
+const BAD = "fix(scope): ABC keys leave core"
+const GOOD = "fix(scope): keys leave core"
+await Bun.write(join(REPO, "bad.txt"), `${BAD}\n`)
+await Bun.write(join(REPO, "good.txt"), `${GOOD}\n`)
+afterAll(() => rmSync(REPO, { force: true, recursive: true }))
+
+const forms = (subject: string, file: string): [string, string][] => [
+  ["-m", `git commit -m "${subject}"`],
+  ["--message=", `git commit --message="${subject}"`],
+  ["-F with a path", `git commit -F ${file}`],
+  ["-F with an absolute path", `git commit -F ${join(REPO, file)}`],
+  ["-F - from a heredoc", `git commit -F - <<'EOF'\n${subject}\n\nbody line\nEOF`],
+  ["-m from a heredoc substitution", `git commit -m "$(cat <<'EOF'\n${subject}\n\nbody line\nEOF\n)"`],
+  ["several -m", `git commit -m "${subject}" -m "body line" -m "another line"`],
+  ["git -C from another folder", `cd ${OUTSIDE} && git -C ${REPO} commit -m "${subject}"`],
+  ["through run-slot", `${SLOT} git commit -m "${subject}"`],
+]
+
+describe("a git commit whose message commitlint refuses is refused before its pre-commit slot wait", () => {
+  test.each(forms(BAD, "bad.txt"))("%s", async (_, command) => {
+    const reason = await bash(command, REPO)
+    expect(reason).toContain("no-unslotted-run hook refuses this git commit")
+    expect(reason).toContain("subject-case")
+  })
+})
+
+describe("a git commit whose message commitlint passes, or one the hook cannot read, runs", () => {
+  test.each([
+    ...forms(GOOD, "good.txt"),
+    ["a message from a variable", `git commit -m "$MSG"`],
+    ["a message file the hook cannot name", `git commit -F "$FILE"`],
+    ["an editor commit", "git commit"],
+    ["a merge's own message", "git commit --no-edit"],
+    ["--no-verify, which skips commit-msg too", `git commit --no-verify -m "${BAD}"`],
+    ["-n, which skips commit-msg too", `git commit -n -m "${BAD}"`],
+    ["--edit, whose editor changes the message", `git commit -e -m "${BAD}"`],
+    ["a checkout with no commitlint", `git commit -m "${BAD}"`, OUTSIDE],
+  ] as [string, string, string?][])("%s", async (_, command, cwd = REPO) => {
+    expect(await bash(command, cwd)).toBeUndefined()
   })
 })
