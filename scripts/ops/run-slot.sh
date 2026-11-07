@@ -494,7 +494,7 @@ chain_steps() {
     [ -n "$file" ] && break
     # an unplaced first word runs a program this cannot read, so a shell word after it runs a script this cannot read too (its -c script, a script file or stdin), whatever follows it
     if [ -n "$unplaced" ]; then
-      case " $CHAIN_SHELLS " in *" ${a##*/} "*) return 1 ;; esac
+      case " $CHAIN_SHELLS " in *" $(basename -- "$a" | tr '[:upper:]' '[:lower:]') "*) return 1 ;; esac
       continue
     fi
     if [ -z "$first" ]; then
@@ -514,7 +514,8 @@ chain_steps() {
       fi
       if [[ "$a" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then lead+=$a$'\x1f'; continue; fi
       if [ -n "$count" ]; then count=""; lead+=$a$'\x1f'; continue; fi
-      b=$(basename -- "$a")
+      # in lower case, since macOS's default disk runs a program named in any case
+      b=$(basename -- "$a" | tr '[:upper:]' '[:lower:]')
       case " $CHAIN_SHELLS " in *" $b "*) first=$b; continue ;; esac
       # docker and podman are judged by docker_reader on their own argv, so a container's shell is no chain of this machine's
       case "$b" in docker|podman) return 0 ;; esac
@@ -607,7 +608,7 @@ def programs(step, i):
     while i < len(step):
         w = step[i]
         words.append(w)
-        name = os.path.basename(w)
+        name = os.path.basename(w).lower()
         if name not in wrappers:
             return words
         flags, values = options.get(name, (set(), set()))
@@ -672,7 +673,7 @@ def can_be(w, names):
 
 
 reserved = {"!", "{", "coproc", "do", "elif", "else", "function", "if", "then", "until", "while"}
-unread = any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3])
+unread = any("$(" in w or "`" in w for step in steps for w in step) and re.search(r"\b(docker|podman)\b|\bportless\b.*\bcompose\b", text + "\x1f" + sys.argv[3], re.I)
 # a command substitution's script ($( ) or a backquote, outside single quotes and $'…', where a backslash escapes a quote), split at blanks, quotes and ; | & ( ) < > with backslashes dropped: a glob or brace in it that can expand to docker, podman or a chain shell reads as one it cannot read, wherever it sits (a case word or pattern, or a word it does not lead), so docker_kind reads its pieces
 subs, j, quote = [], 0, ""
 while j < len(raw):
@@ -738,10 +739,10 @@ for k, step in enumerate(steps):
     if cases and seps[k + 1] in (";;", ";&", ";;&"):
         cases[-1] = "pat"
     hidden = lambda w: w == "eval" or "$" in w
-    if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]) in wrappers and any(map(hidden, step[i + 1 :])))):
+    if i < len(step) and (hidden(step[i]) or (os.path.basename(step[i]).lower() in wrappers and any(map(hidden, step[i + 1 :])))):
         unread = True
-    # a chain shell word anywhere past VAR=x, whatever program leads the step, runs a script this does not read: its own -c script (a nested chain, split only one level), a script file, or one fed on stdin (a pipe, a < redirect or a heredoc), behind any option, value or fd number, so it reads as one it cannot read
-    if any(os.path.basename(w) in shells for w in step[i:]):
+    # a chain shell word (in any letter case) anywhere past VAR=x, whatever program leads the step, runs a script this does not read: its own -c script (a nested chain, split only one level), a script file, or one fed on stdin (a pipe, a < redirect or a heredoc), behind any option, value or fd number, so it reads as one it cannot read
+    if any(os.path.basename(w).lower() in shells for w in step[i:]):
         unread = True
     # the program word, or the program word behind a wrapper (every later word past an option its list lacks), written as an unquoted glob or brace runs whatever the shell expands it to: one that can expand to docker or podman exits 3 in any step, however unreadable the rest, which docker_kind refuses, and a brace, or a glob that can expand to a shell or a wrapper, reads as one it cannot read
     for w in programs(step, i):
@@ -1133,8 +1134,8 @@ glob_pieces() { printf '%s\n' "$@" | tr -d '\\' | tr -s "[:space:];|&()<>\"'\`" 
 docker_kind() {
   local found line words steps pieces rc=0 fix="run each docker build as a run-slot run of its own, so run-slot holds it to one at a time"
   local glob="refuse run-slot.sh refuses a chain with a program word written as a glob or a brace that can expand to docker or podman: $fix"
-  # the reader starts only for a command that names docker or portless, so every other run skips its bun start; one that holds a glob or brace character is read for a program word that can expand to docker or podman (exit 3)
-  case " $* " in
+  # the reader starts only for a command that names docker or portless, in any letter case, so every other run skips its bun start; one that holds a glob or brace character is read for a program word that can expand to docker or podman (exit 3)
+  case " $(printf '%s ' "$@" | tr '[:upper:]' '[:lower:]')" in
     *docker*|*portless*) ;;
     *[\*\?\[\{]*)
       chain_steps "$@" > /dev/null || rc=$?
@@ -1160,7 +1161,7 @@ docker_kind() {
       none) ;;
       *) echo "refuse run-slot.sh refuses a chain that builds a docker image (${words[*]}): $fix"; return ;;
     esac
-  done < <(printf '%s\n' "$steps" | grep -E "docker|portless")
+  done < <(printf '%s\n' "$steps" | grep -iE "docker|portless")
 }
 # a light run, whatever its session's size: a quick kind, a bun install or add, a filtered turbo run, a plain tsc, or a check-types whose work is cached (retro 3, 31 Oct: a big session's 2s git push and 1s bun install each waited over 1,290s for the age bump)
 light_run() {

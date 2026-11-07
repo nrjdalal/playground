@@ -123,10 +123,13 @@ playground ext show <scope> <kind> <key> [--rev <sha>]
 playground ext put <scope> <kind> <key> <path> --reason "<why>" [--attach <file>]...
 playground ext search <words> [--kind <kind>]
 playground ext import-scripts <ops-folder> <job>... --org <org> [--dry-run]   # once, at the switch: see Ops jobs
+playground ext check-modes   # once: lists the scripts stored before put kept the executable bit
 ```
 
 - `list` names every scope's items, `core`'s among them marked `readOnly`, and passes over a folder's `.gitkeep`.
 - `put` writes the item's next revision from a file, from a folder for a `skill` or a `script`, or from standard input with `-`, as one commit in its scope.
+  It keeps each file's executable bit, under `proposed/` and once accepted, so a script a skill runs directly stays runnable.
+- `check-modes` is for one run: it lists each stored file that starts with `#!` but was stored without its executable bit, by an older `put`, and changes nothing; put each one again from a copy that has the bit.
 - A `list` revision lands accepted.
   Any other kind lands under `proposed/`, for review, unless you write it from the dashboard yourself.
 - `--attach` takes a file, repeated for more, kept under `attachments/` by the hash of its bytes; a file over 50 MB is refused.

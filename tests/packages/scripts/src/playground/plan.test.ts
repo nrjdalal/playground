@@ -532,6 +532,15 @@ describe("playground view", () => {
     expect(extraWordRefusal([])).toBeNull()
   })
 
+  // PG-1377: check-modes was missing from the CLI's ext lists, so a stray word ran it rather than being refused
+  test("ext check-modes takes no word, and the help names it", () => {
+    expect(extraWordRefusal(["ext", "check-modes"])).toBeNull()
+    expect(extraWordRefusal(["ext", "check-modes", "x"])).toStartWith(
+      "playground ext check-modes takes no x",
+    )
+    expect(HELP).toContain("| reject | check-modes")
+  })
+
   test("update takes --to and a tag, or nothing", () => {
     expect(extraWordRefusal(["update", "--to", "v0.0.20"])).toBeNull()
     expect(extraWordRefusal(["update", "--to"])).toBe("usage: playground update [--to <tag>]")
