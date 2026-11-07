@@ -850,9 +850,9 @@ export const visible = (value: string): string =>
   value.replaceAll(UNKNOWN, " ").replaceAll(READ, " ")
 
 export const marked = (value: string): boolean => value.includes(UNKNOWN) || value.includes(READ)
-// The characters an eval word may hold bare and still read as written whatever options the shell sets: letters, digits and _ . / = - , : @ %, which no glob option makes an operator without a paren
+// The bare characters no glob option makes an operator without a paren
 const PLAIN = /^[\w./=,:@%-]$/
-// Whether an eval takes a word as other than written: it holds a part the hook cannot read, or a part outside quotes (', ", one escaped character) that is no PLAIN character, since a shell option can make any other character a glob operator (zsh's ^, # and ~, a ksh or bash pattern's paren) whose file names the shell then runs as code
+// Whether an eval takes a word as other than written: an unread part, or a bare character outside PLAIN, which some shell option makes a glob whose file names run as code
 export const unreadWord = (word: Word): boolean => {
   if (word.unknown !== undefined || marked(word.value)) return true
   const src = word.source
@@ -1913,7 +1913,7 @@ async function examineReading(
       if (verdict) break
     }
   } else if (name === "eval") {
-    // an eval of a word the hook cannot read (`unreadWord`), whose text a glob or an expansion may fill with code, runs code the hook never sees, so a hook judges the eval itself, as it does a source of a script it cannot read
+    // an eval of an unread word runs code the hook never sees, so a hook judges the eval itself, as the source branch does
     verdict =
       (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ??
       (await nested(cmd, env, () =>

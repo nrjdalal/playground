@@ -844,6 +844,36 @@ var slice = (word, from) => {
   return { ...word, reads: word.reads?.slice(dropped), value: word.value.slice(from) };
 };
 var marked = (value) => value.includes(UNKNOWN) || value.includes(READ);
+var PLAIN = /^[\w./=,:@%-]$/;
+var unreadWord = (word) => {
+  if (word.unknown !== undefined || marked(word.value))
+    return true;
+  const src = word.source;
+  if (src === undefined)
+    return ![...word.value].every((c) => PLAIN.test(c));
+  for (let i = 0;i < src.length; i++) {
+    const c = src[i];
+    if (c === "\\")
+      i++;
+    else if (c === "'") {
+      i = src.indexOf("'", i + 1);
+      if (i === -1)
+        return true;
+    } else if (c === '"') {
+      for (i++;i < src.length && src[i] !== '"'; i++)
+        if (src[i] === "\\")
+          i++;
+        else if (src[i] === "$" && src[i + 1] === "(")
+          i = balanced(src, i + 1, "(", ")") - 1;
+        else if (src[i] === "`")
+          i = src.indexOf("`", i + 1);
+      if (i === -1 || i >= src.length)
+        return true;
+    } else if (!PLAIN.test(c))
+      return true;
+  }
+  return false;
+};
 var SHELL_OWN = new Set([
   ".",
   "alias",
@@ -1712,7 +1742,7 @@ async function examineReading(cmd, parsed, env, visit, builtins) {
         break;
     }
   } else if (name === "eval") {
-    verdict = await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
+    verdict = (args.some(unreadWord) ? await visit(cmd, parsed, here) : undefined) ?? await nested(cmd, env, () => run(again(lexScript(args.map((a) => a.value).join(" "), env), cmd, parsed), here, visit, builtins));
   } else
     verdict = await visit(cmd, parsed, here);
   await record(cmd, name, args, here);
