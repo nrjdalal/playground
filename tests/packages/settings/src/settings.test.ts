@@ -65,6 +65,7 @@ describe("defineSettings", () => {
       "gates.reviewReserve",
       "gates.smallReserve",
       "gates.startsWindow",
+      "gates.swapUsedMax",
       "github.pollMinutes",
       "glm.readOnlyLoad5",
       "live.branch",

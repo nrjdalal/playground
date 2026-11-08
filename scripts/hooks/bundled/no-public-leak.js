@@ -6207,7 +6207,7 @@ var gateSettings = defineSettings({
   },
   "gates.glmSwapinsMax": {
     default: 100,
-    description: "The swap-ins a second a GLM session starts under.",
+    description: "The swap-ins a second a GLM session, and a fresh Claude worker, starts under; on 7 Nov the machine paged hard at 150 a second.",
     schema: number2().int().positive()
   },
   "gates.memoryFreeMin": {
@@ -6229,6 +6229,11 @@ var gateSettings = defineSettings({
     default: 300,
     description: "The seconds a start counts toward the load gate, since the load average lags a session's start.",
     schema: number2().int().positive()
+  },
+  "gates.swapUsedMax": {
+    default: 85,
+    description: "The swap used share, in percent of the swap's total, a fresh Claude worker starts under; on 7 Nov the machine paged hard with 87% used.",
+    schema: number2().int().min(0).max(100)
   }
 });
 // packages/settings/src/models.ts

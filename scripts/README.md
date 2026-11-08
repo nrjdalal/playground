@@ -18,7 +18,9 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   refusing at or over that line whatever the CPU's idle share, since the owner's rule keeps the load under the cores so a worker or two can be closed to make room, the refusal naming the load, the starts and the line,
   while a `--priority` start passes it with a priority file standing (above, any of them), its row's `readings.priority` naming the file, since priority work comes first,
   and a resume within 15 minutes of `spawn.sh close` ending a row that read live (not `ended`, `parked`, `paused` or `done`) passes it too, its row's `readings.just_closed` naming the close, since that session already counts in the load it comes back into (the close keeps its time and the row's status in the data folder's `closes/<name>`);
-  memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`); for a fresh worker start alone, room for its runs:
+  memory pressure level 1 or 2 with 8% or more free (`gates.memoryFreeMin`),
+  and for a fresh worker start alone no paging: swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`) and swap used under 85% of its total (`gates.swapUsedMax`, `sysctl -n vm.swapusage`), since free memory counts compressible pages and read 62% on 7 Nov while the machine paged hard, while a reviewer, tester or resume keeps its pass;
+  for a fresh worker start alone, room for its runs:
   `scripts/ops/run-slot.sh room`'s lanes, held lanes, free lanes (open and unheld while the queue's next run fits its load units by run-slot's one gate, `unit_fits`, or a medium run with no waiter, `slots.peers`' holders counted) and live waiters, refusing while no lane is free and a run waits in the queue, or when room gives no reading, so a new worker never joins a queue it has no room in,
   while a `--priority` start passes a full queue with a priority file standing, as it passes the load gate, its row's `readings.priority` naming the file, and a reviewer, tester
   or resume skips it and work already admitted finishes; and the launching backend's usage:
@@ -35,7 +37,7 @@ The factory's hooks are in [hooks/README.md](./hooks/README.md).
   so every GLM spawn refuses until `bun run ops:zai-usage` has beaten once).
   A GLM session takes its own load and memory gate in place of the load and memory checks above: load5 (the third field of `sysctl -n vm.loadavg`) under 30 (`gates.glmLoad5Max`), memory pressure level 1, and swap-ins under 100/s (`gates.glmSwapinsMax`, `vm_stat -c 2 1`'s last second), so it starts while Claude's gate holds; Claude's gate stays as above.
   Under Claude Code's sandbox, which refuses the `sysctl` command, every `kern.memorystatus_*` reading and the setuid `ps`, spawn.sh reads the load from `uptime`, the cores from Python's `os.cpu_count()`, and each live session's start from the kernel's process table (`scripts/ops/ptable.py`),
-  and where the sandbox refuses the pressure level the memory check passes on swap-ins under `gates.glmSwapinsMax` in place of the pressure level and free share.
+  and where the sandbox refuses the pressure level the memory check passes on swap-ins under `gates.glmSwapinsMax` in place of the pressure level and free share, and where it refuses the swap use the swap-ins alone decide a fresh worker's paging check.
   Every pass and refusal is one line in `~/.playground/ops/capacity.jsonl`, which the load check counts its starts from, a refusal's carrying the words it printed as `detail`.
   The first dispatcher alone starts past a failing gate, so the owner always has one: every gate still reads past a failing one and the login pick runs, a failing usage gate leaving it on the config's own login.
   Its one row reads `skipped`, naming each gate it went past with the words a refusal would print, which the load check counts as a start; every other manager start takes the gate as a worker's does.

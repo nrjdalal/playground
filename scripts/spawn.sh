@@ -19,7 +19,11 @@ set -euo pipefail
 #      and a resume within 15 minutes of close ending a row that read live (JUST_CLOSED), logged as
 #      readings.just_closed
 #   2. memory, pressure level 1 or 2 (kern.memorystatus_vm_pressure_level) and
-#      free at 8% or more (kern.memorystatus_level)
+#      free at 8% or more (kern.memorystatus_level); a fresh worker start also waits while the
+#      machine pages, with swap-ins under 100/s (vm_stat -c 2 1, gates.glmSwapinsMax) and swap used
+#      under 85% of its total (vm.swapusage, gates.swapUsedMax), since free memory counts
+#      compressible pages and read 62% on 7 Nov while 150 pages swapped in a second
+#      (a reviewer, tester or resume keeps its pass, as at the slots gate)
 #   A GLM session takes its own load and memory gate in place of both:
 #   load5 under 30, pressure level 1 and swap-ins under 100/s (vm_stat -c 2 1)
 #   Under Claude Code's sandbox the load comes from uptime, and a refused pressure level leaves the swap-ins to decide (scripts/README.md)
@@ -350,6 +354,15 @@ def swapins():
     except (IndexError, OSError, StopIteration, subprocess.SubprocessError, ValueError):
         return None
 
+# (used, total) swap in MB from sysctl vm.swapusage, or None when it cannot be read
+def swap_used():
+    try:
+        out = subprocess.run(["sysctl", "-n", "vm.swapusage"], capture_output=True, text=True, timeout=10).stdout
+        found = dict(re.findall(r"(total|used) = ([0-9.]+)M", out))
+        return float(found["used"]), float(found["total"])
+    except (KeyError, OSError, subprocess.SubprocessError, ValueError):
+        return None
+
 def load(name):
     path = os.path.join(data_dir, name)
     if not os.path.exists(path):
@@ -482,6 +495,25 @@ else:
                 refuse("memory", "it cannot read the free share (sysctl kern.memorystatus_level)")
             if readings["free"] < gates["memoryFreeMin"]:
                 refuse("memory", f"free is {readings['free']}% (sysctl kern.memorystatus_level), {gates['memoryFreeMin']}% is the floor. Close a session or wait for the pressure to pass, and run it again.")
+        # paging, for a fresh worker start alone (room is read for one), so a reviewer, tester or resume keeps its pass as at the slots gate: free memory counts compressible pages, and on 7 Nov it read 62% while 150 pages swapped in a second and swap held 87%
+        if room:
+            free = f", while free reads {readings['free']}% (sysctl kern.memorystatus_level), which counts compressible pages" if "free" in readings else ""
+            if "swapins" not in readings:
+                readings["swapins"] = swapins()
+                if readings["swapins"] is None:
+                    refuse("memory", "it cannot read the swap-ins (vm_stat -c 2 1)")
+                if readings["swapins"] >= gates["glmSwapinsMax"]:
+                    refuse("memory", f"swap-ins are {readings['swapins']}/s (vm_stat), {fmt(gates['glmSwapinsMax'])}/s is the line{free}. Close a session or wait for the paging to pass, and run it again.")
+            swap = swap_used()
+            if swap is None and sandbox_refuses("vm.swapusage"):
+                readings["swap"] = "swap use refused by the sandbox, so the swap-ins alone decide"
+            elif swap is None:
+                refuse("memory", "it cannot read the swap used (sysctl vm.swapusage)")
+            else:
+                used, total = swap
+                readings["swap_used"] = round(pct(used, total), 1) if total else 0
+                if readings["swap_used"] >= gates["swapUsedMax"]:
+                    refuse("memory", f"swap used is {used / 1024:.2f} of {total / 1024:.2f} GB ({readings['swap_used']:.0f}%, sysctl vm.swapusage), {fmt(gates['swapUsedMax'])}% is the line{free}. Close a session or wait for the paging to pass, and run it again.")
     except Skip:
         pass
 
@@ -787,17 +819,17 @@ GLM_ACCOUNT=
 GLM_GIVEN=
 # The models a session runs on (models.*) and the capacity gate's lines (gates.*) are settings, each in the docs' list of keys, so changing one is a settings write, never an edit here.
 MODEL_SETTINGS=$(env $UNSET "$BUN" "$REPO/packages/scripts/src/playground/setting.ts" --text models.claude models.default models.checker models.glm models.glmKeychainService \
-  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.reviewReserve gates.smallReserve gates.startsWindow sessions.names sessions.aliases context.window 2>&1) ||
+  gates.glmLoad5Max gates.glmSwapinsMax gates.memoryFreeMin gates.reviewReserve gates.smallReserve gates.startsWindow gates.swapUsedMax sessions.names sessions.aliases context.window 2>&1) ||
   { echo "spawn.sh refuses: it cannot read the model and gate settings: $MODEL_SETTINGS" >&2; exit 1; }
 {
   read -r CLAUDE_MODELS; read -r DEFAULT_MODEL; read -r CHECKER_MODEL; read -r GLM_ID; read -r GLM_KEYCHAIN
-  read -r GLM_LOAD5_MAX; read -r GLM_SWAPINS_MAX; read -r MEMORY_FREE_MIN; read -r REVIEW_RESERVE; read -r SMALL_RESERVE; read -r STARTS_WINDOW
+  read -r GLM_LOAD5_MAX; read -r GLM_SWAPINS_MAX; read -r MEMORY_FREE_MIN; read -r REVIEW_RESERVE; read -r SMALL_RESERVE; read -r STARTS_WINDOW; read -r SWAP_USED_MAX
   read -r SESSION_NAMES; read -r SESSION_ALIASES; read -r WINDOW
 } <<<"$MODEL_SETTINGS"
 SESSION_KINDS=$(python3 -I -c 'import json, sys; n, a = map(json.loads, sys.argv[1:3]); [print(*row) for row in [(v, k) for k, v in n.items()] + [(n["dispatcher"] + "-2", "dispatcher")] + list(a.items())]' "$SESSION_NAMES" "$SESSION_ALIASES")
 # slots.peers, the ops folders of the other factories on this machine, whose starts the load gate counts beside this one's; none when unread
 PEERS=$(setting slots.peers) || PEERS=; [ -n "$PEERS" ] || PEERS="[]"
-GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"reviewReserve\": $REVIEW_RESERVE, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW}"
+GATES="{\"glmLoad5Max\": $GLM_LOAD5_MAX, \"glmSwapinsMax\": $GLM_SWAPINS_MAX, \"memoryFreeMin\": $MEMORY_FREE_MIN, \"peers\": $PEERS, \"reviewReserve\": $REVIEW_RESERVE, \"smallReserve\": $SMALL_RESERVE, \"startsWindow\": $STARTS_WINDOW, \"swapUsedMax\": $SWAP_USED_MAX}"
 MODELS=$(printf '%s\n' $CLAUDE_MODELS | awk '{ m[NR] = $0 } END { for (i = 1; i <= NR; i++) printf "%s%s", m[i], (i < NR - 1 ? ", " : i == NR - 1 ? " or " : "") }')
 CLAUDE_MODEL=
 EFFORT=
