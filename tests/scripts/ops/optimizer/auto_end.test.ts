@@ -10,6 +10,7 @@ import {
   type EndDeps,
   endMerged,
   endOne,
+  finishedOf,
   sweep,
   type Target,
   unsavedLive,
@@ -68,6 +69,14 @@ const input = (over: Partial<CollectInput> = {}): CollectInput => ({
   sessions: {},
   workerPrs: async () => [],
   ...over,
+})
+
+// PG-1419: rm's reader returns a PR (its number beside its state) or none, and the cleanup's finished reads its state alone
+test("finishedOf reads rm's reader shape, a PR beside its state or none: merged and closed are done, open and none are not", () => {
+  expect(finishedOf({ number: 7, state: "MERGED" })).toBe(true)
+  expect(finishedOf({ number: 7, state: "CLOSED" })).toBe(true)
+  expect(finishedOf({ number: 7, state: "OPEN" })).toBe(false)
+  expect(finishedOf(null)).toBe(false)
 })
 
 describe("sweep: ops-tick ends what the detector flags", () => {

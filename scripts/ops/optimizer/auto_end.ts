@@ -9,6 +9,7 @@ import { basename, dirname, join } from "node:path"
 
 import { recordPath } from "../../../api/hono/src/lib/dev/stop"
 import { kindOf, managerKindOfName } from "../../../packages/config/src/kinds"
+import type { Pr } from "../../../packages/scripts/src/playground/rm"
 import {
   type CollectInput,
   collect,
@@ -337,6 +338,10 @@ export async function cleanWorktree(
   return `removed ${path}${containers}${deleted ? `, branch ${branch}` : ""}`
 }
 
+// Whether a worktree's PR, as rm's reader returns it (its number beside its state, or none), is finished: merged or closed.
+export const finishedOf = (pr: Pr | null): boolean =>
+  pr?.state === "MERGED" || pr?.state === "CLOSED"
+
 // This machine's cleanup deps: git, the main checkout this one belongs to, bun run dev:stop in the worktree, playground rm's PR state, playground rm --worktree from this checkout, docker ps -a and docker rm -fv, and the live dashboard's database name.
 export async function cleanupDeps(): Promise<CleanupDeps | null> {
   const common = await git(REPO, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
@@ -357,10 +362,7 @@ export async function cleanupDeps(): Promise<CleanupDeps | null> {
       const lines = out.split("\n")
       return { ok: code === 0, out: lines.find((l) => l.startsWith("dev:stop:")) ?? lines.at(-1)! }
     },
-    finished: async (path, pr) => {
-      const state = await rm.prState(path, pr)
-      return state === "MERGED" || state === "CLOSED"
-    },
+    finished: async (path, pr) => finishedOf(await rm.prState(path, pr)),
     git,
     // rm's roster, clone and link holders alone: its process check would see the stack dev:stop is about to stop, and its saved-work checks run after the stop
     held: async (path, pr) =>

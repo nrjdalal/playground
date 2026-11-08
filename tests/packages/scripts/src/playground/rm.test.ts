@@ -325,7 +325,10 @@ const statedSession = (deps: RmDeps, state: PrState | null) => {
   const session: RmDeps = {
     ...deps,
     caller: async () => "a session (role worker)",
-    prState: async (path, pr) => (asked.push([path, pr]), state),
+    prState: async (path, pr) => (
+      asked.push([path, pr]),
+      state === null ? null : { number: 1, state }
+    ),
   }
   return { asked, session }
 }
@@ -373,8 +376,7 @@ const heldRun = async (
   number = 1,
 ) => {
   writeFileSync(join(deps.data, "roster.json"), JSON.stringify({ agents: [row] }))
-  // PG-1419: the reader gives the PR's number beside its state, so a pass names the PR that freed it
-  const prState = (async () => (state === null ? null : { number, state })) as never
+  const prState = async () => (state === null ? null : { number, state })
   const decision = async (): Promise<Decision> => ({
     kind: "decision",
     preview: { type: "delete", what: `the worktree ${words[1]}` },
@@ -451,10 +453,11 @@ test("a worktree's PR state counts only when exactly one PR answers, as a branch
   const pr = (headRefOid: string, state: PrState, headRefName = "PG-1-thing") => ({
     headRefName,
     headRefOid,
+    number: 1,
     state,
   })
-  expect(prStateOf([pr("head", "MERGED")], at, holds)).toBe("MERGED")
-  expect(prStateOf([pr("older", "CLOSED")], at, holds)).toBe("CLOSED")
+  expect(prStateOf([pr("head", "MERGED")], at, holds)).toEqual({ number: 1, state: "MERGED" })
+  expect(prStateOf([pr("older", "CLOSED")], at, holds)).toEqual({ number: 1, state: "CLOSED" })
   expect(prStateOf([pr("other", "MERGED")], at, holds)).toBeNull()
   expect(prStateOf([pr("head", "MERGED"), pr("older", "OPEN")], at, holds)).toBeNull()
   expect(prStateOf([], at, holds)).toBeNull()
@@ -462,9 +465,12 @@ test("a worktree's PR state counts only when exactly one PR answers, as a branch
   // a stacked child: its parent's PR is another branch's, whose head is only an ancestor of HEAD
   expect(prStateOf([pr("older", "MERGED", "PG-0-parent")], at, holds)).toBeNull()
   // a review clone on its own review-<n> branch, or detached, counts by the exact head alone
-  expect(prStateOf([pr("head", "MERGED", "PG-0-parent")], at, holds)).toBe("MERGED")
+  expect(prStateOf([pr("head", "MERGED", "PG-0-parent")], at, holds)).toEqual({
+    number: 1,
+    state: "MERGED",
+  })
   const detached = { branch: null, head: "head" }
-  expect(prStateOf([pr("head", "MERGED")], detached, holds)).toBe("MERGED")
+  expect(prStateOf([pr("head", "MERGED")], detached, holds)).toEqual({ number: 1, state: "MERGED" })
   expect(prStateOf([pr("older", "MERGED")], detached, holds)).toBeNull()
 })
 
