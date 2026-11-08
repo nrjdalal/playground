@@ -4,7 +4,7 @@ const __CHECKOUT = import.meta.dir.slice(0, import.meta.dir.lastIndexOf("/script
 // scripts/hooks/writing-first.ts
 import { existsSync, readdirSync, realpathSync, unlinkSync } from "fs";
 import { homedir as homedir4 } from "os";
-import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute2, join as join4, relative, resolve as resolve3, sep } from "path";
+import { basename as basename2, dirname as dirname2, isAbsolute as isAbsolute3, join as join4, relative, resolve as resolve3, sep } from "path";
 
 // packages/env/src/aliases.ts
 var DESK_ENV = new Set([
@@ -50,8 +50,15 @@ applyEnvAliases();
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join(home, ".playground");
+import { isAbsolute, join, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join(home, ".playground");
+  if (!isAbsolute(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve(named);
+};
 
 // packages/safe-delete/src/index.ts
 var LIMITS = { bytes: 2 * 1024 ** 3, files: 5000, perMinute: 3 };
@@ -4816,7 +4823,7 @@ var liveSettings = defineSettings({
 
 // scripts/hooks/shell.ts
 import { homedir as homedir3 } from "os";
-import { basename, dirname, isAbsolute, resolve as resolve2 } from "path";
+import { basename, dirname, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
@@ -6683,7 +6690,7 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute(text.value))
+  if (isAbsolute2(text.value))
     return text.value;
   return env.cwd ? resolve2(env.cwd, text.value) : undefined;
 }
@@ -7117,7 +7124,7 @@ function real(path) {
 }
 var inside = (path, dir) => {
   const rel = relative(dir, path);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute2(rel);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute3(rel);
 };
 function repoOf(path) {
   for (let dir = dirname2(path);; dir = dirname2(dir)) {

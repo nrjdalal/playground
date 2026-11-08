@@ -70,8 +70,15 @@ import { existsSync as existsSync3 } from "fs";
 
 // packages/env/src/data-dir.ts
 import { homedir } from "os";
-import { join as join2, resolve } from "path";
-var dataDirOf = (env, home = env.HOME || homedir()) => env.PLAYGROUND_DATA_DIR ? resolve(env.PLAYGROUND_DATA_DIR) : join2(home, ".playground");
+import { isAbsolute, join as join2, resolve } from "path";
+var dataDirOf = (env, home = env.HOME || homedir()) => {
+  const named = env.PLAYGROUND_DATA_DIR;
+  if (!named)
+    return join2(home, ".playground");
+  if (!isAbsolute(named))
+    throw new Error(`PLAYGROUND_DATA_DIR is relative (${named}), so each process would read it from its own folder: set it to an absolute path`);
+  return resolve(named);
+};
 var dataDir = (env = process.env) => dataDirOf(env);
 
 // packages/settings/src/rendered.ts
@@ -127,7 +134,7 @@ var isStrings = (value) => Array.isArray(value) && value.every((item) => typeof 
 
 // scripts/hooks/shell.ts
 import { homedir as homedir2 } from "os";
-import { basename, dirname as dirname2, isAbsolute, resolve as resolve2 } from "path";
+import { basename, dirname as dirname2, isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
 var UNKNOWN = "\x00";
 var READ = "\x01";
 var MAX_BYTES = 1048576;
@@ -1968,7 +1975,7 @@ async function resolveText(text, env) {
 function pathOf(text, env) {
   if (text.unknown || text.reads?.length || text.value === "")
     return;
-  if (isAbsolute(text.value))
+  if (isAbsolute2(text.value))
     return text.value;
   return env.cwd ? resolve2(env.cwd, text.value) : undefined;
 }
